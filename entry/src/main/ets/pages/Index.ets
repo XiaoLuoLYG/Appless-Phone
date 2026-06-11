@@ -38,9 +38,13 @@ import { A2uiStreamMeta, buildChatCompletionsUrl, callLocalModel, modelThinkClos
 import { buildToolGatewayUrl, callToolGateway, defaultToolGatewayUrl, isRegisteredToolId } from '../model/ToolGatewayClient';
 import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
 
-const MODEL_QWEN: string = 'Qwen3-8B';
+const MODEL_LOCAL_QWEN: string = 'Qwen3-8B';
+const MODEL_CLOUD_QWEN: string = 'qwen3-8b';
 const MODEL_DEEPSEEK: string = 'DeepSeek-R1-Distill-Qwen-7B';
 const URL_LOCAL_MODEL: string = 'http://127.0.0.1:11434';
+const URL_CLOUD_MODEL: string = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const CUSTOM_PARAMETERS_NONE: string = '';
+const CUSTOM_PARAMETERS_QWEN_CLOUD: string = '{"enable_thinking":false}';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
 const STREAM_SOURCE_MODEL: string = 'model';
 const STREAM_SOURCE_TOOL: string = 'tool';
@@ -129,7 +133,8 @@ struct Index {
   @State thinkAnimActive: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
   @State apiKey: string = '';
-  @State selectedModel: string = MODEL_QWEN;
+  @State selectedModel: string = MODEL_LOCAL_QWEN;
+  @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
   @State trainVisibleCount: number = TRAIN_INITIAL_VISIBLE;
   @State trainSortMode: string = 'default';
   @State trainFilterAvailable: boolean = false;
@@ -150,7 +155,8 @@ struct Index {
       provider: 'Huawei Local API',
       baseUrl: this.baseUrl,
       model: this.selectedModel,
-      apiKey: this.apiKey
+      apiKey: this.apiKey,
+      customParametersJson: this.customParametersJson
     };
   }
 
@@ -332,9 +338,10 @@ struct Index {
     this.messages = next;
   }
 
-  private applyProviderPreset(baseUrl: string, model: string): void {
+  private applyProviderPreset(baseUrl: string, model: string, customParametersJson: string = CUSTOM_PARAMETERS_NONE): void {
     this.baseUrl = baseUrl;
     this.selectedModel = model;
+    this.customParametersJson = customParametersJson;
     this.statusText = '配置已填入';
     this.lastError = '';
   }
@@ -2494,8 +2501,8 @@ struct Index {
         .margin({ bottom: 6 })
 
       Row() {
-        this.ProviderPresetButton('本地 Qwen', URL_LOCAL_MODEL, MODEL_QWEN)
-        this.ProviderPresetButton('本地 DeepSeek', URL_LOCAL_MODEL, MODEL_DEEPSEEK, false)
+        this.ProviderPresetButton('云端 Qwen', URL_CLOUD_MODEL, MODEL_CLOUD_QWEN, CUSTOM_PARAMETERS_QWEN_CLOUD)
+        this.ProviderPresetButton('本地 DeepSeek', URL_LOCAL_MODEL, MODEL_DEEPSEEK, CUSTOM_PARAMETERS_NONE, false)
       }
       .width('100%')
     }
@@ -2524,7 +2531,7 @@ struct Index {
 
       if (this.showAdvancedSettings) {
         this.InputLabel('Model', 0)
-        TextInput({ text: this.selectedModel, placeholder: 'Qwen3-8B' })
+        TextInput({ text: this.selectedModel, placeholder: MODEL_LOCAL_QWEN })
           .height(42)
           .fontSize(13)
           .backgroundColor(COLOR_PANEL)
@@ -2558,6 +2565,18 @@ struct Index {
           .onChange((value: string) => {
             this.apiKey = value;
           })
+
+        this.InputLabel('自定义请求参数 JSON（可选）', 12)
+        TextInput({ text: this.customParametersJson, placeholder: CUSTOM_PARAMETERS_QWEN_CLOUD })
+          .height(42)
+          .fontSize(13)
+          .backgroundColor(COLOR_PANEL)
+          .borderRadius(9)
+          .border({ width: 1, color: COLOR_LINE })
+          .padding({ left: 10, right: 10 })
+          .onChange((value: string) => {
+            this.customParametersJson = value;
+          })
       }
     }
     .width('100%')
@@ -2565,18 +2584,18 @@ struct Index {
   }
 
   @Builder
-  ProviderPresetButton(label: string, baseUrl: string, model: string, withRightMargin: boolean = true) {
+  ProviderPresetButton(label: string, baseUrl: string, model: string, customParametersJson: string = CUSTOM_PARAMETERS_NONE, withRightMargin: boolean = true) {
     Button(label)
       .height(36)
       .layoutWeight(1)
       .fontSize(11)
-      .fontColor(this.baseUrl === baseUrl && this.selectedModel === model ? '#FFFFFF' : COLOR_INK)
-      .backgroundColor(this.baseUrl === baseUrl && this.selectedModel === model ? COLOR_ACCENT_DARK : '#EDF4F4')
+      .fontColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? '#FFFFFF' : COLOR_INK)
+      .backgroundColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_DARK : '#EDF4F4')
       .borderRadius(9)
-      .border({ width: 1, color: this.baseUrl === baseUrl && this.selectedModel === model ? COLOR_ACCENT_DARK : COLOR_LINE })
+      .border({ width: 1, color: this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_DARK : COLOR_LINE })
       .margin({ right: withRightMargin ? 8 : 0 })
       .onClick(() => {
-        this.applyProviderPreset(baseUrl, model);
+        this.applyProviderPreset(baseUrl, model, customParametersJson);
       })
   }
 

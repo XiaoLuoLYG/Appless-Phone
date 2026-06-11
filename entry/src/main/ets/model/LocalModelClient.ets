@@ -175,6 +175,30 @@ function isLocalBaseUrl(baseUrl: string): boolean {
   return value.indexOf('127.0.0.1') >= 0 || value.indexOf('localhost') >= 0;
 }
 
+function requestBodyJson(body: OpenAiRequestBody, customParametersJson: string): string {
+  const baseJson = JSON.stringify(body);
+  const trimmed = customParametersJson.trim();
+  if (trimmed.length === 0) {
+    return baseJson;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Object;
+    if (parsed === undefined || parsed === null || Array.isArray(parsed)) {
+      aiLogError('[AIPhone][ModelCustomParametersIgnored] custom parameters must be a JSON object');
+      return baseJson;
+    }
+    const customJson = JSON.stringify(parsed);
+    if (customJson.length <= 2) {
+      return baseJson;
+    }
+    return baseJson.substring(0, baseJson.length - 1) + ',' + customJson.substring(1);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    aiLogError('[AIPhone][ModelCustomParametersIgnored] ' + message);
+  }
+  return baseJson;
+}
+
 function toOpenAiMessages(history: A2uiMessage[], prompt: string, systemPrompt: string): OpenAiMessage[] {
   const messages: OpenAiMessage[] = [];
   messages.push({
@@ -1222,7 +1246,7 @@ function parseFullA2ui(content: string, store: A2uiSurfaceStore): string {
   return applyEnvelopes(store, parsed.envelopes);
 }
 
-async function callNonStreamingModel(settings: LocalModelSettings, body: OpenAiRequestBody, requestDebug: string): Promise<A2uiCallResult> {
+async function callNonStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string): Promise<A2uiCallResult> {
   const request = http.createHttp();
   const endpoint = buildChatCompletionsUrl(settings.baseUrl);
   const store = new A2uiSurfaceStore();
@@ -1233,7 +1257,7 @@ async function callNonStreamingModel(settings: LocalModelSettings, body: OpenAiR
     const response = await request.request(endpoint, {
       method: http.RequestMethod.POST,
       header: createHeaders(settings),
-      extraData: JSON.stringify(body),
+      extraData: bodyJson,
       expectDataType: http.HttpDataType.STRING,
       connectTimeout: 10000,
       readTimeout: 60000
@@ -1252,8 +1276,12 @@ async function callNonStreamingModel(settings: LocalModelSettings, body: OpenAiR
         surface: store.getSurface()
       };
     }
+    else {
+      aiLogInfo('[AIPhone][ModelRawResponse] code=' + response.responseCode.toString() + ' body=' + truncateDebugText(rawResponse));
+    }
 
     assistantDebug = normalizeAssistantDebugDisplay(extractAssistantContent(rawResponse));
+    aiLogInfo('[AIPhone][ModelAssistantContent] ' + truncateDebugText(assistantDebug));
     const parseError = parseFullA2ui(assistantDebug, store);
     return {
       ok: parseError.length === 0,
@@ -1279,7 +1307,7 @@ async function callNonStreamingModel(settings: LocalModelSettings, body: OpenAiR
   }
 }
 
-async function callStreamingModel(settings: LocalModelSettings, body: OpenAiRequestBody, requestDebug: string, onSurface: A2uiSurfaceCallback): Promise<A2uiCallResult> {
+async function callStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string, onSurface: A2uiSurfaceCallback): Promise<A2uiCallResult> {
   const request = http.createHttp();
   const endpoint = buildChatCompletionsUrl(settings.baseUrl);
   const store = new A2uiSurfaceStore();
@@ -1409,7 +1437,7 @@ async function callStreamingModel(settings: LocalModelSettings, body: OpenAiRequ
     const responseCode = await request.requestInStream(endpoint, {
       method: http.RequestMethod.POST,
       header: createHeaders(settings),
-      extraData: JSON.stringify(body),
+      extraData: bodyJson,
       connectTimeout: 10000,
       readTimeout: 60000
     });
@@ -1510,20 +1538,23 @@ export async function callLocalModel(settings: LocalModelSettings, prompt: strin
     temperature: 0.2,
     messages: messages
   };
+  const bodyJson = requestBodyJson(body, settings.customParametersJson);
   const requestDebug = JSON.stringify({
     endpoint: buildChatCompletionsUrl(settings.baseUrl),
     provider: settings.provider,
     model: settings.model,
     stream: body.stream,
     temperature: body.temperature,
+    customParametersJson: settings.customParametersJson,
+    bodyJson: bodyJson,
     messages: messages
   });
   aiLogInfo('[AIPhone][A2UIModelRequest] ' + truncateDebugText(requestDebug));
 
   if (shouldStream) {
-    return callStreamingModel(settings, body, requestDebug, onSurface);
+    return callStreamingModel(settings, bodyJson, requestDebug, onSurface);
   }
-  return callNonStreamingModel(settings, body, requestDebug);
+  return callNonStreamingModel(settings, bodyJson, requestDebug);
 }
 
 export function emptyA2uiModelResult(error: string): A2uiCallResult {

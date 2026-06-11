@@ -3,6 +3,7 @@ export interface LocalModelSettings {
   baseUrl: string;
   model: string;
   apiKey: string;
+  customParametersJson: string;
 }
 
 export function defaultLocalModelSettings(): LocalModelSettings {
@@ -10,6 +11,7 @@ export function defaultLocalModelSettings(): LocalModelSettings {
     provider: 'Huawei Local API',
     baseUrl: 'http://127.0.0.1:11434',
     model: 'Qwen3-8B',
-    apiKey: ''
+    apiKey: '',
+    customParametersJson: ''
   };
 }
