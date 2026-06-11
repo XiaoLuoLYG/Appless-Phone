@@ -234,6 +234,66 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
   }
 }
 
+function decodeJsonPointerSegment(segment: string): string {
+  return segment.split('~1').join('/').split('~0').join('~');
+}
+
+function jsonPointerSegments(path: string): string[] {
+  const segments: string[] = [];
+  if (path.length === 0 || path.charAt(0) !== '/') {
+    return segments;
+  }
+  const rawSegments = path.substring(1).split('/');
+  rawSegments.forEach((segment: string) => {
+    segments.push(decodeJsonPointerSegment(segment));
+  });
+  return segments;
+}
+
+function arrayIndex(value: string, length: number): number {
+  const index = Number(value);
+  if (index < 0 || Math.floor(index) !== index || index >= length) {
+    return -1;
+  }
+  return index;
+}
+
+function setLabelValueField(rows: A2uiLabelValueData[], indexText: string, field: string, value: A2uiDataValue): boolean {
+  const index = arrayIndex(indexText, rows.length);
+  if (index < 0) {
+    return false;
+  }
+  if (field === 'label') {
+    rows[index].label = textOf(value);
+    return true;
+  }
+  if (field === 'value') {
+    rows[index].value = textOf(value);
+    return true;
+  }
+  return false;
+}
+
+function setKnownNestedDataPath(next: A2uiRuntimeDataModel, path: string, value: A2uiDataValue): boolean {
+  const segments = jsonPointerSegments(path);
+  if (segments.length === 3 && segments[0] === 'rows') {
+    return setLabelValueField(next.rows, segments[1], segments[2], value);
+  }
+  if (segments.length === 4 && segments[0] === 'trip' && segments[1] === 'rows') {
+    return setLabelValueField(next.trip.rows, segments[2], segments[3], value);
+  }
+  if (segments.length === 4 && segments[0] === 'rows' && segments[1] === 'train') {
+    return setLabelValueField(next.rowGroups.train, segments[2], segments[3], value);
+  }
+  if (segments.length === 4 && segments[0] === 'rows' && segments[1] === 'flight') {
+    return setLabelValueField(next.rowGroups.flight, segments[2], segments[3], value);
+  }
+  if (segments.length === 4 && segments[0] === 'rows' && segments[1] === 'food') {
+    return setLabelValueField(next.rowGroups.food, segments[2], segments[3], value);
+  }
+  return false;
+}
+
 function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2uiDataValue): A2uiRuntimeDataModel {
   const next = parseDataModel(JSON.stringify(model));
   if (path === '/') {
@@ -274,6 +334,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     const requests = value as A2uiToolRequestData[];
     next.toolRequests = requests;
     next.toolRequest = requests.length > 0 ? requests[0] : emptyToolRequest();
+  } else {
+    setKnownNestedDataPath(next, path, value);
   }
   return next;
 }

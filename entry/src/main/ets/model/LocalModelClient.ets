@@ -15,6 +15,7 @@ import {
 } from './A2uiTypes';
 import { parseA2uiJsonl, parseA2uiJsonlChunk } from './A2uiParser';
 import { A2uiSurfaceStore } from './A2uiSurfaceStore';
+import { AIPHONE_COMPONENT_CATALOG_JSON } from './A2uiComponentCatalogConst';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 
 interface OpenAiRequestBody {
@@ -86,13 +87,35 @@ export interface ModelThinkChunk {
   tagRemainder: string;
 }
 
+interface ComponentCatalogEntry {
+  name: string;
+  role: string;
+  usage: string;
+}
+
+function buildComponentCatalogPrompt(): string {
+  try {
+    const entries = JSON.parse(AIPHONE_COMPONENT_CATALOG_JSON) as ComponentCatalogEntry[];
+    const descriptions: string[] = [];
+    entries.forEach((entry: ComponentCatalogEntry) => {
+      descriptions.push(entry.name + '（' + entry.role + '：' + entry.usage + '）');
+    });
+    return '可用 AIPhone catalog 组件：' + descriptions.join('；') + '。';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    aiLogError('[AIPhone][ComponentCatalogPrompt] failed to parse catalog: ' + message);
+    return '可用 AIPhone catalog 组件：SurfaceRoot（布局组件）、Column（布局组件）、Row（布局组件）、Text（内容组件）、InfoRows（内容组件）、ActionBar（交互组件）、ErrorNotice（内容组件）、ThinkingStream（状态组件）、TrainOptions（业务组件）、FlightBoard（业务组件）、FoodChoices（业务组件）；ConfirmPanel 当前不要主动生成。';
+  }
+}
+
 const SYSTEM_PROMPT: string =
   '你是 AIPhone 的本地模型。必须只输出 A2UI v0.9.1 JSONL；如需思考，只能放在 <think>...</think>，不要输出普通中文分析，不要 Markdown，不要代码块，不要自然语言前后缀。' +
   'A2UI 正文每一行都是一个 JSON envelope，只能使用 createSurface, updateComponents, updateDataModel, deleteSurface 四种消息。' +
   '第一行必须 createSurface，字段包含 surfaceId, root, title, intent, status, sendDataModel。' +
   '组件使用 flat component map，通过 SurfaceRoot.child 或 Column/Row.children 组成邻接树。' +
-  '优先使用 AIPhone catalog 组件：SurfaceRoot, Column, Row, Text, ActionBar, ErrorNotice, ThinkingStream, TrainOptions, FlightBoard, FoodChoices, InfoRows；不要输出 ConfirmPanel。' +
+  buildComponentCatalogPrompt() +
   '组件字段只能使用 id, component, child, children, title, text, body, status, tone, variant, dataPath, actions。' +
+  'child/children 只能引用 updateComponents.components 中真实存在的组件 id，禁止把数据值或按钮文案直接放进 children。' +
   'actions 必须是 [{"id":"稳定英文 id","label":"短按钮文案","prompt":"点击后发送给模型的完整中文指令","variant":"primary|secondary|danger"}]。' +
   '数据必须通过 updateDataModel 写入 JSON Pointer 路径，组件用 dataPath 读取，不要把大量结果直接塞进 body。' +
   '思考态用 ThinkingStream；真实班次/航班/店铺结果只能由工具网关返回，你在模型阶段禁止输出 TrainOptions、FlightBoard、FoodChoices 以及 /trains、/flights、/foods。' +
@@ -1246,10 +1269,13 @@ function parseFullA2ui(content: string, store: A2uiSurfaceStore): string {
   return applyEnvelopes(store, parsed.envelopes);
 }
 
-async function callNonStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string): Promise<A2uiCallResult> {
+async function callNonStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string, initialSurface: A2uiSurfaceState | null = null): Promise<A2uiCallResult> {
   const request = http.createHttp();
   const endpoint = buildChatCompletionsUrl(settings.baseUrl);
   const store = new A2uiSurfaceStore();
+  if (initialSurface !== null) {
+    store.seed(initialSurface);
+  }
   let rawResponse = '';
   let assistantDebug = '';
 
@@ -1307,10 +1333,13 @@ async function callNonStreamingModel(settings: LocalModelSettings, bodyJson: str
   }
 }
 
-async function callStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string, onSurface: A2uiSurfaceCallback): Promise<A2uiCallResult> {
+async function callStreamingModel(settings: LocalModelSettings, bodyJson: string, requestDebug: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null): Promise<A2uiCallResult> {
   const request = http.createHttp();
   const endpoint = buildChatCompletionsUrl(settings.baseUrl);
   const store = new A2uiSurfaceStore();
+  if (initialSurface !== null) {
+    store.seed(initialSurface);
+  }
   const decoder = util.TextDecoder.create('utf-8');
   let rawResponse = '';
   let assistantDebug = '';
@@ -1528,7 +1557,7 @@ async function callStreamingModel(settings: LocalModelSettings, bodyJson: string
   }
 }
 
-export async function callLocalModel(settings: LocalModelSettings, prompt: string, history: A2uiMessage[], onSurface: A2uiSurfaceCallback): Promise<A2uiCallResult> {
+export async function callLocalModel(settings: LocalModelSettings, prompt: string, history: A2uiMessage[], onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null): Promise<A2uiCallResult> {
   const systemPrompt = resolveSystemPrompt(prompt);
   const messages = toOpenAiMessages(history, prompt, systemPrompt);
   const shouldStream = isLocalBaseUrl(settings.baseUrl);
@@ -1552,9 +1581,9 @@ export async function callLocalModel(settings: LocalModelSettings, prompt: strin
   aiLogInfo('[AIPhone][A2UIModelRequest] ' + truncateDebugText(requestDebug));
 
   if (shouldStream) {
-    return callStreamingModel(settings, bodyJson, requestDebug, onSurface);
+    return callStreamingModel(settings, bodyJson, requestDebug, onSurface, initialSurface);
   }
-  return callNonStreamingModel(settings, bodyJson, requestDebug);
+  return callNonStreamingModel(settings, bodyJson, requestDebug, initialSurface);
 }
 
 export function emptyA2uiModelResult(error: string): A2uiCallResult {
