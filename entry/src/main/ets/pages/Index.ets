@@ -35,7 +35,7 @@ import {
 } from '../model/A2uiData';
 import { createSeedA2uiSurface } from '../model/A2uiSurfaceStore';
 import { A2uiStreamMeta, buildChatCompletionsUrl, callLocalModel, modelThinkCloseSeen } from '../model/LocalModelClient';
-import { buildToolGatewayUrl, callToolGateway, defaultToolGatewayUrl, isRegisteredToolId } from '../model/ToolGatewayClient';
+import { callToolGateway, defaultToolGatewayUrl, isLocalToolGatewayUrl, isRegisteredToolId, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
 import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
 
 const MODEL_LOCAL_QWEN: string = 'Qwen3-8B';
@@ -51,34 +51,47 @@ const STREAM_SOURCE_TOOL: string = 'tool';
 const DEBUG_SCROLL_MAX_HEIGHT: number = 120;
 const DEBUG_SCROLL_MIN_HEIGHT: number = 56;
 
-const COLOR_INK: string = '#101820';
-const COLOR_TEXT: string = '#24323B';
-const COLOR_MUTED: string = '#66747D';
-const COLOR_LINE: string = '#D8E1E4';
-const COLOR_PAGE: string = '#EEF4F5';
-const COLOR_PANEL: string = '#FBFDFD';
-const COLOR_GLASS: string = '#F7FAFA';
-const COLOR_ACCENT: string = '#176B75';
-const COLOR_ACCENT_DARK: string = '#0D5158';
-const COLOR_ACCENT_SOFT: string = '#DFF1F2';
-const COLOR_PROCESS: string = '#0E7378';
-const COLOR_PROCESS_SOFT: string = '#E9F7F7';
-const COLOR_PROCESS_TINT: string = '#F4FBFB';
-const COLOR_PROCESS_LINE: string = '#B8DEDF';
-const COLOR_PROCESS_SHADOW: string = '#143E4730';
-const COLOR_ERROR: string = '#B42318';
+const COLOR_INK: string = '#F3FBFA';
+const COLOR_TEXT: string = '#D4E5E6';
+const COLOR_MUTED: string = '#8A9DA3';
+const COLOR_LINE: string = '#263943';
+const COLOR_PAGE: string = '#05080D';
+const COLOR_PANEL: string = '#0D151C';
+const COLOR_GLASS: string = '#111D25';
+const COLOR_CARD: string = '#17252D';
+const COLOR_CARD_RAISED: string = '#1D3039';
+const COLOR_FIELD: string = '#091017';
+const COLOR_CARD_EDGE: string = '#38545E';
+const COLOR_CARD_TOP: string = '#213742';
+const COLOR_CARD_INSET: string = '#0C161D';
+const COLOR_EDGE_LIGHT: string = '#577680';
+const COLOR_HIGHLIGHT_LINE: string = '#68F0DE66';
+const COLOR_CARD_GLOW: string = '#0F4D4566';
+const COLOR_ACCENT_SHADOW: string = '#0B514880';
+const COLOR_ACCENT: string = '#35D6B8';
+const COLOR_ACCENT_DARK: string = '#83F2DC';
+const COLOR_ACCENT_DEEP: string = '#0E6F62';
+const COLOR_ACCENT_SOFT: string = '#102F2D';
+const COLOR_BUTTON_TEXT: string = '#F7FFFD';
+const COLOR_PROCESS: string = '#4FDBCA';
+const COLOR_PROCESS_SOFT: string = '#123039';
+const COLOR_PROCESS_TINT: string = '#0D171E';
+const COLOR_PROCESS_LINE: string = '#2B7A72';
+const COLOR_CARD_SHADOW: string = '#020B10D0';
+const COLOR_PANEL_SHADOW: string = '#020B10C8';
+const COLOR_ERROR: string = '#FF8A84';
+const COLOR_ERROR_LINE: string = '#7B393A';
 const FONT_THINK_DISPLAY: string = 'HarmonyOS Sans';
 const FONT_THINK_STREAM: string = 'HarmonyOS Sans';
-const COLOR_THINK_CARD: string = '#FFFFFF';
-const COLOR_THINK_CARD_BORDER: string = '#E2E9EC';
-const COLOR_THINK_CARD_SHADOW: string = '#0D2B3433';
-const COLOR_THINK_STREAM_BG: string = '#F3F6F7';
-const COLOR_THINK_STREAM_BORDER: string = '#D9E2E6';
-const COLOR_THINK_STREAM_INK: string = '#1A262E';
-const COLOR_THINK_STREAM_MUTED: string = '#6A7882';
-const COLOR_THINK_STREAM_ACCENT: string = '#1A7A80';
-const COLOR_ERROR_SOFT: string = '#FDE7E5';
-const COLOR_CHROME: string = '#E7EFF0';
+const COLOR_THINK_CARD: string = '#14212A';
+const COLOR_THINK_CARD_BORDER: string = '#2B424B';
+const COLOR_THINK_STREAM_BG: string = '#0B141B';
+const COLOR_THINK_STREAM_BORDER: string = '#243740';
+const COLOR_THINK_STREAM_INK: string = '#DDF6F2';
+const COLOR_THINK_STREAM_MUTED: string = '#91A6AA';
+const COLOR_THINK_STREAM_ACCENT: string = '#60E4D2';
+const COLOR_ERROR_SOFT: string = '#351B1D';
+const COLOR_CHROME: string = '#1B2A33';
 const TRAIN_INITIAL_VISIBLE: number = 6;
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
 
@@ -406,17 +419,17 @@ struct Index {
 
   private actionBackground(variant: string): string {
     if (variant === 'primary') {
-      return COLOR_ACCENT_DARK;
+      return COLOR_ACCENT_DEEP;
     }
     if (variant === 'danger') {
       return COLOR_ERROR_SOFT;
     }
-    return '#EDF4F4';
+    return COLOR_CARD_RAISED;
   }
 
   private actionTextColor(variant: string): string {
     if (variant === 'primary') {
-      return '#FFFFFF';
+      return COLOR_BUTTON_TEXT;
     }
     if (variant === 'danger') {
       return COLOR_ERROR;
@@ -426,10 +439,10 @@ struct Index {
 
   private actionBorder(variant: string): string {
     if (variant === 'primary') {
-      return COLOR_ACCENT_DARK;
+      return COLOR_ACCENT;
     }
     if (variant === 'danger') {
-      return '#F6B8B3';
+      return COLOR_ERROR_LINE;
     }
     return COLOR_LINE;
   }
@@ -846,13 +859,6 @@ struct Index {
     if (trimmed.length === 0 || this.isBusy) {
       return;
     }
-    if (this.baseUrl.trim().length === 0) {
-      this.lastError = '请先填写本地模型服务的 Base URL。';
-      this.statusText = '缺少配置';
-      aiLogError('[AIPhone][SubmitBlocked] missingBaseUrl');
-      return;
-    }
-
     aiLogInfo('[AIPhone][SubmitPrompt] actionId=' + actionId + ' chars=' + trimmed.length.toString());
     this.appendMessage('user', visibleText);
     this.inputText = '';
@@ -866,6 +872,13 @@ struct Index {
     this.modelThinkClosed = false;
 
     try {
+      if (this.baseUrl.trim().length === 0) {
+        this.lastError = '请先填写本地模型服务的 Base URL。';
+        this.statusText = '缺少配置';
+        aiLogError('[AIPhone][SubmitBlocked] missingBaseUrl');
+        return;
+      }
+
       const result = await callLocalModel(this.getSettings(), trimmed, this.recentMessages(), (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
         this.updateSurfaceFromStream(surface, raw, STREAM_SOURCE_MODEL, meta);
       });
@@ -894,22 +907,17 @@ struct Index {
 
   private async callModelRequestedTool(surface: A2uiSurfaceState, fallbackPrompt: string, fallbackActionId: string): Promise<void> {
     const request = toolRequest(surface);
-    let toolId = request.toolId;
-    let prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
-    if (toolId === 'food.search' && fallbackPrompt.length > 0) {
-      prompt = fallbackPrompt;
-    }
-    let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
+    const toolId = request.toolId;
+    const prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
+    const actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
     if (toolId.length === 0) {
       aiLogInfo('[AIPhone][ToolRequest] none');
       return;
     }
-    // #region agent log
-    aiLogInfo('[Debug65c5d6][H-FOOD] toolId=' + toolId +
+    aiLogInfo('[AIPhone][ToolRequestFromModel] toolId=' + toolId +
       ' modelPromptChars=' + request.prompt.length.toString() +
       ' userPromptChars=' + fallbackPrompt.length.toString() +
       ' sentPromptChars=' + prompt.length.toString());
-    // #endregion
     await this.callToolById(toolId, prompt, actionId);
   }
 
@@ -1085,8 +1093,41 @@ struct Index {
   }
 
   @Builder
+  CardGlint() {
+    Row() {
+      Text('')
+        .width(54)
+        .height(1)
+        .backgroundColor(COLOR_ACCENT_DARK)
+        .opacity(0.54)
+        .margin({ right: 8 })
+      Text('')
+        .height(1)
+        .layoutWeight(1)
+        .backgroundColor(COLOR_HIGHLIGHT_LINE)
+        .opacity(0.48)
+    }
+    .width('100%')
+    .height(1)
+    .clip(true)
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  PremiumRail(accentColor: string, heightValue: number) {
+    Text('')
+      .width(3)
+      .height(heightValue)
+      .borderRadius(3)
+      .backgroundColor(accentColor)
+      .opacity(0.78)
+      .margin({ right: 12 })
+  }
+
+  @Builder
   TopBar() {
     Row() {
+      this.PremiumRail(COLOR_ACCENT, 48)
       Column() {
         Row() {
           Text('AIPhone')
@@ -1116,9 +1157,9 @@ struct Index {
         .width(82)
         .fontSize(13)
         .fontColor(COLOR_INK)
-        .backgroundColor(COLOR_GLASS)
+        .backgroundColor(COLOR_CARD_RAISED)
         .borderRadius(10)
-        .border({ width: 1, color: COLOR_LINE })
+        .border({ width: 1, color: COLOR_CARD_EDGE })
         .margin({ left: 10 })
         .onClick(() => {
           this.showHistory = !this.showHistory;
@@ -1129,9 +1170,9 @@ struct Index {
         .width(78)
         .fontSize(13)
         .fontColor(COLOR_INK)
-        .backgroundColor(COLOR_GLASS)
+        .backgroundColor(COLOR_CARD_RAISED)
         .borderRadius(10)
-        .border({ width: 1, color: COLOR_LINE })
+        .border({ width: 1, color: COLOR_CARD_EDGE })
         .margin({ left: 8 })
         .onClick(() => {
           this.showConfigPage = true;
@@ -1141,7 +1182,8 @@ struct Index {
     .padding({ left: 18, right: 18, top: 16, bottom: 14 })
     .backgroundColor(COLOR_PANEL)
     .borderRadius(20)
-    .border({ width: 1, color: '#FFFFFF' })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 24, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 12 })
   }
 
   @Builder
@@ -1159,6 +1201,7 @@ struct Index {
             .border({ width: 1, color: this.actionBorder(action.variant) })
             .padding({ left: 14, right: 14 })
             .margin({ right: 8, top: 10 })
+            .shadow({ radius: 10, color: action.variant === 'primary' ? COLOR_ACCENT_SHADOW : COLOR_CARD_SHADOW, offsetX: 0, offsetY: 5 })
             .onClick(() => {
               this.sendAction(action);
             })
@@ -1211,12 +1254,14 @@ struct Index {
     .scrollBar(BarState.Off)
     .backgroundColor(COLOR_PANEL)
     .borderRadius(24)
-    .border({ width: 1, color: '#FFFFFF' })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 28, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 14 })
   }
 
   @Builder
   SurfaceHero() {
     Column() {
+      this.CardGlint()
       Row() {
         Text(this.surfaceIntentLabel(this.currentSurface.intent))
           .fontSize(12)
@@ -1240,9 +1285,10 @@ struct Index {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(20)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor(COLOR_CARD_TOP)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_EDGE_LIGHT })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 14 })
   }
 
@@ -1283,7 +1329,7 @@ struct Index {
         .width(88)
         .height(88)
         .borderRadius(44)
-        .backgroundColor('#FFFFFF')
+        .backgroundColor(COLOR_CARD_RAISED)
         .border({ width: 1, color: COLOR_PROCESS_LINE })
         .opacity(0.96)
         .scale({ x: this.orbPulse, y: this.orbPulse })
@@ -1338,6 +1384,7 @@ struct Index {
   @Builder
   EmptySurface() {
     Column() {
+      this.CardGlint()
       Text('今天想安排什么？')
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
@@ -1351,14 +1398,16 @@ struct Index {
     .width('100%')
     .padding(18)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor(COLOR_GLASS)
+    .backgroundColor(COLOR_CARD)
     .borderRadius(16)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 18, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 8 })
   }
 
   @Builder
   ThinkingFallback(surface: A2uiSurfaceState) {
     Column() {
+      this.CardGlint()
       Row() {
         this.ThinkingPulseMark(surface.status)
         Column() {
@@ -1391,7 +1440,7 @@ struct Index {
     .backgroundColor(this.processingCardBackground(surface.status))
     .borderRadius(18)
     .border({ width: 1, color: this.processingCardBorder(surface.status) })
-    .shadow({ radius: 18, color: COLOR_THINK_CARD_SHADOW, offsetX: 0, offsetY: 10 })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
   }
 
   @Builder
@@ -1493,6 +1542,7 @@ struct Index {
   @Builder
   ThinkingPanel(revision: number) {
     Column() {
+      this.CardGlint()
       Row() {
         Column() {
           Row() {
@@ -1556,7 +1606,7 @@ struct Index {
     .backgroundColor(COLOR_THINK_CARD)
     .borderRadius(18)
     .border({ width: 1, color: COLOR_THINK_CARD_BORDER })
-    .shadow({ radius: 16, color: COLOR_THINK_CARD_SHADOW, offsetX: 0, offsetY: 8 })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 14 })
     .key('thinking-panel-' + revision.toString())
   }
@@ -1591,7 +1641,7 @@ struct Index {
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
     .backgroundColor(COLOR_THINK_STREAM_BG)
     .borderRadius(14)
-    .border({ width: 1, color: COLOR_THINK_STREAM_BORDER })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
     .margin({ top: 14 })
     .key('thinking-panel-stream-' + revision.toString())
   }
@@ -1669,6 +1719,7 @@ struct Index {
   @Builder
   ThinkingStream(surface: A2uiSurfaceState, component: A2uiComponent, revision: number) {
     Column() {
+      this.CardGlint()
       this.ThinkingStreamHeader(component)
       if (this.hasThinkingStreamContent(surface, component)) {
         this.ThinkingCardStream(surface, component, revision)
@@ -1682,7 +1733,7 @@ struct Index {
     .backgroundColor(this.processingCardBackground(this.componentStatus(component)))
     .borderRadius(18)
     .border({ width: 1, color: this.processingCardBorder(this.componentStatus(component)) })
-    .shadow({ radius: 18, color: COLOR_THINK_CARD_SHADOW, offsetX: 0, offsetY: 10 })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 14 })
   }
 
@@ -1741,7 +1792,7 @@ struct Index {
     .padding({ left: 14, right: 14, top: 14, bottom: 14 })
     .backgroundColor(COLOR_THINK_STREAM_BG)
     .borderRadius(14)
-    .border({ width: 1, color: COLOR_THINK_STREAM_BORDER })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
     .margin({ top: 16 })
     .key('thinking-stream-' + revision.toString())
   }
@@ -1815,8 +1866,8 @@ struct Index {
     .padding({ left: 20, right: 20, top: 20, bottom: 20 })
     .backgroundColor(COLOR_THINK_CARD)
     .borderRadius(20)
-    .border({ width: 1, color: COLOR_THINK_CARD_BORDER })
-    .shadow({ radius: 20, color: COLOR_THINK_CARD_SHADOW, offsetX: 0, offsetY: 12 })
+    .border({ width: 1, color: COLOR_EDGE_LIGHT })
+    .shadow({ radius: 24, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 12 })
     .margin({ bottom: 14 })
   }
 
@@ -1847,9 +1898,9 @@ struct Index {
     .width('100%')
     .alignItems(VerticalAlign.Top)
     .padding({ left: 14, right: 14, top: 14, bottom: 14 })
-    .backgroundColor(COLOR_THINK_STREAM_BG)
+    .backgroundColor(COLOR_CARD_INSET)
     .borderRadius(14)
-    .border({ width: 1, color: COLOR_THINK_STREAM_BORDER })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
     .margin({ top: 16 })
   }
 
@@ -1888,9 +1939,9 @@ struct Index {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 8 })
-    .backgroundColor('#FFFFFFAA')
+    .backgroundColor(COLOR_CARD_INSET)
     .borderRadius(14)
-    .border({ width: 1, color: '#FFFFFF' })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
     .margin({ top: 15 })
   }
 
@@ -1947,7 +1998,7 @@ struct Index {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .backgroundColor('#F3F7F8')
+    .backgroundColor(COLOR_CARD_INSET)
     .borderRadius(10)
     .border({ width: { left: 3 }, color: COLOR_ACCENT })
     .margin({ top: 10 })
@@ -1972,10 +2023,12 @@ struct Index {
   @Builder
   TrainOptions(surface: A2uiSurfaceState, component: A2uiComponent, revision: number) {
     Column() {
+      this.CardGlint()
       this.ModuleHeader(this.componentTitle(component, '高铁候选'), this.componentBody(component), this.componentStatus(component))
       ForEach(this.displayedTrains(component), (item: A2uiTrainOption) => {
         Column() {
           Column() {
+            this.CardGlint()
             Row() {
               Text(item.trainCode)
                 .fontSize(22)
@@ -2011,9 +2064,10 @@ struct Index {
           .width('100%')
           .alignItems(HorizontalAlign.Start)
           .padding(16)
-          .backgroundColor('#FFFFFF')
-          .borderRadius(14)
-          .border({ width: 1, color: COLOR_LINE })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
+          .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
           .onClick(() => {
             const rowKey = this.trainRowKey(item);
             this.expandedTrainKey = this.expandedTrainKey === rowKey ? '' : rowKey;
@@ -2036,10 +2090,11 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding(16)
+    .padding({ left: 16, right: 16, top: 18, bottom: 16 })
     .backgroundColor(COLOR_GLASS)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
   }
 
@@ -2062,39 +2117,46 @@ struct Index {
   @Builder
   FlightBoard(surface: A2uiSurfaceState, component: A2uiComponent, revision: number) {
     Column() {
+      this.CardGlint()
       this.ModuleHeader(this.componentTitle(component, '航班候选'), this.componentBody(component), this.componentStatus(component))
       ForEach(flightOptions(this.surfaceForRender(), component), (item: A2uiFlightOption) => {
-        Row() {
-          Column() {
-            Text(item.flightNo)
-              .fontSize(19)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_INK)
-            Text(item.airline)
-              .fontSize(12)
-              .fontColor(COLOR_MUTED)
-              .lineHeight(18)
-              .margin({ top: 4 })
+        Column() {
+          this.CardGlint()
+          Row() {
+            Column() {
+              Text(item.flightNo)
+                .fontSize(19)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_INK)
+              Text(item.airline)
+                .fontSize(12)
+                .fontColor(COLOR_MUTED)
+                .lineHeight(18)
+                .margin({ top: 4 })
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            Column() {
+              Text((item.dep.length > 0 ? item.dep : '--') + ' → ' + (item.arr.length > 0 ? item.arr : '--'))
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(COLOR_TEXT)
+              Text(item.status.length > 0 ? item.status : '计划')
+                .fontSize(12)
+                .fontColor(this.statusColor(item.status === '提前取消' ? 'error' : 'ready'))
+                .margin({ top: 5 })
+            }
+            .alignItems(HorizontalAlign.End)
           }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-          Column() {
-            Text((item.dep.length > 0 ? item.dep : '--') + ' → ' + (item.arr.length > 0 ? item.arr : '--'))
-              .fontSize(14)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(COLOR_TEXT)
-            Text(item.status.length > 0 ? item.status : '计划')
-              .fontSize(12)
-              .fontColor(this.statusColor(item.status === '提前取消' ? 'error' : 'ready'))
-              .margin({ top: 5 })
-          }
-          .alignItems(HorizontalAlign.End)
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
         }
         .width('100%')
         .padding(16)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(14)
-        .border({ width: 1, color: COLOR_LINE })
+        .backgroundColor(COLOR_CARD)
+        .borderRadius(16)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
         .margin({ top: 10 })
       }, (item: A2uiFlightOption) => item.flightNo + item.depTime + '-' + revision.toString())
       if (flightOptions(this.surfaceForRender(), component).length === 0 && labelValues(this.surfaceForRender(), component).length > 0) {
@@ -2106,19 +2168,22 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding(16)
+    .padding({ left: 16, right: 16, top: 18, bottom: 16 })
     .backgroundColor(COLOR_GLASS)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
   }
 
   @Builder
   FoodChoices(surface: A2uiSurfaceState, component: A2uiComponent, revision: number) {
     Column() {
+      this.CardGlint()
       this.ModuleHeader(this.componentTitle(component, '附近餐饮'), this.componentBody(component), this.componentStatus(component))
       ForEach(foodOptions(this.surfaceForRender(), component), (item: A2uiFoodOption) => {
         Column() {
+          this.CardGlint()
           Row() {
             Text(item.name)
               .fontSize(17)
@@ -2151,9 +2216,10 @@ struct Index {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .padding(16)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(14)
-        .border({ width: 1, color: COLOR_LINE })
+        .backgroundColor(COLOR_CARD)
+        .borderRadius(16)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
         .margin({ top: 10 })
       }, (item: A2uiFoodOption) => item.name + '|' + item.address + '|' + item.distance)
       if (foodOptions(this.surfaceForRender(), component).length === 0 && labelValues(this.surfaceForRender(), component).length > 0) {
@@ -2165,16 +2231,18 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding(16)
+    .padding({ left: 16, right: 16, top: 18, bottom: 16 })
     .backgroundColor(COLOR_GLASS)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
   }
 
   @Builder
   InfoRows(surface: A2uiSurfaceState, component: A2uiComponent, revision: number) {
     Column() {
+      this.CardGlint()
       this.ModuleHeader(this.componentTitle(component, '信息'), this.componentBody(component), this.componentStatus(component))
       this.LabelValueRows(this.surfaceForRender(), component, revision)
       if (labelValues(this.surfaceForRender(), component).length === 0) {
@@ -2184,16 +2252,18 @@ struct Index {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding(16)
+    .padding({ left: 16, right: 16, top: 18, bottom: 16 })
     .backgroundColor(COLOR_GLASS)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
   }
 
   @Builder
   ErrorNotice(component: A2uiComponent) {
     Column() {
+      this.CardGlint()
       Row() {
         this.ErrorCoreMark()
         Column() {
@@ -2224,9 +2294,10 @@ struct Index {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(18)
-    .backgroundColor('#FFF7F6')
+    .backgroundColor(COLOR_ERROR_SOFT)
     .borderRadius(18)
-    .border({ width: 1, color: '#F6B8B3' })
+    .border({ width: 1, color: COLOR_ERROR_LINE })
+    .shadow({ radius: 18, color: COLOR_CARD_SHADOW, offsetX: 0, offsetY: 8 })
     .margin({ bottom: 12 })
   }
 
@@ -2243,8 +2314,8 @@ struct Index {
         .width(38)
         .height(38)
         .borderRadius(19)
-        .backgroundColor('#FFFFFF')
-        .border({ width: 1, color: '#F6B8B3' })
+        .backgroundColor(COLOR_CARD_RAISED)
+        .border({ width: 1, color: COLOR_ERROR_LINE })
       Text('!')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -2252,10 +2323,10 @@ struct Index {
     }
     .width(62)
     .height(62)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor(COLOR_CARD)
     .borderRadius(19)
-    .border({ width: 1, color: '#FAD1CD' })
-    .shadow({ radius: 14, color: '#8A1F1630', offsetX: 0, offsetY: 7 })
+    .border({ width: 1, color: COLOR_ERROR_LINE })
+    .shadow({ radius: 14, color: COLOR_CARD_SHADOW, offsetX: 0, offsetY: 7 })
   }
 
   @Builder
@@ -2275,12 +2346,13 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(COLOR_ERROR_SOFT)
     .borderRadius(16)
-    .border({ width: 1, color: '#F6B8B3' })
+    .border({ width: 1, color: COLOR_ERROR_LINE })
   }
 
   @Builder
   ModuleHeader(title: string, body: string, status: string) {
     Row() {
+      this.PremiumRail(this.statusColor(status), body.length > 0 ? 48 : 34)
       Column() {
         Text(title)
           .fontSize(17)
@@ -2313,6 +2385,7 @@ struct Index {
   @Builder
   HistoryPanel() {
     Column() {
+      this.CardGlint()
       Row() {
         Text('生成轨迹')
           .fontSize(16)
@@ -2346,9 +2419,9 @@ struct Index {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
             .padding(11)
-            .backgroundColor(message.role === 'user' ? COLOR_ACCENT_SOFT : '#FFFFFF')
+            .backgroundColor(message.role === 'user' ? COLOR_ACCENT_SOFT : COLOR_CARD_INSET)
             .borderRadius(12)
-            .border({ width: 1, color: message.role === 'user' ? '#BBDCDD' : COLOR_LINE })
+            .border({ width: 1, color: message.role === 'user' ? COLOR_PROCESS_LINE : COLOR_CARD_EDGE })
             .margin({ bottom: 8 })
           }, (message: A2uiMessage) => message.id)
         }
@@ -2363,7 +2436,8 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(COLOR_PANEL)
     .borderRadius(20)
-    .border({ width: 1, color: '#FFFFFF' })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 10 })
   }
 
   @Builder
@@ -2376,9 +2450,11 @@ struct Index {
         .height(52)
         .layoutWeight(1)
         .fontSize(15)
-        .backgroundColor('#FFFFFF')
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_FIELD)
         .borderRadius(15)
-        .border({ width: 1, color: COLOR_LINE })
+        .border({ width: 1, color: COLOR_CARD_EDGE })
         .padding({ left: 14, right: 14 })
         .enterKeyType(EnterKeyType.Send)
         .onChange((value: string) => {
@@ -2395,9 +2471,11 @@ struct Index {
         .height(52)
         .width(98)
         .fontSize(15)
-        .fontColor('#FFFFFF')
-        .backgroundColor(COLOR_ACCENT_DARK)
+        .fontColor(COLOR_BUTTON_TEXT)
+        .backgroundColor(COLOR_ACCENT_DEEP)
         .borderRadius(15)
+        .border({ width: 1, color: COLOR_ACCENT })
+        .shadow({ radius: 14, color: COLOR_ACCENT_SHADOW, offsetX: 0, offsetY: 7 })
         .margin({ left: 10 })
         .onClick(() => {
           this.sendPrompt();
@@ -2410,6 +2488,7 @@ struct Index {
   @Builder
   ModelPanel() {
     Column() {
+      this.CardGlint()
       Text('模型连接')
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
@@ -2437,7 +2516,7 @@ struct Index {
         .alignItems(HorizontalAlign.Start)
         .backgroundColor(COLOR_ERROR_SOFT)
         .borderRadius(10)
-        .border({ width: 1, color: '#F6B8B3' })
+        .border({ width: 1, color: COLOR_ERROR_LINE })
         .margin({ bottom: 14 })
       }
 
@@ -2447,9 +2526,11 @@ struct Index {
         .enabled(!this.isBusy)
         .height(42)
         .width('100%')
-        .fontColor('#FFFFFF')
-        .backgroundColor(COLOR_ACCENT_DARK)
+        .fontColor(COLOR_BUTTON_TEXT)
+        .backgroundColor(COLOR_ACCENT_DEEP)
         .borderRadius(10)
+        .border({ width: 1, color: COLOR_ACCENT })
+        .shadow({ radius: 12, color: COLOR_ACCENT_SHADOW, offsetX: 0, offsetY: 6 })
         .margin({ top: 14 })
         .onClick(() => {
           this.testConnection();
@@ -2465,9 +2546,9 @@ struct Index {
         .height(40)
         .width('100%')
         .fontColor(COLOR_INK)
-        .backgroundColor('#F2F7F7')
+        .backgroundColor(COLOR_CARD_RAISED)
         .borderRadius(10)
-        .border({ width: 1, color: COLOR_LINE })
+        .border({ width: 1, color: COLOR_CARD_EDGE })
         .onClick(() => {
           this.showDiagnostics = !this.showDiagnostics;
         })
@@ -2481,7 +2562,8 @@ struct Index {
     .padding(18)
     .backgroundColor(COLOR_PANEL)
     .borderRadius(16)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 10 })
   }
 
   @Builder
@@ -2534,9 +2616,11 @@ struct Index {
         TextInput({ text: this.selectedModel, placeholder: MODEL_LOCAL_QWEN })
           .height(42)
           .fontSize(13)
-          .backgroundColor(COLOR_PANEL)
+          .fontColor(COLOR_TEXT)
+          .placeholderColor(COLOR_MUTED)
+          .backgroundColor(COLOR_FIELD)
           .borderRadius(9)
-          .border({ width: 1, color: COLOR_LINE })
+          .border({ width: 1, color: COLOR_CARD_EDGE })
           .padding({ left: 10, right: 10 })
           .onChange((value: string) => {
             this.selectedModel = value;
@@ -2546,9 +2630,11 @@ struct Index {
         TextInput({ text: this.baseUrl, placeholder: 'http://127.0.0.1:11434' })
           .height(42)
           .fontSize(13)
-          .backgroundColor(COLOR_PANEL)
+          .fontColor(COLOR_TEXT)
+          .placeholderColor(COLOR_MUTED)
+          .backgroundColor(COLOR_FIELD)
           .borderRadius(9)
-          .border({ width: 1, color: COLOR_LINE })
+          .border({ width: 1, color: COLOR_CARD_EDGE })
           .padding({ left: 10, right: 10 })
           .onChange((value: string) => {
             this.baseUrl = value;
@@ -2558,9 +2644,11 @@ struct Index {
         TextInput({ text: this.apiKey, placeholder: '如果接口要求鉴权，在这里填写' })
           .height(42)
           .fontSize(13)
-          .backgroundColor(COLOR_PANEL)
+          .fontColor(COLOR_TEXT)
+          .placeholderColor(COLOR_MUTED)
+          .backgroundColor(COLOR_FIELD)
           .borderRadius(9)
-          .border({ width: 1, color: COLOR_LINE })
+          .border({ width: 1, color: COLOR_CARD_EDGE })
           .padding({ left: 10, right: 10 })
           .onChange((value: string) => {
             this.apiKey = value;
@@ -2589,10 +2677,11 @@ struct Index {
       .height(36)
       .layoutWeight(1)
       .fontSize(11)
-      .fontColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? '#FFFFFF' : COLOR_INK)
-      .backgroundColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_DARK : '#EDF4F4')
+      .fontColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_BUTTON_TEXT : COLOR_INK)
+      .backgroundColor(this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
       .borderRadius(9)
-      .border({ width: 1, color: this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_DARK : COLOR_LINE })
+      .border({ width: 1, color: this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT : COLOR_CARD_EDGE })
+      .shadow({ radius: this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? 10 : 6, color: this.baseUrl === baseUrl && this.selectedModel === model && this.customParametersJson === customParametersJson ? COLOR_ACCENT_SHADOW : COLOR_CARD_SHADOW, offsetX: 0, offsetY: 4 })
       .margin({ right: withRightMargin ? 8 : 0 })
       .onClick(() => {
         this.applyProviderPreset(baseUrl, model, customParametersJson);
@@ -2632,6 +2721,7 @@ struct Index {
   @Builder
   ModelDiagnosticSection() {
     Column() {
+      this.CardGlint()
       this.DiagnosticPhaseShell(
         '模型阶段',
         '模型 SSE 原始流包含 data: 帧；从中提取的 content 即 A2UI JSONL，驱动画布渲染。',
@@ -2663,21 +2753,24 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(COLOR_GLASS)
     .borderRadius(10)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 16, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 7 })
     .margin({ bottom: 10 })
   }
 
   @Builder
   ToolDiagnosticSection() {
     Column() {
+      this.CardGlint()
       this.DiagnosticPhaseShell(
         '工具阶段',
-        '模型在 surface 中发出 toolRequest 后，App 调用 tool-gateway；gateway 返回的 JSONL 会追加或更新画布。',
+        '模型在 surface 中发出 toolRequest 后，所有注册工具都由 HAP 本机工具统一执行；航班和餐饮使用 HAP 包内 rawfile 配置直连真实供应商。',
         COLOR_PROCESS
       )
       Column() {
-        this.DebugText('工具网关地址', buildToolGatewayUrl(TOOL_GATEWAY_URL))
-        Text('由开发机本地服务提供，需在电脑运行 tool-gateway 并完成端口转发。')
+        this.DebugText('统一工具入口', TOOL_GATEWAY_URL)
+        this.DebugText('本机 provider 配置', localProviderConfigDebugSummary())
+        Text(isLocalToolGatewayUrl(TOOL_GATEWAY_URL) ? '航班、火车、餐饮都走 local://aiphone-tools；App 运行时不依赖 Mac 上的 8787 服务。' : '由显式 HTTP tool-gateway 提供；仅用于开发兼容模式。')
           .fontSize(11)
           .fontColor(COLOR_MUTED)
           .lineHeight(16)
@@ -2696,7 +2789,8 @@ struct Index {
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(COLOR_GLASS)
     .borderRadius(10)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 16, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 7 })
   }
 
   @Builder
@@ -2728,9 +2822,9 @@ struct Index {
     .constraintSize({ minHeight: DEBUG_SCROLL_MIN_HEIGHT, maxHeight: maxHeightValue })
     .width('100%')
     .padding(10)
-    .backgroundColor('#FBFDFD')
+    .backgroundColor(COLOR_FIELD)
     .borderRadius(8)
-    .border({ width: 1, color: COLOR_LINE })
+    .border({ width: 1, color: COLOR_CARD_EDGE })
     .scrollBar(BarState.Auto)
   }
 
@@ -2782,9 +2876,9 @@ struct Index {
             .width(76)
             .fontSize(13)
             .fontColor(COLOR_INK)
-            .backgroundColor('#E7EFF0')
+            .backgroundColor(COLOR_CARD_RAISED)
             .borderRadius(10)
-            .border({ width: 1, color: COLOR_LINE })
+            .border({ width: 1, color: COLOR_CARD_EDGE })
             .onClick(() => {
               this.showConfigPage = false;
             })
