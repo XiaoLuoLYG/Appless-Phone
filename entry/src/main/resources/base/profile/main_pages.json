@@ -1,5 +1,6 @@
 {
   "src": [
+    "pages/A2uiHome/Index",
     "pages/Index"
   ]
 }
