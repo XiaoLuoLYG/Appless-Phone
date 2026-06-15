@@ -28,9 +28,11 @@ export struct HomePage {
   @Prop messages: A2uiMessage[] = [];
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop surfaceRenderTick: number = 0;
+  @Prop inputPlaceholder: string = '告诉 PocketAgent 你想完成什么';
   @State sendSpinnerRotation: number = 0;
   private sendSpinnerTimerId: number = -1;
   onToggleHistory: () => void = () => {};
+  onOpenSocial: () => void = () => {};
   onOpenConfig: () => void = () => {};
   onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
@@ -99,7 +101,7 @@ export struct HomePage {
         }
         .alignItems(VerticalAlign.Center)
         .layoutWeight(1)
-        .constraintSize({ maxWidth: 220 })
+        .constraintSize({ maxWidth: 150 })
 
         A2uiButtonView({
           icon: $r('app.media.icon_history'),
@@ -112,6 +114,17 @@ export struct HomePage {
             this.onToggleHistory();
           })
           .margin({ left: 10 })
+
+        A2uiButtonView({
+          label: '社',
+          shape: 'circle',
+          tone: 'secondary',
+          active: this.currentSurface.intent === 'social'
+        })
+          .onClick(() => {
+            this.onOpenSocial();
+          })
+          .margin({ left: 8 })
 
         A2uiButtonView({
           icon: $r('app.media.icon_settings'),
@@ -165,22 +178,28 @@ export struct HomePage {
 
       Column() {
         Row() {
-          TextArea({
-            placeholder: '告诉 PocketAgent 你想完成什么',
+          TextInput({
+            placeholder: this.inputPlaceholder,
             text: this.inputText
           })
-            .constraintSize({ minHeight: 52 })
+            .height(52)
             .layoutWeight(1)
             .fontSize(15)
             .fontColor(COLOR_TEXT)
-            .lineHeight(21)
             .placeholderColor(COLOR_MUTED)
             .backgroundColor('#091017')
             .borderRadius(15)
             .border({ width: 1, color: COLOR_CARD_EDGE })
-            .padding({ left: 14, right: 14, top: 13, bottom: 13 })
+            .padding({ left: 14, right: 14 })
+            .enterKeyType(EnterKeyType.Send)
             .onChange((value: string) => {
               this.inputText = value;
+            })
+            .onSubmit(() => {
+              if (this.isBusy) {
+                return;
+              }
+              this.onSendPrompt();
             })
 
           Stack() {
