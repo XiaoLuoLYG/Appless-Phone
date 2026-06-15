@@ -1,4 +1,5 @@
 import { LocalModelSettings, defaultLocalModelSettings } from '../../model/LocalModelSettings';
+import router from '@ohos.router';
 import { A2uiAction, A2uiCallResult, A2uiComponent, A2uiMessage, A2uiSurfaceState } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
@@ -10,8 +11,8 @@ import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
   updateConnectionPanelState
-} from './A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './A2uiHomeToolRequest';
+} from './state/A2uiHomeState';
+import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
@@ -31,6 +32,7 @@ function logSnippet(text: string): string {
 struct Index {
   @State showConfigPage: boolean = false;
   @State showAdvancedSettings: boolean = false;
+  @State showHistory: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
   @State apiKey: string = '';
   @State selectedModel: string = defaultLocalModelSettings().model;
@@ -44,7 +46,7 @@ struct Index {
   @State refreshTick: number = initialConnectionState.refreshTick;
   @State currentSurface: A2uiSurfaceState = initialSurface;
   @State surfaceRenderTick: number = 0;
-  @State inputText: string = '帮我查询明天北京到上海的航班';
+  @State inputText: string = '帮我查询6月16日北京到上海的高铁票';
   @State messages: A2uiMessage[] = [];
 
   private getSettings(): LocalModelSettings {
@@ -411,16 +413,23 @@ struct Index {
     } else {
       HomePage({
         inputText: $inputText,
-        connectionStatus: this.connectionStatus,
-        connectionMessage: this.connectionMessage,
-        selectedModel: this.selectedModel,
-        baseUrl: this.baseUrl,
         isBusy: this.isBusy,
-        refreshTick: this.refreshTick,
+        showHistory: this.showHistory,
+        messages: this.messages,
         currentSurface: this.currentSurface,
         surfaceRenderTick: this.surfaceRenderTick,
+        onToggleHistory: () => {
+          this.showHistory = !this.showHistory;
+        },
         onOpenConfig: () => {
           this.showConfigPage = true;
+        },
+        onOpenStyleLab: () => {
+          router.pushUrl({ url: 'pages/A2uiHome/StyleLab' }, (error) => {
+            if (error) {
+              aiLogError('[AIPhone][A2uiStyleLabRouteFailed] ' + JSON.stringify(error));
+            }
+          });
         },
         onSendPrompt: () => {
           this.sendPrompt();
