@@ -59,7 +59,7 @@ export function resolveA2uiButtonStyle(tone: string, active: boolean, isEnabled:
     return {
       backgroundColor: COLOR_ACTION_DEACTIVATED,
       borderColor: COLOR_ACTION_DEACTIVATED_EDGE,
-      textColor: COLOR_ACTION_DEACTIVATED_TEXT,
+      textColor: COLOR_BUTTON_TEXT,
       opacity: 1
     };
   }

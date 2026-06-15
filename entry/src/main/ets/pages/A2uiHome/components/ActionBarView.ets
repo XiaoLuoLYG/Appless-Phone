@@ -2,6 +2,7 @@ import { A2uiAction } from '../../../model/A2uiTypes';
 import {
   A2UI_DIALOG_ACTION_GAP,
   A2UI_DIALOG_ACTION_SIDE_PADDING,
+  actionRenderKey,
   usesDialogActionLayout
 } from '../style/A2uiActionBarLayout';
 import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
@@ -49,7 +50,7 @@ export struct ActionBarView {
               })
               .layoutWeight(1)
               .margin({ right: index === 0 ? A2UI_DIALOG_ACTION_GAP : 0 })
-          }, (action: A2uiAction) => action.id + action.label)
+          }, (action: A2uiAction) => actionRenderKey(action))
         }
         .width('100%')
         .padding({ left: A2UI_DIALOG_ACTION_SIDE_PADDING, right: A2UI_DIALOG_ACTION_SIDE_PADDING })
@@ -72,7 +73,7 @@ export struct ActionBarView {
                 this.onAction(action);
               })
               .margin({ right: 8, top: 10 })
-          }, (action: A2uiAction) => action.id + action.label)
+          }, (action: A2uiAction) => actionRenderKey(action))
         }
         .width('100%')
         .margin({ top: 4 })

@@ -27,6 +27,14 @@ export default function a2uiButtonStyleTest() {
       expect(style.opacity < 1).assertTrue();
     });
 
+    it('keeps deactivated button text bright while enabled', 0, () => {
+      const style = resolveA2uiButtonStyle('deactivated', false, true);
+
+      expect(style.backgroundColor).assertEqual(COLOR_ACTION_DEACTIVATED);
+      expect(style.textColor).assertEqual(COLOR_BUTTON_TEXT);
+      expect(style.opacity).assertEqual(1);
+    });
+
     it('uses danger style when enabled and not overridden by disabled', 0, () => {
       expect(resolveA2uiButtonStyle('danger', false, true).backgroundColor).assertEqual(COLOR_ERROR_SOFT);
     });
