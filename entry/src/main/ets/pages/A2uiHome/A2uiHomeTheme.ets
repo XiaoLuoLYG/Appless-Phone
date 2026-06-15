@@ -21,6 +21,12 @@ export const COLOR_CARD_SHADOW: string = '#020B10D0';
 export const COLOR_PANEL_SHADOW: string = '#020B10C8';
 export const COLOR_CARD_GLOW: string = '#0F4D4566';
 export const COLOR_ACCENT_SHADOW: string = '#0B514880';
+export const COLOR_ACTION_ACTIVATED: string = '#32E870';
+export const COLOR_ACTION_ACTIVATED_TEXT: string = '#031408';
+export const COLOR_ACTION_ACTIVATED_EDGE: string = '#76FFA2';
+export const COLOR_ACTION_DEACTIVATED: string = '#1B2931';
+export const COLOR_ACTION_DEACTIVATED_TEXT: string = '#9DAFB4';
+export const COLOR_ACTION_DEACTIVATED_EDGE: string = '#334B55';
 
 export function statusColor(status: string): string {
   if (status === 'ready') {

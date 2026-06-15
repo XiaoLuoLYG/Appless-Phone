@@ -14,48 +14,47 @@ import {
 } from '../A2uiHomeTheme';
 import { A2uiAction, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
-import { StatusBadgeView } from './StatusBadgeView';
 
 @Component
 export struct HomePage {
   @Link inputText: string;
-  @Prop connectionStatus: string = 'idle';
-  @Prop connectionMessage: string = '';
-  @Prop selectedModel: string = '';
-  @Prop baseUrl: string = '';
   @Prop isBusy: boolean = false;
-  @Prop refreshTick: number = 0;
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop surfaceRenderTick: number = 0;
   onOpenConfig: () => void = () => {};
+  onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   build() {
     Column() {
       Row() {
-        Column() {
+        Row() {
           Text('PocketAgent')
-            .fontSize(28)
+            .minFontSize(20)
+            .maxFontSize(28)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text('A2UI Home 最小刷新实验')
+            .minFontSize(10)
+            .maxFontSize(13)
             .fontSize(13)
             .fontColor(COLOR_MUTED)
-            .margin({ top: 5 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ left: 8 })
+            .layoutWeight(1)
         }
-        .alignItems(HorizontalAlign.Start)
+        .alignItems(VerticalAlign.Center)
         .layoutWeight(1)
-
-        StatusBadgeView({
-          status: this.connectionStatus,
-          label: ''
-        })
+        .constraintSize({ maxWidth: 220 })
 
         Button('配置')
           .height(40)
-          .width(78)
-          .fontSize(13)
+          .width(58)
+          .fontSize(12)
           .fontColor(COLOR_INK)
           .backgroundColor(COLOR_CARD_RAISED)
           .borderRadius(10)
@@ -64,8 +63,22 @@ export struct HomePage {
           .onClick(() => {
             this.onOpenConfig();
           })
+
+        Button('Lab')
+          .height(40)
+          .width(54)
+          .fontSize(12)
+          .fontColor(COLOR_BUTTON_TEXT)
+          .backgroundColor(COLOR_ACCENT_DEEP)
+          .borderRadius(10)
+          .border({ width: 1, color: COLOR_ACCENT })
+          .margin({ left: 8 })
+          .onClick(() => {
+            this.onOpenStyleLab();
+          })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .padding({ left: 18, right: 18, top: 16, bottom: 14 })
       .backgroundColor(COLOR_PANEL)
       .borderRadius(20)
@@ -83,27 +96,22 @@ export struct HomePage {
 
       Column() {
         Row() {
-          TextInput({
+          TextArea({
             placeholder: '告诉 PocketAgent 你想完成什么',
             text: this.inputText
           })
-            .height(52)
+            .constraintSize({ minHeight: 52 })
             .layoutWeight(1)
             .fontSize(15)
             .fontColor(COLOR_TEXT)
+            .lineHeight(21)
             .placeholderColor(COLOR_MUTED)
             .backgroundColor('#091017')
             .borderRadius(15)
             .border({ width: 1, color: COLOR_CARD_EDGE })
-            .padding({ left: 14, right: 14 })
-            .enterKeyType(EnterKeyType.Send)
+            .padding({ left: 14, right: 14, top: 13, bottom: 13 })
             .onChange((value: string) => {
               this.inputText = value;
-            })
-            .onSubmit(() => {
-              if (!this.isBusy) {
-                this.onSendPrompt();
-              }
             })
 
           Button(this.isBusy ? '生成中' : '生成')
@@ -122,18 +130,13 @@ export struct HomePage {
             })
         }
         .width('100%')
-        .alignItems(VerticalAlign.Center)
+        .alignItems(VerticalAlign.Bottom)
 
         Row() {
-          Text(this.connectionMessage)
-            .fontSize(11)
-            .fontColor(COLOR_MUTED)
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('panel=' + this.refreshTick.toString() + ' surface=' + this.surfaceRenderTick.toString())
+          Text('surface=' + this.surfaceRenderTick.toString())
             .fontSize(11)
             .fontColor(COLOR_ACCENT)
+            .layoutWeight(1)
         }
         .width('100%')
         .margin({ top: 8 })

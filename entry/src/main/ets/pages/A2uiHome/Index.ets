@@ -1,4 +1,5 @@
 import { LocalModelSettings, defaultLocalModelSettings } from '../../model/LocalModelSettings';
+import router from '@ohos.router';
 import { A2uiAction, A2uiCallResult, A2uiComponent, A2uiMessage, A2uiSurfaceState } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
@@ -44,7 +45,7 @@ struct Index {
   @State refreshTick: number = initialConnectionState.refreshTick;
   @State currentSurface: A2uiSurfaceState = initialSurface;
   @State surfaceRenderTick: number = 0;
-  @State inputText: string = '帮我查询明天北京到上海的航班';
+  @State inputText: string = '帮我查询6月16日北京到上海的高铁票';
   @State messages: A2uiMessage[] = [];
 
   private getSettings(): LocalModelSettings {
@@ -411,16 +412,18 @@ struct Index {
     } else {
       HomePage({
         inputText: $inputText,
-        connectionStatus: this.connectionStatus,
-        connectionMessage: this.connectionMessage,
-        selectedModel: this.selectedModel,
-        baseUrl: this.baseUrl,
         isBusy: this.isBusy,
-        refreshTick: this.refreshTick,
         currentSurface: this.currentSurface,
         surfaceRenderTick: this.surfaceRenderTick,
         onOpenConfig: () => {
           this.showConfigPage = true;
+        },
+        onOpenStyleLab: () => {
+          router.pushUrl({ url: 'pages/A2uiHome/StyleLab' }, (error) => {
+            if (error) {
+              aiLogError('[AIPhone][A2uiStyleLabRouteFailed] ' + JSON.stringify(error));
+            }
+          });
         },
         onSendPrompt: () => {
           this.sendPrompt();

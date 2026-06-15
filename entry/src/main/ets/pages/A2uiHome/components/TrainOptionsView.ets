@@ -14,6 +14,16 @@ import {
   COLOR_TEXT
 } from '../A2uiHomeTheme';
 import { componentBodyOf, componentStatusOf, componentTitleOf } from '../A2uiRenderData';
+import {
+  A2UI_TRAIN_ACTION_FILTER_AVAILABLE,
+  A2UI_TRAIN_ACTION_SHOW_MORE,
+  A2UI_TRAIN_ACTION_SORT_FASTEST,
+  A2UI_TRAIN_INITIAL_VISIBLE,
+  A2uiTrainViewState,
+  isLocalTrainAction,
+  trainActionForState,
+  visibleTrainOptions
+} from '../A2uiTrainOptionsState';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
 
@@ -24,10 +34,64 @@ export struct TrainOptionsView {
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
   @State expandedTrainKey: string = '';
+  @State showAllTrains: boolean = false;
+  @State fastestFirst: boolean = false;
+  @State availableOnly: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   private trains(): A2uiTrainOption[] {
     return trainOptions(this.surface, this.component);
+  }
+
+  private viewState(): A2uiTrainViewState {
+    return {
+      showAll: this.showAllTrains,
+      fastestFirst: this.fastestFirst,
+      availableOnly: this.availableOnly
+    };
+  }
+
+  private visibleTrains(): A2uiTrainOption[] {
+    return visibleTrainOptions(this.trains(), this.viewState());
+  }
+
+  private titleText(): string {
+    return componentTitleOf(this.component, '高铁候选');
+  }
+
+  private showTitle(): boolean {
+    const title = this.titleText();
+    return title.length > 0 && title !== this.surface.title;
+  }
+
+  private visibleActions(): A2uiAction[] {
+    const source = actionsOf(this.component);
+    const next: A2uiAction[] = [];
+    source.forEach((action: A2uiAction) => {
+      if (action.id === A2UI_TRAIN_ACTION_SHOW_MORE && this.trains().length <= A2UI_TRAIN_INITIAL_VISIBLE) {
+        return;
+      }
+      next.push(trainActionForState(action, this.showAllTrains, this.fastestFirst, this.availableOnly));
+    });
+    return next;
+  }
+
+  private handleAction(action: A2uiAction): void {
+    if (!isLocalTrainAction(action)) {
+      this.onAction(action);
+      return;
+    }
+    if (action.id === A2UI_TRAIN_ACTION_SHOW_MORE) {
+      this.showAllTrains = !this.showAllTrains;
+      return;
+    }
+    if (action.id === A2UI_TRAIN_ACTION_SORT_FASTEST) {
+      this.fastestFirst = true;
+      return;
+    }
+    if (action.id === A2UI_TRAIN_ACTION_FILTER_AVAILABLE) {
+      this.availableOnly = !this.availableOnly;
+    }
   }
 
   private trainKey(item: A2uiTrainOption): string {
@@ -70,16 +134,18 @@ export struct TrainOptionsView {
     Column() {
       Row() {
         Column() {
-          Text(componentTitleOf(this.component, '高铁候选'))
-            .fontSize(17)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_INK)
+          if (this.showTitle()) {
+            Text(this.titleText())
+              .fontSize(17)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_INK)
+          }
           if (componentBodyOf(this.component).length > 0) {
             Text(componentBodyOf(this.component))
               .fontSize(13)
               .fontColor(COLOR_MUTED)
               .lineHeight(20)
-              .margin({ top: 7 })
+              .margin({ top: this.showTitle() ? 7 : 0 })
           }
         }
         .alignItems(HorizontalAlign.Start)
@@ -92,13 +158,13 @@ export struct TrainOptionsView {
       .width('100%')
       .alignItems(VerticalAlign.Top)
 
-      if (this.trains().length === 0) {
+      if (this.visibleTrains().length === 0) {
         Text('暂无可展示车次')
           .fontSize(13)
           .fontColor(COLOR_MUTED)
           .padding({ top: 14, bottom: 4 })
       } else {
-        ForEach(this.trains(), (item: A2uiTrainOption) => {
+        ForEach(this.visibleTrains(), (item: A2uiTrainOption) => {
           Column() {
             Row() {
               Text(item.trainCode.length > 0 ? item.trainCode : '--')
@@ -194,9 +260,11 @@ export struct TrainOptionsView {
       }
 
       ActionBarView({
-        actions: actionsOf(this.component),
+        actions: this.visibleActions(),
         isBusy: this.isBusy,
-        onAction: this.onAction
+        onAction: (action: A2uiAction) => {
+          this.handleAction(action);
+        }
       })
     }
     .width('100%')

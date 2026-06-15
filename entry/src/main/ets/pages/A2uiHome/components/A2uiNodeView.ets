@@ -32,6 +32,7 @@ import {
   componentVariantOf,
   findA2uiComponent
 } from '../A2uiRenderData';
+import { a2uiEnterTransition } from '../A2uiHomeMotion';
 import { ActionBarView } from './ActionBarView';
 import { ErrorNoticeView } from './ErrorNoticeView';
 import { FlightBoardView } from './FlightBoardView';
@@ -118,6 +119,7 @@ export struct A2uiNodeView {
           .fontColor(componentToneOf(this.component() as A2uiComponent) === 'muted' ? COLOR_MUTED : COLOR_TEXT)
           .lineHeight(componentVariantOf(this.component() as A2uiComponent) === 'title' ? 26 : 21)
           .margin({ bottom: 10 })
+          .transition(a2uiEnterTransition())
       } else if (this.component()?.component === A2UI_COMPONENT_INFO_ROWS) {
         InfoRowsView({
           surface: this.surface,
@@ -134,6 +136,7 @@ export struct A2uiNodeView {
           isBusy: this.isBusy,
           onAction: this.onAction
         })
+        .key('train-options-' + this.componentId + '-' + this.renderTick.toString())
       } else if (this.component()?.component === A2UI_COMPONENT_FLIGHT_BOARD) {
         FlightBoardView({
           surface: this.surface,
