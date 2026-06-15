@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/A2uiHomeToolRequest';
+import { resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
 import {
   A2uiComponent,
   A2uiFlightData,

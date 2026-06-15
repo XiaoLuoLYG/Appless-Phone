@@ -1,4 +1,4 @@
-import { A2uiAction, A2uiTrainData } from '../../model/A2uiTypes';
+import { A2uiAction, A2uiTrainData } from '../../../model/A2uiTypes';
 
 export const A2UI_TRAIN_INITIAL_VISIBLE: number = 6;
 export const A2UI_TRAIN_ACTION_SHOW_MORE: string = 'client_show_more';

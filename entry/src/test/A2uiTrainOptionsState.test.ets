@@ -8,7 +8,7 @@ import {
   A2uiTrainViewState,
   trainActionForState,
   visibleTrainOptions
-} from '../main/ets/pages/A2uiHome/A2uiTrainOptionsState';
+} from '../main/ets/pages/A2uiHome/state/A2uiTrainOptionsState';
 
 function train(code: string, duration: string, second: string): A2uiTrainData {
   return {

@@ -11,7 +11,7 @@ import {
   COLOR_PANEL,
   COLOR_PANEL_SHADOW,
   COLOR_TEXT,
-} from '../A2uiHomeTheme';
+} from '../style/A2uiHomeTheme';
 import { A2uiAction, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
 

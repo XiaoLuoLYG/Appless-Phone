@@ -6,13 +6,13 @@ import {
   COLOR_PANEL,
   COLOR_PANEL_SHADOW,
   COLOR_TEXT
-} from '../A2uiHomeTheme';
+} from '../style/A2uiHomeTheme';
 import {
   A2UI_MOTION_NORMAL_MS,
   A2UI_SURFACE_ENTER_OFFSET_Y,
   a2uiEnterTransition
-} from '../A2uiHomeMotion';
-import { componentBodyOf, findA2uiComponent, rootComponentIdOf } from '../A2uiRenderData';
+} from '../style/A2uiHomeMotion';
+import { componentBodyOf, findA2uiComponent, rootComponentIdOf } from '../render/A2uiRenderData';
 import { A2uiNodeView } from './A2uiNodeView';
 import { StatusBadgeView } from './StatusBadgeView';
 

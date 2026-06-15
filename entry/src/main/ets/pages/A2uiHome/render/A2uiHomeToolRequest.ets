@@ -1,5 +1,5 @@
-import { A2uiSurfaceState } from '../../model/A2uiTypes';
-import { toolRequest } from '../../model/A2uiData';
+import { A2uiSurfaceState } from '../../../model/A2uiTypes';
+import { toolRequest } from '../../../model/A2uiData';
 
 export interface A2uiHomeResolvedToolRequest {
   hasTool: boolean;

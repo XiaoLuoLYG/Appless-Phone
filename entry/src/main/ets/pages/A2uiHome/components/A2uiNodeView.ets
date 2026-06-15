@@ -23,7 +23,7 @@ import {
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
-} from '../A2uiHomeTheme';
+} from '../style/A2uiHomeTheme';
 import {
   childIdsOf,
   componentTextOf,
@@ -31,8 +31,8 @@ import {
   componentToneOf,
   componentVariantOf,
   findA2uiComponent
-} from '../A2uiRenderData';
-import { a2uiEnterTransition } from '../A2uiHomeMotion';
+} from '../render/A2uiRenderData';
+import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
 import { ActionBarView } from './ActionBarView';
 import { ErrorNoticeView } from './ErrorNoticeView';
 import { FlightBoardView } from './FlightBoardView';

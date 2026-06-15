@@ -7,8 +7,8 @@ import {
   cloneA2uiStyleLabSurface,
   defaultA2uiStyleLabCase,
   findA2uiStyleLabCase
-} from '../main/ets/pages/A2uiHome/A2uiStyleLabMocks';
-import { rootComponentIdOf } from '../main/ets/pages/A2uiHome/A2uiRenderData';
+} from '../main/ets/pages/A2uiHome/mocks/A2uiStyleLabMocks';
+import { rootComponentIdOf } from '../main/ets/pages/A2uiHome/render/A2uiRenderData';
 
 export default function a2uiStyleLabMocksTest() {
   describe('a2uiStyleLabMocks', () => {

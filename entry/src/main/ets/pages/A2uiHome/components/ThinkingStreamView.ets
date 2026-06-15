@@ -8,8 +8,8 @@ import {
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
-} from '../A2uiHomeTheme';
-import { componentBodyOf, componentStatusOf, componentTitleOf, thinkingTextOf } from '../A2uiRenderData';
+} from '../style/A2uiHomeTheme';
+import { componentBodyOf, componentStatusOf, componentTitleOf, thinkingTextOf } from '../render/A2uiRenderData';
 import {
   A2UI_THINKING_DOT_MS,
   A2UI_THINKING_PULSE_MIN,
@@ -17,7 +17,7 @@ import {
   a2uiThinkingDotScale,
   a2uiThinkingDotsActive,
   a2uiEnterTransition
-} from '../A2uiHomeMotion';
+} from '../style/A2uiHomeMotion';
 import { StatusBadgeView } from './StatusBadgeView';
 
 @Component

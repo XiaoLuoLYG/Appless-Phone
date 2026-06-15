@@ -11,8 +11,8 @@ import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
   updateConnectionPanelState
-} from './A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './A2uiHomeToolRequest';
+} from './state/A2uiHomeState';
+import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();

@@ -7,9 +7,9 @@ import {
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
-} from '../A2uiHomeTheme';
-import { componentBodyOf, componentStatusOf, componentTitleOf } from '../A2uiRenderData';
-import { a2uiEnterTransition } from '../A2uiHomeMotion';
+} from '../style/A2uiHomeTheme';
+import { componentBodyOf, componentStatusOf, componentTitleOf } from '../render/A2uiRenderData';
+import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
 

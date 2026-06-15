@@ -11,14 +11,14 @@ import {
   COLOR_PAGE,
   COLOR_PANEL,
   COLOR_TEXT
-} from './A2uiHomeTheme';
+} from './style/A2uiHomeTheme';
 import {
   A2UI_STYLE_LAB_CASES,
   A2uiStyleLabCase,
   cloneA2uiStyleLabSurface,
   defaultA2uiStyleLabCase,
   findA2uiStyleLabCase
-} from './A2uiStyleLabMocks';
+} from './mocks/A2uiStyleLabMocks';
 import { A2uiSurfaceView } from './components/A2uiSurfaceView';
 import { StatusBadgeView } from './components/StatusBadgeView';
 

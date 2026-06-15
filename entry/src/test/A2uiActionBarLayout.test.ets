@@ -2,7 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   A2UI_DIALOG_ACTION_COUNT,
   usesDialogActionLayout
-} from '../main/ets/pages/A2uiHome/A2uiActionBarLayout';
+} from '../main/ets/pages/A2uiHome/style/A2uiActionBarLayout';
 
 export default function a2uiActionBarLayoutTest() {
   describe('a2uiActionBarLayout', () => {

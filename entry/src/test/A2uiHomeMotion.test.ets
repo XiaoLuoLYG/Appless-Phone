@@ -3,7 +3,7 @@ import {
   a2uiThinkingDotOpacity,
   a2uiThinkingDotScale,
   a2uiThinkingDotsActive
-} from '../main/ets/pages/A2uiHome/A2uiHomeMotion';
+} from '../main/ets/pages/A2uiHome/style/A2uiHomeMotion';
 
 export default function a2uiHomeMotionTest() {
   describe('a2uiHomeMotion', () => {

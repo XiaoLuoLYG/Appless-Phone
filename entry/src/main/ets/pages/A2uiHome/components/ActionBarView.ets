@@ -14,13 +14,13 @@ import {
   COLOR_ERROR,
   COLOR_ERROR_SOFT,
   COLOR_INK
-} from '../A2uiHomeTheme';
+} from '../style/A2uiHomeTheme';
 import {
   A2UI_DIALOG_ACTION_GAP,
   A2UI_DIALOG_ACTION_SIDE_PADDING,
   usesDialogActionLayout
-} from '../A2uiActionBarLayout';
-import { a2uiEnterTransition } from '../A2uiHomeMotion';
+} from '../style/A2uiActionBarLayout';
+import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
 
 @Component
 export struct ActionBarView {

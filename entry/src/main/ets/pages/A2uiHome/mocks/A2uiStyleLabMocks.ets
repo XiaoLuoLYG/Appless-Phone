@@ -11,7 +11,7 @@ import {
   A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState
-} from '../../model/A2uiTypes';
+} from '../../../model/A2uiTypes';
 
 export interface A2uiStyleLabCase {
   id: string;
