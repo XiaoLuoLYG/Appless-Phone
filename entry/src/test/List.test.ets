@@ -10,6 +10,7 @@ import a2uiStyleLabMocksTest from './A2uiStyleLabMocks.test';
 import a2uiActionBarLayoutTest from './A2uiActionBarLayout.test';
 import a2uiHomeMotionTest from './A2uiHomeMotion.test';
 import a2uiTrainOptionsStateTest from './A2uiTrainOptionsState.test';
+import a2uiButtonStyleTest from './A2uiButtonStyle.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -24,4 +25,5 @@ export default function testsuite() {
   a2uiActionBarLayoutTest();
   a2uiHomeMotionTest();
   a2uiTrainOptionsStateTest();
+  a2uiButtonStyleTest();
 }

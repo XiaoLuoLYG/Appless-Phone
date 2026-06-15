@@ -15,17 +15,22 @@ import {
 } from '../style/A2uiHomeTheme';
 import { componentBodyOf, componentStatusOf, componentTitleOf } from '../render/A2uiRenderData';
 import {
-  A2UI_TRAIN_ACTION_FILTER_AVAILABLE,
   A2UI_TRAIN_ACTION_SHOW_MORE,
-  A2UI_TRAIN_ACTION_SORT_FASTEST,
   A2UI_TRAIN_INITIAL_VISIBLE,
   A2uiTrainViewState,
   isLocalTrainAction,
+  nextTrainViewStateForAction,
   trainActionForState,
   visibleTrainOptions
 } from '../state/A2uiTrainOptionsState';
+import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS, a2uiEnterTransition } from '../style/A2uiHomeMotion';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
+
+const A2UI_TRAIN_CARD_BASE_HEIGHT: number = 152;
+const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 232;
+const A2UI_TRAIN_CARD_TOP_MARGIN: number = 10;
+const A2UI_TRAIN_LIST_EMPTY_HEIGHT: number = 50;
 
 @Component
 export struct TrainOptionsView {
@@ -55,6 +60,22 @@ export struct TrainOptionsView {
     return visibleTrainOptions(this.trains(), this.viewState());
   }
 
+  private trainCardHeight(item: A2uiTrainOption): number {
+    return this.expandedTrainKey === this.trainKey(item) ? A2UI_TRAIN_CARD_EXPANDED_HEIGHT : A2UI_TRAIN_CARD_BASE_HEIGHT;
+  }
+
+  private trainListHeight(): number {
+    const items = this.visibleTrains();
+    if (items.length === 0) {
+      return A2UI_TRAIN_LIST_EMPTY_HEIGHT;
+    }
+    let height = 0;
+    items.forEach((item: A2uiTrainOption) => {
+      height = height + this.trainCardHeight(item) + A2UI_TRAIN_CARD_TOP_MARGIN;
+    });
+    return height;
+  }
+
   private titleText(): string {
     return componentTitleOf(this.component, '高铁候选');
   }
@@ -81,17 +102,10 @@ export struct TrainOptionsView {
       this.onAction(action);
       return;
     }
-    if (action.id === A2UI_TRAIN_ACTION_SHOW_MORE) {
-      this.showAllTrains = !this.showAllTrains;
-      return;
-    }
-    if (action.id === A2UI_TRAIN_ACTION_SORT_FASTEST) {
-      this.fastestFirst = true;
-      return;
-    }
-    if (action.id === A2UI_TRAIN_ACTION_FILTER_AVAILABLE) {
-      this.availableOnly = !this.availableOnly;
-    }
+    const next = nextTrainViewStateForAction(this.viewState(), action);
+    this.showAllTrains = next.showAll;
+    this.fastestFirst = next.fastestFirst;
+    this.availableOnly = next.availableOnly;
   }
 
   private trainKey(item: A2uiTrainOption): string {
@@ -158,106 +172,117 @@ export struct TrainOptionsView {
       .width('100%')
       .alignItems(VerticalAlign.Top)
 
-      if (this.visibleTrains().length === 0) {
-        Text('暂无可展示车次')
-          .fontSize(13)
-          .fontColor(COLOR_MUTED)
-          .padding({ top: 14, bottom: 4 })
-      } else {
-        ForEach(this.visibleTrains(), (item: A2uiTrainOption) => {
-          Column() {
-            Row() {
-              Text(item.trainCode.length > 0 ? item.trainCode : '--')
-                .fontSize(22)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_INK)
-                .layoutWeight(1)
-              if (item.duration.length > 0) {
-                Text('耗时 ' + item.duration)
-                  .fontSize(12)
-                  .fontColor(COLOR_ACCENT_DARK)
-                  .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-                  .backgroundColor(COLOR_ACCENT_SOFT)
-                  .borderRadius(8)
-              }
-            }
-            .width('100%')
-
-            Row() {
-              Column() {
-                Text(item.depart.length > 0 ? item.depart : '--')
-                  .fontSize(21)
+      Column() {
+        if (this.visibleTrains().length === 0) {
+          Text('暂无可展示车次')
+            .fontSize(13)
+            .fontColor(COLOR_MUTED)
+            .padding({ top: 14, bottom: 4 })
+        } else {
+          ForEach(this.visibleTrains(), (item: A2uiTrainOption) => {
+            Column() {
+              Row() {
+                Text(item.trainCode.length > 0 ? item.trainCode : '--')
+                  .fontSize(22)
                   .fontWeight(FontWeight.Bold)
                   .fontColor(COLOR_INK)
-                Text(item.from.length > 0 ? item.from : '出发站')
-                  .fontSize(12)
-                  .fontColor(COLOR_MUTED)
-                  .margin({ top: 4 })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-
-              Text('→')
-                .fontSize(18)
-                .fontColor(COLOR_MUTED)
-                .margin({ left: 14, right: 14, top: 8 })
-
-              Column() {
-                Text(item.arrive.length > 0 ? item.arrive : '--')
-                  .fontSize(21)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(COLOR_INK)
-                Text(item.to.length > 0 ? item.to : '到达站')
-                  .fontSize(12)
-                  .fontColor(COLOR_MUTED)
-                  .margin({ top: 4 })
-              }
-              .alignItems(HorizontalAlign.End)
-              .layoutWeight(1)
-            }
-            .width('100%')
-            .margin({ top: 12 })
-
-            Text(this.seatSummary(item))
-              .fontSize(13)
-              .fontColor(COLOR_TEXT)
-              .lineHeight(19)
-              .margin({ top: 10 })
-
-            if (this.expandedTrainKey === this.trainKey(item)) {
-              Column() {
-                Text(item.status.length > 0 ? '状态：' + item.status : '状态：以 12306 为准')
-                  .fontSize(12)
-                  .fontColor(COLOR_TEXT)
-                Text('以 12306 为准，不支持订票、支付或抢票。')
-                  .fontSize(12)
-                  .fontColor(COLOR_MUTED)
-                  .lineHeight(18)
-                  .margin({ top: 8 })
+                  .layoutWeight(1)
+                if (item.duration.length > 0) {
+                  Text('耗时 ' + item.duration)
+                    .fontSize(12)
+                    .fontColor(COLOR_ACCENT_DARK)
+                    .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+                    .backgroundColor(COLOR_ACCENT_SOFT)
+                    .borderRadius(8)
+                }
               }
               .width('100%')
-              .alignItems(HorizontalAlign.Start)
-              .padding(12)
-              .backgroundColor(COLOR_FIELD)
-              .borderRadius(10)
-              .border({ width: { left: 3 }, color: COLOR_ACCENT })
-              .margin({ top: 10 })
+
+              Row() {
+                Column() {
+                  Text(item.depart.length > 0 ? item.depart : '--')
+                    .fontSize(21)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(COLOR_INK)
+                  Text(item.from.length > 0 ? item.from : '出发站')
+                    .fontSize(12)
+                    .fontColor(COLOR_MUTED)
+                    .margin({ top: 4 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                Text('→')
+                  .fontSize(18)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ left: 14, right: 14, top: 8 })
+
+                Column() {
+                  Text(item.arrive.length > 0 ? item.arrive : '--')
+                    .fontSize(21)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(COLOR_INK)
+                  Text(item.to.length > 0 ? item.to : '到达站')
+                    .fontSize(12)
+                    .fontColor(COLOR_MUTED)
+                    .margin({ top: 4 })
+                }
+                .alignItems(HorizontalAlign.End)
+                .layoutWeight(1)
+              }
+              .width('100%')
+              .margin({ top: 12 })
+
+              Text(this.seatSummary(item))
+                .fontSize(13)
+                .fontColor(COLOR_TEXT)
+                .lineHeight(19)
+                .margin({ top: 10 })
+
+              if (this.expandedTrainKey === this.trainKey(item)) {
+                Column() {
+                  Text(item.status.length > 0 ? '状态：' + item.status : '状态：以 12306 为准')
+                    .fontSize(12)
+                    .fontColor(COLOR_TEXT)
+                  Text('以 12306 为准，不支持订票、支付或抢票。')
+                    .fontSize(12)
+                    .fontColor(COLOR_MUTED)
+                    .lineHeight(18)
+                    .margin({ top: 8 })
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+                .padding(12)
+                .backgroundColor(COLOR_FIELD)
+                .borderRadius(10)
+                .border({ width: { left: 3 }, color: COLOR_ACCENT })
+                .margin({ top: 10 })
+                .transition(a2uiEnterTransition(4))
+              }
             }
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-          .padding(16)
-          .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .border({ width: 1, color: COLOR_CARD_EDGE })
-          .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
-          .margin({ top: 10 })
-          .onClick(() => {
-            const rowKey = this.trainKey(item);
-            this.expandedTrainKey = this.expandedTrainKey === rowKey ? '' : rowKey;
-          })
-        }, (item: A2uiTrainOption) => this.trainKey(item) + '-' + this.renderTick.toString())
+            .width('100%')
+            .height(this.trainCardHeight(item))
+            .clip(true)
+            .alignItems(HorizontalAlign.Start)
+            .padding(16)
+            .backgroundColor(COLOR_CARD)
+            .borderRadius(16)
+            .border({ width: 1, color: COLOR_CARD_EDGE })
+            .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
+            .margin({ top: 10 })
+            .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
+            .transition(a2uiEnterTransition())
+            .onClick(() => {
+              const rowKey = this.trainKey(item);
+              this.expandedTrainKey = this.expandedTrainKey === rowKey ? '' : rowKey;
+            })
+          }, (item: A2uiTrainOption) => this.trainKey(item) + '-' + this.renderTick.toString())
+        }
       }
+      .width('100%')
+      .height(this.trainListHeight())
+      .clip(true)
+      .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
 
       ActionBarView({
         actions: this.visibleActions(),

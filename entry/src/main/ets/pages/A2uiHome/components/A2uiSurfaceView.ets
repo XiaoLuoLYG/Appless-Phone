@@ -8,6 +8,7 @@ import {
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
 import {
+  A2UI_MOTION_CURVE,
   A2UI_MOTION_NORMAL_MS,
   A2UI_SURFACE_ENTER_OFFSET_Y,
   a2uiEnterTransition
@@ -104,6 +105,6 @@ export struct A2uiSurfaceView {
     .border({ width: 1, color: COLOR_CARD_EDGE })
     .shadow({ radius: 28, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 14 })
     .transition(a2uiEnterTransition(A2UI_SURFACE_ENTER_OFFSET_Y))
-    .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: Curve.EaseOut })
+    .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
   }
 }

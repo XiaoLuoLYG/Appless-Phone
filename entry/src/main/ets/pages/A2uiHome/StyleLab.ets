@@ -139,6 +139,7 @@ struct StyleLab {
           this.handleAction(action);
         }
       })
+      .layoutWeight(1)
       .margin({ top: 12 })
     }
     .width('100%')

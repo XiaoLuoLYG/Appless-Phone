@@ -32,6 +32,7 @@ function logSnippet(text: string): string {
 struct Index {
   @State showConfigPage: boolean = false;
   @State showAdvancedSettings: boolean = false;
+  @State showHistory: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
   @State apiKey: string = '';
   @State selectedModel: string = defaultLocalModelSettings().model;
@@ -413,8 +414,13 @@ struct Index {
       HomePage({
         inputText: $inputText,
         isBusy: this.isBusy,
+        showHistory: this.showHistory,
+        messages: this.messages,
         currentSurface: this.currentSurface,
         surfaceRenderTick: this.surfaceRenderTick,
+        onToggleHistory: () => {
+          this.showHistory = !this.showHistory;
+        },
         onOpenConfig: () => {
           this.showConfigPage = true;
         },

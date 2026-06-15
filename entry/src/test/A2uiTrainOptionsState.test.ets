@@ -6,16 +6,17 @@ import {
   A2UI_TRAIN_ACTION_SORT_FASTEST,
   A2UI_TRAIN_INITIAL_VISIBLE,
   A2uiTrainViewState,
+  nextTrainViewStateForAction,
   trainActionForState,
   visibleTrainOptions
 } from '../main/ets/pages/A2uiHome/state/A2uiTrainOptionsState';
 
-function train(code: string, duration: string, second: string): A2uiTrainData {
+function train(code: string, duration: string, second: string, depart: string = '09:00'): A2uiTrainData {
   return {
     trainCode: code,
     from: '北京南',
     to: '上海虹桥',
-    depart: '09:00',
+    depart: depart,
     arrive: '13:00',
     duration: duration,
     seats: second.length > 0 ? '二等座' + second : '',
@@ -95,6 +96,23 @@ export default function a2uiTrainOptionsStateTest() {
       expect(visibleTrainOptions(trains, state)[0].trainCode).assertEqual('G2');
     });
 
+    it('sorts trains by departure time when fastest sorting is off', 0, () => {
+      const trains: A2uiTrainData[] = [
+        train('G100', '5小时10分', '有', '11:20'),
+        train('G2', '4小时28分', '有', '07:32'),
+        train('G88', '6小时', '有', '09:40')
+      ];
+      const state: A2uiTrainViewState = {
+        showAll: true,
+        fastestFirst: false,
+        availableOnly: false
+      };
+
+      expect(visibleTrainOptions(trains, state)[0].trainCode).assertEqual('G2');
+      expect(visibleTrainOptions(trains, state)[1].trainCode).assertEqual('G88');
+      expect(visibleTrainOptions(trains, state)[2].trainCode).assertEqual('G100');
+    });
+
     it('filters trains locally to available seats', 0, () => {
       const trains: A2uiTrainData[] = [
         train('G100', '5小时10分', '无'),
@@ -130,6 +148,21 @@ export default function a2uiTrainOptionsStateTest() {
 
       expect(showMore.variant).assertEqual('deactivated');
       expect(filter.variant).assertEqual('deactivated');
+    });
+
+    it('toggles local train view flags from action ids', 0, () => {
+      const base: A2uiTrainViewState = {
+        showAll: false,
+        fastestFirst: true,
+        availableOnly: false
+      };
+
+      expect(nextTrainViewStateForAction(base, action(A2UI_TRAIN_ACTION_SORT_FASTEST, '选最快的')).fastestFirst)
+        .assertFalse();
+      expect(nextTrainViewStateForAction(base, action(A2UI_TRAIN_ACTION_SHOW_MORE, '展示全部')).showAll)
+        .assertTrue();
+      expect(nextTrainViewStateForAction(base, action(A2UI_TRAIN_ACTION_FILTER_AVAILABLE, '只看有票')).availableOnly)
+        .assertTrue();
     });
   });
 }

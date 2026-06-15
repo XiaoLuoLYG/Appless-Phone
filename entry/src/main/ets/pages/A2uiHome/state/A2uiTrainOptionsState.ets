@@ -67,6 +67,15 @@ function durationMinutes(duration: string): number {
   return 999999;
 }
 
+function departMinutes(depart: string): number {
+  const text = depart.trim();
+  const colonIndex = text.indexOf(':');
+  if (colonIndex <= 0) {
+    return 999999;
+  }
+  return numericValue(text.substring(0, colonIndex)) * 60 + numericValue(text.substring(colonIndex + 1));
+}
+
 export function visibleTrainOptions(trains: A2uiTrainData[], state: A2uiTrainViewState): A2uiTrainData[] {
   let next: A2uiTrainData[] = trains.slice();
   if (state.availableOnly) {
@@ -75,6 +84,10 @@ export function visibleTrainOptions(trains: A2uiTrainData[], state: A2uiTrainVie
   if (state.fastestFirst) {
     next = next.sort((left: A2uiTrainData, right: A2uiTrainData) => {
       return durationMinutes(left.duration) - durationMinutes(right.duration);
+    });
+  } else {
+    next = next.sort((left: A2uiTrainData, right: A2uiTrainData) => {
+      return departMinutes(left.depart) - departMinutes(right.depart);
     });
   }
   if (!state.showAll && next.length > A2UI_TRAIN_INITIAL_VISIBLE) {
@@ -135,4 +148,29 @@ export function isLocalTrainAction(action: A2uiAction): boolean {
   return action.id === A2UI_TRAIN_ACTION_SHOW_MORE ||
     action.id === A2UI_TRAIN_ACTION_SORT_FASTEST ||
     action.id === A2UI_TRAIN_ACTION_FILTER_AVAILABLE;
+}
+
+export function nextTrainViewStateForAction(state: A2uiTrainViewState, action: A2uiAction): A2uiTrainViewState {
+  if (action.id === A2UI_TRAIN_ACTION_SHOW_MORE) {
+    return {
+      showAll: !state.showAll,
+      fastestFirst: state.fastestFirst,
+      availableOnly: state.availableOnly
+    };
+  }
+  if (action.id === A2UI_TRAIN_ACTION_SORT_FASTEST) {
+    return {
+      showAll: state.showAll,
+      fastestFirst: !state.fastestFirst,
+      availableOnly: state.availableOnly
+    };
+  }
+  if (action.id === A2UI_TRAIN_ACTION_FILTER_AVAILABLE) {
+    return {
+      showAll: state.showAll,
+      fastestFirst: state.fastestFirst,
+      availableOnly: !state.availableOnly
+    };
+  }
+  return state;
 }
