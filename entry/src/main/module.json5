@@ -15,6 +15,15 @@
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
+    "definePermissions": [
+      {
+        "name": "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER",
+        "grantMode": "system_grant",
+        "availableLevel": "system_core",
+        "provisionEnable": true,
+        "distributedSceneEnable": false
+      }
+    ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
@@ -44,18 +53,6 @@
       },
       {
         "name": "ohos.permission.SUBSCRIBE_NOTIFICATION"
-      },
-      {
-        "name": "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER"
-      },
-      {
-        "name": "ohos.permission.NOTIFICATION_CONTROLLER"
-      },
-      {
-        "name": "ohos.permission.NOTIFICATION_AGENT_CONTROLLER"
-      },
-      {
-        "name": "ohos.permission.SUBSCRIBE_NOTIFICATION_WINDOW_STATE"
       }
     ],
     "pages": "$profile:main_pages",
@@ -89,12 +86,7 @@
         "description": "$string:NotificationSubscriberExtAbility_desc",
         "icon": "$media:layered_image",
         "label": "$string:NotificationSubscriberExtAbility_label",
-        "exported": true,
-        "permissions": [
-          "ohos.permission.SUBSCRIBE_NOTIFICATION",
-          "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER",
-          "ohos.permission.NOTIFICATION_CONTROLLER"
-        ]
+        "exported": true
       },
       {
         "name": "SocialAccessibilityExtAbility",

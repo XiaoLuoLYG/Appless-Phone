@@ -32,7 +32,7 @@
           "certpath": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.cer",
           "keyAlias": "debugKey",
           "keyPassword": "0000001B6E68F5D4181F7CB6656C8E78BCB3C9FB0E5A2B52DCE7A118D2AE625D7222204464F4390BBADAAB",
-          "profile": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.p7b",
+          "profile": "/Users/luoyige/.ohos/config/aiphonedemoDebug-20260615-mapkit.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.p12",
           "storePassword": "0000001BF58B1CCEAECAB225B1C21CF291695634AF2C58C2C556692C4DCB4C80B2141ECD247BF136118920"

@@ -4,19 +4,6 @@ import {
   A2uiSocialReplyData
 } from './A2uiTypes';
 
-export const SOCIAL_SUBSCRIBE_NOTIFICATION_PERMISSION: string = 'ohos.permission.SUBSCRIBE_NOTIFICATION';
-export const SOCIAL_NOTIFICATION_SYSTEM_SUBSCRIBER_PERMISSION: string = 'ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER';
-export const SOCIAL_NOTIFICATION_CONTROLLER_PERMISSION: string = 'ohos.permission.NOTIFICATION_CONTROLLER';
-export const SOCIAL_NOTIFICATION_AGENT_CONTROLLER_PERMISSION: string = 'ohos.permission.NOTIFICATION_AGENT_CONTROLLER';
-export const SOCIAL_NOTIFICATION_WINDOW_STATE_PERMISSION: string = 'ohos.permission.SUBSCRIBE_NOTIFICATION_WINDOW_STATE';
-export const SOCIAL_SYSTEM_NOTIFICATION_PERMISSION_NAMES: string[] = [
-  SOCIAL_SUBSCRIBE_NOTIFICATION_PERMISSION,
-  SOCIAL_NOTIFICATION_SYSTEM_SUBSCRIBER_PERMISSION,
-  SOCIAL_NOTIFICATION_CONTROLLER_PERMISSION,
-  SOCIAL_NOTIFICATION_AGENT_CONTROLLER_PERMISSION,
-  SOCIAL_NOTIFICATION_WINDOW_STATE_PERMISSION
-];
-
 export interface SocialCaptureCandidate {
   platform: string;
   conversationId?: string;
@@ -373,7 +360,7 @@ export function buildSocialDiagnosticsRows(capabilities: SocialCapabilities): A2
   return [
     {
       label: '通知权限名',
-      value: SOCIAL_SYSTEM_NOTIFICATION_PERMISSION_NAMES.join(' / ')
+      value: 'ohos.permission.SUBSCRIBE_NOTIFICATION'
     },
     {
       label: '通知中心桥接',
