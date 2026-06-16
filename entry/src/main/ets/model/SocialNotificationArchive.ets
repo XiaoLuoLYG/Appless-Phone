@@ -26,6 +26,33 @@ export interface SocialNotificationArchiveRead {
 interface NotificationContentProbe {
   title?: string;
   text?: string;
+  additionalText?: string;
+  longText?: Object | string;
+  briefText?: string;
+  expandedTitle?: string;
+  longTitle?: string;
+  lines?: string[];
+  normal?: NotificationBasicContentProbe;
+  multiLine?: NotificationBasicContentProbe;
+  picture?: NotificationBasicContentProbe;
+  systemLiveView?: NotificationBasicContentProbe;
+}
+
+interface NotificationBasicContentProbe {
+  title?: string;
+  text?: string;
+  additionalText?: string;
+  longText?: string;
+  briefText?: string;
+  expandedTitle?: string;
+  longTitle?: string;
+  lines?: string[];
+}
+
+interface NotificationRequestProbe {
+  content?: NotificationContentProbe;
+  deliveryTime?: number;
+  appMessageId?: string;
 }
 
 interface NotificationInfoProbe {
@@ -35,6 +62,13 @@ interface NotificationInfoProbe {
   deliveryTime?: number;
   groupName?: string;
   content?: NotificationContentProbe;
+  request?: NotificationRequestProbe;
+  notification?: NotificationRequestProbe;
+}
+
+interface NotificationTextPair {
+  title: string;
+  preview: string;
 }
 
 function textOf(value: string | undefined | null): string {
@@ -64,9 +98,10 @@ function errorCodeOf(error: BusinessError): string {
   return error.code.toString();
 }
 
-function isWechatIdentity(bundleName: string, appName: string, title: string): boolean {
+export function isWechatIdentity(bundleName: string, appName: string, title: string): boolean {
   const identity = (bundleName + ' ' + appName + ' ' + title).toLowerCase();
   return identity.indexOf('com.tencent.mm') >= 0 ||
+    identity.indexOf('com.tencent.wechat') >= 0 ||
     identity.indexOf('wechat') >= 0 ||
     identity.indexOf('weixin') >= 0 ||
     identity.indexOf('micromsg') >= 0 ||
@@ -80,9 +115,121 @@ function receivedAtOf(deliveryTime: number | undefined): string {
   return new Date().toISOString();
 }
 
+function firstText(values: Array<Object | string | number | boolean | null | undefined>): string {
+  for (let index = 0; index < values.length; index++) {
+    const value = textFromValue(values[index]);
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function nestedBasicContent(value: Object | string | undefined): NotificationBasicContentProbe | undefined {
+  if (value !== undefined && value !== null && typeof value === 'object') {
+    return value as NotificationBasicContentProbe;
+  }
+  return undefined;
+}
+
+function linesText(lines: string[] | undefined): string {
+  if (lines === undefined || lines.length === 0) {
+    return '';
+  }
+  const texts: string[] = [];
+  lines.forEach((line: string) => {
+    const text = textOf(line);
+    if (text.length > 0) {
+      texts.push(text);
+    }
+  });
+  return texts.join('\n');
+}
+
+function pairFromBasicContent(content: NotificationBasicContentProbe | undefined): NotificationTextPair {
+  if (content === undefined || content === null) {
+    return {
+      title: '',
+      preview: ''
+    };
+  }
+  return {
+    title: firstText([content.title, content.expandedTitle, content.longTitle]),
+    preview: firstText([content.text, content.longText, content.briefText, content.additionalText, linesText(content.lines)])
+  };
+}
+
+function mergeTextPair(primary: NotificationTextPair, fallback: NotificationTextPair): NotificationTextPair {
+  return {
+    title: primary.title.length > 0 ? primary.title : fallback.title,
+    preview: primary.preview.length > 0 ? primary.preview : fallback.preview
+  };
+}
+
+function pairFromNotificationContent(content: NotificationContentProbe | undefined): NotificationTextPair {
+  if (content === undefined || content === null) {
+    return {
+      title: '',
+      preview: ''
+    };
+  }
+  let pair = pairFromBasicContent(content as Object as NotificationBasicContentProbe);
+  pair = mergeTextPair(pair, pairFromBasicContent(content.normal));
+  pair = mergeTextPair(pair, pairFromBasicContent(nestedBasicContent(content.longText)));
+  pair = mergeTextPair(pair, pairFromBasicContent(content.multiLine));
+  pair = mergeTextPair(pair, pairFromBasicContent(content.picture));
+  pair = mergeTextPair(pair, pairFromBasicContent(content.systemLiveView));
+  return pair;
+}
+
+function pairFromNotificationInfo(probe: NotificationInfoProbe): NotificationTextPair {
+  let pair = pairFromNotificationContent(probe.content);
+  if (probe.request !== undefined) {
+    pair = mergeTextPair(pair, pairFromNotificationContent(probe.request.content));
+  }
+  if (probe.notification !== undefined) {
+    pair = mergeTextPair(pair, pairFromNotificationContent(probe.notification.content));
+  }
+  return pair;
+}
+
+function deliveryTimeFromProbe(probe: NotificationInfoProbe): number | undefined {
+  if (probe.deliveryTime !== undefined && probe.deliveryTime > 0) {
+    return probe.deliveryTime;
+  }
+  if (probe.request !== undefined && probe.request.deliveryTime !== undefined && probe.request.deliveryTime > 0) {
+    return probe.request.deliveryTime;
+  }
+  if (probe.notification !== undefined && probe.notification.deliveryTime !== undefined && probe.notification.deliveryTime > 0) {
+    return probe.notification.deliveryTime;
+  }
+  return undefined;
+}
+
+function hashCodeFromProbe(probe: NotificationInfoProbe): string {
+  const hashCode = textOf(probe.hashCode);
+  if (hashCode.length > 0) {
+    return hashCode;
+  }
+  if (probe.request !== undefined) {
+    const appMessageId = textOf(probe.request.appMessageId);
+    if (appMessageId.length > 0) {
+      return appMessageId;
+    }
+  }
+  if (probe.notification !== undefined) {
+    const appMessageId = textOf(probe.notification.appMessageId);
+    if (appMessageId.length > 0) {
+      return appMessageId;
+    }
+  }
+  return '';
+}
+
 function normalizeRecord(record: SocialNotificationRecord): SocialNotificationRecord {
   const conversationTitle = textOf(record.conversationTitle);
   const senderName = textOf(record.senderName).length > 0 ? textOf(record.senderName) : conversationTitle;
+  const source = textOf(record.source).length > 0 ? textOf(record.source) : 'notification';
   return {
     platform: textOf(record.platform),
     conversationId: textOf(record.conversationId),
@@ -90,7 +237,7 @@ function normalizeRecord(record: SocialNotificationRecord): SocialNotificationRe
     senderName,
     preview: textOf(record.preview),
     receivedAt: textOf(record.receivedAt).length > 0 ? textOf(record.receivedAt) : new Date().toISOString(),
-    source: 'notification',
+    source,
     hashCode: textOf(record.hashCode),
     bundleName: textOf(record.bundleName),
     appName: textOf(record.appName),
@@ -102,7 +249,7 @@ function isUsableRecord(record: SocialNotificationRecord): boolean {
   return record.platform === 'wechat' &&
     record.conversationTitle.length > 0 &&
     record.preview.length > 0 &&
-    record.source === 'notification';
+    (record.source === 'notification' || record.source === 'accessibility');
 }
 
 function recordFromObject(value: Object): SocialNotificationRecord {
@@ -187,11 +334,11 @@ function candidateFromRecord(record: SocialNotificationRecord): SocialCaptureCan
 
 export function captureRecordFromNotificationInfo(notificationInfo: notificationExtensionSubscription.NotificationInfo): SocialNotificationRecord {
   const probe = notificationInfo as NotificationInfoProbe;
-  const content = probe.content === undefined || probe.content === null ? {} as NotificationContentProbe : probe.content;
+  const content = pairFromNotificationInfo(probe);
   const bundleName = textOf(probe.bundleName);
   const appName = textOf(probe.appName);
-  const title = textOf(content.title);
-  const text = textOf(content.text);
+  const title = content.title;
+  const text = content.preview;
   const platform = isWechatIdentity(bundleName, appName, title) ? 'wechat' : '';
   return normalizeRecord({
     platform,
@@ -199,9 +346,9 @@ export function captureRecordFromNotificationInfo(notificationInfo: notification
     conversationTitle: title.length > 0 ? title : appName,
     senderName: title.length > 0 ? title : appName,
     preview: text,
-    receivedAt: receivedAtOf(probe.deliveryTime),
+    receivedAt: receivedAtOf(deliveryTimeFromProbe(probe)),
     source: 'notification',
-    hashCode: textOf(probe.hashCode),
+    hashCode: hashCodeFromProbe(probe),
     bundleName,
     appName,
     capturedAt: new Date().toISOString()

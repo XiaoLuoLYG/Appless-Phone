@@ -9,6 +9,10 @@
       "tablet",
       "2in1"
     ],
+    "querySchemes": [
+      "weixin",
+      "wechat"
+    ],
     "deliveryWithInstall": true,
     "installationFree": false,
     "requestPermissions": [
@@ -16,7 +20,42 @@
         "name": "ohos.permission.INTERNET"
       },
       {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO"
+      },
+      {
         "name": "ohos.permission.SUBSCRIBE_NOTIFICATION"
+      },
+      {
+        "name": "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER"
+      },
+      {
+        "name": "ohos.permission.NOTIFICATION_CONTROLLER"
+      },
+      {
+        "name": "ohos.permission.NOTIFICATION_AGENT_CONTROLLER"
+      },
+      {
+        "name": "ohos.permission.SUBSCRIBE_NOTIFICATION_WINDOW_STATE"
       }
     ],
     "pages": "$profile:main_pages",
@@ -50,7 +89,27 @@
         "description": "$string:NotificationSubscriberExtAbility_desc",
         "icon": "$media:layered_image",
         "label": "$string:NotificationSubscriberExtAbility_label",
-        "exported": true
+        "exported": true,
+        "permissions": [
+          "ohos.permission.SUBSCRIBE_NOTIFICATION",
+          "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER",
+          "ohos.permission.NOTIFICATION_CONTROLLER"
+        ]
+      },
+      {
+        "name": "SocialAccessibilityExtAbility",
+        "srcEntry": "./ets/extensionability/SocialAccessibilityExtAbility.ets",
+        "type": "accessibility",
+        "description": "$string:SocialAccessibilityExtAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:SocialAccessibilityExtAbility_label",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.accessibleability",
+            "resource": "$profile:accessibility_config"
+          }
+        ]
       },
       {
         "name": "EntryBackupAbility",

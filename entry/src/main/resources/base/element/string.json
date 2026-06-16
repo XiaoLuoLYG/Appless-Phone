@@ -19,6 +19,18 @@
     {
       "name": "NotificationSubscriberExtAbility_label",
       "value": "AIPhone Social"
+    },
+    {
+      "name": "SocialAccessibilityExtAbility_desc",
+      "value": "AIPhone social accessibility capture"
+    },
+    {
+      "name": "SocialAccessibilityExtAbility_label",
+      "value": "AIPhone Social Assist"
+    },
+    {
+      "name": "location_permission_reason",
+      "value": "用于在点击系统地图导航时获取一次当前位置作为起点"
     }
   ]
 }

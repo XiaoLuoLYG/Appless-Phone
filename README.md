@@ -54,7 +54,7 @@ food.search -> local://aiphone-tools
 social.reply.send -> local://aiphone-tools
 ```
 
-The app calls 12306, VariFlight, Amap, Tencent Maps, Baidu Maps, Meituan Union, and Taobao Flash/Ele.me Union from the HarmonyOS provider adapters when the matching provider keys are configured. `travel.search` runs the train and flight query adapters, sorts the mixed rows by departure time, and `food.search` runs the enabled food provider adapters, then each aggregate tool merges only real returned rows into one result surface. You do not need to keep a Mac-side `tool-gateway` service running after the HAP is installed.
+The app calls 12306, VariFlight, Amap, Tencent Maps, Baidu Maps, Meituan Union, Taobao Flash/Ele.me Union, McDonald's China MCP, and Luckin Coffee MCP from the HarmonyOS provider adapters when the matching provider keys are configured. `travel.search` runs the train and flight query adapters, sorts the mixed rows by departure time, and `food.search` runs the enabled food provider adapters, then each aggregate tool merges only real returned rows into one result surface. You do not need to keep a Mac-side `tool-gateway` service running after the HAP is installed.
 
 `social.reply.send` is a local social action. The first WeChat build exposes the A2UI surface, local short-term inbox model, permission diagnostics, and exact user-text reply path. It does not fabricate WeChat messages or report send success unless a real notification/accessibility bridge and WeChat automation executor are available.
 
@@ -80,9 +80,11 @@ MEITUAN_UNION_APP_SECRET="..."
 TAOBAO_APP_KEY="..."
 TAOBAO_APP_SECRET="..."
 TAOBAO_FLASH_PID="..."
+MCD_MCP_TOKEN="..."
+LUCKIN_MCP_TOKEN="..."
 ```
 
-The map POI providers (`AMAP_KEY`, `TENCENT_MAP_KEY`, `BAIDU_MAP_AK`) are the simplest query-only sources for nearby restaurants and shops. The Meituan and Taobao Flash providers remain available for platform-specific union results, but they require the matching union developer keys and permissions. Missing keys, provider authorization errors, HTTP errors, and empty provider responses are rendered as source status rows. The app does not place orders, create carts, pay, or invent cross-platform prices.
+The map POI providers (`AMAP_KEY`, `TENCENT_MAP_KEY`, `BAIDU_MAP_AK`) are the simplest query-only sources for nearby restaurants and shops. The Meituan and Taobao Flash providers remain available for platform-specific union results, but they require the matching union developer keys and permissions. `MCD_MCP_TOKEN` enables McDonald's China official MCP queries for nearby stores and menu rows when the prompt mentions McDonald's-like intents. `LUCKIN_MCP_TOKEN` enables Luckin Coffee official MCP queries for nearby shops and product recommendations when the prompt mentions Luckin or coffee-like intents. Missing keys, provider authorization errors, HTTP errors, and empty provider responses are rendered as source status rows. The app does not place orders, create carts, pay, auto-bind coupons, redeem points, cancel orders, or invent cross-platform prices.
 
 ## Optional HTTP tool gateway
 
@@ -127,6 +129,8 @@ AMAP_KEY=
 AMAP_DEFAULT_LOCATION=116.397428,39.90923
 TENCENT_MAP_KEY=
 BAIDU_MAP_AK=
+MCD_MCP_TOKEN=
+LUCKIN_MCP_TOKEN=
 ```
 
 `.env.local` is ignored by git. Do not commit real provider keys, signing files, or local model credentials.

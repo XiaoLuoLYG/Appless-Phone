@@ -108,7 +108,7 @@ function expectedCaseForQuery(query) {
       expectedToolId: 'train.search'
     };
   }
-  if (/附近|周边|外卖|咖啡|奶茶|肯德基|餐饮|美食/.test(query)) {
+  if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'food.search'
@@ -163,13 +163,41 @@ function probeLocalModel() {
     maxBuffer: 2 * 1024 * 1024
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
-  const listenerReachable = result.status === 0 || /403|Call is not allowed/i.test(output);
   const connectionRefused = /Failed to connect|Couldn.t connect|Connection refused|curl:\s*\(7\)/i.test(output);
+  const listenerReachable = !connectionRefused && (
+    /403|Call is not allowed/i.test(output) ||
+    (result.status === 0 && output.length > 0 && !/curl:\s*\(\d+\)/i.test(output))
+  );
   return {
     status: result.status,
     listenerReachable,
     connectionRefused,
     output: output.length > 500 ? `${output.slice(0, 500)}...<truncated>` : output
+  };
+}
+
+function startModelFoundation() {
+  const result = spawnSync('hdc', ['-t', target, 'shell', 'aa', 'start', '-b', 'com.huawei.hmos.hmmodelfoundation', '-a', 'EntryAbility'], {
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024
+  });
+  return {
+    status: result.status,
+    output: `${result.stdout || ''}${result.stderr || ''}`.trim()
+  };
+}
+
+async function ensureLocalModel() {
+  const initial = probeLocalModel();
+  if (!initial.connectionRefused) {
+    return initial;
+  }
+  const recovery = startModelFoundation();
+  await sleep(3000);
+  const afterStart = probeLocalModel();
+  return {
+    ...afterStart,
+    recovery
   };
 }
 
@@ -331,8 +359,12 @@ async function captureWhile(appPid, runAction) {
       await sleep(500);
       const text = logs.join('\n');
       if (/\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
-        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
-        /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text)) {
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text)) {
+        break;
+      }
+      const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
+      const hasToolRequest = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text);
+      if (modelFailed && !hasToolRequest && Date.now() - started > 5000) {
         break;
       }
     }
@@ -423,7 +455,7 @@ function layoutExpectationsForQuery(query) {
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
   }
-  if (/附近|周边|外卖|咖啡|奶茶|肯德基|餐饮|美食/.test(query)) {
+  if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
     return ['奶茶', '餐饮', '高德', '腾讯地图', '百度地图', '美团', '淘宝闪购'];
   }
   return [];
@@ -490,7 +522,7 @@ async function runQuery(query, index, expectedTool) {
   return summary;
 }
 
-const modelHealth = probeLocalModel();
+const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 console.log(`cleanData: ${cleanData ? 'true' : 'false'}`);
 

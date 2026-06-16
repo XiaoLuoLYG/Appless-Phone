@@ -49,6 +49,9 @@ interface HttpRequestHeaders {
   'Referer'?: string;
   'Cookie'?: string;
   'Content-Type'?: string;
+  'Authorization'?: string;
+  'MCP-Protocol-Version'?: string;
+  'Mcp-Session-Id'?: string;
   'X-VARIFLIGHT-KEY'?: string;
   'Content-MD5'?: string;
   'S-Ca-App'?: string;
@@ -102,6 +105,10 @@ interface LocalProviderConfig {
   taobaoAppSecret: string;
   taobaoFlashPid: string;
   taobaoApiUrl: string;
+  mcdMcpToken: string;
+  mcdMcpUrl: string;
+  luckinMcpToken: string;
+  luckinMcpUrl: string;
 }
 
 interface LocalProviderRawConfig {
@@ -126,6 +133,10 @@ interface LocalProviderRawConfig {
   TAOBAO_APP_SECRET?: string;
   TAOBAO_FLASH_PID?: string;
   TAOBAO_API_URL?: string;
+  MCD_MCP_TOKEN?: string;
+  MCD_MCP_URL?: string;
+  LUCKIN_MCP_TOKEN?: string;
+  LUCKIN_MCP_URL?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
   amapKey?: string;
@@ -142,6 +153,10 @@ interface LocalProviderRawConfig {
   taobaoAppSecret?: string;
   taobaoFlashPid?: string;
   taobaoApiUrl?: string;
+  mcdMcpToken?: string;
+  mcdMcpUrl?: string;
+  luckinMcpToken?: string;
+  luckinMcpUrl?: string;
 }
 
 interface VariFlightRequestParams {
@@ -417,6 +432,278 @@ interface TaobaoFlashResult {
   data?: TaobaoFlashStoreRecord[];
 }
 
+interface McpJsonRpcResponse {
+  result?: McpToolResult;
+  error?: McpJsonRpcError;
+}
+
+interface McpJsonRpcError {
+  code?: string | number;
+  message?: string;
+  data?: Object | string | number | boolean;
+}
+
+interface McpToolResult {
+  content?: McpContentItem[];
+  structuredContent?: Object;
+  isError?: boolean;
+}
+
+interface McpContentItem {
+  type?: string;
+  text?: string;
+  data?: Object | string | number | boolean;
+}
+
+class EmptyMcpCapabilities {}
+
+interface McpInitializeClientInfo {
+  name: string;
+  version: string;
+}
+
+interface McpInitializeParams {
+  protocolVersion: string;
+  capabilities: EmptyMcpCapabilities;
+  clientInfo: McpInitializeClientInfo;
+}
+
+interface McpInitializeRequest {
+  jsonrpc: string;
+  id: number;
+  method: string;
+  params: McpInitializeParams;
+}
+
+interface McpInitializedNotification {
+  jsonrpc: string;
+  method: string;
+}
+
+interface McpToolCallParams {
+  name: string;
+  arguments: Object;
+}
+
+interface McpToolCallRequest {
+  jsonrpc: string;
+  id: number;
+  method: string;
+  params: McpToolCallParams;
+}
+
+interface McDonaldsNearbyStoresArgs {
+  searchType: number;
+  beType: number;
+  city: string;
+  keyword: string;
+}
+
+interface McDonaldsMealsArgs {
+  storeCode: string;
+  beCode: string;
+  orderType: number;
+  beType: number;
+}
+
+interface LuckinShopListArgs {
+  deptName: string;
+  longitude: number;
+  latitude: number;
+}
+
+interface LuckinProductSearchArgs {
+  deptId: number;
+  query: string;
+}
+
+type McDonaldsMcpData =
+  McDonaldsStoreRecord[] |
+  McDonaldsStoreContainer |
+  McDonaldsMealsData |
+  McDonaldsMealRecord |
+  McDonaldsCouponRecord[] |
+  McDonaldsCouponContainer |
+  McDonaldsPriceData;
+
+interface McDonaldsPayload {
+  success?: boolean | string;
+  code?: string | number;
+  message?: string;
+  data?: McDonaldsMcpData;
+  result?: McDonaldsMcpData;
+}
+
+interface McDonaldsStoreRecord {
+  storeName?: string;
+  name?: string;
+  address?: string;
+  distance?: string | number;
+  storeCode?: string;
+  beCode?: string;
+  businessStatus?: boolean | string | number;
+  businessStartTime?: string;
+  businessEndTime?: string;
+}
+
+interface McDonaldsStoreContainer {
+  list?: McDonaldsStoreRecord[];
+  records?: McDonaldsStoreRecord[];
+  items?: McDonaldsStoreRecord[];
+  products?: McDonaldsStoreRecord[];
+  data?: McDonaldsStoreRecord[];
+  result?: McDonaldsStoreRecord[];
+}
+
+interface McDonaldsCategoryRecord {
+  name?: string;
+  meals?: McDonaldsCategoryMeal[];
+}
+
+interface McDonaldsCategoryMeal {
+  code?: string;
+  tags?: string[];
+}
+
+interface McDonaldsMealRecord {
+  name?: string;
+  currentPrice?: string | number;
+  price?: string | number;
+  tags?: string[];
+}
+
+interface McDonaldsMealsData {
+  categories?: McDonaldsCategoryRecord[];
+  meals?: McDonaldsMealsMap | McDonaldsMealRecord[];
+}
+
+interface McDonaldsMealsMap {
+}
+
+interface McDonaldsMealEntry {
+  code: string;
+  meal: McDonaldsMealRecord;
+}
+
+interface McDonaldsCouponRecord {
+  title?: string;
+  name?: string;
+  couponCode?: string;
+  couponId?: string;
+  tradeDateTime?: string;
+  products?: McDonaldsCouponProduct[];
+}
+
+interface McDonaldsCouponProduct {
+  productName?: string;
+  productCode?: string;
+}
+
+interface McDonaldsCouponContainer {
+  list?: McDonaldsCouponRecord[];
+  records?: McDonaldsCouponRecord[];
+  items?: McDonaldsCouponRecord[];
+  products?: McDonaldsCouponRecord[];
+  data?: McDonaldsCouponRecord[];
+  result?: McDonaldsCouponRecord[];
+}
+
+interface McDonaldsPriceData {
+  productList?: McDonaldsPriceProduct[];
+  price?: string | number;
+  discount?: string | number;
+  deliveryPrice?: string | number;
+}
+
+interface McDonaldsPriceProduct {
+  productName?: string;
+  productCode?: string;
+  quantity?: string | number;
+  subtotal?: string | number;
+  originalSubtotal?: string | number;
+}
+
+type LuckinMcpData =
+  LuckinShopRecord[] |
+  LuckinShopContainer |
+  LuckinProductRecord[] |
+  LuckinProductContainer |
+  LuckinProductRecord |
+  LuckinOrderRecord;
+
+interface LuckinPayload {
+  data?: LuckinMcpData;
+  result?: LuckinMcpData;
+  message?: string;
+  msg?: string;
+  code?: string | number;
+  success?: boolean | string;
+}
+
+interface LuckinShopRecord {
+  deptId?: string | number;
+  deptName?: string;
+  name?: string;
+  address?: string;
+  deptTags?: string[];
+  tags?: string[];
+  longitude?: string | number;
+  latitude?: string | number;
+  workTimeStart?: string;
+  workTimeEnd?: string;
+  distance?: string | number;
+  number?: string;
+}
+
+interface LuckinShopContainer {
+  list?: LuckinShopRecord[];
+  records?: LuckinShopRecord[];
+  items?: LuckinShopRecord[];
+  products?: LuckinShopRecord[];
+  data?: LuckinShopRecord[];
+  result?: LuckinShopRecord[];
+}
+
+interface LuckinProductRecord {
+  productId?: string | number;
+  productName?: string;
+  name?: string;
+  skuCode?: string;
+  price?: string | number;
+  discountPrice?: string | number;
+  initPrice?: string | number;
+  productAttrs?: LuckinProductAttr[];
+  tags?: string[];
+}
+
+interface LuckinProductContainer {
+  list?: LuckinProductRecord[];
+  records?: LuckinProductRecord[];
+  items?: LuckinProductRecord[];
+  products?: LuckinProductRecord[];
+  data?: LuckinProductRecord[];
+  result?: LuckinProductRecord[];
+}
+
+interface LuckinProductAttr {
+  attributeName?: string;
+  productSubAttrs?: LuckinProductSubAttr[];
+}
+
+interface LuckinProductSubAttr {
+  attributeName?: string;
+  selected?: boolean | null;
+}
+
+interface LuckinOrderRecord {
+  orderId?: string | number;
+  orderStatusName?: string;
+  orderStatus?: string | number;
+  shopInfo?: LuckinShopRecord;
+  productInfoList?: LuckinProductRecord[];
+  orderPayAmount?: string | number;
+}
+
 interface FoodParamPair {
   key: string;
   value: string;
@@ -466,7 +753,11 @@ const DEFAULT_TENCENT_MAP_API_URL: string = 'https://apis.map.qq.com/ws/place/v1
 const DEFAULT_BAIDU_MAP_API_URL: string = 'https://api.map.baidu.com/place/v2/search';
 const DEFAULT_MEITUAN_UNION_API_URL: string = 'https://media.meituan.com/cps_open/common/api/v1/query_coupon';
 const DEFAULT_TAOBAO_API_URL: string = 'https://eco.taobao.com/router/rest';
-const FOOD_RESULT_LIMIT: number = 8;
+const DEFAULT_MCD_MCP_URL: string = 'https://mcp.mcd.cn';
+const DEFAULT_LUCKIN_MCP_URL: string = 'https://gwmcp.lkcoffee.com/order/user/mcp';
+const MCP_PROTOCOL_VERSION: string = '2025-06-18';
+const FOOD_PROVIDER_RESULT_LIMIT: number = 10;
+const FOOD_AGGREGATED_RESULT_LIMIT: number = 24;
 const TRAIN_RESULT_LIMIT: number = 30;
 const TRAIN_INITIAL_VISIBLE: number = 6;
 const TRAIN_CLIENT_ACTIONS: A2uiAction[] = [
@@ -530,7 +821,11 @@ let localProviderConfig: LocalProviderConfig = {
   taobaoAppKey: '',
   taobaoAppSecret: '',
   taobaoFlashPid: '',
-  taobaoApiUrl: DEFAULT_TAOBAO_API_URL
+  taobaoApiUrl: DEFAULT_TAOBAO_API_URL,
+  mcdMcpToken: '',
+  mcdMcpUrl: DEFAULT_MCD_MCP_URL,
+  luckinMcpToken: '',
+  luckinMcpUrl: DEFAULT_LUCKIN_MCP_URL
 };
 
 function userAgentHeaders(): HttpRequestHeaders {
@@ -621,7 +916,11 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     taobaoAppKey: config.taobaoAppKey.trim(),
     taobaoAppSecret: config.taobaoAppSecret.trim(),
     taobaoFlashPid: config.taobaoFlashPid.trim(),
-    taobaoApiUrl: config.taobaoApiUrl.trim().length > 0 ? config.taobaoApiUrl.trim() : DEFAULT_TAOBAO_API_URL
+    taobaoApiUrl: config.taobaoApiUrl.trim().length > 0 ? config.taobaoApiUrl.trim() : DEFAULT_TAOBAO_API_URL,
+    mcdMcpToken: config.mcdMcpToken.trim(),
+    mcdMcpUrl: config.mcdMcpUrl.trim().length > 0 ? config.mcdMcpUrl.trim() : DEFAULT_MCD_MCP_URL,
+    luckinMcpToken: config.luckinMcpToken.trim(),
+    luckinMcpUrl: config.luckinMcpUrl.trim().length > 0 ? config.luckinMcpUrl.trim() : DEFAULT_LUCKIN_MCP_URL
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
@@ -631,6 +930,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' meituanKeyChars=' + localProviderConfig.meituanUnionAppKey.length.toString() +
     ' taobaoKeyChars=' + localProviderConfig.taobaoAppKey.length.toString() +
     ' taobaoPidChars=' + localProviderConfig.taobaoFlashPid.length.toString() +
+    ' mcdMcpTokenChars=' + localProviderConfig.mcdMcpToken.length.toString() +
+    ' luckinMcpTokenChars=' + localProviderConfig.luckinMcpToken.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
 }
 
@@ -652,7 +953,11 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     taobaoAppKey: firstText([parsed.TAOBAO_APP_KEY, parsed.taobaoAppKey]),
     taobaoAppSecret: firstText([parsed.TAOBAO_APP_SECRET, parsed.taobaoAppSecret]),
     taobaoFlashPid: firstText([parsed.TAOBAO_FLASH_PID, parsed.taobaoFlashPid]),
-    taobaoApiUrl: firstText([parsed.TAOBAO_API_URL, parsed.taobaoApiUrl])
+    taobaoApiUrl: firstText([parsed.TAOBAO_API_URL, parsed.taobaoApiUrl]),
+    mcdMcpToken: firstText([parsed.MCD_MCP_TOKEN, parsed.mcdMcpToken]),
+    mcdMcpUrl: firstText([parsed.MCD_MCP_URL, parsed.mcdMcpUrl]),
+    luckinMcpToken: firstText([parsed.LUCKIN_MCP_TOKEN, parsed.luckinMcpToken]),
+    luckinMcpUrl: firstText([parsed.LUCKIN_MCP_URL, parsed.luckinMcpUrl])
   });
 }
 
@@ -665,6 +970,8 @@ export function localProviderConfigDebugSummary(): string {
     ', meituanKey=' + (localProviderConfig.meituanUnionAppKey.length > 0 ? 'present(' + localProviderConfig.meituanUnionAppKey.length.toString() + ')' : 'missing') +
     ', taobaoKey=' + (localProviderConfig.taobaoAppKey.length > 0 ? 'present(' + localProviderConfig.taobaoAppKey.length.toString() + ')' : 'missing') +
     ', taobaoPid=' + (localProviderConfig.taobaoFlashPid.length > 0 ? 'present(' + localProviderConfig.taobaoFlashPid.length.toString() + ')' : 'missing') +
+    ', mcdMcpToken=' + (localProviderConfig.mcdMcpToken.length > 0 ? 'present(' + localProviderConfig.mcdMcpToken.length.toString() + ')' : 'missing') +
+    ', luckinMcpToken=' + (localProviderConfig.luckinMcpToken.length > 0 ? 'present(' + localProviderConfig.luckinMcpToken.length.toString() + ')' : 'missing') +
     ', defaultLocation=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'present' : 'missing');
 }
 
@@ -1197,6 +1504,242 @@ function meituanUnionSignature(appSecret: string, appKey: string, timestamp: str
 
 function postFormText(url: string, headers: HttpRequestHeaders, body: string): Promise<HttpTextResponse> {
   return postJsonText(url, headers, body);
+}
+
+function mcpHeaders(token: string, sessionId: string = ''): HttpRequestHeaders {
+  if (sessionId.length > 0) {
+    return {
+      'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+      'Accept': 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token,
+      'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
+      'Mcp-Session-Id': sessionId
+    };
+  }
+  return {
+    'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+    'Accept': 'application/json, text/event-stream',
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + token,
+    'MCP-Protocol-Version': MCP_PROTOCOL_VERSION
+  };
+}
+
+function escapeRegexLiteral(value: string): string {
+  const specials = '\\^$.*+?()[]{}|';
+  let escaped = '';
+  for (let index = 0; index < value.length; index++) {
+    const char = value.charAt(index);
+    if (specials.indexOf(char) >= 0) {
+      escaped += '\\';
+    }
+    escaped += char;
+  }
+  return escaped;
+}
+
+function jsonTextUnescape(value: string): string {
+  return value.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+function headerValueFromJson(headersJson: string, wantedKey: string): string {
+  const key = escapeRegexLiteral(wantedKey);
+  const arrayPattern = new RegExp('"' + key + '"\\s*:\\s*\\[\\s*"([^"]*)"', 'i');
+  const arrayMatch = arrayPattern.exec(headersJson);
+  if (arrayMatch !== null && arrayMatch.length > 1) {
+    return jsonTextUnescape(arrayMatch[1]);
+  }
+  const stringPattern = new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"', 'i');
+  const stringMatch = stringPattern.exec(headersJson);
+  if (stringMatch !== null && stringMatch.length > 1) {
+    return jsonTextUnescape(stringMatch[1]);
+  }
+  const primitivePattern = new RegExp('"' + key + '"\\s*:\\s*([^,}\\]]+)', 'i');
+  const primitiveMatch = primitivePattern.exec(headersJson);
+  if (primitiveMatch !== null && primitiveMatch.length > 1) {
+    return primitiveMatch[1].trim();
+  }
+  return '';
+}
+
+function parseMcpJsonRpcText(text: string): McpJsonRpcResponse {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return {};
+  }
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed) as McpJsonRpcResponse;
+  }
+  if (trimmed.startsWith('[')) {
+    const responses = JSON.parse(trimmed) as McpJsonRpcResponse[];
+    return responses.length > 0 ? responses[responses.length - 1] : {};
+  }
+  const lines = trimmed.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim();
+    if (!line.startsWith('data:')) {
+      continue;
+    }
+    const data = line.substring('data:'.length).trim();
+    if (data.length === 0 || data === '[DONE]') {
+      continue;
+    }
+    return JSON.parse(data) as McpJsonRpcResponse;
+  }
+  return {};
+}
+
+function firstJsonSlice(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return trimmed;
+  }
+  const objectStart = trimmed.indexOf('{');
+  const objectEnd = trimmed.lastIndexOf('}');
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    return trimmed.substring(objectStart, objectEnd + 1);
+  }
+  const arrayStart = trimmed.indexOf('[');
+  const arrayEnd = trimmed.lastIndexOf(']');
+  if (arrayStart >= 0 && arrayEnd > arrayStart) {
+    return trimmed.substring(arrayStart, arrayEnd + 1);
+  }
+  return '';
+}
+
+function mcpToolPayloadFromText(text: string): Object {
+  const response = parseMcpJsonRpcText(text);
+  if (response.error !== undefined) {
+    throw new Error(firstText([response.error.message, response.error.code, response.error.data, 'MCP JSON-RPC error']));
+  }
+  const result = response.result;
+  if (result === undefined || result === null) {
+    throw new Error('MCP 返回中没有 result。');
+  }
+  if (result.isError === true) {
+    throw new Error('MCP 工具返回错误状态。');
+  }
+  if (result.structuredContent !== undefined && result.structuredContent !== null) {
+    return result.structuredContent;
+  }
+  const content = result.content === undefined ? [] : result.content;
+  for (let index = 0; index < content.length; index++) {
+    const item = content[index];
+    if (item.data !== undefined && item.data !== null && typeof item.data === 'object') {
+      return item.data as Object;
+    }
+    const textValue = textOf(item.text).trim();
+    const jsonSlice = firstJsonSlice(textValue);
+    if (jsonSlice.length > 0) {
+      return JSON.parse(jsonSlice) as Object;
+    }
+  }
+  throw new Error('MCP 工具没有返回可解析的结构化 JSON。');
+}
+
+export function isReadonlyBrandMcpTool(provider: string, toolName: string): boolean {
+  if (provider === '麦当劳') {
+    return [
+      'list-nutrition-foods',
+      'delivery-query-addresses',
+      'delivery-query-stores',
+      'query-meal-assistance',
+      'query-nearby-stores',
+      'query-store-coupons',
+      'query-meals',
+      'query-meal-detail',
+      'calculate-price',
+      'query-order',
+      'campaign-calendar',
+      'available-coupons',
+      'query-my-coupons',
+      'query-my-account',
+      'mall-points-products',
+      'mall-product-detail',
+      'mall-order-list',
+      'mall-order-detail',
+      'now-time-info'
+    ].indexOf(toolName) >= 0;
+  }
+  if (provider === '瑞幸') {
+    return [
+      'queryShopList',
+      'searchProductForMcp',
+      'queryProductDetailInfo',
+      'queryOrderDetailInfo'
+    ].indexOf(toolName) >= 0;
+  }
+  return false;
+}
+
+function brandMcpHttpError(provider: string, phase: string, code: number, text: string): string {
+  const detail = text.substring(0, 300);
+  if (provider === '瑞幸' && detail.toLowerCase().indexOf('missing csrf token') >= 0) {
+    return provider + ' MCP ' + phase + ' HTTP ' + code.toString() + '：服务端要求 CSRF/session 授权；请确认 LUCKIN_MCP_URL 指向 https://gwmcp.lkcoffee.com/order/user/mcp，而不是开放平台官网页面：' + detail;
+  }
+  return provider + ' MCP ' + phase + ' HTTP ' + code.toString() + '：' + detail;
+}
+
+async function callReadonlyBrandMcpTool(provider: string, url: string, token: string, toolName: string, args: Object): Promise<Object> {
+  if (!isReadonlyBrandMcpTool(provider, toolName)) {
+    throw new Error(provider + ' MCP 工具 ' + toolName + ' 不在只读查询白名单内。');
+  }
+  const initRequest: McpInitializeRequest = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities: new EmptyMcpCapabilities(),
+      clientInfo: {
+        name: 'AIPhoneDemo',
+        version: '0.1'
+      }
+    }
+  };
+  const initBody = JSON.stringify(initRequest);
+  const init = await postJsonText(url, mcpHeaders(token), initBody);
+  if (init.code < 200 || init.code >= 300) {
+    throw new Error(brandMcpHttpError(provider, 'initialize', init.code, init.text));
+  }
+  let initParsed: McpJsonRpcResponse = {};
+  try {
+    initParsed = parseMcpJsonRpcText(init.text);
+  } catch (error) {
+    throw new Error(provider + ' MCP initialize 返回格式异常：' + describeThrown(error));
+  }
+  if (initParsed.error !== undefined) {
+    throw new Error(provider + ' MCP initialize 返回错误：' + firstText([initParsed.error.message, initParsed.error.code, initParsed.error.data, 'MCP initialize error']));
+  }
+  const sessionId = headerValueFromJson(init.headers, 'mcp-session-id');
+  if (sessionId.length > 0) {
+    try {
+      const initializedNotification: McpInitializedNotification = {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized'
+      };
+      await postJsonText(url, mcpHeaders(token, sessionId), JSON.stringify(initializedNotification));
+    } catch (error) {
+      aiLogInfo('[AIPhone][BrandMcpInitializedIgnored] provider=' + provider + ' error=' + describeThrown(error));
+    }
+  }
+  const callRequest: McpToolCallRequest = {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: {
+      name: toolName,
+      arguments: args
+    }
+  };
+  const callBody = JSON.stringify(callRequest);
+  aiLogInfo('[AIPhone][BrandMcpRequest] provider=' + provider + ' tool=' + toolName + ' url=' + url + ' bodyChars=' + callBody.length.toString());
+  const response = await postJsonText(url, mcpHeaders(token, sessionId), callBody);
+  if (response.code < 200 || response.code >= 300) {
+    throw new Error(brandMcpHttpError(provider, toolName, response.code, response.text));
+  }
+  return mcpToolPayloadFromText(response.text);
 }
 
 function build12306LeftTicketUrl(path: string, date: string, fromCode: string, toCode: string): string {
@@ -2148,6 +2691,7 @@ function foodResultA2ui(surfaceId: string, title: string, body: string, summaryT
     actions: [
       { id: 'food_show_all', label: '全部范围', prompt: '显示全部附近餐饮', kind: 'client', variant: 'secondary' },
       { id: 'food_filter_1km', label: '1公里内', prompt: '只看一公里内餐饮', kind: 'client', variant: 'secondary' },
+      { id: 'food_show_more', label: '展示更多', prompt: '展示更多附近餐饮', kind: 'client', variant: 'primary' },
       { id: 'food_change_keyword', label: '换关键词', prompt: '换关键词查询附近餐饮', kind: 'prompt', variant: 'secondary' },
       { id: 'food_change_location', label: '换位置', prompt: '换位置查询附近餐饮', kind: 'prompt', variant: 'secondary' }
     ]
@@ -2543,6 +3087,34 @@ function extractFoodKeyword(source: string): string {
   return '餐饮';
 }
 
+function normalizeFoodSearchKeyword(value: string): string {
+  return value.trim()
+    .replace(/^附近(?:的)?/u, '')
+    .replace(/^周边(?:的)?/u, '')
+    .replace(/(?:门店|餐厅|店)$/u, '')
+    .trim();
+}
+
+function splitFoodSearchKeywords(keyword: string): string[] {
+  const cleaned = normalizeFoodSearchKeyword(keyword);
+  const keywords: string[] = [];
+  if (cleaned.length === 0) {
+    keywords.push('餐饮');
+    return keywords;
+  }
+  const parts = cleaned.split(/和|及|与|、|，|,|\/|或/u);
+  for (let index = 0; index < parts.length; index++) {
+    const part = normalizeFoodSearchKeyword(parts[index]);
+    if (part.length > 0) {
+      appendUniqueText(keywords, part);
+    }
+  }
+  if (keywords.length === 0) {
+    keywords.push(cleaned);
+  }
+  return keywords;
+}
+
 function inferAmapCityFromPlace(place: string): string {
   const match = /^(北京|上海|天津|重庆|深圳|广州|杭州|成都|武汉|南京|西安|东莞|佛山)/u.exec(place);
   return match === null ? '' : match[1];
@@ -2809,6 +3381,504 @@ export function foodRecordFromTaobaoFlashStore(item: TaobaoFlashStoreRecord): A2
   };
 }
 
+function mcDonaldsStoresFromData(value: McDonaldsStoreRecord[] | McDonaldsStoreContainer | undefined): McDonaldsStoreRecord[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const container = value as McDonaldsStoreContainer;
+  const arrays: Array<McDonaldsStoreRecord[] | undefined> = [
+    container.list,
+    container.records,
+    container.items,
+    container.products,
+    container.data,
+    container.result
+  ];
+  for (let index = 0; index < arrays.length; index++) {
+    const raw = arrays[index];
+    if (raw !== undefined && raw.length > 0) {
+      return raw;
+    }
+  }
+  return [];
+}
+
+function mcDonaldsCouponsFromData(value: McDonaldsCouponRecord[] | McDonaldsCouponContainer | undefined): McDonaldsCouponRecord[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const container = value as McDonaldsCouponContainer;
+  const arrays: Array<McDonaldsCouponRecord[] | undefined> = [
+    container.list,
+    container.records,
+    container.items,
+    container.products,
+    container.data,
+    container.result
+  ];
+  for (let index = 0; index < arrays.length; index++) {
+    const raw = arrays[index];
+    if (raw !== undefined && raw.length > 0) {
+      return raw;
+    }
+  }
+  return [];
+}
+
+function luckinShopsFromData(value: LuckinShopRecord[] | LuckinShopContainer | undefined): LuckinShopRecord[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const container = value as LuckinShopContainer;
+  const arrays: Array<LuckinShopRecord[] | undefined> = [
+    container.list,
+    container.records,
+    container.items,
+    container.products,
+    container.data,
+    container.result
+  ];
+  for (let index = 0; index < arrays.length; index++) {
+    const raw = arrays[index];
+    if (raw !== undefined && raw.length > 0) {
+      return raw;
+    }
+  }
+  return [];
+}
+
+function luckinProductsFromData(value: LuckinProductRecord[] | LuckinProductContainer | undefined): LuckinProductRecord[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const container = value as LuckinProductContainer;
+  const arrays: Array<LuckinProductRecord[] | undefined> = [
+    container.list,
+    container.records,
+    container.items,
+    container.products,
+    container.data,
+    container.result
+  ];
+  for (let index = 0; index < arrays.length; index++) {
+    const raw = arrays[index];
+    if (raw !== undefined && raw.length > 0) {
+      return raw;
+    }
+  }
+  return [];
+}
+
+function mcpPayloadData(payload: McDonaldsPayload | LuckinPayload): McDonaldsMcpData | LuckinMcpData | undefined {
+  if (payload.data !== undefined && payload.data !== null) {
+    return payload.data;
+  }
+  return payload.result;
+}
+
+function kmNumberDistanceText(value: Object | string | number | boolean | null | undefined): string {
+  const text = textOf(value).trim();
+  if (text.length === 0) {
+    return '';
+  }
+  if (/米|千米|公里|km/i.test(text)) {
+    return text.replace(/km/ig, '千米').replace(/公里/g, '千米');
+  }
+  const amount = Number(text);
+  if (isNaN(amount)) {
+    return text;
+  }
+  if (amount < 10) {
+    return Math.round(amount * 1000).toString() + '米';
+  }
+  return Math.round(amount).toString() + '米';
+}
+
+function pricePart(label: string, value: Object | string | number | boolean | null | undefined): string {
+  const text = textOf(value).trim();
+  if (text.length === 0) {
+    return '';
+  }
+  if (/^¥/.test(text)) {
+    return label + text;
+  }
+  return label + '¥' + text;
+}
+
+function boolStatusText(value: Object | string | number | boolean | null | undefined, trueText: string, falseText: string): string {
+  if (typeof value === 'boolean') {
+    return value ? trueText : falseText;
+  }
+  const text = textOf(value).trim().toLowerCase();
+  if (text.length === 0) {
+    return '';
+  }
+  if (text === 'true' || text === '1' || text === 'yes') {
+    return trueText;
+  }
+  if (text === 'false' || text === '0' || text === 'no') {
+    return falseText;
+  }
+  return textOf(value);
+}
+
+function firstMcDonaldsStore(payload: Object): McDonaldsStoreRecord | null {
+  const stores = mcDonaldsStoresFromData(mcpPayloadData(payload as McDonaldsPayload) as McDonaldsStoreRecord[] | McDonaldsStoreContainer | undefined);
+  return stores.length > 0 ? stores[0] : null;
+}
+
+function firstLuckinShop(payload: Object): LuckinShopRecord | null {
+  const shops = luckinShopsFromData(mcpPayloadData(payload as LuckinPayload) as LuckinShopRecord[] | LuckinShopContainer | undefined);
+  return shops.length > 0 ? shops[0] : null;
+}
+
+function mcdStoreToFood(item: McDonaldsStoreRecord): A2uiFoodData {
+  const status = boolStatusText(item.businessStatus, '营业中', '休息中');
+  const hours = item.businessStartTime !== undefined && item.businessEndTime !== undefined ?
+    item.businessStartTime + '-' + item.businessEndTime : '';
+  return {
+    name: firstText([item.storeName, item.name]),
+    category: joinFoodParts(['麦当劳门店', status, hours]),
+    address: textOf(item.address),
+    distance: meterDistanceText(item.distance),
+    sourceTags: ['麦当劳']
+  };
+}
+
+function mcdMealTags(code: string, categories: McDonaldsCategoryRecord[]): string[] {
+  const tags: string[] = [];
+  for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex++) {
+    const category = categories[categoryIndex];
+    const meals = category.meals === undefined ? [] : category.meals;
+    for (let mealIndex = 0; mealIndex < meals.length; mealIndex++) {
+      if (textOf(meals[mealIndex].code) !== code) {
+        continue;
+      }
+      appendUniqueText(tags, textOf(category.name));
+      const mealTags: string[] = meals[mealIndex].tags === undefined ? [] : (meals[mealIndex].tags as string[]);
+      for (let tagIndex = 0; tagIndex < mealTags.length; tagIndex++) {
+        appendUniqueText(tags, textOf(mealTags[tagIndex]));
+      }
+    }
+  }
+  return tags;
+}
+
+function jsonObjectSlice(source: string, objectStart: number): string {
+  if (objectStart < 0 || objectStart >= source.length || source.charAt(objectStart) !== '{') {
+    return '';
+  }
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (let index = objectStart; index < source.length; index++) {
+    const char = source.charAt(index);
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaping = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === '{') {
+      depth++;
+    } else if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.substring(objectStart, index + 1);
+      }
+    }
+  }
+  return '';
+}
+
+function mcdMealRecordFromMap(mealObject: McDonaldsMealsMap, code: string): McDonaldsMealRecord | null {
+  const source = JSON.stringify(mealObject);
+  const keyToken = JSON.stringify(code);
+  const keyIndex = source.indexOf(keyToken);
+  if (keyIndex < 0) {
+    return null;
+  }
+  const colonIndex = source.indexOf(':', keyIndex + keyToken.length);
+  if (colonIndex < 0) {
+    return null;
+  }
+  const objectStart = source.indexOf('{', colonIndex + 1);
+  const slice = jsonObjectSlice(source, objectStart);
+  if (slice.length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(slice) as McDonaldsMealRecord;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function mcdMealEntries(meals: McDonaldsMealsMap | McDonaldsMealRecord[] | undefined): McDonaldsMealEntry[] {
+  const entries: McDonaldsMealEntry[] = [];
+  if (meals === undefined || meals === null) {
+    return entries;
+  }
+  if (Array.isArray(meals)) {
+    const mealRows = meals as McDonaldsMealRecord[];
+    for (let index = 0; index < mealRows.length; index++) {
+      const row = mealRows[index];
+      const code = textOf((row as McDonaldsCategoryMeal).code);
+      entries.push({ code: code.length > 0 ? code : index.toString(), meal: row });
+    }
+    return entries;
+  }
+  const mealObject = meals as McDonaldsMealsMap;
+  const codes = Object.keys(mealObject);
+  for (let index = 0; index < codes.length; index++) {
+    const code = codes[index];
+    const meal = mcdMealRecordFromMap(mealObject, code);
+    if (meal === null) {
+      continue;
+    }
+    entries.push({ code: code, meal: meal });
+  }
+  return entries;
+}
+
+function mcdMealsToFood(data: McDonaldsMealsData): A2uiFoodData[] {
+  const categories = data.categories === undefined ? [] : data.categories;
+  const foods: A2uiFoodData[] = [];
+  const entries = mcdMealEntries(data.meals);
+  for (let index = 0; index < entries.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+    const code = entries[index].code;
+    const meal = entries[index].meal;
+    const name = textOf(meal.name);
+    if (name.length === 0) {
+      continue;
+    }
+    const tags = mcdMealTags(code, categories);
+    foods.push({
+      name: '麦当劳 · ' + name,
+      category: joinFoodParts([pricePart('', firstText([meal.currentPrice, meal.price])), code]),
+      address: tags.join(' · '),
+      distance: '',
+      sourceTags: ['麦当劳']
+    });
+  }
+  return foods;
+}
+
+function mcdCouponsToFood(coupons: McDonaldsCouponRecord[]): A2uiFoodData[] {
+  const foods: A2uiFoodData[] = [];
+  for (let index = 0; index < coupons.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+    const coupon = coupons[index];
+    const products = coupon.products === undefined ? [] : coupon.products;
+    const productNames: string[] = [];
+    for (let productIndex = 0; productIndex < products.length; productIndex++) {
+      appendUniqueText(productNames, textOf(products[productIndex].productName));
+    }
+    const title = firstText([coupon.title, coupon.name, coupon.couponCode, coupon.couponId]);
+    if (title.length === 0) {
+      continue;
+    }
+    foods.push({
+      name: '麦当劳优惠 · ' + title,
+      category: productNames.join(' · '),
+      address: textOf(coupon.tradeDateTime),
+      distance: '',
+      sourceTags: ['麦当劳']
+    });
+  }
+  return foods;
+}
+
+function mcdPriceToFood(data: McDonaldsPriceData): A2uiFoodData[] {
+  const products = data.productList === undefined ? [] : data.productList;
+  const foods: A2uiFoodData[] = [];
+  for (let index = 0; index < products.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+    const product = products[index];
+    const name = firstText([product.productName, product.productCode]);
+    if (name.length === 0) {
+      continue;
+    }
+    foods.push({
+      name: '麦当劳 · ' + name,
+      category: joinFoodParts([
+        textOf(product.quantity).length > 0 ? '数量' + textOf(product.quantity) : '',
+        pricePart('小计', firstText([product.subtotal, product.originalSubtotal]))
+      ]),
+      address: joinFoodParts([
+        pricePart('应付', data.price),
+        pricePart('优惠', data.discount),
+        pricePart('配送费', data.deliveryPrice)
+      ]),
+      distance: '',
+      sourceTags: ['麦当劳']
+    });
+  }
+  return foods;
+}
+
+export function foodRecordsFromMcDonaldsMcpTool(toolName: string, value: Object): A2uiFoodData[] {
+  const payload = value as McDonaldsPayload;
+  const data = mcpPayloadData(payload);
+  if (toolName === 'query-nearby-stores' || toolName === 'delivery-query-stores') {
+    const stores = mcDonaldsStoresFromData(data as McDonaldsStoreRecord[] | McDonaldsStoreContainer | undefined);
+    const foods: A2uiFoodData[] = [];
+    for (let index = 0; index < stores.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+      const food = mcdStoreToFood(stores[index]);
+      if (food.name.length > 0) {
+        foods.push(food);
+      }
+    }
+    return foods;
+  }
+  if (toolName === 'query-meals') {
+    return mcdMealsToFood(data as McDonaldsMealsData);
+  }
+  if (toolName === 'query-meal-detail') {
+    const detail = data as McDonaldsMealRecord;
+    const name = textOf(detail.name);
+    if (name.length === 0) {
+      return [];
+    }
+    return [{
+      name: '麦当劳 · ' + name,
+      category: pricePart('', firstText([detail.currentPrice, detail.price])),
+      address: '',
+      distance: '',
+      sourceTags: ['麦当劳']
+    }];
+  }
+  if (toolName === 'calculate-price') {
+    return mcdPriceToFood(data as McDonaldsPriceData);
+  }
+  if (toolName === 'query-store-coupons' || toolName === 'available-coupons' || toolName === 'query-my-coupons') {
+    return mcdCouponsToFood(mcDonaldsCouponsFromData(data as McDonaldsCouponRecord[] | McDonaldsCouponContainer | undefined));
+  }
+  return [];
+}
+
+function luckinShopToFood(item: LuckinShopRecord): A2uiFoodData {
+  const tags = item.deptTags !== undefined ? item.deptTags : (item.tags !== undefined ? item.tags : []);
+  return {
+    name: firstText([item.deptName, item.name]),
+    category: joinFoodParts(['瑞幸门店', tags.join(' · '), item.workTimeStart !== undefined && item.workTimeEnd !== undefined ? item.workTimeStart + '-' + item.workTimeEnd : '']),
+    address: textOf(item.address),
+    distance: kmNumberDistanceText(item.distance),
+    location: mapPointLocation({ lng: item.longitude, lat: item.latitude }),
+    sourceTags: ['瑞幸']
+  };
+}
+
+function selectedLuckinAttrs(attrs: LuckinProductAttr[] | undefined): string {
+  if (attrs === undefined) {
+    return '';
+  }
+  const parts: string[] = [];
+  for (let index = 0; index < attrs.length; index++) {
+    const attr = attrs[index];
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        appendUniqueText(parts, textOf(attr.attributeName) + ':' + textOf(child.attributeName));
+      }
+    }
+  }
+  return parts.join(' · ');
+}
+
+function luckinProductToFood(item: LuckinProductRecord): A2uiFoodData {
+  return {
+    name: '瑞幸 · ' + firstText([item.productName, item.name]),
+    category: joinFoodParts([
+      firstText([item.skuCode, item.productId]),
+      pricePart('', firstText([item.discountPrice, item.price, item.initPrice])),
+      item.tags === undefined ? '' : item.tags.join(' · ')
+    ]),
+    address: selectedLuckinAttrs(item.productAttrs),
+    distance: '',
+    sourceTags: ['瑞幸']
+  };
+}
+
+function luckinOrderToFood(item: LuckinOrderRecord): A2uiFoodData[] {
+  const foods: A2uiFoodData[] = [];
+  const products = item.productInfoList === undefined ? [] : item.productInfoList;
+  for (let index = 0; index < products.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+    const product = luckinProductToFood(products[index]);
+    product.address = joinFoodParts([
+      textOf(item.orderStatusName),
+      pricePart('订单金额', item.orderPayAmount),
+      product.address
+    ]);
+    foods.push(product);
+  }
+  if (foods.length === 0 && firstText([item.orderId, item.orderStatusName]).length > 0) {
+    foods.push({
+      name: '瑞幸订单 · ' + textOf(item.orderId),
+      category: textOf(item.orderStatusName),
+      address: pricePart('订单金额', item.orderPayAmount),
+      distance: '',
+      sourceTags: ['瑞幸']
+    });
+  }
+  return foods;
+}
+
+export function foodRecordsFromLuckinMcpTool(toolName: string, value: Object): A2uiFoodData[] {
+  const payload = value as LuckinPayload;
+  const data = mcpPayloadData(payload);
+  if (toolName === 'queryShopList') {
+    const shops = luckinShopsFromData(data as LuckinShopRecord[] | LuckinShopContainer | undefined);
+    const foods: A2uiFoodData[] = [];
+    for (let index = 0; index < shops.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+      const food = luckinShopToFood(shops[index]);
+      if (food.name.length > 0) {
+        foods.push(food);
+      }
+    }
+    return foods;
+  }
+  if (toolName === 'searchProductForMcp' || toolName === 'queryProductDetailInfo') {
+    if (data === undefined) {
+      return [];
+    }
+    const productRows = luckinProductsFromData(data as LuckinProductRecord[] | LuckinProductContainer | undefined);
+    const products = productRows.length > 0 ? productRows : [data as LuckinProductRecord];
+    const foods: A2uiFoodData[] = [];
+    for (let index = 0; index < products.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+      const food = luckinProductToFood(products[index]);
+      if (food.name !== '瑞幸 · ') {
+        foods.push(food);
+      }
+    }
+    return foods;
+  }
+  if (toolName === 'queryOrderDetailInfo') {
+    return luckinOrderToFood(data as LuckinOrderRecord);
+  }
+  return [];
+}
+
 function normalizeFoodName(value: string): string {
   return value.toLowerCase()
     .replace(/\s+/g, '')
@@ -3034,7 +4104,7 @@ function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData): number {
 function selectVisibleFoodResults(foods: A2uiFoodData[]): A2uiFoodData[] {
   const sorted = foods.slice();
   sorted.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right));
-  return sorted.slice(0, FOOD_RESULT_LIMIT);
+  return sorted.slice(0, FOOD_AGGREGATED_RESULT_LIMIT);
 }
 
 function findExistingFoodIndex(foods: A2uiFoodData[], item: A2uiFoodData): number {
@@ -3207,34 +4277,44 @@ class AmapFoodProvider implements FoodProviderAdapter {
     if (location.length === 0) {
       return emptyProviderResult(this.name, '缺少经纬度，无法调用高德周边 POI。');
     }
-    aiLogInfo('[AIPhone][LocalToolAmapRequest] keyChars=' + key.length.toString() +
-      ' locationSource=' + locationSource + ' locationPresent=true keyword=' + keyword);
-    const payload = await amapJsonGet(buildQueryUrl(
-      'https://restapi.amap.com/v3/place/around',
-      ['key', 'location', 'types', 'keywords', 'radius', 'offset', 'page', 'extensions'],
-      [key, location, '050000', keyword, localProviderConfig.amapRadius, '10', '1', 'all']
-    ));
-    if (textOf(payload.status) !== '1') {
-      const providerMessage = firstText([payload.info, payload.infocode, payload.message]);
-      return emptyProviderResult(this.name, providerMessage.length > 0 ? providerMessage : JSON.stringify(payload).substring(0, 500));
-    }
-    const pois = payload.pois === undefined ? [] : payload.pois;
     const foods: A2uiFoodData[] = [];
     const names: string[] = [];
-    for (let index = 0; index < pois.length && foods.length < FOOD_RESULT_LIMIT; index++) {
-      const food = foodRecordForA2ui(pois[index]);
-      const normalized = normalizeFoodName(food.name);
-      if (food.name.length === 0 || names.indexOf(normalized) >= 0) {
+    let totalPois = 0;
+    let providerError = '';
+    const keywords = splitFoodSearchKeywords(keyword);
+    for (let keywordIndex = 0; keywordIndex < keywords.length && keywordIndex < 4 && foods.length < FOOD_PROVIDER_RESULT_LIMIT; keywordIndex++) {
+      const currentKeyword = keywords[keywordIndex];
+      aiLogInfo('[AIPhone][LocalToolAmapRequest] keyChars=' + key.length.toString() +
+        ' locationSource=' + locationSource + ' locationPresent=true keyword=' + currentKeyword);
+      const payload = await amapJsonGet(buildQueryUrl(
+        'https://restapi.amap.com/v3/place/around',
+        ['key', 'location', 'types', 'keywords', 'radius', 'offset', 'page', 'extensions'],
+        [key, location, '050000', currentKeyword, localProviderConfig.amapRadius, '10', '1', 'all']
+      ));
+      if (textOf(payload.status) !== '1') {
+        const providerMessage = firstText([payload.info, payload.infocode, payload.message]);
+        if (providerError.length === 0) {
+          providerError = providerMessage.length > 0 ? providerMessage : JSON.stringify(payload).substring(0, 500);
+        }
         continue;
       }
-      names.push(normalized);
-      foods.push(food);
+      const pois = payload.pois === undefined ? [] : payload.pois;
+      totalPois += pois.length;
+      for (let index = 0; index < pois.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
+        const food = foodRecordForA2ui(pois[index]);
+        const normalized = normalizeFoodName(food.name);
+        if (food.name.length === 0 || names.indexOf(normalized) >= 0) {
+          continue;
+        }
+        names.push(normalized);
+        foods.push(food);
+      }
     }
-    aiLogInfo('[AIPhone][LocalToolAmapResult] pois=' + pois.length.toString() + ' returned=' + foods.length.toString());
+    aiLogInfo('[AIPhone][LocalToolAmapResult] pois=' + totalPois.toString() + ' returned=' + foods.length.toString());
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '高德没有返回可展示餐饮 POI。'
+      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : '高德没有返回可展示餐饮 POI。')
     };
   }
 }
@@ -3273,7 +4353,7 @@ class TencentMapFoodProvider implements FoodProviderAdapter {
     }
     const places = payload.data === undefined ? [] : payload.data;
     const foods: A2uiFoodData[] = [];
-    for (let index = 0; index < places.length && foods.length < FOOD_RESULT_LIMIT; index++) {
+    for (let index = 0; index < places.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
       const food = foodRecordFromTencentMapPlace(places[index]);
       if (food.name.length > 0) {
         foods.push(food);
@@ -3321,7 +4401,7 @@ class BaiduMapFoodProvider implements FoodProviderAdapter {
     }
     const places = payload.results === undefined ? [] : payload.results;
     const foods: A2uiFoodData[] = [];
-    for (let index = 0; index < places.length && foods.length < FOOD_RESULT_LIMIT; index++) {
+    for (let index = 0; index < places.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
       const food = foodRecordFromBaiduPlace(places[index]);
       if (food.name.length > 0) {
         foods.push(food);
@@ -3384,7 +4464,7 @@ class MeituanUnionFoodProvider implements FoodProviderAdapter {
       meituanRecordsFromContainer(payload.data) :
       meituanRecordsFromContainer(payload.result);
     const foods: A2uiFoodData[] = [];
-    for (let index = 0; index < records.length && foods.length < FOOD_RESULT_LIMIT; index++) {
+    for (let index = 0; index < records.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
       const food = foodRecordFromMeituanUnion(records[index]);
       if (food.name.length > 0) {
         foods.push(food);
@@ -3453,7 +4533,7 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
     const result = taobaoResponseResult(payload);
     const records = taobaoRecordsFromResult(result);
     const foods: A2uiFoodData[] = [];
-    for (let index = 0; index < records.length && foods.length < FOOD_RESULT_LIMIT; index++) {
+    for (let index = 0; index < records.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
       const food = foodRecordFromTaobaoFlashStore(records[index]);
       if (food.name.length > 0) {
         foods.push(food);
@@ -3464,6 +4544,118 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
       provider: this.name,
       foods: foods,
       error: foods.length > 0 ? '' : '淘宝闪购没有返回可展示店铺推广结果。'
+    };
+  }
+}
+
+function shouldQueryMcDonalds(prompt: string, keyword: string): boolean {
+  return /麦当劳|mcdonald|mcd|巨无霸|麦乐鸡|麦辣|薯条|汉堡|板烧|麦乐送/i.test(prompt + ' ' + keyword);
+}
+
+function shouldQueryLuckin(prompt: string, keyword: string): boolean {
+  return /瑞幸|luckin|咖啡|拿铁|美式|生椰|冰萃|澳瑞白|厚乳|饮品/i.test(prompt + ' ' + keyword);
+}
+
+function inferFoodCityFromText(text: string): string {
+  const direct = inferAmapCityFromPlace(text);
+  if (direct.length > 0) {
+    return direct;
+  }
+  const cityMatch = /(北京|上海|天津|重庆|深圳|广州|杭州|成都|武汉|南京|西安|苏州|厦门|青岛|长沙|昆明|海口|三亚|东莞|佛山|郑州|宁波|无锡|合肥|福州|济南|沈阳|大连)/u.exec(text);
+  return cityMatch === null ? '深圳' : cityMatch[1];
+}
+
+function brandSearchKeyword(prompt: string, query: FoodQuery, fallback: string): string {
+  if (query.place.length > 0) {
+    return query.place;
+  }
+  const cleaned = prompt
+    .replace(/麦当劳|瑞幸|luckin|mcdonald|mcd/ig, '')
+    .replace(/附近|周边|查询|查|搜索|帮我|门店|菜单|有什么|外卖|点餐/g, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function wantsBrandMenu(prompt: string, keyword: string): boolean {
+  return /菜单|餐品|商品|价格|多少钱|套餐|汉堡|薯条|麦乐鸡|咖啡|拿铁|美式|生椰|冰萃|饮品/u.test(prompt + ' ' + keyword);
+}
+
+class McDonaldsMcpFoodProvider implements FoodProviderAdapter {
+  name: string = '麦当劳';
+
+  async search(prompt: string, query: FoodQuery, keyword: string, _location: string, _locationSource: string): Promise<FoodProviderResult> {
+    const token = localProviderConfig.mcdMcpToken;
+    if (token.length === 0) {
+      return emptyProviderResult(this.name, '未配置 MCD_MCP_TOKEN');
+    }
+    const city = inferFoodCityFromText(query.place.length > 0 ? query.place : prompt);
+    const searchKeyword = brandSearchKeyword(prompt, query, keyword);
+    const storeArgs: McDonaldsNearbyStoresArgs = {
+      searchType: 2,
+      beType: 1,
+      city: city,
+      keyword: searchKeyword
+    };
+    const storePayload = await callReadonlyBrandMcpTool(this.name, localProviderConfig.mcdMcpUrl, token, 'query-nearby-stores', storeArgs);
+    let foods = foodRecordsFromMcDonaldsMcpTool('query-nearby-stores', storePayload);
+    const firstStore = firstMcDonaldsStore(storePayload);
+    if (wantsBrandMenu(prompt, keyword) && firstStore !== null && textOf(firstStore.storeCode).length > 0) {
+      const menuArgs: McDonaldsMealsArgs = {
+        storeCode: textOf(firstStore.storeCode),
+        beCode: textOf(firstStore.beCode),
+        orderType: 1,
+        beType: 1
+      };
+      const menuPayload = await callReadonlyBrandMcpTool(this.name, localProviderConfig.mcdMcpUrl, token, 'query-meals', menuArgs);
+      foods = foods.concat(foodRecordsFromMcDonaldsMcpTool('query-meals', menuPayload));
+    }
+    aiLogInfo('[AIPhone][LocalToolMcDonaldsMcpResult] returned=' + foods.length.toString());
+    return {
+      provider: this.name,
+      foods: foods,
+      error: foods.length > 0 ? '' : '麦当劳 MCP 没有返回可展示的门店或菜单结果。'
+    };
+  }
+}
+
+class LuckinMcpFoodProvider implements FoodProviderAdapter {
+  name: string = '瑞幸';
+
+  async search(prompt: string, _query: FoodQuery, keyword: string, location: string, _locationSource: string): Promise<FoodProviderResult> {
+    const token = localProviderConfig.luckinMcpToken;
+    if (token.length === 0) {
+      return emptyProviderResult(this.name, '未配置 LUCKIN_MCP_TOKEN');
+    }
+    if (location.length === 0) {
+      return emptyProviderResult(this.name, '缺少经纬度，无法调用瑞幸门店查询。');
+    }
+    const longitude = locationLongitude(location);
+    const latitude = locationLatitude(location);
+    if (longitude.length === 0 || latitude.length === 0) {
+      return emptyProviderResult(this.name, '经纬度格式无效：' + location);
+    }
+    const emptyQuery: FoodQuery = { place: '', keyword: keyword };
+    const shopArgs: LuckinShopListArgs = {
+      deptName: /瑞幸|luckin/i.test(prompt) ? brandSearchKeyword(prompt, emptyQuery, '') : '',
+      longitude: Number(longitude),
+      latitude: Number(latitude)
+    };
+    const shopPayload = await callReadonlyBrandMcpTool(this.name, localProviderConfig.luckinMcpUrl, token, 'queryShopList', shopArgs);
+    let foods = foodRecordsFromLuckinMcpTool('queryShopList', shopPayload);
+    const firstShop = firstLuckinShop(shopPayload);
+    if (wantsBrandMenu(prompt, keyword) && firstShop !== null && textOf(firstShop.deptId).length > 0) {
+      const productArgs: LuckinProductSearchArgs = {
+        deptId: Number(textOf(firstShop.deptId)),
+        query: keyword
+      };
+      const productPayload = await callReadonlyBrandMcpTool(this.name, localProviderConfig.luckinMcpUrl, token, 'searchProductForMcp', productArgs);
+      foods = foods.concat(foodRecordsFromLuckinMcpTool('searchProductForMcp', productPayload));
+    }
+    aiLogInfo('[AIPhone][LocalToolLuckinMcpResult] returned=' + foods.length.toString());
+    return {
+      provider: this.name,
+      foods: foods,
+      error: foods.length > 0 ? '' : '瑞幸 MCP 没有返回可展示的门店或商品结果。'
     };
   }
 }
@@ -3502,6 +4694,12 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string): Promise<s
     new MeituanUnionFoodProvider(),
     new TaobaoFlashFoodProvider()
   ];
+  if (shouldQueryMcDonalds(prompt, keyword)) {
+    adapters.push(new McDonaldsMcpFoodProvider());
+  }
+  if (shouldQueryLuckin(prompt, keyword)) {
+    adapters.push(new LuckinMcpFoodProvider());
+  }
   const providerResults: FoodProviderResult[] = preflightResults.slice();
   for (let index = 0; index < adapters.length; index++) {
     providerResults.push(await safeFoodProviderSearch(adapters[index], prompt, query, keyword, location, locationSource));
@@ -3520,7 +4718,7 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string): Promise<s
   return foodResultA2ui(
     surfaceId,
     '外卖聚合搜索',
-    '以下结果来自高德、腾讯地图、百度地图、美团联盟和淘宝闪购联盟；仅展示真实返回字段，不下单、不支付、不创建购物车。',
+    '以下结果来自高德、腾讯地图、百度地图、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。',
     aggregated.foods.length > 0 ?
       '已聚合 ' + aggregated.foods.length.toString() + ' 个可展示结果；' + rows.length.toString() + ' 个来源需要处理。' :
       '所有来源都没有可展示外卖结果；下面只列出真实 provider 状态。',

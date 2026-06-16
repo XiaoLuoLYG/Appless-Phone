@@ -52,10 +52,6 @@ export struct A2uiSurfaceView {
                 .lineHeight(20)
                 .margin({ top: 7 })
             }
-            Text('surface=' + this.surface.surfaceId + ' · seq=' + this.surface.sequence.toString() + ' · render=' + this.renderTick.toString())
-              .fontSize(11)
-              .fontColor(COLOR_MUTED)
-              .margin({ top: 5 })
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)

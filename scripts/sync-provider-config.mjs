@@ -28,7 +28,11 @@ const providerKeys = [
   'TAOBAO_APP_KEY',
   'TAOBAO_APP_SECRET',
   'TAOBAO_FLASH_PID',
-  'TAOBAO_API_URL'
+  'TAOBAO_API_URL',
+  'MCD_MCP_TOKEN',
+  'MCD_MCP_URL',
+  'LUCKIN_MCP_TOKEN',
+  'LUCKIN_MCP_URL'
 ];
 
 function unquote(value) {
@@ -93,5 +97,7 @@ console.log(maskedStatus(config, [
   'AMAP_DEFAULT_LOCATION',
   'MEITUAN_UNION_APP_KEY',
   'TAOBAO_APP_KEY',
-  'TAOBAO_FLASH_PID'
+  'TAOBAO_FLASH_PID',
+  'MCD_MCP_TOKEN',
+  'LUCKIN_MCP_TOKEN'
 ]));
