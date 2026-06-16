@@ -12,6 +12,11 @@ import { A2uiAction, A2uiMessage, A2uiSurfaceState, emptyA2uiSurface } from '../
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
+import {
+  A2UI_HOME_MAX_WIDTH,
+  A2UI_HOME_TITLE_MAX_WIDTH,
+  A2UI_HOME_TITLE_MIN_WIDTH
+} from '../style/A2uiHomeLayout';
 import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS } from '../style/A2uiHomeMotion';
 
 const A2UI_HISTORY_EMPTY_HEIGHT: number = 108;
@@ -79,78 +84,84 @@ export struct HomePage {
   }
 
   build() {
-    Column() {
-      Row() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column() {
         Row() {
-          Text('PocketAgent')
-            .minFontSize(20)
-            .maxFontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_INK)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('A2UI Home 最小刷新实验')
-            .minFontSize(10)
-            .maxFontSize(13)
-            .fontSize(13)
-            .fontColor(COLOR_MUTED)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row() {
+            Stack({ alignContent: Alignment.Center }) {
+              Text('PocketAgent')
+                .fontSize(28)
+                .minFontSize(18)
+                .maxFontSize(28)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_INK)
+                .maxLines(1)
+                .textAlign(TextAlign.Center)
+            }
+            .height(36)
+            .constraintSize({ minWidth: A2UI_HOME_TITLE_MIN_WIDTH, maxWidth: A2UI_HOME_TITLE_MAX_WIDTH })
+
+            Text('A2UI Home 最小刷新实验')
+              .minFontSize(10)
+              .maxFontSize(13)
+              .fontSize(13)
+              .fontColor(COLOR_MUTED)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ left: 8 })
+              .layoutWeight(1)
+          }
+          .alignItems(VerticalAlign.Center)
+          .layoutWeight(1)
+
+          A2uiButtonView({
+            icon: $r('app.media.icon_history'),
+            hasIcon: true,
+            shape: 'circle',
+            tone: 'secondary',
+            active: this.showHistory
+          })
+            .onClick(() => {
+              this.onToggleHistory();
+            })
+            .margin({ left: 10 })
+
+          A2uiButtonView({
+            label: '社',
+            shape: 'circle',
+            tone: 'secondary',
+            active: this.currentSurface.intent === 'social'
+          })
+            .onClick(() => {
+              this.onOpenSocial();
+            })
             .margin({ left: 8 })
-            .layoutWeight(1)
+
+          A2uiButtonView({
+            icon: $r('app.media.icon_settings'),
+            hasIcon: true,
+            shape: 'circle',
+            tone: 'secondary'
+          })
+            .onClick(() => {
+              this.onOpenConfig();
+            })
+            .margin({ left: 8 })
+
+          A2uiButtonView({
+            icon: $r('app.media.icon_lab'),
+            hasIcon: true,
+            shape: 'circle',
+            tone: 'secondary'
+          })
+            .onClick(() => {
+              this.onOpenStyleLab();
+            })
+            .margin({ left: 8 })
         }
+        .width('100%')
         .alignItems(VerticalAlign.Center)
-        .layoutWeight(1)
-        .constraintSize({ maxWidth: 150 })
-
-        A2uiButtonView({
-          icon: $r('app.media.icon_history'),
-          hasIcon: true,
-          shape: 'circle',
-          tone: 'secondary',
-          active: this.showHistory
-        })
-          .onClick(() => {
-            this.onToggleHistory();
-          })
-          .margin({ left: 10 })
-
-        A2uiButtonView({
-          label: '社',
-          shape: 'circle',
-          tone: 'secondary',
-          active: this.currentSurface.intent === 'social'
-        })
-          .onClick(() => {
-            this.onOpenSocial();
-          })
-          .margin({ left: 8 })
-
-        A2uiButtonView({
-          icon: $r('app.media.icon_settings'),
-          hasIcon: true,
-          shape: 'circle',
-          tone: 'secondary'
-        })
-          .onClick(() => {
-            this.onOpenConfig();
-          })
-          .margin({ left: 8 })
-
-        A2uiButtonView({
-          icon: $r('app.media.icon_lab'),
-          hasIcon: true,
-          shape: 'circle',
-          tone: 'secondary'
-        })
-          .onClick(() => {
-            this.onOpenStyleLab();
-          })
-          .margin({ left: 8 })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-      .padding({ left: 18, right: 18, top: 16, bottom: 14 })
+        .padding({ left: 18, right: 18, top: 16, bottom: 14 })
 
       Column() {
         if (this.showHistory) {
@@ -240,10 +251,15 @@ export struct HomePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
       .padding({ top: 12, left: 4, right: 4 })
+      }
+      .width('100%')
+      .constraintSize({ maxWidth: A2UI_HOME_MAX_WIDTH })
+      .height('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+      .backgroundColor(COLOR_PAGE)
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(COLOR_PAGE)
   }
 }
