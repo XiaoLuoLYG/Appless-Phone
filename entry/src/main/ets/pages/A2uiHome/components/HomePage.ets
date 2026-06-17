@@ -13,6 +13,10 @@ import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
 import {
+  isPromptInputEnabled,
+  nextSendSpinnerRotation
+} from '../state/A2uiHomeState';
+import {
   A2UI_HOME_MAX_WIDTH,
   A2UI_HOME_TITLE_MAX_WIDTH,
   A2UI_HOME_TITLE_MIN_WIDTH
@@ -23,7 +27,6 @@ const A2UI_HISTORY_EMPTY_HEIGHT: number = 108;
 const A2UI_HISTORY_ROW_HEIGHT: number = 76;
 const A2UI_HISTORY_MAX_HEIGHT: number = 254;
 const A2UI_SEND_SPINNER_INTERVAL_MS: number = 90;
-const A2UI_SEND_SPINNER_STEP_DEG: number = 24;
 
 @Component
 export struct HomePage {
@@ -56,11 +59,7 @@ export struct HomePage {
       return;
     }
     this.sendSpinnerTimerId = setInterval(() => {
-      if (this.isBusy) {
-        this.sendSpinnerRotation = (this.sendSpinnerRotation + A2UI_SEND_SPINNER_STEP_DEG) % 360;
-      } else if (this.sendSpinnerRotation !== 0) {
-        this.sendSpinnerRotation = 0;
-      }
+      this.sendSpinnerRotation = nextSendSpinnerRotation(this.sendSpinnerRotation, this.isBusy);
     }, A2UI_SEND_SPINNER_INTERVAL_MS);
   }
 
@@ -203,7 +202,11 @@ export struct HomePage {
             .borderRadius(15)
             .border({ width: 1, color: COLOR_CARD_EDGE })
             .padding({ left: 14, right: 14, top: 13, bottom: 13 })
+            .enabled(isPromptInputEnabled(this.isBusy))
             .onChange((value: string) => {
+              if (!isPromptInputEnabled(this.isBusy)) {
+                return;
+              }
               this.inputText = value;
             })
 
@@ -229,6 +232,7 @@ export struct HomePage {
             .border({ width: 1, color: COLOR_ACCENT })
             .shadow({ radius: 14, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 7 })
             .margin({ left: 8, right: 2 })
+            .enabled(!this.isBusy)
             .onClick(() => {
               if (this.isBusy) {
                 return;

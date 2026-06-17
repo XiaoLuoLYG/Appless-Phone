@@ -1,5 +1,7 @@
 import { A2uiSurfaceState } from '../../../model/A2uiTypes';
 
+export const A2UI_SEND_SPINNER_STEP_DEG: number = 24;
+
 export interface ConnectionPanelState {
   connectionStatus: string;
   connectionMessage: string;
@@ -42,6 +44,21 @@ export function updateConnectionPanelState(current: ConnectionPanelState, update
 
 export function shouldApplySurfaceUpdate(current: A2uiSurfaceState, next: A2uiSurfaceState): boolean {
   return current.surfaceId !== next.surfaceId || current.sequence !== next.sequence;
+}
+
+export function nextSendSpinnerRotation(current: number, isBusy: boolean): number {
+  if (!isBusy) {
+    return 0;
+  }
+  return current + A2UI_SEND_SPINNER_STEP_DEG;
+}
+
+export function isPromptInputEnabled(isBusy: boolean): boolean {
+  return !isBusy;
+}
+
+export function inputTextAfterPromptSubmit(current: string): string {
+  return current;
 }
 
 export function connectionStatusLabel(status: string): string {

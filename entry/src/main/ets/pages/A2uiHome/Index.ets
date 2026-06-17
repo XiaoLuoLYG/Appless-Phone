@@ -34,6 +34,7 @@ import { normalizeFoodProviderDelayMs } from './state/A2uiHomeDebugSettings';
 import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
+  inputTextAfterPromptSubmit,
   shouldApplySurfaceUpdate,
   updateConnectionPanelState
 } from './state/A2uiHomeState';
@@ -498,7 +499,7 @@ struct Index {
       return;
     }
     this.isBusy = true;
-    this.inputText = '';
+    this.inputText = inputTextAfterPromptSubmit(this.inputText);
     this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, 'sending'), this.currentSocialReplies());
     aiLogInfo('[AIPhone][SocialReplyRequest] messageId=' + message.id +
       ' platform=' + message.platform +
@@ -573,7 +574,7 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + trimmed.length.toString() +
       ' model=' + this.selectedModel +
       ' baseUrl=' + this.baseUrl);
-    this.inputText = '';
+    this.inputText = inputTextAfterPromptSubmit(this.inputText);
     this.isBusy = true;
     this.markChecking('正在生成 A2UI...');
     try {

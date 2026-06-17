@@ -1,7 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
 import {
+  A2UI_SEND_SPINNER_STEP_DEG,
   createInitialConnectionPanelState,
+  inputTextAfterPromptSubmit,
+  isPromptInputEnabled,
+  nextSendSpinnerRotation,
   shouldApplySurfaceUpdate,
   updateConnectionPanelState
 } from '../main/ets/pages/A2uiHome/state/A2uiHomeState';
@@ -61,6 +65,18 @@ export default function a2uiHomeStateTest() {
     it('skips applying the same surface sequence twice', 0, () => {
       expect(shouldApplySurfaceUpdate(surface(12, 'ready'), surface(12, 'ready'))).assertFalse();
       expect(shouldApplySurfaceUpdate(surface(12, 'calling_tool'), surface(13, 'ready'))).assertTrue();
+    });
+
+    it('keeps send spinner rotation monotonic while loading', 0, () => {
+      expect(nextSendSpinnerRotation(360 - A2UI_SEND_SPINNER_STEP_DEG, true)).assertEqual(360);
+      expect(nextSendSpinnerRotation(360, true)).assertEqual(360 + A2UI_SEND_SPINNER_STEP_DEG);
+      expect(nextSendSpinnerRotation(360 + A2UI_SEND_SPINNER_STEP_DEG, false)).assertEqual(0);
+    });
+
+    it('locks prompt input while busy and preserves submitted text', 0, () => {
+      expect(isPromptInputEnabled(false)).assertTrue();
+      expect(isPromptInputEnabled(true)).assertFalse();
+      expect(inputTextAfterPromptSubmit('帮我查深圳北站附近餐馆')).assertEqual('帮我查深圳北站附近餐馆');
     });
   });
 }
