@@ -1,9 +1,7 @@
-export const A2UI_MOTION_FAST_MS: number = 180;
 export const A2UI_MOTION_NORMAL_MS: number = 260;
 export const A2UI_MOTION_CURVE: Curve = Curve.EaseInOut;
 export const A2UI_THINKING_DOT_MS: number = 420;
 export const A2UI_ENTER_OFFSET_Y: number = 8;
-export const A2UI_SURFACE_ENTER_OFFSET_Y: number = 10;
 export const A2UI_THINKING_PULSE_MIN: number = 1;
 
 export function a2uiEnterTransition(offsetY: number = A2UI_ENTER_OFFSET_Y): TransitionEffect {
@@ -11,14 +9,6 @@ export function a2uiEnterTransition(offsetY: number = A2UI_ENTER_OFFSET_Y): Tran
     .opacity(0)
     .combine(TransitionEffect.translate({ x: 0, y: offsetY, z: 0 }))
     .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE });
-}
-
-export function a2uiShouldAnimateActionBarUpdates(): boolean {
-  return false;
-}
-
-export function a2uiShouldAnimateResultCardUpdates(): boolean {
-  return true;
 }
 
 function normalizedStep(value: number): number {

@@ -8,7 +8,6 @@ import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
   COLOR_FIELD,
-  COLOR_GLASS,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
@@ -24,8 +23,10 @@ import {
   visibleTrainOptions
 } from '../state/A2uiTrainOptionsState';
 import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS, a2uiEnterTransition } from '../style/A2uiHomeMotion';
+import { A2UI_PANEL_BACKGROUND_COLOR, A2UI_PANEL_BORDER_COLOR, A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
+import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 const A2UI_TRAIN_CARD_BASE_HEIGHT: number = 152;
 const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 232;
@@ -146,6 +147,9 @@ export struct TrainOptionsView {
 
   build() {
     Column() {
+      A2uiPanelAccentView()
+
+      Column() {
       Row() {
         Column() {
           if (this.showTitle()) {
@@ -295,9 +299,12 @@ export struct TrainOptionsView {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ left: 16, right: 16, top: 18, bottom: 16 })
-    .backgroundColor(COLOR_GLASS)
-    .borderRadius(18)
-    .border({ width: 1, color: COLOR_CARD_EDGE })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(A2UI_PANEL_BACKGROUND_COLOR)
+    .borderRadius(A2UI_PANEL_CORNER_RADIUS)
+    .border({ width: 1, color: A2UI_PANEL_BORDER_COLOR })
     .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
   }

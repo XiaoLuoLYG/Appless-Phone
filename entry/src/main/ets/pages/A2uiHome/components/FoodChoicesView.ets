@@ -47,8 +47,14 @@ import {
 } from '../style/A2uiHomeTheme';
 import { componentBodyOf, componentStatusOf, componentTitleOf } from '../render/A2uiRenderData';
 import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
+import {
+  A2UI_PANEL_BACKGROUND_COLOR,
+  A2UI_PANEL_BORDER_COLOR,
+  A2UI_PANEL_CORNER_RADIUS
+} from '../style/A2uiPanelFrameStyle';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
+import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 const SYSTEM_MAP_BUNDLE: string = 'com.huawei.hmos.maps.app';
 const SYSTEM_MAP_ABILITY: string = 'EntryAbility';
@@ -417,14 +423,7 @@ export struct FoodChoicesView {
 
   build() {
     Column() {
-      Row()
-        .width('72%')
-        .height(2)
-        .linearGradient({
-          angle: 90,
-          colors: [['#00000000', 0], ['#22D3EE', 0.5], ['#00000000', 1]]
-        })
-        .shadow({ radius: 6, color: '#22D3EE80', offsetX: 0, offsetY: 0 })
+      A2uiPanelAccentView()
 
       Column() {
         Row() {
@@ -589,9 +588,9 @@ export struct FoodChoicesView {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('#121214')
-    .borderRadius(18)
-    .border({ width: 1, color: '#27272A' })
+    .backgroundColor(A2UI_PANEL_BACKGROUND_COLOR)
+    .borderRadius(A2UI_PANEL_CORNER_RADIUS)
+    .border({ width: 1, color: A2UI_PANEL_BORDER_COLOR })
     .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
   }
 }
