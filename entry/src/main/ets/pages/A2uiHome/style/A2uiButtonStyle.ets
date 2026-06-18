@@ -15,11 +15,20 @@ import {
   COLOR_INK
 } from './A2uiHomeTheme';
 
+export const A2UI_CIRCLE_BUTTON_SIZE: number = 32;
+export const A2UI_CIRCLE_BUTTON_ICON_SIZE: number = 16;
+export const A2UI_CIRCLE_BUTTON_BACKGROUND: string = '#18181B';
+export const A2UI_CIRCLE_BUTTON_BORDER: string = '#27272A';
+
 export interface A2uiButtonVisualStyle {
   backgroundColor: string;
   borderColor: string;
   textColor: string;
   opacity: number;
+}
+
+export function resolveA2uiButtonColor(overrideColor: string, fallbackColor: string): string {
+  return overrideColor.length > 0 ? overrideColor : fallbackColor;
 }
 
 export function resolveA2uiButtonStyle(tone: string, active: boolean, isEnabled: boolean): A2uiButtonVisualStyle {

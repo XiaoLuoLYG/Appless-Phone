@@ -1,5 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveA2uiButtonStyle } from '../main/ets/pages/A2uiHome/style/A2uiButtonStyle';
+import {
+  A2UI_CIRCLE_BUTTON_BACKGROUND,
+  A2UI_CIRCLE_BUTTON_BORDER,
+  A2UI_CIRCLE_BUTTON_ICON_SIZE,
+  A2UI_CIRCLE_BUTTON_SIZE,
+  resolveA2uiButtonColor,
+  resolveA2uiButtonStyle
+} from '../main/ets/pages/A2uiHome/style/A2uiButtonStyle';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DEEP,
@@ -37,6 +44,18 @@ export default function a2uiButtonStyleTest() {
 
     it('uses danger style when enabled and not overridden by disabled', 0, () => {
       expect(resolveA2uiButtonStyle('danger', false, true).backgroundColor).assertEqual(COLOR_ERROR_SOFT);
+    });
+
+    it('uses compact title-bar defaults for circle buttons', 0, () => {
+      expect(A2UI_CIRCLE_BUTTON_SIZE).assertEqual(32);
+      expect(A2UI_CIRCLE_BUTTON_ICON_SIZE).assertEqual(16);
+      expect(A2UI_CIRCLE_BUTTON_BACKGROUND).assertEqual('#18181B');
+      expect(A2UI_CIRCLE_BUTTON_BORDER).assertEqual('#27272A');
+    });
+
+    it('uses explicit color overrides and falls back for empty values', 0, () => {
+      expect(resolveA2uiButtonColor('#0D9488', '#18181B')).assertEqual('#0D9488');
+      expect(resolveA2uiButtonColor('', '#18181B')).assertEqual('#18181B');
     });
   });
 }

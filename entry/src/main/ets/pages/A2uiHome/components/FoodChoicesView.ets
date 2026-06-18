@@ -41,7 +41,6 @@ import {
   COLOR_FOOD_TENCENT_GLOW,
   COLOR_FOOD_TENCENT_LINE,
   COLOR_FOOD_TENCENT_SOFT,
-  COLOR_GLASS,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
@@ -418,7 +417,17 @@ export struct FoodChoicesView {
 
   build() {
     Column() {
-      Row() {
+      Row()
+        .width('72%')
+        .height(2)
+        .linearGradient({
+          angle: 90,
+          colors: [['#00000000', 0], ['#22D3EE', 0.5], ['#00000000', 1]]
+        })
+        .shadow({ radius: 6, color: '#22D3EE80', offsetX: 0, offsetY: 0 })
+
+      Column() {
+        Row() {
         Column() {
           Text(componentTitleOf(this.component, '附近餐饮'))
             .fontSize(17)
@@ -438,17 +447,17 @@ export struct FoodChoicesView {
           status: componentStatusOf(this.component, this.surface.status),
           label: ''
         })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Top)
-
-      ActionBarView({
-        actions: this.visibleActions(),
-        isBusy: this.isBusy,
-        onAction: (action: A2uiAction) => {
-          this.handleAction(action);
         }
-      })
+        .width('100%')
+        .alignItems(VerticalAlign.Top)
+
+        ActionBarView({
+          actions: this.visibleActions(),
+          isBusy: this.isBusy,
+          onAction: (action: A2uiAction) => {
+            this.handleAction(action);
+          }
+        })
 
       if (this.visibleFoods().length === 0 && this.foods().length > 0 && this.filterMode === 'within_1km') {
         Column() {
@@ -474,8 +483,9 @@ export struct FoodChoicesView {
           .fontSize(13)
           .fontColor(COLOR_MUTED)
           .padding({ top: 14, bottom: 4 })
-      } else {
-        ForEach(this.visibleFoods(), (item: A2uiFoodOption) => {
+        } else {
+          Column() {
+            ForEach(this.visibleFoods(), (item: A2uiFoodOption) => {
           Column() {
             Column() {
               Row() {
@@ -563,16 +573,25 @@ export struct FoodChoicesView {
           .alignItems(HorizontalAlign.Start)
           .margin({ top: 10 })
           .transition(a2uiEnterTransition())
-        }, (item: A2uiFoodOption) => this.foodRowKey(item) + '-' + this.renderTick.toString())
+            }, (item: A2uiFoodOption) => this.foodRowKey(item) + '-' + this.renderTick.toString())
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: 10, right: 10, bottom: 10 })
+          .backgroundColor('#09090B')
+          .borderRadius(14)
+          .margin({ top: 12 })
+        }
       }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: 16, right: 16, top: 17, bottom: 16 })
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 18, bottom: 16 })
-    .backgroundColor(COLOR_GLASS)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#121214')
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .border({ width: 1, color: '#27272A' })
     .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
-    .margin({ bottom: 12 })
   }
 }

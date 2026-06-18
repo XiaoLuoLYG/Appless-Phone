@@ -1,8 +1,5 @@
 import {
   COLOR_ACCENT,
-  COLOR_ACCENT_DEEP,
-  COLOR_CARD_EDGE,
-  COLOR_CARD_GLOW,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_PAGE,
@@ -17,9 +14,7 @@ import {
   nextSendSpinnerRotation
 } from '../state/A2uiHomeState';
 import {
-  A2UI_HOME_MAX_WIDTH,
-  A2UI_HOME_TITLE_MAX_WIDTH,
-  A2UI_HOME_TITLE_MIN_WIDTH
+  A2UI_HOME_MAX_WIDTH
 } from '../style/A2uiHomeLayout';
 import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS } from '../style/A2uiHomeMotion';
 
@@ -86,32 +81,12 @@ export struct HomePage {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
         Row() {
-          Row() {
-            Stack({ alignContent: Alignment.Center }) {
-              Text('PocketAgent')
-                .fontSize(28)
-                .minFontSize(18)
-                .maxFontSize(28)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_INK)
-                .maxLines(1)
-                .textAlign(TextAlign.Center)
-            }
-            .height(36)
-            .constraintSize({ minWidth: A2UI_HOME_TITLE_MIN_WIDTH, maxWidth: A2UI_HOME_TITLE_MAX_WIDTH })
-
-            Text('A2UI Home 最小刷新实验')
-              .minFontSize(10)
-              .maxFontSize(13)
-              .fontSize(13)
-              .fontColor(COLOR_MUTED)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ left: 8 })
-              .layoutWeight(1)
-          }
-          .alignItems(VerticalAlign.Center)
-          .layoutWeight(1)
+          Text('PocketAgent')
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(COLOR_INK)
+            .maxLines(1)
+            .layoutWeight(1)
 
           A2uiButtonView({
             icon: $r('app.media.icon_history'),
@@ -123,7 +98,7 @@ export struct HomePage {
             .onClick(() => {
               this.onToggleHistory();
             })
-            .margin({ left: 10 })
+            .margin({ left: 8 })
 
           A2uiButtonView({
             label: '社',
@@ -160,7 +135,7 @@ export struct HomePage {
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
-        .padding({ left: 18, right: 18, top: 16, bottom: 14 })
+        .padding({ left: 4, right: 4, top: 10, bottom: 16 })
 
       Column() {
         if (this.showHistory) {
@@ -192,16 +167,21 @@ export struct HomePage {
             placeholder: this.inputPlaceholder,
             text: this.inputText
           })
-            .constraintSize({ minHeight: 52 })
+            .constraintSize({ minHeight: 32, maxHeight: 72 })
             .layoutWeight(1)
             .fontSize(15)
             .fontColor(COLOR_TEXT)
             .lineHeight(21)
             .placeholderColor(COLOR_MUTED)
-            .backgroundColor('#091017')
-            .borderRadius(15)
-            .border({ width: 1, color: COLOR_CARD_EDGE })
-            .padding({ left: 14, right: 14, top: 13, bottom: 13 })
+            .backgroundColor('#00000000')
+            .borderRadius(0)
+            .border({ width: 0 })
+            .padding({
+              left: 0,
+              right: 0,
+              top: 5,
+              bottom: 5
+            })
             .enabled(isPromptInputEnabled(this.isBusy))
             .onChange((value: string) => {
               if (!isPromptInputEnabled(this.isBusy)) {
@@ -210,28 +190,20 @@ export struct HomePage {
               this.inputText = value;
             })
 
-          Stack() {
-            if (this.isBusy) {
-              Image($r('app.media.icon_wait_spinner'))
-                .width(25)
-                .height(25)
-                .objectFit(ImageFit.Contain)
-                .rotate({ angle: this.sendSpinnerRotation })
-                .animation({ duration: A2UI_SEND_SPINNER_INTERVAL_MS, curve: Curve.Linear })
-            } else {
-              Image($r('app.media.arrow_up'))
-                .width(27)
-                .height(27)
-                .objectFit(ImageFit.Contain)
-            }
-          }
-            .width(46)
-            .height(46)
-            .backgroundColor(COLOR_ACCENT_DEEP)
-            .borderRadius(23)
-            .border({ width: 1, color: COLOR_ACCENT })
-            .shadow({ radius: 14, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 7 })
-            .margin({ left: 8, right: 2 })
+          A2uiButtonView({
+            icon: this.isBusy ? $r('app.media.icon_wait_spinner') : $r('app.media.arrow_up'),
+            hasIcon: true,
+            shape: 'circle',
+            circleSize: 32,
+            iconSize: this.isBusy ? 20 : 16,
+            customBackgroundColor: '#0D9488',
+            customBorderWidth: 0,
+            shadowColor: '#0D948866',
+            shadowRadius: 15,
+            iconRotation: this.sendSpinnerRotation
+          })
+            .animation({ duration: A2UI_SEND_SPINNER_INTERVAL_MS, curve: Curve.Linear })
+            .margin({ left: 8 })
             .enabled(!this.isBusy)
             .onClick(() => {
               if (this.isBusy) {
@@ -242,6 +214,12 @@ export struct HomePage {
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
+        .constraintSize({ minHeight: 48 })
+        .padding({ left: 16, right: 8, top: 8, bottom: 8 })
+        .backgroundColor('#18181B')
+        .borderRadius(24)
+        .border({ width: 1, color: '#27272A' })
+        .shadow({ radius: 20, color: '#00000080', offsetX: 0, offsetY: 10 })
 
         Row() {
           Text('surface=' + this.surfaceRenderTick.toString())
