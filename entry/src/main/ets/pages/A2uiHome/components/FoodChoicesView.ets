@@ -10,35 +10,24 @@ import {
   COLOR_ACCENT_DEEP,
   COLOR_ACCENT_SOFT,
   COLOR_BUTTON_TEXT,
-  COLOR_CARD,
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
   COLOR_CARD_INSET,
   COLOR_CARD_RAISED,
   COLOR_ERROR,
   COLOR_FOOD_AMAP,
-  COLOR_FOOD_AMAP_CARD,
-  COLOR_FOOD_AMAP_GLOW,
   COLOR_FOOD_AMAP_LINE,
   COLOR_FOOD_AMAP_SOFT,
   COLOR_FOOD_BAIDU,
-  COLOR_FOOD_BAIDU_CARD,
-  COLOR_FOOD_BAIDU_GLOW,
   COLOR_FOOD_BAIDU_LINE,
   COLOR_FOOD_BAIDU_SOFT,
   COLOR_FOOD_MEITUAN,
-  COLOR_FOOD_MEITUAN_CARD,
-  COLOR_FOOD_MEITUAN_GLOW,
   COLOR_FOOD_MEITUAN_LINE,
   COLOR_FOOD_MEITUAN_SOFT,
   COLOR_FOOD_TAOBAO,
-  COLOR_FOOD_TAOBAO_CARD,
-  COLOR_FOOD_TAOBAO_GLOW,
   COLOR_FOOD_TAOBAO_LINE,
   COLOR_FOOD_TAOBAO_SOFT,
   COLOR_FOOD_TENCENT,
-  COLOR_FOOD_TENCENT_CARD,
-  COLOR_FOOD_TENCENT_GLOW,
   COLOR_FOOD_TENCENT_LINE,
   COLOR_FOOD_TENCENT_SOFT,
   COLOR_INK,
@@ -65,6 +54,10 @@ interface FoodNavigationTarget {
 }
 
 type FoodFilterMode = 'all' | 'within_1km';
+
+const FOOD_CARD_BACKGROUND: string = '#18181B';
+const FOOD_CARD_BORDER: string = '#27272A';
+const FOOD_CARD_ACTIVE_BORDER: string = '#0D9488';
 
 @Component
 export struct FoodChoicesView {
@@ -105,14 +98,6 @@ export struct FoodChoicesView {
       }
     });
     return tags;
-  }
-
-  private primarySource(item: A2uiFoodOption): string {
-    const tags = this.sourceTags(item);
-    if (tags.length === 1) {
-      return tags[0];
-    }
-    return '';
   }
 
   private sourceAccent(source: string): string {
@@ -172,58 +157,8 @@ export struct FoodChoicesView {
     return COLOR_CARD_EDGE;
   }
 
-  private sourceCard(source: string): string {
-    if (source === '高德') {
-      return COLOR_FOOD_AMAP_CARD;
-    }
-    if (source === '腾讯地图') {
-      return COLOR_FOOD_TENCENT_CARD;
-    }
-    if (source === '百度地图') {
-      return COLOR_FOOD_BAIDU_CARD;
-    }
-    if (source === '美团') {
-      return COLOR_FOOD_MEITUAN_CARD;
-    }
-    if (source === '淘宝闪购') {
-      return COLOR_FOOD_TAOBAO_CARD;
-    }
-    return COLOR_CARD;
-  }
-
-  private sourceGlow(source: string): string {
-    if (source === '高德') {
-      return COLOR_FOOD_AMAP_GLOW;
-    }
-    if (source === '腾讯地图') {
-      return COLOR_FOOD_TENCENT_GLOW;
-    }
-    if (source === '百度地图') {
-      return COLOR_FOOD_BAIDU_GLOW;
-    }
-    if (source === '美团') {
-      return COLOR_FOOD_MEITUAN_GLOW;
-    }
-    if (source === '淘宝闪购') {
-      return COLOR_FOOD_TAOBAO_GLOW;
-    }
-    return COLOR_CARD_GLOW;
-  }
-
-  private cardBackground(item: A2uiFoodOption): string {
-    return this.sourceCard(this.primarySource(item));
-  }
-
   private cardBorder(item: A2uiFoodOption): string {
-    return this.sourceLine(this.primarySource(item));
-  }
-
-  private cardGlow(item: A2uiFoodOption): string {
-    return this.sourceGlow(this.primarySource(item));
-  }
-
-  private cardAccent(item: A2uiFoodOption): string {
-    return this.sourceAccent(this.primarySource(item));
+    return this.expandedFoodKey === this.foodRowKey(item) ? FOOD_CARD_ACTIVE_BORDER : FOOD_CARD_BORDER;
   }
 
   private locationText(item: A2uiFoodOption): string {
@@ -406,19 +341,10 @@ export struct FoodChoicesView {
         .onClick(() => {
           this.openFoodNavigation(item);
         })
-      Text('只拉起路线规划，不下单不支付')
-        .fontSize(12)
-        .fontColor(COLOR_MUTED)
-        .lineHeight(18)
-        .margin({ top: 8 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .backgroundColor(COLOR_CARD_INSET)
-    .borderRadius(10)
-    .border({ width: { left: 3 }, color: this.cardBorder(item) })
-    .margin({ top: 10 })
+    .padding({ top: 8 })
   }
 
   build() {
@@ -496,11 +422,11 @@ export struct FoodChoicesView {
                 if (item.distance.length > 0) {
                   Text(item.distance)
                     .fontSize(12)
-                    .fontColor(this.cardAccent(item))
+                    .fontColor(COLOR_ACCENT_DARK)
                     .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-                    .backgroundColor(this.sourceSoft(this.primarySource(item)))
+                    .backgroundColor(COLOR_ACCENT_SOFT)
                     .borderRadius(8)
-                    .border({ width: 1, color: this.cardBorder(item) })
+                    .border({ width: 1, color: COLOR_ACCENT })
                 }
               }
               .width('100%')
@@ -536,37 +462,49 @@ export struct FoodChoicesView {
                 .lineHeight(19)
                 .margin({ top: 7 })
 
+              if (this.expandedFoodKey === this.foodRowKey(item)) {
+                Row()
+                  .width('100%')
+                  .height(1)
+                  .backgroundColor(FOOD_CARD_BORDER)
+                  .margin({ top: 12 })
+
+                this.FoodDetailPanel(item)
+              }
+
               Row() {
                 Text(this.expandedFoodKey === this.foodRowKey(item) ? '收起' : '详情')
                   .fontSize(12)
                   .fontWeight(FontWeight.Medium)
-                  .fontColor(this.cardAccent(item))
+                  .fontColor(COLOR_ACCENT_DARK)
                 Blank()
                   .layoutWeight(1)
-                if (this.canNavigate(item)) {
+                if (this.expandedFoodKey === this.foodRowKey(item)) {
+                  Text('只拉起路线规划，不下单不支付')
+                    .fontSize(11)
+                    .fontColor(COLOR_MUTED)
+                    .textAlign(TextAlign.End)
+                    .maxLines(2)
+                } else if (this.canNavigate(item)) {
                   Text('可导航')
                     .fontSize(12)
                     .fontColor(COLOR_ACCENT_DARK)
                 }
               }
               .width('100%')
+              .alignItems(VerticalAlign.Bottom)
               .margin({ top: 10 })
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
             .padding(16)
-            .backgroundColor(this.cardBackground(item))
-            .borderRadius(16)
+            .backgroundColor(FOOD_CARD_BACKGROUND)
+            .borderRadius(12)
             .border({ width: 1, color: this.cardBorder(item) })
-            .shadow({ radius: 20, color: this.cardGlow(item), offsetX: 0, offsetY: 9 })
             .onClick(() => {
               const rowKey = this.foodRowKey(item);
               this.expandedFoodKey = this.expandedFoodKey === rowKey ? '' : rowKey;
             })
-
-            if (this.expandedFoodKey === this.foodRowKey(item)) {
-              this.FoodDetailPanel(item)
-            }
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
