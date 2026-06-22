@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveA2uiButtonStyle } from '../main/ets/pages/A2uiHome/style/A2uiButtonStyle';
+import { resolveA2uiButtonColor, resolveA2uiButtonStyle } from '../main/ets/pages/A2uiHome/style/A2uiButtonStyle';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DEEP,
@@ -27,8 +27,21 @@ export default function a2uiButtonStyleTest() {
       expect(style.opacity < 1).assertTrue();
     });
 
+    it('keeps deactivated button text bright while enabled', 0, () => {
+      const style = resolveA2uiButtonStyle('deactivated', false, true);
+
+      expect(style.backgroundColor).assertEqual(COLOR_ACTION_DEACTIVATED);
+      expect(style.textColor).assertEqual(COLOR_BUTTON_TEXT);
+      expect(style.opacity).assertEqual(1);
+    });
+
     it('uses danger style when enabled and not overridden by disabled', 0, () => {
       expect(resolveA2uiButtonStyle('danger', false, true).backgroundColor).assertEqual(COLOR_ERROR_SOFT);
+    });
+
+    it('uses explicit color overrides and falls back for empty values', 0, () => {
+      expect(resolveA2uiButtonColor('#0D9488', '#18181B')).assertEqual('#0D9488');
+      expect(resolveA2uiButtonColor('', '#18181B')).assertEqual('#18181B');
     });
   });
 }

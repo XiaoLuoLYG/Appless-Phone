@@ -3,15 +3,16 @@ import { actionsOf, labelValues, A2uiLabelValue } from '../../../model/A2uiData'
 import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
-  COLOR_GLASS,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
 import { componentBodyOf, componentStatusOf, componentTitleOf } from '../render/A2uiRenderData';
 import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
+import { A2UI_PANEL_BACKGROUND_COLOR, A2UI_PANEL_BORDER_COLOR, A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
+import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 @Component
 export struct InfoRowsView {
@@ -27,6 +28,9 @@ export struct InfoRowsView {
 
   build() {
     Column() {
+      A2uiPanelAccentView()
+
+      Column() {
       Row() {
         Column() {
           Text(componentTitleOf(this.component, '信息'))
@@ -87,9 +91,12 @@ export struct InfoRowsView {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ left: 16, right: 16, top: 18, bottom: 16 })
-    .backgroundColor(COLOR_GLASS)
-    .borderRadius(18)
-    .border({ width: 1, color: COLOR_CARD_EDGE })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(A2UI_PANEL_BACKGROUND_COLOR)
+    .borderRadius(A2UI_PANEL_CORNER_RADIUS)
+    .border({ width: 1, color: A2UI_PANEL_BORDER_COLOR })
     .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
     .transition(a2uiEnterTransition())

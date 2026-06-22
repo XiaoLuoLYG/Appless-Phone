@@ -12,6 +12,8 @@ import a2uiActionBarLayoutTest from './A2uiActionBarLayout.test';
 import a2uiHomeMotionTest from './A2uiHomeMotion.test';
 import a2uiTrainOptionsStateTest from './A2uiTrainOptionsState.test';
 import a2uiButtonStyleTest from './A2uiButtonStyle.test';
+import a2uiHomeDebugSettingsTest from './A2uiHomeDebugSettings.test';
+import a2uiPartialUpdatePlannerTest from './A2uiPartialUpdatePlanner.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -28,4 +30,6 @@ export default function testsuite() {
   a2uiHomeMotionTest();
   a2uiTrainOptionsStateTest();
   a2uiButtonStyleTest();
+  a2uiHomeDebugSettingsTest();
+  a2uiPartialUpdatePlannerTest();
 }
