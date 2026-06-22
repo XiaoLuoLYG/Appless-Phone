@@ -2,12 +2,14 @@ import {
   A2UI_COMPONENT_ACTION_BAR,
   A2UI_COMPONENT_COLUMN,
   A2UI_COMPONENT_ERROR_NOTICE,
+  A2UI_COMPONENT_FOOD_CHOICES,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_STREAM,
   A2uiAction,
   A2uiComponent,
+  A2uiFoodData,
   A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState
@@ -30,13 +32,17 @@ function action(id: string, label: string, variant: string = 'secondary'): A2uiA
   };
 }
 
-function modelJson(rows: A2uiLabelValueData[] = [], thoughts: string[] = []): string {
+function modelJson(
+  rows: A2uiLabelValueData[] = [],
+  thoughts: string[] = [],
+  foods: A2uiFoodData[] = []
+): string {
   const model: A2uiRuntimeDataModel = {
     rows: rows,
     trains: [],
     flights: [],
     travelOptions: [],
-    foods: [],
+    foods: foods,
     social: {
       messages: [],
       replies: [],
@@ -234,6 +240,45 @@ const errorSurface: A2uiSurfaceState = surface('error', '错误提示组件', 'e
   }
 ]);
 
+const foodChoicesSurface: A2uiSurfaceState = surface(
+  'food_choices',
+  '外卖聚合搜索',
+  'ready',
+  [
+    { id: 'root', component: A2UI_COMPONENT_SURFACE_ROOT, child: 'results' },
+    {
+      id: 'results',
+      component: A2UI_COMPONENT_FOOD_CHOICES,
+      title: '外卖聚合搜索',
+      body: '以下结果来自高德、腾讯地图、百度地图；仅展示真实返回字段，不下单、不支付。',
+      status: 'ready',
+      dataPath: '/foods',
+      actions: [
+        action('food_show_all', '全部范围', 'activated'),
+        action('food_filter_1km', '1公里内')
+      ]
+    }
+  ],
+  modelJson([], [], [
+    {
+      name: '三津汤包 (深圳北站店)',
+      category: '餐饮服务; 餐饮相关场所; 餐饮相关',
+      address: '民治街道深圳北站（深圳北站地铁D口旁）',
+      distance: '21米',
+      location: '114.029506,22.609878',
+      sourceTags: ['高德', '腾讯地图']
+    },
+    {
+      name: 'N多寿司 (深圳北站店)',
+      category: '餐饮服务; 快餐厅; 快餐厅',
+      address: '民治街道北站社区深圳北站综合交通枢纽东广场C1栋102号',
+      distance: '0米',
+      location: '114.029506,22.609878',
+      sourceTags: ['高德']
+    }
+  ])
+);
+
 export const A2UI_STYLE_LAB_CASES: A2uiStyleLabCase[] = [
   {
     id: 'simple',
@@ -270,6 +315,12 @@ export const A2UI_STYLE_LAB_CASES: A2uiStyleLabCase[] = [
     title: 'ErrorNotice',
     description: '错误提示降级态',
     surface: errorSurface
+  },
+  {
+    id: 'food_choices',
+    title: 'FoodChoices',
+    description: '两张餐厅卡片，检查父框、亮痕和列表衬底',
+    surface: foodChoicesSurface
   }
 ];
 

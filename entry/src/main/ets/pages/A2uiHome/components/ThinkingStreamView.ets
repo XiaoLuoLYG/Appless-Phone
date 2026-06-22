@@ -4,7 +4,6 @@ import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
   COLOR_FIELD,
-  COLOR_GLASS,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_TEXT
@@ -18,7 +17,9 @@ import {
   a2uiThinkingDotsActive,
   a2uiEnterTransition
 } from '../style/A2uiHomeMotion';
+import { A2UI_PANEL_BACKGROUND_COLOR, A2UI_PANEL_BORDER_COLOR, A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { StatusBadgeView } from './StatusBadgeView';
+import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 @Component
 export struct ThinkingStreamView {
@@ -122,6 +123,9 @@ export struct ThinkingStreamView {
 
   build() {
     Column() {
+      A2uiPanelAccentView()
+
+      Column() {
       Row() {
         Text('')
           .width(10)
@@ -227,9 +231,12 @@ export struct ThinkingStreamView {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-    .backgroundColor(COLOR_GLASS)
-    .borderRadius(18)
-    .border({ width: 1, color: COLOR_CARD_EDGE })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(A2UI_PANEL_BACKGROUND_COLOR)
+    .borderRadius(A2UI_PANEL_CORNER_RADIUS)
+    .border({ width: 1, color: A2UI_PANEL_BORDER_COLOR })
     .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
     .transition(a2uiEnterTransition())

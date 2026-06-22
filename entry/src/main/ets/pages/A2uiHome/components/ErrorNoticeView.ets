@@ -1,6 +1,7 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, labelValues, A2uiLabelValue } from '../../../model/A2uiData';
 import {
+  COLOR_CARD_GLOW,
   COLOR_ERROR,
   COLOR_ERROR_LINE,
   COLOR_ERROR_SOFT,
@@ -10,7 +11,9 @@ import {
 } from '../style/A2uiHomeTheme';
 import { componentBodyOf, componentTitleOf } from '../render/A2uiRenderData';
 import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
+import { A2UI_PANEL_BACKGROUND_COLOR, A2UI_PANEL_BORDER_COLOR, A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { ActionBarView } from './ActionBarView';
+import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 @Component
 export struct ErrorNoticeView {
@@ -26,6 +29,9 @@ export struct ErrorNoticeView {
 
   build() {
     Column() {
+      A2uiPanelAccentView({ showAccent: false })
+
+      Column() {
       Text(componentTitleOf(this.component, 'A2UI 提示'))
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
@@ -74,9 +80,13 @@ export struct ErrorNoticeView {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(18)
-    .backgroundColor(COLOR_ERROR_SOFT)
-    .borderRadius(18)
-    .border({ width: 1, color: COLOR_ERROR_LINE })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(A2UI_PANEL_BACKGROUND_COLOR)
+    .borderRadius(A2UI_PANEL_CORNER_RADIUS)
+    .border({ width: 1, color: A2UI_PANEL_BORDER_COLOR })
+    .shadow({ radius: 22, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 10 })
     .margin({ bottom: 12 })
     .transition(a2uiEnterTransition())
   }

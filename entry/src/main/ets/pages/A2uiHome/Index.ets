@@ -18,7 +18,7 @@ import {
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
-import { callToolGateway, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
+import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
 import {
   AccessibilityIngestProvider,
   NotificationIngestProvider,
@@ -31,9 +31,12 @@ import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../../mod
 import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../../model/SocialNotificationArchive';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
+import { normalizeFoodProviderDelayMs } from './state/A2uiHomeDebugSettings';
 import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
+  inputTextAfterPromptSubmit,
+  shouldApplySurfaceUpdate,
   updateConnectionPanelState
 } from './state/A2uiHomeState';
 import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
@@ -66,6 +69,8 @@ struct Index {
   @State apiKey: string = '';
   @State selectedModel: string = defaultLocalModelSettings().model;
   @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
+  @State foodProviderDelayEnabled: boolean = false;
+  @State foodProviderDelayMs: string = '0';
   @State isBusy: boolean = false;
   @State connectionStatus: string = initialConnectionState.connectionStatus;
   @State connectionMessage: string = initialConnectionState.connectionMessage;
@@ -75,7 +80,7 @@ struct Index {
   @State refreshTick: number = initialConnectionState.refreshTick;
   @State currentSurface: A2uiSurfaceState = initialSurface;
   @State surfaceRenderTick: number = 0;
-  @State inputText: string = '帮我查询6月16日北京到上海的高铁票';
+  @State inputText: string = '帮我查询深圳北站附近的餐馆。';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
   @State selectedSocialMessageId: string = '';
@@ -197,6 +202,9 @@ struct Index {
   }
 
   private applySurface(surface: A2uiSurfaceState): void {
+    if (!shouldApplySurfaceUpdate(this.currentSurface, surface)) {
+      return;
+    }
     this.currentSurface = this.surfaceSnapshot(surface);
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
@@ -553,7 +561,7 @@ struct Index {
       return;
     }
     this.isBusy = true;
-    this.inputText = '';
+    this.inputText = inputTextAfterPromptSubmit(this.inputText);
     this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, 'sending'), this.currentSocialReplies());
     aiLogInfo('[AIPhone][SocialReplyRequest] messageId=' + message.id +
       ' platform=' + message.platform +
@@ -628,7 +636,7 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + trimmed.length.toString() +
       ' model=' + this.selectedModel +
       ' baseUrl=' + this.baseUrl);
-    this.inputText = '';
+    this.inputText = inputTextAfterPromptSubmit(this.inputText);
     this.isBusy = true;
     this.markChecking('正在生成 A2UI...');
     try {
@@ -796,6 +804,10 @@ struct Index {
       ' promptChars=' + prompt.length.toString() +
       ' actionId=' + actionId +
       ' gateway=' + TOOL_GATEWAY_URL);
+    configureLocalToolDebugConfig({
+      foodProviderDelayEnabled: this.foodProviderDelayEnabled,
+      foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs)
+    });
     this.markChecking('正在调用工具：' + toolId);
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
@@ -912,6 +924,8 @@ struct Index {
         apiKey: $apiKey,
         selectedModel: $selectedModel,
         customParametersJson: $customParametersJson,
+        foodProviderDelayEnabled: $foodProviderDelayEnabled,
+        foodProviderDelayMs: $foodProviderDelayMs,
         showAdvancedSettings: $showAdvancedSettings,
         connectionStatus: this.connectionStatus,
         connectionMessage: this.connectionMessage,
