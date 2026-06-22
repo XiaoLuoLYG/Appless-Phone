@@ -76,7 +76,13 @@ function businessSurface(): A2uiSurfaceState {
     rows: rows,
     trains: trains,
     flights: flights,
+    travelOptions: [],
     foods: foods,
+    social: {
+      messages: [],
+      replies: [],
+      diagnostics: []
+    },
     thoughts: thoughts,
     summary: summary,
     trip: trip,

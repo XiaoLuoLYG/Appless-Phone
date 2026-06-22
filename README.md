@@ -1,156 +1,179 @@
 # PocketAgent
 
-PocketAgent is a HarmonyOS prototype for an agentic phone experience. It turns a natural-language command into a native A2UI task surface, then routes supported actions through a local tool gateway instead of hard-coded demo cards.
+PocketAgent is a publishable HarmonyOS demo of an agentic phone interface: a natural-language request becomes a native A2UI task surface, then supported live-data actions run through real, query-only adapters.
+
+The default runtime is device-local: the app points at an OpenAI-compatible model endpoint, defaults to `http://127.0.0.1:11434`, and keeps registered tool calls on `local://aiphone-tools`. The Node.js gateway in this repo is a compatibility and smoke-test helper, not a required Mac-side runtime service.
 
 ![PocketAgent running on HarmonyOS](docs/assets/pocketagent-current.jpeg)
 
-The current demo focuses on five real-world assistant tasks:
+## Try The Demo
 
-- Unified travel plan search that queries high-speed rail and flights together.
-- Train search through the 12306 public availability endpoint.
-- Flight search through a configurable VariFlight or compatible provider.
-- Food aggregation search through Amap POI, Meituan Union, and Taobao Flash/Ele.me Union provider adapters.
-- Social inbox for real captured WeChat messages, with notification/accessibility diagnostics and failure-closed reply dispatch.
+Start with the step-by-step [quickstart guide](docs/quickstart.md). The shortest demo path is:
 
-PocketAgent keeps regulated commerce query-only. It can summarize choices and render confirmation boundaries, but it does not book tickets, pay, grab seats, or place delivery orders. Social replies are only sent through a real device-side WeChat automation executor; if that executor or the required permissions are missing, the app shows an explicit failure instead of pretending a message was sent.
+1. Open the project in DevEco Studio and run the `entry` module.
+2. In the app settings page, test the default local model endpoint or configure your own OpenAI-compatible endpoint.
+3. Ask `你好` to verify the A2UI response loop.
+4. Ask `我明天从北京去上海，帮我搜索出行方案` to verify `travel.search` routing.
+5. Ask `帮我搜索深圳坂田华为基地附近的咖啡` to verify `food.search` routing.
 
-## What is inside
+Without provider keys, live searches should show explicit missing-config/provider status rows. With provider keys synced into the HAP, those same prompts render real provider rows.
 
-- `entry/`: HarmonyOS ArkTS app, A2UI renderer, model client, and unit tests.
-- `tool-gateway/`: Optional Node.js compatibility gateway and provider smoke harness.
-- `local-model-whitelist/`: Model whitelist snapshots used while testing local model integrations.
-- `docs/a2ui.md`: Public notes for the A2UI message protocol used by this prototype.
+## Current Capabilities
+
+| Area | What is implemented | Boundary |
+| --- | --- | --- |
+| A2UI surface runtime | Streams A2UI v0.9.1 JSONL into a native ArkUI renderer with catalog validation, data-model updates, local action handling, debug panels, and unit tests. | Unknown components, malformed JSON, legacy payloads, model-generated HTML, and JavaScript are rejected. |
+| Travel search | `travel.search` aggregates train and flight rows; `train.search` queries 12306 availability; `flight.search` uses VariFlight or a compatible configured provider. | It summarizes choices only. It does not book tickets, issue tickets, pay, or grab seats. |
+| Food search | `food.search` aggregates configured Amap, Tencent Maps, Baidu Maps, Meituan Union, Taobao Flash/Ele.me Union, McDonald's China MCP, and Luckin Coffee MCP query adapters. | It does not create carts, place orders, pay, auto-bind coupons, redeem points, cancel orders, or invent cross-platform prices. |
+| Social inbox and reply | The WeChat-first surface can ingest real captured messages through notification/accessibility paths, show permission diagnostics, and route exact user-text replies through a device-side executor when available. | It does not fabricate contacts/messages. Reply success is only shown after a real executor confirms the send. |
+| Verification | ArkTS unit tests cover parsing, rendering data, tool routing, provider mapping, social store behavior, and UI state helpers. Node scripts cover gateway and device smoke paths. | Device and provider smokes may fail when SDK/signing state, provider keys, or system permissions are missing; those failures should stay visible. |
 
 ## Architecture
 
 ```text
 User command
   -> HarmonyOS ArkTS app
-  -> OpenAI-compatible local/cloud model endpoint
+  -> OpenAI-compatible local or cloud model endpoint
   -> A2UI JSONL stream
   -> Native ArkUI task surface
-  -> In-app local tool call
-  -> Query-only provider adapter
+  -> local://aiphone-tools
+  -> Query-only provider adapter or local social action
 ```
 
-The app supports an OpenAI-compatible chat completion endpoint and streams A2UI JSONL envelopes into a catalog-driven renderer. Unknown components, legacy payloads, malformed JSON, and unsafe dynamic UI formats are rejected instead of executed.
+The model is only allowed to request registered tools through `/toolRequest`. Real train, flight, food, and social rows are produced by the app/provider layer, not invented by the model prompt.
+
+## Repository Map
+
+- `entry/`: HarmonyOS ArkTS app, A2UI renderer, model client, device-side tool adapters, social bridge, and unit tests.
+- `tool-gateway/`: Optional Node.js compatibility gateway plus provider smoke harness.
+- `scripts/sync-provider-config.mjs`: Copies ignored local provider keys into an ignored HAP rawfile before installation.
+- `scripts/aiphone-device-smoke.mjs`: HDC-driven device smoke checks for model routing and tool execution.
+- `docs/quickstart.md`: Step-by-step public demo tutorial.
+- `docs/a2ui.md`: Public notes for the A2UI message protocol.
+- `docs/social-notification-permission.md`: Checklist for the WeChat notification-center path.
+- `local-model-whitelist/`: Model whitelist snapshots used while testing local model integrations.
 
 ## Requirements
 
 - DevEco Studio with HarmonyOS SDK 6.1.0 or compatible.
-- Node.js 18 or newer for `tool-gateway`.
+- A HarmonyOS device or simulator configured for your signing profile.
+- An OpenAI-compatible chat-completions model endpoint. The default local path is `http://127.0.0.1:11434` with model `Qwen3-8B`.
+- Node.js 18 or newer for config sync, gateway smoke tests, and device smoke scripts.
 - Optional provider keys for flight and food search.
-- Optional local model runtime exposing an OpenAI-compatible API, such as a local chat completion server.
+- Optional notification/accessibility permissions for the WeChat social path.
 
-## Tool execution
-
-By default the HAP uses one tool route for every registered tool:
-
-```text
-flight.search -> local://aiphone-tools
-train.search -> local://aiphone-tools
-travel.search -> local://aiphone-tools
-food.search -> local://aiphone-tools
-social.reply.send -> local://aiphone-tools
-```
-
-The app calls 12306, VariFlight, Amap, Tencent Maps, Baidu Maps, Meituan Union, and Taobao Flash/Ele.me Union from the HarmonyOS provider adapters when the matching provider keys are configured. `travel.search` runs the train and flight query adapters, sorts the mixed rows by departure time, and `food.search` runs the enabled food provider adapters, then each aggregate tool merges only real returned rows into one result surface. You do not need to keep a Mac-side `tool-gateway` service running after the HAP is installed.
-
-`social.reply.send` is a local social action. The first WeChat build exposes the A2UI surface, local short-term inbox model, permission diagnostics, and exact user-text reply path. It does not fabricate WeChat messages or report send success unless a real notification/accessibility bridge and WeChat automation executor are available.
-
-For the WeChat notification-center path, apply for `ohos.permission.SUBSCRIBE_NOTIFICATION` and update the HAP Profile before testing on device. The project-side checklist is in [docs/social-notification-permission.md](docs/social-notification-permission.md).
-
-Flight and food search need provider keys inside the installed HAP. Before building or installing, sync the ignored local env file into an ignored rawfile resource:
-
-```bash
-node scripts/sync-provider-config.mjs
-```
-
-This writes `entry/src/main/resources/rawfile/aiphone_provider_config.json`, which is packaged into the HAP and read by `EntryAbility` at startup. The generated file is ignored by git and should not be committed.
-
-For food aggregation, configure any subset of these query-only providers:
-
-```bash
-AMAP_KEY="..."
-AMAP_DEFAULT_LOCATION="116.397428,39.90923"
-TENCENT_MAP_KEY="..."
-BAIDU_MAP_AK="..."
-MEITUAN_UNION_APP_KEY="..."
-MEITUAN_UNION_APP_SECRET="..."
-TAOBAO_APP_KEY="..."
-TAOBAO_APP_SECRET="..."
-TAOBAO_FLASH_PID="..."
-```
-
-The map POI providers (`AMAP_KEY`, `TENCENT_MAP_KEY`, `BAIDU_MAP_AK`) are the simplest query-only sources for nearby restaurants and shops. The Meituan and Taobao Flash providers remain available for platform-specific union results, but they require the matching union developer keys and permissions. Missing keys, provider authorization errors, HTTP errors, and empty provider responses are rendered as source status rows. The app does not place orders, create carts, pay, or invent cross-platform prices.
-
-## Optional HTTP tool gateway
-
-```bash
-cd tool-gateway
-cp .env.example .env.local
-npm start
-```
-
-The compatibility gateway listens on `http://127.0.0.1:8787`, but the app does not use it by default.
-
-Useful endpoints:
-
-- `GET /health`
-- `GET /mcp/tools`
-- `POST /api/aiphone/tool`
-- `POST /mcp/call`
-
-If you explicitly switch the app back to the HTTP gateway for development, reverse the gateway port with HDC:
-
-```bash
-hdc rport tcp:8787 tcp:8787
-```
-
-## Run the HarmonyOS app
+## Quick Start
 
 1. Open this repository in DevEco Studio.
 2. Let DevEco restore OHPM dependencies.
 3. Configure your own signing profile if DevEco does not create one automatically.
-4. Fill `tool-gateway/.env.local`, then run `node scripts/sync-provider-config.mjs`.
-5. Run the `entry` module on a HarmonyOS device or simulator.
-6. The default tool route stays in-app for flight, train, food, travel aggregation, and social reply dispatch. No Mac-side gateway is required at runtime.
+4. Run the `entry` module on a HarmonyOS device or simulator.
+5. In the app settings page, test the model connection. The default is the local Qwen path; the cloud Qwen preset can be used with an API key and compatible request parameters.
 
-## Provider configuration
+The installed app does not need `tool-gateway` running for the default route. It uses `local://aiphone-tools` for `flight.search`, `train.search`, `travel.search`, `food.search`, and `social.reply.send`.
 
-Copy `tool-gateway/.env.example` to `tool-gateway/.env.local` and fill only the providers you want to enable. Then sync it into the HAP rawfile before installation.
+For a fuller walkthrough, see [docs/quickstart.md](docs/quickstart.md).
+
+## Provider Configuration
+
+Copy the ignored local env file when you want real provider-backed search:
+
+```bash
+cd tool-gateway
+cp .env.example .env.local
+```
+
+Fill only the providers you want to enable, then package those values into the ignored rawfile before building or installing the HAP:
+
+```bash
+cd ..
+node scripts/sync-provider-config.mjs
+```
+
+The script writes `entry/src/main/resources/rawfile/aiphone_provider_config.json`. That generated file is ignored by git and should not be committed.
+
+Common provider keys:
 
 ```bash
 FLIGHT_MCP_KEY=
 VARIFLIGHT_API_KEY=
 AMAP_KEY=
 AMAP_DEFAULT_LOCATION=116.397428,39.90923
+AMAP_RADIUS=3000
 TENCENT_MAP_KEY=
 BAIDU_MAP_AK=
+MEITUAN_UNION_APP_KEY=
+MEITUAN_UNION_APP_SECRET=
+TAOBAO_APP_KEY=
+TAOBAO_APP_SECRET=
+TAOBAO_FLASH_PID=
+MCD_MCP_TOKEN=
+LUCKIN_MCP_TOKEN=
 ```
 
-`.env.local` is ignored by git. Do not commit real provider keys, signing files, or local model credentials.
+Provider behavior:
 
-## A2UI protocol
+- `train.search` uses 12306 query-only availability and does not need an account for the default path.
+- `flight.search` uses VariFlight / 飞常准 or a compatible configured flight provider.
+- `travel.search` runs train and flight queries, then sorts returned rows by departure time.
+- `food.search` runs enabled food providers, deduplicates normalized store names, merges visible source tags, and turns missing keys or provider failures into status rows.
+- Brand MCP adapters for McDonald's and Luckin are only used for relevant prompts and only call read/query allowlisted tools.
 
-A2UI messages are newline-delimited JSON envelopes. The app currently accepts:
+## Social Permissions
 
-- `createSurface`
-- `updateComponents`
-- `updateDataModel`
-- `deleteSurface`
+The first social channel is WeChat. The app can show a real short-term inbox only after a notification or accessibility capture path is available on the device.
 
-The first catalog includes `SurfaceRoot`, `Column`, `Row`, `Text`, `ActionBar`, `ErrorNotice`, `ThinkingStream`, `SocialInbox`, `TravelOptions`, `TrainOptions`, `FlightBoard`, `FoodChoices`, `ConfirmPanel`, and `InfoRows`.
+For the notification-center path, apply for `ohos.permission.SUBSCRIBE_NOTIFICATION` and update the HAP Profile before testing. Some devices or profiles may not expose that permission; in that case the app should show diagnostics instead of pretending to capture messages. See [docs/social-notification-permission.md](docs/social-notification-permission.md).
 
-See [docs/a2ui.md](docs/a2ui.md) for more detail.
+Reply dispatch is deliberately failure-closed: `social.reply.send` only reports `sent` after a real device-side WeChat executor confirms the action.
 
-## Security notes
+## Optional HTTP Tool Gateway
 
-- The renderer never executes model-generated HTML or JavaScript.
+The Node gateway is useful for development smoke tests and for explicit HTTP gateway experiments:
+
+```bash
+cd tool-gateway
+npm start
+```
+
+It listens on `http://127.0.0.1:8787` by default and exposes:
+
+- `GET /health`
+- `GET /mcp/tools`
+- `POST /api/aiphone/tool`
+- `POST /mcp/call`
+
+Only use HDC reverse porting if you intentionally switch the app from `local://aiphone-tools` back to the HTTP gateway for development:
+
+```bash
+hdc rport tcp:8787 tcp:8787
+```
+
+## Test And Smoke
+
+- Run ArkTS unit tests from DevEco Studio for `entry/src/test`.
+- Run gateway smoke tests:
+
+```bash
+cd tool-gateway
+npm run smoke
+```
+
+- Run device smoke tests when HDC can see the target device and the app is installed:
+
+```bash
+node scripts/aiphone-device-smoke.mjs
+```
+
+Provider or device smokes should surface the real failure: missing SDK components, signing issues, missing provider keys, provider authorization errors, unavailable model services, or missing system permissions.
+
+## Security And Truthfulness
+
 - Tool calls are limited to registered provider adapters and explicit local social actions.
-- The social inbox never creates test contacts or synthetic messages; empty permission states are rendered as diagnostics.
-- Booking, payment, ticket grabbing, order placement, and commerce account automation are outside the current boundary.
-- Public example configuration uses placeholders only.
+- Missing provider keys, provider HTTP failures, empty results, and permission gaps are rendered as A2UI status/error surfaces.
+- The social inbox never creates test contacts or synthetic messages.
+- Booking, payment, ticket grabbing, delivery ordering, cart creation, and commerce account automation are outside the current product boundary.
+- `.env.local`, generated provider rawfiles, signing files, and local model credentials must stay out of git.
 
 ## License
 

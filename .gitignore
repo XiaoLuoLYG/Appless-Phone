@@ -2,11 +2,11 @@
 /oh_modules
 /local.properties
 /.idea
+/.cursor/
 **/.DS_Store
 **/build
 /.hvigor
 tool-gateway/.hvigor/
-.cursor/debug-*.log
 .cxx
 /.clangd
 /.clang-format
@@ -18,7 +18,9 @@ docs/superpowers/
 tool-gateway/.env.local
 tool-gateway/.env
 tool-gateway/.smoke/
+tool-gateway/.map-smoke/
 entry/src/main/resources/rawfile/aiphone_provider_config.json
+entry/src/main/resources/rawfile/agconnect-services.json
 
 # Local verification captures
 /aiphone-*.jpeg

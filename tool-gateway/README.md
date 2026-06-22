@@ -2,7 +2,7 @@
 
 This optional local gateway gives the HarmonyOS demo a stable HTTP endpoint for development-time tool-call smoke tests.
 
-The app does not need this service for its default runtime path. Current HAP builds keep `flight.search`, `train.search`, `travel.search`, `food.search`, and `social.reply.send` on `local://aiphone-tools`; the device calls 12306, VariFlight, Amap, Meituan Union, and Taobao Flash/Ele.me Union directly when matching keys are configured. Social reply dispatch stays device-side and only reports success when a real WeChat automation executor is connected. Use `scripts/sync-provider-config.mjs` before installation to package provider keys into the ignored HAP rawfile.
+The app does not need this service for its default runtime path. Current HAP builds keep `flight.search`, `train.search`, `travel.search`, `food.search`, and `social.reply.send` on `local://aiphone-tools`; the device calls 12306, VariFlight, Amap, Tencent Maps, Baidu Maps, Meituan Union, Taobao Flash/Ele.me Union, McDonald's China MCP, and Luckin Coffee MCP directly when matching keys are configured. Social reply dispatch stays device-side and only reports success when a real WeChat automation executor is connected. Use `scripts/sync-provider-config.mjs` before installation to package provider keys into the ignored HAP rawfile.
 
 ## Start
 
@@ -133,7 +133,7 @@ The gateway calls VariFlight's query endpoint only. Booking, ticket issuing, pas
 
 V1 is query-only. It does not call Meituan, Ele.me, Taobao Flash, or Amap ordering APIs.
 
-The default HAP route is `local://aiphone-tools`, where `food.search` aggregates configured Amap, Meituan Union, and Taobao Flash/Ele.me Union adapters. The compatibility Node gateway can still return Amap POI data, but the in-app provider path is the primary implementation.
+The default HAP route is `local://aiphone-tools`, where `food.search` aggregates configured Amap, Tencent Maps, Baidu Maps, Meituan Union, Taobao Flash/Ele.me Union, McDonald's China MCP, and Luckin Coffee MCP adapters. The compatibility Node gateway can still return Amap POI data, but the in-app provider path is the primary implementation.
 
 Query nearby restaurants with Amap Web Service POI:
 
@@ -162,9 +162,11 @@ MEITUAN_UNION_APP_SECRET="..."
 TAOBAO_APP_KEY="..."
 TAOBAO_APP_SECRET="..."
 TAOBAO_FLASH_PID="..."
+MCD_MCP_TOKEN="..."
+LUCKIN_MCP_TOKEN="..."
 ```
 
-The app returns query choices only. Ordering, cart creation, delivery quote, and payment are out of scope. Missing keys and provider errors are displayed as source status rows instead of mock stores.
+McDonald's and Luckin use their official Streamable HTTP MCP endpoints by default (`https://mcp.mcd.cn` and `https://gwmcp.lkcoffee.com/order/user/mcp`). The app only calls read/query allowlisted tools for store, menu, product, coupon, price calculation, and order-status lookup. Ordering, cart creation, payment, automatic coupon binding, point redemption, and cancellation are out of scope. Missing keys and provider errors are displayed as source status rows instead of mock stores.
 
 Generic HTTP API adapters:
 

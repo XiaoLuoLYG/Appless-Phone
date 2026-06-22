@@ -145,7 +145,7 @@ export struct SocialInboxView {
         .alignItems(VerticalAlign.Top)
         .padding({ top: 7, bottom: 7 })
       }, (row: A2uiLabelValue) => row.label + row.value + '-' + this.renderTick.toString())
-      Button('打开通知授权')
+      Button('尝试通知授权')
         .enabled(!this.isBusy)
         .fontSize(13)
         .fontColor(COLOR_BUTTON_TEXT)
@@ -216,7 +216,7 @@ export struct SocialInboxView {
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_INK)
-          Text('AIPhone 不会生成测试联系人或测试消息。需要通知中心桥接或辅助捕获可用后，真实微信消息才会出现在这里。')
+          Text('等待系统通知读取能力开放后，真实微信新消息会出现在这里。')
             .fontSize(13)
             .fontColor(COLOR_MUTED)
             .lineHeight(20)
@@ -308,9 +308,6 @@ export struct SocialInboxView {
         })
       }, (item: A2uiSocialMessage) => item.id + '-' + this.renderTick.toString())
 
-      if (this.diagnostics().length > 0) {
-        this.SocialDiagnostics()
-      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

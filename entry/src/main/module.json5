@@ -9,11 +9,47 @@
       "tablet",
       "2in1"
     ],
+    "querySchemes": [
+      "weixin",
+      "wechat"
+    ],
     "deliveryWithInstall": true,
     "installationFree": false,
+    "definePermissions": [
+      {
+        "name": "ohos.permission.NOTIFICATION_SYSTEM_SUBSCRIBER",
+        "grantMode": "system_grant",
+        "availableLevel": "system_core",
+        "provisionEnable": true,
+        "distributedSceneEnable": false
+      }
+    ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO"
       },
       {
         "name": "ohos.permission.SUBSCRIBE_NOTIFICATION"
@@ -51,6 +87,21 @@
         "icon": "$media:layered_image",
         "label": "$string:NotificationSubscriberExtAbility_label",
         "exported": true
+      },
+      {
+        "name": "SocialAccessibilityExtAbility",
+        "srcEntry": "./ets/extensionability/SocialAccessibilityExtAbility.ets",
+        "type": "accessibility",
+        "description": "$string:SocialAccessibilityExtAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:SocialAccessibilityExtAbility_label",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.accessibleability",
+            "resource": "$profile:accessibility_config"
+          }
+        ]
       },
       {
         "name": "EntryBackupAbility",

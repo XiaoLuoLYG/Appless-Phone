@@ -29,6 +29,7 @@ export struct HomePage {
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop surfaceRenderTick: number = 0;
   @Prop inputPlaceholder: string = '告诉 PocketAgent 你想完成什么';
+  @Prop isSocialReturnAvailable: boolean = false;
   @State sendSpinnerRotation: number = 0;
   private sendSpinnerTimerId: number = -1;
   onToggleHistory: () => void = () => {};
@@ -78,6 +79,10 @@ export struct HomePage {
     return Math.min(contentHeight, A2UI_HISTORY_MAX_HEIGHT);
   }
 
+  private shouldShowSocialBackButton(): boolean {
+    return this.currentSurface.intent === 'social' && this.isSocialReturnAvailable;
+  }
+
   build() {
     Column() {
       Row() {
@@ -115,16 +120,29 @@ export struct HomePage {
           })
           .margin({ left: 10 })
 
-        A2uiButtonView({
-          label: '社',
-          shape: 'circle',
-          tone: 'secondary',
-          active: this.currentSurface.intent === 'social'
-        })
-          .onClick(() => {
-            this.onOpenSocial();
+        if (this.shouldShowSocialBackButton()) {
+          A2uiButtonView({
+            icon: $r('app.media.icon_back'),
+            hasIcon: true,
+            shape: 'circle',
+            tone: 'secondary'
           })
-          .margin({ left: 8 })
+            .onClick(() => {
+              this.onOpenSocial();
+            })
+            .margin({ left: 8 })
+        } else {
+          A2uiButtonView({
+            label: '社',
+            shape: 'circle',
+            tone: 'secondary',
+            active: this.currentSurface.intent === 'social'
+          })
+            .onClick(() => {
+              this.onOpenSocial();
+            })
+            .margin({ left: 8 })
+        }
 
         A2uiButtonView({
           icon: $r('app.media.icon_settings'),
@@ -234,14 +252,6 @@ export struct HomePage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        Row() {
-          Text('surface=' + this.surfaceRenderTick.toString())
-            .fontSize(11)
-            .fontColor(COLOR_ACCENT)
-            .layoutWeight(1)
-        }
-        .width('100%')
-        .margin({ top: 8 })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)

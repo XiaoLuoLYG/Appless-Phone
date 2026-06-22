@@ -7,6 +7,7 @@ import {
   buildSocialDiagnosticsRows,
   probeSocialCapabilities
 } from '../main/ets/model/SocialBridge';
+import { isWechatIdentity } from '../main/ets/model/SocialNotificationArchive';
 
 export default function socialBridgeTest() {
   describe('socialBridge', () => {
@@ -85,6 +86,10 @@ export default function socialBridgeTest() {
       expect(accessibility.capture().error).assertEqual('辅助权限未授权');
     });
 
+    it('recognizes WeChat PC bundle identity from HarmonyOS PC notifications', 0, () => {
+      expect(isWechatIdentity('com.tencent.wechat.pc', '', '')).assertTrue();
+    });
+
     it('fails reply dispatch explicitly when WeChat automation is unavailable', 0, () => {
       const automation = new WechatReplyAutomation(false, '辅助自动化未授权');
       const result = automation.send({
@@ -102,16 +107,24 @@ export default function socialBridgeTest() {
     it('builds diagnostics rows from capability probe without hiding unavailable paths', 0, () => {
       const capabilities = probeSocialCapabilities({
         notificationBridgeAvailable: false,
+        notificationBridgeDetail: '通知权限未授予',
         accessibilityAvailable: true,
+        accessibilityDetail: '辅助捕获可用',
         wechatInstalled: false,
+        wechatBundleName: '',
+        wechatDetectionDetail: 'bundle 查询失败',
         lastCapture: '无真实消息',
         lastSend: '未发送'
       });
       const rows = buildSocialDiagnosticsRows(capabilities);
 
-      expect(rows[0].value).assertEqual('不可用');
-      expect(rows[1].value).assertEqual('可用');
-      expect(rows[2].value).assertEqual('未检测到');
+      expect(rows[1].value).assertEqual('不可用');
+      expect(rows[2].value).assertEqual('通知权限未授予');
+      expect(rows[3].value).assertEqual('可用');
+      expect(rows[4].value).assertEqual('辅助捕获可用');
+      expect(rows[5].value).assertEqual('未检测到');
+      expect(rows[6].value).assertEqual('无');
+      expect(rows[7].value).assertEqual('bundle 查询失败');
     });
   });
 }
