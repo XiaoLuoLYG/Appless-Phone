@@ -68,6 +68,16 @@ export const COLOR_FOOD_TAOBAO_SOFT: string = '#251B3D';
 export const COLOR_FOOD_TAOBAO_LINE: string = '#6E52AF';
 export const COLOR_FOOD_TAOBAO_CARD: string = '#191329';
 export const COLOR_FOOD_TAOBAO_GLOW: string = '#3D267066';
+export const COLOR_FOOD_MCD: string = '#FFC94A';
+export const COLOR_FOOD_MCD_SOFT: string = '#33250B';
+export const COLOR_FOOD_MCD_LINE: string = '#A66D1D';
+export const COLOR_FOOD_MCD_CARD: string = '#23190A';
+export const COLOR_FOOD_MCD_GLOW: string = '#6A420B66';
+export const COLOR_FOOD_LUCKIN: string = '#5E93FF';
+export const COLOR_FOOD_LUCKIN_SOFT: string = '#132748';
+export const COLOR_FOOD_LUCKIN_LINE: string = '#416AB8';
+export const COLOR_FOOD_LUCKIN_CARD: string = '#101B30';
+export const COLOR_FOOD_LUCKIN_GLOW: string = '#173B7A66';
 
 export function statusColor(status: string): string {
   if (status === 'ready') {

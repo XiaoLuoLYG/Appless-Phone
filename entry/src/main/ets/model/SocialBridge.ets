@@ -29,16 +29,24 @@ export interface SocialCaptureResult {
 
 export interface SocialCapabilityInput {
   notificationBridgeAvailable: boolean;
+  notificationBridgeDetail?: string;
   accessibilityAvailable: boolean;
+  accessibilityDetail?: string;
   wechatInstalled: boolean;
+  wechatBundleName?: string;
+  wechatDetectionDetail?: string;
   lastCapture: string;
   lastSend: string;
 }
 
 export interface SocialCapabilities {
   notificationBridgeAvailable: boolean;
+  notificationBridgeDetail: string;
   accessibilityAvailable: boolean;
+  accessibilityDetail: string;
   wechatInstalled: boolean;
+  wechatBundleName: string;
+  wechatDetectionDetail: string;
   lastCapture: string;
   lastSend: string;
 }
@@ -333,8 +341,12 @@ export class WechatReplyAutomation {
 export function probeSocialCapabilities(input: SocialCapabilityInput): SocialCapabilities {
   return {
     notificationBridgeAvailable: input.notificationBridgeAvailable,
+    notificationBridgeDetail: textOf(input.notificationBridgeDetail),
     accessibilityAvailable: input.accessibilityAvailable,
+    accessibilityDetail: textOf(input.accessibilityDetail),
     wechatInstalled: input.wechatInstalled,
+    wechatBundleName: textOf(input.wechatBundleName),
+    wechatDetectionDetail: textOf(input.wechatDetectionDetail),
     lastCapture: textOf(input.lastCapture),
     lastSend: textOf(input.lastSend)
   };
@@ -355,12 +367,28 @@ export function buildSocialDiagnosticsRows(capabilities: SocialCapabilities): A2
       value: availability(capabilities.notificationBridgeAvailable)
     },
     {
-      label: '辅助权限',
+      label: '通知桥接说明',
+      value: capabilities.notificationBridgeDetail.length > 0 ? capabilities.notificationBridgeDetail : '未返回真实微信通知'
+    },
+    {
+      label: '辅助捕获',
       value: availability(capabilities.accessibilityAvailable)
     },
     {
-      label: '微信识别',
+      label: '辅助说明',
+      value: capabilities.accessibilityDetail.length > 0 ? capabilities.accessibilityDetail : '未接入辅助捕获'
+    },
+    {
+      label: '微信消息识别',
       value: capabilities.wechatInstalled ? '已检测到' : '未检测到'
+    },
+    {
+      label: '微信包名',
+      value: capabilities.wechatBundleName.length > 0 ? capabilities.wechatBundleName : '无'
+    },
+    {
+      label: '微信探测说明',
+      value: capabilities.wechatDetectionDetail.length > 0 ? capabilities.wechatDetectionDetail : '无'
     },
     {
       label: '最近捕获',

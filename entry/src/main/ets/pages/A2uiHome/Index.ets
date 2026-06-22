@@ -27,6 +27,7 @@ import {
   buildSocialDiagnosticsRows,
   probeSocialCapabilities
 } from '../../model/SocialBridge';
+import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../../model/SocialCapabilityProbe';
 import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../../model/SocialNotificationArchive';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
@@ -47,7 +48,8 @@ const initialSurface: A2uiSurfaceState = createSeedA2uiSurface();
 const LOG_SNIPPET_LIMIT: number = 1200;
 const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 PocketAgent 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
-const SOCIAL_REPLY_UNAVAILABLE: string = '辅助自动化未授权或未接入真实微信发送器';
+const SOCIAL_REPLY_UNAVAILABLE: string = '真实微信发送器未接入或当前设备未开放自动发送能力';
+const SOCIAL_NOTIFICATION_UNSUPPORTED_HINT: string = '当前 PC 系统未向三方应用开放通知内容订阅；系统开放后会显示真实微信新消息';
 const SOCIAL_MESSAGE_STORE: SocialMessageStore = new SocialMessageStore();
 
 function logSnippet(text: string): string {
@@ -85,6 +87,10 @@ struct Index {
   @State selectedSocialConversationTitle: string = '';
   @State socialLastCapture: string = '无真实消息';
   @State socialLastSend: string = '未发送';
+  @State hasSocialReturnSurface: boolean = false;
+  @State socialReturnSurface: A2uiSurfaceState = initialSurface;
+  @State socialReturnInputText: string = '';
+  @State socialReturnInputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
 
   private getSettings(): LocalModelSettings {
     return {
@@ -350,6 +356,45 @@ struct Index {
     return readNotificationCaptureArchive(context);
   }
 
+  private rememberSocialReturnSurface(): void {
+    if (this.currentSurface.intent === 'social') {
+      return;
+    }
+    this.socialReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    this.socialReturnInputText = this.inputText;
+    this.socialReturnInputPlaceholder = this.inputPlaceholder;
+    this.hasSocialReturnSurface = true;
+  }
+
+  private restoreSocialReturnSurface(): void {
+    if (!this.hasSocialReturnSurface) {
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.socialReturnSurface);
+    this.selectedSocialMessageId = '';
+    this.selectedSocialConversationTitle = '';
+    this.inputText = this.socialReturnInputText;
+    this.inputPlaceholder = this.socialReturnInputPlaceholder.length > 0 ? this.socialReturnInputPlaceholder : DEFAULT_INPUT_PLACEHOLDER;
+    this.hasSocialReturnSurface = false;
+    this.applySurface(surface);
+    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+      ok: true,
+      status: 'ready',
+      message: '已返回上一页。',
+      requestDebug: this.lastModelRequest,
+      assistantDebug: this.lastModelOutput,
+      error: ''
+    }));
+  }
+
+  private handleSocialNavigation(): void {
+    if (this.currentSurface.intent === 'social' && this.hasSocialReturnSurface) {
+      this.restoreSocialReturnSurface();
+      return;
+    }
+    this.openSocialInbox();
+  }
+
   private async openSocialNotificationSubscriptionSettings(): Promise<void> {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -366,30 +411,43 @@ struct Index {
       aiLogInfo('[AIPhone][SocialNotificationSettings] opened');
     } catch (error) {
       const businessError = error as BusinessError;
-      const message = '通知订阅授权页打开失败：' + businessError.message;
+      const code = businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString();
+      const message = code === '201' ?
+        '通知订阅不可用：权限被拒绝，或当前 PC 系统未向三方应用开放通知内容订阅' :
+        ('通知订阅授权页打开失败：' + businessError.message);
       this.socialLastCapture = message;
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: false,
         status: 'error',
-        message: '通知授权不可用。',
+        message: code === '201' ? '当前设备不支持通知订阅桥接。' : '通知授权不可用。',
         requestDebug: this.lastModelRequest,
         assistantDebug: this.lastModelOutput,
         error: message
       }));
-      const code = businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString();
       aiLogError('[AIPhone][SocialNotificationSettingsError] code=' + code +
         ' message=' + businessError.message);
     }
   }
 
   private openSocialInbox(): void {
+    this.rememberSocialReturnSurface();
     const archive = this.readSocialNotificationArchive();
-    const notificationCandidates = archive.ok ? archive.candidates : [];
+    const wechatProbe = detectWechatBundleSync();
+    const accessibilityProbe = detectSocialAccessibilitySync();
+    aiLogInfo('[AIPhone][SocialWechatProbe] installed=' + wechatProbe.installed.toString() +
+      ' bundle=' + wechatProbe.bundleName +
+      ' detail=' + wechatProbe.detail);
+    aiLogInfo('[AIPhone][SocialAccessibilityProbe] available=' + accessibilityProbe.available.toString() +
+      ' detail=' + accessibilityProbe.detail);
+    const notificationCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'notification') : [];
+    const accessibilityCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'accessibility') : [];
     const notificationUnavailable = archive.ok ?
-      '未捕获到真实微信通知：请确认 ACL/Profile、系统通知订阅授权和微信通知预览' :
+      SOCIAL_NOTIFICATION_UNSUPPORTED_HINT :
       ('通知中心缓存读取失败：' + archive.error);
     const notification = new NotificationIngestProvider(notificationCandidates.length > 0, notificationUnavailable, notificationCandidates).capture();
-    const accessibility = new AccessibilityIngestProvider(false, '辅助捕获未授权或未接入').capture();
+    const accessibilityUnavailable = archive.ok ? accessibilityProbe.detail : ('辅助缓存读取失败：' + archive.error);
+    const accessibility = new AccessibilityIngestProvider(accessibilityProbe.available || accessibilityCandidates.length > 0,
+      accessibilityUnavailable, accessibilityCandidates).capture();
     this.socialLastCapture = notification.ok ? '通知中心返回 ' + notification.messages.length.toString() + ' 条' :
       (accessibility.ok ? '辅助捕获返回 ' + accessibility.messages.length.toString() + ' 条' : '无真实消息：' + notification.error + '；' + accessibility.error);
     notification.messages.forEach(candidate => {
@@ -400,8 +458,12 @@ struct Index {
     });
     const capabilities = probeSocialCapabilities({
       notificationBridgeAvailable: notification.ok,
+      notificationBridgeDetail: notification.ok ? '已读取真实通知缓存' : notification.error,
       accessibilityAvailable: accessibility.ok,
-      wechatInstalled: notification.messages.length > 0,
+      accessibilityDetail: accessibility.ok ? accessibilityProbe.detail + '；缓存 ' + accessibility.messages.length.toString() + ' 条' : accessibility.error,
+      wechatInstalled: wechatProbe.installed || notification.messages.length > 0 || accessibility.messages.length > 0,
+      wechatBundleName: wechatProbe.bundleName,
+      wechatDetectionDetail: wechatProbe.detail,
       lastCapture: this.socialLastCapture,
       lastSend: this.socialLastSend
     });
@@ -613,6 +675,15 @@ struct Index {
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         await this.callModelRequestedTool(result.surface, trimmed, actionId);
+      } else {
+        const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, trimmed, actionId);
+        if (fallbackRequest.hasTool) {
+          aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
+            ' reason=model_failed promptChars=' + fallbackRequest.prompt.length.toString());
+          await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId);
+        } else {
+          this.appendMessage('assistant', 'A2UI 生成失败：' + result.error);
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
@@ -879,11 +950,12 @@ struct Index {
         currentSurface: this.currentSurface,
         surfaceRenderTick: this.surfaceRenderTick,
         inputPlaceholder: this.inputPlaceholder,
+        isSocialReturnAvailable: this.hasSocialReturnSurface,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
         onOpenSocial: () => {
-          this.openSocialInbox();
+          this.handleSocialNavigation();
         },
         onOpenConfig: () => {
           this.showConfigPage = true;

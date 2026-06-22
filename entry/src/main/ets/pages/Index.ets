@@ -46,6 +46,7 @@ import {
   trainOptions
 } from '../model/A2uiData';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../model/A2uiSurfaceStore';
+import { buildSystemFoodNavigationUri, describeSystemFoodNavigationUri } from '../model/FoodNavigation';
 import { A2uiStreamMeta, buildChatCompletionsUrl, callLocalModel, modelThinkCloseSeen } from '../model/LocalModelClient';
 import { callToolGateway, defaultToolGatewayUrl, foodDistanceMeters, isLocalToolGatewayUrl, isRegisteredToolId, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
 import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
@@ -57,6 +58,7 @@ import {
   buildSocialDiagnosticsRows,
   probeSocialCapabilities
 } from '../model/SocialBridge';
+import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../model/SocialCapabilityProbe';
 import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../model/SocialNotificationArchive';
 
 const MODEL_LOCAL_QWEN: string = 'Qwen3-8B';
@@ -70,6 +72,7 @@ const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
 const STREAM_SOURCE_MODEL: string = 'model';
 const STREAM_SOURCE_TOOL: string = 'tool';
 const STREAM_SOURCE_SOCIAL: string = 'social';
+const SOCIAL_NOTIFICATION_UNSUPPORTED_HINT: string = '当前 PC 系统未向三方应用开放通知内容订阅；系统开放后会显示真实微信新消息';
 const DEBUG_SCROLL_MAX_HEIGHT: number = 120;
 const DEBUG_SCROLL_MIN_HEIGHT: number = 56;
 
@@ -155,9 +158,8 @@ const COLOR_THINK_STREAM_ACCENT: string = '#60E4D2';
 const COLOR_ERROR_SOFT: string = '#351B1D';
 const COLOR_CHROME: string = '#1B2A33';
 const TRAIN_INITIAL_VISIBLE: number = 6;
+const FOOD_INITIAL_VISIBLE: number = 8;
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
-const SYSTEM_MAP_BUNDLE: string = 'com.huawei.hmos.maps.app';
-const SYSTEM_MAP_ABILITY: string = 'EntryAbility';
 const SOCIAL_REPLY_UNAVAILABLE: string = '辅助自动化未授权或未接入真实微信发送器';
 const SOCIAL_MESSAGE_STORE: SocialMessageStore = new SocialMessageStore();
 
@@ -227,6 +229,7 @@ struct Index {
   @State travelFilterMode: string = 'all';
   @State expandedTravelKey: string = '';
   @State foodFilterMode: string = 'all';
+  @State foodVisibleCount: number = FOOD_INITIAL_VISIBLE;
   @State expandedFoodKey: string = '';
   @State foodNavigationStatus: string = '';
   @State inputPlaceholder: string = '告诉 AIPhone 你想完成什么';
@@ -234,6 +237,10 @@ struct Index {
   @State selectedSocialConversationTitle: string = '';
   @State socialLastCapture: string = '无真实消息';
   @State socialLastSend: string = '未发送';
+  @State hasSocialReturnSurface: boolean = false;
+  @State socialReturnSurface: A2uiSurfaceState = createSeedA2uiSurface();
+  @State socialReturnInputText: string = '';
+  @State socialReturnInputPlaceholder: string = '告诉 AIPhone 你想完成什么';
 
   aboutToAppear(): void {
     this.startStandbyAnimation();
@@ -1137,46 +1144,19 @@ struct Index {
     return item.location.trim();
   }
 
-  private foodLocationParts(item: A2uiFoodOption): string[] {
-    const location = this.foodLocationText(item);
-    if (location.length === 0) {
-      return [];
-    }
-    const parts = location.split(',');
-    if (parts.length < 2) {
-      return [];
-    }
-    const longitude = parts[0].trim();
-    const latitude = parts[1].trim();
-    if (longitude.length === 0 || latitude.length === 0) {
-      return [];
-    }
-    return [latitude, longitude];
-  }
-
   private foodCanNavigate(item: A2uiFoodOption): boolean {
-    return this.foodLocationParts(item).length === 2;
+    return buildSystemFoodNavigationUri(this.foodLocationText(item), '', item.name).length > 0;
   }
 
   private foodNavigationUnavailableText(item: A2uiFoodOption): string {
-    if (this.foodLocationParts(item).length !== 2) {
-      return '缺少真实坐标，不能导航';
+    if (!this.foodCanNavigate(item)) {
+      return '缺少真实坐标，不能打开地图';
     }
     return '';
   }
 
-  private systemFoodNavigationUri(item: A2uiFoodOption): string {
-    const parts = this.foodLocationParts(item);
-    if (parts.length !== 2) {
-      return '';
-    }
-    return 'maps://navigation?saddr=&daddr=' + parts[0] + ',' + parts[1] + '&type=walk';
-  }
-
   private foodNavigationWant(uri: string): Want {
     return {
-      bundleName: SYSTEM_MAP_BUNDLE,
-      abilityName: SYSTEM_MAP_ABILITY,
       action: 'ohos.want.action.viewData',
       entities: ['entity.system.browsable'],
       uri: uri
@@ -1185,14 +1165,26 @@ struct Index {
 
   private foodNavigationTargets(item: A2uiFoodOption): FoodNavigationTarget[] {
     const targets: FoodNavigationTarget[] = [];
-    const systemUri = this.systemFoodNavigationUri(item);
-    if (systemUri.length > 0) {
-      targets.push({ name: '系统地图', want: this.foodNavigationWant(systemUri) });
+    const debug = describeSystemFoodNavigationUri(this.foodLocationText(item), '', item.name);
+    aiLogInfo('[AIPhone][FoodNavigationUri] surface=main mode=' + debug.mode +
+      ' destinationRaw=' + this.foodLocationText(item) + ' destinationMap=' + debug.destination +
+      ' originRaw= originMap=' + debug.origin + ' name=' + debug.name + ' uri=' + debug.uri);
+    if (debug.uri.length > 0) {
+      targets.push({ name: '系统地图', want: this.foodNavigationWant(debug.uri) });
     }
     return targets;
   }
 
   private async openFoodNavigation(item: A2uiFoodOption): Promise<void> {
+    if (!this.foodCanNavigate(item)) {
+      const reason = this.foodNavigationUnavailableText(item);
+      this.foodNavigationStatus = reason;
+      this.statusText = reason;
+      return;
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    aiLogInfo('[AIPhone][FoodNavigationClick] surface=main name=' + item.name +
+      ' destinationRaw=' + this.foodLocationText(item));
     const targets = this.foodNavigationTargets(item);
     if (targets.length === 0) {
       const reason = this.foodNavigationUnavailableText(item);
@@ -1200,16 +1192,32 @@ struct Index {
       this.statusText = reason;
       return;
     }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     let lastError = '';
     for (let index = 0; index < targets.length; index++) {
       const target = targets[index];
       try {
-        await context.startAbility(target.want);
-        this.foodNavigationStatus = '已请求' + target.name + '从当前位置导航';
-        this.statusText = '已请求系统地图导航';
         const uri: string = target.want.uri === undefined ? '' : target.want.uri;
-        aiLogInfo('[AIPhone][FoodNavigation] provider=' + target.name + ' uriChars=' + uri.length.toString() + ' name=' + item.name);
+        let launchMode = 'openLink';
+        try {
+          aiLogInfo('[AIPhone][FoodNavigationLaunchAttempt] surface=main provider=' + target.name +
+            ' launchMode=openLink uri=' + uri);
+          await context.openLink(uri);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchResult] surface=main provider=' + target.name +
+            ' launchMode=openLink ok=true');
+        } catch (linkError) {
+          const linkBusinessError = linkError as BusinessError;
+          launchMode = 'startAbility';
+          aiLogError('[AIPhone][FoodNavigation] openLink failed provider=' + target.name + ' code=' + (linkBusinessError.code === undefined || linkBusinessError.code === null ? 'unknown' : linkBusinessError.code.toString()) + ' message=' + linkBusinessError.message);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchAttempt] surface=main provider=' + target.name +
+            ' launchMode=startAbility implicit=true uri=' + uri);
+          await context.startAbility(target.want);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchResult] surface=main provider=' + target.name +
+            ' launchMode=startAbility ok=true');
+        }
+        this.foodNavigationStatus = '已在' + target.name + '打开目的地';
+        this.statusText = '已打开系统地图目的地';
+        aiLogInfo('[AIPhone][FoodNavigation] provider=' + target.name + ' launchMode=' + launchMode +
+          ' uriChars=' + uri.length.toString() + ' mode=destination_only name=' + item.name);
         return;
       } catch (error) {
         const businessError = error as BusinessError;
@@ -1218,10 +1226,10 @@ struct Index {
         aiLogError('[AIPhone][FoodNavigation] failed provider=' + target.name + ' code=' + code + ' message=' + businessError.message);
       }
     }
-    const message = '导航打开失败：' + lastError;
+    const message = '地图打开失败：' + lastError;
     this.foodNavigationStatus = message;
     this.lastError = message;
-    this.statusText = '导航不可用';
+    this.statusText = '地图不可用';
   }
 
   private processingCardBackground(status: string): string {
@@ -1602,6 +1610,33 @@ struct Index {
     this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, 'selected'), this.currentSocialReplies());
   }
 
+  private socialNavLabel(): string {
+    return this.currentSurface.intent === 'social' && this.hasSocialReturnSurface ? '返回' : '社交';
+  }
+
+  private rememberSocialReturnSurface(): void {
+    if (this.currentSurface.intent === 'social') {
+      return;
+    }
+    this.socialReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    this.socialReturnInputText = this.inputText;
+    this.socialReturnInputPlaceholder = this.inputPlaceholder;
+    this.hasSocialReturnSurface = true;
+  }
+
+  private restoreSocialReturnSurface(): void {
+    if (!this.hasSocialReturnSurface) {
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.socialReturnSurface);
+    this.selectedSocialMessageId = '';
+    this.selectedSocialConversationTitle = '';
+    this.inputText = this.socialReturnInputText;
+    this.inputPlaceholder = this.socialReturnInputPlaceholder.length > 0 ? this.socialReturnInputPlaceholder : '告诉 AIPhone 你想完成什么';
+    this.hasSocialReturnSurface = false;
+    this.updateSurfaceFromStream(surface, '', STREAM_SOURCE_SOCIAL);
+  }
+
   private readSocialNotificationArchive(): SocialNotificationArchiveRead {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     return readNotificationCaptureArchive(context);
@@ -1616,24 +1651,37 @@ struct Index {
       aiLogInfo('[AIPhone][SocialNotificationSettings] opened');
     } catch (error) {
       const businessError = error as BusinessError;
-      const message = '通知订阅授权页打开失败：' + businessError.message;
-      this.lastError = message;
-      this.statusText = '通知授权不可用';
-      this.socialLastCapture = message;
       const code = businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString();
+      const message = code === '201' ?
+        '通知订阅不可用：权限被拒绝，或当前 PC 系统未向三方应用开放通知内容订阅' :
+        ('通知订阅授权页打开失败：' + businessError.message);
+      this.lastError = message;
+      this.statusText = code === '201' ? '当前设备不支持通知订阅桥接' : '通知授权不可用';
+      this.socialLastCapture = message;
       aiLogError('[AIPhone][SocialNotificationSettingsError] code=' + code +
         ' message=' + businessError.message);
     }
   }
 
   private openSocialInbox(): void {
+    this.rememberSocialReturnSurface();
     const archive = this.readSocialNotificationArchive();
-    const notificationCandidates = archive.ok ? archive.candidates : [];
+    const wechatProbe = detectWechatBundleSync();
+    const accessibilityProbe = detectSocialAccessibilitySync();
+    aiLogInfo('[AIPhone][SocialWechatProbe] installed=' + wechatProbe.installed.toString() +
+      ' bundle=' + wechatProbe.bundleName +
+      ' detail=' + wechatProbe.detail);
+    aiLogInfo('[AIPhone][SocialAccessibilityProbe] available=' + accessibilityProbe.available.toString() +
+      ' detail=' + accessibilityProbe.detail);
+    const notificationCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'notification') : [];
+    const accessibilityCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'accessibility') : [];
     const notificationUnavailable = archive.ok ?
-      '未捕获到真实微信通知：请确认 ACL/Profile、系统通知订阅授权和微信通知预览' :
+      SOCIAL_NOTIFICATION_UNSUPPORTED_HINT :
       ('通知中心缓存读取失败：' + archive.error);
     const notification = new NotificationIngestProvider(notificationCandidates.length > 0, notificationUnavailable, notificationCandidates).capture();
-    const accessibility = new AccessibilityIngestProvider(false, '辅助捕获未授权或未接入').capture();
+    const accessibilityUnavailable = archive.ok ? accessibilityProbe.detail : ('辅助缓存读取失败：' + archive.error);
+    const accessibility = new AccessibilityIngestProvider(accessibilityProbe.available || accessibilityCandidates.length > 0,
+      accessibilityUnavailable, accessibilityCandidates).capture();
     this.socialLastCapture = notification.ok ? '通知中心返回 ' + notification.messages.length.toString() + ' 条' :
       (accessibility.ok ? '辅助捕获返回 ' + accessibility.messages.length.toString() + ' 条' : '无真实消息：' + notification.error + '；' + accessibility.error);
     notification.messages.forEach(candidate => {
@@ -1644,8 +1692,12 @@ struct Index {
     });
     const capabilities = probeSocialCapabilities({
       notificationBridgeAvailable: notification.ok,
+      notificationBridgeDetail: notification.ok ? '已读取真实通知缓存' : notification.error,
       accessibilityAvailable: accessibility.ok,
-      wechatInstalled: notification.messages.length > 0,
+      accessibilityDetail: accessibility.ok ? accessibilityProbe.detail + '；缓存 ' + accessibility.messages.length.toString() + ' 条' : accessibility.error,
+      wechatInstalled: wechatProbe.installed || notification.messages.length > 0 || accessibility.messages.length > 0,
+      wechatBundleName: wechatProbe.bundleName,
+      wechatDetectionDetail: wechatProbe.detail,
       lastCapture: this.socialLastCapture,
       lastSend: this.socialLastSend
     });
@@ -1799,6 +1851,7 @@ struct Index {
 
   private resetFoodViewState(): void {
     this.foodFilterMode = 'all';
+    this.foodVisibleCount = FOOD_INITIAL_VISIBLE;
     this.expandedFoodKey = '';
     this.foodNavigationStatus = '';
   }
@@ -1872,12 +1925,20 @@ struct Index {
     return labelValues(this.surfaceForRender(), this.directRowsComponent()).length > 0;
   }
 
-  private displayedFoodOptions(component: A2uiComponent): A2uiFoodOption[] {
+  private filteredFoodOptions(component: A2uiComponent): A2uiFoodOption[] {
     let rows = foodOptions(this.surfaceForRender(), component);
     if (this.foodFilterMode === 'within_1km') {
       rows = rows.filter((item: A2uiFoodOption) => foodDistanceMeters(item.distance) <= 1000);
     }
     return rows;
+  }
+
+  private displayedFoodOptions(component: A2uiComponent): A2uiFoodOption[] {
+    const rows = this.filteredFoodOptions(component);
+    if (rows.length <= this.foodVisibleCount) {
+      return rows;
+    }
+    return rows.slice(0, this.foodVisibleCount);
   }
 
   private parseDurationMinutes(duration: string): number {
@@ -1989,13 +2050,27 @@ struct Index {
     }
     if (action.id === 'food_show_all') {
       this.foodFilterMode = 'all';
+      this.foodVisibleCount = FOOD_INITIAL_VISIBLE;
       this.statusText = '已显示全部附近餐饮';
       this.renderRevision = this.renderRevision + 1;
       return;
     }
     if (action.id === 'food_filter_1km') {
       this.foodFilterMode = 'within_1km';
+      this.foodVisibleCount = FOOD_INITIAL_VISIBLE;
       this.statusText = '已筛选 1 公里内餐饮';
+      this.renderRevision = this.renderRevision + 1;
+      return;
+    }
+    if (action.id === 'food_show_more') {
+      const component = this.componentWithType(A2UI_COMPONENT_FOOD_CHOICES, 'food_direct');
+      const total = this.filteredFoodOptions(component).length;
+      if (this.foodVisibleCount >= total) {
+        this.statusText = '已展示全部附近餐饮';
+      } else {
+        this.foodVisibleCount = Math.min(this.foodVisibleCount + FOOD_INITIAL_VISIBLE, total);
+        this.statusText = '已展示更多附近餐饮';
+      }
       this.renderRevision = this.renderRevision + 1;
     }
   }
@@ -2114,7 +2189,7 @@ struct Index {
           this.showHistory = !this.showHistory;
         })
 
-      Button('社交')
+      Button(this.socialNavLabel())
         .height(40)
         .width(70)
         .fontSize(13)
@@ -2124,7 +2199,11 @@ struct Index {
         .border({ width: 1, color: COLOR_SOCIAL_LINE })
         .margin({ left: 8 })
         .onClick(() => {
-          this.openSocialInbox();
+          if (this.currentSurface.intent === 'social' && this.hasSocialReturnSurface) {
+            this.restoreSocialReturnSurface();
+          } else {
+            this.openSocialInbox();
+          }
         })
 
       Button('配置')
@@ -3112,8 +3191,23 @@ struct Index {
           .fontSize(12)
           .fontColor(COLOR_MUTED)
           .margin({ left: 8 })
+        Blank()
+          .layoutWeight(1)
+        if (this.hasSocialReturnSurface) {
+          Button('返回上一页')
+            .height(32)
+            .fontSize(12)
+            .fontColor(COLOR_SOCIAL)
+            .backgroundColor(COLOR_SOCIAL_SOFT)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_SOCIAL_LINE })
+            .onClick(() => {
+              this.restoreSocialReturnSurface();
+            })
+        }
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .margin({ top: 10 })
 
       if (socialMessages(surface, component).length === 0) {
@@ -3122,7 +3216,7 @@ struct Index {
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_INK)
-          Text('AIPhone 不会生成测试联系人或测试消息。需要通知中心桥接或辅助捕获可用后，真实微信消息才会出现在这里。')
+          Text('等待系统通知读取能力开放后，真实微信新消息会出现在这里。')
             .fontSize(13)
             .fontColor(COLOR_MUTED)
             .lineHeight(20)
@@ -3214,7 +3308,6 @@ struct Index {
         })
       }, (item: A2uiSocialMessage) => item.id + '-' + revision.toString())
 
-      this.SocialDiagnostics(surface, revision)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -3249,7 +3342,7 @@ struct Index {
         .alignItems(VerticalAlign.Top)
         .padding({ top: 7, bottom: 7 })
       }, (row: A2uiLabelValue) => row.label + row.value + '-' + revision.toString())
-      Button('打开通知授权')
+      Button('尝试通知授权')
         .fontSize(13)
         .fontColor(COLOR_BUTTON_TEXT)
         .height(38)
@@ -3617,7 +3710,7 @@ struct Index {
           .lineHeight(18)
           .margin({ top: 8 })
       }
-      Button(this.foodCanNavigate(item) ? '系统地图导航' : '导航不可用')
+      Button(this.foodCanNavigate(item) ? '系统地图' : '地图不可用')
         .enabled(this.foodCanNavigate(item) && !this.isBusy)
         .height(38)
         .width('100%')
@@ -3630,7 +3723,7 @@ struct Index {
         .onClick(() => {
           this.openFoodNavigation(item);
         })
-      Text('只拉起路线规划，不下单不支付')
+      Text('只打开目的地位置，不下单不支付')
         .fontSize(12)
         .fontColor(COLOR_MUTED)
         .lineHeight(18)
@@ -3711,7 +3804,7 @@ struct Index {
               Blank()
                 .layoutWeight(1)
               if (this.foodCanNavigate(item)) {
-                Text('可导航')
+                Text('可打开地图')
                   .fontSize(12)
                   .fontColor(COLOR_ACCENT_DARK)
               }

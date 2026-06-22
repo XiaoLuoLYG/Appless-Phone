@@ -3,6 +3,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, foodOptions, A2uiFoodOption } from '../../../model/A2uiData';
 import { aiLogError, aiLogInfo } from '../../../model/AiphoneLogger';
+import { buildSystemFoodNavigationUri, describeSystemFoodNavigationUri } from '../../../model/FoodNavigation';
 import { foodDistanceMeters } from '../../../model/ToolGatewayClient';
 import {
   COLOR_ACCENT,
@@ -24,9 +25,15 @@ import {
   COLOR_FOOD_MEITUAN,
   COLOR_FOOD_MEITUAN_LINE,
   COLOR_FOOD_MEITUAN_SOFT,
+  COLOR_FOOD_MCD,
+  COLOR_FOOD_MCD_LINE,
+  COLOR_FOOD_MCD_SOFT,
   COLOR_FOOD_TAOBAO,
   COLOR_FOOD_TAOBAO_LINE,
   COLOR_FOOD_TAOBAO_SOFT,
+  COLOR_FOOD_LUCKIN,
+  COLOR_FOOD_LUCKIN_LINE,
+  COLOR_FOOD_LUCKIN_SOFT,
   COLOR_FOOD_TENCENT,
   COLOR_FOOD_TENCENT_LINE,
   COLOR_FOOD_TENCENT_SOFT,
@@ -44,9 +51,6 @@ import {
 import { ActionBarView } from './ActionBarView';
 import { StatusBadgeView } from './StatusBadgeView';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
-
-const SYSTEM_MAP_BUNDLE: string = 'com.huawei.hmos.maps.app';
-const SYSTEM_MAP_ABILITY: string = 'EntryAbility';
 
 interface FoodNavigationTarget {
   name: string;
@@ -116,6 +120,12 @@ export struct FoodChoicesView {
     if (source === '淘宝闪购') {
       return COLOR_FOOD_TAOBAO;
     }
+    if (source === '麦当劳') {
+      return COLOR_FOOD_MCD;
+    }
+    if (source === '瑞幸') {
+      return COLOR_FOOD_LUCKIN;
+    }
     return COLOR_ACCENT_DARK;
   }
 
@@ -134,6 +144,12 @@ export struct FoodChoicesView {
     }
     if (source === '淘宝闪购') {
       return COLOR_FOOD_TAOBAO_SOFT;
+    }
+    if (source === '麦当劳') {
+      return COLOR_FOOD_MCD_SOFT;
+    }
+    if (source === '瑞幸') {
+      return COLOR_FOOD_LUCKIN_SOFT;
     }
     return COLOR_ACCENT_SOFT;
   }
@@ -154,6 +170,12 @@ export struct FoodChoicesView {
     if (source === '淘宝闪购') {
       return COLOR_FOOD_TAOBAO_LINE;
     }
+    if (source === '麦当劳') {
+      return COLOR_FOOD_MCD_LINE;
+    }
+    if (source === '瑞幸') {
+      return COLOR_FOOD_LUCKIN_LINE;
+    }
     return COLOR_CARD_EDGE;
   }
 
@@ -168,46 +190,19 @@ export struct FoodChoicesView {
     return item.location.trim();
   }
 
-  private locationParts(item: A2uiFoodOption): string[] {
-    const location = this.locationText(item);
-    if (location.length === 0) {
-      return [];
-    }
-    const parts = location.split(',');
-    if (parts.length < 2) {
-      return [];
-    }
-    const longitude = parts[0].trim();
-    const latitude = parts[1].trim();
-    if (longitude.length === 0 || latitude.length === 0) {
-      return [];
-    }
-    return [latitude, longitude];
-  }
-
   private canNavigate(item: A2uiFoodOption): boolean {
-    return this.locationParts(item).length === 2;
+    return buildSystemFoodNavigationUri(this.locationText(item), '', item.name).length > 0;
   }
 
   private navigationUnavailableText(item: A2uiFoodOption): string {
     if (!this.canNavigate(item)) {
-      return '缺少真实坐标，不能导航';
+      return '缺少真实坐标，不能打开地图';
     }
     return '';
   }
 
-  private systemNavigationUri(item: A2uiFoodOption): string {
-    const parts = this.locationParts(item);
-    if (parts.length !== 2) {
-      return '';
-    }
-    return 'maps://navigation?saddr=&daddr=' + parts[0] + ',' + parts[1] + '&type=walk';
-  }
-
   private navigationWant(uri: string): Want {
     return {
-      bundleName: SYSTEM_MAP_BUNDLE,
-      abilityName: SYSTEM_MAP_ABILITY,
       action: 'ohos.want.action.viewData',
       entities: ['entity.system.browsable'],
       uri: uri
@@ -216,28 +211,54 @@ export struct FoodChoicesView {
 
   private navigationTargets(item: A2uiFoodOption): FoodNavigationTarget[] {
     const targets: FoodNavigationTarget[] = [];
-    const systemUri = this.systemNavigationUri(item);
-    if (systemUri.length > 0) {
-      targets.push({ name: '系统地图', want: this.navigationWant(systemUri) });
+    const debug = describeSystemFoodNavigationUri(this.locationText(item), '', item.name);
+    aiLogInfo('[AIPhone][FoodNavigationUri] surface=a2ui_home mode=' + debug.mode +
+      ' destinationRaw=' + this.locationText(item) + ' destinationMap=' + debug.destination +
+      ' originRaw= originMap=' + debug.origin + ' name=' + debug.name + ' uri=' + debug.uri);
+    if (debug.uri.length > 0) {
+      targets.push({ name: '系统地图', want: this.navigationWant(debug.uri) });
     }
     return targets;
   }
 
   private async openFoodNavigation(item: A2uiFoodOption): Promise<void> {
+    if (!this.canNavigate(item)) {
+      this.foodNavigationStatus = this.navigationUnavailableText(item);
+      return;
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    aiLogInfo('[AIPhone][FoodNavigationClick] surface=a2ui_home name=' + item.name +
+      ' destinationRaw=' + this.locationText(item));
     const targets = this.navigationTargets(item);
     if (targets.length === 0) {
       this.foodNavigationStatus = this.navigationUnavailableText(item);
       return;
     }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     let lastError = '';
     for (let index = 0; index < targets.length; index++) {
       const target = targets[index];
       try {
-        await context.startAbility(target.want);
-        this.foodNavigationStatus = '已请求' + target.name + '从当前位置导航';
         const uri: string = target.want.uri === undefined ? '' : target.want.uri;
-        aiLogInfo('[AIPhone][FoodNavigation] provider=' + target.name + ' uriChars=' + uri.length.toString() + ' name=' + item.name);
+        let launchMode = 'openLink';
+        try {
+          aiLogInfo('[AIPhone][FoodNavigationLaunchAttempt] surface=a2ui_home provider=' + target.name +
+            ' launchMode=openLink uri=' + uri);
+          await context.openLink(uri);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchResult] surface=a2ui_home provider=' + target.name +
+            ' launchMode=openLink ok=true');
+        } catch (linkError) {
+          const linkBusinessError = linkError as BusinessError;
+          launchMode = 'startAbility';
+          aiLogError('[AIPhone][FoodNavigation] openLink failed provider=' + target.name + ' code=' + (linkBusinessError.code === undefined || linkBusinessError.code === null ? 'unknown' : linkBusinessError.code.toString()) + ' message=' + linkBusinessError.message);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchAttempt] surface=a2ui_home provider=' + target.name +
+            ' launchMode=startAbility implicit=true uri=' + uri);
+          await context.startAbility(target.want);
+          aiLogInfo('[AIPhone][FoodNavigationLaunchResult] surface=a2ui_home provider=' + target.name +
+            ' launchMode=startAbility ok=true');
+        }
+        this.foodNavigationStatus = '已在' + target.name + '打开目的地';
+        aiLogInfo('[AIPhone][FoodNavigation] provider=' + target.name + ' launchMode=' + launchMode +
+          ' uriChars=' + uri.length.toString() + ' mode=destination_only name=' + item.name);
         return;
       } catch (error) {
         const businessError = error as BusinessError;
@@ -246,7 +267,7 @@ export struct FoodChoicesView {
         aiLogError('[AIPhone][FoodNavigation] failed provider=' + target.name + ' code=' + code + ' message=' + businessError.message);
       }
     }
-    this.foodNavigationStatus = '导航打开失败：' + lastError;
+    this.foodNavigationStatus = '地图打开失败：' + lastError;
   }
 
   private isLocalFoodAction(action: A2uiAction): boolean {
@@ -328,7 +349,7 @@ export struct FoodChoicesView {
           .lineHeight(18)
           .margin({ top: 8 })
       }
-      Button(this.canNavigate(item) ? '系统地图导航' : '导航不可用')
+      Button(this.canNavigate(item) ? '系统地图' : '地图不可用')
         .enabled(this.canNavigate(item) && !this.isBusy)
         .height(38)
         .width('100%')

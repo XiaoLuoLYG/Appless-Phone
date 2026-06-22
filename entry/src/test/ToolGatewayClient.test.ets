@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiFoodData, A2uiLabelValueData, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
+import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
@@ -9,9 +10,12 @@ import {
   foodDistanceMeters,
   foodProviderProgressRows,
   foodRecordFromBaiduPlace,
+  foodRecordsFromLuckinMcpTool,
+  foodRecordsFromMcDonaldsMcpTool,
   foodRecordFromMeituanUnion,
   foodRecordFromTencentMapPlace,
   foodRecordFromTaobaoFlashStore,
+  isReadonlyBrandMcpTool,
   isLocalToolGatewayUrl,
   isRegisteredToolId,
   providerIssueRows,
@@ -20,6 +24,82 @@ import {
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '../main/ets/model/ToolGatewayClient';
+
+interface McDonaldsStoreFixture {
+  storeName: string;
+  address: string;
+  distance: string;
+  businessStatus: boolean;
+  businessStartTime: string;
+  businessEndTime: string;
+}
+
+interface McDonaldsStoresPayloadFixture {
+  data: McDonaldsStoreFixture[];
+}
+
+interface McDonaldsMealRefFixture {
+  code: string;
+  tags: string[];
+}
+
+interface McDonaldsCategoryFixture {
+  name: string;
+  meals: McDonaldsMealRefFixture[];
+}
+
+interface McDonaldsMealFixture {
+  name: string;
+  currentPrice: string;
+}
+
+interface McDonaldsMealsByCodeFixture {
+  '920215': McDonaldsMealFixture;
+}
+
+interface McDonaldsMealsDataFixture {
+  categories: McDonaldsCategoryFixture[];
+  meals: McDonaldsMealsByCodeFixture;
+}
+
+interface McDonaldsMealsPayloadFixture {
+  data: McDonaldsMealsDataFixture;
+}
+
+interface LuckinShopFixture {
+  deptName: string;
+  address: string;
+  distance: number;
+  deptTags: string[];
+  longitude: number;
+  latitude: number;
+}
+
+interface LuckinShopsPayloadFixture {
+  data: LuckinShopFixture[];
+}
+
+interface LuckinProductSubAttributeFixture {
+  attributeName: string;
+  selected: boolean;
+}
+
+interface LuckinProductAttributeFixture {
+  attributeName: string;
+  productSubAttrs: LuckinProductSubAttributeFixture[];
+}
+
+interface LuckinProductFixture {
+  productName: string;
+  price: number;
+  skuCode: string;
+  productAttrs: LuckinProductAttributeFixture[];
+  tags: string[];
+}
+
+interface LuckinProductsPayloadFixture {
+  data: LuckinProductFixture[];
+}
 
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
@@ -46,6 +126,105 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
       expect(isRegisteredToolId('social.reply.send')).assertTrue();
+    });
+
+    it('keeps brand MCP adapters query-only', 0, () => {
+      expect(isReadonlyBrandMcpTool('麦当劳', 'query-nearby-stores')).assertTrue();
+      expect(isReadonlyBrandMcpTool('麦当劳', 'query-meals')).assertTrue();
+      expect(isReadonlyBrandMcpTool('麦当劳', 'create-order')).assertFalse();
+      expect(isReadonlyBrandMcpTool('麦当劳', 'auto-bind-coupons')).assertFalse();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'queryShopList')).assertTrue();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'searchProductForMcp')).assertTrue();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'createOrder')).assertFalse();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'cancelOrder')).assertFalse();
+    });
+
+    it('maps McDonalds MCP store and menu query payloads to food records', 0, () => {
+      const storesPayload: McDonaldsStoresPayloadFixture = {
+        data: [
+          {
+            storeName: '麦当劳深圳科技园餐厅',
+            address: '深圳市南山区科苑路',
+            distance: '320米',
+            businessStatus: true,
+            businessStartTime: '07:00',
+            businessEndTime: '22:00'
+          }
+        ]
+      };
+      const mealsPayload: McDonaldsMealsPayloadFixture = {
+        data: {
+          categories: [
+            {
+              name: '人气热卖',
+              meals: [
+                { code: '920215', tags: ['第二份半价'] }
+              ]
+            }
+          ],
+          meals: {
+            '920215': {
+              name: '培根安格斯厚牛堡大套餐',
+              currentPrice: '55.5'
+            }
+          }
+        }
+      };
+      const stores = foodRecordsFromMcDonaldsMcpTool('query-nearby-stores', storesPayload);
+      const meals = foodRecordsFromMcDonaldsMcpTool('query-meals', mealsPayload);
+
+      expect(stores[0].name).assertEqual('麦当劳深圳科技园餐厅');
+      expect(stores[0].category.indexOf('营业中')).assertLarger(-1);
+      expect(stores[0].distance).assertEqual('320米');
+      expect((stores[0].sourceTags === undefined ? [] : stores[0].sourceTags)[0]).assertEqual('麦当劳');
+      expect(meals[0].name).assertEqual('麦当劳 · 培根安格斯厚牛堡大套餐');
+      expect(meals[0].category.indexOf('¥55.5')).assertLarger(-1);
+      expect(meals[0].address.indexOf('第二份半价')).assertLarger(-1);
+    });
+
+    it('maps Luckin MCP shop and product query payloads to food records', 0, () => {
+      const shopsPayload: LuckinShopsPayloadFixture = {
+        data: [
+          {
+            deptName: '瑞幸咖啡 深圳科技园店',
+            address: '深圳市南山区科技园',
+            distance: 0.42,
+            deptTags: ['可自提'],
+            longitude: 114.0579,
+            latitude: 22.5431
+          }
+        ]
+      };
+      const productsPayload: LuckinProductsPayloadFixture = {
+        data: [
+          {
+            productName: '生椰拿铁',
+            price: 19,
+            skuCode: 'SKU001',
+            productAttrs: [
+              { attributeName: '温度', productSubAttrs: [{ attributeName: '冰', selected: true }] }
+            ],
+            tags: ['人气']
+          }
+        ]
+      };
+      const shops = foodRecordsFromLuckinMcpTool('queryShopList', shopsPayload);
+      const products = foodRecordsFromLuckinMcpTool('searchProductForMcp', productsPayload);
+
+      expect(shops[0].name).assertEqual('瑞幸咖啡 深圳科技园店');
+      expect(shops[0].category.indexOf('可自提')).assertLarger(-1);
+      expect(shops[0].distance).assertEqual('420米');
+      expect(shops[0].location).assertEqual('114.0579,22.5431');
+      expect((shops[0].sourceTags === undefined ? [] : shops[0].sourceTags)[0]).assertEqual('瑞幸');
+      expect(products[0].name).assertEqual('瑞幸 · 生椰拿铁');
+      expect(products[0].category.indexOf('SKU001')).assertLarger(-1);
+      expect(products[0].address.indexOf('温度:冰')).assertLarger(-1);
+    });
+
+    it('builds system map food destination search', 0, () => {
+      expect(foodMapsLatLng('116.397470,39.908823')).assertEqual('39.908823,116.397470');
+      expect(buildSystemFoodNavigationUri('116.397470,39.908823', '')).assertEqual('petalmaps://poidetail?center=39.908823,116.397470&z=16&marker=39.908823,116.397470&name=%E7%9B%AE%E7%9A%84%E5%9C%B0&utm_source=com.example.aiphonedemo');
+      expect(buildSystemFoodNavigationUri('116.397470,39.908823', '116.398470,39.909823', '喜茶(深圳坂田华创里店)')).assertEqual('petalmaps://poidetail?center=39.908823,116.397470&z=16&marker=39.908823,116.397470&name=%E5%96%9C%E8%8C%B6%28%E6%B7%B1%E5%9C%B3%E5%9D%82%E7%94%B0%E5%8D%8E%E5%88%9B%E9%87%8C%E5%BA%97%29&utm_source=com.example.aiphonedemo');
     });
 
     it('sorts unified travel options by departure time', 0, () => {
@@ -482,6 +661,34 @@ export default function toolGatewayClientTest() {
       expect(firstTags.indexOf('高德')).assertLarger(-1);
       expect(firstTags.indexOf('腾讯地图')).assertLarger(-1);
       expect(firstTags.indexOf('百度地图')).assertLarger(-1);
+    });
+
+    it('keeps more than the default visible food rows for client show more', 0, () => {
+      const amapFoods: A2uiFoodData[] = [];
+      const tencentFoods: A2uiFoodData[] = [];
+      for (let index = 0; index < 10; index++) {
+        amapFoods.push({
+          name: '高德餐饮 ' + index.toString(),
+          category: '餐饮服务',
+          address: '高德地址 ' + index.toString(),
+          distance: (100 + index).toString() + '米',
+          sourceTags: ['高德']
+        });
+        tencentFoods.push({
+          name: '腾讯餐饮 ' + index.toString(),
+          category: '美食',
+          address: '腾讯地址 ' + index.toString(),
+          distance: (300 + index).toString() + '米',
+          sourceTags: ['腾讯地图']
+        });
+      }
+
+      const merged = aggregateFoodProviderResults([
+        { provider: '高德', foods: amapFoods, error: '' },
+        { provider: '腾讯地图', foods: tencentFoods, error: '' }
+      ]);
+
+      expect(merged.foods.length).assertLarger(8);
     });
 
     it('keeps legacy food records without source tags renderable', 0, () => {
