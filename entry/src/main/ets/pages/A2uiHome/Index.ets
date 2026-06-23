@@ -2,6 +2,7 @@ import { LocalModelSettings, defaultLocalModelSettings } from '../../model/Local
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { formBindingData, formProvider } from '@kit.FormKit';
 import { notificationExtensionSubscription } from '@kit.NotificationKit';
 import {
   A2UI_COMPONENT_SOCIAL_INBOX,
@@ -10,6 +11,7 @@ import {
   A2uiCallResult,
   A2uiComponent,
   A2uiDynamicToolConnectData,
+  A2uiFoodData,
   A2uiMessage,
   A2uiRuntimeDataModel,
   A2uiSocialMessageData,
@@ -20,6 +22,12 @@ import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
 import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
+import {
+  NavigationCardSnapshot,
+  PreferencesNavigationCardSnapshotStore,
+  buildNavigationCardBindingData,
+  navigationCardSnapshotFromFoodOption
+} from '../../model/NavigationCardSnapshot';
 import {
   AccessibilityIngestProvider,
   NotificationIngestProvider,
@@ -52,6 +60,7 @@ const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，�
 const SOCIAL_REPLY_UNAVAILABLE: string = '真实微信发送器未接入或当前设备未开放自动发送能力';
 const SOCIAL_NOTIFICATION_UNSUPPORTED_HINT: string = '当前 PC 系统未向三方应用开放通知内容订阅；系统开放后会显示真实微信新消息';
 const SOCIAL_MESSAGE_STORE: SocialMessageStore = new SocialMessageStore();
+const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
@@ -787,6 +796,82 @@ struct Index {
     }
   }
 
+  private navigationCardStore(): PreferencesNavigationCardSnapshotStore {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    return new PreferencesNavigationCardSnapshotStore(context);
+  }
+
+  private async refreshNavigationCardForms(snapshot: NavigationCardSnapshot): Promise<void> {
+    const store = this.navigationCardStore();
+    const formIds = await store.getFormIds();
+    if (formIds.length === 0) {
+      aiLogInfo('[AIPhone][NavigationCardRefresh] noForms title=' + snapshot.title);
+      return;
+    }
+    const binding = formBindingData.createFormBindingData(buildNavigationCardBindingData(snapshot, Date.now()));
+    for (let index = 0; index < formIds.length; index++) {
+      const formId = formIds[index];
+      try {
+        await formProvider.updateForm(formId, binding);
+        aiLogInfo('[AIPhone][NavigationCardRefresh] formId=' + formId + ' ok=true');
+      } catch (error) {
+        const businessError = error as BusinessError;
+        aiLogError('[AIPhone][NavigationCardRefresh] formId=' + formId +
+          ' ok=false code=' + (businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString()) +
+          ' message=' + businessError.message);
+      }
+    }
+  }
+
+  private async pinNavigationCard(item: A2uiFoodData): Promise<void> {
+    const now = Date.now();
+    const result = navigationCardSnapshotFromFoodOption(item, {
+      surfaceId: this.currentSurface.surfaceId,
+      toolId: 'food.search',
+      updatedAt: now,
+      expiresAt: now + NAVIGATION_CARD_TTL_MS
+    });
+    if (!result.ok || result.snapshot === undefined) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: result.error,
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: result.error
+      }));
+      aiLogError('[AIPhone][NavigationCardPin] ok=false reason=' + result.error);
+      return;
+    }
+    try {
+      const store = this.navigationCardStore();
+      await store.saveSnapshot(result.snapshot);
+      await this.refreshNavigationCardForms(result.snapshot);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '已固定为桌面导航卡片：' + result.snapshot.title,
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      aiLogInfo('[AIPhone][NavigationCardPin] ok=true title=' + result.snapshot.title +
+        ' sourceTags=' + result.snapshot.sourceTags.join('/') +
+        ' mapUriChars=' + result.snapshot.mapUri.length.toString());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '导航卡片保存失败',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][NavigationCardPin] ok=false saveError=' + message);
+    }
+  }
+
   private focusEditQuery(actionId: string = ''): void {
     if (actionId === 'travel_change_date') {
       this.inputPlaceholder = '请输入新的日期或路线，如：后天北京到上海出行方案';
@@ -1033,6 +1118,9 @@ struct Index {
         },
         onAction: (action: A2uiAction) => {
           this.sendAction(action);
+        },
+        onPinNavigationCard: (item: A2uiFoodData) => {
+          this.pinNavigationCard(item);
         }
       })
     }

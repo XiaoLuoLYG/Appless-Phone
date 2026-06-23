@@ -1,9 +1,18 @@
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { formBindingData, formProvider } from '@kit.FormKit';
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, foodOptions, A2uiFoodOption } from '../../../model/A2uiData';
 import { aiLogError, aiLogInfo } from '../../../model/AiphoneLogger';
 import { buildSystemFoodNavigationUri, describeSystemFoodNavigationUri } from '../../../model/FoodNavigation';
+import {
+  NavigationCardSnapshot,
+  PreferencesNavigationCardSnapshotStore,
+  buildNavigationCardBindingData,
+  canCreateNavigationCardFromFoodOption,
+  navigationCardPinActionFromFoodOption,
+  navigationCardSnapshotFromFoodOption
+} from '../../../model/NavigationCardSnapshot';
 import { foodDistanceMeters } from '../../../model/ToolGatewayClient';
 import {
   COLOR_ACCENT,
@@ -62,6 +71,7 @@ type FoodFilterMode = 'all' | 'within_1km';
 const FOOD_CARD_BACKGROUND: string = '#18181B';
 const FOOD_CARD_BORDER: string = '#27272A';
 const FOOD_CARD_ACTIVE_BORDER: string = '#0D9488';
+const FOOD_NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 
 @Component
 export struct FoodChoicesView {
@@ -73,6 +83,7 @@ export struct FoodChoicesView {
   @State expandedFoodKey: string = '';
   @State foodNavigationStatus: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinNavigationCard: (item: A2uiFoodOption) => void = (_item: A2uiFoodOption) => {};
 
   private foods(): A2uiFoodOption[] {
     return foodOptions(this.surface, this.component);
@@ -305,6 +316,74 @@ export struct FoodChoicesView {
     this.filterMode = action.id === 'food_filter_1km' ? 'within_1km' : 'all';
   }
 
+  private pinNavigationCard(item: A2uiFoodOption): void {
+    if (!canCreateNavigationCardFromFoodOption(item)) {
+      this.foodNavigationStatus = '缺少真实坐标，不能生成导航卡片';
+      aiLogInfo('[AIPhone][NavigationCardPinClick] surface=a2ui_home ok=false reason=missing_coordinate name=' + item.name);
+      return;
+    }
+    aiLogInfo('[AIPhone][NavigationCardPinClick] surface=a2ui_home ok=true name=' + item.name +
+      ' location=' + this.locationText(item));
+    this.saveNavigationCard(item);
+  }
+
+  private navigationCardStore(): PreferencesNavigationCardSnapshotStore {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    return new PreferencesNavigationCardSnapshotStore(context);
+  }
+
+  private async refreshNavigationCardForms(snapshot: NavigationCardSnapshot): Promise<void> {
+    const store = this.navigationCardStore();
+    const formIds = await store.getFormIds();
+    if (formIds.length === 0) {
+      aiLogInfo('[AIPhone][NavigationCardRefresh] surface=a2ui_home noForms title=' + snapshot.title);
+      return;
+    }
+    const binding = formBindingData.createFormBindingData(buildNavigationCardBindingData(snapshot, Date.now()));
+    for (let index = 0; index < formIds.length; index++) {
+      const formId = formIds[index];
+      try {
+        await formProvider.updateForm(formId, binding);
+        aiLogInfo('[AIPhone][NavigationCardRefresh] surface=a2ui_home formId=' + formId + ' ok=true');
+      } catch (error) {
+        const businessError = error as BusinessError;
+        aiLogError('[AIPhone][NavigationCardRefresh] surface=a2ui_home formId=' + formId +
+          ' ok=false code=' + (businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString()) +
+          ' message=' + businessError.message);
+      }
+    }
+  }
+
+  private async saveNavigationCard(item: A2uiFoodOption): Promise<void> {
+    const now = Date.now();
+    const result = navigationCardSnapshotFromFoodOption(item, {
+      surfaceId: this.surface.surfaceId,
+      toolId: 'food.search',
+      updatedAt: now,
+      expiresAt: now + FOOD_NAVIGATION_CARD_TTL_MS
+    });
+    if (!result.ok || result.snapshot === undefined) {
+      this.foodNavigationStatus = result.error;
+      aiLogError('[AIPhone][NavigationCardPin] surface=a2ui_home ok=false reason=' + result.error);
+      return;
+    }
+    try {
+      const store = this.navigationCardStore();
+      await store.saveSnapshot(result.snapshot);
+      await this.refreshNavigationCardForms(result.snapshot);
+      this.foodNavigationStatus = '已固定为桌面导航卡片：' + result.snapshot.title;
+      aiLogInfo('[AIPhone][NavigationCardPin] surface=a2ui_home ok=true title=' + result.snapshot.title +
+        ' sourceTags=' + result.snapshot.sourceTags.join('/') +
+        ' mapUriChars=' + result.snapshot.mapUri.length.toString());
+      this.onPinNavigationCard(item);
+    } catch (error) {
+      const businessError = error as BusinessError;
+      const message = businessError.message === undefined || businessError.message === null ? JSON.stringify(error) : businessError.message;
+      this.foodNavigationStatus = '导航卡片保存失败：' + message;
+      aiLogError('[AIPhone][NavigationCardPin] surface=a2ui_home ok=false reason=save_failed message=' + message);
+    }
+  }
+
   @Builder
   private DetailRow(label: string, value: string) {
     Row() {
@@ -361,6 +440,19 @@ export struct FoodChoicesView {
         .margin({ top: 10 })
         .onClick(() => {
           this.openFoodNavigation(item);
+        })
+      Button(navigationCardPinActionFromFoodOption(item).label.length > 0 ? navigationCardPinActionFromFoodOption(item).label : '不能固定为卡片')
+        .enabled(canCreateNavigationCardFromFoodOption(item) && !this.isBusy)
+        .height(38)
+        .width('100%')
+        .fontSize(13)
+        .fontColor(canCreateNavigationCardFromFoodOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+        .backgroundColor(COLOR_CARD_INSET)
+        .borderRadius(10)
+        .border({ width: 1, color: canCreateNavigationCardFromFoodOption(item) ? COLOR_ACCENT : COLOR_CARD_EDGE })
+        .margin({ top: 8 })
+        .onClick(() => {
+          this.pinNavigationCard(item);
         })
     }
     .width('100%')
