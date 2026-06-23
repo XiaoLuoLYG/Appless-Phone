@@ -13,6 +13,7 @@ export default function socialBridgeTest() {
   describe('socialBridge', () => {
     it('keeps only real captured social messages and deduplicates repeats', 0, () => {
       const store = new SocialMessageStore(24 * 60 * 60 * 1000, 3);
+      const nowIso = '2026-06-11T08:31:00.000Z';
       const first = store.ingest({
         platform: 'wechat',
         conversationTitle: 'Alice',
@@ -20,7 +21,7 @@ export default function socialBridgeTest() {
         preview: '晚上一起吃饭吗',
         receivedAt: '2026-06-11T08:30:00.000Z',
         source: 'notification'
-      });
+      }, nowIso);
       const duplicate = store.ingest({
         platform: 'wechat',
         conversationTitle: 'Alice',
@@ -28,7 +29,7 @@ export default function socialBridgeTest() {
         preview: '晚上一起吃饭吗',
         receivedAt: '2026-06-11T08:30:20.000Z',
         source: 'notification'
-      });
+      }, nowIso);
 
       expect(first.accepted).assertTrue();
       expect(duplicate.accepted).assertFalse();

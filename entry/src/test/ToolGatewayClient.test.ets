@@ -128,6 +128,17 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('social.reply.send')).assertTrue();
     });
 
+    it('allows only explicit dynamic catalog aliases to enter the local tool host', 0, () => {
+      expect(isRegisteredToolId('travel.search')).assertTrue();
+      expect(isRegisteredToolId('dynamic.search')).assertTrue();
+      expect(isRegisteredToolId('weather.query')).assertTrue();
+      expect(isRegisteredToolId('maps.weather')).assertTrue();
+      expect(isRegisteredToolId('statistics.search')).assertTrue();
+      expect(isRegisteredToolId('ppt.generate')).assertTrue();
+      expect(isRegisteredToolId('weather.search')).assertFalse();
+      expect(isRegisteredToolId('ferry.ticket.search')).assertFalse();
+    });
+
     it('keeps brand MCP adapters query-only', 0, () => {
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-nearby-stores')).assertTrue();
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-meals')).assertTrue();

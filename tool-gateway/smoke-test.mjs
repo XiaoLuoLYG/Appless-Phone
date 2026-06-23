@@ -273,6 +273,63 @@ function matchesAllowedProviderError(testCase, result) {
   return result.httpStatus >= 200 && result.httpStatus < 300 && result.parseErrors.length === 0;
 }
 
+async function smokeDynamicMcpFixture() {
+  const fixtureEndpoint = process.env.DYNAMIC_MCP_FIXTURE_URL || 'http://127.0.0.1:8799/mcp';
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+    'MCP-Protocol-Version': '2025-06-18'
+  };
+  const init = await fetch(fixtureEndpoint, {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'aiphone-smoke', version: '0.1' }
+      }
+    }),
+    signal: AbortSignal.timeout(5000)
+  });
+  const initPayload = await init.json();
+  if (!init.ok || !initPayload.result) {
+    throw new Error('dynamic MCP fixture initialize failed');
+  }
+  const listed = await fetch(fixtureEndpoint, {
+    method: 'POST',
+    headers: {
+      ...baseHeaders,
+      'Mcp-Session-Id': init.headers.get('mcp-session-id') || ''
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    signal: AbortSignal.timeout(5000)
+  });
+  const listPayload = await listed.json();
+  if (!listed.ok || !Array.isArray(listPayload.result?.tools) || !listPayload.result.tools.some(tool => tool.name === 'echo')) {
+    throw new Error('dynamic MCP fixture tools/list failed');
+  }
+  const called = await fetch(fixtureEndpoint, {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'echo', arguments: { query: 'hello' } }
+    }),
+    signal: AbortSignal.timeout(5000)
+  });
+  const callPayload = await called.json();
+  if (!called.ok || !JSON.stringify(callPayload).includes('fixture echo: hello')) {
+    throw new Error('dynamic MCP fixture tools/call failed');
+  }
+  console.log('PASS host/dynamic-mcp-fixture initialize tools/list tools/call');
+}
+
 function fileSizeIfExists(filePath) {
   try {
     return fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
@@ -389,6 +446,8 @@ async function main() {
       result.failures.forEach(failure => console.log(`  - ${failure}`));
     }
   }
+
+  await smokeDynamicMcpFixture();
 
   const afterLogs = useDevice ? captureHilog(target, 'after') : '';
   const gatewayErrText = readTextFromOffset(gatewayErr, gatewayErrOffset);

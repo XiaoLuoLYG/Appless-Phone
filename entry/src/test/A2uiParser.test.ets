@@ -1,7 +1,18 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '../main/ets/model/A2uiParser';
 import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
-import { componentById, foodOptions, labelValues, socialMessages, socialReplies, toolRequest, trainOptions, travelOptions } from '../main/ets/model/A2uiData';
+import {
+  componentById,
+  dynamicToolConnect,
+  foodOptions,
+  genericToolResults,
+  labelValues,
+  socialMessages,
+  socialReplies,
+  toolRequest,
+  trainOptions,
+  travelOptions
+} from '../main/ets/model/A2uiData';
 import {
   appendThinkingStream,
   extractA2uiJsonlFromModelChunk,
@@ -120,6 +131,27 @@ export default function a2uiParserTest() {
       expect(request.toolId).assertEqual('train.search');
       expect(request.prompt).assertEqual('查高铁');
       expect(request.actionId).assertEqual('model_tool_request');
+    });
+
+    it('accepts dynamic tool components and stores dynamic tool data', 0, () => {
+      const stream =
+        '{"version":"v0.9.1","createSurface":{"surfaceId":"dynamic","root":"root","title":"动态工具","intent":"dynamic_tool","status":"ready"}}\n' +
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"dynamic","components":[{"id":"root","component":"SurfaceRoot","children":["connect","results"],"title":"动态工具","status":"ready"},{"id":"connect","component":"ToolConnectCard","title":"Amap Maps","dataPath":"/dynamicToolConnect","status":"needs_auth"},{"id":"results","component":"GenericToolResults","title":"工具结果","dataPath":"/genericToolResults","status":"ready"}]}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic","path":"/dynamicToolConnect","value":{"toolId":"maps.weather","manifestId":"modelscope.@amap.amap-maps","displayName":"Amap Maps","sourceUrl":"https://modelscope.cn/mcp/servers/%40amap/amap-maps","status":"needs_auth","message":"API key required","credentialName":"AMAP_MAPS_API_KEY","credentialRef":"dynamic:modelscope.@amap.amap-maps:AMAP_MAPS_API_KEY","registrationUrl":"https://lbs.amap.com/","actions":[]}}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic","path":"/genericToolResults","value":[{"sourceTag":"MCP · fixture","toolName":"fixture.search","title":"Fixture result","status":"success","summary":"One real fixture row returned.","rows":[{"label":"Result","value":"Fixture row"}],"rawPreview":"{\\"ok\\":true}"}]}}\n';
+      const parsed = parseA2uiJsonl(stream);
+      const store = new A2uiSurfaceStore();
+
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+
+      const surface = store.getSurface();
+      expect(parsed.error).assertEqual('');
+      expect(componentById(surface, 'connect')?.component).assertEqual('ToolConnectCard');
+      expect(componentById(surface, 'results')?.component).assertEqual('GenericToolResults');
+      expect(dynamicToolConnect(surface).credentialName).assertEqual('AMAP_MAPS_API_KEY');
+      expect(genericToolResults(surface)[0].rows[0].value).assertEqual('Fixture row');
     });
 
     it('accepts SocialInbox messages and reply state without falling back to rows', 0, () => {
