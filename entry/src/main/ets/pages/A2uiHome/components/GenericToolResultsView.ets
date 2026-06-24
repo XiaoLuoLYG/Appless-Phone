@@ -9,11 +9,14 @@ import {
 import { actionsOf, genericToolResults } from '../../../model/A2uiData';
 import {
   COLOR_ACCENT,
+  COLOR_ACCENT_DARK,
   COLOR_ACCENT_SOFT,
   COLOR_CARD,
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
+  COLOR_CARD_INSET,
   COLOR_CARD_RAISED,
+  COLOR_FIELD,
   COLOR_INK,
   COLOR_LINE,
   COLOR_MUTED,
@@ -31,6 +34,7 @@ export struct GenericToolResultsView {
   @Prop component: A2uiComponent = { id: '', component: 'GenericToolResults' };
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
+  @State selectedGmailKey: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   private results(): A2uiGenericToolResultData[] {
@@ -52,6 +56,26 @@ export struct GenericToolResultsView {
     return item.toolName === 'maps_weather' || item.title.indexOf('天气') >= 0;
   }
 
+  private isGmailResult(item: A2uiGenericToolResultData): boolean {
+    return item.sourceTag === 'Gmail API' ||
+      item.toolName.indexOf('users.threads') === 0 ||
+      item.toolName.indexOf('users.drafts') === 0;
+  }
+
+  private isGmailResults(): boolean {
+    const rows = this.results();
+    for (let index = 0; index < rows.length; index++) {
+      if (this.isGmailResult(rows[index])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isGmailDraft(item: A2uiGenericToolResultData): boolean {
+    return item.toolName.indexOf('users.drafts') === 0 || item.title.indexOf('草稿') >= 0;
+  }
+
   private rowValue(item: A2uiGenericToolResultData, label: string): string {
     for (let index = 0; index < item.rows.length; index++) {
       if (item.rows[index].label === label) {
@@ -59,6 +83,138 @@ export struct GenericToolResultsView {
       }
     }
     return '';
+  }
+
+  private cleanSender(value: string): string {
+    const angle = value.indexOf('<');
+    const raw = angle > 0 ? value.substring(0, angle) : value;
+    const cleaned = raw.split('"').join('').trim();
+    if (cleaned.length > 0) {
+      return cleaned;
+    }
+    const at = value.indexOf('@');
+    if (at > 0) {
+      return value.substring(0, at).split('<').join('').trim();
+    }
+    return value.trim();
+  }
+
+  private gmailPrimary(item: A2uiGenericToolResultData): string {
+    if (this.isGmailDraft(item)) {
+      const to = this.rowValue(item, 'To');
+      return to.length > 0 ? to : 'Draft';
+    }
+    const from = this.cleanSender(this.rowValue(item, 'From'));
+    return from.length > 0 ? from : 'Unknown sender';
+  }
+
+  private gmailAvatar(item: A2uiGenericToolResultData): string {
+    const primary = this.gmailPrimary(item).trim();
+    if (primary.length === 0) {
+      return 'G';
+    }
+    return primary.substring(0, 1).toUpperCase();
+  }
+
+  private gmailRowKey(item: A2uiGenericToolResultData, index: number): string {
+    const id = this.rowValue(item, 'Thread ID').length > 0 ? this.rowValue(item, 'Thread ID') : this.rowValue(item, 'Draft ID');
+    return id.length > 0 ? id : item.toolName + '|' + item.title + '|' + index.toString();
+  }
+
+  private gmailSelected(item: A2uiGenericToolResultData, index: number): boolean {
+    return this.selectedGmailKey === this.gmailRowKey(item, index);
+  }
+
+  private gmailSubject(item: A2uiGenericToolResultData): string {
+    if (this.isGmailDraft(item)) {
+      const subject = this.rowValue(item, 'Subject');
+      return subject.length > 0 ? subject : item.title;
+    }
+    return this.titleOf(item);
+  }
+
+  private gmailDate(item: A2uiGenericToolResultData): string {
+    const date = this.rowValue(item, 'Date');
+    if (date.length === 0) {
+      return this.isGmailDraft(item) ? 'Draft' : '';
+    }
+    const parts = date.split(' ');
+    if (parts.length >= 3 && parts[0].indexOf(',') >= 0) {
+      return parts[1] + ' ' + parts[2];
+    }
+    return date.length > 18 ? date.substring(0, 18) : date;
+  }
+
+  private gmailLabelText(value: string): string {
+    const label = value.trim();
+    if (label === 'IMPORTANT') {
+      return 'Important';
+    }
+    if (label === 'INBOX') {
+      return 'Inbox';
+    }
+    if (label === 'UNREAD') {
+      return 'Unread';
+    }
+    if (label === 'CATEGORY_PROMOTIONS') {
+      return 'Promotions';
+    }
+    if (label === 'CATEGORY_PERSONAL') {
+      return 'Personal';
+    }
+    if (label === 'SENT') {
+      return 'Sent';
+    }
+    return '';
+  }
+
+  private gmailLabels(item: A2uiGenericToolResultData): string[] {
+    const labels: string[] = [];
+    if (this.isGmailDraft(item)) {
+      labels.push('Draft');
+      return labels;
+    }
+    const raw = this.rowValue(item, 'Labels');
+    if (raw.length === 0) {
+      return labels;
+    }
+    const pieces = raw.split(',');
+    for (let index = 0; index < pieces.length && labels.length < 3; index++) {
+      const label = this.gmailLabelText(pieces[index]);
+      if (label.length > 0) {
+        labels.push(label);
+      }
+    }
+    return labels;
+  }
+
+  private gmailDetailRows(item: A2uiGenericToolResultData): A2uiGenericToolResultRowData[] {
+    const rows: A2uiGenericToolResultRowData[] = [];
+    item.rows.forEach((row: A2uiGenericToolResultRowData) => {
+      if (row.label === 'Labels' || row.label === 'Messages') {
+        return;
+      }
+      rows.push(row);
+    });
+    return rows;
+  }
+
+  private gmailHeaderTitle(): string {
+    const rows = this.results();
+    for (let index = 0; index < rows.length; index++) {
+      if (this.isGmailDraft(rows[index])) {
+        return 'Draft saved';
+      }
+    }
+    return 'Inbox';
+  }
+
+  private gmailHeaderMeta(): string {
+    const count = this.results().length;
+    if (this.gmailHeaderTitle() === 'Draft saved') {
+      return 'Saved in Gmail. Not sent.';
+    }
+    return count.toString() + (count === 1 ? ' message' : ' messages');
   }
 
   private firstRowValue(item: A2uiGenericToolResultData, labels: string[]): string {
@@ -97,6 +253,170 @@ export struct GenericToolResultsView {
             .fontSize(13)
             .fontColor(COLOR_MUTED)
             .margin({ top: 12 })
+        } else if (this.isGmailResults()) {
+          Row() {
+            Column() {
+              Text(this.gmailHeaderTitle())
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_INK)
+              Text(this.gmailHeaderMeta())
+                .fontSize(12)
+                .fontColor(COLOR_MUTED)
+                .margin({ top: 3 })
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+
+            Text('G')
+              .fontSize(13)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#F6FAF8')
+              .width(28)
+              .height(28)
+              .textAlign(TextAlign.Center)
+              .backgroundColor('#C94E43')
+              .borderRadius(7)
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .margin({ top: 14 })
+
+          Column() {
+            ForEach(this.results(), (item: A2uiGenericToolResultData, index: number) => {
+              Row() {
+                Text(this.gmailAvatar(item))
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(COLOR_INK)
+                  .width(34)
+                  .height(34)
+                  .textAlign(TextAlign.Center)
+                  .backgroundColor(this.isGmailDraft(item) ? COLOR_ACCENT_SOFT : COLOR_CARD)
+                  .borderRadius(9)
+                  .border({ width: 1, color: this.isGmailDraft(item) ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                  .margin({ right: 12 })
+
+                Column() {
+                  Row() {
+                    Text(this.gmailPrimary(item))
+                      .fontSize(13)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(COLOR_INK)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+
+                    Text(this.gmailDate(item))
+                      .fontSize(11)
+                      .fontColor(COLOR_MUTED)
+                      .margin({ left: 10 })
+                  }
+                  .width('100%')
+                  .alignItems(VerticalAlign.Center)
+
+                  Text(this.gmailSubject(item))
+                    .fontSize(14)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(COLOR_TEXT)
+                    .width('100%')
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .margin({ top: 3 })
+
+                  Text(item.summary)
+                    .fontSize(12)
+                    .fontColor(COLOR_MUTED)
+                    .lineHeight(18)
+                    .width('100%')
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .margin({ top: 3 })
+
+                  if (this.gmailLabels(item).length > 0) {
+                    Row() {
+                      ForEach(this.gmailLabels(item), (label: string) => {
+                        Text(label)
+                          .fontSize(10)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(label === 'Important' ? '#F3C26B' : COLOR_MUTED)
+                          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                          .backgroundColor(label === 'Important' ? '#332813' : COLOR_FIELD)
+                          .borderRadius(6)
+                          .border({ width: 1, color: label === 'Important' ? '#7C6128' : COLOR_LINE })
+                          .margin({ right: 6 })
+                      }, (label: string, labelIndex: number) => label + labelIndex.toString())
+                    }
+                    .width('100%')
+                    .margin({ top: 9 })
+                  }
+
+                  if (this.gmailSelected(item, index)) {
+                    Column() {
+                      Row() {
+                        Text('Selected')
+                          .fontSize(10)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor(COLOR_ACCENT_DARK)
+                          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+                          .backgroundColor(COLOR_ACCENT_SOFT)
+                          .borderRadius(6)
+                          .border({ width: 1, color: COLOR_ACCENT })
+                      }
+                      .width('100%')
+
+                      ForEach(this.gmailDetailRows(item), (row: A2uiGenericToolResultRowData) => {
+                        Row() {
+                          Text(row.label)
+                            .fontSize(11)
+                            .fontColor(COLOR_MUTED)
+                            .width(74)
+                          Text(row.value)
+                            .fontSize(12)
+                            .fontColor(COLOR_TEXT)
+                            .lineHeight(18)
+                            .maxLines(2)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                            .layoutWeight(1)
+                        }
+                        .width('100%')
+                        .alignItems(VerticalAlign.Top)
+                        .margin({ top: 8 })
+                      }, (row: A2uiGenericToolResultRowData, rowIndex: number) => row.label + row.value + rowIndex.toString())
+                    }
+                    .width('100%')
+                    .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+                    .margin({ top: 10 })
+                    .backgroundColor(COLOR_FIELD)
+                    .borderRadius(10)
+                    .border({ width: 1, color: COLOR_LINE })
+                  }
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Top)
+              .padding({ left: 12, right: 12, top: 13, bottom: 13 })
+              .backgroundColor(this.gmailSelected(item, index) ? COLOR_CARD_RAISED : (index === 0 ? COLOR_CARD : COLOR_CARD_INSET))
+              .borderRadius(this.gmailSelected(item, index) || index === 0 ? 12 : 0)
+              .border({
+                width: this.gmailSelected(item, index) ? 1 : { bottom: index === this.results().length - 1 ? 0 : 1 },
+                color: this.gmailSelected(item, index) ? COLOR_ACCENT : COLOR_LINE
+              })
+              .transition(a2uiEnterTransition())
+              .onClick(() => {
+                const key = this.gmailRowKey(item, index);
+                this.selectedGmailKey = this.selectedGmailKey === key ? '' : key;
+              })
+            }, (item: A2uiGenericToolResultData, index: number) => item.toolName + item.title + index.toString() + '-' + this.renderTick.toString())
+          }
+          .width('100%')
+          .margin({ top: 12 })
+          .clip(true)
+          .backgroundColor(COLOR_CARD_INSET)
+          .borderRadius(14)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
         } else {
           ForEach(this.results(), (item: A2uiGenericToolResultData, index: number) => {
             Column() {

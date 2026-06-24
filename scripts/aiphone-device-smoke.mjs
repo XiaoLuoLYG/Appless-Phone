@@ -105,6 +105,10 @@ const finalLayoutBlockingMarkers = [
   '需要供应商配置',
   '需要配置：',
   '查询失败',
+  'Gmail API 调用失败',
+  'Gmail MCP 调用失败',
+  'Internal error',
+  '2300999',
   'Bad Request',
   '暂无可展示数据',
   '暂不支持的组件',
@@ -662,10 +666,10 @@ function layoutExpectationsForQuery(query) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
-    return ['Gmail Draft Preview', 'Gmail 草稿已创建', 'Draft ID'];
+    return ['Draft saved', 'Saved in Gmail', 'Draft'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
-    return ['Gmail API', 'Thread ID', '没有找到匹配邮件'];
+    return ['Inbox', 'Important', '没有找到匹配邮件'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];

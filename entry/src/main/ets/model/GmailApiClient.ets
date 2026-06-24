@@ -82,6 +82,16 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
   return JSON.stringify(value);
 }
 
+function decodeGmailText(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'");
+}
+
 function responseText(result: Object | string | number | boolean | ArrayBuffer): string {
   if (typeof result === 'string') {
     return result;
@@ -123,16 +133,18 @@ async function requestJson(
   const request = http.createHttp();
   try {
     const headers = bearerHeaders(accessToken);
-    if (body !== null) {
-      headers['Content-Type'] = 'application/json';
-    }
-    const response = await request.request(url, {
+    const options: http.HttpRequestOptions = {
       method: method,
       header: headers,
-      extraData: body === null ? '' : JSON.stringify(body),
+      usingProtocol: http.HttpProtocol.HTTP1_1,
       connectTimeout: 10000,
       readTimeout: 20000
-    });
+    };
+    if (body !== null) {
+      headers['Content-Type'] = 'application/json';
+      options.extraData = JSON.stringify(body);
+    }
+    const response = await request.request(url, options);
     const text = responseText(response.result);
     const payload = text.length > 0 ? JSON.parse(text) as Object : new Object();
     if (response.responseCode < 200 || response.responseCode >= 300) {
@@ -209,10 +221,10 @@ function messageCount(thread: GmailThread): number {
 function threadResult(thread: GmailThread): DynamicGenericToolResult {
   const newest = lastMessage(thread);
   const first = firstMessage(thread);
-  const subject = firstHeader(first, 'Subject').length > 0 ? firstHeader(first, 'Subject') : '(no subject)';
-  const from = firstHeader(newest, 'From');
-  const date = firstHeader(newest, 'Date');
-  const snippet = textOf(newest.snippet).length > 0 ? textOf(newest.snippet) : textOf(first.snippet);
+  const subject = firstHeader(first, 'Subject').length > 0 ? decodeGmailText(firstHeader(first, 'Subject')) : '(no subject)';
+  const from = decodeGmailText(firstHeader(newest, 'From'));
+  const date = decodeGmailText(firstHeader(newest, 'Date'));
+  const snippet = decodeGmailText(textOf(newest.snippet).length > 0 ? textOf(newest.snippet) : textOf(first.snippet));
   const rows: A2uiLabelValueData[] = [
     { label: 'From', value: from.length > 0 ? from : 'Unknown sender' },
     { label: 'Date', value: date.length > 0 ? date : textOf(newest.internalDate) },
