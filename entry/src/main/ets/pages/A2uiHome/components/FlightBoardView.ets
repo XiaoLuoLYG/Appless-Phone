@@ -160,7 +160,7 @@ export struct FlightBoardView {
         .fontColor(COLOR_MUTED)
         .lineHeight(18)
         .margin({ top: 8 })
-      Button(canCreateNavigationCardFromFlightOption(item) ? '固定为导航卡片' : '缺少机场，不能固定')
+      Button(canCreateNavigationCardFromFlightOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
         .enabled(canCreateNavigationCardFromFlightOption(item) && !this.isBusy)
         .height(38)
         .width('100%')

@@ -19,6 +19,7 @@ import {
   navigationCardSnapshotFromFoodOption,
   navigationCardSnapshotFromTrainOption,
   navigationCardSnapshotFromTravelOption,
+  resolveNavigationCardMapUri,
   sanitizeNavigationCardSourceTags
 } from '../main/ets/model/NavigationCardSnapshot';
 
@@ -225,9 +226,10 @@ export default function navigationCardSnapshotTest() {
         expect(result.snapshot.title).assertEqual('G79');
         expect(result.snapshot.routeText).assertEqual('北京南 → 上海虹桥');
         expect(result.snapshot.targetName).assertEqual('北京南站');
+        expect(result.snapshot.location).assertEqual('116.37639,39.86583');
         expect(result.snapshot.departureTime).assertEqual('10:00');
         expect(result.snapshot.serviceText).assertEqual('高铁 · 12306');
-        expect(result.snapshot.mapUri.indexOf('petalmaps://navigation?daddr=')).assertEqual(0);
+        expect(result.snapshot.mapUri).assertEqual('petalmaps://poidetail?center=39.86583,116.37639&z=16&marker=39.86583,116.37639&name=%E5%8C%97%E4%BA%AC%E5%8D%97%E7%AB%99&utm_source=com.example.aiphonedemo');
       }
     });
 
@@ -245,10 +247,11 @@ export default function navigationCardSnapshotTest() {
         expect(result.snapshot.cardStyle).assertEqual('travel');
         expect(result.snapshot.transport).assertEqual('train');
         expect(result.snapshot.sourceTags.join('/')).assertEqual('高铁 · 12306');
+        expect(result.snapshot.mapUri).assertEqual('petalmaps://poidetail?center=39.86583,116.37639&z=16&marker=39.86583,116.37639&name=%E5%8C%97%E4%BA%AC%E5%8D%97%E7%AB%99&utm_source=com.example.aiphonedemo');
       }
     });
 
-    it('creates flight departure cards only when a real airport name is present', 0, () => {
+    it('creates flight departure cards only when a real airport coordinate is present', 0, () => {
       const readyFlight = navigationCardSnapshotFromFlightOption(flightOptionWithAirport(), {
         surfaceId: 'surface_flight',
         toolId: 'flight.search',
@@ -261,7 +264,9 @@ export default function navigationCardSnapshotTest() {
         expect(readyFlight.snapshot.cardStyle).assertEqual('travel');
         expect(readyFlight.snapshot.transport).assertEqual('flight');
         expect(readyFlight.snapshot.targetName).assertEqual('北京首都机场');
+        expect(readyFlight.snapshot.location).assertEqual('116.58444,40.08000');
         expect(readyFlight.snapshot.departureTime).assertEqual('2026-06-25 08:30:00');
+        expect(readyFlight.snapshot.mapUri).assertEqual('petalmaps://poidetail?center=40.08000,116.58444&z=16&marker=40.08000,116.58444&name=%E5%8C%97%E4%BA%AC%E9%A6%96%E9%83%BD%E6%9C%BA%E5%9C%BA&utm_source=com.example.aiphonedemo');
       }
 
       const codeOnly = flightOptionWithAirport();
@@ -273,8 +278,23 @@ export default function navigationCardSnapshotTest() {
         expiresAt: 1770003600000
       });
       expect(rejected.ok).assertFalse();
-      expect(rejected.error).assertEqual('缺少真实出发站或机场，不能生成出行卡片');
+      expect(rejected.error).assertEqual('缺少真实出发站或机场坐标，不能生成出行卡片');
       expect(canCreateNavigationCardFromFlightOption(codeOnly)).assertFalse();
+    });
+
+    it('rejects train departure cards when the departure station has no real coordinate', 0, () => {
+      const item = trainOption();
+      item.from = '不存在枢纽';
+      const result = navigationCardSnapshotFromTrainOption(item, {
+        surfaceId: 'surface_train',
+        toolId: 'train.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+
+      expect(result.ok).assertFalse();
+      expect(result.error).assertEqual('缺少真实出发站或机场坐标，不能生成出行卡片');
+      expect(canCreateNavigationCardFromTrainOption(item)).assertFalse();
     });
 
     it('maps travel snapshot fields to form binding data', 0, () => {
@@ -293,8 +313,25 @@ export default function navigationCardSnapshotTest() {
         expect(binding.targetName).assertEqual('北京南站');
         expect(binding.departureTime).assertEqual('10:00');
         expect(binding.sourceText).assertEqual('');
+        expect(binding.destinationUri).assertEqual('petalmaps://poidetail?center=39.86583,116.37639&z=16&marker=39.86583,116.37639&name=%E5%8C%97%E4%BA%AC%E5%8D%97%E7%AB%99&utm_source=com.example.aiphonedemo');
         expect(binding.primaryAction).assertEqual('open_map');
       }
+    });
+
+    it('upgrades legacy travel map links to coordinate-backed POI links for existing desktop cards', 0, () => {
+      const legacy: NavigationCardSnapshot = readySnapshot();
+      legacy.cardStyle = 'travel';
+      legacy.transport = 'train';
+      legacy.title = 'G79';
+      legacy.address = '北京南站';
+      legacy.location = '北京南站';
+      legacy.targetName = '北京南站';
+      legacy.mapUri = 'petalmaps://navigation?daddr=%E5%8C%97%E4%BA%AC%E5%8D%97%E7%AB%99&language=zh&type=drive&utm_source=com.example.aiphonedemo';
+
+      const binding = buildNavigationCardBindingData(legacy, 1770000100000);
+      const expected = 'petalmaps://poidetail?center=39.86583,116.37639&z=16&marker=39.86583,116.37639&name=%E5%8C%97%E4%BA%AC%E5%8D%97%E7%AB%99&utm_source=com.example.aiphonedemo';
+      expect(binding.destinationUri).assertEqual(expected);
+      expect(resolveNavigationCardMapUri('travel', 'train', '北京南站', '北京南站', legacy.mapUri)).assertEqual(expected);
     });
 
     it('stores one current snapshot and registered form ids in memory tests', 0, async () => {

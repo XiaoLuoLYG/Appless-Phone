@@ -1,4 +1,4 @@
-import { buildSystemFoodNavigationUri } from '../../model/FoodNavigation';
+import { resolveNavigationCardMapUri } from '../../model/NavigationCardSnapshot';
 
 let storage = LocalStorage.getShared();
 
@@ -51,13 +51,8 @@ struct NavigationCard {
   }
 
   private resolvedMapUri(): string {
-    if (this.destinationUri.length > 0) {
-      return this.destinationUri;
-    }
-    if (this.mapUri.length > 0) {
-      return this.mapUri;
-    }
-    return buildSystemFoodNavigationUri(this.location, '', this.title);
+    const storedUri = this.destinationUri.length > 0 ? this.destinationUri : this.mapUri;
+    return resolveNavigationCardMapUri(this.cardStyle, this.transport, this.location, this.targetName, storedUri);
   }
 
   private effectiveStatus(): string {

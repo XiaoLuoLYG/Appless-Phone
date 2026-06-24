@@ -1,5 +1,5 @@
 import { A2uiAction, A2uiFlightData, A2uiFoodData, A2uiTrainData, A2uiTravelOptionData } from './A2uiTypes';
-import { buildSystemFoodNavigationUri, buildSystemPlaceNavigationUri } from './FoodNavigation';
+import { buildSystemFoodNavigationUri } from './FoodNavigation';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
@@ -88,12 +88,28 @@ interface LooseNavigationCardEvent {
   event?: string;
 }
 
+interface TravelHubLocation {
+  name: string;
+  location: string;
+  aliases: string[];
+}
+
 const NAVIGATION_CARD_SOURCE_TAG_LIMIT: number = 4;
 const NAVIGATION_CARD_MISSING_COORDINATE: string = '缺少真实坐标，不能生成导航卡片';
-const NAVIGATION_CARD_MISSING_TRAVEL_TARGET: string = '缺少真实出发站或机场，不能生成出行卡片';
+const NAVIGATION_CARD_MISSING_TRAVEL_TARGET_COORDINATE: string = '缺少真实出发站或机场坐标，不能生成出行卡片';
 const NAVIGATION_CARD_STORE: string = 'navigation_card_snapshot_store';
 const NAVIGATION_CARD_SNAPSHOT_KEY: string = 'current_snapshot';
 const NAVIGATION_CARD_FORM_IDS_KEY: string = 'form_ids';
+const TRAIN_HUB_LOCATIONS: TravelHubLocation[] = [
+  { name: '北京南站', location: '116.37639,39.86583', aliases: ['北京南'] },
+  { name: '上海虹桥站', location: '121.32760,31.20033', aliases: ['上海虹桥'] },
+  { name: '深圳北站', location: '114.029506,22.609878', aliases: ['深圳北'] }
+];
+const FLIGHT_HUB_LOCATIONS: TravelHubLocation[] = [
+  { name: '北京首都机场', location: '116.58444,40.08000', aliases: ['北京首都国际机场'] },
+  { name: '上海虹桥机场', location: '121.33632,31.19788', aliases: ['上海虹桥国际机场'] },
+  { name: '深圳宝安机场', location: '113.810664,22.639258', aliases: ['深圳宝安国际机场'] }
+];
 
 function cleanText(value: string | undefined): string {
   if (value === undefined || value === null) {
@@ -186,6 +202,68 @@ function normalizeFlightHub(value: string): string {
   return '';
 }
 
+function cleanDirectLocation(value: string | undefined): string {
+  const location = cleanText(value);
+  if (location.length > 0 && buildSystemFoodNavigationUri(location, '', '目的地').length > 0) {
+    return location;
+  }
+  return '';
+}
+
+function normalizeTravelHubLookupText(value: string): string {
+  return cleanText(value)
+    .replace(/[\s　]/g, '')
+    .replace(/国际机场/g, '机场');
+}
+
+function travelHubMatches(hub: TravelHubLocation, target: string): boolean {
+  const normalizedTarget = normalizeTravelHubLookupText(target);
+  if (normalizedTarget.length === 0) {
+    return false;
+  }
+  if (normalizeTravelHubLookupText(hub.name) === normalizedTarget) {
+    return true;
+  }
+  let matched = false;
+  hub.aliases.forEach((alias: string) => {
+    if (normalizeTravelHubLookupText(alias) === normalizedTarget) {
+      matched = true;
+    }
+  });
+  return matched;
+}
+
+function resolveTravelHubLocation(transport: string, targetName: string): TravelHubLocation | null {
+  const hubs = transport === 'flight' ? FLIGHT_HUB_LOCATIONS : TRAIN_HUB_LOCATIONS;
+  let matched: TravelHubLocation | null = null;
+  hubs.forEach((hub: TravelHubLocation) => {
+    if (matched === null && travelHubMatches(hub, targetName)) {
+      matched = hub;
+    }
+  });
+  return matched;
+}
+
+export function resolveNavigationCardMapUri(cardStyle: string, transport: string, location: string,
+  targetName: string, mapUri: string): string {
+  if (cardStyle !== 'travel') {
+    return cleanText(mapUri).length > 0 ? cleanText(mapUri) : buildSystemFoodNavigationUri(location, '', targetName);
+  }
+  const target = cleanText(targetName).length > 0 ? cleanText(targetName) : cleanText(location);
+  const directLocation = cleanDirectLocation(location);
+  if (directLocation.length > 0) {
+    const directUri = buildSystemFoodNavigationUri(directLocation, '', target);
+    if (directUri.length > 0) {
+      return directUri;
+    }
+  }
+  const resolvedHub = resolveTravelHubLocation(transport, target);
+  if (resolvedHub !== null) {
+    return buildSystemFoodNavigationUri(resolvedHub.location, '', resolvedHub.name);
+  }
+  return cleanText(mapUri);
+}
+
 function buildTravelSourceTags(sourceTag: string): string[] {
   const tag = cleanText(sourceTag);
   if (tag.length > 0) {
@@ -206,18 +284,25 @@ function travelSnapshot(
   title: string,
   routeText: string,
   targetName: string,
+  targetLocation: string | undefined,
   departureTime: string,
   arrivalTime: string,
   serviceText: string,
   sourceTags: string[],
   context: NavigationCardSnapshotContext
 ): NavigationCardSnapshotBuildResult {
-  const target = cleanText(targetName);
-  const mapUri = buildSystemPlaceNavigationUri(target);
-  if (target.length === 0 || mapUri.length === 0) {
+  let target = cleanText(targetName);
+  let location = cleanDirectLocation(targetLocation);
+  const resolvedHub = resolveTravelHubLocation(transport, target);
+  if (location.length === 0 && resolvedHub !== null) {
+    location = resolvedHub.location;
+    target = resolvedHub.name;
+  }
+  const mapUri = buildSystemFoodNavigationUri(location, '', target);
+  if (target.length === 0 || location.length === 0 || mapUri.length === 0) {
     return {
       ok: false,
-      error: NAVIGATION_CARD_MISSING_TRAVEL_TARGET
+      error: NAVIGATION_CARD_MISSING_TRAVEL_TARGET_COORDINATE
     };
   }
   const snapshot: NavigationCardSnapshot = {
@@ -228,7 +313,7 @@ function travelSnapshot(
     title: cleanText(title).length > 0 ? cleanText(title) : (transport === 'flight' ? '航班出发' : '高铁出发'),
     subtitle: cleanText(routeText),
     address: target,
-    location: target,
+    location: location,
     targetName: target,
     departureTime: cleanText(departureTime),
     arrivalTime: cleanText(arrivalTime),
@@ -347,6 +432,7 @@ export function navigationCardSnapshotFromTravelOption(
     cleanText(item.title),
     joinRoute(item.from, item.to),
     target,
+    item.fromLocation,
     item.depart,
     item.arrive,
     service,
@@ -373,6 +459,7 @@ export function navigationCardSnapshotFromTrainOption(
     cleanText(item.trainCode),
     joinRoute(item.from, item.to),
     normalizeTrainHub(item.from),
+    item.fromLocation,
     item.depart,
     item.arrive,
     '高铁 · 12306',
@@ -400,6 +487,7 @@ export function navigationCardSnapshotFromFlightOption(
     title,
     joinRoute(item.dep, item.arr),
     normalizeFlightHub(item.dep),
+    item.depLocation,
     item.depTime,
     item.arrTime,
     '飞机 · 飞常准',
@@ -515,6 +603,8 @@ export function buildNavigationCardBindingData(snapshot: NavigationCardSnapshot 
       secondaryAction: NAVIGATION_CARD_ACTION_REFRESH
     };
   }
+  const readyMapUri = resolveNavigationCardMapUri(snapshot.cardStyle, snapshot.transport, snapshot.location,
+    snapshot.targetName, snapshot.mapUri);
   return {
     kind: CARD_SNAPSHOT_KIND_NAVIGATION_DESTINATION,
     status: 'ready',
@@ -531,8 +621,8 @@ export function buildNavigationCardBindingData(snapshot: NavigationCardSnapshot 
     routeText: snapshot.routeText,
     serviceText: snapshot.serviceText,
     sourceText: bindingSourceText(snapshot),
-    mapUri: snapshot.mapUri,
-    destinationUri: snapshot.mapUri,
+    mapUri: readyMapUri,
+    destinationUri: readyMapUri,
     message: snapshot.address.length > 0 ? snapshot.address : '真实 provider 坐标',
     updatedText: formatUpdatedText(snapshot.updatedAt),
     primaryAction: NAVIGATION_CARD_ACTION_OPEN_MAP,
