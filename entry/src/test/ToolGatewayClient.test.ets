@@ -1,10 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiFoodData, A2uiLabelValueData, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
+import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
+import { genericToolResults, dynamicToolConnect } from '../main/ets/model/A2uiData';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
+  callToolGateway,
   defaultToolGatewayUrl,
   foodA2uiRenderState,
   foodDistanceMeters,
@@ -137,6 +139,58 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('ppt.generate')).assertTrue();
       expect(isRegisteredToolId('weather.search')).assertFalse();
       expect(isRegisteredToolId('ferry.ticket.search')).assertFalse();
+    });
+
+    it('registers Gmail tools on the same local tool framework without enabling silent send', 0, () => {
+      expect(isRegisteredToolId('gmail.mail.search')).assertTrue();
+      expect(isRegisteredToolId('gmail.thread.read')).assertTrue();
+      expect(isRegisteredToolId('gmail.draft.create')).assertTrue();
+      expect(isRegisteredToolId('gmail.draft.apply')).assertTrue();
+      expect(isRegisteredToolId('gmail.open.web')).assertTrue();
+      expect(isRegisteredToolId('gmail.message.send')).assertTrue();
+      expect(isRegisteredToolId('gmail.unknown')).assertFalse();
+    });
+
+    it('returns Gmail auth-required, blocked, and open-web A2UI from the local gateway', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const authResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看下 Gmail 最近的重要邮件',
+        'surface_gmail_auth',
+        'client_intent_fallback',
+        noop
+      );
+      const blockedResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.message.send',
+        '帮我 Gmail 直接发送这封邮件',
+        'surface_gmail_blocked',
+        'client_intent_fallback',
+        noop
+      );
+      const webResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.open.web',
+        '打开 Gmail 网页版',
+        'surface_gmail_web',
+        'client_intent_fallback',
+        noop
+      );
+
+      expect(authResult.ok).assertTrue();
+      expect(dynamicToolConnect(authResult.surface).toolId).assertEqual('gmail.mail.search');
+      expect(dynamicToolConnect(authResult.surface).credentialName).assertEqual('Google OAuth or Gmail Web session');
+      expect(authResult.raw.indexOf('不会模拟 Gmail 邮件')).assertLarger(-1);
+
+      expect(blockedResult.ok).assertTrue();
+      expect(genericToolResults(blockedResult.surface)[0].status).assertEqual('blocked');
+      expect(genericToolResults(blockedResult.surface)[0].summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
+
+      expect(webResult.ok).assertTrue();
+      expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
+      expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
+      expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
     });
 
     it('keeps brand MCP adapters query-only', 0, () => {

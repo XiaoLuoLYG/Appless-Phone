@@ -23,10 +23,12 @@ import { A2uiSurfaceCallback } from './LocalModelClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 import { connectCardA2ui, genericToolResultsA2ui, unsupportedTransportA2ui } from './DynamicToolA2ui';
 import { AssetCredentialStore, credentialRefFor } from './DynamicCredentialStore';
+import { gmailAuthRequiredA2ui, gmailBlockedSendA2ui, gmailOpenWebA2ui } from './GmailToolA2ui';
 import { GenericMcpClient } from './GenericMcpClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
+import { isGmailToolId, isKnownDomainToolId } from './ToolDefinitionRegistry';
 import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
@@ -954,6 +956,9 @@ export function buildToolGatewayUrl(baseUrl: string): string {
 }
 
 export function isRegisteredToolId(toolId: string): boolean {
+  if (isKnownDomainToolId(toolId)) {
+    return true;
+  }
   if (isBuiltInToolId(toolId)) {
     return true;
   }
@@ -5507,7 +5512,24 @@ async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: 
   return buildDynamicToolJsonlWithManifest(toolId, prompt, surfaceId, manifest);
 }
 
+function gmailAuthUnavailableMessage(toolId: string, prompt: string): string {
+  return 'Gmail 工具 ' + toolId + ' 已在统一工具框架注册，但当前设备没有可用的 Google OAuth、Workspace MCP 或 Gmail Web 登录会话；AIPhone 不会模拟 Gmail 邮件、草稿或发送结果。请求：' + prompt.substring(0, 160);
+}
+
+function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string): string {
+  if (toolId === 'gmail.message.send') {
+    return gmailBlockedSendA2ui(surfaceId, toolId);
+  }
+  if (toolId === 'gmail.open.web') {
+    return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
+  }
+  return gmailAuthRequiredA2ui(surfaceId, toolId, gmailAuthUnavailableMessage(toolId, prompt));
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null): Promise<string> {
+  if (isGmailToolId(toolId)) {
+    return callLocalGmailTool(toolId, prompt, surfaceId);
+  }
   if (toolId === 'social.reply.send') {
     return errorA2ui(
       surfaceId,

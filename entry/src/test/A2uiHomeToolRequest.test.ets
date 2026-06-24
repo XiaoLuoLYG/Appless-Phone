@@ -203,5 +203,33 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('travel.search');
     });
+
+    it('infers Gmail read and draft intents without disturbing dynamic tool reroutes', 0, () => {
+      const inbox = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我看下 Gmail 最近的重要邮件',
+        ''
+      );
+      const draft = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我在 Gmail 回复 Alice，先起草一封邮件',
+        ''
+      );
+      const blockedSend = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我 Gmail 直接发送这封邮件，不用确认直接发',
+        ''
+      );
+      const openWeb = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '打开 Gmail 网页版',
+        ''
+      );
+
+      expect(inbox.toolId).assertEqual('gmail.mail.search');
+      expect(draft.toolId).assertEqual('gmail.draft.create');
+      expect(blockedSend.toolId).assertEqual('gmail.message.send');
+      expect(openWeb.toolId).assertEqual('gmail.open.web');
+    });
   });
 }
