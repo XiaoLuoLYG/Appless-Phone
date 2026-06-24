@@ -20,30 +20,45 @@ import {
   COLOR_ACCENT_DEEP,
   COLOR_ACCENT_SOFT,
   COLOR_BUTTON_TEXT,
+  COLOR_CARD,
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
   COLOR_CARD_INSET,
   COLOR_CARD_RAISED,
   COLOR_ERROR,
   COLOR_FOOD_AMAP,
+  COLOR_FOOD_AMAP_CARD,
+  COLOR_FOOD_AMAP_GLOW,
   COLOR_FOOD_AMAP_LINE,
   COLOR_FOOD_AMAP_SOFT,
   COLOR_FOOD_BAIDU,
+  COLOR_FOOD_BAIDU_CARD,
+  COLOR_FOOD_BAIDU_GLOW,
   COLOR_FOOD_BAIDU_LINE,
   COLOR_FOOD_BAIDU_SOFT,
   COLOR_FOOD_MEITUAN,
+  COLOR_FOOD_MEITUAN_CARD,
+  COLOR_FOOD_MEITUAN_GLOW,
   COLOR_FOOD_MEITUAN_LINE,
   COLOR_FOOD_MEITUAN_SOFT,
   COLOR_FOOD_MCD,
+  COLOR_FOOD_MCD_CARD,
+  COLOR_FOOD_MCD_GLOW,
   COLOR_FOOD_MCD_LINE,
   COLOR_FOOD_MCD_SOFT,
   COLOR_FOOD_TAOBAO,
+  COLOR_FOOD_TAOBAO_CARD,
+  COLOR_FOOD_TAOBAO_GLOW,
   COLOR_FOOD_TAOBAO_LINE,
   COLOR_FOOD_TAOBAO_SOFT,
   COLOR_FOOD_LUCKIN,
+  COLOR_FOOD_LUCKIN_CARD,
+  COLOR_FOOD_LUCKIN_GLOW,
   COLOR_FOOD_LUCKIN_LINE,
   COLOR_FOOD_LUCKIN_SOFT,
   COLOR_FOOD_TENCENT,
+  COLOR_FOOD_TENCENT_CARD,
+  COLOR_FOOD_TENCENT_GLOW,
   COLOR_FOOD_TENCENT_LINE,
   COLOR_FOOD_TENCENT_SOFT,
   COLOR_INK,
@@ -68,9 +83,6 @@ interface FoodNavigationTarget {
 
 type FoodFilterMode = 'all' | 'within_1km';
 
-const FOOD_CARD_BACKGROUND: string = '#18181B';
-const FOOD_CARD_BORDER: string = '#27272A';
-const FOOD_CARD_ACTIVE_BORDER: string = '#0D9488';
 const FOOD_NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 
 @Component
@@ -113,6 +125,14 @@ export struct FoodChoicesView {
       }
     });
     return tags;
+  }
+
+  private primarySource(item: A2uiFoodOption): string {
+    const tags = this.sourceTags(item);
+    if (tags.length > 0) {
+      return tags[0];
+    }
+    return '';
   }
 
   private sourceAccent(source: string): string {
@@ -190,8 +210,75 @@ export struct FoodChoicesView {
     return COLOR_CARD_EDGE;
   }
 
+  private sourceCard(source: string): string {
+    if (source === '高德') {
+      return COLOR_FOOD_AMAP_CARD;
+    }
+    if (source === '腾讯地图') {
+      return COLOR_FOOD_TENCENT_CARD;
+    }
+    if (source === '百度地图') {
+      return COLOR_FOOD_BAIDU_CARD;
+    }
+    if (source === '美团') {
+      return COLOR_FOOD_MEITUAN_CARD;
+    }
+    if (source === '淘宝闪购') {
+      return COLOR_FOOD_TAOBAO_CARD;
+    }
+    if (source === '麦当劳') {
+      return COLOR_FOOD_MCD_CARD;
+    }
+    if (source === '瑞幸') {
+      return COLOR_FOOD_LUCKIN_CARD;
+    }
+    return COLOR_CARD;
+  }
+
+  private sourceGlow(source: string): string {
+    if (source === '高德') {
+      return COLOR_FOOD_AMAP_GLOW;
+    }
+    if (source === '腾讯地图') {
+      return COLOR_FOOD_TENCENT_GLOW;
+    }
+    if (source === '百度地图') {
+      return COLOR_FOOD_BAIDU_GLOW;
+    }
+    if (source === '美团') {
+      return COLOR_FOOD_MEITUAN_GLOW;
+    }
+    if (source === '淘宝闪购') {
+      return COLOR_FOOD_TAOBAO_GLOW;
+    }
+    if (source === '麦当劳') {
+      return COLOR_FOOD_MCD_GLOW;
+    }
+    if (source === '瑞幸') {
+      return COLOR_FOOD_LUCKIN_GLOW;
+    }
+    return COLOR_CARD_GLOW;
+  }
+
+  private cardAccent(item: A2uiFoodOption): string {
+    return this.sourceAccent(this.primarySource(item));
+  }
+
+  private cardSoft(item: A2uiFoodOption): string {
+    return this.sourceSoft(this.primarySource(item));
+  }
+
+  private cardBackground(item: A2uiFoodOption): string {
+    return this.sourceCard(this.primarySource(item));
+  }
+
   private cardBorder(item: A2uiFoodOption): string {
-    return this.expandedFoodKey === this.foodRowKey(item) ? FOOD_CARD_ACTIVE_BORDER : FOOD_CARD_BORDER;
+    const source = this.primarySource(item);
+    return this.expandedFoodKey === this.foodRowKey(item) ? this.sourceAccent(source) : this.sourceLine(source);
+  }
+
+  private cardGlow(item: A2uiFoodOption): string {
+    return this.sourceGlow(this.primarySource(item));
   }
 
   private locationText(item: A2uiFoodOption): string {
@@ -535,11 +622,11 @@ export struct FoodChoicesView {
                 if (item.distance.length > 0) {
                   Text(item.distance)
                     .fontSize(12)
-                    .fontColor(COLOR_ACCENT_DARK)
+                    .fontColor(this.cardAccent(item))
                     .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-                    .backgroundColor(COLOR_ACCENT_SOFT)
+                    .backgroundColor(this.cardSoft(item))
                     .borderRadius(8)
-                    .border({ width: 1, color: COLOR_ACCENT })
+                    .border({ width: 1, color: this.cardBorder(item) })
                 }
               }
               .width('100%')
@@ -579,7 +666,7 @@ export struct FoodChoicesView {
                 Row()
                   .width('100%')
                   .height(1)
-                  .backgroundColor(FOOD_CARD_BORDER)
+                  .backgroundColor(this.cardBorder(item))
                   .margin({ top: 12 })
 
                 this.FoodDetailPanel(item)
@@ -589,7 +676,7 @@ export struct FoodChoicesView {
                 Text(this.expandedFoodKey === this.foodRowKey(item) ? '收起' : '详情')
                   .fontSize(12)
                   .fontWeight(FontWeight.Medium)
-                  .fontColor(COLOR_ACCENT_DARK)
+                  .fontColor(this.cardAccent(item))
                 Blank()
                   .layoutWeight(1)
                 if (this.expandedFoodKey === this.foodRowKey(item)) {
@@ -601,7 +688,7 @@ export struct FoodChoicesView {
                 } else if (this.canNavigate(item)) {
                   Text('可导航')
                     .fontSize(12)
-                    .fontColor(COLOR_ACCENT_DARK)
+                    .fontColor(this.cardAccent(item))
                 }
               }
               .width('100%')
@@ -611,9 +698,10 @@ export struct FoodChoicesView {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
             .padding(16)
-            .backgroundColor(FOOD_CARD_BACKGROUND)
+            .backgroundColor(this.cardBackground(item))
             .borderRadius(12)
             .border({ width: 1, color: this.cardBorder(item) })
+            .shadow({ radius: 20, color: this.cardGlow(item), offsetX: 0, offsetY: 9 })
             .onClick(() => {
               const rowKey = this.foodRowKey(item);
               this.expandedFoodKey = this.expandedFoodKey === rowKey ? '' : rowKey;
