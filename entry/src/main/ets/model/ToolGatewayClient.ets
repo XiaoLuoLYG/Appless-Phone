@@ -18,6 +18,7 @@ import {
 } from './A2uiTypes';
 import { parseA2uiJsonl, parseA2uiJsonlChunk } from './A2uiParser';
 import { A2uiSurfaceStore } from './A2uiSurfaceStore';
+import { A2uiSurfaceThrottle } from './A2uiSurfaceThrottle';
 import { A2uiSurfaceCallback } from './LocalModelClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 import { connectCardA2ui, genericToolResultsA2ui, unsupportedTransportA2ui } from './DynamicToolA2ui';
@@ -884,11 +885,13 @@ let localProviderConfig: LocalProviderConfig = {
 export interface LocalToolDebugConfig {
   foodProviderDelayEnabled: boolean;
   foodProviderDelayMs: number;
+  foodPartialThrottleMs: number;
 }
 
 let localToolDebugConfig: LocalToolDebugConfig = {
   foodProviderDelayEnabled: false,
-  foodProviderDelayMs: 0
+  foodProviderDelayMs: 0,
+  foodPartialThrottleMs: 500
 };
 
 type LocalA2uiEmitter = (jsonl: string) => void;
@@ -962,9 +965,11 @@ export function isRegisteredToolId(toolId: string): boolean {
 
 export function configureLocalToolDebugConfig(config: LocalToolDebugConfig): void {
   const delayMs = config.foodProviderDelayMs < 0 ? 0 : config.foodProviderDelayMs;
+  const throttleMs = config.foodPartialThrottleMs < 0 ? 0 : config.foodPartialThrottleMs;
   localToolDebugConfig = {
     foodProviderDelayEnabled: config.foodProviderDelayEnabled,
-    foodProviderDelayMs: delayMs
+    foodProviderDelayMs: delayMs,
+    foodPartialThrottleMs: throttleMs
   };
 }
 
@@ -5534,7 +5539,13 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
     store.seed(initialSurface);
   }
   let rawResponse = '';
-  const emitJsonl = (jsonl: string): void => {
+  const throttleMs = toolId === 'food.search' ? localToolDebugConfig.foodPartialThrottleMs : 0;
+  const surfaceThrottle = new A2uiSurfaceThrottle(throttleMs, (surface: A2uiSurfaceState, raw: string) => {
+    aiLogInfo('[AIPhone][LocalToolSurfaceThrottleEmit] intervalMs=' + throttleMs.toString() +
+      ' sequence=' + surface.sequence.toString() + ' status=' + surface.status);
+    onSurface(surface, raw);
+  });
+  const emitJsonl = (jsonl: string, immediate: boolean = false): void => {
     if (jsonl.length === 0 || streamError.length > 0) {
       return;
     }
@@ -5551,7 +5562,12 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
       aiLogError('[AIPhone][LocalToolEmitApplyError] ' + applyError);
       return;
     }
-    onSurface(store.getSurface(), rawResponse);
+    const surface = store.getSurface();
+    if (immediate) {
+      onSurface(surface, rawResponse);
+    } else {
+      surfaceThrottle.enqueue(surface, rawResponse);
+    }
   };
   const localDebugBody: ToolGatewayRequestBody = {
     toolId: toolId,
@@ -5571,12 +5587,13 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
   let parsed = parseA2uiJsonl(pending);
   let streamError = parsed.error;
   if (streamError.length === 0) {
-    emitJsonl(pending);
+    emitJsonl(pending, true);
   }
 
   try {
     const resultJsonl = await buildLocalToolJsonl(toolId, prompt, surfaceId, emitJsonl);
     emitJsonl(resultJsonl);
+    surfaceThrottle.flush();
     aiLogInfo('[AIPhone][LocalToolResult] ok=' + (streamError.length === 0 ? 'true' : 'false') + ' rawChars=' + rawResponse.length.toString());
     return {
       ok: streamError.length === 0,
@@ -5600,6 +5617,7 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
     rawResponse += exceptionJsonl;
     parsed = parseA2uiJsonl(exceptionJsonl);
     streamError = parsed.error.length > 0 ? parsed.error : applyEnvelopes(store, parsed.envelopes);
+    surfaceThrottle.cancel();
     onSurface(store.getSurface(), rawResponse);
     return {
       ok: streamError.length === 0,

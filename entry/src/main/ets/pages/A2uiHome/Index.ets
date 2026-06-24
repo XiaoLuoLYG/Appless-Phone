@@ -40,7 +40,11 @@ import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../../mod
 import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../../model/SocialNotificationArchive';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
-import { normalizeFoodProviderDelayMs } from './state/A2uiHomeDebugSettings';
+import {
+  A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
+  normalizeFoodPartialThrottleMs,
+  normalizeFoodProviderDelayMs
+} from './state/A2uiHomeDebugSettings';
 import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
@@ -81,6 +85,7 @@ struct Index {
   @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
   @State foodProviderDelayEnabled: boolean = false;
   @State foodProviderDelayMs: string = '0';
+  @State foodPartialThrottleMs: string = A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS.toString();
   @State isBusy: boolean = false;
   @State connectionStatus: string = initialConnectionState.connectionStatus;
   @State connectionMessage: string = initialConnectionState.connectionMessage;
@@ -952,7 +957,8 @@ struct Index {
       ' gateway=' + TOOL_GATEWAY_URL);
     configureLocalToolDebugConfig({
       foodProviderDelayEnabled: this.foodProviderDelayEnabled,
-      foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs)
+      foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs),
+      foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
     this.markChecking('正在调用工具：' + toolId);
     const result: A2uiCallResult = await callToolGateway(
@@ -1072,6 +1078,7 @@ struct Index {
         customParametersJson: $customParametersJson,
         foodProviderDelayEnabled: $foodProviderDelayEnabled,
         foodProviderDelayMs: $foodProviderDelayMs,
+        foodPartialThrottleMs: $foodPartialThrottleMs,
         showAdvancedSettings: $showAdvancedSettings,
         connectionStatus: this.connectionStatus,
         connectionMessage: this.connectionMessage,

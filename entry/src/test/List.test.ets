@@ -22,6 +22,7 @@ import a2uiButtonStyleTest from './A2uiButtonStyle.test';
 import a2uiHomeDebugSettingsTest from './A2uiHomeDebugSettings.test';
 import a2uiPartialUpdatePlannerTest from './A2uiPartialUpdatePlanner.test';
 import navigationCardSnapshotTest from './NavigationCardSnapshot.test';
+import a2uiSurfaceThrottleTest from './A2uiSurfaceThrottle.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -48,4 +49,5 @@ export default function testsuite() {
   a2uiHomeDebugSettingsTest();
   a2uiPartialUpdatePlannerTest();
   navigationCardSnapshotTest();
+  a2uiSurfaceThrottleTest();
 }
