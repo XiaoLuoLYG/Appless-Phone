@@ -194,6 +194,13 @@ function buildTravelSourceTags(sourceTag: string): string[] {
   return [];
 }
 
+function bindingSourceText(snapshot: NavigationCardSnapshot): string {
+  if (snapshot.cardStyle === 'travel') {
+    return '';
+  }
+  return snapshot.sourceTags.join(' / ');
+}
+
 function travelSnapshot(
   transport: string,
   title: string,
@@ -474,7 +481,7 @@ export function buildNavigationCardBindingData(snapshot: NavigationCardSnapshot 
       arrivalTime: snapshot.arrivalTime,
       routeText: snapshot.routeText,
       serviceText: snapshot.serviceText,
-      sourceText: snapshot.sourceTags.join(' / '),
+      sourceText: bindingSourceText(snapshot),
       mapUri: '',
       destinationUri: '',
       message: snapshot.error.length > 0 ? snapshot.error : '导航卡片生成失败',
@@ -499,7 +506,7 @@ export function buildNavigationCardBindingData(snapshot: NavigationCardSnapshot 
       arrivalTime: snapshot.arrivalTime,
       routeText: snapshot.routeText,
       serviceText: snapshot.serviceText,
-      sourceText: snapshot.sourceTags.join(' / '),
+      sourceText: bindingSourceText(snapshot),
       mapUri: '',
       destinationUri: '',
       message: '导航卡片已过期，请回到 PocketAgent 刷新真实结果',
@@ -523,7 +530,7 @@ export function buildNavigationCardBindingData(snapshot: NavigationCardSnapshot 
     arrivalTime: snapshot.arrivalTime,
     routeText: snapshot.routeText,
     serviceText: snapshot.serviceText,
-    sourceText: snapshot.sourceTags.join(' / '),
+    sourceText: bindingSourceText(snapshot),
     mapUri: snapshot.mapUri,
     destinationUri: snapshot.mapUri,
     message: snapshot.address.length > 0 ? snapshot.address : '真实 provider 坐标',

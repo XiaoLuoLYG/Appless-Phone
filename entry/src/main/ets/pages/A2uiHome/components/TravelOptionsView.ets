@@ -240,6 +240,19 @@ export struct TravelOptionsView {
         .fontColor(COLOR_MUTED)
         .lineHeight(18)
         .margin({ top: 8 })
+      Button(canCreateNavigationCardFromTravelOption(item) ? '固定为导航卡片' : (item.source === 'flight' ? '缺少机场，不能固定' : '缺少站点，不能固定'))
+        .enabled(canCreateNavigationCardFromTravelOption(item) && !this.isBusy)
+        .height(38)
+        .width('100%')
+        .fontSize(13)
+        .fontColor(canCreateNavigationCardFromTravelOption(item) ? this.sourceAccent(item.source) : COLOR_MUTED)
+        .backgroundColor(this.sourceSoft(item.source))
+        .borderRadius(10)
+        .border({ width: 1, color: canCreateNavigationCardFromTravelOption(item) ? this.sourceLine(item.source) : COLOR_CARD_EDGE })
+        .margin({ top: 10 })
+        .onClick(() => {
+          this.onPinTravelNavigationCard(item);
+        })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -335,19 +348,6 @@ export struct TravelOptionsView {
                     .fontSize(12)
                     .fontColor(statusColor(item.status.indexOf('失败') >= 0 || item.status.indexOf('取消') >= 0 ? 'error' : 'ready'))
                 }
-                Button(canCreateNavigationCardFromTravelOption(item) ? '固定卡片' : (item.source === 'flight' ? '缺少机场' : '缺少站点'))
-                  .enabled(canCreateNavigationCardFromTravelOption(item))
-                  .height(30)
-                  .fontSize(12)
-                  .fontColor(canCreateNavigationCardFromTravelOption(item) ? this.sourceAccent(item.source) : COLOR_MUTED)
-                  .backgroundColor(this.sourceSoft(item.source))
-                  .borderRadius(8)
-                  .border({ width: 1, color: this.sourceLine(item.source) })
-                  .padding({ left: 9, right: 9 })
-                  .margin({ left: 10 })
-                  .onClick(() => {
-                    this.onPinTravelNavigationCard(item);
-                  })
                 Text(this.expandedTravelKey === this.rowKey(item) ? '收起' : '详情')
                   .fontSize(12)
                   .fontWeight(FontWeight.Medium)

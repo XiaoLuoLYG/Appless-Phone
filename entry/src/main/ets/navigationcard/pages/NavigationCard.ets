@@ -178,16 +178,6 @@ struct NavigationCard {
     return '出发信息';
   }
 
-  private travelServiceText(): string {
-    if (this.serviceText.length > 0) {
-      return this.serviceText;
-    }
-    if (this.sourceText.length > 0) {
-      return this.sourceText;
-    }
-    return this.transport === 'flight' ? '飞常准' : '12306';
-  }
-
   private travelTimeText(): string {
     return this.departureTime.length > 0 ? this.departureTime : '--:--';
   }
@@ -458,14 +448,11 @@ struct NavigationCard {
             .border({ width: 1, color: TRAVEL_EDGE })
             .borderRadius(9)
             .maxLines(1)
-          Text(this.travelServiceText())
-            .fontSize(13)
-            .fontColor(TRAVEL_MUTED)
+          Blank()
             .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ left: 8 })
-          this.StatusMark()
+          if (!this.isReady()) {
+            this.StatusMark()
+          }
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)

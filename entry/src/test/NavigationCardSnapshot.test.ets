@@ -292,6 +292,7 @@ export default function navigationCardSnapshotTest() {
         expect(binding.routeText).assertEqual('北京南 → 上海虹桥');
         expect(binding.targetName).assertEqual('北京南站');
         expect(binding.departureTime).assertEqual('10:00');
+        expect(binding.sourceText).assertEqual('');
         expect(binding.primaryAction).assertEqual('open_map');
       }
     });

@@ -30,7 +30,7 @@ import { StatusBadgeView } from './StatusBadgeView';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 const A2UI_TRAIN_CARD_BASE_HEIGHT: number = 152;
-const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 232;
+const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 282;
 const A2UI_TRAIN_CARD_TOP_MARGIN: number = 10;
 const A2UI_TRAIN_LIST_EMPTY_HEIGHT: number = 50;
 
@@ -202,17 +202,6 @@ export struct TrainOptionsView {
                     .borderRadius(8)
                     .margin({ right: 8 })
                 }
-                Button(canCreateNavigationCardFromTrainOption(item) ? '固定卡片' : '缺少站点')
-                  .enabled(canCreateNavigationCardFromTrainOption(item))
-                  .height(30)
-                  .fontSize(12)
-                  .fontColor(canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
-                  .backgroundColor(COLOR_ACCENT_SOFT)
-                  .borderRadius(8)
-                  .padding({ left: 9, right: 9 })
-                  .onClick(() => {
-                    this.onPinTrainNavigationCard(item);
-                  })
               }
               .width('100%')
 
@@ -267,6 +256,19 @@ export struct TrainOptionsView {
                     .fontColor(COLOR_MUTED)
                     .lineHeight(18)
                     .margin({ top: 8 })
+                  Button(canCreateNavigationCardFromTrainOption(item) ? '固定为导航卡片' : '缺少站点，不能固定')
+                    .enabled(canCreateNavigationCardFromTrainOption(item) && !this.isBusy)
+                    .height(38)
+                    .width('100%')
+                    .fontSize(13)
+                    .fontColor(canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+                    .backgroundColor(COLOR_ACCENT_SOFT)
+                    .borderRadius(10)
+                    .border({ width: 1, color: canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                    .margin({ top: 10 })
+                    .onClick(() => {
+                      this.onPinTrainNavigationCard(item);
+                    })
                 }
                 .width('100%')
                 .alignItems(HorizontalAlign.Start)
