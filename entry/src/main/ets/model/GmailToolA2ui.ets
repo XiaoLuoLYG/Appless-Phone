@@ -12,7 +12,7 @@ import {
   A2uiSummaryData
 } from './A2uiTypes';
 
-const GMAIL_WEB_URL: string = 'https://mail.google.com/mail/u/0/#inbox';
+export const GMAIL_WEB_URL: string = 'https://mail.google.com/mail/u/0/#inbox';
 const GMAIL_MANIFEST_ID: string = 'google.gmail';
 const GMAIL_DISPLAY_NAME: string = 'Gmail';
 const GENERIC_RESULTS_PATH: string = '/genericToolResults';
@@ -146,7 +146,7 @@ export function gmailAuthRequiredA2ui(surfaceId: string, toolId: string, message
     credentialRef: 'gmail:auth',
     registrationUrl: GMAIL_WEB_URL,
     actions: [
-      action('gmail.open.web', '打开 Gmail Web', '打开 Gmail Web', 'primary', 'prompt'),
+      action('gmail.open.web', '打开 Gmail Web', GMAIL_WEB_URL, 'primary', 'client'),
       action('gmail_retry_auth', '重试认证', '重新检测 Gmail 登录状态', 'secondary', 'prompt')
     ]
   };

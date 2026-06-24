@@ -19,6 +19,7 @@ import {
   A2uiSurfaceState
 } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
+import { GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
 import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
@@ -476,18 +477,19 @@ struct Index {
         action: 'ohos.want.action.viewData',
         uri: url
       });
+      aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true url=' + url);
     } catch (error) {
       const businessError = error as BusinessError;
-      const message = '注册页打开失败：' + businessError.message;
+      const message = '外部页面打开失败：' + businessError.message;
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: false,
         status: 'error',
-        message: '无法打开注册页。',
+        message: '无法打开外部页面。',
         requestDebug: this.lastModelRequest,
         assistantDebug: this.lastModelOutput,
         error: message
       }));
-      aiLogError('[AIPhone][DynamicToolOpenRegistrationError] ' + message);
+      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false url=' + url + ' message=' + businessError.message);
     }
   }
 
@@ -778,6 +780,10 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'gmail.open.web') {
+      await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GMAIL_WEB_URL);
+      return;
+    }
     if (action.id === 'social_select_message') {
       this.selectSocialMessageById(action.prompt);
       return;

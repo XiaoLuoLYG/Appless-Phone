@@ -82,6 +82,8 @@ export default function gmailToolA2uiTest() {
       expect(auth.sourceUrl).assertEqual('https://mail.google.com/mail/u/0/#inbox');
       expect(auth.credentialName).assertEqual('Google OAuth or Gmail Web session');
       expect(auth.actions[0].id).assertEqual('gmail.open.web');
+      expect(auth.actions[0].kind).assertEqual('client');
+      expect(auth.actions[0].prompt).assertEqual('https://mail.google.com/mail/u/0/#inbox');
     });
 
     it('renders Gmail rows through GenericToolResults without leaking bodies', 0, () => {
