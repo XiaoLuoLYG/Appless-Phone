@@ -4,6 +4,7 @@ import {
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_FLIGHT_BOARD,
   A2UI_COMPONENT_FOOD_CHOICES,
+  A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SOCIAL_INBOX,
@@ -11,6 +12,7 @@ import {
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_CARD,
   A2UI_COMPONENT_THINKING_STREAM,
+  A2UI_COMPONENT_TOOL_CONNECT_CARD,
   A2UI_COMPONENT_TRAVEL_OPTIONS,
   A2UI_COMPONENT_TRAIN_OPTIONS,
   A2uiAction,
@@ -39,9 +41,11 @@ import { ActionBarView } from './ActionBarView';
 import { ErrorNoticeView } from './ErrorNoticeView';
 import { FlightBoardView } from './FlightBoardView';
 import { FoodChoicesView } from './FoodChoicesView';
+import { GenericToolResultsView } from './GenericToolResultsView';
 import { InfoRowsView } from './InfoRowsView';
 import { SocialInboxView } from './SocialInboxView';
 import { ThinkingStreamView } from './ThinkingStreamView';
+import { ToolConnectCardView } from './ToolConnectCardView';
 import { TrainOptionsView } from './TrainOptionsView';
 import { TravelOptionsView } from './TravelOptionsView';
 
@@ -167,6 +171,22 @@ export struct A2uiNodeView {
         })
       } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_INBOX) {
         SocialInboxView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_TOOL_CONNECT_CARD) {
+        ToolConnectCardView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_GENERIC_TOOL_RESULTS) {
+        GenericToolResultsView({
           surface: this.surface,
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,

@@ -20,6 +20,19 @@ import { parseA2uiJsonl, parseA2uiJsonlChunk } from './A2uiParser';
 import { A2uiSurfaceStore } from './A2uiSurfaceStore';
 import { A2uiSurfaceCallback } from './LocalModelClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
+import { connectCardA2ui, genericToolResultsA2ui, unsupportedTransportA2ui } from './DynamicToolA2ui';
+import { AssetCredentialStore, credentialRefFor } from './DynamicCredentialStore';
+import { GenericMcpClient } from './GenericMcpClient';
+import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
+import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
+import { sampleManifestForToolId } from './DynamicToolSamples';
+import {
+  DynamicCredentialSpec,
+  DynamicGenericToolResult,
+  DynamicToolManifest,
+  DynamicToolRegistration,
+  DynamicToolTransport
+} from './DynamicToolTypes';
 import {
   A2uiPartialDataPatch,
   A2uiPartialRenderState,
@@ -288,6 +301,25 @@ interface AmapPayload {
   message?: string;
   pois?: AmapPoi[];
   geocodes?: AmapGeocode[];
+}
+
+interface AmapWeatherLive {
+  province?: string;
+  city?: string;
+  adcode?: string;
+  weather?: string;
+  temperature?: string;
+  winddirection?: string;
+  windpower?: string;
+  humidity?: string;
+  reporttime?: string;
+}
+
+interface AmapWeatherPayload {
+  status?: string;
+  info?: string;
+  infocode?: string;
+  lives?: AmapWeatherLive[];
 }
 
 export interface TencentMapPlace {
@@ -919,7 +951,13 @@ export function buildToolGatewayUrl(baseUrl: string): string {
 }
 
 export function isRegisteredToolId(toolId: string): boolean {
-  return toolId === 'travel.search' || toolId === 'flight.search' || toolId === 'train.search' || toolId === 'food.search' || toolId === 'social.reply.send';
+  if (isBuiltInToolId(toolId)) {
+    return true;
+  }
+  if (toolId === 'dynamic.search') {
+    return true;
+  }
+  return sampleManifestForToolId(toolId) !== null;
 }
 
 export function configureLocalToolDebugConfig(config: LocalToolDebugConfig): void {
@@ -4983,6 +5021,487 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   return trainResultA2ui(surfaceId, '12306 余票查询', body, summaryText, top);
 }
 
+interface DynamicPromptArgs {
+  query: string;
+  prompt: string;
+  city: string;
+}
+
+const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
+const genericMcpClient: GenericMcpClient = new GenericMcpClient();
+const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
+
+function dynamicCityFromPrompt(prompt: string): string {
+  if (prompt.indexOf('深圳') >= 0) {
+    return '深圳';
+  }
+  if (prompt.indexOf('北京') >= 0) {
+    return '北京';
+  }
+  if (prompt.indexOf('上海') >= 0) {
+    return '上海';
+  }
+  if (prompt.indexOf('广州') >= 0) {
+    return '广州';
+  }
+  return prompt;
+}
+
+function dynamicArgsFromPrompt(prompt: string): DynamicPromptArgs {
+  return {
+    query: prompt,
+    prompt: prompt,
+    city: dynamicCityFromPrompt(prompt)
+  };
+}
+
+function transportOption(transport: DynamicToolTransport, key: string, fallback: string = ''): string {
+  const fromProperty = (transport as Object as Record<string, string>)[key];
+  if (typeof fromProperty === 'string' && fromProperty.trim().length > 0) {
+    return fromProperty.trim();
+  }
+  const fromEnv = transport.env[key];
+  return fromEnv === undefined || fromEnv === null || fromEnv.trim().length === 0 ? fallback : fromEnv.trim();
+}
+
+function appendQueryParam(url: string, key: string, value: string): string {
+  if (key.length === 0 || value.length === 0) {
+    return url;
+  }
+  const separator = url.indexOf('?') >= 0 ? '&' : '?';
+  return url + separator + encodeURIComponent(key) + '=' + encodeURIComponent(value);
+}
+
+function appendFixedQuery(url: string, fixedQuery: string): string {
+  const trimmed = fixedQuery.trim();
+  if (trimmed.length === 0) {
+    return url;
+  }
+  const separator = url.indexOf('?') >= 0 ? '&' : '?';
+  return url + separator + trimmed;
+}
+
+function dynamicArgumentValue(args: DynamicPromptArgs, key: string): string {
+  if (key === 'city') {
+    return args.city;
+  }
+  if (key === 'prompt') {
+    return args.prompt;
+  }
+  return args.query;
+}
+
+function dynamicHttpApiHeaders(transport: DynamicToolTransport, credentialValue: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const keys = Object.keys(transport.headers);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    headers[key] = transport.headers[key];
+  }
+  const placement = transportOption(transport, 'credentialPlacement', '');
+  if (credentialValue.length > 0 && placement === 'header') {
+    const headerName = transportOption(transport, 'credentialParam', 'Authorization');
+    headers[headerName] = headerName.toLowerCase() === 'authorization' ? 'Bearer ' + credentialValue : credentialValue;
+  }
+  return headers;
+}
+
+function dynamicHttpApiUrl(transport: DynamicToolTransport, credentialValue: string, args: DynamicPromptArgs): string {
+  let url = appendFixedQuery(transport.url, transportOption(transport, 'fixedQuery', ''));
+  const queryParam = transportOption(transport, 'queryParam', 'query');
+  url = appendQueryParam(url, queryParam, dynamicArgumentValue(args, queryParam));
+  if (credentialValue.length > 0 && transportOption(transport, 'credentialPlacement', '') === 'query') {
+    url = appendQueryParam(url, transportOption(transport, 'credentialParam', 'key'), credentialValue);
+  }
+  return url;
+}
+
+async function requestDynamicHttpApiGet(url: string, headers: Record<string, string>): Promise<HttpTextResponse> {
+  const request = http.createHttp();
+  const decoder = util.TextDecoder.create('utf-8');
+  try {
+    const response = await request.request(url, {
+      method: http.RequestMethod.GET,
+      header: headers,
+      usingProtocol: http.HttpProtocol.HTTP1_1,
+      connectTimeout: 10000,
+      readTimeout: 30000
+    });
+    let text = '';
+    if (typeof response.result === 'string') {
+      text = response.result;
+    } else {
+      text = decoder.decodeToString(new Uint8Array(response.result as ArrayBuffer));
+    }
+    return {
+      code: response.responseCode,
+      text: text,
+      cookies: response.cookies === undefined ? '' : response.cookies,
+      headers: JSON.stringify(response.header)
+    };
+  } catch (error) {
+    throw new Error('Dynamic HTTP API GET failed: ' + describeThrown(error));
+  } finally {
+    request.destroy();
+  }
+}
+
+function rowsFromAmapWeather(live: AmapWeatherLive): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [];
+  const pairs: A2uiLabelValueData[] = [
+    { label: '城市', value: textOf(live.city) },
+    { label: '天气', value: textOf(live.weather) },
+    { label: '温度', value: textOf(live.temperature).length > 0 ? textOf(live.temperature) + '°C' : '' },
+    { label: '风向', value: textOf(live.winddirection) },
+    { label: '风力', value: textOf(live.windpower) },
+    { label: '湿度', value: textOf(live.humidity).length > 0 ? textOf(live.humidity) + '%' : '' },
+    { label: '发布时间', value: textOf(live.reporttime) }
+  ];
+  for (let index = 0; index < pairs.length; index++) {
+    if (pairs[index].value.length > 0) {
+      rows.push(pairs[index]);
+    }
+  }
+  return rows;
+}
+
+function dynamicHttpApiResultFromJson(registration: DynamicToolRegistration, response: HttpTextResponse): DynamicGenericToolResult {
+  if (registration.mcpToolName === 'maps_weather') {
+    const payload = JSON.parse(response.text) as AmapWeatherPayload;
+    const live = payload.lives !== undefined && payload.lives.length > 0 ? payload.lives[0] : null;
+    if (response.code >= 200 && response.code < 300 && payload.status === '1' && live !== null) {
+      return {
+        sourceTag: registration.displayName,
+        toolName: registration.mcpToolName,
+        title: '高德天气查询',
+        status: 'success',
+        summary: textOf(live.city) + '当前天气：' + textOf(live.weather) + '，' + textOf(live.temperature) + '°C。',
+        rows: rowsFromAmapWeather(live),
+        rawPreview: response.text.substring(0, 1200)
+      };
+    }
+    return {
+      sourceTag: registration.displayName,
+      toolName: registration.mcpToolName,
+      title: '高德天气查询失败',
+      status: 'error',
+      summary: textOf(payload.info).length > 0 ? textOf(payload.info) : '高德天气 API 返回异常。',
+      rows: [
+        { label: 'HTTP', value: response.code.toString() },
+        { label: 'infocode', value: textOf(payload.infocode) }
+      ],
+      rawPreview: response.text.substring(0, 1200)
+    };
+  }
+
+  return {
+    sourceTag: registration.displayName,
+    toolName: registration.mcpToolName,
+    title: '动态 HTTP API 返回',
+    status: response.code >= 200 && response.code < 300 ? 'success' : 'error',
+    summary: response.code >= 200 && response.code < 300 ? '已收到远程 HTTP API 返回。' : '远程 HTTP API 返回 HTTP ' + response.code.toString(),
+    rows: [{ label: 'HTTP', value: response.code.toString() }],
+    rawPreview: response.text.substring(0, 1200)
+  };
+}
+
+async function callDynamicHttpApiTool(registration: DynamicToolRegistration, credentialValue: string, prompt: string): Promise<DynamicGenericToolResult> {
+  const method = transportOption(registration.transport, 'method', 'GET').toUpperCase();
+  if (method !== 'GET') {
+    return dynamicErrorResult(registration.displayName, registration.mcpToolName, 'HTTP API 暂不支持', '当前 HAP 动态 HTTP API 只支持 GET。');
+  }
+  try {
+    const args = dynamicArgsFromPrompt(prompt);
+    const url = dynamicHttpApiUrl(registration.transport, credentialValue, args);
+    const response = await requestDynamicHttpApiGet(url, dynamicHttpApiHeaders(registration.transport, credentialValue));
+    return dynamicHttpApiResultFromJson(registration, response);
+  } catch (error) {
+    return dynamicErrorResult(registration.displayName, registration.mcpToolName, 'HTTP API 调用失败', describeThrown(error));
+  }
+}
+
+function firstSafeToolName(manifest: DynamicToolManifest): string {
+  for (let index = 0; index < manifest.tools.length; index++) {
+    if (!isUnsafeMcpTool(manifest.tools[index].name, manifest.tools[index].description)) {
+      return manifest.tools[index].name;
+    }
+  }
+  return '';
+}
+
+function firstRequiredCredential(manifest: DynamicToolManifest): DynamicCredentialSpec | null {
+  for (let index = 0; index < manifest.requiredCredentials.length; index++) {
+    if (manifest.requiredCredentials[index].required) {
+      return manifest.requiredCredentials[index];
+    }
+  }
+  return null;
+}
+
+function credentialNameFromRef(credentialRef: string): string {
+  const index = credentialRef.lastIndexOf(':');
+  if (index < 0 || index >= credentialRef.length - 1) {
+    return '';
+  }
+  return credentialRef.substring(index + 1);
+}
+
+function missingDynamicManifest(toolId: string): DynamicToolManifest {
+  return {
+    id: 'dynamic.missing.' + toolId,
+    displayName: toolId,
+    sourceUrl: '',
+    hosted: false,
+    fromSiteUrl: '',
+    capabilities: [],
+    requiredCredentials: [],
+    transports: [],
+    tools: []
+  };
+}
+
+function manifestForRegistration(registration: DynamicToolRegistration): DynamicToolManifest {
+  const sample = sampleManifestForToolId(registration.toolId);
+  if (sample !== null) {
+    return sample;
+  }
+  const credentials: DynamicCredentialSpec[] = [];
+  const credentialName = credentialNameFromRef(registration.credentialRef);
+  if (credentialName.length > 0) {
+    credentials.push({
+      name: credentialName,
+      description: 'Credential required by remote MCP server',
+      required: true,
+      placement: 'header',
+      scheme: 'Bearer',
+      testValue: ''
+    });
+  }
+  return {
+    id: registration.manifestId,
+    displayName: registration.displayName,
+    sourceUrl: registration.sourceUrl,
+    hosted: true,
+    fromSiteUrl: registration.sourceUrl,
+    capabilities: [],
+    requiredCredentials: credentials,
+    transports: [registration.transport],
+    tools: [{
+      name: registration.mcpToolName,
+      description: '',
+      inputSchema: new Object()
+    }]
+  };
+}
+
+function manifestWithInferredCredential(manifest: DynamicToolManifest, credential: DynamicCredentialSpec): DynamicToolManifest {
+  const credentials: DynamicCredentialSpec[] = [credential];
+  for (let index = 0; index < manifest.requiredCredentials.length; index++) {
+    if (manifest.requiredCredentials[index].name !== credential.name) {
+      credentials.push(manifest.requiredCredentials[index]);
+    }
+  }
+  return {
+    id: manifest.id,
+    displayName: manifest.displayName,
+    sourceUrl: manifest.sourceUrl,
+    hosted: manifest.hosted,
+    fromSiteUrl: manifest.fromSiteUrl,
+    capabilities: manifest.capabilities.slice(),
+    requiredCredentials: credentials,
+    transports: manifest.transports,
+    tools: manifest.tools
+  };
+}
+
+function dynamicErrorResult(displayName: string, toolName: string, title: string, message: string): DynamicGenericToolResult {
+  return {
+    sourceTag: displayName,
+    toolName: toolName,
+    title: title,
+    status: 'error',
+    summary: message,
+    rows: [{ label: '状态', value: 'error' }],
+    rawPreview: message
+  };
+}
+
+function enabledRegistration(registration: DynamicToolRegistration): DynamicToolRegistration {
+  return {
+    toolId: registration.toolId,
+    manifestId: registration.manifestId,
+    displayName: registration.displayName,
+    status: 'enabled',
+    transport: registration.transport,
+    mcpToolName: registration.mcpToolName,
+    credentialRef: registration.credentialRef,
+    sourceUrl: registration.sourceUrl,
+    lastError: ''
+  };
+}
+
+function failedRegistration(registration: DynamicToolRegistration, message: string): DynamicToolRegistration {
+  return {
+    toolId: registration.toolId,
+    manifestId: registration.manifestId,
+    displayName: registration.displayName,
+    status: 'preflight_failed',
+    transport: registration.transport,
+    mcpToolName: registration.mcpToolName,
+    credentialRef: registration.credentialRef,
+    sourceUrl: registration.sourceUrl,
+    lastError: message
+  };
+}
+
+async function callEnabledDynamicTool(registration: DynamicToolRegistration, credentialValue: string, prompt: string, surfaceId: string): Promise<string> {
+  try {
+    if (registration.transport.type === 'http_api') {
+      const result = await callDynamicHttpApiTool(registration, credentialValue, prompt);
+      return genericToolResultsA2ui(surfaceId, registration.toolId, [result]);
+    }
+    const result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
+    return genericToolResultsA2ui(surfaceId, registration.toolId, [result]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    const result = dynamicErrorResult(registration.displayName, registration.mcpToolName, 'MCP 工具调用失败', message);
+    return genericToolResultsA2ui(surfaceId, registration.toolId, [result]);
+  }
+}
+
+async function preflightAndCallDynamicTool(
+  registration: DynamicToolRegistration,
+  manifest: DynamicToolManifest,
+  credentialValue: string,
+  prompt: string,
+  surfaceId: string
+): Promise<string> {
+  try {
+    if (registration.transport.type === 'http_api') {
+      const next = enabledRegistration(registration);
+      dynamicToolRegistry.setRegistration(next);
+      return callEnabledDynamicTool(next, credentialValue, prompt, surfaceId);
+    }
+    const preflight = await genericMcpClient.preflight(registration, credentialValue);
+    if (!preflight.ok) {
+      const message = preflight.message.length > 0 ? preflight.message : '远程 MCP 预检失败。';
+      if (preflight.inferredCredential !== null) {
+        const inferredManifest = manifestWithInferredCredential(manifest, preflight.inferredCredential);
+        const inferredRef = credentialRefFor(manifest.id, preflight.inferredCredential.name);
+        dynamicToolRegistry.enableAlias(registration.toolId, inferredManifest, registration.mcpToolName, inferredRef);
+        return connectCardA2ui(surfaceId, registration.toolId, inferredManifest, 'needs_auth', message, prompt);
+      }
+      dynamicToolRegistry.setRegistration(failedRegistration(registration, message));
+      return connectCardA2ui(surfaceId, registration.toolId, manifest, 'preflight_failed', message, prompt);
+    }
+    const next = enabledRegistration(registration);
+    dynamicToolRegistry.setRegistration(next);
+    return callEnabledDynamicTool(next, credentialValue, prompt, surfaceId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    dynamicToolRegistry.setRegistration(failedRegistration(registration, message));
+    return connectCardA2ui(surfaceId, registration.toolId, manifest, 'preflight_failed', message, prompt);
+  }
+}
+
+async function buildRegisteredDynamicToolJsonl(registration: DynamicToolRegistration, prompt: string, surfaceId: string): Promise<string> {
+  const manifest = manifestForRegistration(registration);
+  const credentialValue = registration.credentialRef.length > 0 ? await dynamicCredentialStore.get(registration.credentialRef) : '';
+  if (registration.credentialRef.length > 0 && credentialValue.length === 0 && registration.status !== 'enabled') {
+    return connectCardA2ui(surfaceId, registration.toolId, manifest, 'needs_auth', '该工具需要凭据后才能测试连接。', prompt);
+  }
+  if (registration.status === 'enabled') {
+    return callEnabledDynamicTool(registration, credentialValue, prompt, surfaceId);
+  }
+  return preflightAndCallDynamicTool(registration, manifest, credentialValue, prompt, surfaceId);
+}
+
+async function buildDynamicToolJsonlWithManifest(toolId: string, prompt: string, surfaceId: string, manifest: DynamicToolManifest): Promise<string> {
+  const transport = selectBestRemoteTransport(manifest);
+  if (transport === null) {
+    return unsupportedTransportA2ui(surfaceId, toolId, manifest, prompt);
+  }
+
+  const mcpToolName = firstSafeToolName(manifest);
+  if (mcpToolName.length === 0) {
+    return connectCardA2ui(surfaceId, toolId, manifest, 'unsafe_action_blocked', '该 MCP 只暴露交易或高风险动作，当前版本不会自动调用。', prompt);
+  }
+
+  let credentialRef = '';
+  let credentialValue = '';
+  const requiredCredential = firstRequiredCredential(manifest);
+  if (requiredCredential !== null) {
+    credentialRef = credentialRefFor(manifest.id, requiredCredential.name);
+    credentialValue = await dynamicCredentialStore.get(credentialRef);
+    if (credentialValue.length === 0) {
+      return connectCardA2ui(surfaceId, toolId, manifest, 'needs_auth', '该工具需要凭据后才能测试连接。', prompt);
+    }
+  }
+
+  const candidate = dynamicToolRegistry.enableAlias(toolId, manifest, mcpToolName, credentialRef);
+  if (candidate.status === 'unsupported_transport') {
+    return unsupportedTransportA2ui(surfaceId, toolId, manifest, prompt);
+  }
+  if (candidate.status === 'unsafe_action_blocked') {
+    return connectCardA2ui(surfaceId, toolId, manifest, 'unsafe_action_blocked', '该 MCP 只暴露交易或高风险动作，当前版本不会自动调用。', prompt);
+  }
+  return preflightAndCallDynamicTool(candidate, manifest, credentialValue, prompt, surfaceId);
+}
+
+function dynamicDiscoveryMissingManifest(prompt: string): DynamicToolManifest {
+  const manifest = missingDynamicManifest('dynamic.search');
+  manifest.displayName = '动态工具搜索';
+  manifest.sourceUrl = 'modelscope-local-catalog';
+  manifest.capabilities = ['dynamic.discovery'];
+  manifest.tools = [{
+    name: 'dynamic.search',
+    description: 'Search the local ModelScope-derived MCP catalog for a matching remote tool.',
+    inputSchema: new Object()
+  }];
+  manifest.fromSiteUrl = 'https://modelscope.cn/mcp';
+  return manifest;
+}
+
+async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string): Promise<string> {
+  const discovery: DynamicToolDiscoveryResult | null = discoverDynamicToolForPrompt(prompt);
+  if (discovery === null) {
+    aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=none source=modelscope-local-catalog');
+    return connectCardA2ui(
+      surfaceId,
+      'dynamic.search',
+      dynamicDiscoveryMissingManifest(prompt),
+      'no_tool_found',
+      '已根据用户请求搜索本机 ModelScope MCP 候选目录，但没有找到可直接接入的远程 MCP/API。',
+      prompt
+    );
+  }
+  aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt +
+    ' selectedToolId=' + discovery.toolId +
+    ' manifestId=' + discovery.manifest.id +
+    ' source=' + discovery.source +
+    ' score=' + discovery.score.toString() +
+    ' reason=' + discovery.reason);
+  return buildDynamicToolJsonlWithManifest(discovery.toolId, prompt, surfaceId, discovery.manifest);
+}
+
+async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string): Promise<string> {
+  if (toolId === 'dynamic.search') {
+    return buildDiscoveredDynamicToolJsonl(prompt, surfaceId);
+  }
+
+  const registration = dynamicToolRegistry.registrationForToolId(toolId);
+  if (registration !== null) {
+    return buildRegisteredDynamicToolJsonl(registration, prompt, surfaceId);
+  }
+
+  const manifest = sampleManifestForToolId(toolId);
+  if (manifest === null) {
+    return connectCardA2ui(surfaceId, toolId, missingDynamicManifest(toolId), 'no_tool_found', '没有找到可在鸿蒙设备直接运行的远程 MCP/API。', prompt);
+  }
+
+  return buildDynamicToolJsonlWithManifest(toolId, prompt, surfaceId, manifest);
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null): Promise<string> {
   if (toolId === 'social.reply.send') {
     return errorA2ui(
@@ -5006,7 +5525,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   if (toolId === 'food.search') {
     return callLocalFoodSearch(prompt, surfaceId, emitJsonl);
   }
-  return missingConfigA2ui(surfaceId, toolId);
+  return buildDynamicToolJsonl(toolId, prompt, surfaceId);
 }
 
 async function callLocalTool(toolId: string, prompt: string, surfaceId: string, actionId: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null): Promise<A2uiCallResult> {

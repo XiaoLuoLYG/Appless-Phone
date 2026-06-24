@@ -91,7 +91,21 @@ function businessSurface(): A2uiSurfaceState {
     summary: summary,
     trip: trip,
     rowGroups: rowGroups,
-    toolRequest: toolRequest
+    toolRequest: toolRequest,
+    dynamicToolConnect: {
+      toolId: '',
+      prompt: '',
+      manifestId: '',
+      displayName: '',
+      sourceUrl: '',
+      status: '',
+      message: '',
+      credentialName: '',
+      credentialRef: '',
+      registrationUrl: '',
+      actions: []
+    },
+    genericToolResults: []
   };
   const components: A2uiComponent[] = [];
   return {

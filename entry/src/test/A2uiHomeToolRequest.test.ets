@@ -62,7 +62,21 @@ function surfaceWithToolRequest(toolId: string, prompt: string, actionId: string
     summary: summary,
     trip: trip,
     rowGroups: rowGroups,
-    toolRequest: request
+    toolRequest: request,
+    dynamicToolConnect: {
+      toolId: '',
+      prompt: '',
+      manifestId: '',
+      displayName: '',
+      sourceUrl: '',
+      status: '',
+      message: '',
+      credentialName: '',
+      credentialRef: '',
+      registrationUrl: '',
+      actions: []
+    },
+    genericToolResults: []
   };
   const components: A2uiComponent[] = [];
   return {
@@ -106,8 +120,8 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('retry_food');
     });
 
-    it('reports no tool when the data model has no tool id', 0, () => {
-      const resolved = resolveA2uiHomeToolRequest(surfaceWithToolRequest('', '', ''), '原始请求', '');
+    it('reports no tool when the prompt has no tool intent', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(surfaceWithToolRequest('', '', ''), '你好', '');
 
       expect(resolved.hasTool).assertFalse();
       expect(resolved.toolId).assertEqual('');
@@ -123,6 +137,59 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('food.search');
       expect(resolved.prompt).assertEqual('帮我搜索深圳坂田华为基地附近的奶茶店');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('infers ferry search when the user asks for ferry tickets', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我查明天深圳到珠海的船票',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('dynamic.search');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('reroutes ferry tickets to dynamic search even when the model selects travel search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('travel.search', '帮我查明天深圳到珠海的船票', 'model_tool_request'),
+        '帮我查明天深圳到珠海的船票',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('dynamic.search');
+      expect(resolved.prompt).assertEqual('帮我查明天深圳到珠海的船票');
+      expect(resolved.actionId).assertEqual('model_tool_request');
+    });
+
+    it('infers weather and statistics dynamic tools', 0, () => {
+      const weather = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我查明天深圳天气',
+        ''
+      );
+      const statistics = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我查询统计局GDP数据',
+        ''
+      );
+
+      expect(weather.toolId).assertEqual('dynamic.search');
+      expect(statistics.toolId).assertEqual('dynamic.search');
+    });
+
+    it('infers ppt generation as an unsupported dynamic MCP candidate', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我生成一份深圳低空经济介绍PPT',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('dynamic.search');
       expect(resolved.actionId).assertEqual('client_intent_fallback');
     });
 

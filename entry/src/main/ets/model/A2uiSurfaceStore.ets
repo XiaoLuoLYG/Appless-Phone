@@ -4,8 +4,10 @@ import {
   A2uiApplyResult,
   A2uiComponent,
   A2uiDataValue,
+  A2uiDynamicToolConnectData,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
   A2uiLabelValueData,
   A2uiEnvelope,
   A2uiRowGroupsData,
@@ -89,7 +91,9 @@ function emptyDataModel(): A2uiRuntimeDataModel {
       toolId: '',
       prompt: '',
       actionId: ''
-    }
+    },
+    dynamicToolConnect: emptyDynamicToolConnect(),
+    genericToolResults: []
   };
 }
 
@@ -114,6 +118,22 @@ function emptyToolRequest(): A2uiToolRequestData {
     toolId: '',
     prompt: '',
     actionId: ''
+  };
+}
+
+function emptyDynamicToolConnect(): A2uiDynamicToolConnectData {
+  return {
+    toolId: '',
+    prompt: '',
+    manifestId: '',
+    displayName: '',
+    sourceUrl: '',
+    status: '',
+    message: '',
+    credentialName: '',
+    credentialRef: '',
+    registrationUrl: '',
+    actions: []
   };
 }
 
@@ -214,6 +234,25 @@ function normalizeToolRequest(parsed: A2uiRuntimeDataModel, fallback: A2uiToolRe
   return fallback;
 }
 
+function normalizeDynamicToolConnect(parsed: A2uiRuntimeDataModel, fallback: A2uiDynamicToolConnectData): A2uiDynamicToolConnectData {
+  if (parsed.dynamicToolConnect === undefined || parsed.dynamicToolConnect === null) {
+    return fallback;
+  }
+  return {
+    toolId: textOf(parsed.dynamicToolConnect.toolId),
+    prompt: textOf(parsed.dynamicToolConnect.prompt),
+    manifestId: textOf(parsed.dynamicToolConnect.manifestId),
+    displayName: textOf(parsed.dynamicToolConnect.displayName),
+    sourceUrl: textOf(parsed.dynamicToolConnect.sourceUrl),
+    status: textOf(parsed.dynamicToolConnect.status),
+    message: textOf(parsed.dynamicToolConnect.message),
+    credentialName: textOf(parsed.dynamicToolConnect.credentialName),
+    credentialRef: textOf(parsed.dynamicToolConnect.credentialRef),
+    registrationUrl: textOf(parsed.dynamicToolConnect.registrationUrl),
+    actions: Array.isArray(parsed.dynamicToolConnect.actions) ? parsed.dynamicToolConnect.actions : []
+  };
+}
+
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
   if (parsed.rowGroups === undefined || parsed.rowGroups === null) {
     return fallback;
@@ -254,6 +293,8 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       },
       rowGroups: normalizeRowGroups(parsed, fallback.rowGroups),
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
+      dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
+      genericToolResults: Array.isArray(parsed.genericToolResults) ? parsed.genericToolResults : fallback.genericToolResults,
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -367,6 +408,10 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
   } else if (path === '/toolRequest') {
     next.toolRequest = value as A2uiToolRequestData;
     next.toolRequests = [next.toolRequest];
+  } else if (path === '/dynamicToolConnect') {
+    next.dynamicToolConnect = value as A2uiDynamicToolConnectData;
+  } else if (path === '/genericToolResults') {
+    next.genericToolResults = value as A2uiGenericToolResultData[];
   } else if (path === '/toolRequests') {
     const requests = value as A2uiToolRequestData[];
     next.toolRequests = requests;

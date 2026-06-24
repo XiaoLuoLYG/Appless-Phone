@@ -9,6 +9,7 @@ import {
   A2uiAction,
   A2uiCallResult,
   A2uiComponent,
+  A2uiDynamicToolConnectData,
   A2uiMessage,
   A2uiRuntimeDataModel,
   A2uiSocialMessageData,
@@ -197,7 +198,21 @@ struct Index {
         toolId: '',
         prompt: '',
         actionId: ''
-      }
+      },
+      dynamicToolConnect: {
+        toolId: '',
+        prompt: '',
+        manifestId: '',
+        displayName: '',
+        sourceUrl: '',
+        status: '',
+        message: '',
+        credentialName: '',
+        credentialRef: '',
+        registrationUrl: '',
+        actions: []
+      },
+      genericToolResults: []
     };
   }
 
@@ -264,6 +279,14 @@ struct Index {
       return [];
     }
     return model.social.replies;
+  }
+
+  private currentDynamicToolConnect(): A2uiDynamicToolConnectData | null {
+    const model = this.parsedDataModel();
+    if (model === null || model.dynamicToolConnect === undefined || model.dynamicToolConnect === null) {
+      return null;
+    }
+    return model.dynamicToolConnect;
   }
 
   private selectedSocialMessage(): A2uiSocialMessageData | null {
@@ -426,6 +449,31 @@ struct Index {
       }));
       aiLogError('[AIPhone][SocialNotificationSettingsError] code=' + code +
         ' message=' + businessError.message);
+    }
+  }
+
+  private async openExternalUrl(url: string): Promise<void> {
+    if (url.length === 0) {
+      return;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await context.startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: url
+      });
+    } catch (error) {
+      const businessError = error as BusinessError;
+      const message = '注册页打开失败：' + businessError.message;
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '无法打开注册页。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][DynamicToolOpenRegistrationError] ' + message);
     }
   }
 
@@ -714,14 +762,27 @@ struct Index {
     await this.submitPrompt(this.inputText, this.inputText);
   }
 
-  private handleClientAction(action: A2uiAction): void {
+  private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
     if (action.id === 'social_select_message') {
       this.selectSocialMessageById(action.prompt);
       return;
     }
     if (action.id === 'social_open_notification_settings') {
-      this.openSocialNotificationSubscriptionSettings();
+      await this.openSocialNotificationSubscriptionSettings();
+      return;
+    }
+    if (action.id === 'dynamic_open_registration') {
+      await this.openExternalUrl(action.prompt);
+      return;
+    }
+    if (action.id === 'dynamic_test_connection') {
+      const data = this.currentDynamicToolConnect();
+      if (data === null || data.toolId.length === 0) {
+        return;
+      }
+      const testPrompt = action.prompt.length > 0 ? action.prompt : (data.prompt.length > 0 ? data.prompt : data.toolId);
+      await this.callToolById(data.toolId, testPrompt, action.id);
       return;
     }
   }
@@ -755,7 +816,7 @@ struct Index {
   private async sendAction(action: A2uiAction): Promise<void> {
     const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
-      this.handleClientAction(action);
+      await this.handleClientAction(action);
       return;
     }
     if (kind === 'input') {

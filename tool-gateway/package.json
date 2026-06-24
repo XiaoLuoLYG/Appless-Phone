@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "dynamic-fixture": "node dynamic-mcp-fixture.mjs",
     "smoke": "node smoke-test.mjs",
     "smoke:device": "node smoke-test.mjs --device"
   }

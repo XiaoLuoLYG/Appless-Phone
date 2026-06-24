@@ -18,9 +18,33 @@ function containsAny(text: string, words: string[]): boolean {
   return false;
 }
 
-function inferredToolIdForPrompt(prompt: string): string {
+function forcedDynamicToolIdForPrompt(prompt: string): string {
   if (prompt.length === 0) {
     return '';
+  }
+  if (containsAny(prompt, ['船票', '轮渡', '客船', '渡轮', '码头']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '票', '余票', '班次'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['天气', '气温', '下雨', '降雨']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '今天', '明天'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['统计局', 'GDP', 'CPI', '人口', '经济数据']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['PPT', 'ppt', '幻灯片', '演示文稿']) &&
+    containsAny(prompt, ['生成', '做', '制作', '创建'])) {
+    return 'dynamic.search';
+  }
+  return '';
+}
+
+function inferredToolIdForPrompt(prompt: string): string {
+  const dynamicToolId = forcedDynamicToolIdForPrompt(prompt);
+  if (dynamicToolId.length > 0) {
+    return dynamicToolId;
   }
   if (containsAny(prompt, ['附近', '周边', '外卖', '咖啡', '奶茶', '餐饮', '美食', '肯德基']) &&
     containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '附近', '周边'])) {
@@ -47,7 +71,13 @@ export function resolveA2uiHomeToolRequest(
   let toolId = request.toolId;
   const prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
-  if (toolId.length === 0) {
+  const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
+  if (forcedDynamicToolId.length > 0) {
+    toolId = forcedDynamicToolId;
+    if (actionId.length === 0) {
+      actionId = request.toolId.length > 0 ? 'client_dynamic_reroute' : 'client_intent_fallback';
+    }
+  } else if (toolId.length === 0) {
     toolId = inferredToolIdForPrompt(fallbackPrompt);
     if (toolId.length > 0 && actionId.length === 0) {
       actionId = 'client_intent_fallback';
