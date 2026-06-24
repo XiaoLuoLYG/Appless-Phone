@@ -32,7 +32,10 @@ const providerKeys = [
   'MCD_MCP_TOKEN',
   'MCD_MCP_URL',
   'LUCKIN_MCP_TOKEN',
-  'LUCKIN_MCP_URL'
+  'LUCKIN_MCP_URL',
+  'GMAIL_AUTH_URL',
+  'GMAIL_OAUTH_CLIENT_ID',
+  'GMAIL_OAUTH_REDIRECT_URI'
 ];
 
 function unquote(value) {
@@ -99,5 +102,7 @@ console.log(maskedStatus(config, [
   'TAOBAO_APP_KEY',
   'TAOBAO_FLASH_PID',
   'MCD_MCP_TOKEN',
-  'LUCKIN_MCP_TOKEN'
+  'LUCKIN_MCP_TOKEN',
+  'GMAIL_AUTH_URL',
+  'GMAIL_OAUTH_CLIENT_ID'
 ]));

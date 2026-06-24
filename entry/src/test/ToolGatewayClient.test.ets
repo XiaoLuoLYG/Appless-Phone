@@ -7,6 +7,7 @@ import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
   foodA2uiRenderState,
   foodDistanceMeters,
@@ -180,7 +181,10 @@ export default function toolGatewayClientTest() {
 
       expect(authResult.ok).assertTrue();
       expect(dynamicToolConnect(authResult.surface).toolId).assertEqual('gmail.mail.search');
-      expect(dynamicToolConnect(authResult.surface).credentialName).assertEqual('Google OAuth or Gmail Web session');
+      expect(dynamicToolConnect(authResult.surface).credentialName).assertEqual('Google Workspace MCP OAuth');
+      expect(dynamicToolConnect(authResult.surface).sourceUrl).assertEqual('https://gmailmcp.googleapis.com/mcp/v1');
+      expect(dynamicToolConnect(authResult.surface).actions[0].id).assertEqual('gmail.authorize');
+      expect(dynamicToolConnect(authResult.surface).actions[1].id).assertEqual('gmail.open.web');
       expect(authResult.raw.indexOf('不会模拟 Gmail 邮件')).assertLarger(-1);
 
       expect(blockedResult.ok).assertTrue();
@@ -191,6 +195,34 @@ export default function toolGatewayClientTest() {
       expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
       expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
       expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+    });
+
+    it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
+      configureLocalProviderConfigFromRawJson(JSON.stringify({
+        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth2redirect/google'
+      }));
+
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const authResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看下 Gmail 最近的重要邮件',
+        'surface_gmail_auth_with_client',
+        'client_intent_fallback',
+        noop
+      );
+
+      configureLocalProviderConfigFromRawJson('{}');
+
+      const authAction = dynamicToolConnect(authResult.surface).actions[0];
+      expect(authResult.ok).assertTrue();
+      expect(authAction.id).assertEqual('gmail.authorize');
+      expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
+      expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth2redirect%2Fgoogle')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
     });
 
     it('keeps brand MCP adapters query-only', 0, () => {

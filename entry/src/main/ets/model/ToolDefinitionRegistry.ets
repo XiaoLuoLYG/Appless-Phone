@@ -77,7 +77,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'mailSearchQuery',
     outputSchema: 'mailThreads',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.thread.read', 'gmail.draft.create', 'gmail.open.web']
+    actions: ['gmail.authorize', 'gmail.thread.read', 'gmail.draft.create', 'gmail.open.web']
   },
   {
     toolId: 'gmail.thread.read',
@@ -89,7 +89,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'mailThreadReadQuery',
     outputSchema: 'mailThread',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.draft.create', 'gmail.open.web']
+    actions: ['gmail.authorize', 'gmail.draft.create', 'gmail.open.web']
   },
   {
     toolId: 'gmail.draft.create',
@@ -101,7 +101,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'draftCreateRequest',
     outputSchema: 'draftReply',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.draft.apply', 'gmail.open.web']
+    actions: ['gmail.authorize', 'gmail.draft.apply', 'gmail.open.web']
   },
   {
     toolId: 'gmail.draft.apply',
@@ -113,7 +113,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'draftApplyRequest',
     outputSchema: 'draftApplyResult',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.open.web']
+    actions: ['gmail.authorize', 'gmail.open.web']
   },
   {
     toolId: 'gmail.open.web',
@@ -137,7 +137,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'messageSendRequest',
     outputSchema: 'blockedAction',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.draft.apply', 'gmail.open.web']
+    actions: ['gmail.authorize', 'gmail.draft.apply', 'gmail.open.web']
   }
 ];
 

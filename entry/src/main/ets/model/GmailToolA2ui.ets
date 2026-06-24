@@ -13,6 +13,10 @@ import {
 } from './A2uiTypes';
 
 export const GMAIL_WEB_URL: string = 'https://mail.google.com/mail/u/0/#inbox';
+export const GMAIL_MCP_SERVER_URL: string = 'https://gmailmcp.googleapis.com/mcp/v1';
+export const GMAIL_MCP_AUTH_SETUP_URL: string = 'https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server';
+const GMAIL_OAUTH_AUTH_URL: string = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GMAIL_OAUTH_SCOPES: string = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose';
 const GMAIL_MANIFEST_ID: string = 'google.gmail';
 const GMAIL_DISPLAY_NAME: string = 'Gmail';
 const GENERIC_RESULTS_PATH: string = '/genericToolResults';
@@ -27,6 +31,23 @@ function action(id: string, label: string, prompt: string, variant: string, kind
     variant: variant,
     kind: kind
   };
+}
+
+export function gmailOAuthAuthorizationUrl(clientId: string, redirectUri: string): string {
+  const cleanedClientId = clientId.trim();
+  const cleanedRedirectUri = redirectUri.trim();
+  if (cleanedClientId.length === 0 || cleanedRedirectUri.length === 0) {
+    return GMAIL_MCP_AUTH_SETUP_URL;
+  }
+  return GMAIL_OAUTH_AUTH_URL +
+    '?client_id=' + encodeURIComponent(cleanedClientId) +
+    '&redirect_uri=' + encodeURIComponent(cleanedRedirectUri) +
+    '&response_type=code' +
+    '&scope=' + encodeURIComponent(GMAIL_OAUTH_SCOPES) +
+    '&access_type=offline' +
+    '&prompt=consent' +
+    '&include_granted_scopes=true' +
+    '&state=aiphone_gmail_mcp';
 }
 
 function jsonLine(envelope: A2uiEnvelope): string {
@@ -133,20 +154,26 @@ function genericResultsFromDynamic(results: DynamicGenericToolResult[]): A2uiGen
   return mapped;
 }
 
-export function gmailAuthRequiredA2ui(surfaceId: string, toolId: string, message: string): string {
+export function gmailAuthRequiredA2ui(
+  surfaceId: string,
+  toolId: string,
+  message: string,
+  authorizeUrl: string = GMAIL_MCP_AUTH_SETUP_URL
+): string {
   const connectData: A2uiDynamicToolConnectData = {
     toolId: toolId,
     prompt: '',
     manifestId: GMAIL_MANIFEST_ID,
     displayName: GMAIL_DISPLAY_NAME,
-    sourceUrl: GMAIL_WEB_URL,
+    sourceUrl: GMAIL_MCP_SERVER_URL,
     status: 'needs_auth',
     message: message,
-    credentialName: 'Google OAuth or Gmail Web session',
-    credentialRef: 'gmail:auth',
-    registrationUrl: GMAIL_WEB_URL,
+    credentialName: 'Google Workspace MCP OAuth',
+    credentialRef: 'gmail:mcp_oauth',
+    registrationUrl: authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL,
     actions: [
-      action('gmail.open.web', '打开 Gmail Web', GMAIL_WEB_URL, 'primary', 'client'),
+      action('gmail.authorize', '授权 Gmail', authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL, 'primary', 'client'),
+      action('gmail.open.web', '打开 Gmail Web', GMAIL_WEB_URL, 'secondary', 'client'),
       action('gmail_retry_auth', '重试认证', '重新检测 Gmail 登录状态', 'secondary', 'prompt')
     ]
   };

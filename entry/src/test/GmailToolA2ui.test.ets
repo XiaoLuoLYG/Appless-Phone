@@ -79,11 +79,16 @@ export default function gmailToolA2uiTest() {
       expect(auth.toolId).assertEqual('gmail.mail.search');
       expect(auth.manifestId).assertEqual('google.gmail');
       expect(auth.displayName).assertEqual('Gmail');
-      expect(auth.sourceUrl).assertEqual('https://mail.google.com/mail/u/0/#inbox');
-      expect(auth.credentialName).assertEqual('Google OAuth or Gmail Web session');
-      expect(auth.actions[0].id).assertEqual('gmail.open.web');
+      expect(auth.sourceUrl).assertEqual('https://gmailmcp.googleapis.com/mcp/v1');
+      expect(auth.credentialName).assertEqual('Google Workspace MCP OAuth');
+      expect(auth.actions[0].id).assertEqual('gmail.authorize');
+      expect(auth.actions[0].label).assertEqual('授权 Gmail');
       expect(auth.actions[0].kind).assertEqual('client');
-      expect(auth.actions[0].prompt).assertEqual('https://mail.google.com/mail/u/0/#inbox');
+      expect(auth.actions[0].prompt).assertEqual('https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server');
+      expect(auth.actions[1].id).assertEqual('gmail.open.web');
+      expect(auth.actions[1].kind).assertEqual('client');
+      expect(auth.actions[1].variant).assertEqual('secondary');
+      expect(auth.actions[1].prompt).assertEqual('https://mail.google.com/mail/u/0/#inbox');
     });
 
     it('renders Gmail rows through GenericToolResults without leaking bodies', 0, () => {

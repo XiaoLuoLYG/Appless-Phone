@@ -19,7 +19,7 @@ import {
   A2uiSurfaceState
 } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
-import { GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
+import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
 import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
@@ -780,6 +780,10 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'gmail.authorize') {
+      await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GMAIL_MCP_AUTH_SETUP_URL);
+      return;
+    }
     if (action.id === 'gmail.open.web') {
       await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GMAIL_WEB_URL);
       return;

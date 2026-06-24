@@ -80,7 +80,8 @@ const visibleDomainMarkers = [
   'gmail.draft.create',
   'gmail.open.web',
   'gmail.message.send',
-  'Google OAuth or Gmail Web session',
+  'Google Workspace MCP OAuth',
+  '授权 Gmail',
   'UnsafeActionBlocked',
   '不会模拟 Gmail 邮件',
   '不会自动发送 Gmail',
@@ -661,7 +662,7 @@ function layoutExpectationsForQuery(query) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
-    return ['接入工具：Gmail', 'gmail.draft.create', 'Google OAuth or Gmail Web session'];
+    return ['接入工具：Gmail', 'gmail.draft.create', 'Google Workspace MCP OAuth'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
     return ['接入工具：Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];

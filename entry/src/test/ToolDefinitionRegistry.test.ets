@@ -56,6 +56,7 @@ export default function toolDefinitionRegistryTest() {
       expect(mailSearch.authModes.join(',')).assertEqual('oauth,mcp_auth,web_session');
       expect(mailSearch.outputSchema).assertEqual('mailThreads');
       expect(mailSearch.a2uiComponent).assertEqual('GenericToolResults');
+      expect(mailSearch.actions[0]).assertEqual('gmail.authorize');
       expect(draftApply.riskLevel).assertEqual('confirm_required');
       expect(messageSend.riskLevel).assertEqual('blocked');
       expect(messageSend.outputSchema).assertEqual('blockedAction');
