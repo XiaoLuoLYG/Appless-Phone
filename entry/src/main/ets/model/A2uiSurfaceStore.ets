@@ -8,6 +8,7 @@ import {
   A2uiFlightData,
   A2uiFoodData,
   A2uiGenericToolResultData,
+  A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
   A2uiRowGroupsData,
@@ -151,6 +152,21 @@ interface LooseRowData {
   body?: Object[];
 }
 
+interface LooseGenericToolResultRowData {
+  label?: Object | string | number | boolean | null;
+  value?: Object | string | number | boolean | null;
+}
+
+interface LooseGenericToolResultData {
+  sourceTag?: Object | string | number | boolean | null;
+  toolName?: Object | string | number | boolean | null;
+  title?: Object | string | number | boolean | null;
+  status?: Object | string | number | boolean | null;
+  summary?: Object | string | number | boolean | null;
+  rows?: Object[];
+  rawPreview?: Object | string | number | boolean | null;
+}
+
 function textOf(value: Object | string | number | boolean | null | undefined): string {
   if (value === undefined || value === null) {
     return '';
@@ -253,6 +269,53 @@ function normalizeDynamicToolConnect(parsed: A2uiRuntimeDataModel, fallback: A2u
   };
 }
 
+function normalizeGenericToolResultRows(rows: Object[] | undefined): A2uiGenericToolResultRowData[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const normalized: A2uiGenericToolResultRowData[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    const source = rows[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const row = source as LooseGenericToolResultRowData;
+    const label = textOf(row.label);
+    const value = textOf(row.value);
+    if (label.length > 0 || value.length > 0) {
+      normalized.push({
+        label: label,
+        value: value
+      });
+    }
+  }
+  return normalized;
+}
+
+function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2uiGenericToolResultData[]): A2uiGenericToolResultData[] {
+  if (!Array.isArray(parsed.genericToolResults)) {
+    return fallback;
+  }
+  const normalized: A2uiGenericToolResultData[] = [];
+  for (let index = 0; index < parsed.genericToolResults.length; index++) {
+    const source = parsed.genericToolResults[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const result = source as LooseGenericToolResultData;
+    normalized.push({
+      sourceTag: textOf(result.sourceTag),
+      toolName: textOf(result.toolName),
+      title: textOf(result.title),
+      status: textOf(result.status),
+      summary: textOf(result.summary),
+      rows: normalizeGenericToolResultRows(result.rows),
+      rawPreview: textOf(result.rawPreview)
+    });
+  }
+  return normalized;
+}
+
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
   if (parsed.rowGroups === undefined || parsed.rowGroups === null) {
     return fallback;
@@ -294,7 +357,7 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       rowGroups: normalizeRowGroups(parsed, fallback.rowGroups),
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
-      genericToolResults: Array.isArray(parsed.genericToolResults) ? parsed.genericToolResults : fallback.genericToolResults,
+      genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {

@@ -73,6 +73,17 @@ const visibleDomainMarkers = [
   'weather.query',
   'statistics.search',
   'ppt.generate',
+  'Gmail',
+  'Gmail Web',
+  'google.gmail',
+  'gmail.mail.search',
+  'gmail.draft.create',
+  'gmail.open.web',
+  'gmail.message.send',
+  'Google OAuth or Gmail Web session',
+  'UnsafeActionBlocked',
+  '不会模拟 Gmail 邮件',
+  '不会自动发送 Gmail',
   'AMAP_MAPS_API_KEY',
   'Authorization',
   'API_KEY',
@@ -155,6 +166,30 @@ function expectedCaseForQuery(query) {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
       expectedDiscoveredToolId: 'ppt.generate'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.open.web'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.message.send'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.draft.create'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.mail.search'
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -618,6 +653,18 @@ function layoutExpectationsForQuery(query) {
   }
   if (/PPT|ppt|幻灯片|演示文稿/.test(query)) {
     return ['接入工具', 'ppt.generate', 'API_KEY', 'unsupported_transport', '歌者PPT'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query)) {
+    return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+    return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+    return ['接入工具：Gmail', 'gmail.draft.create', 'Google OAuth or Gmail Web session'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return ['接入工具：Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];

@@ -154,6 +154,30 @@ export default function a2uiParserTest() {
       expect(genericToolResults(surface)[0].rows[0].value).assertEqual('Fixture row');
     });
 
+    it('normalizes partial dynamic tool result data for renderer safety', 0, () => {
+      const stream =
+        '{"version":"v0.9.1","createSurface":{"surfaceId":"dynamic-partial","root":"root","title":"动态工具","intent":"dynamic_tool","status":"ready"}}\n' +
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"dynamic-partial","components":[{"id":"root","component":"SurfaceRoot","child":"results","title":"动态工具","status":"ready"},{"id":"results","component":"GenericToolResults","title":"工具结果","dataPath":"/genericToolResults","status":"ready"}]}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic-partial","path":"/genericToolResults","value":[{"title":"Partial result","rows":[{"label":"Only label"},{}]}]}}\n';
+      const parsed = parseA2uiJsonl(stream);
+      const store = new A2uiSurfaceStore();
+
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+
+      const results = genericToolResults(store.getSurface());
+      expect(parsed.error).assertEqual('');
+      expect(results.length).assertEqual(1);
+      expect(results[0].title).assertEqual('Partial result');
+      expect(results[0].sourceTag).assertEqual('');
+      expect(results[0].summary).assertEqual('');
+      expect(results[0].rawPreview).assertEqual('');
+      expect(results[0].rows.length).assertEqual(1);
+      expect(results[0].rows[0].label).assertEqual('Only label');
+      expect(results[0].rows[0].value).assertEqual('');
+    });
+
     it('accepts SocialInbox messages and reply state without falling back to rows', 0, () => {
       const stream =
         '{"version":"v0.9.1","createSurface":{"surfaceId":"social","root":"root","title":"社交收件箱","intent":"social","status":"ready"}}\n' +
