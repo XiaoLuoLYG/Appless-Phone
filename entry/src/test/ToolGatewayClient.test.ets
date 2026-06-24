@@ -228,7 +228,7 @@ export default function toolGatewayClientTest() {
     it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
       configureLocalProviderConfigFromRawJson(JSON.stringify({
         GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-        GMAIL_OAUTH_REDIRECT_URI: 'aiphone://oauth/google'
+        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
       }));
 
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
@@ -248,7 +248,7 @@ export default function toolGatewayClientTest() {
       expect(authAction.id).assertEqual('gmail.authorize');
       expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
       expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('redirect_uri=aiphone%3A%2F%2Foauth%2Fgoogle')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
       expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
       expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
       expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
@@ -267,7 +267,7 @@ export default function toolGatewayClientTest() {
       const mcp = new FixtureGmailMcpClient();
       configureLocalProviderConfigFromRawJson(JSON.stringify({
         GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-        GMAIL_OAUTH_REDIRECT_URI: 'aiphone://oauth/google'
+        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
       }));
       configureGmailCredentialStoreForTests(store);
       configureGmailMcpClientForTests(mcp);

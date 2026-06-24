@@ -7,7 +7,7 @@ export const GMAIL_ACCESS_TOKEN_REF: string = 'gmail:mcp_oauth';
 export const GMAIL_REFRESH_TOKEN_REF: string = 'gmail:mcp_refresh';
 export const GMAIL_TOKEN_SET_REF: string = 'gmail:mcp_tokens';
 export const GMAIL_PENDING_OAUTH_REF: string = 'gmail:mcp_pending_oauth';
-export const GMAIL_DEFAULT_REDIRECT_URI: string = 'aiphone://oauth/google';
+export const GMAIL_DEFAULT_REDIRECT_URI: string = 'com.example.aiphonedemo:/oauth/google';
 export const GMAIL_OAUTH_SCOPES: string = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose';
 
 const GOOGLE_OAUTH_AUTH_URL: string = 'https://accounts.google.com/o/oauth2/v2/auth';

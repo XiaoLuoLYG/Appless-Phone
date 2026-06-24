@@ -20,14 +20,14 @@ export default function gmailOAuthClientTest() {
     it('builds Google OAuth URLs with PKCE and the Gmail MCP scopes', 0, () => {
       const url = buildGmailOAuthAuthorizationUrl({
         clientId: 'client-123.apps.googleusercontent.com',
-        redirectUri: 'aiphone://oauth/google',
+        redirectUri: 'com.example.aiphonedemo:/oauth/google',
         state: 'state-123',
         codeChallenge: 'challenge-456'
       });
 
       expect(url.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
       expect(url.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-      expect(url.indexOf('redirect_uri=aiphone%3A%2F%2Foauth%2Fgoogle')).assertLarger(-1);
+      expect(url.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
       expect(url.indexOf('scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.compose')).assertLarger(-1);
       expect(url.indexOf('state=state-123')).assertLarger(-1);
       expect(url.indexOf('code_challenge=challenge-456')).assertLarger(-1);
@@ -41,8 +41,8 @@ export default function gmailOAuthClientTest() {
     });
 
     it('parses OAuth redirect results and rejects missing codes', 0, () => {
-      const success = parseGmailOAuthRedirect('aiphone://oauth/google?code=auth-code&state=state-123&scope=gmail');
-      const denied = parseGmailOAuthRedirect('aiphone://oauth/google?error=access_denied&state=state-123');
+      const success = parseGmailOAuthRedirect('com.example.aiphonedemo:/oauth/google?code=auth-code&state=state-123&scope=gmail');
+      const denied = parseGmailOAuthRedirect('com.example.aiphonedemo:/oauth/google?error=access_denied&state=state-123');
 
       expect(success.ok).assertTrue();
       expect(success.code).assertEqual('auth-code');
@@ -55,12 +55,12 @@ export default function gmailOAuthClientTest() {
       const exchange = buildGmailTokenExchangeBody({
         clientId: 'client-123',
         clientSecret: 'secret-456',
-        redirectUri: 'aiphone://oauth/google'
+        redirectUri: 'com.example.aiphonedemo:/oauth/google'
       }, 'auth-code', 'verifier-789');
       const refresh = buildGmailRefreshTokenBody({
         clientId: 'client-123',
         clientSecret: '',
-        redirectUri: 'aiphone://oauth/google'
+        redirectUri: 'com.example.aiphonedemo:/oauth/google'
       }, 'refresh-token');
 
       expect(exchange.indexOf('grant_type=authorization_code')).assertLarger(-1);

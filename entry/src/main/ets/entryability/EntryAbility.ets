@@ -9,6 +9,12 @@ import { configureLocalProviderConfigFromRawJson, gmailOAuthConfigFromProvider, 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
 
+function isGmailOAuthRedirectUri(uri: string): boolean {
+  return uri.indexOf('com.example.aiphonedemo:/oauth/google') === 0 ||
+    uri.indexOf('com.example.aiphonedemo://oauth/google') === 0 ||
+    uri.indexOf('aiphone://oauth/google') === 0;
+}
+
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -44,7 +50,7 @@ export default class EntryAbility extends UIAbility {
 
   private handleGmailOAuthWant(want: Want): void {
     const uri = want.uri === undefined ? '' : want.uri;
-    if (uri.indexOf('aiphone://oauth/google') !== 0) {
+    if (!isGmailOAuthRedirectUri(uri)) {
       return;
     }
     handleGmailOAuthRedirect(new AssetCredentialStore(), gmailOAuthConfigFromProvider(), uri)

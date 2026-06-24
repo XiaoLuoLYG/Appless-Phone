@@ -84,6 +84,15 @@
             ],
             "uris": [
               {
+                "scheme": "com.example.aiphonedemo",
+                "pathStartWith": "oauth/google"
+              },
+              {
+                "scheme": "com.example.aiphonedemo",
+                "host": "oauth",
+                "pathStartWith": "google"
+              },
+              {
                 "scheme": "aiphone",
                 "host": "oauth",
                 "pathStartWith": "google"
