@@ -2,7 +2,9 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import util from '@ohos.util';
-import { configureLocalProviderConfigFromRawJson, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
+import { AssetCredentialStore } from '../model/DynamicCredentialStore';
+import { handleGmailOAuthRedirect } from '../model/GmailOAuthClient';
+import { configureLocalProviderConfigFromRawJson, gmailOAuthConfigFromProvider, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
@@ -15,6 +17,7 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     this.loadLocalProviderConfig();
+    this.handleGmailOAuthWant(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -31,6 +34,26 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
+    this.loadLocalProviderConfig();
+    this.handleGmailOAuthWant(want);
+  }
+
+  private handleGmailOAuthWant(want: Want): void {
+    const uri = want.uri === undefined ? '' : want.uri;
+    if (uri.indexOf('aiphone://oauth/google') !== 0) {
+      return;
+    }
+    handleGmailOAuthRedirect(new AssetCredentialStore(), gmailOAuthConfigFromProvider(), uri)
+      .then(() => {
+        hilog.info(DOMAIN, 'testTag', '%{public}s', 'Gmail OAuth authorization saved.');
+      })
+      .catch((err: Object) => {
+        hilog.error(DOMAIN, 'testTag', 'Gmail OAuth callback failed. Cause: %{public}s', JSON.stringify(err));
+      });
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

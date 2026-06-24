@@ -22,8 +22,31 @@ import { A2uiSurfaceThrottle } from './A2uiSurfaceThrottle';
 import { A2uiSurfaceCallback } from './LocalModelClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 import { connectCardA2ui, genericToolResultsA2ui, unsupportedTransportA2ui } from './DynamicToolA2ui';
-import { AssetCredentialStore, credentialRefFor } from './DynamicCredentialStore';
-import { GMAIL_MCP_AUTH_SETUP_URL, gmailAuthRequiredA2ui, gmailBlockedSendA2ui, gmailOAuthAuthorizationUrl, gmailOpenWebA2ui } from './GmailToolA2ui';
+import { AssetCredentialStore, CredentialStore, credentialRefFor } from './DynamicCredentialStore';
+import {
+  GMAIL_MCP_AUTH_SETUP_URL,
+  GMAIL_MCP_SERVER_URL,
+  gmailAuthRequiredA2ui,
+  gmailBlockedSendA2ui,
+  gmailDraftPreviewA2ui,
+  gmailOpenWebA2ui,
+  gmailThreadResultsA2ui
+} from './GmailToolA2ui';
+import {
+  GMAIL_ACCESS_TOKEN_REF,
+  GMAIL_DEFAULT_REDIRECT_URI,
+  GmailOAuthConfig,
+  buildGmailOAuthAuthorizationUrl,
+  createGmailOAuthPending,
+  gmailMcpArgsForPrompt,
+  gmailMcpToolNameForToolId,
+  gmailPkceChallengeS256,
+  isGmailAccessTokenFresh,
+  loadGmailOAuthTokenSet,
+  refreshGmailOAuthAccessToken,
+  saveGmailOAuthPending,
+  saveGmailOAuthTokenSet
+} from './GmailOAuthClient';
 import { GenericMcpClient } from './GenericMcpClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
@@ -134,6 +157,7 @@ interface LocalProviderConfig {
   luckinMcpUrl: string;
   gmailAuthUrl: string;
   gmailOauthClientId: string;
+  gmailOauthClientSecret: string;
   gmailOauthRedirectUri: string;
 }
 
@@ -166,6 +190,8 @@ interface LocalProviderRawConfig {
   GMAIL_AUTH_URL?: string;
   GMAIL_OAUTH_CLIENT_ID?: string;
   GOOGLE_OAUTH_CLIENT_ID?: string;
+  GMAIL_OAUTH_CLIENT_SECRET?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
   GMAIL_OAUTH_REDIRECT_URI?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
@@ -189,6 +215,7 @@ interface LocalProviderRawConfig {
   luckinMcpUrl?: string;
   gmailAuthUrl?: string;
   gmailOauthClientId?: string;
+  gmailOauthClientSecret?: string;
   gmailOauthRedirectUri?: string;
 }
 
@@ -916,6 +943,7 @@ let localProviderConfig: LocalProviderConfig = {
   luckinMcpUrl: DEFAULT_LUCKIN_MCP_URL,
   gmailAuthUrl: '',
   gmailOauthClientId: '',
+  gmailOauthClientSecret: '',
   gmailOauthRedirectUri: ''
 };
 
@@ -1047,7 +1075,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     luckinMcpUrl: config.luckinMcpUrl.trim().length > 0 ? config.luckinMcpUrl.trim() : DEFAULT_LUCKIN_MCP_URL,
     gmailAuthUrl: config.gmailAuthUrl.trim(),
     gmailOauthClientId: config.gmailOauthClientId.trim(),
-    gmailOauthRedirectUri: config.gmailOauthRedirectUri.trim()
+    gmailOauthClientSecret: config.gmailOauthClientSecret.trim(),
+    gmailOauthRedirectUri: config.gmailOauthRedirectUri.trim().length > 0 ? config.gmailOauthRedirectUri.trim() : GMAIL_DEFAULT_REDIRECT_URI
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
@@ -1060,6 +1089,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' mcdMcpTokenChars=' + localProviderConfig.mcdMcpToken.length.toString() +
     ' luckinMcpTokenChars=' + localProviderConfig.luckinMcpToken.length.toString() +
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
+    ' gmailOauthClientSecretChars=' + localProviderConfig.gmailOauthClientSecret.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
 }
 
@@ -1088,6 +1118,7 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     luckinMcpUrl: firstText([parsed.LUCKIN_MCP_URL, parsed.luckinMcpUrl]),
     gmailAuthUrl: firstText([parsed.GMAIL_AUTH_URL, parsed.gmailAuthUrl]),
     gmailOauthClientId: firstText([parsed.GMAIL_OAUTH_CLIENT_ID, parsed.GOOGLE_OAUTH_CLIENT_ID, parsed.gmailOauthClientId]),
+    gmailOauthClientSecret: firstText([parsed.GMAIL_OAUTH_CLIENT_SECRET, parsed.GOOGLE_OAUTH_CLIENT_SECRET, parsed.gmailOauthClientSecret]),
     gmailOauthRedirectUri: firstText([parsed.GMAIL_OAUTH_REDIRECT_URI, parsed.gmailOauthRedirectUri])
   });
 }
@@ -1104,6 +1135,7 @@ export function localProviderConfigDebugSummary(): string {
     ', mcdMcpToken=' + (localProviderConfig.mcdMcpToken.length > 0 ? 'present(' + localProviderConfig.mcdMcpToken.length.toString() + ')' : 'missing') +
     ', luckinMcpToken=' + (localProviderConfig.luckinMcpToken.length > 0 ? 'present(' + localProviderConfig.luckinMcpToken.length.toString() + ')' : 'missing') +
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
+    ', gmailOauthClientSecret=' + (localProviderConfig.gmailOauthClientSecret.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientSecret.length.toString() + ')' : 'missing') +
     ', defaultLocation=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'present' : 'missing');
 }
 
@@ -5091,6 +5123,17 @@ const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 
+let gmailMcpClient: GenericMcpClient = genericMcpClient;
+let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
+
+export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
+  gmailMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureGmailCredentialStoreForTests(store: CredentialStore | null): void {
+  gmailCredentialStore = store === null ? dynamicCredentialStore : store;
+}
+
 function dynamicCityFromPrompt(prompt: string): string {
   if (prompt.indexOf('深圳') >= 0) {
     return '深圳';
@@ -5690,24 +5733,108 @@ function gmailAuthUnavailableMessage(toolId: string, prompt: string): string {
   return 'Gmail 工具 ' + toolId + ' 已在统一工具框架注册，但当前设备没有可用的 Google Workspace MCP OAuth 授权；Gmail Web 仅作为人工处理兜底。AIPhone 不会模拟 Gmail 邮件、草稿或发送结果。请求：' + prompt.substring(0, 160);
 }
 
-function gmailAuthorizeUrl(): string {
+export function gmailOAuthConfigFromProvider(): GmailOAuthConfig {
+  return {
+    clientId: localProviderConfig.gmailOauthClientId,
+    clientSecret: localProviderConfig.gmailOauthClientSecret,
+    redirectUri: localProviderConfig.gmailOauthRedirectUri.length > 0 ? localProviderConfig.gmailOauthRedirectUri : GMAIL_DEFAULT_REDIRECT_URI
+  };
+}
+
+export async function prepareGmailOAuthAuthorizationUrl(): Promise<string> {
   if (localProviderConfig.gmailAuthUrl.length > 0) {
     return localProviderConfig.gmailAuthUrl;
   }
-  if (localProviderConfig.gmailOauthClientId.length > 0 && localProviderConfig.gmailOauthRedirectUri.length > 0) {
-    return gmailOAuthAuthorizationUrl(localProviderConfig.gmailOauthClientId, localProviderConfig.gmailOauthRedirectUri);
+  const config = gmailOAuthConfigFromProvider();
+  if (config.clientId.length === 0 || config.redirectUri.length === 0) {
+    return GMAIL_MCP_AUTH_SETUP_URL;
   }
-  return GMAIL_MCP_AUTH_SETUP_URL;
+  const pending = createGmailOAuthPending();
+  await saveGmailOAuthPending(gmailCredentialStore, pending);
+  return buildGmailOAuthAuthorizationUrl({
+    clientId: config.clientId,
+    redirectUri: config.redirectUri,
+    state: pending.state,
+    codeChallenge: gmailPkceChallengeS256(pending.codeVerifier)
+  });
 }
 
-function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string): string {
+async function gmailAccessTokenForMcp(): Promise<string> {
+  const token = await loadGmailOAuthTokenSet(gmailCredentialStore);
+  if (token !== null) {
+    if (isGmailAccessTokenFresh(token)) {
+      return token.accessToken;
+    }
+    if (token.refreshToken.length > 0) {
+      const config = gmailOAuthConfigFromProvider();
+      if (config.clientId.length === 0) {
+        throw new Error('Gmail OAuth access token expired and OAuth client config is missing.');
+      }
+      const refreshed = await refreshGmailOAuthAccessToken(config, token.refreshToken);
+      const saved = await saveGmailOAuthTokenSet(gmailCredentialStore, refreshed);
+      return saved.accessToken;
+    }
+    return token.accessToken;
+  }
+  return gmailCredentialStore.get(GMAIL_ACCESS_TOKEN_REF);
+}
+
+function gmailMcpRegistration(toolId: string, mcpToolName: string): DynamicToolRegistration {
+  return {
+    toolId: toolId,
+    manifestId: 'google.gmail',
+    displayName: 'Gmail',
+    status: 'enabled',
+    transport: {
+      type: 'streamable_http',
+      url: GMAIL_MCP_SERVER_URL,
+      command: '',
+      args: [],
+      headers: {},
+      env: {}
+    },
+    mcpToolName: mcpToolName,
+    credentialRef: GMAIL_ACCESS_TOKEN_REF,
+    sourceUrl: GMAIL_MCP_SERVER_URL,
+    lastError: ''
+  };
+}
+
+function gmailErrorResult(toolName: string, message: string): DynamicGenericToolResult {
+  return dynamicErrorResult('Gmail', toolName, 'Gmail MCP 调用失败', message);
+}
+
+async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string): Promise<string> {
   if (toolId === 'gmail.message.send') {
     return gmailBlockedSendA2ui(surfaceId, toolId);
   }
   if (toolId === 'gmail.open.web') {
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
-  return gmailAuthRequiredA2ui(surfaceId, toolId, gmailAuthUnavailableMessage(toolId, prompt), gmailAuthorizeUrl());
+  const mcpToolName = gmailMcpToolNameForToolId(toolId);
+  if (mcpToolName.length === 0) {
+    return gmailAuthRequiredA2ui(surfaceId, toolId, '未知 Gmail 工具：' + toolId, GMAIL_MCP_AUTH_SETUP_URL);
+  }
+
+  let accessToken = '';
+  try {
+    accessToken = await gmailAccessTokenForMcp();
+  } catch (error) {
+    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(mcpToolName, describeThrown(error))]);
+  }
+  if (accessToken.length === 0) {
+    return gmailAuthRequiredA2ui(surfaceId, toolId, gmailAuthUnavailableMessage(toolId, prompt), await prepareGmailOAuthAuthorizationUrl());
+  }
+
+  try {
+    const result = await gmailMcpClient.callTool(gmailMcpRegistration(toolId, mcpToolName), accessToken, gmailMcpArgsForPrompt(toolId, prompt));
+    if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+      return gmailDraftPreviewA2ui(surfaceId, result);
+    }
+    return gmailThreadResultsA2ui(surfaceId, toolId, [result]);
+  } catch (error) {
+    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(mcpToolName, describeThrown(error))]);
+  }
 }
 
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null): Promise<string> {

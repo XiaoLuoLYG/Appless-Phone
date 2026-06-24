@@ -3,10 +3,16 @@ import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2u
 import { genericToolResults, dynamicToolConnect } from '../main/ets/model/A2uiData';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
+import { MemoryCredentialStore } from '../main/ets/model/DynamicCredentialStore';
+import { saveGmailOAuthTokenSet } from '../main/ets/model/GmailOAuthClient';
+import { DynamicGenericToolResult, DynamicToolRegistration } from '../main/ets/model/DynamicToolTypes';
+import { GenericMcpClient } from '../main/ets/model/GenericMcpClient';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  configureGmailCredentialStoreForTests,
+  configureGmailMcpClientForTests,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
   foodA2uiRenderState,
@@ -28,6 +34,27 @@ import {
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '../main/ets/model/ToolGatewayClient';
+
+class FixtureGmailMcpClient extends GenericMcpClient {
+  lastToolName: string = '';
+  lastCredential: string = '';
+  lastArgs: string = '';
+
+  async callTool(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<DynamicGenericToolResult> {
+    this.lastToolName = registration.mcpToolName;
+    this.lastCredential = credentialValue;
+    this.lastArgs = JSON.stringify(args);
+    return {
+      sourceTag: 'Gmail',
+      toolName: registration.mcpToolName,
+      title: 'Important launch thread',
+      status: 'success',
+      summary: 'MCP returned one real Gmail thread.',
+      rows: [{ label: 'Thread', value: 'thread-123' }],
+      rawPreview: '{"threadId":"thread-123"}'
+    };
+  }
+}
 
 interface McDonaldsStoreFixture {
   storeName: string;
@@ -201,7 +228,7 @@ export default function toolGatewayClientTest() {
     it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
       configureLocalProviderConfigFromRawJson(JSON.stringify({
         GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth2redirect/google'
+        GMAIL_OAUTH_REDIRECT_URI: 'aiphone://oauth/google'
       }));
 
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
@@ -221,9 +248,50 @@ export default function toolGatewayClientTest() {
       expect(authAction.id).assertEqual('gmail.authorize');
       expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
       expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth2redirect%2Fgoogle')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('redirect_uri=aiphone%3A%2F%2Foauth%2Fgoogle')).assertLarger(-1);
       expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
       expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('code_challenge_method=S256')).assertLarger(-1);
+    });
+
+    it('uses stored Gmail OAuth tokens to call Gmail MCP without asking auth again', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      const mcp = new FixtureGmailMcpClient();
+      configureLocalProviderConfigFromRawJson(JSON.stringify({
+        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+        GMAIL_OAUTH_REDIRECT_URI: 'aiphone://oauth/google'
+      }));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(mcp);
+
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看 Gmail 里最新的重要邮件',
+        'surface_gmail_mcp',
+        'client_intent_fallback',
+        noop
+      );
+
+      configureGmailCredentialStoreForTests(null);
+      configureGmailMcpClientForTests(null);
+      configureLocalProviderConfigFromRawJson('{}');
+
+      expect(result.ok).assertTrue();
+      expect(result.surface.status).assertEqual('ready');
+      expect(genericToolResults(result.surface)[0].title).assertEqual('Important launch thread');
+      expect(mcp.lastToolName).assertEqual('search_threads');
+      expect(mcp.lastCredential).assertEqual('stored-access-token');
+      expect(mcp.lastArgs.indexOf('is:important')).assertLarger(-1);
     });
 
     it('keeps brand MCP adapters query-only', 0, () => {

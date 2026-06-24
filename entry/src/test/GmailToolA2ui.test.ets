@@ -81,6 +81,7 @@ export default function gmailToolA2uiTest() {
       expect(auth.displayName).assertEqual('Gmail');
       expect(auth.sourceUrl).assertEqual('https://gmailmcp.googleapis.com/mcp/v1');
       expect(auth.credentialName).assertEqual('Google Workspace MCP OAuth');
+      expect(auth.credentialRef).assertEqual('');
       expect(auth.actions[0].id).assertEqual('gmail.authorize');
       expect(auth.actions[0].label).assertEqual('授权 Gmail');
       expect(auth.actions[0].kind).assertEqual('client');

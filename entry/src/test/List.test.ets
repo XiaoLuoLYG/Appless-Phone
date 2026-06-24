@@ -26,6 +26,7 @@ import a2uiSurfaceThrottleTest from './A2uiSurfaceThrottle.test';
 import toolDefinitionRegistryTest from './ToolDefinitionRegistry.test';
 import gmailToolNormalizerTest from './GmailToolNormalizer.test';
 import gmailToolA2uiTest from './GmailToolA2ui.test';
+import gmailOAuthClientTest from './GmailOAuthClient.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -56,4 +57,5 @@ export default function testsuite() {
   toolDefinitionRegistryTest();
   gmailToolNormalizerTest();
   gmailToolA2uiTest();
+  gmailOAuthClientTest();
 }
