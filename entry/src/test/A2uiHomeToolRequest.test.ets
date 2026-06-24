@@ -231,5 +231,33 @@ export default function a2uiHomeToolRequestTest() {
       expect(blockedSend.toolId).assertEqual('gmail.message.send');
       expect(openWeb.toolId).assertEqual('gmail.open.web');
     });
+
+    it('routes requested Gmail visual smoke prompts to safe Gmail tools', 0, () => {
+      const latestImportant = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我看 Gmail 里最新的重要邮件',
+        ''
+      );
+      const openWeb = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '打开 Gmail 网页版',
+        ''
+      );
+      const draftMail = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
+        ''
+      );
+      const directSend = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '用 Gmail 直接发送一封邮件给 alice@example.com 说测试',
+        ''
+      );
+
+      expect(latestImportant.toolId).assertEqual('gmail.mail.search');
+      expect(openWeb.toolId).assertEqual('gmail.open.web');
+      expect(draftMail.toolId).assertEqual('gmail.draft.create');
+      expect(directSend.toolId).assertEqual('gmail.message.send');
+    });
   });
 }
