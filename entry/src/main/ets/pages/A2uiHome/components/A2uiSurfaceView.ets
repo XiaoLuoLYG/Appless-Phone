@@ -1,4 +1,4 @@
-import { A2uiAction, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
+import { A2uiAction, A2uiFoodData, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { rootComponentIdOf } from '../render/A2uiRenderData';
 import { A2uiNodeView } from './A2uiNodeView';
 
@@ -8,6 +8,7 @@ export struct A2uiSurfaceView {
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
 
   private hasRenderableSurface(): boolean {
     return this.surface.components.length > 0;
@@ -21,7 +22,10 @@ export struct A2uiSurfaceView {
           componentId: rootComponentIdOf(this.surface),
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinNavigationCard: (item: A2uiFoodData) => {
+            this.onPinNavigationCard(item);
+          }
         })
       }
     }

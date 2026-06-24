@@ -17,6 +17,7 @@ import {
   A2UI_COMPONENT_TRAIN_OPTIONS,
   A2uiAction,
   A2uiComponent,
+  A2uiFoodData,
   A2uiSurfaceState,
   emptyA2uiSurface
 } from '../../../model/A2uiTypes';
@@ -56,6 +57,7 @@ export struct A2uiNodeView {
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
 
   private component(): A2uiComponent | null {
     return findA2uiComponent(this.surface, this.componentId);
@@ -98,7 +100,10 @@ export struct A2uiNodeView {
               componentId: childId,
               renderTick: this.renderTick,
               isBusy: this.isBusy,
-              onAction: this.onAction
+              onAction: this.onAction,
+              onPinNavigationCard: (item: A2uiFoodData) => {
+                this.onPinNavigationCard(item);
+              }
             })
           }, (childId: string) => childId + '-' + this.renderTick.toString())
         }
@@ -113,7 +118,10 @@ export struct A2uiNodeView {
               componentId: childId,
               renderTick: this.renderTick,
               isBusy: this.isBusy,
-              onAction: this.onAction
+              onAction: this.onAction,
+              onPinNavigationCard: (item: A2uiFoodData) => {
+                this.onPinNavigationCard(item);
+              }
             })
           }, (childId: string) => childId + '-' + this.renderTick.toString())
         }
@@ -167,7 +175,10 @@ export struct A2uiNodeView {
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinNavigationCard: (item: A2uiFoodData) => {
+            this.onPinNavigationCard(item);
+          }
         })
       } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_INBOX) {
         SocialInboxView({

@@ -21,6 +21,7 @@ import a2uiTrainOptionsStateTest from './A2uiTrainOptionsState.test';
 import a2uiButtonStyleTest from './A2uiButtonStyle.test';
 import a2uiHomeDebugSettingsTest from './A2uiHomeDebugSettings.test';
 import a2uiPartialUpdatePlannerTest from './A2uiPartialUpdatePlanner.test';
+import navigationCardSnapshotTest from './NavigationCardSnapshot.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -46,4 +47,5 @@ export default function testsuite() {
   a2uiButtonStyleTest();
   a2uiHomeDebugSettingsTest();
   a2uiPartialUpdatePlannerTest();
+  navigationCardSnapshotTest();
 }

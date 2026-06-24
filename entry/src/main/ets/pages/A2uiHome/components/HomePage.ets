@@ -5,7 +5,7 @@ import {
   COLOR_PAGE,
   COLOR_TEXT,
 } from '../style/A2uiHomeTheme';
-import { A2uiAction, A2uiMessage, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
+import { A2uiAction, A2uiFoodData, A2uiMessage, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
@@ -41,6 +41,7 @@ export struct HomePage {
   onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
 
   aboutToAppear(): void {
     this.startSendSpinnerTimer();
@@ -174,7 +175,10 @@ export struct HomePage {
         surface: this.currentSurface,
         renderTick: this.surfaceRenderTick,
         isBusy: this.isBusy,
-        onAction: this.onAction
+        onAction: this.onAction,
+        onPinNavigationCard: (item: A2uiFoodData) => {
+          this.onPinNavigationCard(item);
+        }
       })
       .layoutWeight(1)
       .margin({ top: 14 })

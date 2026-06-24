@@ -104,6 +104,21 @@
         ]
       },
       {
+        "name": "NavigationCardFormExtensionAbility",
+        "srcEntry": "./ets/extensionability/NavigationCardFormExtensionAbility.ets",
+        "type": "form",
+        "description": "$string:NavigationCardFormExtensionAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:NavigationCardFormExtensionAbility_label",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:navigation_card_form_config"
+          }
+        ]
+      },
+      {
         "name": "EntryBackupAbility",
         "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",
         "type": "backup",
