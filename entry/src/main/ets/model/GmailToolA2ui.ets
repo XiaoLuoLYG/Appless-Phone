@@ -239,12 +239,13 @@ export function gmailBlockedSendA2ui(surfaceId: string, toolId: string): string 
 }
 
 export function gmailOpenWebA2ui(surfaceId: string, url: string): string {
+  const openSummary = '已打开 Gmail 网页版，可使用当前浏览器会话继续处理邮件。';
   const result: A2uiGenericToolResultData = {
     sourceTag: 'System intent',
     toolName: 'gmail.open.web',
     title: 'Gmail Web',
     status: 'needs_user',
-    summary: 'Open Gmail Web to continue in the signed-in browser session.',
+    summary: openSummary,
     rows: [
       { label: 'URL', value: url }
     ],
@@ -261,5 +262,5 @@ export function gmailOpenWebA2ui(surfaceId: string, url: string): string {
       ])
     ]) +
     dataLine(surfaceId, GENERIC_RESULTS_PATH, [result]) +
-    dataLine(surfaceId, SUMMARY_PATH, summary('Open Gmail Web to continue in the signed-in browser session.', 'gmail.open.web', 1));
+    dataLine(surfaceId, SUMMARY_PATH, summary(openSummary, 'gmail.open.web', 1));
 }

@@ -62,6 +62,20 @@ export struct GenericToolResultsView {
       item.toolName.indexOf('users.drafts') === 0;
   }
 
+  private isGmailWebResult(item: A2uiGenericToolResultData): boolean {
+    return item.toolName === 'gmail.open.web';
+  }
+
+  private isGmailWebResults(): boolean {
+    const rows = this.results();
+    for (let index = 0; index < rows.length; index++) {
+      if (this.isGmailWebResult(rows[index])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private isGmailResults(): boolean {
     const rows = this.results();
     for (let index = 0; index < rows.length; index++) {
@@ -217,6 +231,42 @@ export struct GenericToolResultsView {
     return count.toString() + (count === 1 ? ' message' : ' messages');
   }
 
+  private gmailWebResult(): A2uiGenericToolResultData {
+    const rows = this.results();
+    for (let index = 0; index < rows.length; index++) {
+      if (this.isGmailWebResult(rows[index])) {
+        return rows[index];
+      }
+    }
+    return {
+      sourceTag: 'System intent',
+      toolName: 'gmail.open.web',
+      title: 'Gmail Web',
+      status: 'needs_user',
+      summary: '',
+      rows: [],
+      rawPreview: ''
+    };
+  }
+
+  private gmailWebUrl(): string {
+    const value = this.firstRowValue(this.gmailWebResult(), ['URL', 'Link', 'Destination']);
+    return value.length > 0 ? value : 'https://mail.google.com/mail/u/0/#inbox';
+  }
+
+  private gmailWebHost(): string {
+    let host = this.gmailWebUrl();
+    const httpsPrefix = 'https://';
+    const httpPrefix = 'http://';
+    if (host.indexOf(httpsPrefix) === 0) {
+      host = host.substring(httpsPrefix.length);
+    } else if (host.indexOf(httpPrefix) === 0) {
+      host = host.substring(httpPrefix.length);
+    }
+    const slash = host.indexOf('/');
+    return slash > 0 ? host.substring(0, slash) : host;
+  }
+
   private firstRowValue(item: A2uiGenericToolResultData, labels: string[]): string {
     for (let index = 0; index < labels.length; index++) {
       const value = this.rowValue(item, labels[index]);
@@ -253,6 +303,98 @@ export struct GenericToolResultsView {
             .fontSize(13)
             .fontColor(COLOR_MUTED)
             .margin({ top: 12 })
+        } else if (this.isGmailWebResults()) {
+          Column() {
+            Row() {
+              Text('G')
+                .fontSize(15)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#F8FAF8')
+                .width(38)
+                .height(38)
+                .textAlign(TextAlign.Center)
+                .backgroundColor('#C94E43')
+                .borderRadius(10)
+                .margin({ right: 12 })
+
+              Column() {
+                Text('Gmail')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(COLOR_INK)
+                Text(this.gmailWebHost())
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 3 })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+
+              Text('网页版')
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(COLOR_ACCENT_DARK)
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .backgroundColor(COLOR_ACCENT_SOFT)
+                .borderRadius(7)
+                .border({ width: 1, color: COLOR_ACCENT })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+
+            Text('已打开 Gmail 网页版')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_INK)
+              .width('100%')
+              .margin({ top: 16 })
+
+            Text('使用当前浏览器会话继续处理邮件。')
+              .fontSize(13)
+              .fontColor(COLOR_TEXT)
+              .lineHeight(20)
+              .width('100%')
+              .margin({ top: 6 })
+
+            Column() {
+              Row() {
+                Text('目标地址')
+                  .fontSize(11)
+                  .fontColor(COLOR_MUTED)
+                  .layoutWeight(1)
+                Text(this.gmailWebHost())
+                  .fontSize(12)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(COLOR_TEXT)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+
+              Text(this.gmailWebUrl())
+                .fontSize(12)
+                .fontColor(COLOR_MUTED)
+                .lineHeight(18)
+                .width('100%')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 8 })
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 11, bottom: 11 })
+            .margin({ top: 14 })
+            .backgroundColor(COLOR_FIELD)
+            .borderRadius(10)
+            .border({ width: 1, color: COLOR_LINE })
+          }
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 14, bottom: 14 })
+          .margin({ top: 14 })
+          .backgroundColor(COLOR_CARD_INSET)
+          .borderRadius(14)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
+          .transition(a2uiEnterTransition())
         } else if (this.isGmailResults()) {
           Row() {
             Column() {
