@@ -256,7 +256,7 @@ export struct TrainOptionsView {
                     .fontColor(COLOR_MUTED)
                     .lineHeight(18)
                     .margin({ top: 8 })
-                  Button(canCreateNavigationCardFromTrainOption(item) ? '固定为导航卡片' : '缺少站点，不能固定')
+                  Button(canCreateNavigationCardFromTrainOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
                     .enabled(canCreateNavigationCardFromTrainOption(item) && !this.isBusy)
                     .height(38)
                     .width('100%')

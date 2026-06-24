@@ -36,6 +36,7 @@ export interface A2uiTrainData {
   trainCode: string;
   from: string;
   to: string;
+  fromLocation?: string;
   depart: string;
   arrive: string;
   duration: string;
@@ -54,6 +55,7 @@ export interface A2uiFlightData {
   airline: string;
   dep: string;
   arr: string;
+  depLocation?: string;
   depTime: string;
   arrTime: string;
   status: string;
@@ -67,6 +69,7 @@ export interface A2uiTravelOptionData {
   title: string;
   from: string;
   to: string;
+  fromLocation?: string;
   depart: string;
   arrive: string;
   duration: string;

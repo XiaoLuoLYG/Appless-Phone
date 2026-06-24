@@ -240,7 +240,7 @@ export struct TravelOptionsView {
         .fontColor(COLOR_MUTED)
         .lineHeight(18)
         .margin({ top: 8 })
-      Button(canCreateNavigationCardFromTravelOption(item) ? '固定为导航卡片' : (item.source === 'flight' ? '缺少机场，不能固定' : '缺少站点，不能固定'))
+      Button(canCreateNavigationCardFromTravelOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
         .enabled(canCreateNavigationCardFromTravelOption(item) && !this.isBusy)
         .height(38)
         .width('100%')
