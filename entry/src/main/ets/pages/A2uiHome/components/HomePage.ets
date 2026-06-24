@@ -5,7 +5,16 @@ import {
   COLOR_PAGE,
   COLOR_TEXT,
 } from '../style/A2uiHomeTheme';
-import { A2uiAction, A2uiFoodData, A2uiMessage, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
+import {
+  A2uiAction,
+  A2uiFlightData,
+  A2uiFoodData,
+  A2uiMessage,
+  A2uiSurfaceState,
+  A2uiTrainData,
+  A2uiTravelOptionData,
+  emptyA2uiSurface
+} from '../../../model/A2uiTypes';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
@@ -42,6 +51,9 @@ export struct HomePage {
   onSendPrompt: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
+  onPinTravelNavigationCard: (item: A2uiTravelOptionData) => void = (_item: A2uiTravelOptionData) => {};
+  onPinTrainNavigationCard: (item: A2uiTrainData) => void = (_item: A2uiTrainData) => {};
+  onPinFlightNavigationCard: (item: A2uiFlightData) => void = (_item: A2uiFlightData) => {};
 
   aboutToAppear(): void {
     this.startSendSpinnerTimer();
@@ -178,6 +190,15 @@ export struct HomePage {
         onAction: this.onAction,
         onPinNavigationCard: (item: A2uiFoodData) => {
           this.onPinNavigationCard(item);
+        },
+        onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+          this.onPinTravelNavigationCard(item);
+        },
+        onPinTrainNavigationCard: (item: A2uiTrainData) => {
+          this.onPinTrainNavigationCard(item);
+        },
+        onPinFlightNavigationCard: (item: A2uiFlightData) => {
+          this.onPinFlightNavigationCard(item);
         }
       })
       .layoutWeight(1)

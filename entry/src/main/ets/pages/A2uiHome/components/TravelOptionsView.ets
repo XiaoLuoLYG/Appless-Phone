@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, travelOptions, A2uiTravelOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromTravelOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
@@ -36,6 +37,7 @@ export struct TravelOptionsView {
   @State filterMode: TravelFilterMode = 'all';
   @State expandedTravelKey: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinTravelNavigationCard: (item: A2uiTravelOption) => void = (_item: A2uiTravelOption) => {};
 
   private options(): A2uiTravelOption[] {
     return travelOptions(this.surface, this.component);
@@ -333,6 +335,19 @@ export struct TravelOptionsView {
                     .fontSize(12)
                     .fontColor(statusColor(item.status.indexOf('失败') >= 0 || item.status.indexOf('取消') >= 0 ? 'error' : 'ready'))
                 }
+                Button(canCreateNavigationCardFromTravelOption(item) ? '固定卡片' : (item.source === 'flight' ? '缺少机场' : '缺少站点'))
+                  .enabled(canCreateNavigationCardFromTravelOption(item))
+                  .height(30)
+                  .fontSize(12)
+                  .fontColor(canCreateNavigationCardFromTravelOption(item) ? this.sourceAccent(item.source) : COLOR_MUTED)
+                  .backgroundColor(this.sourceSoft(item.source))
+                  .borderRadius(8)
+                  .border({ width: 1, color: this.sourceLine(item.source) })
+                  .padding({ left: 9, right: 9 })
+                  .margin({ left: 10 })
+                  .onClick(() => {
+                    this.onPinTravelNavigationCard(item);
+                  })
                 Text(this.expandedTravelKey === this.rowKey(item) ? '收起' : '详情')
                   .fontSize(12)
                   .fontWeight(FontWeight.Medium)

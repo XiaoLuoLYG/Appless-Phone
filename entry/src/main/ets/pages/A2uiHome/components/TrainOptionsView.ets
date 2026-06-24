@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, trainOptions, A2uiTrainOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromTrainOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
@@ -44,6 +45,7 @@ export struct TrainOptionsView {
   @State fastestFirst: boolean = false;
   @State availableOnly: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinTrainNavigationCard: (item: A2uiTrainOption) => void = (_item: A2uiTrainOption) => {};
 
   private trains(): A2uiTrainOption[] {
     return trainOptions(this.surface, this.component);
@@ -198,7 +200,19 @@ export struct TrainOptionsView {
                     .padding({ left: 9, right: 9, top: 5, bottom: 5 })
                     .backgroundColor(COLOR_ACCENT_SOFT)
                     .borderRadius(8)
+                    .margin({ right: 8 })
                 }
+                Button(canCreateNavigationCardFromTrainOption(item) ? '固定卡片' : '缺少站点')
+                  .enabled(canCreateNavigationCardFromTrainOption(item))
+                  .height(30)
+                  .fontSize(12)
+                  .fontColor(canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+                  .backgroundColor(COLOR_ACCENT_SOFT)
+                  .borderRadius(8)
+                  .padding({ left: 9, right: 9 })
+                  .onClick(() => {
+                    this.onPinTrainNavigationCard(item);
+                  })
               }
               .width('100%')
 

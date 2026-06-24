@@ -18,6 +18,7 @@ import {
   foodRecordFromMeituanUnion,
   foodRecordFromTencentMapPlace,
   foodRecordFromTaobaoFlashStore,
+  flightRecordForA2ui,
   isReadonlyBrandMcpTool,
   isLocalToolGatewayUrl,
   isRegisteredToolId,
@@ -392,6 +393,23 @@ export default function toolGatewayClientTest() {
       expect(sorted[0].id).assertEqual('train-early');
       expect(sorted[1].id).assertEqual('flight-priced');
       expect(sorted[3].id).assertEqual('flight-empty');
+    });
+
+    it('prefers real flight airport names over provider city codes', 0, () => {
+      const record = flightRecordForA2ui({
+        FlightNo: 'ZH9951',
+        FlightCompany: '深圳航空',
+        FlightDepcode: 'SZX',
+        FlightDepAirport: '深圳宝安国际机场',
+        FlightArrcode: 'SHA',
+        FlightArrAirport: '上海虹桥机场',
+        FlightDeptimePlanDate: '2026-06-24 18:40',
+        FlightArrtimePlanDate: '2026-06-24 20:55',
+        FlightState: '计划'
+      });
+
+      expect(record.dep).assertEqual('深圳宝安国际机场');
+      expect(record.arr).assertEqual('上海虹桥机场');
     });
 
     it('maps Meituan union delivery coupon results to food records', 0, () => {

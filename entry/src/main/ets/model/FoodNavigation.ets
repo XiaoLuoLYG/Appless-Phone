@@ -68,3 +68,12 @@ export function buildSystemFoodNavigationUri(destinationLocation: string, origin
   destinationName: string = ''): string {
   return describeSystemFoodNavigationUri(destinationLocation, originLocation, destinationName).uri;
 }
+
+export function buildSystemPlaceNavigationUri(destinationName: string): string {
+  const name = destinationName.trim();
+  if (name.length === 0) {
+    return '';
+  }
+  return 'petalmaps://navigation?daddr=' + encodeMapParam(name) +
+    '&language=zh&type=drive&utm_source=com.example.aiphonedemo';
+}

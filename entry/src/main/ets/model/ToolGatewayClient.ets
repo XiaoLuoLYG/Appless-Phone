@@ -210,7 +210,7 @@ interface VariFlightRequestPayload {
 
 type FlightProviderItem = FlightProviderRecord | string;
 
-interface FlightProviderRecord {
+export interface FlightProviderRecord {
   FlightNo?: string;
   flightNo?: string;
   flight_no?: string;
@@ -3025,7 +3025,7 @@ function parseFlightTextToA2ui(text: string): A2uiFlightData {
   };
 }
 
-function flightRecordForA2ui(item: FlightProviderItem): A2uiFlightData {
+export function flightRecordForA2ui(item: FlightProviderRecord | string): A2uiFlightData {
   if (typeof item === 'string') {
     const trimmed = item.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -3041,8 +3041,8 @@ function flightRecordForA2ui(item: FlightProviderItem): A2uiFlightData {
   return {
     flightNo: flightNo,
     airline: firstText([item.FlightCompany, item.airline, item.airlineName, item.AirlineName, item.carrier, item.carrierName]),
-    dep: firstText([item.FlightDepcode, item.FlightDepAirport, item.dep, item.depAirport, item.depAirportName, item.dep_city, item.departure, item.departureAirport]),
-    arr: firstText([item.FlightArrcode, item.FlightArrAirport, item.arr, item.arrAirport, item.arrAirportName, item.arr_city, item.arrival, item.arrivalAirport]),
+    dep: firstText([item.FlightDepAirport, item.depAirportName, item.depAirport, item.departureAirport, item.departure, item.dep, item.dep_city, item.FlightDepcode]),
+    arr: firstText([item.FlightArrAirport, item.arrAirportName, item.arrAirport, item.arrivalAirport, item.arrival, item.arr, item.arr_city, item.FlightArrcode]),
     depTime: firstText([item.FlightDeptimePlanDate, item.FlightDeptimeReadyDate, item.FlightDeptimeDate, item.FlightDepTime, item.depTime, item.dep_time, item.departureTime, item.std, item.scheduleDepTime]),
     arrTime: firstText([item.FlightArrtimePlanDate, item.FlightArrtimeReadyDate, item.FlightArrtimeDate, item.FlightArrTime, item.arrTime, item.arr_time, item.arrivalTime, item.sta, item.scheduleArrTime]),
     status: firstText([item.FlightState, item.FlightStatus, item.status, item.flightStatus, item.state]),

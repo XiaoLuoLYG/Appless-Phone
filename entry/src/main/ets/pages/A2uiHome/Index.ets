@@ -11,12 +11,15 @@ import {
   A2uiCallResult,
   A2uiComponent,
   A2uiDynamicToolConnectData,
+  A2uiFlightData,
   A2uiFoodData,
   A2uiMessage,
   A2uiRuntimeDataModel,
   A2uiSocialMessageData,
   A2uiSocialReplyData,
-  A2uiSurfaceState
+  A2uiSurfaceState,
+  A2uiTrainData,
+  A2uiTravelOptionData
 } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
@@ -25,9 +28,13 @@ import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
 import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId } from '../../model/ToolGatewayClient';
 import {
   NavigationCardSnapshot,
+  NavigationCardSnapshotBuildResult,
   PreferencesNavigationCardSnapshotStore,
   buildNavigationCardBindingData,
-  navigationCardSnapshotFromFoodOption
+  navigationCardSnapshotFromFlightOption,
+  navigationCardSnapshotFromFoodOption,
+  navigationCardSnapshotFromTrainOption,
+  navigationCardSnapshotFromTravelOption
 } from '../../model/NavigationCardSnapshot';
 import {
   AccessibilityIngestProvider,
@@ -838,14 +845,7 @@ struct Index {
     }
   }
 
-  private async pinNavigationCard(item: A2uiFoodData): Promise<void> {
-    const now = Date.now();
-    const result = navigationCardSnapshotFromFoodOption(item, {
-      surfaceId: this.currentSurface.surfaceId,
-      toolId: 'food.search',
-      updatedAt: now,
-      expiresAt: now + NAVIGATION_CARD_TTL_MS
-    });
+  private async saveNavigationCardResult(result: NavigationCardSnapshotBuildResult, label: string): Promise<void> {
     if (!result.ok || result.snapshot === undefined) {
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: false,
@@ -855,7 +855,7 @@ struct Index {
         assistantDebug: this.lastModelOutput,
         error: result.error
       }));
-      aiLogError('[AIPhone][NavigationCardPin] ok=false reason=' + result.error);
+      aiLogError('[AIPhone][NavigationCardPin] ok=false label=' + label + ' reason=' + result.error);
       return;
     }
     try {
@@ -865,12 +865,14 @@ struct Index {
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: true,
         status: 'ready',
-        message: '已固定为桌面导航卡片：' + result.snapshot.title,
+        message: '已固定为桌面导航卡片：' + (result.snapshot.cardStyle === 'travel' ? result.snapshot.routeText : result.snapshot.title),
         requestDebug: this.lastModelRequest,
         assistantDebug: this.lastModelOutput,
         error: ''
       }));
       aiLogInfo('[AIPhone][NavigationCardPin] ok=true title=' + result.snapshot.title +
+        ' cardStyle=' + result.snapshot.cardStyle +
+        ' transport=' + result.snapshot.transport +
         ' sourceTags=' + result.snapshot.sourceTags.join('/') +
         ' mapUriChars=' + result.snapshot.mapUri.length.toString());
     } catch (error) {
@@ -885,6 +887,46 @@ struct Index {
       }));
       aiLogError('[AIPhone][NavigationCardPin] ok=false saveError=' + message);
     }
+  }
+
+  private async pinNavigationCard(item: A2uiFoodData): Promise<void> {
+    const now = Date.now();
+    await this.saveNavigationCardResult(navigationCardSnapshotFromFoodOption(item, {
+      surfaceId: this.currentSurface.surfaceId,
+      toolId: 'food.search',
+      updatedAt: now,
+      expiresAt: now + NAVIGATION_CARD_TTL_MS
+    }), 'food');
+  }
+
+  private async pinTravelNavigationCard(item: A2uiTravelOptionData): Promise<void> {
+    const now = Date.now();
+    await this.saveNavigationCardResult(navigationCardSnapshotFromTravelOption(item, {
+      surfaceId: this.currentSurface.surfaceId,
+      toolId: 'travel.search',
+      updatedAt: now,
+      expiresAt: now + NAVIGATION_CARD_TTL_MS
+    }), item.source === 'flight' ? 'travel-flight' : 'travel-train');
+  }
+
+  private async pinTrainNavigationCard(item: A2uiTrainData): Promise<void> {
+    const now = Date.now();
+    await this.saveNavigationCardResult(navigationCardSnapshotFromTrainOption(item, {
+      surfaceId: this.currentSurface.surfaceId,
+      toolId: 'train.search',
+      updatedAt: now,
+      expiresAt: now + NAVIGATION_CARD_TTL_MS
+    }), 'train');
+  }
+
+  private async pinFlightNavigationCard(item: A2uiFlightData): Promise<void> {
+    const now = Date.now();
+    await this.saveNavigationCardResult(navigationCardSnapshotFromFlightOption(item, {
+      surfaceId: this.currentSurface.surfaceId,
+      toolId: 'flight.search',
+      updatedAt: now,
+      expiresAt: now + NAVIGATION_CARD_TTL_MS
+    }), 'flight');
   }
 
   private focusEditQuery(actionId: string = ''): void {
@@ -1138,6 +1180,15 @@ struct Index {
         },
         onPinNavigationCard: (item: A2uiFoodData) => {
           this.pinNavigationCard(item);
+        },
+        onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+          this.pinTravelNavigationCard(item);
+        },
+        onPinTrainNavigationCard: (item: A2uiTrainData) => {
+          this.pinTrainNavigationCard(item);
+        },
+        onPinFlightNavigationCard: (item: A2uiFlightData) => {
+          this.pinFlightNavigationCard(item);
         }
       })
     }

@@ -1,4 +1,12 @@
-import { A2uiAction, A2uiFoodData, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
+import {
+  A2uiAction,
+  A2uiFlightData,
+  A2uiFoodData,
+  A2uiSurfaceState,
+  A2uiTrainData,
+  A2uiTravelOptionData,
+  emptyA2uiSurface
+} from '../../../model/A2uiTypes';
 import { rootComponentIdOf } from '../render/A2uiRenderData';
 import { A2uiNodeView } from './A2uiNodeView';
 
@@ -9,6 +17,9 @@ export struct A2uiSurfaceView {
   @Prop isBusy: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
+  onPinTravelNavigationCard: (item: A2uiTravelOptionData) => void = (_item: A2uiTravelOptionData) => {};
+  onPinTrainNavigationCard: (item: A2uiTrainData) => void = (_item: A2uiTrainData) => {};
+  onPinFlightNavigationCard: (item: A2uiFlightData) => void = (_item: A2uiFlightData) => {};
 
   private hasRenderableSurface(): boolean {
     return this.surface.components.length > 0;
@@ -25,6 +36,15 @@ export struct A2uiSurfaceView {
           onAction: this.onAction,
           onPinNavigationCard: (item: A2uiFoodData) => {
             this.onPinNavigationCard(item);
+          },
+          onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+            this.onPinTravelNavigationCard(item);
+          },
+          onPinTrainNavigationCard: (item: A2uiTrainData) => {
+            this.onPinTrainNavigationCard(item);
+          },
+          onPinFlightNavigationCard: (item: A2uiFlightData) => {
+            this.onPinFlightNavigationCard(item);
           }
         })
       }

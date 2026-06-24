@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiFoodData } from '../main/ets/model/A2uiTypes';
+import { A2uiFlightData, A2uiFoodData, A2uiTrainData, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
 import {
   CARD_SNAPSHOT_KIND_NAVIGATION_DESTINATION,
   NAVIGATION_CARD_PIN_ACTION_ID,
@@ -8,11 +8,17 @@ import {
   NavigationCardSnapshotBuildResult,
   buildEmptyNavigationCardBindingData,
   buildNavigationCardBindingData,
+  canCreateNavigationCardFromFlightOption,
   canCreateNavigationCardFromFoodOption,
+  canCreateNavigationCardFromTrainOption,
+  canCreateNavigationCardFromTravelOption,
   navigationCardPinActionFromFoodOption,
   navigationCardFormEventFromMessage,
+  navigationCardSnapshotFromFlightOption,
   navigationCardSnapshotExpired,
   navigationCardSnapshotFromFoodOption,
+  navigationCardSnapshotFromTrainOption,
+  navigationCardSnapshotFromTravelOption,
   sanitizeNavigationCardSourceTags
 } from '../main/ets/model/NavigationCardSnapshot';
 
@@ -27,6 +33,56 @@ function foodOptionWithLocation(): A2uiFoodData {
   };
 }
 
+function trainOption(): A2uiTrainData {
+  return {
+    trainCode: 'G79',
+    from: '北京南',
+    to: '上海虹桥',
+    depart: '10:00',
+    arrive: '14:18',
+    duration: '4小时18分',
+    seats: '二等座有票',
+    status: '可查',
+    business: '',
+    first: '有',
+    second: '有',
+    noSeat: '',
+    hardSeat: '',
+    sleeperSoft: ''
+  };
+}
+
+function flightOptionWithAirport(): A2uiFlightData {
+  return {
+    flightNo: 'CA1831',
+    airline: '中国国航',
+    dep: '北京首都机场',
+    arr: '上海虹桥机场',
+    depTime: '2026-06-25 08:30:00',
+    arrTime: '2026-06-25 10:45:00',
+    status: '计划',
+    price: '720'
+  };
+}
+
+function travelTrainOption(): A2uiTravelOptionData {
+  return {
+    id: 'train-G79',
+    source: 'train',
+    sourceTag: '高铁 · 12306',
+    title: 'G79',
+    from: '北京南',
+    to: '上海虹桥',
+    depart: '10:00',
+    arrive: '14:18',
+    duration: '4小时18分',
+    price: '',
+    availability: '二等座有票',
+    status: '可查',
+    detail: ''
+  };
+}
+
 function readySnapshot(): NavigationCardSnapshot {
   const result = navigationCardSnapshotFromFoodOption(foodOptionWithLocation(), {
     surfaceId: 'surface_food',
@@ -38,10 +94,17 @@ function readySnapshot(): NavigationCardSnapshot {
     return {
       kind: CARD_SNAPSHOT_KIND_NAVIGATION_DESTINATION,
       status: 'error',
+      cardStyle: 'destination',
+      transport: '',
       title: '',
       subtitle: '',
       address: '',
       location: '',
+      targetName: '',
+      departureTime: '',
+      arrivalTime: '',
+      routeText: '',
+      serviceText: '',
       sourceTags: [],
       mapUri: '',
       surfaceId: '',
@@ -70,9 +133,11 @@ export default function navigationCardSnapshotTest() {
       if (result.snapshot !== undefined) {
         expect(result.snapshot.kind).assertEqual(CARD_SNAPSHOT_KIND_NAVIGATION_DESTINATION);
         expect(result.snapshot.status).assertEqual('ready');
+        expect(result.snapshot.cardStyle).assertEqual('destination');
         expect(result.snapshot.title).assertEqual('喜茶(深圳坂田华创里店)');
         expect(result.snapshot.address).assertEqual('深圳市龙岗区坂田街道华创里');
         expect(result.snapshot.location).assertEqual('116.397470,39.908823');
+        expect(result.snapshot.targetName).assertEqual('喜茶(深圳坂田华创里店)');
         expect(result.snapshot.sourceTags.join('/')).assertEqual('高德/腾讯地图');
         expect(result.snapshot.mapUri).assertEqual('petalmaps://poidetail?center=39.908823,116.397470&z=16&marker=39.908823,116.397470&name=%E5%96%9C%E8%8C%B6%28%E6%B7%B1%E5%9C%B3%E5%9D%82%E7%94%B0%E5%8D%8E%E5%88%9B%E9%87%8C%E5%BA%97%29&utm_source=com.example.aiphonedemo');
       }
@@ -113,6 +178,7 @@ export default function navigationCardSnapshotTest() {
     it('maps ready, expired, error, and empty states to stable binding data', 0, () => {
       const ready = buildNavigationCardBindingData(readySnapshot(), 1770000100000);
       expect(ready.status).assertEqual('ready');
+      expect(ready.cardStyle).assertEqual('destination');
       expect(ready.title).assertEqual('喜茶(深圳坂田华创里店)');
       expect(ready.sourceText).assertEqual('高德 / 腾讯地图');
       expect(ready.primaryAction).assertEqual('open_map');
@@ -140,6 +206,94 @@ export default function navigationCardSnapshotTest() {
     it('detects expiry by absolute timestamp', 0, () => {
       expect(navigationCardSnapshotExpired(readySnapshot(), 1770003599999)).assertFalse();
       expect(navigationCardSnapshotExpired(readySnapshot(), 1770003600000)).assertTrue();
+    });
+
+    it('creates a travel departure card from train rows', 0, () => {
+      const result = navigationCardSnapshotFromTrainOption(trainOption(), {
+        surfaceId: 'surface_train',
+        toolId: 'train.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+
+      expect(result.ok).assertTrue();
+      expect(canCreateNavigationCardFromTrainOption(trainOption())).assertTrue();
+      expect(result.snapshot === undefined).assertFalse();
+      if (result.snapshot !== undefined) {
+        expect(result.snapshot.cardStyle).assertEqual('travel');
+        expect(result.snapshot.transport).assertEqual('train');
+        expect(result.snapshot.title).assertEqual('G79');
+        expect(result.snapshot.routeText).assertEqual('北京南 → 上海虹桥');
+        expect(result.snapshot.targetName).assertEqual('北京南站');
+        expect(result.snapshot.departureTime).assertEqual('10:00');
+        expect(result.snapshot.serviceText).assertEqual('高铁 · 12306');
+        expect(result.snapshot.mapUri.indexOf('petalmaps://navigation?daddr=')).assertEqual(0);
+      }
+    });
+
+    it('creates a travel departure card from integrated travel options', 0, () => {
+      const result = navigationCardSnapshotFromTravelOption(travelTrainOption(), {
+        surfaceId: 'surface_travel',
+        toolId: 'travel.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+
+      expect(result.ok).assertTrue();
+      expect(canCreateNavigationCardFromTravelOption(travelTrainOption())).assertTrue();
+      if (result.snapshot !== undefined) {
+        expect(result.snapshot.cardStyle).assertEqual('travel');
+        expect(result.snapshot.transport).assertEqual('train');
+        expect(result.snapshot.sourceTags.join('/')).assertEqual('高铁 · 12306');
+      }
+    });
+
+    it('creates flight departure cards only when a real airport name is present', 0, () => {
+      const readyFlight = navigationCardSnapshotFromFlightOption(flightOptionWithAirport(), {
+        surfaceId: 'surface_flight',
+        toolId: 'flight.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+      expect(readyFlight.ok).assertTrue();
+      expect(canCreateNavigationCardFromFlightOption(flightOptionWithAirport())).assertTrue();
+      if (readyFlight.snapshot !== undefined) {
+        expect(readyFlight.snapshot.cardStyle).assertEqual('travel');
+        expect(readyFlight.snapshot.transport).assertEqual('flight');
+        expect(readyFlight.snapshot.targetName).assertEqual('北京首都机场');
+        expect(readyFlight.snapshot.departureTime).assertEqual('2026-06-25 08:30:00');
+      }
+
+      const codeOnly = flightOptionWithAirport();
+      codeOnly.dep = 'BJS';
+      const rejected = navigationCardSnapshotFromFlightOption(codeOnly, {
+        surfaceId: 'surface_flight',
+        toolId: 'flight.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+      expect(rejected.ok).assertFalse();
+      expect(rejected.error).assertEqual('缺少真实出发站或机场，不能生成出行卡片');
+      expect(canCreateNavigationCardFromFlightOption(codeOnly)).assertFalse();
+    });
+
+    it('maps travel snapshot fields to form binding data', 0, () => {
+      const result = navigationCardSnapshotFromTravelOption(travelTrainOption(), {
+        surfaceId: 'surface_travel',
+        toolId: 'travel.search',
+        updatedAt: 1770000000000,
+        expiresAt: 1770003600000
+      });
+      expect(result.snapshot === undefined).assertFalse();
+      if (result.snapshot !== undefined) {
+        const binding = buildNavigationCardBindingData(result.snapshot, 1770000100000);
+        expect(binding.cardStyle).assertEqual('travel');
+        expect(binding.transport).assertEqual('train');
+        expect(binding.routeText).assertEqual('北京南 → 上海虹桥');
+        expect(binding.targetName).assertEqual('北京南站');
+        expect(binding.departureTime).assertEqual('10:00');
+        expect(binding.primaryAction).assertEqual('open_map');
+      }
     });
 
     it('stores one current snapshot and registered form ids in memory tests', 0, async () => {

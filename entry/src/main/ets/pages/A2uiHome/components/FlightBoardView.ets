@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, flightOptions, A2uiFlightOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromFlightOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
@@ -29,6 +30,7 @@ export struct FlightBoardView {
   @Prop isBusy: boolean = false;
   @State selectedDate: Date = new Date();
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinFlightNavigationCard: (item: A2uiFlightOption) => void = (_item: A2uiFlightOption) => {};
 
   aboutToAppear(): void {
     this.selectedDate = this.initialDate();
@@ -159,7 +161,19 @@ export struct FlightBoardView {
                   .padding({ left: 9, right: 9, top: 5, bottom: 5 })
                   .backgroundColor(COLOR_ACCENT_SOFT)
                   .borderRadius(8)
+                  .margin({ right: 8 })
               }
+              Button(canCreateNavigationCardFromFlightOption(item) ? '固定卡片' : '缺少机场')
+                .enabled(canCreateNavigationCardFromFlightOption(item))
+                .height(30)
+                .fontSize(12)
+                .fontColor(canCreateNavigationCardFromFlightOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+                .backgroundColor(COLOR_ACCENT_SOFT)
+                .borderRadius(8)
+                .padding({ left: 9, right: 9 })
+                .onClick(() => {
+                  this.onPinFlightNavigationCard(item);
+                })
             }
             .width('100%')
             .alignItems(VerticalAlign.Top)

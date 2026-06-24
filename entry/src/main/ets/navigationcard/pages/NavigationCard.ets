@@ -14,16 +14,30 @@ const CARD_ACCENT_DARK: string = '#8B5E18';
 const CARD_ERROR: string = '#FCA5A5';
 const CARD_EXPIRED: string = '#FDBA74';
 const CARD_SHADOW: string = '#6606111F';
+const TRAVEL_BG: string = '#07131F';
+const TRAVEL_PANEL: string = '#0E2133';
+const TRAVEL_EDGE: string = '#2A5A75';
+const TRAVEL_TRAIN: string = '#62D59B';
+const TRAVEL_FLIGHT: string = '#76C7FF';
+const TRAVEL_MUTED: string = '#A7B9C9';
+const TRAVEL_BUTTON_TEXT: string = '#06111D';
 
 @Entry(storage)
 @Component
 struct NavigationCard {
   @LocalStorageProp('cardStatus') cardStatus: string = 'empty';
   @LocalStorageProp('status') fallbackStatus: string = 'empty';
+  @LocalStorageProp('cardStyle') cardStyle: string = 'destination';
+  @LocalStorageProp('transport') transport: string = '';
   @LocalStorageProp('title') title: string = 'PocketAgent 导航';
   @LocalStorageProp('subtitle') subtitle: string = '';
   @LocalStorageProp('address') address: string = '';
   @LocalStorageProp('location') location: string = '';
+  @LocalStorageProp('targetName') targetName: string = '';
+  @LocalStorageProp('departureTime') departureTime: string = '';
+  @LocalStorageProp('arrivalTime') arrivalTime: string = '';
+  @LocalStorageProp('routeText') routeText: string = '';
+  @LocalStorageProp('serviceText') serviceText: string = '';
   @LocalStorageProp('sourceText') sourceText: string = '';
   @LocalStorageProp('mapUri') mapUri: string = '';
   @LocalStorageProp('destinationUri') destinationUri: string = '';
@@ -69,6 +83,10 @@ struct NavigationCard {
     return this.effectiveStatus() === 'ready';
   }
 
+  private isTravelStyle(): boolean {
+    return this.cardStyle === 'travel';
+  }
+
   private openAgent(): void {
     postCardAction(this, {
       action: 'router',
@@ -107,6 +125,73 @@ struct NavigationCard {
     return this.title.length > 0 ? this.title : 'PocketAgent 导航';
   }
 
+  private destinationTitleSize(): number {
+    const count = this.titleText().length;
+    if (count >= 26) {
+      return 19;
+    }
+    if (count >= 20) {
+      return 21;
+    }
+    if (count >= 15) {
+      return 23;
+    }
+    return 25;
+  }
+
+  private destinationTitleLineHeight(): number {
+    const size = this.destinationTitleSize();
+    if (size <= 19) {
+      return 23;
+    }
+    if (size <= 21) {
+      return 25;
+    }
+    return 29;
+  }
+
+  private travelAccentColor(): string {
+    return this.transport === 'flight' ? TRAVEL_FLIGHT : TRAVEL_TRAIN;
+  }
+
+  private travelKindText(): string {
+    return this.transport === 'flight' ? '航班' : '高铁';
+  }
+
+  private travelTargetText(): string {
+    if (this.targetName.length > 0) {
+      return this.targetName;
+    }
+    if (this.address.length > 0) {
+      return this.address;
+    }
+    return this.transport === 'flight' ? '出发机场' : '出发车站';
+  }
+
+  private travelRouteText(): string {
+    if (this.routeText.length > 0) {
+      return this.routeText;
+    }
+    if (this.subtitle.length > 0) {
+      return this.subtitle;
+    }
+    return '出发信息';
+  }
+
+  private travelServiceText(): string {
+    if (this.serviceText.length > 0) {
+      return this.serviceText;
+    }
+    if (this.sourceText.length > 0) {
+      return this.sourceText;
+    }
+    return this.transport === 'flight' ? '飞常准' : '12306';
+  }
+
+  private travelTimeText(): string {
+    return this.departureTime.length > 0 ? this.departureTime : '--:--';
+  }
+
   private subtitleText(): string {
     if (this.isReady()) {
       return this.subtitle.length > 0 ? this.subtitle : this.message;
@@ -115,7 +200,10 @@ struct NavigationCard {
   }
 
   private primaryLabel(): string {
-    return this.isReady() ? '打开地图' : '回到对话';
+    if (!this.isReady()) {
+      return '回到对话';
+    }
+    return this.isTravelStyle() ? '去出发地' : '打开地图';
   }
 
   private secondaryLabel(): string {
@@ -139,7 +227,7 @@ struct NavigationCard {
   private statusLabel(): string {
     const status = this.effectiveStatus();
     if (status === 'ready') {
-      return '导航';
+      return this.isTravelStyle() ? '出发' : '导航';
     }
     if (status === 'expired') {
       return '已过期';
@@ -288,7 +376,8 @@ struct NavigationCard {
     .margin({ top: 8 })
   }
 
-  build() {
+  @Builder
+  private DestinationCard() {
     Stack() {
       this.CardChrome()
 
@@ -308,10 +397,10 @@ struct NavigationCard {
         this.AccentRail()
 
         Text(this.titleText())
-          .fontSize(25)
+          .fontSize(this.destinationTitleSize())
           .fontWeight(FontWeight.Bold)
           .fontColor(CARD_TEXT)
-          .lineHeight(29)
+          .lineHeight(this.destinationTitleLineHeight())
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 6 })
@@ -319,6 +408,9 @@ struct NavigationCard {
         this.FailureCopy()
         this.Metadata()
         this.AddressLine()
+
+        Blank()
+          .layoutWeight(1)
 
         Row() {
           this.PrimaryAction()
@@ -338,5 +430,137 @@ struct NavigationCard {
     .borderRadius(18)
     .border({ width: 1, color: CARD_EDGE })
     .shadow({ radius: 22, color: CARD_SHADOW, offsetX: 0, offsetY: 10 })
+  }
+
+  @Builder
+  private TravelCard() {
+    Stack() {
+      Column() {
+        Row()
+          .height(1)
+          .width('100%')
+          .backgroundColor(this.travelAccentColor())
+          .opacity(0.72)
+        Blank()
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(TRAVEL_BG)
+
+      Column() {
+        Row() {
+          Text(this.travelKindText())
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.travelAccentColor())
+            .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+            .backgroundColor(TRAVEL_PANEL)
+            .border({ width: 1, color: TRAVEL_EDGE })
+            .borderRadius(9)
+            .maxLines(1)
+          Text(this.travelServiceText())
+            .fontSize(13)
+            .fontColor(TRAVEL_MUTED)
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ left: 8 })
+          this.StatusMark()
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Text(this.travelRouteText())
+          .fontSize(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(CARD_TEXT)
+          .lineHeight(22)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 9 })
+
+        if (this.isReady()) {
+          Row() {
+            Text(this.travelTimeText())
+              .fontSize(34)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(CARD_TEXT)
+              .lineHeight(38)
+              .maxLines(1)
+              .layoutWeight(1)
+            if (this.arrivalTime.length > 0) {
+              Text('到 ' + this.arrivalTime)
+                .fontSize(13)
+                .fontColor(TRAVEL_MUTED)
+                .maxLines(1)
+                .margin({ top: 13 })
+            }
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .margin({ top: 2 })
+
+          Text(this.travelTargetText())
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(TRAVEL_MUTED)
+            .lineHeight(20)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 3 })
+        } else {
+          Text(this.subtitleText())
+            .fontSize(17)
+            .fontColor(this.statusAccentColor())
+            .lineHeight(22)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 10 })
+        }
+
+        Blank()
+          .layoutWeight(1)
+
+        Row() {
+          Text(this.primaryLabel())
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(TRAVEL_BUTTON_TEXT)
+            .textAlign(TextAlign.Center)
+            .padding({ left: 11, right: 11, top: 6, bottom: 6 })
+            .backgroundColor(this.travelAccentColor())
+            .borderRadius(9)
+            .layoutWeight(1)
+            .maxLines(1)
+            .onClick(() => {
+              if (this.isReady()) {
+                this.openMap();
+              } else {
+                this.openAgent();
+              }
+            })
+          this.SecondaryAction()
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ left: 16, right: 16, top: 13, bottom: 12 })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(TRAVEL_BG)
+    .borderRadius(18)
+    .border({ width: 1, color: TRAVEL_EDGE })
+    .shadow({ radius: 22, color: '#66060F18', offsetX: 0, offsetY: 10 })
+  }
+
+  build() {
+    if (this.isTravelStyle()) {
+      this.TravelCard()
+    } else {
+      this.DestinationCard()
+    }
   }
 }
