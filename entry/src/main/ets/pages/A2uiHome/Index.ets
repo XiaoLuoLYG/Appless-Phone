@@ -58,6 +58,7 @@ import {
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
   shouldApplySurfaceUpdate,
+  shouldShowWelcome,
   updateConnectionPanelState
 } from './state/A2uiHomeState';
 import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
@@ -67,7 +68,7 @@ const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
 const initialConnectionState: ConnectionPanelState = createInitialConnectionPanelState();
 const initialSurface: A2uiSurfaceState = createSeedA2uiSurface();
 const LOG_SNIPPET_LIMIT: number = 1200;
-const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 PocketAgent 你想完成什么';
+const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 HarmonyAgentPhone 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
 const SOCIAL_REPLY_UNAVAILABLE: string = '真实微信发送器未接入或当前设备未开放自动发送能力';
 const SOCIAL_NOTIFICATION_UNSUPPORTED_HINT: string = '当前 PC 系统未向三方应用开放通知内容订阅；系统开放后会显示真实微信新消息';
@@ -104,7 +105,7 @@ struct Index {
   @State currentSurface: A2uiSurfaceState = initialSurface;
   @State surfaceRenderTick: number = 0;
   @State isAwaitingFirstSurface: boolean = false;
-  @State inputText: string = '帮我查询深圳北站附近的餐馆。';
+  @State inputText: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
   @State selectedSocialMessageId: string = '';
@@ -138,6 +139,16 @@ struct Index {
   }
 
   private applyPanelState(next: ConnectionPanelState): void {
+    this.connectionStatus = next.connectionStatus;
+    this.connectionMessage = next.connectionMessage;
+    this.lastModelRequest = next.lastModelRequest;
+    this.lastModelOutput = next.lastModelOutput;
+    this.lastError = next.lastError;
+    this.refreshTick = next.refreshTick;
+  }
+
+  private resetPanelState(): void {
+    const next = createInitialConnectionPanelState();
     this.connectionStatus = next.connectionStatus;
     this.connectionMessage = next.connectionMessage;
     this.lastModelRequest = next.lastModelRequest;
@@ -251,6 +262,24 @@ struct Index {
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
+  }
+
+  private resetCurrentSession(): void {
+    this.showHistory = false;
+    this.isBusy = false;
+    this.isAwaitingFirstSurface = false;
+    this.messages = [];
+    this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
+    this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.inputText = '';
+    this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    this.selectedSocialMessageId = '';
+    this.selectedSocialConversationTitle = '';
+    this.hasSocialReturnSurface = false;
+    this.socialReturnSurface = this.surfaceSnapshot(createSeedA2uiSurface());
+    this.socialReturnInputText = '';
+    this.socialReturnInputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    this.resetPanelState();
   }
 
   private markChecking(message: string): void {
@@ -1167,6 +1196,7 @@ struct Index {
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,
         isSocialReturnAvailable: this.hasSocialReturnSurface,
+        showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -1175,6 +1205,9 @@ struct Index {
         },
         onOpenConfig: () => {
           this.showConfigPage = true;
+        },
+        onResetSession: () => {
+          this.resetCurrentSession();
         },
         onOpenStyleLab: () => {
           router.pushUrl({ url: 'pages/A2uiHome/StyleLab' }, (error) => {

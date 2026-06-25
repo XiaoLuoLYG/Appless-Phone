@@ -4,16 +4,18 @@ import {
   A2UI_SEND_SPINNER_STEP_DEG,
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
+  isWelcomeSurface,
   isPromptInputEnabled,
   nextSendSpinnerRotation,
+  shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
   updateConnectionPanelState
 } from '../main/ets/pages/A2uiHome/state/A2uiHomeState';
 
-function surface(sequence: number, status: string): A2uiSurfaceState {
+function surface(sequence: number, status: string, surfaceId: string = 'surface_model'): A2uiSurfaceState {
   return {
-    surfaceId: 'surface_model',
+    surfaceId: surfaceId,
     rootId: 'root',
     title: '测试',
     intent: 'food',
@@ -84,6 +86,15 @@ export default function a2uiHomeStateTest() {
       expect(shouldShowQueryPendingSurface(true, true)).assertTrue();
       expect(shouldShowQueryPendingSurface(true, false)).assertFalse();
       expect(shouldShowQueryPendingSurface(false, true)).assertFalse();
+    });
+
+    it('shows welcome only for an idle seed surface with no messages', 0, () => {
+      const welcome = surface(1, 'idle', 'surface_seed');
+      expect(isWelcomeSurface(welcome)).assertTrue();
+      expect(shouldShowWelcome(false, 0, welcome)).assertTrue();
+      expect(shouldShowWelcome(true, 0, welcome)).assertFalse();
+      expect(shouldShowWelcome(false, 1, welcome)).assertFalse();
+      expect(shouldShowWelcome(false, 0, surface(2, 'ready', 'surface_food'))).assertFalse();
     });
   });
 }

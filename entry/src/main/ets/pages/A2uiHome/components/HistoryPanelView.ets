@@ -18,7 +18,7 @@ export struct HistoryPanelView {
   @Prop messages: A2uiMessage[] = [];
 
   private roleLabel(role: string): string {
-    return role === 'user' ? '你' : 'PocketAgent';
+    return role === 'user' ? '你' : 'HarmonyAgentPhone';
   }
 
   private rowBackground(role: string): string {
