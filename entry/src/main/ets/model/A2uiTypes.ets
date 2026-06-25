@@ -310,7 +310,7 @@ export function emptyA2uiSurface(surfaceId: string = 'surface_main'): A2uiSurfac
   return {
     surfaceId: surfaceId,
     rootId: 'root',
-    title: 'AIPhone',
+    title: 'HarmonyAgentPhone',
     intent: 'general',
     status: 'idle',
     components: [],

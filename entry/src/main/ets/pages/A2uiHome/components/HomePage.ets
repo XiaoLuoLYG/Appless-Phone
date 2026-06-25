@@ -1,9 +1,10 @@
 import {
-  COLOR_ACCENT,
+  COLOR_CARD_EDGE,
   COLOR_INK,
   COLOR_MUTED,
   COLOR_PAGE,
-  COLOR_TEXT,
+  COLOR_PANEL,
+  COLOR_TEXT
 } from '../style/A2uiHomeTheme';
 import {
   A2uiAction,
@@ -42,8 +43,9 @@ export struct HomePage {
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop surfaceRenderTick: number = 0;
   @Prop isAwaitingFirstSurface: boolean = false;
-  @Prop inputPlaceholder: string = '告诉 PocketAgent 你想完成什么';
+  @Prop inputPlaceholder: string = '告诉 HarmonyAgentPhone 你想完成什么';
   @Prop isSocialReturnAvailable: boolean = false;
+  @Prop showWelcome: boolean = false;
   @State sendSpinnerRotation: number = 0;
   private sendSpinnerTimerId: number = -1;
   onToggleHistory: () => void = () => {};
@@ -51,6 +53,7 @@ export struct HomePage {
   onOpenConfig: () => void = () => {};
   onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
+  onResetSession: () => void = () => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
   onPinTravelNavigationCard: (item: A2uiTravelOptionData) => void = (_item: A2uiTravelOptionData) => {};
@@ -97,11 +100,52 @@ export struct HomePage {
     return this.currentSurface.intent === 'social' && this.isSocialReturnAvailable;
   }
 
+  private canResetSession(): boolean {
+    return !this.isBusy && (!this.showWelcome || this.inputText.trim().length > 0);
+  }
+
+  @Builder
+  private WelcomeCard() {
+    Row() {
+      Column() {
+        Text('开始一个任务')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_INK)
+          .maxLines(1)
+
+        Text('在底部输入一句话，生成原生任务卡片。')
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .margin({ top: 5 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text('A2UI')
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(COLOR_INK)
+        .maxLines(1)
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .backgroundColor('#12323A')
+        .borderRadius(12)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 14, right: 12, top: 12, bottom: 12 })
+    .backgroundColor(COLOR_PANEL)
+    .borderRadius(16)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+  }
+
   build() {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
         Row() {
-          Text('PocketAgent')
+          Text('HarmonyAgentPhone')
             .fontSize(18)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_INK)
@@ -117,6 +161,21 @@ export struct HomePage {
           })
             .onClick(() => {
               this.onToggleHistory();
+            })
+            .margin({ left: 8 })
+
+          A2uiButtonView({
+            label: '清',
+            shape: 'circle',
+            tone: 'secondary',
+            isEnabled: this.canResetSession()
+          })
+            .enabled(this.canResetSession())
+            .onClick(() => {
+              if (!this.canResetSession()) {
+                return;
+              }
+              this.onResetSession();
             })
             .margin({ left: 8 })
 
@@ -185,27 +244,37 @@ export struct HomePage {
       .margin({ top: this.showHistory ? 14 : 0 })
       .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
 
-      A2uiSurfaceView({
-        surface: this.currentSurface,
-        renderTick: this.surfaceRenderTick,
-        isBusy: this.isBusy,
-        showPendingSurface: shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface),
-        onAction: this.onAction,
-        onPinNavigationCard: (item: A2uiFoodData) => {
-          this.onPinNavigationCard(item);
-        },
-        onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
-          this.onPinTravelNavigationCard(item);
-        },
-        onPinTrainNavigationCard: (item: A2uiTrainData) => {
-          this.onPinTrainNavigationCard(item);
-        },
-        onPinFlightNavigationCard: (item: A2uiFlightData) => {
-          this.onPinFlightNavigationCard(item);
+      if (this.showWelcome) {
+        Column() {
+          this.WelcomeCard()
+          Blank()
         }
-      })
-      .layoutWeight(1)
-      .margin({ top: 14 })
+        .width('100%')
+        .layoutWeight(1)
+        .margin({ top: 14 })
+      } else {
+        A2uiSurfaceView({
+          surface: this.currentSurface,
+          renderTick: this.surfaceRenderTick,
+          isBusy: this.isBusy,
+          showPendingSurface: shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface),
+          onAction: this.onAction,
+          onPinNavigationCard: (item: A2uiFoodData) => {
+            this.onPinNavigationCard(item);
+          },
+          onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+            this.onPinTravelNavigationCard(item);
+          },
+          onPinTrainNavigationCard: (item: A2uiTrainData) => {
+            this.onPinTrainNavigationCard(item);
+          },
+          onPinFlightNavigationCard: (item: A2uiFlightData) => {
+            this.onPinFlightNavigationCard(item);
+          }
+        })
+        .layoutWeight(1)
+        .margin({ top: 14 })
+      }
 
       Column() {
         Row() {

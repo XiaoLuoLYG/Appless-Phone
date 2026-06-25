@@ -1,6 +1,6 @@
 {
   "modelVersion": "6.1.0",
-  "description": "PocketAgent HarmonyOS agent phone demo.",
+  "description": "HarmonyAgentPhone HarmonyOS agent phone demo.",
   "dependencies": {
   },
   "devDependencies": {
