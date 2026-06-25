@@ -26,11 +26,16 @@ The HarmonyOS app is a temporary shell. The plan is to make the app layer option
 <p align="center"><sub>Travel planning | Nearby coffee</sub></p>
 
 <div align="center">
-  <img src="docs/assets/screenshots/gmail-inbox.jpg" width="48%" alt="Gmail inbox" />
-  <img src="docs/assets/screenshots/home-cards.jpg" width="48%" alt="HarmonyOS home cards" />
+  <img src="docs/assets/screenshots/gmail-inbox.jpg" width="72%" alt="Gmail inbox" />
 </div>
 
-<p align="center"><sub>Gmail inbox | HarmonyOS home cards</sub></p>
+<p align="center"><sub>Gmail inbox</sub></p>
+
+<div align="center">
+  <img src="docs/assets/screenshots/home-cards.jpg" width="82%" alt="HarmonyOS home cards" />
+</div>
+
+<p align="center"><sub>HarmonyOS home cards</sub></p>
 
 ## Video previews
 
