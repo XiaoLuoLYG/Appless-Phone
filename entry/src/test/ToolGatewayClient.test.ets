@@ -1,10 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiFoodData, A2uiLabelValueData, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
+import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
+import { genericToolResults, dynamicToolConnect } from '../main/ets/model/A2uiData';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
+import { MemoryCredentialStore } from '../main/ets/model/DynamicCredentialStore';
+import { saveGmailOAuthTokenSet } from '../main/ets/model/GmailOAuthClient';
+import { DynamicGenericToolResult, DynamicToolRegistration } from '../main/ets/model/DynamicToolTypes';
+import { GenericMcpClient } from '../main/ets/model/GenericMcpClient';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
+  callToolGateway,
+  configureGmailCredentialStoreForTests,
+  configureGmailMcpClientForTests,
+  configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
   foodA2uiRenderState,
   foodDistanceMeters,
@@ -15,6 +24,7 @@ import {
   foodRecordFromMeituanUnion,
   foodRecordFromTencentMapPlace,
   foodRecordFromTaobaoFlashStore,
+  flightRecordForA2ui,
   isReadonlyBrandMcpTool,
   isLocalToolGatewayUrl,
   isRegisteredToolId,
@@ -24,6 +34,27 @@ import {
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '../main/ets/model/ToolGatewayClient';
+
+class FixtureGmailMcpClient extends GenericMcpClient {
+  lastToolName: string = '';
+  lastCredential: string = '';
+  lastArgs: string = '';
+
+  async callTool(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<DynamicGenericToolResult> {
+    this.lastToolName = registration.mcpToolName;
+    this.lastCredential = credentialValue;
+    this.lastArgs = JSON.stringify(args);
+    return {
+      sourceTag: 'Gmail',
+      toolName: registration.mcpToolName,
+      title: 'Important launch thread',
+      status: 'success',
+      summary: 'MCP returned one real Gmail thread.',
+      rows: [{ label: 'Thread', value: 'thread-123' }],
+      rawPreview: '{"threadId":"thread-123"}'
+    };
+  }
+}
 
 interface McDonaldsStoreFixture {
   storeName: string;
@@ -126,6 +157,141 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
       expect(isRegisteredToolId('social.reply.send')).assertTrue();
+    });
+
+    it('allows only explicit dynamic catalog aliases to enter the local tool host', 0, () => {
+      expect(isRegisteredToolId('travel.search')).assertTrue();
+      expect(isRegisteredToolId('dynamic.search')).assertTrue();
+      expect(isRegisteredToolId('weather.query')).assertTrue();
+      expect(isRegisteredToolId('maps.weather')).assertTrue();
+      expect(isRegisteredToolId('statistics.search')).assertTrue();
+      expect(isRegisteredToolId('ppt.generate')).assertTrue();
+      expect(isRegisteredToolId('weather.search')).assertFalse();
+      expect(isRegisteredToolId('ferry.ticket.search')).assertFalse();
+    });
+
+    it('registers Gmail tools on the same local tool framework without enabling silent send', 0, () => {
+      expect(isRegisteredToolId('gmail.mail.search')).assertTrue();
+      expect(isRegisteredToolId('gmail.thread.read')).assertTrue();
+      expect(isRegisteredToolId('gmail.draft.create')).assertTrue();
+      expect(isRegisteredToolId('gmail.draft.apply')).assertTrue();
+      expect(isRegisteredToolId('gmail.open.web')).assertTrue();
+      expect(isRegisteredToolId('gmail.message.send')).assertTrue();
+      expect(isRegisteredToolId('gmail.unknown')).assertFalse();
+    });
+
+    it('returns Gmail auth-required, blocked, and open-web A2UI from the local gateway', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const authResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看下 Gmail 最近的重要邮件',
+        'surface_gmail_auth',
+        'client_intent_fallback',
+        noop
+      );
+      const blockedResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.message.send',
+        '帮我 Gmail 直接发送这封邮件',
+        'surface_gmail_blocked',
+        'client_intent_fallback',
+        noop
+      );
+      const webResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.open.web',
+        '打开 Gmail 网页版',
+        'surface_gmail_web',
+        'client_intent_fallback',
+        noop
+      );
+
+      expect(authResult.ok).assertTrue();
+      expect(dynamicToolConnect(authResult.surface).toolId).assertEqual('gmail.mail.search');
+      expect(dynamicToolConnect(authResult.surface).credentialName).assertEqual('Google Workspace MCP OAuth');
+      expect(dynamicToolConnect(authResult.surface).sourceUrl).assertEqual('https://gmailmcp.googleapis.com/mcp/v1');
+      expect(dynamicToolConnect(authResult.surface).actions[0].id).assertEqual('gmail.authorize');
+      expect(dynamicToolConnect(authResult.surface).actions[1].id).assertEqual('gmail.open.web');
+      expect(authResult.raw.indexOf('不会模拟 Gmail 邮件')).assertLarger(-1);
+
+      expect(blockedResult.ok).assertTrue();
+      expect(genericToolResults(blockedResult.surface)[0].status).assertEqual('blocked');
+      expect(genericToolResults(blockedResult.surface)[0].summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
+
+      expect(webResult.ok).assertTrue();
+      expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
+      expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
+      expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+    });
+
+    it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
+      configureLocalProviderConfigFromRawJson(JSON.stringify({
+        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+      }));
+
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const authResult: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看下 Gmail 最近的重要邮件',
+        'surface_gmail_auth_with_client',
+        'client_intent_fallback',
+        noop
+      );
+
+      configureLocalProviderConfigFromRawJson('{}');
+
+      const authAction = dynamicToolConnect(authResult.surface).actions[0];
+      expect(authResult.ok).assertTrue();
+      expect(authAction.id).assertEqual('gmail.authorize');
+      expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
+      expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
+      expect(authAction.prompt.indexOf('code_challenge_method=S256')).assertLarger(-1);
+    });
+
+    it('uses stored Gmail OAuth tokens to call Gmail MCP without asking auth again', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      const mcp = new FixtureGmailMcpClient();
+      configureLocalProviderConfigFromRawJson(JSON.stringify({
+        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+      }));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(mcp);
+
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'gmail.mail.search',
+        '帮我看 Gmail 里最新的重要邮件',
+        'surface_gmail_mcp',
+        'client_intent_fallback',
+        noop
+      );
+
+      configureGmailCredentialStoreForTests(null);
+      configureGmailMcpClientForTests(null);
+      configureLocalProviderConfigFromRawJson('{}');
+
+      expect(result.ok).assertTrue();
+      expect(result.surface.status).assertEqual('ready');
+      expect(genericToolResults(result.surface)[0].title).assertEqual('Important launch thread');
+      expect(mcp.lastToolName).assertEqual('search_threads');
+      expect(mcp.lastCredential).assertEqual('stored-access-token');
+      expect(mcp.lastArgs.indexOf('is:important')).assertLarger(-1);
     });
 
     it('keeps brand MCP adapters query-only', 0, () => {
@@ -295,6 +461,23 @@ export default function toolGatewayClientTest() {
       expect(sorted[0].id).assertEqual('train-early');
       expect(sorted[1].id).assertEqual('flight-priced');
       expect(sorted[3].id).assertEqual('flight-empty');
+    });
+
+    it('prefers real flight airport names over provider city codes', 0, () => {
+      const record = flightRecordForA2ui({
+        FlightNo: 'ZH9951',
+        FlightCompany: '深圳航空',
+        FlightDepcode: 'SZX',
+        FlightDepAirport: '深圳宝安国际机场',
+        FlightArrcode: 'SHA',
+        FlightArrAirport: '上海虹桥机场',
+        FlightDeptimePlanDate: '2026-06-24 18:40',
+        FlightArrtimePlanDate: '2026-06-24 20:55',
+        FlightState: '计划'
+      });
+
+      expect(record.dep).assertEqual('深圳宝安国际机场');
+      expect(record.arr).assertEqual('上海虹桥机场');
     });
 
     it('maps Meituan union delivery coupon results to food records', 0, () => {

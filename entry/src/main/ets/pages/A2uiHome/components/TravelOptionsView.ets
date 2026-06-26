@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, travelOptions, A2uiTravelOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromTravelOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
@@ -36,6 +37,7 @@ export struct TravelOptionsView {
   @State filterMode: TravelFilterMode = 'all';
   @State expandedTravelKey: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinTravelNavigationCard: (item: A2uiTravelOption) => void = (_item: A2uiTravelOption) => {};
 
   private options(): A2uiTravelOption[] {
     return travelOptions(this.surface, this.component);
@@ -238,6 +240,19 @@ export struct TravelOptionsView {
         .fontColor(COLOR_MUTED)
         .lineHeight(18)
         .margin({ top: 8 })
+      Button(canCreateNavigationCardFromTravelOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
+        .enabled(canCreateNavigationCardFromTravelOption(item) && !this.isBusy)
+        .height(38)
+        .width('100%')
+        .fontSize(13)
+        .fontColor(canCreateNavigationCardFromTravelOption(item) ? this.sourceAccent(item.source) : COLOR_MUTED)
+        .backgroundColor(this.sourceSoft(item.source))
+        .borderRadius(10)
+        .border({ width: 1, color: canCreateNavigationCardFromTravelOption(item) ? this.sourceLine(item.source) : COLOR_CARD_EDGE })
+        .margin({ top: 10 })
+        .onClick(() => {
+          this.onPinTravelNavigationCard(item);
+        })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

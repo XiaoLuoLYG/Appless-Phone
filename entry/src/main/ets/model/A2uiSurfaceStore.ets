@@ -4,8 +4,11 @@ import {
   A2uiApplyResult,
   A2uiComponent,
   A2uiDataValue,
+  A2uiDynamicToolConnectData,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
+  A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
   A2uiRowGroupsData,
@@ -89,7 +92,9 @@ function emptyDataModel(): A2uiRuntimeDataModel {
       toolId: '',
       prompt: '',
       actionId: ''
-    }
+    },
+    dynamicToolConnect: emptyDynamicToolConnect(),
+    genericToolResults: []
   };
 }
 
@@ -117,6 +122,22 @@ function emptyToolRequest(): A2uiToolRequestData {
   };
 }
 
+function emptyDynamicToolConnect(): A2uiDynamicToolConnectData {
+  return {
+    toolId: '',
+    prompt: '',
+    manifestId: '',
+    displayName: '',
+    sourceUrl: '',
+    status: '',
+    message: '',
+    credentialName: '',
+    credentialRef: '',
+    registrationUrl: '',
+    actions: []
+  };
+}
+
 interface LooseRowData {
   label?: Object | string | number | boolean | null;
   value?: Object | string | number | boolean | null;
@@ -129,6 +150,21 @@ interface LooseRowData {
   rows?: Object[];
   items?: Object[];
   body?: Object[];
+}
+
+interface LooseGenericToolResultRowData {
+  label?: Object | string | number | boolean | null;
+  value?: Object | string | number | boolean | null;
+}
+
+interface LooseGenericToolResultData {
+  sourceTag?: Object | string | number | boolean | null;
+  toolName?: Object | string | number | boolean | null;
+  title?: Object | string | number | boolean | null;
+  status?: Object | string | number | boolean | null;
+  summary?: Object | string | number | boolean | null;
+  rows?: Object[];
+  rawPreview?: Object | string | number | boolean | null;
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -214,6 +250,72 @@ function normalizeToolRequest(parsed: A2uiRuntimeDataModel, fallback: A2uiToolRe
   return fallback;
 }
 
+function normalizeDynamicToolConnect(parsed: A2uiRuntimeDataModel, fallback: A2uiDynamicToolConnectData): A2uiDynamicToolConnectData {
+  if (parsed.dynamicToolConnect === undefined || parsed.dynamicToolConnect === null) {
+    return fallback;
+  }
+  return {
+    toolId: textOf(parsed.dynamicToolConnect.toolId),
+    prompt: textOf(parsed.dynamicToolConnect.prompt),
+    manifestId: textOf(parsed.dynamicToolConnect.manifestId),
+    displayName: textOf(parsed.dynamicToolConnect.displayName),
+    sourceUrl: textOf(parsed.dynamicToolConnect.sourceUrl),
+    status: textOf(parsed.dynamicToolConnect.status),
+    message: textOf(parsed.dynamicToolConnect.message),
+    credentialName: textOf(parsed.dynamicToolConnect.credentialName),
+    credentialRef: textOf(parsed.dynamicToolConnect.credentialRef),
+    registrationUrl: textOf(parsed.dynamicToolConnect.registrationUrl),
+    actions: Array.isArray(parsed.dynamicToolConnect.actions) ? parsed.dynamicToolConnect.actions : []
+  };
+}
+
+function normalizeGenericToolResultRows(rows: Object[] | undefined): A2uiGenericToolResultRowData[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const normalized: A2uiGenericToolResultRowData[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    const source = rows[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const row = source as LooseGenericToolResultRowData;
+    const label = textOf(row.label);
+    const value = textOf(row.value);
+    if (label.length > 0 || value.length > 0) {
+      normalized.push({
+        label: label,
+        value: value
+      });
+    }
+  }
+  return normalized;
+}
+
+function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2uiGenericToolResultData[]): A2uiGenericToolResultData[] {
+  if (!Array.isArray(parsed.genericToolResults)) {
+    return fallback;
+  }
+  const normalized: A2uiGenericToolResultData[] = [];
+  for (let index = 0; index < parsed.genericToolResults.length; index++) {
+    const source = parsed.genericToolResults[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const result = source as LooseGenericToolResultData;
+    normalized.push({
+      sourceTag: textOf(result.sourceTag),
+      toolName: textOf(result.toolName),
+      title: textOf(result.title),
+      status: textOf(result.status),
+      summary: textOf(result.summary),
+      rows: normalizeGenericToolResultRows(result.rows),
+      rawPreview: textOf(result.rawPreview)
+    });
+  }
+  return normalized;
+}
+
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
   if (parsed.rowGroups === undefined || parsed.rowGroups === null) {
     return fallback;
@@ -254,6 +356,8 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       },
       rowGroups: normalizeRowGroups(parsed, fallback.rowGroups),
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
+      dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
+      genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -367,6 +471,10 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
   } else if (path === '/toolRequest') {
     next.toolRequest = value as A2uiToolRequestData;
     next.toolRequests = [next.toolRequest];
+  } else if (path === '/dynamicToolConnect') {
+    next.dynamicToolConnect = value as A2uiDynamicToolConnectData;
+  } else if (path === '/genericToolResults') {
+    next.genericToolResults = value as A2uiGenericToolResultData[];
   } else if (path === '/toolRequests') {
     const requests = value as A2uiToolRequestData[];
     next.toolRequests = requests;
@@ -448,13 +556,16 @@ export class A2uiSurfaceStore {
         const nextRootId = envelope.createSurface.root === undefined || envelope.createSurface.root.length === 0 ?
           'root' : envelope.createSurface.root;
         const nextTitle = envelope.createSurface.title === undefined || envelope.createSurface.title.length === 0 ?
-          'AIPhone' : envelope.createSurface.title;
+          'Appless Phone' : envelope.createSurface.title;
         const nextIntent = envelope.createSurface.intent === undefined || envelope.createSurface.intent.length === 0 ?
           'general' : envelope.createSurface.intent;
         const nextStatus = envelope.createSurface.status === undefined || envelope.createSurface.status.length === 0 ?
           'thinking' : envelope.createSurface.status;
         const preservedThoughts = parseDataModel(this.surface.dataModelJson).thoughts;
         if (this.surface.surfaceId === nextSurfaceId && this.surface.components.length > 0) {
+          if (envelope.createSurface.sendDataModel === true && nextStatus === 'calling_tool') {
+            this.surface.dataModelJson = JSON.stringify(emptyDataModel());
+          }
           this.surface.rootId = nextRootId;
           this.surface.title = nextTitle;
           this.surface.intent = nextIntent;
@@ -543,7 +654,7 @@ export function createSeedA2uiSurface(): A2uiSurfaceState {
     createSurface: {
       surfaceId: 'surface_seed',
       root: 'root',
-      title: 'AIPhone',
+      title: 'Appless Phone',
       intent: 'general',
       status: 'idle',
       sendDataModel: true

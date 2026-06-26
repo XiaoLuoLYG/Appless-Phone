@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, trainOptions, A2uiTrainOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromTrainOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
@@ -29,7 +30,7 @@ import { StatusBadgeView } from './StatusBadgeView';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
 const A2UI_TRAIN_CARD_BASE_HEIGHT: number = 152;
-const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 232;
+const A2UI_TRAIN_CARD_EXPANDED_HEIGHT: number = 282;
 const A2UI_TRAIN_CARD_TOP_MARGIN: number = 10;
 const A2UI_TRAIN_LIST_EMPTY_HEIGHT: number = 50;
 
@@ -44,6 +45,7 @@ export struct TrainOptionsView {
   @State fastestFirst: boolean = false;
   @State availableOnly: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinTrainNavigationCard: (item: A2uiTrainOption) => void = (_item: A2uiTrainOption) => {};
 
   private trains(): A2uiTrainOption[] {
     return trainOptions(this.surface, this.component);
@@ -198,6 +200,7 @@ export struct TrainOptionsView {
                     .padding({ left: 9, right: 9, top: 5, bottom: 5 })
                     .backgroundColor(COLOR_ACCENT_SOFT)
                     .borderRadius(8)
+                    .margin({ right: 8 })
                 }
               }
               .width('100%')
@@ -253,6 +256,19 @@ export struct TrainOptionsView {
                     .fontColor(COLOR_MUTED)
                     .lineHeight(18)
                     .margin({ top: 8 })
+                  Button(canCreateNavigationCardFromTrainOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
+                    .enabled(canCreateNavigationCardFromTrainOption(item) && !this.isBusy)
+                    .height(38)
+                    .width('100%')
+                    .fontSize(13)
+                    .fontColor(canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+                    .backgroundColor(COLOR_ACCENT_SOFT)
+                    .borderRadius(10)
+                    .border({ width: 1, color: canCreateNavigationCardFromTrainOption(item) ? COLOR_ACCENT : COLOR_CARD_EDGE })
+                    .margin({ top: 10 })
+                    .onClick(() => {
+                      this.onPinTrainNavigationCard(item);
+                    })
                 }
                 .width('100%')
                 .alignItems(HorizontalAlign.Start)

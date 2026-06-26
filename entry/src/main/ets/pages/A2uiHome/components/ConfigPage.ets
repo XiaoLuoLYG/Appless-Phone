@@ -30,6 +30,7 @@ export struct ConfigPage {
   @Link customParametersJson: string;
   @Link foodProviderDelayEnabled: boolean;
   @Link foodProviderDelayMs: string;
+  @Link foodPartialThrottleMs: string;
   @Link showAdvancedSettings: boolean;
   @Prop connectionStatus: string = 'idle';
   @Prop connectionMessage: string = '';
@@ -275,6 +276,20 @@ export struct ConfigPage {
               .opacity(this.foodProviderDelayEnabled ? 1 : 0.55)
               .onChange((value: string) => {
                 this.foodProviderDelayMs = value;
+              })
+
+            this.InputLabel('局部更新间隔（毫秒）', 12)
+            TextInput({ text: this.foodPartialThrottleMs, placeholder: '500' })
+              .height(42)
+              .fontSize(13)
+              .fontColor(COLOR_TEXT)
+              .placeholderColor(COLOR_MUTED)
+              .backgroundColor(COLOR_FIELD)
+              .borderRadius(9)
+              .border({ width: 1, color: COLOR_CARD_EDGE })
+              .padding({ left: 10, right: 10 })
+              .onChange((value: string) => {
+                this.foodPartialThrottleMs = value;
               })
           }
 

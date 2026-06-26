@@ -2,31 +2,47 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "PocketAgent"
+      "value": "Appless Phone"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "PocketAgent"
+      "value": "Appless Phone"
     },
     {
       "name": "EntryAbility_label",
-      "value": "PocketAgent"
+      "value": "Appless Phone"
     },
     {
       "name": "NotificationSubscriberExtAbility_desc",
-      "value": "AIPhone social notification subscriber"
+      "value": "Appless Phone social notification subscriber"
     },
     {
       "name": "NotificationSubscriberExtAbility_label",
-      "value": "AIPhone Social"
+      "value": "Appless Phone Social"
     },
     {
       "name": "SocialAccessibilityExtAbility_desc",
-      "value": "AIPhone social accessibility capture"
+      "value": "Appless Phone social accessibility capture"
     },
     {
       "name": "SocialAccessibilityExtAbility_label",
-      "value": "AIPhone Social Assist"
+      "value": "Appless Phone Social Assist"
+    },
+    {
+      "name": "NavigationCardFormExtensionAbility_desc",
+      "value": "Appless Phone navigation desktop card"
+    },
+    {
+      "name": "NavigationCardFormExtensionAbility_label",
+      "value": "Appless Phone Navigation"
+    },
+    {
+      "name": "NavigationCard_display_name",
+      "value": "Appless Phone 导航"
+    },
+    {
+      "name": "NavigationCard_desc",
+      "value": "显示从 Appless Phone 对话固定的真实导航目的地"
     },
     {
       "name": "location_permission_reason",

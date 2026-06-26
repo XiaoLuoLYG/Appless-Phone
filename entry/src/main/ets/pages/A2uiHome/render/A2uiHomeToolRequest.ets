@@ -18,9 +18,63 @@ function containsAny(text: string, words: string[]): boolean {
   return false;
 }
 
-function inferredToolIdForPrompt(prompt: string): string {
+function forcedDynamicToolIdForPrompt(prompt: string): string {
   if (prompt.length === 0) {
     return '';
+  }
+  if (containsAny(prompt, ['船票', '轮渡', '客船', '渡轮', '码头']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '票', '余票', '班次'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['天气', '气温', '下雨', '降雨']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '今天', '明天'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['统计局', 'GDP', 'CPI', '人口', '经济数据']) &&
+    containsAny(prompt, ['查', '查询', '搜索', '帮我搜'])) {
+    return 'dynamic.search';
+  }
+  if (containsAny(prompt, ['PPT', 'ppt', '幻灯片', '演示文稿']) &&
+    containsAny(prompt, ['生成', '做', '制作', '创建'])) {
+    return 'dynamic.search';
+  }
+  return '';
+}
+
+function gmailToolIdForPrompt(prompt: string): string {
+  if (prompt.length === 0) {
+    return '';
+  }
+  const normalized = prompt.toLowerCase();
+  const hasGmailSignal = containsAny(normalized, ['gmail', 'google mail', 'mail.google.com']) ||
+    containsAny(prompt, ['谷歌邮箱', '谷歌邮件']);
+  if (!hasGmailSignal) {
+    return '';
+  }
+  if (containsAny(prompt, ['打开', '网页版', '网页', '浏览器', '登录', '登陆'])) {
+    return 'gmail.open.web';
+  }
+  if (containsAny(prompt, ['直接发送', '立刻发送', '马上发送', '自动发送', '不确认直接发', '不用确认直接发'])) {
+    return 'gmail.message.send';
+  }
+  if (containsAny(prompt, ['回复', '写', '撰写', '起草', '草稿', '发一封', '发送邮件', '发出去']) ||
+    containsAny(normalized, ['draft', 'drafts'])) {
+    return 'gmail.draft.create';
+  }
+  if (containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '看', '读取', '读', '找', '收件箱', '邮件', '最新', '重要'])) {
+    return 'gmail.mail.search';
+  }
+  return '';
+}
+
+function inferredToolIdForPrompt(prompt: string): string {
+  const dynamicToolId = forcedDynamicToolIdForPrompt(prompt);
+  if (dynamicToolId.length > 0) {
+    return dynamicToolId;
+  }
+  const gmailToolId = gmailToolIdForPrompt(prompt);
+  if (gmailToolId.length > 0) {
+    return gmailToolId;
   }
   if (containsAny(prompt, ['附近', '周边', '外卖', '咖啡', '奶茶', '餐饮', '美食', '肯德基']) &&
     containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '附近', '周边'])) {
@@ -47,7 +101,13 @@ export function resolveA2uiHomeToolRequest(
   let toolId = request.toolId;
   const prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
-  if (toolId.length === 0) {
+  const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
+  if (forcedDynamicToolId.length > 0) {
+    toolId = forcedDynamicToolId;
+    if (actionId.length === 0) {
+      actionId = request.toolId.length > 0 ? 'client_dynamic_reroute' : 'client_intent_fallback';
+    }
+  } else if (toolId.length === 0) {
     toolId = inferredToolIdForPrompt(fallbackPrompt);
     if (toolId.length > 0 && actionId.length === 0) {
       actionId = 'client_intent_fallback';

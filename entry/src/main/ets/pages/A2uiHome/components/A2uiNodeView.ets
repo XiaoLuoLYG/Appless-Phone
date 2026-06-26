@@ -4,6 +4,7 @@ import {
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_FLIGHT_BOARD,
   A2UI_COMPONENT_FOOD_CHOICES,
+  A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SOCIAL_INBOX,
@@ -11,10 +12,15 @@ import {
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_CARD,
   A2UI_COMPONENT_THINKING_STREAM,
+  A2UI_COMPONENT_TOOL_CONNECT_CARD,
   A2UI_COMPONENT_TRAVEL_OPTIONS,
   A2UI_COMPONENT_TRAIN_OPTIONS,
   A2uiAction,
   A2uiComponent,
+  A2uiFlightData,
+  A2uiFoodData,
+  A2uiTrainData,
+  A2uiTravelOptionData,
   A2uiSurfaceState,
   emptyA2uiSurface
 } from '../../../model/A2uiTypes';
@@ -39,9 +45,11 @@ import { ActionBarView } from './ActionBarView';
 import { ErrorNoticeView } from './ErrorNoticeView';
 import { FlightBoardView } from './FlightBoardView';
 import { FoodChoicesView } from './FoodChoicesView';
+import { GenericToolResultsView } from './GenericToolResultsView';
 import { InfoRowsView } from './InfoRowsView';
 import { SocialInboxView } from './SocialInboxView';
 import { ThinkingStreamView } from './ThinkingStreamView';
+import { ToolConnectCardView } from './ToolConnectCardView';
 import { TrainOptionsView } from './TrainOptionsView';
 import { TravelOptionsView } from './TravelOptionsView';
 
@@ -52,6 +60,10 @@ export struct A2uiNodeView {
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinNavigationCard: (item: A2uiFoodData) => void = (_item: A2uiFoodData) => {};
+  onPinTravelNavigationCard: (item: A2uiTravelOptionData) => void = (_item: A2uiTravelOptionData) => {};
+  onPinTrainNavigationCard: (item: A2uiTrainData) => void = (_item: A2uiTrainData) => {};
+  onPinFlightNavigationCard: (item: A2uiFlightData) => void = (_item: A2uiFlightData) => {};
 
   private component(): A2uiComponent | null {
     return findA2uiComponent(this.surface, this.componentId);
@@ -94,7 +106,19 @@ export struct A2uiNodeView {
               componentId: childId,
               renderTick: this.renderTick,
               isBusy: this.isBusy,
-              onAction: this.onAction
+              onAction: this.onAction,
+              onPinNavigationCard: (item: A2uiFoodData) => {
+                this.onPinNavigationCard(item);
+              },
+              onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+                this.onPinTravelNavigationCard(item);
+              },
+              onPinTrainNavigationCard: (item: A2uiTrainData) => {
+                this.onPinTrainNavigationCard(item);
+              },
+              onPinFlightNavigationCard: (item: A2uiFlightData) => {
+                this.onPinFlightNavigationCard(item);
+              }
             })
           }, (childId: string) => childId + '-' + this.renderTick.toString())
         }
@@ -109,7 +133,19 @@ export struct A2uiNodeView {
               componentId: childId,
               renderTick: this.renderTick,
               isBusy: this.isBusy,
-              onAction: this.onAction
+              onAction: this.onAction,
+              onPinNavigationCard: (item: A2uiFoodData) => {
+                this.onPinNavigationCard(item);
+              },
+              onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+                this.onPinTravelNavigationCard(item);
+              },
+              onPinTrainNavigationCard: (item: A2uiTrainData) => {
+                this.onPinTrainNavigationCard(item);
+              },
+              onPinFlightNavigationCard: (item: A2uiFlightData) => {
+                this.onPinFlightNavigationCard(item);
+              }
             })
           }, (childId: string) => childId + '-' + this.renderTick.toString())
         }
@@ -138,7 +174,10 @@ export struct A2uiNodeView {
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinTrainNavigationCard: (item: A2uiTrainData) => {
+            this.onPinTrainNavigationCard(item);
+          }
         })
         .key('train-options-' + this.componentId + '-' + this.renderTick.toString())
       } else if (this.component()?.component === A2UI_COMPONENT_TRAVEL_OPTIONS) {
@@ -147,7 +186,10 @@ export struct A2uiNodeView {
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+            this.onPinTravelNavigationCard(item);
+          }
         })
       } else if (this.component()?.component === A2UI_COMPONENT_FLIGHT_BOARD) {
         FlightBoardView({
@@ -155,7 +197,10 @@ export struct A2uiNodeView {
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinFlightNavigationCard: (item: A2uiFlightData) => {
+            this.onPinFlightNavigationCard(item);
+          }
         })
       } else if (this.component()?.component === A2UI_COMPONENT_FOOD_CHOICES) {
         FoodChoicesView({
@@ -163,10 +208,29 @@ export struct A2uiNodeView {
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
           isBusy: this.isBusy,
-          onAction: this.onAction
+          onAction: this.onAction,
+          onPinNavigationCard: (item: A2uiFoodData) => {
+            this.onPinNavigationCard(item);
+          }
         })
       } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_INBOX) {
         SocialInboxView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_TOOL_CONNECT_CARD) {
+        ToolConnectCardView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_GENERIC_TOOL_RESULTS) {
+        GenericToolResultsView({
           surface: this.surface,
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,

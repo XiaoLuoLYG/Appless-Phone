@@ -1,0 +1,159 @@
+{
+  "manifests": [
+    {
+      "toolIds": ["fixture.echo"],
+      "manifest": {
+        "id": "modelscope.fixture.echo",
+        "displayName": "Fixture Echo MCP",
+        "sourceUrl": "local-fixture",
+        "hosted": true,
+        "fromSiteUrl": "",
+        "capabilities": ["test.echo"],
+        "requiredCredentials": [],
+        "transports": [
+          {
+            "type": "streamable_http",
+            "url": "https://fixture.invalid/mcp",
+            "command": "",
+            "args": [],
+            "headers": {},
+            "env": {}
+          }
+        ],
+        "tools": [
+          {
+            "name": "echo",
+            "description": "Return a deterministic echo result.",
+            "inputSchema": {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": { "type": "string" }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "toolIds": ["weather.query", "maps.weather"],
+      "manifest": {
+        "id": "modelscope.@amap.amap-maps",
+        "displayName": "高德地图",
+        "sourceUrl": "https://modelscope.cn/mcp/servers/%40amap/amap-maps",
+        "hosted": true,
+        "fromSiteUrl": "https://lbs.amap.com/api/mcp-server/gettingstarted",
+        "capabilities": ["location-services", "weather.query", "route.plan"],
+        "requiredCredentials": [
+          {
+            "name": "AMAP_MAPS_API_KEY",
+            "description": "您在高德官网上申请的key",
+            "required": true,
+            "placement": "env",
+            "scheme": "",
+            "testValue": "1"
+          }
+        ],
+        "transports": [
+          {
+            "type": "stdio",
+            "url": "",
+            "command": "npx",
+            "args": ["-y", "@amap/amap-maps-mcp-server"],
+            "headers": {},
+            "env": { "AMAP_MAPS_API_KEY": "" }
+          }
+        ],
+        "tools": [
+          {
+            "name": "maps_weather",
+            "description": "根据城市名称或 adcode 查询天气",
+            "inputSchema": {
+              "type": "object",
+              "required": ["city"],
+              "properties": {
+                "city": { "type": "string" }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "toolIds": ["statistics.search"],
+      "manifest": {
+        "id": "modelscope.thatcoder.cnbs",
+        "displayName": "中国国家统计局数据查询",
+        "sourceUrl": "https://modelscope.cn/mcp/servers/thatcoder/cnbs",
+        "hosted": true,
+        "fromSiteUrl": "https://github.com/icen-ai/mcp-cnbs",
+        "capabilities": ["research-and-data"],
+        "requiredCredentials": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token required by the hosted MCP endpoint",
+            "required": false,
+            "placement": "header",
+            "scheme": "Bearer",
+            "testValue": "1"
+          }
+        ],
+        "transports": [
+          {
+            "type": "streamable_http",
+            "url": "https://cnbs.mcp.icen.ai",
+            "command": "",
+            "args": [],
+            "headers": {},
+            "env": {}
+          }
+        ],
+        "tools": [
+          {
+            "name": "cnbs_search",
+            "description": "Search statistics",
+            "inputSchema": {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": { "type": "string" }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "toolIds": ["ppt.generate"],
+      "manifest": {
+        "id": "modelscope.@deckflow.gezhe-mcp-server",
+        "displayName": "歌者PPT",
+        "sourceUrl": "https://modelscope.cn/mcp/servers/%40deckflow/gezhe-mcp-server",
+        "hosted": false,
+        "fromSiteUrl": "https://github.com/deckflow/gezhe-ppt-mcp",
+        "capabilities": ["AIGC"],
+        "requiredCredentials": [
+          {
+            "name": "API_KEY",
+            "description": "替换为获取的 API_KEY",
+            "required": true,
+            "placement": "env",
+            "scheme": "",
+            "testValue": "1"
+          }
+        ],
+        "transports": [
+          {
+            "type": "stdio",
+            "url": "",
+            "command": "npx",
+            "args": ["-y", "gezhe-mcp-server"],
+            "headers": {},
+            "env": { "API_KEY": "your-api-key-here" }
+          }
+        ],
+        "tools": []
+      }
+    }
+  ]
+}

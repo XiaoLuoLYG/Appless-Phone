@@ -2,8 +2,11 @@ import {
   A2uiAction,
   A2uiComponent,
   A2uiDataValue,
+  A2uiDynamicToolConnectData,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
+  A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
@@ -39,6 +42,21 @@ interface LooseRowData {
   body?: Object[];
 }
 
+interface LooseGenericToolResultRowData {
+  label?: Object | string | number | boolean | null;
+  value?: Object | string | number | boolean | null;
+}
+
+interface LooseGenericToolResultData {
+  sourceTag?: Object | string | number | boolean | null;
+  toolName?: Object | string | number | boolean | null;
+  title?: Object | string | number | boolean | null;
+  status?: Object | string | number | boolean | null;
+  summary?: Object | string | number | boolean | null;
+  rows?: Object[];
+  rawPreview?: Object | string | number | boolean | null;
+}
+
 function emptyModel(): A2uiRuntimeDataModel {
   return {
     rows: [],
@@ -62,7 +80,9 @@ function emptyModel(): A2uiRuntimeDataModel {
       toolId: '',
       prompt: '',
       actionId: ''
-    }
+    },
+    dynamicToolConnect: emptyDynamicToolConnect(),
+    genericToolResults: []
   };
 }
 
@@ -80,6 +100,88 @@ function emptyRowGroups(): A2uiRowGroupsData {
     flight: [],
     food: []
   };
+}
+
+function emptyDynamicToolConnect(): A2uiDynamicToolConnectData {
+  return {
+    toolId: '',
+    prompt: '',
+    manifestId: '',
+    displayName: '',
+    sourceUrl: '',
+    status: '',
+    message: '',
+    credentialName: '',
+    credentialRef: '',
+    registrationUrl: '',
+    actions: []
+  };
+}
+
+function normalizeDynamicToolConnect(parsed: A2uiRuntimeDataModel, fallback: A2uiDynamicToolConnectData): A2uiDynamicToolConnectData {
+  if (parsed.dynamicToolConnect === undefined || parsed.dynamicToolConnect === null) {
+    return fallback;
+  }
+  return {
+    toolId: textOf(parsed.dynamicToolConnect.toolId),
+    prompt: textOf(parsed.dynamicToolConnect.prompt),
+    manifestId: textOf(parsed.dynamicToolConnect.manifestId),
+    displayName: textOf(parsed.dynamicToolConnect.displayName),
+    sourceUrl: textOf(parsed.dynamicToolConnect.sourceUrl),
+    status: textOf(parsed.dynamicToolConnect.status),
+    message: textOf(parsed.dynamicToolConnect.message),
+    credentialName: textOf(parsed.dynamicToolConnect.credentialName),
+    credentialRef: textOf(parsed.dynamicToolConnect.credentialRef),
+    registrationUrl: textOf(parsed.dynamicToolConnect.registrationUrl),
+    actions: Array.isArray(parsed.dynamicToolConnect.actions) ? parsed.dynamicToolConnect.actions : []
+  };
+}
+
+function normalizeGenericToolResultRows(rows: Object[] | undefined): A2uiGenericToolResultRowData[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const normalized: A2uiGenericToolResultRowData[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    const source = rows[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const row = source as LooseGenericToolResultRowData;
+    const label = textOf(row.label);
+    const value = textOf(row.value);
+    if (label.length > 0 || value.length > 0) {
+      normalized.push({
+        label: label,
+        value: value
+      });
+    }
+  }
+  return normalized;
+}
+
+function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2uiGenericToolResultData[]): A2uiGenericToolResultData[] {
+  if (!Array.isArray(parsed.genericToolResults)) {
+    return fallback;
+  }
+  const normalized: A2uiGenericToolResultData[] = [];
+  for (let index = 0; index < parsed.genericToolResults.length; index++) {
+    const source = parsed.genericToolResults[index];
+    if (source === undefined || source === null) {
+      continue;
+    }
+    const result = source as LooseGenericToolResultData;
+    normalized.push({
+      sourceTag: textOf(result.sourceTag),
+      toolName: textOf(result.toolName),
+      title: textOf(result.title),
+      status: textOf(result.status),
+      summary: textOf(result.summary),
+      rows: normalizeGenericToolResultRows(result.rows),
+      rawPreview: textOf(result.rawPreview)
+    });
+  }
+  return normalized;
 }
 
 function normalizeToolRequest(parsed: A2uiRuntimeDataModel, fallback: A2uiToolRequestData): A2uiToolRequestData {
@@ -132,6 +234,8 @@ function parseModel(surface: A2uiSurfaceState): A2uiRuntimeDataModel {
       },
       rowGroups: normalizeRowGroups(parsed, fallback.rowGroups),
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
+      dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
+      genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -270,6 +374,12 @@ export function resolveData(surface: A2uiSurfaceState, path: string | undefined)
   if (path === '/toolRequest') {
     return model.toolRequest;
   }
+  if (path === '/dynamicToolConnect') {
+    return model.dynamicToolConnect;
+  }
+  if (path === '/genericToolResults') {
+    return model.genericToolResults;
+  }
   if (path === '/') {
     return model;
   }
@@ -325,6 +435,24 @@ export function foodOptions(surface: A2uiSurfaceState, component: A2uiComponent)
   return [];
 }
 
+export function uniqueFoodSourceTags(sourceTags: string[] | null | undefined): string[] {
+  if (sourceTags === undefined || sourceTags === null || !Array.isArray(sourceTags)) {
+    return [];
+  }
+  const tags: string[] = [];
+  sourceTags.forEach((tag: string) => {
+    if (tag.length > 0 && tags.indexOf(tag) < 0) {
+      tags.push(tag);
+    }
+  });
+  return tags;
+}
+
+export function foodVisualSourceTag(sourceTags: string[] | null | undefined): string {
+  const tags = uniqueFoodSourceTags(sourceTags);
+  return tags.length === 1 ? tags[0] : '';
+}
+
 export function socialMessages(surface: A2uiSurfaceState, component: A2uiComponent): A2uiSocialMessage[] {
   const data = resolveData(surface, component.dataPath);
   if (component.dataPath === '/social/messages') {
@@ -352,6 +480,14 @@ export function actionsOf(component: A2uiComponent): A2uiAction[] {
 
 export function toolRequest(surface: A2uiSurfaceState): A2uiToolRequest {
   return parseModel(surface).toolRequest;
+}
+
+export function dynamicToolConnect(surface: A2uiSurfaceState): A2uiDynamicToolConnectData {
+  return parseModel(surface).dynamicToolConnect;
+}
+
+export function genericToolResults(surface: A2uiSurfaceState): A2uiGenericToolResultData[] {
+  return parseModel(surface).genericToolResults;
 }
 
 export function componentById(surface: A2uiSurfaceState, id: string): A2uiComponent | null {

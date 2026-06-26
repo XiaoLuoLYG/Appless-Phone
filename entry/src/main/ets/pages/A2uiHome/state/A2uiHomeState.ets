@@ -57,6 +57,20 @@ export function isPromptInputEnabled(isBusy: boolean): boolean {
   return !isBusy;
 }
 
+export function shouldShowQueryPendingSurface(isBusy: boolean, isAwaitingFirstSurface: boolean): boolean {
+  return isBusy && isAwaitingFirstSurface;
+}
+
+export function isWelcomeSurface(surface: A2uiSurfaceState): boolean {
+  return surface.surfaceId === 'surface_seed' &&
+    surface.status === 'idle' &&
+    surface.components.length === 0;
+}
+
+export function shouldShowWelcome(isBusy: boolean, messageCount: number, surface: A2uiSurfaceState): boolean {
+  return !isBusy && messageCount === 0 && isWelcomeSurface(surface);
+}
+
 export function inputTextAfterPromptSubmit(current: string): string {
   return current;
 }

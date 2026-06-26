@@ -1,7 +1,18 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '../main/ets/model/A2uiParser';
 import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
-import { componentById, foodOptions, labelValues, socialMessages, socialReplies, toolRequest, trainOptions, travelOptions } from '../main/ets/model/A2uiData';
+import {
+  componentById,
+  dynamicToolConnect,
+  foodOptions,
+  genericToolResults,
+  labelValues,
+  socialMessages,
+  socialReplies,
+  toolRequest,
+  trainOptions,
+  travelOptions
+} from '../main/ets/model/A2uiData';
 import {
   appendThinkingStream,
   extractA2uiJsonlFromModelChunk,
@@ -120,6 +131,51 @@ export default function a2uiParserTest() {
       expect(request.toolId).assertEqual('train.search');
       expect(request.prompt).assertEqual('查高铁');
       expect(request.actionId).assertEqual('model_tool_request');
+    });
+
+    it('accepts dynamic tool components and stores dynamic tool data', 0, () => {
+      const stream =
+        '{"version":"v0.9.1","createSurface":{"surfaceId":"dynamic","root":"root","title":"动态工具","intent":"dynamic_tool","status":"ready"}}\n' +
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"dynamic","components":[{"id":"root","component":"SurfaceRoot","children":["connect","results"],"title":"动态工具","status":"ready"},{"id":"connect","component":"ToolConnectCard","title":"Amap Maps","dataPath":"/dynamicToolConnect","status":"needs_auth"},{"id":"results","component":"GenericToolResults","title":"工具结果","dataPath":"/genericToolResults","status":"ready"}]}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic","path":"/dynamicToolConnect","value":{"toolId":"maps.weather","manifestId":"modelscope.@amap.amap-maps","displayName":"Amap Maps","sourceUrl":"https://modelscope.cn/mcp/servers/%40amap/amap-maps","status":"needs_auth","message":"API key required","credentialName":"AMAP_MAPS_API_KEY","credentialRef":"dynamic:modelscope.@amap.amap-maps:AMAP_MAPS_API_KEY","registrationUrl":"https://lbs.amap.com/","actions":[]}}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic","path":"/genericToolResults","value":[{"sourceTag":"MCP · fixture","toolName":"fixture.search","title":"Fixture result","status":"success","summary":"One real fixture row returned.","rows":[{"label":"Result","value":"Fixture row"}],"rawPreview":"{\\"ok\\":true}"}]}}\n';
+      const parsed = parseA2uiJsonl(stream);
+      const store = new A2uiSurfaceStore();
+
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+
+      const surface = store.getSurface();
+      expect(parsed.error).assertEqual('');
+      expect(componentById(surface, 'connect')?.component).assertEqual('ToolConnectCard');
+      expect(componentById(surface, 'results')?.component).assertEqual('GenericToolResults');
+      expect(dynamicToolConnect(surface).credentialName).assertEqual('AMAP_MAPS_API_KEY');
+      expect(genericToolResults(surface)[0].rows[0].value).assertEqual('Fixture row');
+    });
+
+    it('normalizes partial dynamic tool result data for renderer safety', 0, () => {
+      const stream =
+        '{"version":"v0.9.1","createSurface":{"surfaceId":"dynamic-partial","root":"root","title":"动态工具","intent":"dynamic_tool","status":"ready"}}\n' +
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"dynamic-partial","components":[{"id":"root","component":"SurfaceRoot","child":"results","title":"动态工具","status":"ready"},{"id":"results","component":"GenericToolResults","title":"工具结果","dataPath":"/genericToolResults","status":"ready"}]}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"dynamic-partial","path":"/genericToolResults","value":[{"title":"Partial result","rows":[{"label":"Only label"},{}]}]}}\n';
+      const parsed = parseA2uiJsonl(stream);
+      const store = new A2uiSurfaceStore();
+
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+
+      const results = genericToolResults(store.getSurface());
+      expect(parsed.error).assertEqual('');
+      expect(results.length).assertEqual(1);
+      expect(results[0].title).assertEqual('Partial result');
+      expect(results[0].sourceTag).assertEqual('');
+      expect(results[0].summary).assertEqual('');
+      expect(results[0].rawPreview).assertEqual('');
+      expect(results[0].rows.length).assertEqual(1);
+      expect(results[0].rows[0].label).assertEqual('Only label');
+      expect(results[0].rows[0].value).assertEqual('');
     });
 
     it('accepts SocialInbox messages and reply state without falling back to rows', 0, () => {
@@ -311,6 +367,42 @@ export default function a2uiParserTest() {
       expect(surface.title).assertEqual('Second');
       expect(surface.components.length).assertEqual(2);
       expect(componentById(surface, 'body') !== null).assertTrue();
+    });
+
+    it('clears stale thoughts when a same-surface request starts a new data model', 0, () => {
+      const store = new A2uiSurfaceStore();
+      store.apply(parseA2uiEnvelope('{"createSurface":{"surfaceId":"surface_model","root":"root","title":"旧工具","status":"ready","sendDataModel":true}}'));
+      store.apply(parseA2uiEnvelope('{"updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"旧工具","status":"ready"},{"id":"thinking","component":"ThinkingStream","title":"旧工具","dataPath":"/thoughts","status":"ready"}]}}'));
+      store.apply(parseA2uiEnvelope(
+        '{"updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在识别出行约束","正在等待 12306 和飞常准返回一段更长的旧文案"]}}'
+      ));
+
+      store.apply(parseA2uiEnvelope('{"createSurface":{"surfaceId":"surface_model","root":"root","title":"正在搜索外卖","status":"calling_tool","sendDataModel":true}}'));
+      store.apply(parseA2uiEnvelope(
+        '{"updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在等待外卖来源返回"]}}'
+      ));
+
+      const surface = store.getSurface();
+      expect(surface.dataModelJson.indexOf('外卖来源')).assertLarger(-1);
+      expect(surface.dataModelJson.indexOf('12306')).assertEqual(-1);
+      expect(surface.dataModelJson.indexOf('飞常准')).assertEqual(-1);
+    });
+
+    it('keeps food results when a same-surface partial stream changes status to ready', 0, () => {
+      const store = new A2uiSurfaceStore();
+      store.apply(parseA2uiEnvelope('{"createSurface":{"surfaceId":"surface_food","root":"root","title":"外卖聚合搜索","intent":"food","status":"calling_tool","sendDataModel":true}}'));
+      store.apply(parseA2uiEnvelope('{"updateComponents":{"surfaceId":"surface_food","components":[{"id":"root","component":"SurfaceRoot","child":"results","title":"外卖聚合搜索","status":"calling_tool"},{"id":"results","component":"FoodChoices","title":"外卖聚合搜索","dataPath":"/foods","status":"calling_tool"}]}}'));
+      store.apply(parseA2uiEnvelope('{"updateDataModel":{"surfaceId":"surface_food","path":"/foods","value":[{"name":"坂田基地咖啡店","category":"咖啡","address":"深圳坂田基地附近","distance":"300米","sourceTags":["高德"]}]}}'));
+
+      store.apply(parseA2uiEnvelope('{"createSurface":{"surfaceId":"surface_food","root":"root","title":"外卖聚合搜索","intent":"food","status":"ready","sendDataModel":true}}'));
+      store.apply(parseA2uiEnvelope('{"updateComponents":{"surfaceId":"surface_food","components":[{"id":"root","component":"SurfaceRoot","child":"results","title":"外卖聚合搜索","status":"ready"},{"id":"results","component":"FoodChoices","title":"外卖聚合搜索","dataPath":"/foods","status":"ready"}]}}'));
+
+      const surface = store.getSurface();
+      const food = componentById(surface, 'results');
+      expect(food !== null).assertTrue();
+      if (food !== null) {
+        expect(foodOptions(surface, food)[0].name).assertEqual('坂田基地咖啡店');
+      }
     });
 
     it('apply failure does not wipe existing surface state', 0, () => {

@@ -1,5 +1,6 @@
 import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
 import { actionsOf, flightOptions, A2uiFlightOption } from '../../../model/A2uiData';
+import { canCreateNavigationCardFromFlightOption } from '../../../model/NavigationCardSnapshot';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
@@ -28,7 +29,9 @@ export struct FlightBoardView {
   @Prop renderTick: number = 0;
   @Prop isBusy: boolean = false;
   @State selectedDate: Date = new Date();
+  @State expandedFlightKey: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
+  onPinFlightNavigationCard: (item: A2uiFlightOption) => void = (_item: A2uiFlightOption) => {};
 
   aboutToAppear(): void {
     this.selectedDate = this.initialDate();
@@ -95,10 +98,89 @@ export struct FlightBoardView {
     return dep + ' → ' + arr;
   }
 
+  private flightKey(item: A2uiFlightOption): string {
+    return item.flightNo + '|' + item.dep + '|' + item.depTime + '|' + item.arrTime;
+  }
+
   private timeText(item: A2uiFlightOption): string {
     const dep = item.depTime.length > 0 ? item.depTime : '--';
     const arr = item.arrTime.length > 0 ? item.arrTime : '--';
     return dep + ' - ' + arr;
+  }
+
+  @Builder
+  private FlightDetailPanel(item: A2uiFlightOption) {
+    Column() {
+      Row() {
+        Text('路线')
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .width(58)
+        Text(this.flightRoute(item))
+          .fontSize(13)
+          .fontColor(COLOR_TEXT)
+          .lineHeight(20)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+      .padding({ top: 4, bottom: 4 })
+      Row() {
+        Text('时间')
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .width(58)
+        Text(this.timeText(item))
+          .fontSize(13)
+          .fontColor(COLOR_TEXT)
+          .lineHeight(20)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+      .padding({ top: 4, bottom: 4 })
+      if (item.status.length > 0) {
+        Row() {
+          Text('状态')
+            .fontSize(12)
+            .fontColor(COLOR_MUTED)
+            .width(58)
+          Text(item.status)
+            .fontSize(13)
+            .fontColor(COLOR_TEXT)
+            .lineHeight(20)
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Top)
+        .padding({ top: 4, bottom: 4 })
+      }
+      Text('以飞常准返回为准，不支持订票。')
+        .fontSize(12)
+        .fontColor(COLOR_MUTED)
+        .lineHeight(18)
+        .margin({ top: 8 })
+      Button(canCreateNavigationCardFromFlightOption(item) ? '固定为导航卡片' : '缺少坐标，不能固定')
+        .enabled(canCreateNavigationCardFromFlightOption(item) && !this.isBusy)
+        .height(38)
+        .width('100%')
+        .fontSize(13)
+        .fontColor(canCreateNavigationCardFromFlightOption(item) ? COLOR_ACCENT_DARK : COLOR_MUTED)
+        .backgroundColor(COLOR_ACCENT_SOFT)
+        .borderRadius(10)
+        .border({ width: 1, color: canCreateNavigationCardFromFlightOption(item) ? COLOR_ACCENT : COLOR_CARD_EDGE })
+        .margin({ top: 10 })
+        .onClick(() => {
+          this.onPinFlightNavigationCard(item);
+        })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(12)
+    .backgroundColor(COLOR_FIELD)
+    .borderRadius(10)
+    .border({ width: { left: 3 }, color: COLOR_ACCENT })
+    .margin({ top: 10 })
   }
 
   build() {
@@ -159,6 +241,7 @@ export struct FlightBoardView {
                   .padding({ left: 9, right: 9, top: 5, bottom: 5 })
                   .backgroundColor(COLOR_ACCENT_SOFT)
                   .borderRadius(8)
+                  .margin({ right: 8 })
               }
             }
             .width('100%')
@@ -182,6 +265,10 @@ export struct FlightBoardView {
               .fontSize(13)
               .fontColor(COLOR_MUTED)
               .margin({ top: 6 })
+
+            if (this.expandedFlightKey === this.flightKey(item)) {
+              this.FlightDetailPanel(item)
+            }
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -191,7 +278,11 @@ export struct FlightBoardView {
           .border({ width: 1, color: COLOR_CARD_EDGE })
           .shadow({ radius: 20, color: COLOR_CARD_GLOW, offsetX: 0, offsetY: 9 })
           .margin({ top: 10 })
-        }, (item: A2uiFlightOption) => item.flightNo + item.depTime + item.arrTime + '-' + this.renderTick.toString())
+          .onClick(() => {
+            const key = this.flightKey(item);
+            this.expandedFlightKey = this.expandedFlightKey === key ? '' : key;
+          })
+        }, (item: A2uiFlightOption) => this.flightKey(item) + '-' + this.renderTick.toString())
       }
 
       Column() {

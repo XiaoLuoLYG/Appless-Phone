@@ -16,6 +16,8 @@ export const A2UI_COMPONENT_FOOD_CHOICES: string = 'FoodChoices';
 export const A2UI_COMPONENT_SOCIAL_INBOX: string = 'SocialInbox';
 export const A2UI_COMPONENT_CONFIRM_PANEL: string = 'ConfirmPanel';
 export const A2UI_COMPONENT_INFO_ROWS: string = 'InfoRows';
+export const A2UI_COMPONENT_TOOL_CONNECT_CARD: string = 'ToolConnectCard';
+export const A2UI_COMPONENT_GENERIC_TOOL_RESULTS: string = 'GenericToolResults';
 
 export interface A2uiAction {
   id: string;
@@ -34,6 +36,7 @@ export interface A2uiTrainData {
   trainCode: string;
   from: string;
   to: string;
+  fromLocation?: string;
   depart: string;
   arrive: string;
   duration: string;
@@ -52,6 +55,7 @@ export interface A2uiFlightData {
   airline: string;
   dep: string;
   arr: string;
+  depLocation?: string;
   depTime: string;
   arrTime: string;
   status: string;
@@ -65,6 +69,7 @@ export interface A2uiTravelOptionData {
   title: string;
   from: string;
   to: string;
+  fromLocation?: string;
   depart: string;
   arrive: string;
   duration: string;
@@ -135,6 +140,35 @@ export interface A2uiToolRequestData {
   actionId: string;
 }
 
+export interface A2uiDynamicToolConnectData {
+  toolId: string;
+  prompt: string;
+  manifestId: string;
+  displayName: string;
+  sourceUrl: string;
+  status: string;
+  message: string;
+  credentialName: string;
+  credentialRef: string;
+  registrationUrl: string;
+  actions: A2uiAction[];
+}
+
+export interface A2uiGenericToolResultRowData {
+  label: string;
+  value: string;
+}
+
+export interface A2uiGenericToolResultData {
+  sourceTag: string;
+  toolName: string;
+  title: string;
+  status: string;
+  summary: string;
+  rows: A2uiGenericToolResultRowData[];
+  rawPreview: string;
+}
+
 export interface A2uiRuntimeDataModel {
   rows: A2uiLabelValueData[];
   trains: A2uiTrainData[];
@@ -147,6 +181,8 @@ export interface A2uiRuntimeDataModel {
   trip: A2uiTripData;
   rowGroups: A2uiRowGroupsData;
   toolRequest: A2uiToolRequestData;
+  dynamicToolConnect: A2uiDynamicToolConnectData;
+  genericToolResults: A2uiGenericToolResultData[];
   toolRequests?: A2uiToolRequestData[];
 }
 
@@ -165,6 +201,8 @@ export type A2uiDataValue =
   A2uiTripData |
   A2uiRowGroupsData |
   A2uiToolRequestData |
+  A2uiDynamicToolConnectData |
+  A2uiGenericToolResultData[] |
   A2uiToolRequestData[] |
   string |
   number |
@@ -272,7 +310,7 @@ export function emptyA2uiSurface(surfaceId: string = 'surface_main'): A2uiSurfac
   return {
     surfaceId: surfaceId,
     rootId: 'root',
-    title: 'AIPhone',
+    title: 'Appless Phone',
     intent: 'general',
     status: 'idle',
     components: [],
@@ -301,7 +339,9 @@ export function defaultA2uiCapabilities(): A2uiClientCapabilities {
       A2UI_COMPONENT_FOOD_CHOICES,
       A2UI_COMPONENT_SOCIAL_INBOX,
       A2UI_COMPONENT_CONFIRM_PANEL,
-      A2UI_COMPONENT_INFO_ROWS
+      A2UI_COMPONENT_INFO_ROWS,
+      A2UI_COMPONENT_TOOL_CONNECT_CARD,
+      A2UI_COMPONENT_GENERIC_TOOL_RESULTS
     ],
     transport: ['jsonl', 'openai-compatible-sse']
   };

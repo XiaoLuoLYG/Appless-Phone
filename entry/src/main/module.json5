@@ -74,6 +74,40 @@
             "actions": [
               "ohos.want.action.home"
             ]
+          },
+          {
+            "entities": [
+              "entity.system.browsable"
+            ],
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "com.example.aiphonedemo"
+              },
+              {
+                "scheme": "com.example.aiphonedemo",
+                "pathStartWith": "oauth/google"
+              },
+              {
+                "scheme": "com.example.aiphonedemo",
+                "host": "oauth",
+                "pathStartWith": "google"
+              },
+              {
+                "scheme": "aiphone",
+                "host": "oauth",
+                "pathStartWith": "google"
+              },
+              {
+                "scheme": "com.googleusercontent.apps.358078200829-covuu6l8dgvs7kaejua7mrkke7e8833b"
+              },
+              {
+                "scheme": "com.googleusercontent.apps.358078200829-covuu6l8dgvs7kaejua7mrkke7e8833b",
+                "pathStartWith": "oauth2redirect"
+              }
+            ]
           }
         ]
       }
@@ -100,6 +134,21 @@
           {
             "name": "ohos.accessibleability",
             "resource": "$profile:accessibility_config"
+          }
+        ]
+      },
+      {
+        "name": "NavigationCardFormExtensionAbility",
+        "srcEntry": "./ets/extensionability/NavigationCardFormExtensionAbility.ets",
+        "type": "form",
+        "description": "$string:NavigationCardFormExtensionAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:NavigationCardFormExtensionAbility_label",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:navigation_card_form_config"
           }
         ]
       },

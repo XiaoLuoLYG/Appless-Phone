@@ -67,7 +67,21 @@ function modelJson(
       toolId: '',
       prompt: '',
       actionId: ''
-    }
+    },
+    dynamicToolConnect: {
+      toolId: '',
+      prompt: '',
+      manifestId: '',
+      displayName: '',
+      sourceUrl: '',
+      status: '',
+      message: '',
+      credentialName: '',
+      credentialRef: '',
+      registrationUrl: '',
+      actions: []
+    },
+    genericToolResults: []
   };
   return JSON.stringify(model);
 }

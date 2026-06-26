@@ -14,6 +14,33 @@ const defaultCases = [
   { query: '帮我搜索深圳坂田华为基地附近的奶茶店', expectsTool: true, expectedToolId: 'food.search' }
 ];
 
+const dynamicCases = [
+  {
+    query: '帮我查明天深圳到珠海的船票',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'none'
+  },
+  {
+    query: '帮我查明天深圳天气',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'weather.query'
+  },
+  {
+    query: '帮我查一下最近的统计局GDP数据',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'statistics.search'
+  },
+  {
+    query: '帮我生成一份深圳低空经济介绍PPT',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'ppt.generate'
+  }
+];
+
 const forbiddenSyntheticMarkers = [
   '高铁 G 字头',
   '动车 D 字头',
@@ -40,6 +67,28 @@ const visibleDomainMarkers = [
   '奶茶',
   '坂田',
   '华为',
+  '接入工具',
+  'dynamic.search',
+  'ferry.ticket.search',
+  'weather.query',
+  'statistics.search',
+  'ppt.generate',
+  'Gmail',
+  'Gmail Web',
+  'google.gmail',
+  'gmail.mail.search',
+  'gmail.draft.create',
+  'gmail.open.web',
+  'gmail.message.send',
+  'Google Workspace MCP OAuth',
+  '授权 Gmail',
+  'UnsafeActionBlocked',
+  '不会模拟 Gmail 邮件',
+  '不会自动发送 Gmail',
+  'AMAP_MAPS_API_KEY',
+  'Authorization',
+  'API_KEY',
+  '歌者PPT',
   '多展示一些',
   '选最快的'
 ];
@@ -56,6 +105,10 @@ const finalLayoutBlockingMarkers = [
   '需要供应商配置',
   '需要配置：',
   '查询失败',
+  'Gmail API 调用失败',
+  'Gmail MCP 调用失败',
+  'Internal error',
+  '2300999',
   'Bad Request',
   '暂无可展示数据',
   '暂不支持的组件',
@@ -77,9 +130,11 @@ const finalLayoutBlockingPatterns = [
 
 const argv = process.argv.slice(2);
 const cleanData = process.env.AIPHONE_SMOKE_CLEAN_DATA === '1' || argv.includes('--clean-data');
-const queryArgs = argv.filter((arg) => arg !== '--clean-data');
+const runDynamicCases = argv.includes('--dynamic-tools');
+const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools');
+const selectedDefaultCases = runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases;
 const useDefaultCases = queryArgs.length === 0;
-const queries = useDefaultCases ? defaultCases.map((testCase) => testCase.query) : queryArgs;
+const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
 
@@ -88,6 +143,58 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: false,
       expectedToolId: ''
+    };
+  }
+  if (/船票|轮渡|客船|渡轮|码头/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'none'
+    };
+  }
+  if (/天气|气温|下雨|降雨/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'weather.query'
+    };
+  }
+  if (/统计局|GDP|CPI|人口|经济数据/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'statistics.search'
+    };
+  }
+  if (/PPT|ppt|幻灯片|演示文稿/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'ppt.generate'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.open.web'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.message.send'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.draft.create'
+    };
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'gmail.mail.search'
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -121,10 +228,17 @@ function expectedCaseForQuery(query) {
 }
 
 function firstTarget() {
-  const result = spawnSync('hdc', ['list', 'targets'], { encoding: 'utf8' });
-  const lines = result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  const result = spawnSync('hdc', ['list', 'targets'], { encoding: 'utf8', timeout: 12000 });
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  if (result.error !== undefined) {
+    throw new Error(`hdc list targets failed before finding a device: ${result.error.message}`);
+  }
+  if (result.status !== 0 || /Connect server failed/i.test(output)) {
+    throw new Error(`hdc list targets failed before finding a device: ${output}`);
+  }
+  const lines = output.split('\n').map((line) => line.trim()).filter((line) => line.length > 0 && !/list of targets/i.test(line));
   if (lines.length === 0) {
-    throw new Error('No hdc target found. Set AIPHONE_HDC_TARGET.');
+    throw new Error(`No hdc target found. Set AIPHONE_HDC_TARGET. hdc output: ${output}`);
   }
   return lines[0];
 }
@@ -135,7 +249,8 @@ function hdc(args, options = {}) {
     maxBuffer: 20 * 1024 * 1024,
     ...options
   });
-  if (result.status !== 0) {
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  if (result.status !== 0 || /Connect server failed/i.test(output)) {
     throw new Error(`hdc ${args.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
   }
   return result.stdout;
@@ -163,13 +278,15 @@ function probeLocalModel() {
     maxBuffer: 2 * 1024 * 1024
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
-  const connectionRefused = /Failed to connect|Couldn.t connect|Connection refused|curl:\s*\(7\)/i.test(output);
+  const hdcUnavailable = /Connect server failed/i.test(output);
+  const connectionRefused = hdcUnavailable || /Failed to connect|Couldn.t connect|Connection refused|curl:\s*\(7\)/i.test(output);
   const listenerReachable = !connectionRefused && (
     /403|Call is not allowed/i.test(output) ||
     (result.status === 0 && output.length > 0 && !/curl:\s*\(\d+\)/i.test(output))
   );
   return {
     status: result.status,
+    hdcUnavailable,
     listenerReachable,
     connectionRefused,
     output: output.length > 500 ? `${output.slice(0, 500)}...<truncated>` : output
@@ -189,12 +306,18 @@ function startModelFoundation() {
 
 async function ensureLocalModel() {
   const initial = probeLocalModel();
+  if (initial.hdcUnavailable) {
+    throw new Error(`hdc unavailable before local model probe: ${initial.output}`);
+  }
   if (!initial.connectionRefused) {
     return initial;
   }
   const recovery = startModelFoundation();
   await sleep(3000);
   const afterStart = probeLocalModel();
+  if (afterStart.hdcUnavailable) {
+    throw new Error(`hdc unavailable after model foundation recovery attempt: ${afterStart.output}`);
+  }
   return {
     ...afterStart,
     recovery
@@ -216,7 +339,7 @@ function walk(node, visit) {
   }
 }
 
-function center(bounds) {
+function parseBounds(bounds) {
   const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(bounds || '');
   if (!match) {
     return null;
@@ -226,9 +349,38 @@ function center(bounds) {
   const right = Number.parseInt(match[3], 10);
   const bottom = Number.parseInt(match[4], 10);
   return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
     x: Math.floor((left + right) / 2),
     y: Math.floor((top + bottom) / 2)
   };
+}
+
+function center(bounds) {
+  const parsed = parseBounds(bounds);
+  if (parsed === null) {
+    return null;
+  }
+  return {
+    x: parsed.x,
+    y: parsed.y
+  };
+}
+
+function verticallyOverlaps(a, b) {
+  return a.top <= b.bottom && b.top <= a.bottom;
+}
+
+function attrIsTrue(value) {
+  return value === true || value === 'true';
+}
+
+function attrIsFalse(value) {
+  return value === false || value === 'false';
 }
 
 function dumpLayout(localName = 'latest-layout.json') {
@@ -292,18 +444,55 @@ function collectInputText(layout) {
 
 function findControls(layout) {
   let input = null;
+  let inputBounds = null;
   let generate = null;
+  const clickable = [];
   walk(layout, (node) => {
     const attrs = node.attributes || {};
-    if ((attrs.type === 'TextInput' || attrs.type === 'TextArea') && input === null) {
-      input = center(attrs.bounds);
+    const bounds = parseBounds(attrs.bounds);
+    if ((attrs.type === 'TextInput' || attrs.type === 'TextArea') && input === null && bounds !== null) {
+      inputBounds = bounds;
+      input = {
+        x: bounds.x,
+        y: bounds.y
+      };
     }
-    if (attrs.type === 'Button' && attrs.text === '生成') {
-      generate = center(attrs.bounds);
+    if (bounds !== null && attrIsTrue(attrs.clickable) && !attrIsFalse(attrs.enabled)) {
+      clickable.push({
+        type: attrs.type || '',
+        text: attrs.text || '',
+        bounds
+      });
+    }
+    if (attrs.type === 'Button' && attrs.text === '生成' && bounds !== null) {
+      generate = {
+        x: bounds.x,
+        y: bounds.y
+      };
     }
   });
   if (input === null) {
     throw new Error('Could not locate AIPhone input control.');
+  }
+  if (generate === null && inputBounds !== null) {
+    const sendCandidate = clickable
+      .filter((item) => item.bounds.left >= inputBounds.right - 4 &&
+        item.bounds.left <= inputBounds.right + 120 &&
+        verticallyOverlaps(item.bounds, inputBounds) &&
+        item.bounds.width >= 24 &&
+        item.bounds.width <= 100 &&
+        item.bounds.height >= 24 &&
+        item.bounds.height <= 100)
+      .sort((a, b) => Math.abs(a.bounds.x - inputBounds.right) - Math.abs(b.bounds.x - inputBounds.right))[0];
+    if (sendCandidate) {
+      generate = {
+        x: sendCandidate.bounds.x,
+        y: sendCandidate.bounds.y
+      };
+    }
+  }
+  if (generate === null) {
+    throw new Error('Could not locate AIPhone send control.');
   }
   return { input, generate };
 }
@@ -407,19 +596,25 @@ function activeHilogProcesses() {
     .filter((line) => line.includes('hdc') && line.includes('hilog'));
 }
 
-function analyze(query, logs, expectedTool, expectedToolId = '') {
+function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscoveredToolId = '') {
   const text = logs.join('\n');
   const escapedToolId = expectedToolId.replace('.', '\\.');
   const toolIdPattern = expectedToolId.length > 0 ?
     new RegExp(`\\[AIPhone\\]\\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\\][^\\n]*toolId=${escapedToolId}`) :
     null;
   const hasExpectedToolId = toolIdPattern === null ? true : toolIdPattern.test(text);
+  const discoveryPattern = expectedDiscoveredToolId.length > 0 ?
+    new RegExp(`\\[AIPhone\\]\\[DynamicToolDiscovery\\][^\\n]*selectedToolId=${expectedDiscoveredToolId.replace('.', '\\.')}`) :
+    null;
+  const hasExpectedDiscoveredToolId = discoveryPattern === null ? true : discoveryPattern.test(text);
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
   const result = {
     query,
     expectedTool,
     expectedToolId,
+    expectedDiscoveredToolId,
     hasExpectedToolId,
+    hasExpectedDiscoveredToolId,
     directIntent: /\[AIPhone\]\[ToolRequestByIntent\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
     model200: /\[AIPhone\]\[ModelStreamResponse\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
@@ -430,6 +625,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '') {
     providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) || /\[AIPhone\]\[LocalToolException\]/.test(text) || (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
+    gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
   const modelPassed = result.model200 && result.modelOk && !result.modelFailed;
@@ -438,7 +634,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '') {
     !result.syntheticFallback &&
     !result.directIntent;
   if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId;
+    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId;
   } else if (expectedTool === false) {
     result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
   } else {
@@ -448,9 +644,37 @@ function analyze(query, logs, expectedTool, expectedToolId = '') {
   return result;
 }
 
+function isGmailWebQuery(query) {
+  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query);
+}
+
 function layoutExpectationsForQuery(query) {
   if (/^你好$|问候|打招呼/.test(query)) {
     return ['你好'];
+  }
+  if (/船票|轮渡|客船|渡轮|码头/.test(query)) {
+    return ['接入工具', 'dynamic.search', '没有找到'];
+  }
+  if (/天气|气温|下雨|降雨/.test(query)) {
+    return ['接入工具', 'weather.query', 'AMAP_MAPS_API_KEY', '高德天气预报', '预报日期'];
+  }
+  if (/统计局|GDP|CPI|人口|经济数据/.test(query)) {
+    return ['接入工具', 'statistics.search', 'Authorization', '中国国家统计局'];
+  }
+  if (/PPT|ppt|幻灯片|演示文稿/.test(query)) {
+    return ['接入工具', 'ppt.generate', 'API_KEY', 'unsupported_transport', '歌者PPT'];
+  }
+  if (isGmailWebQuery(query)) {
+    return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+    return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+    return ['Draft saved', 'Saved in Gmail', 'Draft'];
+  }
+  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return ['Inbox', 'Important', '没有找到匹配邮件'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
@@ -488,12 +712,14 @@ async function runQuery(query, index, expectedTool) {
     if (!typed) {
       throw new Error(`Could not type full query into AIPhone input: ${query}`);
     }
-    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', '2054']);
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(controls.generate.x), String(controls.generate.y)]);
   });
   const logPath = join(outDir, `query-${index + 1}.log`);
   writeFileSync(logPath, logs.join('\n') + '\n');
-  const expectedToolId = useDefaultCases ? (defaultCases[index].expectedToolId || '') : expectedCaseForQuery(query).expectedToolId;
-  const summary = analyze(query, logs, expectedTool, expectedToolId);
+  const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+  const expectedToolId = expectedCase.expectedToolId || '';
+  const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
+  const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
@@ -502,6 +728,7 @@ async function runQuery(query, index, expectedTool) {
   writeFileSync(layoutTextPath, layoutText + '\n');
   const expectedMarkers = layoutExpectationsForQuery(query);
   const expectedHits = expectedMarkers.filter((marker) => layoutText.includes(marker));
+  const allowsExternalGmailWeb = isGmailWebQuery(query) && summary.gmailWebOpened === true;
   const allowsPartialTravelSourceFailure = expectedToolId === 'travel.search' &&
     summary.toolOk === true &&
     (layoutText.includes('来源状态') || layoutText.includes('飞常准')) &&
@@ -517,7 +744,8 @@ async function runQuery(query, index, expectedTool) {
   summary.screenPath = captureScreen(`query-${index + 1}-final-screen.png`);
   summary.layoutExpectedHits = expectedHits;
   summary.layoutBlockingHits = layoutBlockingHits;
-  summary.layoutOk = layoutBlockingHits.length === 0 && (expectedMarkers.length === 0 || expectedHits.length > 0);
+  summary.layoutOk = layoutBlockingHits.length === 0 &&
+    (allowsExternalGmailWeb || expectedMarkers.length === 0 || expectedHits.length > 0);
   summary.ok = summary.ok && summary.layoutOk;
   return summary;
 }
@@ -530,7 +758,7 @@ const summaries = [];
 for (let index = 0; index < queries.length; index += 1) {
   const query = queries[index];
   console.log(`\n[${index + 1}/${queries.length}] ${query}`);
-  const inferredCase = useDefaultCases ? defaultCases[index] : expectedCaseForQuery(query);
+  const inferredCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedTool = inferredCase.expectsTool;
   const summary = await runQuery(query, index, expectedTool);
   summaries.push(summary);
@@ -549,6 +777,9 @@ const finalLayoutForbiddenActionHits = forbiddenLayoutActionMarkers.filter((mark
 const finalQuery = queries.length > 0 ? queries[queries.length - 1] : '';
 const finalAllowsPartialTravel = /出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(finalQuery);
 const finalSummary = summaries.length > 0 ? summaries[summaries.length - 1] : null;
+const finalAllowsExternalGmailWeb = isGmailWebQuery(finalQuery) &&
+  finalSummary !== null &&
+  finalSummary.gmailWebOpened === true;
 const finalAllowsSourceFailure =
   finalAllowsPartialTravel &&
   finalSummary !== null &&
@@ -566,6 +797,12 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
   return finalLayoutText.includes(marker);
 });
 for (const blockingPattern of finalLayoutBlockingPatterns) {
+  if (finalSummary !== null &&
+    finalSummary.expectedToolId === 'dynamic.search' &&
+    finalSummary.expectedDiscoveredToolId === 'weather.query' &&
+    finalLayoutText.includes('高德天气')) {
+    continue;
+  }
   if (blockingPattern.pattern.test(finalLayoutText)) {
     finalLayoutBlockingHits.push(blockingPattern.name);
   }
@@ -581,7 +818,7 @@ const visibleOutput = {
   syntheticHits: finalLayoutSyntheticHits,
   forbiddenActionHits: finalLayoutForbiddenActionHits,
   blockingHits: finalLayoutBlockingHits,
-  ok: finalLayoutDomainHits.length > 0 &&
+  ok: (finalAllowsExternalGmailWeb || finalLayoutDomainHits.length > 0) &&
     finalLayoutSyntheticHits.length === 0 &&
     finalLayoutForbiddenActionHits.length === 0 &&
     finalLayoutBlockingHits.length === 0
