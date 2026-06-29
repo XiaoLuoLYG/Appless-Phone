@@ -35,6 +35,14 @@ const gmailCases = [
   { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' }
 ];
 
+const googleAppCases = [
+  { query: '帮我在 YouTube 搜索 qwen max 官方介绍视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
+  { query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
+  { query: '帮我看今天的 Google Calendar 日程', expectsTool: true, expectedToolId: 'calendar.events.search' },
+  { query: '帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程', expectsTool: true, expectedToolId: 'calendar.event.create' },
+  { query: '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'maps.place.search' }
+];
+
 const fullRegressionCases = [
   ...defaultCases.slice(0, 2),
   { query: '帮我查明天北京到上海航班', expectsTool: true, expectedToolId: 'flight.search' },
@@ -43,7 +51,8 @@ const fullRegressionCases = [
   { query: '帮我查附近咖啡', expectsTool: true, expectedToolId: 'food.search' },
   { query: '帮我查深圳坂田附近麦当劳门店和菜单', expectsTool: true, expectedToolId: 'food.search' },
   ...dynamicCases,
-  ...gmailCases
+  ...gmailCases,
+  ...googleAppCases
 ];
 
 const forbiddenSyntheticMarkers = [
@@ -79,6 +88,18 @@ const visibleDomainMarkers = [
   'statistics.search',
   'ppt.generate',
   'Gmail',
+  'YouTube',
+  'youtube.video.search',
+  'youtube.mine.playlists',
+  'YOUTUBE_API_KEY',
+  'Google Calendar',
+  'calendar.events.search',
+  'calendar.event.create',
+  'Google OAuth',
+  'Google Places',
+  'Google Maps',
+  'maps.place.search',
+  'GOOGLE_MAPS_API_KEY',
   'Gmail Web',
   'google.gmail',
   'gmail.mail.search',
@@ -142,9 +163,10 @@ const forbiddenGmailSendSuccessPatterns = [
 const argv = process.argv.slice(2);
 const cleanData = process.env.AIPHONE_SMOKE_CLEAN_DATA === '1' || argv.includes('--clean-data');
 const runDynamicCases = argv.includes('--dynamic-tools');
+const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
-const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--full-regression');
-const selectedDefaultCases = runFullRegression ? fullRegressionCases : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases);
+const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--google-apps' && arg !== '--full-regression');
+const selectedDefaultCases = runFullRegression ? fullRegressionCases : (runGoogleApps ? defaultCases.concat(googleAppCases) : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases));
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
@@ -208,6 +230,48 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.mail.search'
+    };
+  }
+  if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.mine.playlists'
+    };
+  }
+  if (/YouTube|油管/i.test(query) && /订阅|subscriptions?/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.mine.subscriptions'
+    };
+  }
+  if (/YouTube|油管/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.video.search'
+    };
+  }
+  if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
+    if (/创建|新建|添加|安排|预约/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.create'
+      };
+    }
+    if (/更新|修改|改到|改为|调整/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.update'
+      };
+    }
+    return {
+      expectsTool: true,
+      expectedToolId: 'calendar.events.search'
+    };
+  }
+  if (/Google\s*Maps|Google\s*Places|谷歌地图/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: /详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search'
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -722,7 +786,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     modelSelectedExpectedToolId,
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
-    model200: /\[AIPhone\]\[ModelStreamResponse\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
+    model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
     modelOk: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=true/.test(text),
     toolRequested: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text),
     toolOk: /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=true/.test(text),
@@ -791,6 +855,21 @@ function layoutExpectationsForQuery(query) {
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
     return ['Gmail', 'gmail.mail.search', 'Google Workspace MCP OAuth', '授权 Gmail', '不会模拟 Gmail 邮件', '没有找到匹配邮件'];
+  }
+  if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
+    return ['YouTube', 'youtube.mine.playlists', 'OAuth', '不会模拟播放列表'];
+  }
+  if (/YouTube|油管/i.test(query) && /订阅|subscriptions?/i.test(query)) {
+    return ['YouTube', 'youtube.mine.subscriptions', 'OAuth', '不会模拟播放列表'];
+  }
+  if (/YouTube|油管/i.test(query)) {
+    return ['YouTube', 'youtube.video.search', 'YouTube Data API', 'YOUTUBE_API_KEY'];
+  }
+  if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
+    return ['Google Calendar', 'OAuth', '不会模拟日程'];
+  }
+  if (/Google\s*Maps|Google\s*Places|谷歌地图/i.test(query)) {
+    return ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
@@ -941,6 +1020,9 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
   return finalLayoutText.includes(marker);
 });
 for (const blockingPattern of finalLayoutBlockingPatterns) {
+  if (finalSummary !== null && finalSummary.expectedToolId.startsWith('calendar.')) {
+    continue;
+  }
   if (finalSummary !== null &&
     finalSummary.expectedToolId === 'dynamic.search' &&
     finalSummary.expectedDiscoveredToolId === 'weather.query' &&

@@ -138,6 +138,102 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'blockedAction',
     a2uiComponent: 'GenericToolResults',
     actions: ['gmail.authorize', 'gmail.draft.apply', 'gmail.open.web']
+  },
+  {
+    toolId: 'youtube.video.search',
+    domain: 'youtube',
+    intent: 'youtube.video.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'youtubeVideoSearchQuery',
+    outputSchema: 'youtubeVideos',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['youtube.open.web']
+  },
+  {
+    toolId: 'youtube.mine.playlists',
+    domain: 'youtube',
+    intent: 'youtube.mine.playlists',
+    riskLevel: 'read',
+    backendPriority: ['oauth_api', 'web_session'],
+    authModes: ['oauth', 'web_session'],
+    inputSchema: 'youtubeMinePlaylistsQuery',
+    outputSchema: 'youtubePlaylists',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['youtube.authorize', 'youtube.open.web']
+  },
+  {
+    toolId: 'youtube.mine.subscriptions',
+    domain: 'youtube',
+    intent: 'youtube.mine.subscriptions',
+    riskLevel: 'read',
+    backendPriority: ['oauth_api', 'web_session'],
+    authModes: ['oauth', 'web_session'],
+    inputSchema: 'youtubeMineSubscriptionsQuery',
+    outputSchema: 'youtubeSubscriptions',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['youtube.authorize', 'youtube.open.web']
+  },
+  {
+    toolId: 'calendar.events.search',
+    domain: 'calendar',
+    intent: 'calendar.events.search',
+    riskLevel: 'read',
+    backendPriority: ['oauth_api'],
+    authModes: ['oauth'],
+    inputSchema: 'calendarEventsSearchQuery',
+    outputSchema: 'calendarEvents',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['calendar.authorize']
+  },
+  {
+    toolId: 'calendar.event.create',
+    domain: 'calendar',
+    intent: 'calendar.event.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['oauth'],
+    inputSchema: 'calendarEventCreateRequest',
+    outputSchema: 'calendarEvent',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['calendar.authorize']
+  },
+  {
+    toolId: 'calendar.event.update',
+    domain: 'calendar',
+    intent: 'calendar.event.update',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['oauth'],
+    inputSchema: 'calendarEventUpdateRequest',
+    outputSchema: 'calendarEvent',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['calendar.authorize']
+  },
+  {
+    toolId: 'maps.place.search',
+    domain: 'maps',
+    intent: 'maps.place.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'mapsPlaceSearchQuery',
+    outputSchema: 'places',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
+    toolId: 'maps.place.details',
+    domain: 'maps',
+    intent: 'maps.place.details',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'mapsPlaceDetailsQuery',
+    outputSchema: 'place',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
   }
 ];
 
@@ -179,6 +275,21 @@ export function isKnownDomainToolId(toolId: string): boolean {
 export function isGmailToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'gmail';
+}
+
+export function isYouTubeToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'youtube';
+}
+
+export function isCalendarToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'calendar';
+}
+
+export function isMapsToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'maps';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import util from '@ohos.util';
 import { AssetCredentialStore } from '../model/DynamicCredentialStore';
 import { handleGmailOAuthRedirect } from '../model/GmailOAuthClient';
+import { configureLocalModelSettingsFromRawJson, localModelSettingsDebugSummary } from '../model/LocalModelSettings';
 import { configureLocalProviderConfigFromRawJson, gmailOAuthConfigFromProvider, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
 import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
 
@@ -153,8 +154,10 @@ export default class EntryAbility extends UIAbility {
     try {
       const bytes = this.context.resourceManager.getRawFileContentSync(LOCAL_PROVIDER_CONFIG_RAWFILE);
       const decoder = util.TextDecoder.create('utf-8');
-      configureLocalProviderConfigFromRawJson(decoder.decodeToString(bytes));
-      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. %{public}s', localProviderConfigDebugSummary());
+      const rawJson = decoder.decodeToString(bytes);
+      configureLocalProviderConfigFromRawJson(rawJson);
+      configureLocalModelSettingsFromRawJson(rawJson);
+      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. %{public}s %{public}s', localProviderConfigDebugSummary(), localModelSettingsDebugSummary());
     } catch (err) {
       hilog.info(DOMAIN, 'testTag', 'Local provider config not loaded from %{public}s. Cause: %{public}s', LOCAL_PROVIDER_CONFIG_RAWFILE, JSON.stringify(err));
     }

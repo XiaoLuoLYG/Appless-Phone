@@ -813,13 +813,13 @@ const HTML_HOME_JS: string = `
         });
       }
       var detailHost = expandable ? add(card, 'div', 'details') : card;
+      addActions(detailHost, block.actions);
       addPairs(detailHost, block.metrics, 'metrics');
       addPairs(detailHost, block.rows, 'rows');
       if (text(block.rawPreview).length > 0) {
         add(detailHost, 'pre', 'raw', block.rawPreview);
       }
       addCredentialForm(detailHost, block);
-      addActions(detailHost, block.actions);
     });
     applyLocalView();
   } else {

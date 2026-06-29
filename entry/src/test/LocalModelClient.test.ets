@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveSystemPrompt } from '../main/ets/model/LocalModelClient';
+import { buildChatCompletionsUrl, resolveSystemPrompt } from '../main/ets/model/LocalModelClient';
+import { configureLocalModelSettingsFromRawJson, defaultLocalModelSettings } from '../main/ets/model/LocalModelSettings';
 
 export default function localModelClientTest() {
   describe('localModelClient', () => {
@@ -16,10 +17,21 @@ export default function localModelClientTest() {
       expect(baseline.indexOf('麦当劳官方 MCP 查询结果') >= 0).assertTrue();
       expect(baseline.indexOf('禁止创建订单、支付、自动领券') >= 0).assertTrue();
       expect(baseline.indexOf('gmail.mail.search|gmail.thread.read|gmail.draft.create|gmail.draft.apply|gmail.open.web|gmail.message.send') >= 0).assertTrue();
+      expect(baseline.indexOf('calendar.events.search|calendar.event.create|calendar.event.update')).assertLarger(-1);
+      expect(baseline.indexOf('maps.place.search|maps.place.details')).assertLarger(-1);
+      expect(baseline.indexOf('calendar.event.delete')).assertEqual(-1);
+      expect(baseline.indexOf('maps.route.plan')).assertEqual(-1);
       expect(baseline.indexOf('模型阶段禁止编造 Gmail 邮件') >= 0).assertTrue();
+      expect(baseline.indexOf('youtube.video.search')).assertLarger(-1);
+      expect(baseline.indexOf('YouTube')).assertLarger(-1);
+      expect(baseline.indexOf('模型阶段禁止编造 YouTube 视频')).assertLarger(-1);
+      expect(baseline.indexOf('模型阶段禁止编造 Google Calendar 日程')).assertLarger(-1);
+      expect(baseline.indexOf('Google Maps 搜索')).assertLarger(-1);
       expect(baseline.indexOf('dynamic.search|gmail.mail.search') >= 0).assertTrue();
+      expect(baseline.indexOf('youtube.video.search|youtube.mine.playlists|youtube.mine.subscriptions')).assertLarger(-1);
       expect(baseline.indexOf('"args"') >= 0).assertTrue();
       expect(baseline.indexOf('Gmail 查询必须由你生成 args.query') >= 0).assertTrue();
+      expect(baseline.indexOf('YouTube 搜索必须由你生成 args.query') >= 0).assertTrue();
       expect(baseline.indexOf('当前邮件能力只有 Gmail') >= 0).assertTrue();
       expect(baseline.indexOf('用户只说邮件或收件箱也按 Gmail 请求处理') >= 0).assertTrue();
       expect(baseline.indexOf('gmail.ai.reply.draft') >= 0).assertTrue();
@@ -40,6 +52,22 @@ export default function localModelClientTest() {
       expect(resolveSystemPrompt('帮我查明天北京到上海高铁票')).assertEqual(baseline);
       expect(resolveSystemPrompt('帮我看 Gmail 里最新的重要邮件')).assertEqual(baseline);
       expect(resolveSystemPrompt('我想明天从北京去上海，帮我整理可查的出行选项')).assertEqual(baseline);
+    });
+
+    it('builds DashScope compatible chat completion URLs without double appending paths', 0, () => {
+      expect(buildChatCompletionsUrl('https://dashscope.aliyuncs.com/compatible-mode/v1')).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+      expect(buildChatCompletionsUrl('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions')).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+    });
+
+    it('defaults to DashScope qwen-max and reads its local rawfile key', 0, () => {
+      configureLocalModelSettingsFromRawJson('{"DASHSCOPE_API_KEY":"test-key"}');
+      const settings = defaultLocalModelSettings();
+      expect(settings.provider).assertEqual('DashScope');
+      expect(settings.baseUrl).assertEqual('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
+      expect(settings.model).assertEqual('qwen-max');
+      expect(settings.apiKey).assertEqual('test-key');
+      expect(settings.customParametersJson).assertEqual('{"enable_thinking":false}');
+      configureLocalModelSettingsFromRawJson('{}');
     });
   });
 }

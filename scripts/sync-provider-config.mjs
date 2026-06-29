@@ -8,6 +8,7 @@ const envPath = join(rootDir, 'tool-gateway', '.env.local');
 const outPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'aiphone_provider_config.json');
 
 const providerKeys = [
+  'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'X_VARIFLIGHT_KEY',
@@ -33,10 +34,15 @@ const providerKeys = [
   'MCD_MCP_URL',
   'LUCKIN_MCP_TOKEN',
   'LUCKIN_MCP_URL',
+  'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+  'GOOGLE_OAUTH_REDIRECT_URI',
   'GMAIL_AUTH_URL',
   'GMAIL_OAUTH_CLIENT_ID',
   'GMAIL_OAUTH_CLIENT_SECRET',
   'GMAIL_OAUTH_REDIRECT_URI',
+  'YOUTUBE_API_KEY',
   'GMAIL_MCP_USER_PROJECT',
   'GOOGLE_CLOUD_PROJECT'
 ];
@@ -95,6 +101,7 @@ writeFileSync(outPath, JSON.stringify(config, null, 2) + '\n');
 
 console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
+  'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'AMAP_KEY',
@@ -106,9 +113,13 @@ console.log(maskedStatus(config, [
   'TAOBAO_FLASH_PID',
   'MCD_MCP_TOKEN',
   'LUCKIN_MCP_TOKEN',
+  'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
   'GMAIL_AUTH_URL',
   'GMAIL_OAUTH_CLIENT_ID',
   'GMAIL_OAUTH_CLIENT_SECRET',
+  'YOUTUBE_API_KEY',
   'GMAIL_MCP_USER_PROJECT',
   'GOOGLE_CLOUD_PROJECT'
 ]));

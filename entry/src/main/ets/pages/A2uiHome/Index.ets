@@ -22,10 +22,10 @@ import {
   A2uiTravelOptionData
 } from '../../model/A2uiTypes';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
-import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
+import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '../../model/GmailToolA2ui';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl } from '../../model/ToolGatewayClient';
+import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl } from '../../model/ToolGatewayClient';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -131,7 +131,7 @@ struct Index {
   @State showAdvancedSettings: boolean = false;
   @State showHistory: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
-  @State apiKey: string = '';
+  @State apiKey: string = defaultLocalModelSettings().apiKey;
   @State selectedModel: string = defaultLocalModelSettings().model;
   @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
   @State foodProviderDelayEnabled: boolean = false;
@@ -163,7 +163,7 @@ struct Index {
 
   private getSettings(): LocalModelSettings {
     return {
-      provider: 'Huawei Local API',
+      provider: defaultLocalModelSettings().provider,
       baseUrl: this.baseUrl,
       model: this.selectedModel,
       apiKey: this.apiKey,
@@ -1276,6 +1276,15 @@ struct Index {
     if (action.id === 'gmail.authorize') {
       const authorizeUrl = await prepareGmailOAuthAuthorizationUrl();
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL);
+      return;
+    }
+    if (action.id === 'calendar.authorize') {
+      const authorizeUrl = await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL);
+      await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL);
+      return;
+    }
+    if (action.id === 'calendar.open.web') {
+      await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GOOGLE_CALENDAR_WEB_URL);
       return;
     }
     if (action.id === 'gmail.open.web') {

@@ -3,6 +3,13 @@ import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import util from '@ohos.util';
 import { CredentialStore } from './DynamicCredentialStore';
 import { aiLogInfo } from './AiphoneLogger';
+import {
+  buildGoogleOAuthAuthorizationUrl,
+  buildGoogleRefreshTokenBody,
+  buildGoogleTokenExchangeBody,
+  GoogleOAuthConfig,
+  parseGoogleOAuthRedirect
+} from './GoogleOAuthClient';
 
 export const GMAIL_ACCESS_TOKEN_REF: string = 'gmail:mcp_oauth';
 export const GMAIL_REFRESH_TOKEN_REF: string = 'gmail:mcp_refresh';
@@ -11,6 +18,7 @@ export const GMAIL_PENDING_OAUTH_REF: string = 'gmail:mcp_pending_oauth';
 export const GMAIL_DEFAULT_REDIRECT_URI: string = 'com.example.aiphonedemo:/oauth/google';
 export const GMAIL_MCP_RESOURCE: string = 'https://gmailmcp.googleapis.com/mcp';
 export const GMAIL_OAUTH_SCOPES: string = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose';
+export const GOOGLE_CLOUD_OAUTH_SCOPES: string = GMAIL_OAUTH_SCOPES + ' https://www.googleapis.com/auth/calendar.events';
 
 const GOOGLE_OAUTH_AUTH_URL: string = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_OAUTH_TOKEN_URL: string = 'https://oauth2.googleapis.com/token';
@@ -21,6 +29,7 @@ export interface GmailOAuthConfig {
   clientSecret: string;
   redirectUri: string;
   resource: string;
+  scopes?: string;
 }
 
 export interface GmailOAuthAuthorizeParams {
@@ -29,6 +38,7 @@ export interface GmailOAuthAuthorizeParams {
   state: string;
   codeChallenge: string;
   resource: string;
+  scopes?: string;
 }
 
 export interface GmailOAuthRedirectResult {
@@ -102,7 +112,6 @@ export class GmailCreateDraftArgs {
   }
 }
 
-type QueryValueMap = Record<string, string>;
 type GmailArgRecord = Record<string, Object | string | number | boolean | null | undefined>;
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -164,61 +173,60 @@ function pageSizeArg(args: GmailArgRecord): number {
   return value > 10 ? 10 : value;
 }
 
+function charCount(value: string, target: string): number {
+  let count = 0;
+  for (let index = 0; index < value.length; index++) {
+    if (value.charAt(index) === target) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function previousNonSpaceChar(value: string, startIndex: number): string {
+  for (let index = startIndex; index >= 0; index--) {
+    const current = value.charAt(index);
+    if (current !== ' ' && current !== '\t' && current !== '\n' && current !== '\r') {
+      return current;
+    }
+  }
+  return '';
+}
+
+function nextNonSpaceChar(value: string, startIndex: number): string {
+  for (let index = startIndex; index < value.length; index++) {
+    const current = value.charAt(index);
+    if (current !== ' ' && current !== '\t' && current !== '\n' && current !== '\r') {
+      return current;
+    }
+  }
+  return '';
+}
+
+function removeDanglingQuoteAfterClosedGroup(query: string): string {
+  if (charCount(query, '"') % 2 === 0) {
+    return query;
+  }
+  for (let index = 0; index < query.length; index++) {
+    if (query.charAt(index) === '"' &&
+      previousNonSpaceChar(query, index - 1) === '}' &&
+      (nextNonSpaceChar(query, index + 1) === '-' || nextNonSpaceChar(query, index + 1).length === 0)) {
+      return query.substring(0, index) + query.substring(index + 1);
+    }
+  }
+  return query;
+}
+
 function gmailSearchQueryFromArgs(args: GmailArgRecord): string {
   let query = stringArg(args, 'query').trim();
   if (query.length === 0) {
     query = 'newer_than:30d';
   }
+  query = removeDanglingQuoteAfterClosedGroup(query);
   if (query.indexOf('-in:draft') < 0) {
     query += ' -in:draft';
   }
   return query;
-}
-
-function urlEncode(value: string): string {
-  return encodeURIComponent(value);
-}
-
-function urlDecode(value: string): string {
-  return decodeURIComponent(value.replace(/\+/g, ' '));
-}
-
-function appendFormPair(parts: string[], key: string, value: string): void {
-  if (value.length === 0) {
-    return;
-  }
-  parts.push(urlEncode(key) + '=' + urlEncode(value));
-}
-
-function parseQuery(query: string): QueryValueMap {
-  const values: QueryValueMap = {};
-  if (query.length === 0) {
-    return values;
-  }
-  const pairs = query.split('&');
-  for (let index = 0; index < pairs.length; index++) {
-    const pair = pairs[index];
-    if (pair.length === 0) {
-      continue;
-    }
-    const eq = pair.indexOf('=');
-    const key = eq < 0 ? pair : pair.substring(0, eq);
-    const value = eq < 0 ? '' : pair.substring(eq + 1);
-    values[urlDecode(key)] = urlDecode(value);
-  }
-  return values;
-}
-
-function queryStringFromUri(uri: string): string {
-  const queryStart = uri.indexOf('?');
-  if (queryStart < 0) {
-    return '';
-  }
-  const hashStart = uri.indexOf('#', queryStart + 1);
-  if (hashStart < 0) {
-    return uri.substring(queryStart + 1);
-  }
-  return uri.substring(queryStart + 1, hashStart);
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -258,54 +266,40 @@ export function createGmailOAuthPending(nowMs: number = Date.now()): GmailOAuthP
 }
 
 export function buildGmailOAuthAuthorizationUrl(params: GmailOAuthAuthorizeParams): string {
-  const parts: string[] = [];
-  appendFormPair(parts, 'client_id', params.clientId.trim());
-  appendFormPair(parts, 'redirect_uri', params.redirectUri.trim());
-  appendFormPair(parts, 'response_type', 'code');
-  appendFormPair(parts, 'scope', GMAIL_OAUTH_SCOPES);
-  appendFormPair(parts, 'access_type', 'offline');
-  appendFormPair(parts, 'prompt', 'consent');
-  appendFormPair(parts, 'include_granted_scopes', 'true');
-  appendFormPair(parts, 'resource', params.resource.trim());
-  appendFormPair(parts, 'state', params.state.trim());
-  appendFormPair(parts, 'code_challenge', params.codeChallenge.trim());
-  appendFormPair(parts, 'code_challenge_method', 'S256');
-  return GOOGLE_OAUTH_AUTH_URL + '?' + parts.join('&');
+  const scopes = params.scopes === undefined || params.scopes.trim().length === 0 ? GMAIL_OAUTH_SCOPES : params.scopes;
+  return buildGoogleOAuthAuthorizationUrl({
+    authUrl: GOOGLE_OAUTH_AUTH_URL,
+    clientId: params.clientId,
+    redirectUri: params.redirectUri,
+    state: params.state,
+    codeChallenge: params.codeChallenge,
+    scopes: scopes,
+    resource: params.resource
+  });
 }
 
 export function parseGmailOAuthRedirect(uri: string): GmailOAuthRedirectResult {
-  const values = parseQuery(queryStringFromUri(uri));
-  const error = values.error === undefined ? '' : values.error;
-  if (error.length > 0) {
-    return { ok: false, code: '', state: values.state === undefined ? '' : values.state, error: error };
-  }
-  const code = values.code === undefined ? '' : values.code;
-  if (code.length === 0) {
-    return { ok: false, code: '', state: values.state === undefined ? '' : values.state, error: 'missing_code' };
-  }
-  return { ok: true, code: code, state: values.state === undefined ? '' : values.state, error: '' };
+  return parseGoogleOAuthRedirect(uri) as GmailOAuthRedirectResult;
 }
 
 export function buildGmailTokenExchangeBody(config: GmailOAuthConfig, code: string, codeVerifier: string): string {
-  const parts: string[] = [];
-  appendFormPair(parts, 'client_id', config.clientId);
-  appendFormPair(parts, 'client_secret', config.clientSecret);
-  appendFormPair(parts, 'code', code);
-  appendFormPair(parts, 'code_verifier', codeVerifier);
-  appendFormPair(parts, 'redirect_uri', config.redirectUri);
-  appendFormPair(parts, 'grant_type', 'authorization_code');
-  appendFormPair(parts, 'resource', config.resource);
-  return parts.join('&');
+  const googleConfig: GoogleOAuthConfig = {
+    clientId: config.clientId,
+    clientSecret: config.clientSecret,
+    redirectUri: config.redirectUri,
+    resource: config.resource
+  };
+  return buildGoogleTokenExchangeBody(googleConfig, code, codeVerifier);
 }
 
 export function buildGmailRefreshTokenBody(config: GmailOAuthConfig, refreshToken: string): string {
-  const parts: string[] = [];
-  appendFormPair(parts, 'client_id', config.clientId);
-  appendFormPair(parts, 'client_secret', config.clientSecret);
-  appendFormPair(parts, 'refresh_token', refreshToken);
-  appendFormPair(parts, 'grant_type', 'refresh_token');
-  appendFormPair(parts, 'resource', config.resource);
-  return parts.join('&');
+  const googleConfig: GoogleOAuthConfig = {
+    clientId: config.clientId,
+    clientSecret: config.clientSecret,
+    redirectUri: config.redirectUri,
+    resource: config.resource
+  };
+  return buildGoogleRefreshTokenBody(googleConfig, refreshToken);
 }
 
 function responseText(result: Object | string | number | boolean | ArrayBuffer): string {
@@ -405,12 +399,13 @@ export async function saveGmailOAuthTokenSet(
     ' existingTokenSet=' + (existing === null ? 'false' : 'true') +
     ' persistedRefreshChars=' + refreshToken.length.toString());
   const expiresIn = numberOf(response.expires_in, 3600);
+  const responseScope = textOf(response.scope);
   const token: GmailOAuthTokenSet = {
     accessToken: accessToken,
     refreshToken: refreshToken,
     expiresAtMs: nowMs + expiresIn * 1000 - TOKEN_EXPIRY_SKEW_MS,
     tokenType: textOf(response.token_type).length > 0 ? textOf(response.token_type) : 'Bearer',
-    scope: textOf(response.scope)
+    scope: responseScope.length > 0 ? responseScope : (existing === null ? '' : existing.scope)
   };
   await store.put(GMAIL_TOKEN_SET_REF, JSON.stringify(token));
   await store.put(GMAIL_ACCESS_TOKEN_REF, token.accessToken);

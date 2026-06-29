@@ -354,6 +354,91 @@ export default function a2uiParserTest() {
       expect(split.inThink).assertFalse();
     });
 
+    it('normalizes flat model A2UI objects after a qwen close think tag', 0, () => {
+      const content =
+        '</think>\n\n' +
+        '{"version":"v0.9.1","surfaceId":"main","root":"main-root","title":"欢迎消息","intent":"greeting","status":"ready","sendDataModel":{"path":"/greeting","value":{"content":"您好"}}}\n' +
+        '{"version":"v0.9.1","surfaceId":"main","root":"main-root","component":"InfoRows","title":"问候信息","dataPath":"/greeting","status":"ready","actions":[]}\n';
+      const split = splitModelThinkFromContent(content);
+      const extracted = extractA2uiJsonlFromModelChunk(split.content);
+      const parsed = parseA2uiJsonl(extracted.jsonl);
+
+      expect(parsed.error).assertEqual('');
+      expect(parsed.envelopes.length).assertLarger(2);
+      expect(parsed.envelopes[0].createSurface?.surfaceId).assertEqual('main');
+      expect(parsed.envelopes[1].updateDataModel?.path).assertEqual('/greeting');
+      expect(parsed.envelopes[2].updateComponents?.components[0].id).assertEqual('main-root');
+    });
+
+    it('unwraps model A2UI content envelopes', 0, () => {
+      const content =
+        '{"version":"v0.9.1","content":{"createSurface":{"surfaceId":"main","root":"root","title":"查看最近重要邮件","intent":"gmail","status":"calling_tool"}}}\n' +
+        '{"version":"v0.9.1","content":{"updateDataModel":{"/toolRequest":{"toolId":"gmail.mail.search","prompt":"帮我看 Gmail 里最新的重要邮件","actionId":"model_tool_request","args":{"query":"is:important newer_than:30d","pageSize":10}}}}}\n';
+      const extracted = extractA2uiJsonlFromModelChunk(content);
+      const parsed = parseA2uiJsonl(extracted.jsonl);
+
+      expect(parsed.error).assertEqual('');
+      expect(parsed.envelopes[0].createSurface?.surfaceId).assertEqual('main');
+      expect(parsed.envelopes[1].updateDataModel?.path).assertEqual('/toolRequest');
+    });
+
+    it('rebuilds split sendDataModel toolRequest and args from compact model output', 0, () => {
+      const content =
+        '{"createSurface":{"surfaceId":"surface_model","root":"SurfaceRoot","title":"搜索Gmail邮件","intent":"gmail","status":"calling_tool","sendDataModel":{"/thoughts":"开始处理用户的Gmail搜索请求","/toolRequest":"gmail.mail.search","/args":{"query":"newer_than:365d {\\"eccv\\" \\"ECCV\\" \\"论文\\"} -category:promotions -in:draft","pageSize":10,"intentSummary":"搜索最近与ECCV论文相关的Gmail邮件"}}}}\n';
+      const extracted = extractA2uiJsonlFromModelChunk(content);
+      const parsed = parseA2uiJsonl(extracted.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+      const request = toolRequest(store.getSurface());
+      const serializedArgs = JSON.stringify(request.args);
+
+      expect(parsed.error).assertEqual('');
+      expect(request.toolId).assertEqual('gmail.mail.search');
+      expect(request.actionId).assertEqual('model_tool_request');
+      expect(serializedArgs.indexOf('ECCV')).assertLarger(-1);
+      expect(serializedArgs.indexOf('pageSize')).assertLarger(-1);
+    });
+
+    it('recovers Gmail query from compact model output that misplaced args in rows text', 0, () => {
+      const content =
+        '{"createSurface":{"surfaceId":"surface_model","root":"SurfaceRoot","title":"搜索Gmail邮件","intent":"gmail","status":"calling_tool","sendDataModel":{"/thoughts":"开始处理用户的Gmail搜索请求","/toolRequest":"gmail.mail.search","/rows":"[{\'query\':\'newer_than:365d {\\"eccv\\" \\"ECCV\\" \\"提交论文\\"}\\" -category:promotions -in:draft\'}]"}}}\n';
+      const extracted = extractA2uiJsonlFromModelChunk(content);
+      const parsed = parseA2uiJsonl(extracted.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+      const request = toolRequest(store.getSurface());
+      const serializedArgs = JSON.stringify(request.args);
+
+      expect(parsed.error).assertEqual('');
+      expect(request.toolId).assertEqual('gmail.mail.search');
+      expect(serializedArgs.indexOf('ECCV')).assertLarger(-1);
+      expect(serializedArgs.indexOf('newer_than:365d')).assertLarger(-1);
+    });
+
+    it('preserves tool args from flat compact surface sendDataModel output', 0, () => {
+      const content =
+        '{"surfaceId":"surface_model","root":"root","title":"正在搜索 Gmail","intent":"gmail","status":"calling_tool","sendDataModel":{"/toolRequest":{"toolId":"gmail.mail.search","args":{"query":"newer_than:365d {\\"ECCV\\" \\"European Conference on Computer Vision\\" \\"论文提交\\"} -category:promotions -in:draft","pageSize":20}}}}\n';
+      const extracted = extractA2uiJsonlFromModelChunk(content);
+      const parsed = parseA2uiJsonl(extracted.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach(envelope => {
+        store.apply(envelope);
+      });
+      const request = toolRequest(store.getSurface());
+      const serializedArgs = JSON.stringify(request.args);
+
+      expect(parsed.error).assertEqual('');
+      expect(request.toolId).assertEqual('gmail.mail.search');
+      expect(request.prompt.length).assertEqual(0);
+      expect(request.actionId.length).assertEqual(0);
+      expect(serializedArgs.indexOf('European Conference on Computer Vision')).assertLarger(-1);
+      expect(serializedArgs.indexOf('"pageSize":20')).assertLarger(-1);
+    });
+
     it('detects redacted thinking close tag', 0, () => {
       expect(modelThinkCloseSeen('分析完成</think>\n{"version":"v0.9.1"}')).assertTrue();
       expect(modelThinkCloseSeen('还在思考中')).assertFalse();
