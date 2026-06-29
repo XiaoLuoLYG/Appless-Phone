@@ -163,7 +163,9 @@ async function requestJson(
   method: http.RequestMethod,
   url: string,
   accessToken: string,
-  body: Object | null
+  body: Object | null,
+  connectTimeoutMs: number = 10000,
+  readTimeoutMs: number = 20000
 ): Promise<Object> {
   const request = http.createHttp();
   const methodName = requestMethodName(method);
@@ -174,8 +176,8 @@ async function requestJson(
       method: method,
       header: headers,
       usingProtocol: http.HttpProtocol.HTTP1_1,
-      connectTimeout: 10000,
-      readTimeout: 20000
+      connectTimeout: connectTimeoutMs,
+      readTimeout: readTimeoutMs
     };
     if (body !== null) {
       headers['Content-Type'] = 'application/json';
@@ -206,6 +208,30 @@ async function requestJson(
     throw new Error(message);
   } finally {
     request.destroy();
+  }
+}
+
+function isOperationTimeout(error: Error | Object | string | number | boolean | null | undefined): boolean {
+  const message = describeRequestError(error);
+  return message.indexOf('Operation timeout') >= 0 || message.indexOf('2300028') >= 0;
+}
+
+async function requestJsonWithTimeoutRetry(
+  method: http.RequestMethod,
+  url: string,
+  accessToken: string,
+  body: Object | null
+): Promise<Object> {
+  try {
+    return await requestJson(method, url, accessToken, body);
+  } catch (error) {
+    if (!isOperationTimeout(error)) {
+      throw new Error(describeRequestError(error));
+    }
+    aiLogInfo('[AIPhone][GmailApiHttpRetry] method=' + requestMethodName(method) +
+      ' path=' + gmailApiPath(url) +
+      ' reason=' + describeRequestError(error).substring(0, 160));
+    return await requestJson(method, url, accessToken, body, 20000, 30000);
   }
 }
 
@@ -352,6 +378,16 @@ async function getThread(accessToken: string, threadId: string): Promise<GmailTh
   return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;
 }
 
+async function getThreadOrNull(accessToken: string, threadId: string): Promise<GmailThread | null> {
+  try {
+    return await getThread(accessToken, threadId);
+  } catch (error) {
+    aiLogError('[AIPhone][GmailThreadDetailSkipped] threadId=' + threadId +
+      ' error=' + describeRequestError(error).substring(0, 160));
+    return null;
+  }
+}
+
 async function searchThreads(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
   const gmailArgs = gmailMcpArgsForPrompt('gmail.mail.search', prompt, args) as GmailSearchThreadsArgs;
   const pageSize = gmailArgs.pageSize > 0 ? Math.min(gmailArgs.pageSize, 10) : 10;
@@ -360,27 +396,38 @@ async function searchThreads(accessToken: string, prompt: string, args: Object |
     ['maxResults', pageSize.toString()],
     ['includeSpamTrash', 'false']
   ]);
-  const listed = await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThreadsListResponse;
+  aiLogInfo('[AIPhone][GmailSearchQuery] chars=' + gmailArgs.query.length.toString() +
+    ' pageSize=' + pageSize.toString() +
+    ' query=' + gmailArgs.query.substring(0, 220));
+  let listed: GmailThreadsListResponse;
+  try {
+    listed = await requestJsonWithTimeoutRetry(http.RequestMethod.GET, url, accessToken, null) as GmailThreadsListResponse;
+  } catch (error) {
+    return [errorResult('users.threads.list', describeRequestError(error) +
+      ' Query: ' + gmailArgs.query.substring(0, 180))];
+  }
   const items = Array.isArray(listed.threads) ? listed.threads : [];
   if (items.length === 0) {
     return [noResultsResult(gmailArgs.query, listed.resultSizeEstimate === undefined ? 0 : listed.resultSizeEstimate)];
   }
-  const tasks: Promise<GmailThread>[] = [];
+  const tasks: Promise<GmailThread | null>[] = [];
   for (let index = 0; index < items.length && index < pageSize; index++) {
     const threadId = textOf(items[index].id);
     if (threadId.length === 0) {
       continue;
     }
-    tasks.push(getThread(accessToken, threadId));
+    tasks.push(getThreadOrNull(accessToken, threadId));
   }
   const results: DynamicGenericToolResult[] = [];
-  const threads = await Promise.all(tasks);
+  const threads: (GmailThread | null)[] = await Promise.all(tasks);
   for (let index = 0; index < threads.length; index++) {
-    results.push(threadResult(threads[index]));
+    if (threads[index] !== null) {
+      results.push(threadResult(threads[index] as GmailThread));
+    }
   }
   const estimate = listed.resultSizeEstimate === undefined ? results.length : listed.resultSizeEstimate;
   return results.length > 0 ? [searchSummaryResult(gmailArgs.query, results.length, estimate)].concat(results) :
-    [noResultsResult(gmailArgs.query, estimate)];
+    [errorResult('users.threads.get', 'Gmail thread detail requests failed.')];
 }
 
 async function readThread(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {

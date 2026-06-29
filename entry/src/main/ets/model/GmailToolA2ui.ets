@@ -16,8 +16,13 @@ export const GMAIL_WEB_URL: string = 'https://mail.google.com/mail/u/0/#inbox';
 export const GMAIL_DRAFTS_URL: string = 'https://mail.google.com/mail/u/0/#drafts';
 export const GMAIL_MCP_SERVER_URL: string = 'https://gmailmcp.googleapis.com/mcp/v1';
 export const GMAIL_MCP_AUTH_SETUP_URL: string = 'https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server';
+export const GOOGLE_OAUTH_SETUP_URL: string = 'https://console.cloud.google.com/apis/credentials';
+export const GOOGLE_CALENDAR_WEB_URL: string = 'https://calendar.google.com/calendar/u/0/r';
+export const GOOGLE_CALENDAR_API_URL: string = 'https://www.googleapis.com/calendar/v3';
 const GMAIL_MANIFEST_ID: string = 'google.gmail';
 const GMAIL_DISPLAY_NAME: string = 'Gmail';
+const CALENDAR_MANIFEST_ID: string = 'google.calendar';
+const CALENDAR_DISPLAY_NAME: string = 'Google Calendar';
 const GENERIC_RESULTS_PATH: string = '/genericToolResults';
 const SUMMARY_PATH: string = '/summary';
 const CONNECT_PATH: string = '/dynamicToolConnect';
@@ -48,14 +53,14 @@ function jsonLine(envelope: A2uiEnvelope): string {
   return JSON.stringify(envelope) + '\n';
 }
 
-function createSurfaceLine(surfaceId: string, title: string, status: string): string {
+function createSurfaceLine(surfaceId: string, title: string, status: string, intent: string = 'gmail'): string {
   return jsonLine({
     version: A2UI_VERSION,
     createSurface: {
       surfaceId: surfaceId,
       root: 'root',
       title: title,
-      intent: 'gmail',
+      intent: intent,
       status: status
     }
   });
@@ -245,6 +250,49 @@ export function gmailAuthRequiredA2ui(
   };
 
   return createSurfaceLine(surfaceId, GMAIL_DISPLAY_NAME, 'needs_input') +
+    componentsLine(surfaceId, [root, connect]) +
+    dataLine(surfaceId, CONNECT_PATH, connectData);
+}
+
+export function calendarAuthRequiredA2ui(
+  surfaceId: string,
+  toolId: string,
+  message: string,
+  authorizeUrl: string = GOOGLE_OAUTH_SETUP_URL
+): string {
+  const connectData: A2uiDynamicToolConnectData = {
+    toolId: toolId,
+    prompt: '',
+    manifestId: CALENDAR_MANIFEST_ID,
+    displayName: CALENDAR_DISPLAY_NAME,
+    sourceUrl: GOOGLE_CALENDAR_API_URL,
+    status: 'needs_auth',
+    message: message,
+    credentialName: 'Google OAuth',
+    credentialRef: '',
+    registrationUrl: authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL,
+    actions: [
+      action('calendar.authorize', '授权 Calendar', authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL, 'primary', 'client'),
+      action('calendar.open.web', '打开 Calendar Web', GOOGLE_CALENDAR_WEB_URL, 'secondary', 'client'),
+      action('calendar_retry_auth', '重试认证', '重新检测 Google Calendar 授权状态', 'secondary', 'prompt')
+    ]
+  };
+  const root: A2uiComponent = {
+    id: 'root',
+    component: A2UI_COMPONENT_SURFACE_ROOT,
+    child: 'calendar_connect',
+    title: CALENDAR_DISPLAY_NAME,
+    status: 'needs_auth'
+  };
+  const connect: A2uiComponent = {
+    id: 'calendar_connect',
+    component: A2UI_COMPONENT_TOOL_CONNECT_CARD,
+    title: CALENDAR_DISPLAY_NAME,
+    dataPath: CONNECT_PATH,
+    status: 'needs_auth'
+  };
+
+  return createSurfaceLine(surfaceId, CALENDAR_DISPLAY_NAME, 'needs_input', 'calendar') +
     componentsLine(surfaceId, [root, connect]) +
     dataLine(surfaceId, CONNECT_PATH, connectData);
 }

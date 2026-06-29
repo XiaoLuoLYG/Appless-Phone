@@ -120,19 +120,22 @@ const SYSTEM_PROMPT: string =
   'child/children 只能引用 updateComponents.components 中真实存在的组件 id，禁止把数据值或按钮文案直接放进 children。' +
   'actions 必须是 [{"id":"稳定英文 id","label":"短按钮文案","prompt":"点击后发送给模型的完整中文指令","variant":"primary|secondary|danger"}]。' +
   '数据必须通过 updateDataModel 写入 JSON Pointer 路径，组件用 dataPath 读取，不要把大量结果直接塞进 body。' +
-  '思考态用 ThinkingStream；真实班次/航班/店铺/社交消息/Gmail 邮件结果只能由工具网关或客户端桥接返回，你在模型阶段禁止输出 SocialInbox、TravelOptions、TrainOptions、FlightBoard、FoodChoices、ToolConnectCard、GenericToolResults 以及 /social、/travelOptions、/trains、/flights、/foods、/dynamicToolConnect、/genericToolResults。' +
+  '思考态用 ThinkingStream；真实班次/航班/店铺/社交消息/Gmail/YouTube/Google Calendar/Google Maps 结果只能由工具网关或客户端桥接返回，你在模型阶段禁止输出 SocialInbox、TravelOptions、TrainOptions、FlightBoard、FoodChoices、ToolConnectCard、GenericToolResults 以及 /social、/travelOptions、/trains、/flights、/foods、/dynamicToolConnect、/genericToolResults。' +
   '先判断用户意图，再选唯一输出形态：' +
-  '1) 实时查询或外部服务请求：用户需要 live 库存、可订班次、附近店铺、Gmail 收件箱/草稿/网页版等当前可查或需账号会话的结果，或包含“查、查询、搜索、帮我搜、可查、票、余票、附近、周边、航班、机票、高铁、火车票、外卖、餐饮、咖啡、奶茶、肯德基、麦当劳、瑞幸、Gmail、谷歌邮箱、谷歌邮件、Gmail 邮件、Gmail 收件箱、Gmail 草稿、打开 Gmail、写邮件、起草邮件、发送邮件”等当前结果词 → 必须连续输出 createSurface(status=calling_tool)、updateComponents(含 ThinkingStream)、updateDataModel /thoughts、updateDataModel /toolRequest 四类 envelope 后立即停止；禁止只输出 createSurface，禁止 status=ready，禁止 InfoRows，禁止 /rows。' +
+  '1) 实时查询或外部服务请求：用户需要 live 库存、可订班次、附近店铺、Google Maps 搜索、Google Calendar 日程、Gmail 收件箱/草稿/网页版、YouTube 视频/播放列表/订阅等当前可查或需账号会话的结果，或包含“查、查询、搜索、帮我搜、可查、票、余票、附近、周边、航班、机票、高铁、火车票、外卖、餐饮、咖啡、奶茶、肯德基、麦当劳、瑞幸、Google Maps、谷歌地图、Google Calendar、谷歌日历、日程、Gmail、谷歌邮箱、谷歌邮件、Gmail 邮件、Gmail 收件箱、Gmail 草稿、打开 Gmail、写邮件、起草邮件、发送邮件、YouTube、油管、视频、播放列表、订阅”等当前结果词 → 必须连续输出 createSurface(status=calling_tool)、updateComponents(含 ThinkingStream)、updateDataModel /thoughts、updateDataModel /toolRequest 四类 envelope 后立即停止；禁止只输出 createSurface，禁止 status=ready，禁止 InfoRows，禁止 /rows。' +
   '泛化出行实时查询尤其严格：只要用户给出日期、出发地、目的地，并要求“出行方案、搜索出行方案、怎么去、比较、可查选项”，必须调用 travel.search；不要把“方案、整理、比较、选项”当成非实时整理。' +
   '船票、轮渡、客船、渡轮、码头查询不属于 travel.search/train.search/flight.search 的内置能力；遇到这类当前查询必须选择 dynamic.search，让客户端搜索可接入 MCP/API 候选，不能改查高铁或航班。天气、统计局/GDP/CPI/人口/经济数据、PPT/幻灯片等当前未内置高频场景也必须选择 dynamic.search。' +
   '2) 非实时整理：仅当用户没有查、查询、搜索、可查、票、附近、周边等当前结果词，且缺少实时查询所需字段时，才使用 SurfaceRoot + InfoRows(dataPath=/rows) + updateDataModel /rows，禁止 /toolRequest。' +
   '3) 寒暄或说明 → SurfaceRoot + Text 或简短 InfoRows。' +
-  '可用工具：travel.search 用于同时查询并混排高铁和航班出行方案；train.search 用于用户明确只查铁路车次和余票；flight.search 用于用户明确只查航班或机票；food.search 用于查询周边餐饮、POI、麦当劳官方 MCP 查询结果和瑞幸官方 MCP 查询结果；dynamic.search 用于当前没有内置工具但可通过 MCP/API 候选目录接入的场景。food.search 只做门店、菜单、商品、优惠、价格计算、订单状态等查询聚合，禁止创建订单、支付、自动领券、兑换积分商品或取消订单。Gmail 工具：gmail.mail.search 用于搜索/查看 Gmail 收件箱或邮件列表；gmail.thread.read 用于读取指定 Gmail 线程；gmail.draft.create 用于生成 Gmail 回复或新邮件草稿预览；gmail.draft.apply 用于把已确认草稿交给真实 Gmail 会话继续处理；gmail.open.web 用于打开 Gmail 网页版；gmail.message.send 只用于用户明确要求绕过确认直接发送，并会被客户端阻断。模型阶段禁止编造 Gmail 邮件、联系人、正文、线程或发送结果。社交消息入口和 social.reply.send 由客户端在选中真实消息后处理，模型禁止编造社交消息或联系人。必须由你根据完整用户意图选择是否需要工具以及唯一 toolId。' +
+  '可用工具：travel.search 用于同时查询并混排高铁和航班出行方案；train.search 用于用户明确只查铁路车次和余票；flight.search 用于用户明确只查航班或机票；food.search 用于查询周边餐饮、POI、麦当劳官方 MCP 查询结果和瑞幸官方 MCP 查询结果；dynamic.search 用于当前没有内置工具但可通过 MCP/API 候选目录接入的场景。food.search 只做门店、菜单、商品、优惠、价格计算、订单状态等查询聚合，禁止创建订单、支付、自动领券、兑换积分商品或取消订单。YouTube 工具：youtube.video.search 用于公开视频搜索；youtube.mine.playlists 用于读取登录用户播放列表；youtube.mine.subscriptions 用于读取登录用户订阅。模型阶段禁止编造 YouTube 视频、频道、播放列表或订阅内容。Google Calendar 工具：calendar.events.search 用于查看日程；calendar.event.create 用于直接创建真实日程；calendar.event.update 用于直接修改真实日程；当前不支持删除日程。模型阶段禁止编造 Google Calendar 日程或 eventId；缺少 title/start/end/eventId 时必须通过 args 或错误提示暴露缺失字段，不猜精确时间。Google Maps 工具：maps.place.search 用于 Google Maps/Places 地点和 POI 搜索；maps.place.details 用于地点详情；当前不支持路线规划，禁止把 Google Maps POI 请求改成 food.search。Gmail 工具：gmail.mail.search 用于搜索/查看 Gmail 收件箱或邮件列表；gmail.thread.read 用于读取指定 Gmail 线程；gmail.draft.create 用于生成 Gmail 回复或新邮件草稿预览；gmail.draft.apply 用于把已确认草稿交给真实 Gmail 会话继续处理；gmail.open.web 用于打开 Gmail 网页版；gmail.message.send 只用于用户明确要求绕过确认直接发送，并会被客户端阻断。模型阶段禁止编造 Gmail 邮件、联系人、正文、线程或发送结果。社交消息入口和 social.reply.send 由客户端在选中真实消息后处理，模型禁止编造社交消息或联系人。必须由你根据完整用户意图选择是否需要工具以及唯一 toolId。' +
   '泛化出行搜索，例如“从北京去上海帮我搜索出行方案”“明天北京到上海怎么去”“帮我比较出行方案”，只要日期、出发地、目的地明确，就必须选择 travel.search；如果明确说只查高铁/火车/动车，选择 train.search；如果明确说只查飞机/航班/机票，选择 flight.search。' +
   '如果出行查询缺少出发地、目的地或日期，禁止调用工具，只输出 InfoRows 说明需要补充的字段。' +
   '当前邮件能力只有 Gmail；用户只说邮件或收件箱也按 Gmail 请求处理。如果用户请求 Gmail 或邮件：查找/查看邮件/收件箱/最新重要邮件选择 gmail.mail.search；读取特定线程选择 gmail.thread.read；回复、写邮件、撰写、起草、草稿选择 gmail.draft.create；gmail.ai.reply.draft 是客户端按钮动作，携带真实 Gmail 线程上下文；收到它时必须选择 gmail.draft.create，并返回 args.threadId、args.to、args.subject、args.body、args.replyMode；打开网页版选择 gmail.open.web；明确要求直接发送、立刻发送、马上发送、不确认直接发才选择 gmail.message.send。' +
+  '如果用户请求 YouTube 或油管：搜索公开视频选择 youtube.video.search 并写入 args.query；查看我的播放列表选择 youtube.mine.playlists；查看我的订阅选择 youtube.mine.subscriptions。' +
+  '如果用户请求 Google Calendar/谷歌日历/日程：查看日程选择 calendar.events.search；创建日程选择 calendar.event.create 并写入 args.title、args.start、args.end；修改日程选择 calendar.event.update 并写入 args.eventId、args.title/start/end 中的待改字段。' +
+  '如果用户请求 Google Maps/谷歌地图/Places 地点：地点或 POI 搜索选择 maps.place.search 并写入 args.query；地点详情选择 maps.place.details 并写入 args.placeId；禁止把 Google Maps 搜索改成 food.search。' +
   '客户端禁止把论文、录取、导师等词写成本地规则；Gmail 模糊意图必须由模型写入 args.query，用 Gmail 搜索语法表达时间、重要性、发件人或主题词。生成 args.query 时优先保留用户给出的发件人、机构、主题和事件短语；中文意图必须扩展英文同义词和常见邮件措辞，例如论文/学术可补充 paper、manuscript、submission、review、conference、journal、camera-ready，录取/申请结果可补充 admission decision、decision letter、offer letter、accepted、admitted、congratulations、waitlist、rejection、application status。如果同一句同时包含论文/学术和录取/申请结果，必须把两个意图的英文词都放入同一个 args.query。不要把所有示例词都塞进同一个查询；每次只选最相关 6-10 个 OR 项。可使用 from:、subject:、newer_than:、OR/{ }、引号短语、-category:promotions 和 -in:draft 降低噪音；不要把容易误命中营销邮件的泛词单独作为 OR 项。' +
-  '如果你选择 status=calling_tool，同一次响应中必须包含 /toolRequest；/toolRequest 是唯一合法路径，禁止 /toolRequests；值必须是 {"toolId":"travel.search|train.search|flight.search|food.search|dynamic.search|gmail.mail.search|gmail.thread.read|gmail.draft.create|gmail.draft.apply|gmail.open.web|gmail.message.send","prompt":"原始中文请求","actionId":"model_tool_request","args":{"可选":"结构化参数"}}。非 Gmail 工具可以省略 args。Gmail 查询必须由你生成 args.query；Gmail 读取线程必须包含 args.threadId；Gmail 草稿必须包含 args.to、args.subject、args.body。' +
+  '如果你选择 status=calling_tool，同一次响应中必须包含 /toolRequest；/toolRequest 是唯一合法路径，禁止 /toolRequests；值必须是 {"toolId":"travel.search|train.search|flight.search|food.search|dynamic.search|gmail.mail.search|gmail.thread.read|gmail.draft.create|gmail.draft.apply|gmail.open.web|gmail.message.send|youtube.video.search|youtube.mine.playlists|youtube.mine.subscriptions|calendar.events.search|calendar.event.create|calendar.event.update|maps.place.search|maps.place.details","prompt":"原始中文请求","actionId":"model_tool_request","args":{"可选":"结构化参数"}}。非 Gmail/YouTube/Calendar/Maps 工具可以省略 args。Gmail 查询必须由你生成 args.query；Gmail 读取线程必须包含 args.threadId；Gmail 草稿必须包含 args.to、args.subject、args.body；YouTube 搜索必须由你生成 args.query；Calendar 创建必须包含 title、start、end，修改必须包含 eventId 和待修改字段；Maps 搜索必须包含 query，详情必须包含 placeId。' +
   '整理类 /rows 的 value 必须是 [{"label":"...","value":"..."}]；只写用户已给信息与下一步确认项，严禁编造精确班次、航班号、价格、耗时、库存、营业状态；尤其不要输出 G123、MU5101、自驾耗时等示例式假数据。' +
   '订票、下单、支付、抢票不能自动执行；交易请求只用 Text 或 ErrorNotice 告知需用户自行确认。' +
   '示例 A，寒暄：' +
@@ -152,6 +155,11 @@ const SYSTEM_PROMPT: string =
   '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在搜索出行方案","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在同时查询高铁和航班","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
   '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在识别出发地、目的地和日期","正在准备调用综合出行工具","正在等待真实工具返回"]}}' + '\n' +
   '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/toolRequest","value":{"toolId":"travel.search","prompt":"我明天要从北京去上海，帮我搜索出行方案","actionId":"model_tool_request"}}}' + '\n' +
+  '示例 I，YouTube 公开视频搜索（到 /toolRequest 结束）：' +
+  '{"version":"v0.9.1","createSurface":{"surfaceId":"surface_model","root":"root","title":"正在搜索 YouTube","intent":"youtube","status":"calling_tool","sendDataModel":true}}' + '\n' +
+  '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在搜索 YouTube","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在把 YouTube 请求交给工具","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在识别 YouTube 搜索词","正在准备调用 YouTube Data API","正在等待真实视频结果"]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/toolRequest","value":{"toolId":"youtube.video.search","prompt":"帮我在 YouTube 搜索 qwen max 官方介绍视频","actionId":"model_tool_request","args":{"query":"qwen max 官方介绍视频"}}}}' + '\n' +
   '示例 E，查看 Gmail（到 /toolRequest 结束）：' +
   '{"version":"v0.9.1","createSurface":{"surfaceId":"surface_model","root":"root","title":"正在准备 Gmail","intent":"gmail","status":"calling_tool","sendDataModel":true}}' + '\n' +
   '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在准备 Gmail","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在把 Gmail 请求交给工具","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
@@ -172,6 +180,16 @@ const SYSTEM_PROMPT: string =
   '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在创建 Gmail 回复草稿","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在为选中的 Gmail 线程生成回复正文","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
   '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在读取按钮携带的真实线程上下文","正在撰写可审核回复正文","正在准备创建 Gmail 草稿"]}}' + '\n' +
   '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/toolRequest","value":{"toolId":"gmail.draft.create","prompt":"Create a Gmail reply draft for the selected thread","actionId":"model_tool_request","args":{"threadId":"thread-123","to":["committee@example.edu"],"subject":"Re: Admission decision","body":"Thanks for sharing the update. I appreciate the information and will review the details carefully.","replyMode":"reply"}}}}' + '\n' +
+  '示例 J，Google Calendar 创建日程（到 /toolRequest 结束；不要编造 eventId）：' +
+  '{"version":"v0.9.1","createSurface":{"surfaceId":"surface_model","root":"root","title":"正在准备 Google Calendar","intent":"calendar","status":"calling_tool","sendDataModel":true}}' + '\n' +
+  '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在准备 Google Calendar","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在把日程请求交给 Google Calendar 工具","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在识别日程标题和时间","正在准备调用 Google Calendar","正在等待真实 OAuth/API 状态"]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/toolRequest","value":{"toolId":"calendar.event.create","prompt":"帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程","actionId":"model_tool_request","args":{"title":"AIPhoneDemo smoke","start":"2026-06-30T15:00:00+08:00","end":"2026-06-30T15:30:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}}}}' + '\n' +
+  '示例 K，Google Maps POI 搜索（到 /toolRequest 结束；禁止改成 food.search）：' +
+  '{"version":"v0.9.1","createSurface":{"surfaceId":"surface_model","root":"root","title":"正在搜索 Google Maps","intent":"maps","status":"calling_tool","sendDataModel":true}}' + '\n' +
+  '{"version":"v0.9.1","updateComponents":{"surfaceId":"surface_model","components":[{"id":"root","component":"SurfaceRoot","child":"thinking","title":"正在搜索 Google Maps","status":"calling_tool"},{"id":"thinking","component":"ThinkingStream","title":"Appless Phone 正在处理","body":"正在调用 Google Places 搜索地点","status":"calling_tool","dataPath":"/thoughts","actions":[]}]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/thoughts","value":["正在识别地点搜索关键词","正在准备调用 Google Places API","正在等待真实 API Key 或地点结果"]}}' + '\n' +
+  '{"version":"v0.9.1","updateDataModel":{"surfaceId":"surface_model","path":"/toolRequest","value":{"toolId":"maps.place.search","prompt":"帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店","actionId":"model_tool_request","args":{"query":"深圳坂田华为基地附近的咖啡店"}}}}' + '\n' +
   '旧 aiphone.ui.v1 或 aiphone.ui.v2 格式不再受支持，绝不能输出。' +
   '客户端能力如下：' + JSON.stringify(defaultA2uiCapabilities()) + '。';
 
@@ -758,6 +776,7 @@ interface A2uiEnvelopeProbe {
   updateDataModel?: Object | null;
   deleteSurface?: Object | null;
   toolRequest?: Object | string | number | boolean | null;
+  content?: Object | string | number | boolean | null;
 }
 
 type CompactRecord = Record<string, Object | string | number | boolean | null | undefined>;
@@ -792,9 +811,22 @@ interface CompactToolRequestPatchProbe {
 
 interface CompactCreateSurfaceProbe {
   surfaceId?: Object | string | number | boolean | null;
+  root?: Object | string | number | boolean | null;
   title?: Object | string | number | boolean | null;
   intent?: Object | string | number | boolean | null;
+  status?: Object | string | number | boolean | null;
   sendDataModel?: Object | string | number | boolean | null;
+}
+
+interface FlatA2uiProbe extends CompactCreateSurfaceProbe {
+  component?: Object | string | number | boolean | null;
+  id?: Object | string | number | boolean | null;
+  child?: Object | string | number | boolean | null;
+  children?: string[] | null;
+  text?: Object | string | number | boolean | null;
+  body?: Object | string | number | boolean | null;
+  dataPath?: Object | string | number | boolean | null;
+  actions?: Object[] | null;
 }
 
 interface CompactUpdateComponentsProbe {
@@ -1243,8 +1275,7 @@ function compactToolRequestToA2uiJsonl(parsed: A2uiEnvelopeProbe): string {
   if (toolRequest === null && create !== null) {
     const sendDataModel = compactObjectValue(create.sendDataModel);
     if (sendDataModel !== null) {
-      const sendDataRecord = sendDataModel as CompactRecord;
-      toolRequest = compactObjectValue(sendDataRecord['/toolRequest']);
+      toolRequest = compactToolRequestFromSendDataModel(sendDataModel);
     }
   }
   if (toolRequest === null) {
@@ -1300,6 +1331,97 @@ function compactToolRequestToA2uiJsonl(parsed: A2uiEnvelopeProbe): string {
     }
   };
   return JSON.stringify(createSurface) + '\n' + JSON.stringify(updateComponents) + '\n' + JSON.stringify(updateDataModel) + '\n';
+}
+
+function compactFlatA2uiToJsonl(parsed: A2uiEnvelopeProbe): string {
+  const flat = parsed as FlatA2uiProbe;
+  const surfaceId = compactTextOf(flat.surfaceId);
+  if (surfaceId.length === 0) {
+    return '';
+  }
+  const root = compactTextOf(flat.root);
+  const title = compactTextOf(flat.title);
+  const status = compactTextOf(flat.status);
+  const component = compactTextOf(flat.component);
+  if (component.length === 0 && root.length > 0 && title.length > 0) {
+    const createSurface: A2uiEnvelope = {
+      version: 'v0.9.1',
+      createSurface: {
+        surfaceId: surfaceId,
+        root: root,
+        title: title,
+        intent: compactTextOf(flat.intent),
+        status: status.length > 0 ? status : 'ready',
+        sendDataModel: true
+      }
+    };
+    let jsonl = JSON.stringify(createSurface) + '\n';
+    const sendDataModel = compactObjectValue(flat.sendDataModel);
+    if (sendDataModel !== null) {
+      const toolRequest = compactToolRequestFromSendDataModel(sendDataModel);
+      if (toolRequest !== null) {
+        const updateToolRequest: A2uiEnvelope = {
+          version: 'v0.9.1',
+          updateDataModel: {
+            surfaceId: surfaceId,
+            path: '/toolRequest',
+            value: toolRequest as A2uiDataValue
+          }
+        };
+        jsonl += JSON.stringify(updateToolRequest) + '\n';
+      }
+      const record = sendDataModel as CompactToolRequestPatchProbe;
+      const path = compactTextOf(record.path);
+      if (path.length > 0 && record.value !== undefined) {
+        const updateDataModel: A2uiEnvelope = {
+          version: 'v0.9.1',
+          updateDataModel: {
+            surfaceId: surfaceId,
+            path: path,
+            value: record.value as A2uiDataValue
+          }
+        };
+        jsonl += JSON.stringify(updateDataModel) + '\n';
+      }
+    }
+    return jsonl;
+  }
+  if (component.length === 0) {
+    return '';
+  }
+  const componentId = compactTextOf(flat.id).length > 0 ? compactTextOf(flat.id) :
+    (component === 'SurfaceRoot' && root.length > 0 ? root : component.toLowerCase());
+  const normalizedStatus = status.length > 0 ? status : 'ready';
+  const components: A2uiComponent[] = [];
+  if (component !== 'SurfaceRoot' && root.length > 0) {
+    components.push({
+      id: root,
+      component: 'SurfaceRoot',
+      child: componentId,
+      title: title,
+      status: normalizedStatus
+    });
+  }
+  components.push({
+    id: componentId,
+    component: component,
+    child: compactTextOf(flat.child),
+    children: flat.children === null || flat.children === undefined ? [] : flat.children,
+    title: title,
+    text: compactTextOf(flat.text),
+    body: compactTextOf(flat.body),
+    status: normalizedStatus,
+    dataPath: compactTextOf(flat.dataPath),
+    actions: []
+  });
+  const updateComponents: A2uiEnvelope = {
+    version: 'v0.9.1',
+    updateComponents: {
+      surfaceId: surfaceId,
+      components: components
+    }
+  };
+  return JSON.stringify(updateComponents) + '\n';
 }
 
 function compactSurfaceId(parsed: A2uiEnvelopeProbe): string {
@@ -1404,6 +1526,54 @@ function compactToolRequestValue(patch: CompactToolRequestPatchProbe): Object | 
   return compactObjectValue(patch.merge[0]);
 }
 
+function compactTextBetween(source: string, startToken: string, endToken: string): string {
+  const start = source.indexOf(startToken);
+  if (start < 0) {
+    return '';
+  }
+  const valueStart = start + startToken.length;
+  const end = source.indexOf(endToken, valueStart);
+  return end < 0 ? '' : source.substring(valueStart, end);
+}
+
+function queryFromCompactRowsText(rowsText: string): string {
+  const doubleQuoted = compactTextBetween(rowsText, '"query":"', '"');
+  if (doubleQuoted.length > 0) {
+    return doubleQuoted;
+  }
+  return compactTextBetween(rowsText, "'query':'", "'");
+}
+
+function compactToolRequestFromSendDataModel(sendDataModel: Object): Object | null {
+  const record = sendDataModel as CompactRecord;
+  const nested = compactObjectValue(record['/toolRequest']);
+  if (nested !== null) {
+    return nested;
+  }
+  const toolId = compactTextOf(record['/toolRequest']).trim();
+  if (toolId.length === 0) {
+    return null;
+  }
+  const request = new Object() as CompactRecord;
+  request.toolId = toolId;
+  request.prompt = compactTextOf(record['/prompt']);
+  request.actionId = compactTextOf(record['/actionId']).length > 0 ? compactTextOf(record['/actionId']) : 'model_tool_request';
+  const args = compactObjectValue(record['/args']);
+  if (args !== null) {
+    request.args = args;
+  } else if (toolId === 'gmail.mail.search') {
+    const rowsQuery = queryFromCompactRowsText(compactTextOf(record['/rows']));
+    if (rowsQuery.length > 0) {
+      const recoveredArgs = new Object() as CompactRecord;
+      recoveredArgs.query = rowsQuery;
+      request.args = recoveredArgs;
+      aiLogInfo('[AIPhone][ModelCompactToolArgsRecovered] toolId=' + toolId +
+        ' source=/rows queryChars=' + rowsQuery.length.toString());
+    }
+  }
+  return request;
+}
+
 function compactObjectValue(value: Object | string | number | boolean | null | undefined): Object | null {
   if (value === undefined || value === null ||
     typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -1475,6 +1645,10 @@ function normalizeModelEnvelopeCandidate(candidate: string): string {
   try {
     const normalizedCandidate = candidate.split('"/rows":').join('"rows":');
     const parsed = JSON.parse(normalizedCandidate) as A2uiEnvelopeProbe;
+    const wrappedContent = compactObjectValue(parsed.content);
+    if (wrappedContent !== null) {
+      return normalizeModelEnvelopeCandidate(JSON.stringify(wrappedContent));
+    }
     const messageCount = candidateMessageCount(parsed);
     if (hasNestedToolRequest(parsed)) {
       const nestedToolRequestJsonl = compactToolRequestToA2uiJsonl(parsed);
@@ -1494,7 +1668,11 @@ function normalizeModelEnvelopeCandidate(candidate: string): string {
     if (shorthandDataModelJsonl.length > 0) {
       return shorthandDataModelJsonl;
     }
-    if (messageCount === 1 && normalizedCandidate.indexOf('"version"') >= 0) {
+    const flatA2uiJsonl = compactFlatA2uiToJsonl(parsed);
+    if (flatA2uiJsonl.length > 0) {
+      return flatA2uiJsonl;
+    }
+    if (messageCount === 1) {
       return candidate + '\n';
     }
     const normalized = compactModelCandidateToA2uiJsonl(parsed);

@@ -3,9 +3,12 @@ import {
   GMAIL_TOOL_IDS,
   allToolDefinitions,
   backendLabel,
+  isCalendarToolId,
   isGmailToolId,
   isKnownDomainToolId,
   isLocalAdapterToolId,
+  isMapsToolId,
+  isYouTubeToolId,
   resolveBackendForTool,
   toolDefinitionForToolId
 } from '../main/ets/model/ToolDefinitionRegistry';
@@ -37,12 +40,43 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('gmail.draft.apply')).assertTrue();
       expect(isKnownDomainToolId('gmail.open.web')).assertTrue();
       expect(isKnownDomainToolId('gmail.message.send')).assertTrue();
+      expect(isKnownDomainToolId('calendar.events.search')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.create')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.update')).assertTrue();
+      expect(isKnownDomainToolId('maps.place.search')).assertTrue();
+      expect(isKnownDomainToolId('maps.place.details')).assertTrue();
       expect(isKnownDomainToolId('gmail.unknown')).assertFalse();
+      expect(isKnownDomainToolId('youtube.video.search')).assertTrue();
+      expect(isKnownDomainToolId('youtube.mine.playlists')).assertTrue();
+      expect(isKnownDomainToolId('youtube.mine.subscriptions')).assertTrue();
+      expect(isKnownDomainToolId('youtube.unknown')).assertFalse();
 
       expect(isLocalAdapterToolId('travel.search')).assertTrue();
       expect(isLocalAdapterToolId('gmail.mail.search')).assertFalse();
       expect(isGmailToolId('gmail.mail.search')).assertTrue();
       expect(isGmailToolId('food.search')).assertFalse();
+      expect(isYouTubeToolId('youtube.video.search')).assertTrue();
+      expect(isYouTubeToolId('gmail.mail.search')).assertFalse();
+    });
+
+    it('registers Calendar writes and Maps POI search explicitly', 0, () => {
+      const calendarCreate = toolDefinitionForToolId('calendar.event.create') as ToolDefinition;
+      const calendarUpdate = toolDefinitionForToolId('calendar.event.update') as ToolDefinition;
+      const mapsSearch = toolDefinitionForToolId('maps.place.search') as ToolDefinition;
+
+      expect(calendarCreate.domain).assertEqual('calendar');
+      expect(calendarCreate.riskLevel).assertEqual('confirm_required');
+      expect(calendarCreate.backendPriority.join(',')).assertEqual('oauth_api');
+      expect(calendarCreate.outputSchema).assertEqual('calendarEvent');
+      expect(calendarUpdate.riskLevel).assertEqual('confirm_required');
+      expect(isCalendarToolId('calendar.events.search')).assertTrue();
+      expect(isCalendarToolId('calendar.event.delete')).assertFalse();
+      expect(mapsSearch.domain).assertEqual('maps');
+      expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
+      expect(mapsSearch.outputSchema).assertEqual('places');
+      expect(isMapsToolId('maps.place.details')).assertTrue();
+      expect(toolDefinitionForToolId('maps.route.plan')).assertEqual(null);
+      expect(toolDefinitionForToolId('calendar.event.delete')).assertEqual(null);
     });
 
     it('keeps Gmail definitions declarative and direct send blocked', 0, () => {
@@ -61,6 +95,20 @@ export default function toolDefinitionRegistryTest() {
       expect(messageSend.riskLevel).assertEqual('blocked');
       expect(messageSend.outputSchema).assertEqual('blockedAction');
       expect(GMAIL_TOOL_IDS.indexOf('gmail.message.send') >= 0).assertTrue();
+    });
+
+    it('keeps YouTube public search separate from OAuth account tools', 0, () => {
+      const search = toolDefinitionForToolId('youtube.video.search') as ToolDefinition;
+      const playlists = toolDefinitionForToolId('youtube.mine.playlists') as ToolDefinition;
+
+      expect(search.domain).assertEqual('youtube');
+      expect(search.riskLevel).assertEqual('read');
+      expect(search.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(search.authModes.join(',')).assertEqual('provider_key');
+      expect(search.outputSchema).assertEqual('youtubeVideos');
+      expect(search.a2uiComponent).assertEqual('GenericToolResults');
+      expect(playlists.backendPriority.join(',')).assertEqual('oauth_api,web_session');
+      expect(playlists.authModes.join(',')).assertEqual('oauth,web_session');
     });
 
     it('resolves available Gmail backends before returning an auth-needed reason', 0, () => {

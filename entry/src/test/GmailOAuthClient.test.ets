@@ -185,6 +185,19 @@ export default function gmailOAuthClientTest() {
       expect(draftJson.indexOf('alice@example.com')).assertEqual(-1);
     });
 
+    it('removes a dangling quote after Gmail OR groups from structured search args', 0, () => {
+      const providedSearchArgs: GmailSearchArgsFixture = {
+        query: 'newer_than:365d {"eccv" "ECCV" "论文"}" -category:promotions',
+        pageSize: 10
+      };
+      const searchArgs = gmailMcpArgsForPrompt('gmail.mail.search', '帮我查看我Gmail里和我eccv论文相关的邮件', providedSearchArgs);
+      const searchJson = JSON.stringify(searchArgs);
+
+      expect(searchJson.indexOf('}" -category')).assertEqual(-1);
+      expect(searchJson.indexOf('} -category:promotions -in:draft')).assertLarger(-1);
+      expect(searchJson.indexOf('ECCV')).assertLarger(-1);
+    });
+
     it('accepts scalar Gmail draft recipients from model structured args', 0, () => {
       const providedDraftArgs: GmailDraftScalarRecipientArgsFixture = {
         threadId: 'thread-123',

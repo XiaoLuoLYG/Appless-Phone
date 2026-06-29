@@ -168,6 +168,41 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('client_intent_fallback');
     });
 
+    it('does not reroute explicit Google Maps POI requests to food search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('maps.place.search');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('infers explicit Google Calendar tools without inventing args', 0, () => {
+      const search = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我看今天的 Google Calendar 日程',
+        ''
+      );
+      const create = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我在明天下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程',
+        ''
+      );
+      const update = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '把 AIPhoneDemo smoke 日程改到明天下午4点',
+        ''
+      );
+
+      expect(search.toolId).assertEqual('calendar.events.search');
+      expect(create.toolId).assertEqual('calendar.event.create');
+      expect(update.toolId).assertEqual('calendar.event.update');
+      expect(create.args === null).assertTrue();
+    });
+
     it('infers ferry search when the user asks for ferry tickets', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),

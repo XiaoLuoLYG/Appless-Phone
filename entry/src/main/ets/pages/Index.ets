@@ -62,7 +62,7 @@ import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../model/
 import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../model/SocialNotificationArchive';
 
 const MODEL_LOCAL_QWEN: string = 'Qwen3-8B';
-const MODEL_CLOUD_QWEN: string = 'qwen3-8b';
+const MODEL_CLOUD_QWEN: string = 'qwen-max';
 const MODEL_DEEPSEEK: string = 'DeepSeek-R1-Distill-Qwen-7B';
 const URL_LOCAL_MODEL: string = 'http://127.0.0.1:11434';
 const URL_CLOUD_MODEL: string = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
@@ -218,8 +218,8 @@ struct Index {
   @State standbyAnimActive: boolean = false;
   @State thinkAnimActive: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
-  @State apiKey: string = '';
-  @State selectedModel: string = MODEL_LOCAL_QWEN;
+  @State apiKey: string = defaultLocalModelSettings().apiKey;
+  @State selectedModel: string = defaultLocalModelSettings().model;
   @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
   @State trainVisibleCount: number = TRAIN_INITIAL_VISIBLE;
   @State trainSortMode: string = 'default';
@@ -253,7 +253,7 @@ struct Index {
 
   private getSettings(): LocalModelSettings {
     return {
-      provider: 'Huawei Local API',
+      provider: defaultLocalModelSettings().provider,
       baseUrl: this.baseUrl,
       model: this.selectedModel,
       apiKey: this.apiKey,
@@ -4226,7 +4226,7 @@ struct Index {
         .margin({ bottom: 6 })
 
       Row() {
-        this.ProviderPresetButton('云端 Qwen', URL_CLOUD_MODEL, MODEL_CLOUD_QWEN, CUSTOM_PARAMETERS_QWEN_CLOUD)
+        this.ProviderPresetButton('云端 Qwen Max', URL_CLOUD_MODEL, MODEL_CLOUD_QWEN, CUSTOM_PARAMETERS_QWEN_CLOUD)
         this.ProviderPresetButton('本地 DeepSeek', URL_LOCAL_MODEL, MODEL_DEEPSEEK, CUSTOM_PARAMETERS_NONE, false)
       }
       .width('100%')

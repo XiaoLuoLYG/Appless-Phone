@@ -84,6 +84,29 @@ function inferredGmailToolIdForPrompt(prompt: string): string {
   return '';
 }
 
+function inferredCalendarToolIdForPrompt(prompt: string): string {
+  if (!containsAny(prompt, ['Google Calendar', '谷歌日历', '日程'])) {
+    return '';
+  }
+  if (containsAny(prompt, ['创建', '新建', '添加', '新增', '安排'])) {
+    return 'calendar.event.create';
+  }
+  if (containsAny(prompt, ['修改', '改到', '更新', '调整'])) {
+    return 'calendar.event.update';
+  }
+  return 'calendar.events.search';
+}
+
+function inferredMapsToolIdForPrompt(prompt: string): string {
+  if (!containsAny(prompt, ['Google Maps', '谷歌地图', 'Google Places'])) {
+    return '';
+  }
+  if (containsAny(prompt, ['详情', '详细', 'placeId', 'Place ID'])) {
+    return 'maps.place.details';
+  }
+  return 'maps.place.search';
+}
+
 function inferredToolIdForPrompt(prompt: string): string {
   const dynamicToolId = forcedDynamicToolIdForPrompt(prompt);
   if (dynamicToolId.length > 0) {
@@ -92,6 +115,14 @@ function inferredToolIdForPrompt(prompt: string): string {
   const gmailToolId = inferredGmailToolIdForPrompt(prompt);
   if (gmailToolId.length > 0) {
     return gmailToolId;
+  }
+  const calendarToolId = inferredCalendarToolIdForPrompt(prompt);
+  if (calendarToolId.length > 0) {
+    return calendarToolId;
+  }
+  const mapsToolId = inferredMapsToolIdForPrompt(prompt);
+  if (mapsToolId.length > 0) {
+    return mapsToolId;
   }
   if (containsAny(prompt, ['附近', '周边', '外卖', '咖啡', '奶茶', '餐饮', '美食', '肯德基']) &&
     containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '附近', '周边'])) {

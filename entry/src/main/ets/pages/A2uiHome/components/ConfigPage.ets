@@ -131,7 +131,7 @@ export struct ConfigPage {
           }
 
           Row() {
-            Button('云端 Qwen')
+            Button('云端 Qwen Max')
               .height(36)
               .layoutWeight(1)
               .fontSize(11)
@@ -142,7 +142,7 @@ export struct ConfigPage {
               .margin({ right: 8 })
               .onClick(() => {
                 this.baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-                this.selectedModel = 'qwen3-8b';
+                this.selectedModel = 'qwen-max';
                 this.customParametersJson = '{"enable_thinking":false}';
               })
             Button('本地 Qwen')
@@ -163,7 +163,7 @@ export struct ConfigPage {
           .margin({ bottom: 14 })
 
           this.InputLabel('Model', 0)
-          TextInput({ text: this.selectedModel, placeholder: 'Qwen3-8B' })
+          TextInput({ text: this.selectedModel, placeholder: 'qwen-max' })
             .height(42)
             .fontSize(13)
             .fontColor(COLOR_TEXT)

@@ -186,12 +186,31 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
   return normalized;
 }
 
+function normalizeToolRequestValue(value: A2uiToolRequestData | null | undefined, fallback: A2uiToolRequestData): A2uiToolRequestData {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const toolId = textOf(value.toolId);
+  if (toolId.length === 0) {
+    return fallback;
+  }
+  const normalized: A2uiToolRequestData = {
+    toolId: toolId,
+    prompt: textOf(value.prompt),
+    actionId: textOf(value.actionId)
+  };
+  if (value.args !== undefined && value.args !== null) {
+    normalized.args = value.args;
+  }
+  return normalized;
+}
+
 function normalizeToolRequest(parsed: A2uiRuntimeDataModel, fallback: A2uiToolRequestData): A2uiToolRequestData {
-  if (parsed.toolRequest !== undefined && parsed.toolRequest !== null && parsed.toolRequest.toolId !== undefined) {
-    return parsed.toolRequest;
+  if (parsed.toolRequest !== undefined && parsed.toolRequest !== null) {
+    return normalizeToolRequestValue(parsed.toolRequest, fallback);
   }
   if (parsed.toolRequests !== undefined && parsed.toolRequests !== null && Array.isArray(parsed.toolRequests) && parsed.toolRequests.length > 0) {
-    return parsed.toolRequests[0];
+    return normalizeToolRequestValue(parsed.toolRequests[0], fallback);
   }
   return fallback;
 }
