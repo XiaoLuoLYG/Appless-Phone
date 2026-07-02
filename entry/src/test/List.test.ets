@@ -43,6 +43,10 @@ import socialHubViewDataTest from './SocialHubViewData.test';
 import socialHubA2uiTest from './SocialHubA2ui.test';
 import socialHubClientTest from './SocialHubClient.test';
 import voiceInputBridgeTest from './VoiceInputBridge.test';
+import personaStoreTest from './PersonaStore.test';
+import personaRouterTest from './PersonaRouter.test';
+import personaPromptTest from './PersonaPrompt.test';
+import personaA2uiTest from './PersonaA2ui.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -87,6 +91,10 @@ export default function testsuite() {
   socialHubA2uiTest();
   socialHubClientTest();
   voiceInputBridgeTest();
+  personaStoreTest();
+  personaRouterTest();
+  personaPromptTest();
+  personaA2uiTest();
   htmlHomeSnapshotTest();
   htmlHomeRendererTest();
   htmlHomeActionPolicyTest();

@@ -27,7 +27,9 @@ export default function socialHubA2uiTest() {
         text: 'Hello',
         timestamp: '2026-07-01T01:00:00.000Z',
         url: 'https://x.com/openai/status/1',
+        mediaUrl: '',
         channel: '',
+        channelId: '',
         threadId: '',
         unread: false
       }];

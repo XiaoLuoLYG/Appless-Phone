@@ -6,6 +6,7 @@
   "author": "XiaoLuoLYG",
   "license": "UNLICENSED",
   "dependencies": {
+    "@loop/agent-core": "file:../agent_core",
     "libentry.so": "file:./src/main/cpp/types/libentry"
   }
 }

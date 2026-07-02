@@ -9,6 +9,13 @@ const outPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'a
 
 const providerKeys = [
   'TOOL_GATEWAY_API_KEY',
+  'X_BEARER_TOKEN',
+  'X_ACCESS_TOKEN',
+  'X_OAUTH_TOKEN',
+  'X_USERNAME',
+  'X_OAUTH_CLIENT_ID',
+  'X_OAUTH_REDIRECT_URI',
+  'SLACK_USER_TOKEN',
   'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
@@ -108,6 +115,10 @@ writeFileSync(outPath, JSON.stringify(config, null, 2) + '\n');
 console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
   'TOOL_GATEWAY_API_KEY',
+  'X_BEARER_TOKEN',
+  'X_USERNAME',
+  'X_OAUTH_CLIENT_ID',
+  'SLACK_USER_TOKEN',
   'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',

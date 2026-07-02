@@ -53,6 +53,18 @@ import {
   saveGmailOAuthPending,
   saveGmailOAuthTokenSet
 } from './GmailOAuthClient';
+import {
+  X_DEFAULT_REDIRECT_URI,
+  X_OAUTH_ACCESS_TOKEN_REF,
+  XOAuthConfig,
+  buildXOAuthAuthorizationUrl,
+  createXOAuthPending,
+  isXAccessTokenFresh,
+  loadXOAuthTokenSet,
+  refreshXOAuthAccessToken,
+  saveXOAuthPending,
+  saveXOAuthTokenSet
+} from './XOAuthClient';
 import { GenericMcpClient } from './GenericMcpClient';
 import { callGmailApiTool } from './GmailApiClient';
 import { callYouTubeVideoSearch } from './YouTubeApiClient';
@@ -61,8 +73,8 @@ import { callCalendarTool } from './CalendarApiClient';
 import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { SocialHubClient } from './SocialHubClient';
-import { SocialHubPlatform } from './SocialHubTypes';
+import { SocialHubClient, SocialHubProviderConfig } from './SocialHubClient';
+import { SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
@@ -152,6 +164,12 @@ interface StationDefault {
 
 interface LocalProviderConfig {
   toolGatewayApiKey: string;
+  xBearerToken: string;
+  xUsername: string;
+  xOauthClientId: string;
+  xOauthRedirectUri: string;
+  slackUserToken: string;
+  slackBotToken: string;
   flightMcpKey: string;
   variflightApiUrl: string;
   amapKey: string;
@@ -191,6 +209,14 @@ interface LocalProviderConfig {
 
 interface LocalProviderRawConfig {
   TOOL_GATEWAY_API_KEY?: string;
+  X_BEARER_TOKEN?: string;
+  X_ACCESS_TOKEN?: string;
+  X_OAUTH_TOKEN?: string;
+  X_USERNAME?: string;
+  X_OAUTH_CLIENT_ID?: string;
+  X_OAUTH_REDIRECT_URI?: string;
+  SLACK_USER_TOKEN?: string;
+  SLACK_BOT_TOKEN?: string;
   FLIGHT_MCP_KEY?: string;
   VARIFLIGHT_API_KEY?: string;
   X_VARIFLIGHT_KEY?: string;
@@ -268,6 +294,12 @@ interface LocalProviderRawConfig {
   qqMailImapPort?: string;
   qqMailDraftsMailbox?: string;
   toolGatewayApiKey?: string;
+  xBearerToken?: string;
+  xUsername?: string;
+  xOauthClientId?: string;
+  xOauthRedirectUri?: string;
+  slackUserToken?: string;
+  slackBotToken?: string;
 }
 
 interface VariFlightRequestParams {
@@ -973,6 +1005,12 @@ const CHINA_FLIGHT_CITY_CODES: FlightCityCode[] = [
 let stationCache: StationCache | null = null;
 let localProviderConfig: LocalProviderConfig = {
   toolGatewayApiKey: '',
+  xBearerToken: '',
+  xUsername: '',
+  xOauthClientId: '',
+  xOauthRedirectUri: X_DEFAULT_REDIRECT_URI,
+  slackUserToken: '',
+  slackBotToken: '',
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
   amapKey: '',
@@ -1125,6 +1163,12 @@ function firstText(values: Array<Object | string | number | boolean | null | und
 export function configureLocalProviderConfig(config: LocalProviderConfig): void {
   localProviderConfig = {
     toolGatewayApiKey: config.toolGatewayApiKey.trim(),
+    xBearerToken: config.xBearerToken.trim(),
+    xUsername: config.xUsername.trim().replace('@', ''),
+    xOauthClientId: config.xOauthClientId.trim(),
+    xOauthRedirectUri: config.xOauthRedirectUri.trim().length > 0 ? config.xOauthRedirectUri.trim() : X_DEFAULT_REDIRECT_URI,
+    slackUserToken: config.slackUserToken.trim(),
+    slackBotToken: config.slackBotToken.trim(),
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
     amapKey: config.amapKey.trim(),
@@ -1163,6 +1207,11 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ' toolGatewayApiKeyChars=' + localProviderConfig.toolGatewayApiKey.length.toString() +
+    ' xBearerTokenChars=' + localProviderConfig.xBearerToken.length.toString() +
+    ' xUsernamePresent=' + (localProviderConfig.xUsername.length > 0 ? 'true' : 'false') +
+    ' xOauthClientIdChars=' + localProviderConfig.xOauthClientId.length.toString() +
+    ' slackUserTokenChars=' + localProviderConfig.slackUserToken.length.toString() +
+    ' slackBotTokenChars=' + localProviderConfig.slackBotToken.length.toString() +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
     ' amapKeyChars=' + localProviderConfig.amapKey.length.toString() +
     ' tencentMapKeyChars=' + localProviderConfig.tencentMapKey.length.toString() +
@@ -1187,6 +1236,12 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
   const parsed = JSON.parse(rawJson) as LocalProviderRawConfig;
   configureLocalProviderConfig({
     toolGatewayApiKey: firstText([parsed.TOOL_GATEWAY_API_KEY, parsed.toolGatewayApiKey]),
+    xBearerToken: firstText([parsed.X_BEARER_TOKEN, parsed.X_ACCESS_TOKEN, parsed.X_OAUTH_TOKEN, parsed.xBearerToken]),
+    xUsername: firstText([parsed.X_USERNAME, parsed.xUsername]),
+    xOauthClientId: firstText([parsed.X_OAUTH_CLIENT_ID, parsed.xOauthClientId]),
+    xOauthRedirectUri: firstText([parsed.X_OAUTH_REDIRECT_URI, parsed.xOauthRedirectUri]),
+    slackUserToken: firstText([parsed.SLACK_USER_TOKEN, parsed.slackUserToken]),
+    slackBotToken: firstText([parsed.SLACK_BOT_TOKEN, parsed.slackBotToken]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
     amapKey: firstText([parsed.AMAP_KEY, parsed.amapKey]),
@@ -1228,6 +1283,11 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
 export function localProviderConfigDebugSummary(): string {
   return 'rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ', toolGatewayApiKey=' + (localProviderConfig.toolGatewayApiKey.length > 0 ? 'present(' + localProviderConfig.toolGatewayApiKey.length.toString() + ')' : 'missing') +
+    ', xBearerToken=' + (localProviderConfig.xBearerToken.length > 0 ? 'present(' + localProviderConfig.xBearerToken.length.toString() + ')' : 'missing') +
+    ', xUsername=' + (localProviderConfig.xUsername.length > 0 ? 'present' : 'missing') +
+    ', xOauthClientId=' + (localProviderConfig.xOauthClientId.length > 0 ? 'present(' + localProviderConfig.xOauthClientId.length.toString() + ')' : 'missing') +
+    ', slackUserToken=' + (localProviderConfig.slackUserToken.length > 0 ? 'present(' + localProviderConfig.slackUserToken.length.toString() + ')' : 'missing') +
+    ', slackBotToken=' + (localProviderConfig.slackBotToken.length > 0 ? 'present(' + localProviderConfig.slackBotToken.length.toString() + ')' : 'missing') +
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
     ', amapKey=' + (localProviderConfig.amapKey.length > 0 ? 'present(' + localProviderConfig.amapKey.length.toString() + ')' : 'missing') +
     ', tencentMapKey=' + (localProviderConfig.tencentMapKey.length > 0 ? 'present(' + localProviderConfig.tencentMapKey.length.toString() + ')' : 'missing') +
@@ -4356,7 +4416,50 @@ function foodSourceCount(item: A2uiFoodData): number {
   return foodTags(item, '').length;
 }
 
-function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData): number {
+export interface FoodPreferenceArgs {
+  brandPreference?: string;
+  brandStrict?: boolean;
+  sweetness?: string;
+}
+
+function foodPreferenceArgs(args: Object | null): FoodPreferenceArgs {
+  if (args === null) {
+    return {};
+  }
+  const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const brand = textOf(raw.brandPreference).trim();
+  const brandStrict = textOf(raw.brandStrict).trim();
+  const sweetness = textOf(raw.sweetness).trim();
+  const preferences: FoodPreferenceArgs = {};
+  if (brand.length > 0) {
+    preferences.brandPreference = brand;
+  }
+  if (brandStrict === 'true') {
+    preferences.brandStrict = true;
+  }
+  if (sweetness.length > 0) {
+    preferences.sweetness = sweetness;
+  }
+  return preferences;
+}
+
+function foodMatchesBrand(item: A2uiFoodData, brand: string): boolean {
+  return brand.length > 0 && (item.name.indexOf(brand) >= 0 || foodHasSourceTag(item, brand));
+}
+
+function preferredFoodScore(item: A2uiFoodData, preferences: FoodPreferenceArgs): number {
+  const brand = preferences.brandPreference === undefined ? '' : preferences.brandPreference;
+  if (foodMatchesBrand(item, brand)) {
+    return -1000;
+  }
+  return 0;
+}
+
+function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData, preferences: FoodPreferenceArgs = {}): number {
+  const preferenceDiff = preferredFoodScore(left, preferences) - preferredFoodScore(right, preferences);
+  if (preferenceDiff !== 0) {
+    return preferenceDiff;
+  }
   const leftMerged = foodSourceCount(left) > 1 ? 0 : 1;
   const rightMerged = foodSourceCount(right) > 1 ? 0 : 1;
   if (leftMerged !== rightMerged) {
@@ -4369,9 +4472,12 @@ function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData): number {
   return left.name.localeCompare(right.name);
 }
 
-function selectVisibleFoodResults(foods: A2uiFoodData[]): A2uiFoodData[] {
-  const sorted = foods.slice();
-  sorted.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right));
+function selectVisibleFoodResults(foods: A2uiFoodData[], preferences: FoodPreferenceArgs = {}): A2uiFoodData[] {
+  const brand = preferences.brandPreference === undefined ? '' : preferences.brandPreference;
+  const strictFoods = preferences.brandStrict === true ? foods.filter((item: A2uiFoodData): boolean => foodMatchesBrand(item, brand)) : [];
+  const candidates = preferences.brandStrict === true ? strictFoods : foods;
+  const sorted = candidates.slice();
+  sorted.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right, preferences));
   const sourceOrder: string[] = [];
   for (let index = 0; index < sorted.length; index++) {
     addCoveredFoodSources(sourceOrder, sorted[index]);
@@ -4391,7 +4497,7 @@ function selectVisibleFoodResults(foods: A2uiFoodData[]): A2uiFoodData[] {
       selected.push(sorted[index]);
     }
   }
-  selected.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right));
+  selected.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right, preferences));
   return selected;
 }
 
@@ -4404,7 +4510,7 @@ function findExistingFoodIndex(foods: A2uiFoodData[], item: A2uiFoodData): numbe
   return -1;
 }
 
-export function aggregateFoodProviderResults(results: FoodProviderResult[]): FoodAggregationResult {
+export function aggregateFoodProviderResults(results: FoodProviderResult[], preferences: FoodPreferenceArgs = {}): FoodAggregationResult {
   const foods: A2uiFoodData[] = [];
   const issues: FoodProviderResult[] = [];
   for (let resultIndex = 0; resultIndex < results.length; resultIndex++) {
@@ -4430,7 +4536,7 @@ export function aggregateFoodProviderResults(results: FoodProviderResult[]): Foo
     }
   }
   return {
-    foods: selectVisibleFoodResults(foods),
+    foods: selectVisibleFoodResults(foods, preferences),
     issues: issues
   };
 }
@@ -4478,7 +4584,7 @@ export function foodProviderProgressRows(providerNames: string[], completedResul
   return rows;
 }
 
-export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodProviderResult>[], initialResults: FoodProviderResult[], onPartial: (snapshot: FoodProviderPartialSnapshot) => void, partialDelayMs: number = 0): Promise<FoodProviderStreamResult> {
+export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodProviderResult>[], initialResults: FoodProviderResult[], onPartial: (snapshot: FoodProviderPartialSnapshot) => void, partialDelayMs: number = 0, preferences: FoodPreferenceArgs = {}): Promise<FoodProviderStreamResult> {
   const providerResults: FoodProviderResult[] = initialResults.slice();
   let completed = 0;
   const delayMs = partialDelayMs > 0 ? partialDelayMs : 0;
@@ -4494,7 +4600,7 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
         }
         providerResults.push(result);
         completed += 1;
-        const aggregated = aggregateFoodProviderResults(providerResults);
+        const aggregated = aggregateFoodProviderResults(providerResults, preferences);
         onPartial({
           provider: result.provider,
           completed: completed,
@@ -4510,7 +4616,7 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
   await Promise.all(wrappedTasks);
   await partialChain;
   return {
-    aggregation: aggregateFoodProviderResults(providerResults),
+    aggregation: aggregateFoodProviderResults(providerResults, preferences),
     results: providerResults
   };
 }
@@ -5066,8 +5172,9 @@ class LuckinMcpFoodProvider implements FoodProviderAdapter {
   }
 }
 
-async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null): Promise<string> {
+async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   const key = localProviderConfig.amapKey;
+  const preferences = foodPreferenceArgs(args);
 
   const query = extractFoodQuery(prompt);
   const preflightResults: FoodProviderResult[] = [];
@@ -5146,9 +5253,11 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
         ' dataPaths=' + planned.updatedDataPaths.join(','));
       emitJsonl(planned.jsonl);
     }
-  }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0);
+  }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0, preferences);
   const aggregated = streamed.aggregation;
   const rows = foodProviderProgressRows(providerNames, streamed.results);
+  const preferenceNote = preferences.brandPreference !== undefined && preferences.brandPreference.length > 0 ?
+    (preferences.brandStrict === true ? '已按偏好只展示' : '已按偏好优先展示') + preferences.brandPreference + '相关真实结果。' : '';
   aiLogInfo('[AIPhone][LocalToolFoodAggregate] keyword=' + keyword +
     ' locationSource=' + locationSource +
     ' locationPresent=' + (location.length > 0 ? 'true' : 'false') +
@@ -5158,7 +5267,7 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
   const finalState = foodA2uiRenderState(
     surfaceId,
     '外卖聚合搜索',
-    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。',
+    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
     aggregated.foods.length > 0 ?
       '已聚合 ' + aggregated.foods.length.toString() + ' 个可展示结果；' + rows.length.toString() + ' 个来源状态见下方。' :
       '所有来源都没有可展示外卖结果；下面只列出真实 provider 状态。',
@@ -5272,6 +5381,7 @@ const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
+const X_OAUTH_SETUP_URL: string = 'https://developer.x.com/en/portal/dashboard';
 
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
@@ -5925,6 +6035,58 @@ export async function prepareGmailOAuthAuthorizationUrl(): Promise<string> {
   return prepareGoogleOAuthAuthorizationUrl(GMAIL_MCP_AUTH_SETUP_URL);
 }
 
+export function xOAuthConfigFromProvider(): XOAuthConfig {
+  return {
+    clientId: localProviderConfig.xOauthClientId,
+    redirectUri: localProviderConfig.xOauthRedirectUri.length > 0 ? localProviderConfig.xOauthRedirectUri : X_DEFAULT_REDIRECT_URI
+  };
+}
+
+export async function prepareXOAuthAuthorizationUrl(): Promise<string> {
+  const config = xOAuthConfigFromProvider();
+  if (config.clientId.length === 0 || config.redirectUri.length === 0) {
+    aiLogInfo('[AIPhone][XOAuthAuthorizeUrl] source=setup-docs clientConfigured=' +
+      (config.clientId.length > 0 ? 'true' : 'false') +
+      ' redirectConfigured=' + (config.redirectUri.length > 0 ? 'true' : 'false'));
+    return X_OAUTH_SETUP_URL;
+  }
+  const pending = createXOAuthPending();
+  await saveXOAuthPending(dynamicCredentialStore, pending);
+  aiLogInfo('[AIPhone][XOAuthPendingSaved] stateChars=' + pending.state.length.toString() +
+    ' verifierChars=' + pending.codeVerifier.length.toString() +
+    ' redirectChars=' + config.redirectUri.length.toString() +
+    ' clientChars=' + config.clientId.length.toString());
+  return buildXOAuthAuthorizationUrl(config, pending);
+}
+
+async function xAccessTokenForDm(): Promise<string> {
+  const token = await loadXOAuthTokenSet(dynamicCredentialStore);
+  if (token !== null) {
+    if (isXAccessTokenFresh(token)) {
+      return token.accessToken;
+    }
+    if (token.refreshToken.length > 0) {
+      const config = xOAuthConfigFromProvider();
+      if (config.clientId.length > 0) {
+        const refreshed = await refreshXOAuthAccessToken(config, token.refreshToken);
+        const saved = await saveXOAuthTokenSet(dynamicCredentialStore, refreshed);
+        return saved.accessToken;
+      }
+    }
+    return token.accessToken;
+  }
+  return dynamicCredentialStore.get(X_OAUTH_ACCESS_TOKEN_REF);
+}
+
+async function safeXAccessTokenForDm(): Promise<string> {
+  try {
+    return await xAccessTokenForDm();
+  } catch (error) {
+    aiLogError('[AIPhone][XOAuthAccessLoadFailed] ' + describeThrown(error));
+    return '';
+  }
+}
+
 async function gmailAccessTokenForMcp(): Promise<string> {
   aiLogInfo('[AIPhone][GmailAccessLoad] start');
   const token = await loadGmailOAuthTokenSet(gmailCredentialStore);
@@ -6194,6 +6356,20 @@ function isSocialHubToolId(toolId: string): boolean {
   return toolId === 'social.feed.search' || toolId === 'social.reply.draft' || toolId === 'x.post.search';
 }
 
+function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProviderConfig {
+  return {
+    xBearerToken: localProviderConfig.xBearerToken,
+    xUsername: localProviderConfig.xUsername,
+    xUserAccessToken: xUserAccessToken,
+    slackUserToken: localProviderConfig.slackUserToken,
+    slackBotToken: localProviderConfig.slackBotToken
+  };
+}
+
+export async function sendLocalSocialHubReply(item: SocialHubItemData, text: string): Promise<SocialHubDraftData> {
+  return socialHubClient.sendReply(item, text, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig());
+}
+
 async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'social.reply.draft') {
     const request: SocialHubDraftRequestArgs = args === null ? emptySocialHubDraftRequestArgs() : args as SocialHubDraftRequestArgs;
@@ -6203,11 +6379,14 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
       itemId.length > 0 ? itemId : prompt,
       socialHubPlatformFromText(textOf(request.platform)),
       instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿',
-      localProviderConfig.toolGatewayApiKey
+      localProviderConfig.toolGatewayApiKey,
+      socialHubProviderConfig()
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
-  const result = toolId === 'x.post.search' ? await socialHubClient.xPostSearch(prompt, localProviderConfig.toolGatewayApiKey) : await socialHubClient.feed(prompt, localProviderConfig.toolGatewayApiKey);
+  const result = toolId === 'x.post.search' ?
+    await socialHubClient.xPostSearch(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig()) :
+    await socialHubClient.feed(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig(await safeXAccessTokenForDm()));
   return socialHubFeedA2ui(surfaceId, result.items, result.connections);
 }
 
@@ -6527,7 +6706,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalTrainSearch(prompt, surfaceId);
   }
   if (toolId === 'food.search') {
-    return callLocalFoodSearch(prompt, surfaceId, emitJsonl);
+    return callLocalFoodSearch(prompt, surfaceId, emitJsonl, args);
   }
   return buildDynamicToolJsonl(toolId, prompt, surfaceId);
 }

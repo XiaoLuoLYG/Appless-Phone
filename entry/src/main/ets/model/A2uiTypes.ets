@@ -157,6 +157,19 @@ export interface A2uiGenericToolResultData {
   rawPreview: string;
 }
 
+export interface A2uiPersonaData {
+  id: string;
+  name: string;
+  avatarKey: string;
+  status: string;
+  reason: string;
+}
+
+export interface A2uiPersonaMemoryData {
+  summary: string;
+  preferences: string[];
+}
+
 export interface A2uiRuntimeDataModel {
   rows: A2uiLabelValueData[];
   trains: A2uiTrainData[];
@@ -172,6 +185,8 @@ export interface A2uiRuntimeDataModel {
   dynamicToolConnect: A2uiDynamicToolConnectData;
   genericToolResults: A2uiGenericToolResultData[];
   socialHub: SocialHubData;
+  persona: A2uiPersonaData;
+  personaMemory: A2uiPersonaMemoryData;
   toolRequests?: A2uiToolRequestData[];
 }
 
@@ -190,6 +205,8 @@ export type A2uiDataValue =
   A2uiToolRequestData |
   A2uiDynamicToolConnectData |
   A2uiGenericToolResultData[] |
+  A2uiPersonaData |
+  A2uiPersonaMemoryData |
   SocialHubData |
   SocialHubItemData[] |
   SocialHubItemData |

@@ -35,6 +35,8 @@ import {
   foodOptions,
   genericToolResults,
   labelValues,
+  personaMemoryData,
+  personaRuntimeData,
   resolveData,
   socialHubConnections,
   socialHubDraft,
@@ -61,6 +63,8 @@ import {
   HtmlHomeKind,
   HtmlHomeMediaEmbed,
   HtmlHomeMetric,
+  HtmlHomePersona,
+  HtmlHomePersonaMemory,
   HtmlHomeSource,
   HtmlHomeTimelineItem
 } from './HtmlHomeTypes';
@@ -81,6 +85,42 @@ export interface CreateHtmlHomeDocumentParams {
   inputText?: string;
 }
 
+function emptyHtmlPersona(): HtmlHomePersona {
+  return {
+    id: '',
+    name: '',
+    avatarKey: '',
+    status: '',
+    reason: ''
+  };
+}
+
+function emptyHtmlPersonaMemory(): HtmlHomePersonaMemory {
+  return {
+    summary: '',
+    preferences: []
+  };
+}
+
+function htmlPersona(surface: A2uiSurfaceState): HtmlHomePersona {
+  const persona = personaRuntimeData(surface);
+  return {
+    id: persona.id,
+    name: persona.name,
+    avatarKey: persona.avatarKey,
+    status: persona.status,
+    reason: persona.reason
+  };
+}
+
+function htmlPersonaMemory(surface: A2uiSurfaceState): HtmlHomePersonaMemory {
+  const memory = personaMemoryData(surface);
+  return {
+    summary: memory.summary,
+    preferences: memory.preferences
+  };
+}
+
 export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): HtmlHomeDocument {
   const prompt = firstText(params.inputText, lastUserMessage(params.messages));
   if (params.surface === undefined || params.surface === null) {
@@ -90,7 +130,7 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
   const surface = params.surface;
   const kind = kindOf(surface);
   const root = findA2uiComponent(surface, surface.rootId.length > 0 ? surface.rootId : 'root');
-  const document: HtmlHomeDocument = withBusy({
+  const baseDocument: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
     source: sourceOf(kind, surface, params.isBusy),
     kind: kind,
@@ -102,9 +142,12 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     blocks: [],
     actions: [],
     history: recentHistory(params.messages),
+    persona: htmlPersona(surface),
+    personaMemory: htmlPersonaMemory(surface),
     rawSurfaceRoot: root,
     generatedAt: new Date().toISOString()
-  }, params.isBusy);
+  };
+  const document: HtmlHomeDocument = withBusy(baseDocument, params.isBusy);
 
   surface.components.forEach((component: A2uiComponent) => {
     appendComponentActions(document.actions, component);
@@ -116,7 +159,7 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
 }
 
 function welcomeDocument(params: CreateHtmlHomeDocumentParams): HtmlHomeDocument {
-  return withBusy({
+  const document: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
     source: 'welcome',
     kind: 'welcome',
@@ -128,9 +171,12 @@ function welcomeDocument(params: CreateHtmlHomeDocumentParams): HtmlHomeDocument
     blocks: [],
     actions: [],
     history: recentHistory(params.messages),
+    persona: emptyHtmlPersona(),
+    personaMemory: emptyHtmlPersonaMemory(),
     rawSurfaceRoot: null,
     generatedAt: new Date().toISOString()
-  }, params.isBusy);
+  };
+  return withBusy(document, params.isBusy);
 }
 
 function pendingDocument(params: CreateHtmlHomeDocumentParams, prompt: string): HtmlHomeDocument {
@@ -142,7 +188,7 @@ function pendingDocument(params: CreateHtmlHomeDocumentParams, prompt: string): 
       status: 'pending'
     });
   }
-  return withBusy({
+  const document: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
     source: 'pending',
     kind: 'thinking',
@@ -154,9 +200,12 @@ function pendingDocument(params: CreateHtmlHomeDocumentParams, prompt: string): 
     blocks: [],
     actions: [],
     history: recentHistory(params.messages),
+    persona: emptyHtmlPersona(),
+    personaMemory: emptyHtmlPersonaMemory(),
     rawSurfaceRoot: null,
     generatedAt: new Date().toISOString()
-  }, params.isBusy);
+  };
+  return withBusy(document, params.isBusy);
 }
 
 function appendBlocksForComponent(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {

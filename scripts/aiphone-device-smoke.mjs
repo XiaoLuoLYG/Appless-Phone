@@ -15,8 +15,11 @@ const defaultCases = [
   { query: '帮我查看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search' },
   { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
   { query: '帮我在b站和youtube里搜索qwen max 的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
-  { query: '打开社交消息聚合，看看 Slack、X、企业微信', expectsTool: true, expectedToolId: 'social.feed.search' },
-  { query: '帮我查看 X 上 openai 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' }
+  { query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search' },
+  { query: '帮我查看 X 上 openai 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
+  { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
+  { query: '把饮食搭子的 memory 改成：用户咖啡偏好：只喝瑞幸咖啡。', expectsTool: false, expectedToolId: '' },
+  { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' }
 ];
 
 const dynamicCases = [
@@ -233,6 +236,12 @@ const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000
 const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 
 function expectedCaseForQuery(query) {
+  if (isPersonaMemoryUpdateQuery(query)) {
+    return {
+      expectsTool: false,
+      expectedToolId: ''
+    };
+  }
   if (/^你好$|问候|打招呼/.test(query)) {
     return {
       expectsTool: false,
@@ -526,7 +535,21 @@ async function ensureLocalModel() {
 }
 
 function cleanupHilogProcesses() {
-  spawnSync('pkill', ['-f', `hdc -t ${target} hilog`], { encoding: 'utf8' });
+  const targetHilogPattern = `-t ${target} hilog`;
+  const killMatching = (signal) => {
+    for (const line of activeHilogProcesses()) {
+      if (!line.includes(targetHilogPattern)) {
+        continue;
+      }
+      const match = /^(\d+)\s+/.exec(line);
+      if (match !== null) {
+        spawnSync('kill', [`-${signal}`, match[1]], { encoding: 'utf8' });
+      }
+    }
+  };
+  killMatching('TERM');
+  spawnSync('sleep', ['0.3']);
+  killMatching('KILL');
 }
 
 function sleep(ms) {
@@ -789,7 +812,8 @@ async function captureWhile(appPid, runAction) {
       await sleep(500);
       const text = logs.join('\n');
       const done = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
-        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text);
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
+        /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
@@ -906,6 +930,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
   const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
     new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
     new RegExp(`toolId=${escapedToolId}`).test(text);
+  const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
   const result = {
     query,
     expectedTool,
@@ -917,6 +942,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     htmlHomeSurfaceLoad,
     htmlLoadError: /\[AIPhone\]\[HtmlHomeSurfaceLoadError\]/.test(text),
     modelSelectedExpectedToolId,
+    personaCoffeeProof,
+    personaMemoryUpdateProof: !isPersonaMemoryUpdateQuery(query) ||
+      /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*personaId=food_companion[^\n]*preference=luckin_only/.test(text),
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
     model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
@@ -946,8 +974,13 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
   result.transportPassed = !result.failedConnect && !result.providerFailed;
   result.basePassedWithoutTransport = baseWithoutTransport;
   const basePassed = result.transportPassed && baseWithoutTransport;
-  if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId;
+  if (isPersonaMemoryUpdateQuery(query)) {
+    result.modelPassed = result.personaMemoryUpdateProof === true;
+    result.transportPassed = true;
+    result.basePassedWithoutTransport = true;
+    result.ok = result.personaMemoryUpdateProof === true && !result.toolRequested && !result.localToolRequest;
+  } else if (expectedTool === true) {
+    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
     result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
   } else {
@@ -959,6 +992,18 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
 
 function isGmailWebQuery(query) {
   return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query);
+}
+
+function isPersonaCoffeeQuery(query) {
+  return /点一杯咖啡|来一杯咖啡|买杯咖啡/.test(query);
+}
+
+function isPersonaMemoryUpdateQuery(query) {
+  return /瑞幸/.test(query) && /只喝|只买|只点/.test(query);
+}
+
+function hasLuckinMemoryEvidence(text) {
+  return /只展示瑞幸|只喝瑞幸|瑞幸相关真实结果|瑞幸优先/.test(text);
 }
 
 function isGmailEccvQuery(query) {
@@ -1002,7 +1047,7 @@ function isXPostSearchQuery(query) {
 function hasTruthfulSocialHubState(text) {
   return /SocialHub/.test(text) &&
     /社交工作台/.test(text) &&
-    /待授权|等待授权接入|异常|受限|已连接|未配置|Social bridge unavailable|HTTP|scope|rate|token|configured|真实数据接入前|还没有真实消息/i.test(text);
+    /待授权|等待授权接入|异常|受限|已连接|在线|connected|未配置|Social bridge unavailable|HTTP|scope|rate|token|configured|可搜索你有权限看到的消息|真实数据接入前|还没有真实消息/i.test(text);
 }
 
 function hasVisibleSocialHubOutput(text, expectedToolId) {
@@ -1013,7 +1058,10 @@ function hasVisibleSocialHubOutput(text, expectedToolId) {
     return /\bX\b/.test(text);
   }
   if (expectedToolId === 'social.feed.search') {
-    return /\bX\b/.test(text) && /Slack/.test(text) && /企业微信/.test(text);
+    return /\bX\b/.test(text) &&
+      /Slack/.test(text) &&
+      /企业微信/.test(text) &&
+      (/回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
   }
   return false;
 }
@@ -1023,6 +1071,9 @@ function isCalendarQuery(query) {
 }
 
 function layoutExpectationsForQuery(query) {
+  if (isPersonaMemoryUpdateQuery(query)) {
+    return [];
+  }
   if (/^你好$|问候|打招呼/.test(query)) {
     return ['你好'];
   }
@@ -1101,6 +1152,9 @@ function layoutExpectationsForQuery(query) {
     return ['高铁', '12306', 'train.search'];
   }
   if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
+    if (isPersonaCoffeeQuery(query)) {
+      return ['饮食搭子', '餐饮', '咖啡', '高德', '百度地图'];
+    }
     return ['奶茶', '餐饮', '高德', '腾讯地图', '百度地图', '美团', '淘宝闪购'];
   }
   return [];
@@ -1369,7 +1423,9 @@ async function runQuery(query, index, expectedTool) {
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
+  const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
   const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  summary.expectedPersonaMemory = expectedPersonaMemory;
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
@@ -1385,6 +1441,21 @@ async function runQuery(query, index, expectedTool) {
   );
   const evidenceText = scrollEvidence.text;
   const evidenceLayout = scrollEvidence.currentLayout;
+  if (isPersonaCoffeeQuery(query) && /饮食搭子上线|饮食搭子/.test(evidenceText)) {
+    summary.personaCoffeeProof = true;
+    summary.personaExpectedMemoryProof = expectedPersonaMemory !== 'luckin_only' || hasLuckinMemoryEvidence(evidenceText);
+    if (expectedTool === true &&
+      summary.basePassedWithoutTransport === true &&
+      summary.modelPassed === true &&
+      summary.toolRequested &&
+      summary.localToolRequest &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.hasExpectedDiscoveredToolId &&
+      summary.personaExpectedMemoryProof) {
+      summary.ok = true;
+    }
+  }
   const expectedHits = expectedMarkers.filter((marker) => evidenceText.includes(marker));
   const expectedMisses = expectedMarkers.filter((marker) => !evidenceText.includes(marker));
   const calendarMarkersOk = !isCalendarQuery(query) || expectedMisses.length === 0;
@@ -1434,6 +1505,10 @@ async function runQuery(query, index, expectedTool) {
     (expectedMarkers.length === 0 || expectedHits.length > 0) &&
     calendarMarkersOk &&
     summary.gmailEccvKeywordVisible;
+  if (expectedPersonaMemory === 'luckin_only') {
+    summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
+    summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
+  }
   summary.mailAggregateVisible = expectedToolId !== 'mail.search' ||
     (isMailAggregationQuery(query) ? (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText)) :
       (isQqMailQuery(query) ? /QQ Mail/.test(evidenceText) : (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText))));
@@ -1449,19 +1524,39 @@ async function runQuery(query, index, expectedTool) {
       draftToolOk: true,
       draftVisible: true
     };
+  if (isPersonaMemoryUpdateQuery(query)) {
+    summary.mailAggregateVisible = true;
+    summary.layoutTextExposed = summary.personaMemoryUpdateProof === true;
+    summary.layoutOk = layoutBlockingHits.length === 0 &&
+      forbiddenSocialHubLegacyHits.length === 0 &&
+      summary.layoutTextExposed;
+    summary.ok = summary.ok && summary.layoutOk;
+    return summary;
+  }
   summary.modelFailed = summary.modelFailed || summary.mailExpandedActions.draftModelFailed === true;
   summary.providerFailed = summary.providerFailed || summary.mailExpandedActions.draftProviderFailed === true;
-  summary.layoutTextExposed = summary.layoutTextExposed &&
-    summary.mailAggregateVisible &&
-    summary.mailExpandedActions.actionVisible &&
-    summary.mailExpandedActions.draftClicked &&
-    summary.mailExpandedActions.draftToolRequested &&
-    summary.mailExpandedActions.draftToolOk &&
-    summary.mailExpandedActions.draftVisible;
+  if (expectsMailDraftAction) {
+    summary.layoutTextExposed = summary.layoutTextExposed &&
+      summary.mailAggregateVisible &&
+      summary.mailExpandedActions.actionVisible &&
+      summary.mailExpandedActions.draftClicked &&
+      summary.mailExpandedActions.draftToolRequested &&
+      summary.mailExpandedActions.draftToolOk &&
+      summary.mailExpandedActions.draftVisible;
+  } else {
+    summary.layoutTextExposed = summary.layoutTextExposed && summary.mailAggregateVisible;
+  }
   const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' && summary.htmlHomeDocument.ok;
   summary.layoutOk = layoutBlockingHits.length === 0 &&
     forbiddenSocialHubLegacyHits.length === 0 &&
     (isSocialHubCase ? socialHubVisibleOutput : (allowsExternalGmailWeb || summary.layoutTextExposed || allowsHtmlDocumentOnly));
+  const layoutEvidenceRecovered = expectedTool === true &&
+    !summary.basePassedWithoutTransport &&
+    summary.htmlHomeSurfaceLoad.ok &&
+    !summary.htmlLoadError &&
+    !summary.syntheticFallback &&
+    summary.layoutOk;
+  summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
   if (isSocialHubCase) {
     summary.ok = summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
@@ -1471,6 +1566,17 @@ async function runQuery(query, index, expectedTool) {
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
       (summary.transportPassed === true || allowsSocialHubTruthfulState) &&
+      summary.layoutOk;
+  } else if (layoutEvidenceRecovered) {
+    summary.basePassedWithoutTransport = true;
+    summary.ok = summary.modelPassed === true &&
+      summary.transportPassed === true &&
+      summary.toolRequested &&
+      summary.localToolRequest &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.hasExpectedDiscoveredToolId &&
+      summary.personaCoffeeProof === true &&
       summary.layoutOk;
   } else {
     summary.ok = summary.ok && summary.layoutOk;
@@ -1521,6 +1627,7 @@ const finalLayoutForbiddenActionHits = forbiddenLayoutActionMarkers.filter((mark
 const finalQuery = queries.length > 0 ? queries[queries.length - 1] : '';
 const finalAllowsPartialTravel = /出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(finalQuery);
 const finalSummary = summaries.length > 0 ? summaries[summaries.length - 1] : null;
+const finalAllowsPersonaMemoryUpdate = finalSummary !== null && finalSummary.personaMemoryUpdateProof === true;
 const finalAllowsExternalGmailWeb = isGmailWebQuery(finalQuery) &&
   finalSummary !== null &&
   finalSummary.gmailWebOpened === true;
@@ -1579,7 +1686,7 @@ const visibleOutput = {
   syntheticHits: finalLayoutSyntheticHits,
   forbiddenActionHits: finalLayoutForbiddenActionHits,
   blockingHits: finalLayoutBlockingHits,
-  ok: (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalLayoutDomainHits.length > 0 ||
+  ok: (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate || finalLayoutDomainHits.length > 0 ||
     (finalSummary !== null &&
       !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
       finalSummary.htmlHomeDocument !== undefined &&

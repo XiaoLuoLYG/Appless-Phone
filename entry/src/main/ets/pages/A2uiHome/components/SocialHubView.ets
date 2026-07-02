@@ -19,6 +19,7 @@ import {
   COLOR_CARD,
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,
+  COLOR_CARD_RAISED,
   COLOR_INK,
   COLOR_LINE,
   COLOR_MUTED,
@@ -34,22 +35,22 @@ import {
 } from '../style/A2uiPanelFrameStyle';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 import { A2uiButtonView } from './common/A2uiButtonView';
-import { ActionBarView } from './ActionBarView';
-import { StatusBadgeView } from './StatusBadgeView';
 import {
   socialHubAuthorText,
-  socialHubBadgeStatus,
   socialHubConnectionMessage,
   socialHubConnectionStatusLabel,
   socialHubDraftDisplayText,
   socialHubItemMetaText,
+  socialHubKindLabel,
   socialHubPlatformLabel,
   socialHubPrimaryText
 } from './SocialHubViewData';
 
-const SOCIAL_HUB_ROW_HEIGHT: number = 74;
-const SOCIAL_HUB_CONNECTION_HEIGHT: number = 62;
-const SOCIAL_HUB_ACTION_WIDTH: number = 68;
+const SOCIAL_HUB_CONNECTION_HEIGHT: number = 64;
+
+interface SocialHubSendReplyArgs {
+  text: string;
+}
 
 @Component
 export struct SocialHubView {
@@ -60,6 +61,8 @@ export struct SocialHubView {
     dataPath: '/socialHub/items'
   };
   @Prop isBusy: boolean = false;
+  @State replyText: string = '';
+  @State activeItemId: string = '';
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   private items(): SocialHubItemData[] {
@@ -72,6 +75,14 @@ export struct SocialHubView {
 
   private isSelected(item: SocialHubItemData): boolean {
     return item.id.length > 0 && item.id === this.selected().id;
+  }
+
+  private isActive(item: SocialHubItemData): boolean {
+    return this.isSelected(item) || (item.id.length > 0 && item.id === this.activeItemId);
+  }
+
+  private isPostExpanded(item: SocialHubItemData): boolean {
+    return item.kind === 'post' && this.isActive(item);
   }
 
   private connection(platform: SocialHubPlatform): SocialHubConnectionData {
@@ -90,16 +101,6 @@ export struct SocialHubView {
     };
   }
 
-  private selectAction(item: SocialHubItemData): A2uiAction {
-    return {
-      id: 'social_hub_select_item',
-      label: '选择',
-      prompt: item.id,
-      variant: this.isSelected(item) ? 'activated' : 'secondary',
-      kind: 'client'
-    };
-  }
-
   private draftAction(item: SocialHubItemData): A2uiAction {
     return {
       id: 'social_hub_draft_reply',
@@ -107,6 +108,20 @@ export struct SocialHubView {
       prompt: item.id,
       variant: 'primary',
       kind: 'client'
+    };
+  }
+
+  private sendReplyAction(item: SocialHubItemData): A2uiAction {
+    const args: SocialHubSendReplyArgs = {
+      text: this.replyText
+    };
+    return {
+      id: 'social_hub_send_reply',
+      label: '发送',
+      prompt: item.id,
+      variant: 'primary',
+      kind: 'client',
+      args: args
     };
   }
 
@@ -120,114 +135,428 @@ export struct SocialHubView {
     };
   }
 
-  private detailActions(): A2uiAction[] {
-    const item = this.selected();
-    const actions: A2uiAction[] = [this.draftAction(item)];
-    if (item.url.length > 0) {
-      actions.push(this.openSourceAction(item));
+  private authorizeAction(platform: SocialHubPlatform): A2uiAction {
+    return {
+      id: platform === 'x' ? 'x.authorize' : 'social_hub_authorize',
+      label: '授权',
+      prompt: platform,
+      variant: 'primary',
+      kind: 'client'
+    };
+  }
+
+  private canAuthorize(connection: SocialHubConnectionData): boolean {
+    return connection.platform === 'x' &&
+      (connection.status === 'needs_auth' || connection.status === 'limited' || connection.status === 'disabled');
+  }
+
+  private openInlineReply(item: SocialHubItemData): void {
+    if (!this.isBusy) {
+      if (this.activeItemId !== item.id) {
+        this.replyText = '';
+      }
+      this.activeItemId = item.id;
     }
-    return actions;
+  }
+
+  private connectionStatusText(connection: SocialHubConnectionData): string {
+    if (connection.status === 'connected') {
+      return '在线';
+    }
+    if (connection.status === 'limited') {
+      return '只读';
+    }
+    if (connection.status === 'needs_auth') {
+      return '授权';
+    }
+    if (connection.status === 'error') {
+      return '异常';
+    }
+    return '待配置';
+  }
+
+  private connectionStatusColor(connection: SocialHubConnectionData): string {
+    if (connection.status === 'connected') {
+      return '#2F7754';
+    }
+    if (connection.status === 'limited') {
+      return '#8A5A16';
+    }
+    if (connection.status === 'needs_auth') {
+      return '#476F9F';
+    }
+    if (connection.status === 'error') {
+      return '#B04A42';
+    }
+    return COLOR_MUTED;
+  }
+
+  private connectionStatusBackground(connection: SocialHubConnectionData): string {
+    if (connection.status === 'connected') {
+      return '#E7F3E8';
+    }
+    if (connection.status === 'limited') {
+      return '#F3E6D4';
+    }
+    if (connection.status === 'needs_auth') {
+      return '#E8EDF8';
+    }
+    if (connection.status === 'error') {
+      return '#F6E2DF';
+    }
+    return '#F5F1EB';
+  }
+
+  private connectionDetail(connection: SocialHubConnectionData): string {
+    if (connection.platform === 'x' && connection.status === 'limited') {
+      return socialHubConnectionMessage(connection);
+    }
+    if (connection.platform === 'slack' && connection.status === 'connected') {
+      return '可搜索你有权限看到的消息';
+    }
+    if (connection.platform === 'wecom' && connection.status === 'needs_auth') {
+      return '需要应用凭证和回调配置';
+    }
+    if (connection.status === 'disabled') {
+      return '还没有添加凭证';
+    }
+    return socialHubConnectionMessage(connection);
+  }
+
+  private isDraftForItem(item: SocialHubItemData): boolean {
+    const draft = socialHubDraft(this.surface);
+    return draft.itemId === item.id && draft.status !== 'empty';
+  }
+
+  @Builder
+  private PlatformLogo(platform: SocialHubPlatform, size: number) {
+    if (platform === 'x') {
+      Image($r('app.media.logo_x'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'slack') {
+      Image($r('app.media.logo_slack'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'wecom') {
+      Image($r('app.media.logo_wecom'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else {
+      Image($r('app.media.icon_social'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    }
   }
 
   @Builder
   private ConnectionCell(platform: SocialHubPlatform) {
-    Column() {
-      Row() {
+    Row() {
+      this.PlatformLogo(platform, 28)
+      Column() {
         Text(socialHubPlatformLabel(platform))
-          .fontSize(13)
+          .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .fontColor(COLOR_INK)
           .maxLines(1)
-          .layoutWeight(1)
-        StatusBadgeView({
-          status: socialHubBadgeStatus(this.connection(platform).status),
-          label: socialHubConnectionStatusLabel(this.connection(platform).status)
-        })
+        Text(this.connectionDetail(this.connection(platform)))
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 2 })
       }
-      .width('100%')
-      .height(28)
-      .alignItems(VerticalAlign.Center)
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .margin({ left: 10, right: 10 })
 
-      Text(socialHubConnectionMessage(this.connection(platform)))
+      Text(this.connectionStatusText(this.connection(platform)))
         .fontSize(12)
-        .fontColor(COLOR_MUTED)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 4 })
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.connectionStatusColor(this.connection(platform)))
+        .textAlign(TextAlign.Center)
+        .width(54)
+        .height(28)
+        .backgroundColor(this.connectionStatusBackground(this.connection(platform)))
+        .borderRadius(10)
+        .border({ width: 1, color: this.connectionStatusColor(this.connection(platform)) })
     }
+    .width('100%')
     .height(SOCIAL_HUB_CONNECTION_HEIGHT)
-    .layoutWeight(1)
-    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-    .backgroundColor(COLOR_SOCIAL_SOFT)
-    .borderRadius(10)
-    .border({ width: 1, color: COLOR_SOCIAL_LINE })
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 12, right: 12 })
+    .backgroundColor(COLOR_CARD_RAISED)
+    .borderRadius(16)
+    .border({ width: 1, color: COLOR_LINE })
+    .margin({ top: platform === 'x' ? 0 : 8 })
+    .onClick(() => {
+      if (this.canAuthorize(this.connection(platform))) {
+        this.onAction(this.authorizeAction(platform));
+      }
+    })
+  }
+
+  @Builder
+  private InlinePostActions(item: SocialHubItemData) {
+    Row() {
+      A2uiButtonView({
+        label: '生成草稿',
+        shape: 'pill',
+        tone: 'primary',
+        isEnabled: !this.isBusy
+      })
+        .width(108)
+        .onClick(() => {
+          if (!this.isBusy) {
+            this.onAction(this.draftAction(item));
+          }
+        })
+      if (item.url.length > 0) {
+        Blank()
+          .width(8)
+        A2uiButtonView({
+          label: '打开来源',
+          shape: 'pill',
+          tone: 'secondary',
+          isEnabled: !this.isBusy
+        })
+          .width(108)
+          .onClick(() => {
+            if (!this.isBusy) {
+              this.onAction(this.openSourceAction(item));
+            }
+          })
+      }
+    }
+    .width('100%')
+    .margin({ top: 12 })
+  }
+
+  @Builder
+  private InlineReply(item: SocialHubItemData) {
+    Column() {
+      if (item.platform === 'slack') {
+        Row() {
+          TextInput({ text: this.replyText, placeholder: '回复 Slack' })
+            .layoutWeight(1)
+            .height(44)
+            .fontSize(14)
+            .fontColor(COLOR_TEXT)
+            .placeholderColor(COLOR_MUTED)
+            .backgroundColor(COLOR_CARD_RAISED)
+            .borderRadius(14)
+            .border({ width: 1, color: COLOR_LINE })
+            .padding({ left: 12, right: 12 })
+            .onChange((value: string) => {
+              this.replyText = value;
+            })
+          Blank()
+            .width(8)
+          A2uiButtonView({
+            label: '发送',
+            shape: 'pill',
+            tone: 'primary',
+            isEnabled: !this.isBusy
+          })
+            .width(84)
+            .onClick(() => {
+              if (!this.isBusy) {
+                this.onAction(this.sendReplyAction(item));
+              }
+            })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      } else {
+        TextArea({ text: this.replyText, placeholder: '回复 ' + socialHubPlatformLabel(item.platform) })
+          .width('100%')
+          .height(82)
+          .fontSize(14)
+          .fontColor(COLOR_TEXT)
+          .placeholderColor(COLOR_MUTED)
+          .backgroundColor(COLOR_CARD_RAISED)
+          .borderRadius(14)
+          .border({ width: 1, color: COLOR_LINE })
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .onChange((value: string) => {
+            this.replyText = value;
+          })
+
+        Row() {
+          A2uiButtonView({
+            label: '生成草稿',
+            shape: 'pill',
+            tone: 'primary',
+            isEnabled: !this.isBusy
+          })
+            .width(108)
+            .onClick(() => {
+              if (!this.isBusy) {
+                this.onAction(this.draftAction(item));
+              }
+            })
+          if (item.url.length > 0) {
+            Blank()
+              .width(8)
+            A2uiButtonView({
+              label: '打开来源',
+              shape: 'pill',
+              tone: 'secondary',
+              isEnabled: !this.isBusy
+            })
+              .width(108)
+              .onClick(() => {
+                if (!this.isBusy) {
+                  this.onAction(this.openSourceAction(item));
+                }
+              })
+          }
+        }
+        .width('100%')
+        .margin({ top: 10 })
+      }
+
+      if (this.isDraftForItem(item)) {
+        Text(socialHubDraftDisplayText(socialHubDraft(this.surface)))
+          .fontSize(13)
+          .fontColor(socialHubDraft(this.surface).status === 'error' ? '#B04A42' : COLOR_TEXT)
+          .lineHeight(20)
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .backgroundColor(COLOR_SOCIAL_SOFT)
+          .borderRadius(12)
+          .border({ width: 1, color: COLOR_SOCIAL_LINE })
+          .margin({ top: 10 })
+      }
+    }
+    .width('100%')
+    .margin({ top: 12 })
   }
 
   @Builder
   private MessageRow(item: SocialHubItemData) {
-    Row() {
+    Column() {
       Column() {
         Row() {
-          Text(socialHubAuthorText(item))
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(COLOR_INK)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-          if (item.unread) {
-            Text('未读')
-              .fontSize(11)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(COLOR_SOCIAL)
-              .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-              .backgroundColor(COLOR_SOCIAL_SOFT)
-              .borderRadius(7)
-              .margin({ left: 8 })
+          this.PlatformLogo(item.platform, 30)
+          Blank()
+            .width(10)
+          Column() {
+            Text(socialHubAuthorText(item))
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_INK)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(socialHubItemMetaText(item))
+              .fontSize(12)
+              .fontColor(COLOR_MUTED)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Text(socialHubKindLabel(item.kind))
+            .fontSize(11)
+            .fontColor(COLOR_MUTED)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(COLOR_CARD_RAISED)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_LINE })
+
+          if (!this.isActive(item) && item.kind !== 'post') {
+            Blank()
+              .width(8)
+            A2uiButtonView({
+              label: '回复',
+              shape: 'pill',
+              tone: 'secondary',
+              isEnabled: !this.isBusy
+            })
+              .onClick(() => {
+                this.openInlineReply(item);
+              })
           }
         }
         .width('100%')
-        .height(22)
         .alignItems(VerticalAlign.Center)
-
-        Text(socialHubPrimaryText(item))
-          .fontSize(13)
-          .fontColor(COLOR_TEXT)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
-
-        Text(socialHubItemMetaText(item))
-          .fontSize(11)
-          .fontColor(COLOR_MUTED)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
-      }
-      .layoutWeight(1)
-      .padding({ right: 10 })
-
-      A2uiButtonView({
-        label: this.isSelected(item) ? '已选' : '选择',
-        shape: 'pill',
-        tone: this.isSelected(item) ? 'activated' : 'secondary',
-        active: this.isSelected(item),
-        isEnabled: !this.isBusy
-      })
-        .width(SOCIAL_HUB_ACTION_WIDTH)
         .onClick(() => {
-          if (this.isBusy) {
-            return;
-          }
-          this.onAction(this.selectAction(item));
+          this.openInlineReply(item);
         })
+
+        if (this.isActive(item)) {
+          Text(socialHubPrimaryText(item))
+            .fontSize(item.kind === 'post' ? 15 : 16)
+            .fontWeight(item.kind === 'post' ? FontWeight.Regular : FontWeight.Medium)
+            .fontColor(COLOR_TEXT)
+            .lineHeight(item.kind === 'post' ? 22 : 24)
+            .width('100%')
+            .margin({ top: 12 })
+            .onClick(() => {
+              this.openInlineReply(item);
+            })
+        } else {
+          Text(socialHubPrimaryText(item))
+            .fontSize(16)
+            .fontWeight(item.kind === 'post' ? FontWeight.Regular : FontWeight.Medium)
+            .fontColor(COLOR_TEXT)
+            .lineHeight(24)
+            .maxLines(item.kind === 'post' ? 4 : 2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .margin({ top: 12 })
+            .onClick(() => {
+              this.openInlineReply(item);
+            })
+        }
+
+        if (item.kind === 'post' && item.mediaUrl.length > 0) {
+          Image(item.mediaUrl)
+            .width('100%')
+            .height(this.isPostExpanded(item) ? 218 : 132)
+            .objectFit(ImageFit.Cover)
+            .borderRadius(14)
+            .backgroundColor(COLOR_CARD_RAISED)
+            .margin({ top: 10 })
+            .onClick(() => {
+              this.openInlineReply(item);
+            })
+        }
+
+        if (item.unread) {
+          Text('未读')
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(COLOR_SOCIAL)
+            .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+            .backgroundColor(COLOR_SOCIAL_SOFT)
+            .borderRadius(7)
+            .margin({ top: 10 })
+        }
+
+        if (item.kind === 'post' && this.isPostExpanded(item)) {
+          this.InlinePostActions(item)
+        } else if (this.isActive(item)) {
+          this.InlineReply(item)
+        }
+      }
+      .width('100%')
     }
     .width('100%')
-    .height(SOCIAL_HUB_ROW_HEIGHT)
-    .alignItems(VerticalAlign.Center)
-    .padding({ left: 12, right: 10 })
-    .backgroundColor(this.isSelected(item) ? COLOR_SOCIAL_CARD : '#00000000')
-    .border({ width: { bottom: 1 }, color: COLOR_LINE })
+    .padding({ left: 14, right: 14, top: 14, bottom: 14 })
+    .margin({ top: 10 })
+    .backgroundColor(this.isActive(item) ? COLOR_SOCIAL_CARD : COLOR_CARD_RAISED)
+    .borderRadius(18)
+    .border({ width: 1, color: this.isActive(item) ? COLOR_SOCIAL_LINE : COLOR_LINE })
+    .onClick(() => {
+      this.openInlineReply(item);
+    })
   }
 
   @Builder
@@ -265,80 +594,21 @@ export struct SocialHubView {
         .alignItems(HorizontalAlign.Center)
         .border({ width: { top: 1 }, color: COLOR_LINE })
       } else {
-        ForEach(this.items(), (item: SocialHubItemData) => {
-          this.MessageRow(item)
-        }, (item: SocialHubItemData) => item.id)
+        Scroll() {
+          Column() {
+            ForEach(this.items(), (item: SocialHubItemData) => {
+              this.MessageRow(item)
+            }, (item: SocialHubItemData) => item.id)
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: 520 })
+        .scrollBar(BarState.Auto)
       }
     }
     .width('100%')
     .clip(true)
-  }
-
-  @Builder
-  private DetailPanel() {
-    Column() {
-      Row() {
-        Text('详情 / 草稿')
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_INK)
-          .layoutWeight(1)
-        StatusBadgeView({
-          status: socialHubDraft(this.surface).status === 'error' ? 'error' : 'idle',
-          label: socialHubDraft(this.surface).status === 'draft' ? '本地草稿' : '未发送'
-        })
-      }
-      .width('100%')
-      .height(30)
-      .alignItems(VerticalAlign.Center)
-
-      if (this.selected().id.length === 0) {
-        Text('选择一条真实消息后，可以在这里生成本地草稿预览。')
-          .fontSize(13)
-          .fontColor(COLOR_MUTED)
-          .lineHeight(19)
-          .height(54)
-          .margin({ top: 10 })
-      } else {
-        Text(socialHubAuthorText(this.selected()))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_INK)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 10 })
-
-        Text(socialHubPrimaryText(this.selected()))
-          .fontSize(13)
-          .fontColor(COLOR_TEXT)
-          .lineHeight(20)
-          .maxLines(3)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 6 })
-      }
-
-      ActionBarView({
-        actions: this.detailActions(),
-        isBusy: this.isBusy,
-        onAction: this.onAction
-      })
-
-      Text(socialHubDraftDisplayText(socialHubDraft(this.surface)))
-        .fontSize(13)
-        .fontColor(socialHubDraft(this.surface).status === 'error' ? '#B04A42' : COLOR_TEXT)
-        .lineHeight(20)
-        .maxLines(5)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .backgroundColor(COLOR_SOCIAL_SOFT)
-        .borderRadius(10)
-        .border({ width: 1, color: COLOR_SOCIAL_LINE })
-        .margin({ top: 12 })
-    }
-    .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-    .border({ width: { top: 1 }, color: COLOR_LINE })
   }
 
   build() {
@@ -364,17 +634,12 @@ export struct SocialHubView {
         .height(34)
         .alignItems(VerticalAlign.Center)
 
-        Row() {
+        Column() {
           this.ConnectionCell('x')
-          Blank()
-            .width(8)
           this.ConnectionCell('slack')
-          Blank()
-            .width(8)
           this.ConnectionCell('wecom')
         }
         .width('100%')
-        .height(SOCIAL_HUB_CONNECTION_HEIGHT)
         .margin({ top: 8 })
 
         Column() {
@@ -383,11 +648,6 @@ export struct SocialHubView {
         .width('100%')
         .margin({ top: 12 })
 
-        Column() {
-          this.DetailPanel()
-        }
-        .width('100%')
-        .margin({ top: 12 })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 12, bottom: 12 })
