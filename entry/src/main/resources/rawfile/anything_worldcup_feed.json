@@ -1,0 +1,330 @@
+{
+  "topic": "World Cup 2026",
+  "date": "2026-07-02",
+  "updatedAt": "2026-07-02 16:15 Asia/Shanghai",
+  "sourceNote": "横版集锦和竖屏短视频使用 FOX Sports 页面暴露的 MP4 直链；比分、赛程、战报和球员信息按 2026-07-02 可核验公开来源整理。",
+  "officialScheduleUrl": "https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/scores-fixtures",
+  "hero": {
+    "kicker": "Today / Round of 32",
+    "title": "世界杯 Anything OS",
+    "subtitle": "同一个兴趣主题里刷集锦、战报、赛程、球员数据和长内容线索。",
+    "background": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=1400&q=82"
+  },
+  "sources": [
+    { "id": "all", "label": "全部", "kind": "all" },
+    { "id": "highlights", "label": "集锦", "kind": "video" },
+    { "id": "fixtures", "label": "赛程", "kind": "schedule" },
+    { "id": "news", "label": "战报", "kind": "news" },
+    { "id": "stats", "label": "数据", "kind": "data" },
+    { "id": "clips", "label": "短视频", "kind": "clip" }
+  ],
+  "videos": [
+    {
+      "id": "usa-bosnia",
+      "kind": "video",
+      "provider": "FOX Sports",
+      "title": "United States vs Bosnia and Herzegovina Highlights",
+      "match": "United States 2-0 Bosnia and Herzegovina",
+      "score": "2-0",
+      "status": "Final",
+      "duration": "4:43",
+      "published": "6 HOURS AGO",
+      "streamType": "MP4",
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-2qwc6yy1zekzejvv/USavsBIH_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-2qwc6yy1zekzejvv",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16523782/1280/720/pqfvhwb8ymv0qct3.jpg?ve=1&tl=1",
+      "summary": "美国队在 Round of 32 中 2-0 晋级，Balogun 先打开局面，Tillman 用任意球扩大优势。"
+    },
+    {
+      "id": "belgium-senegal",
+      "kind": "video",
+      "provider": "FOX Sports",
+      "title": "Belgium vs Senegal Highlights",
+      "match": "Belgium 3-2 Senegal",
+      "score": "3-2",
+      "status": "Final",
+      "duration": "4:52",
+      "published": "9 HOURS AGO",
+      "streamType": "MP4",
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-ujm5rsfrv6i6z90l/4MIN_BEL_SEN_HL_0701_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-ujm5rsfrv6i6z90l",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16523036/1280/720/rj2i2qtxmsc9sit4.jpg?ve=1&tl=1",
+      "summary": "比利时从 0-2 追到 3-2，Tielemans 在加时最后阶段罚入制胜点球。"
+    },
+    {
+      "id": "england-dr-congo",
+      "kind": "video",
+      "provider": "FOX Sports",
+      "title": "England vs DR Congo Highlights",
+      "match": "England 2-1 DR Congo",
+      "score": "2-1",
+      "status": "Final",
+      "duration": "4:34",
+      "published": "14 HOURS AGO",
+      "streamType": "MP4",
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-ct3q1x3m4x5j8w35/ENGvsCOD_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-ct3q1x3m4x5j8w35",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16521433/1280/720/5zcrwg1736os1if3.jpg?ve=1&tl=1",
+      "summary": "英格兰开局落后，Harry Kane 在最后 15 分钟梅开二度，完成 2-1 逆转。"
+    },
+    {
+      "id": "tielemans-goal",
+      "kind": "clip",
+      "provider": "FOX Sports",
+      "title": "Tielemans Vertical Penalty Short",
+      "match": "Belgium 3-2 Senegal",
+      "score": "Goal",
+      "status": "Short",
+      "duration": "0:33",
+      "published": "Today",
+      "streamType": "MP4",
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-4k4xtgem88th16ix/bel_goal_3_pk_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch-vertical/fmc-4k4xtgem88th16ix",
+      "thumbnail": "https://static-media.fox.com/fmc/prod/sports/VX-16523037/hmko6casq6f4cggj.png",
+      "summary": "0:33 竖屏短片，Tielemans 加时点球破门。"
+    },
+    {
+      "id": "kane-goal",
+      "kind": "clip",
+      "provider": "FOX Sports",
+      "title": "Harry Kane Late Equalizer",
+      "match": "England 2-1 DR Congo",
+      "score": "Goal",
+      "status": "Clip",
+      "duration": "1:31",
+      "published": "14 HOURS AGO",
+      "streamType": "MP4",
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-dnof9dhbsvttl0wn/ENG_KANE_GOAL_75_COD_0701_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-dnof9dhbsvttl0wn",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/0d5f8769-f593-42f4-828b-5b2910d29b2a/1280/720/r80obcejcvkp48ey.png?ve=1&tl=1",
+      "summary": "Kane 在 75' 打进扳平球。"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "spain-austria",
+      "match": "Spain vs Austria",
+      "status": "Upcoming",
+      "timeLocal": "Jul 2, 12:00 PM PT",
+      "timeET": "3:00 PM ET",
+      "timeChina": "北京时间 7/3 03:00",
+      "venue": "SoFi Stadium",
+      "city": "Los Angeles",
+      "source": "CBS Sports / FIFA",
+      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
+      "angle": "Spain 对 Austria，今日第一场淘汰赛。"
+    },
+    {
+      "id": "portugal-croatia",
+      "match": "Portugal vs Croatia",
+      "status": "Upcoming",
+      "timeLocal": "Jul 2, 7:00 PM ET",
+      "timeET": "7:00 PM ET",
+      "timeChina": "北京时间 7/3 07:00",
+      "venue": "BMO Field",
+      "city": "Toronto",
+      "source": "CBS Sports / FIFA",
+      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
+      "angle": "Ronaldo 与 Modric 再碰面，晚间焦点战。"
+    },
+    {
+      "id": "switzerland-algeria",
+      "match": "Switzerland vs Algeria",
+      "status": "Upcoming",
+      "timeLocal": "Jul 2, 8:00 PM PT",
+      "timeET": "11:00 PM ET",
+      "timeChina": "北京时间 7/3 11:00",
+      "venue": "BC Place",
+      "city": "Vancouver",
+      "source": "CBS Sports / FIFA",
+      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
+      "angle": "Switzerland 对 Algeria，温哥华夜场。"
+    }
+  ],
+  "players": [
+    {
+      "id": "harry-kane",
+      "name": "Harry Kane",
+      "team": "England",
+      "role": "Captain / Striker",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/453.vresize.350.350.medium.2.png",
+      "match": "England 2-1 DR Congo",
+      "source": "FOX Sports Boxscore",
+      "sourceUrl": "https://www.foxsports.com/soccer/fifa-world-cup-men-england-vs-dr-congo-jul-01-2026-game-boxscore-607912",
+      "stats": [
+        { "label": "Goals", "value": "2" },
+        { "label": "SOG", "value": "3" },
+        { "label": "Passes", "value": "9" },
+        { "label": "Goal times", "value": "75' / 86'" }
+      ],
+      "note": "75'、86' 连进两球。"
+    },
+    {
+      "id": "youri-tielemans",
+      "name": "Youri Tielemans",
+      "team": "Belgium",
+      "role": "Midfielder",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/3543.vresize.350.350.medium.2.png",
+      "match": "Belgium 3-2 Senegal",
+      "source": "The Guardian",
+      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/belgium-senegal-2026-world-cup-last-32-match-report",
+      "stats": [
+        { "label": "Winner", "value": "124:44" },
+        { "label": "Type", "value": "Penalty" },
+        { "label": "Score swing", "value": "0-2 to 3-2" },
+        { "label": "Next", "value": "USA" }
+      ],
+      "note": "124:44 罚进制胜点球。"
+    },
+    {
+      "id": "folarin-balogun",
+      "name": "Folarin Balogun",
+      "team": "United States",
+      "role": "Forward",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/74048.vresize.350.350.medium.2.png",
+      "match": "United States 2-0 Bosnia and Herzegovina",
+      "source": "The Guardian / People",
+      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/folarin-balogun-red-card-world-cup-appeal-usmnt",
+      "stats": [
+        { "label": "Goal", "value": "Opener" },
+        { "label": "Red card", "value": "64'" },
+        { "label": "Next match", "value": "Suspended" },
+        { "label": "Result", "value": "2-0" }
+      ],
+      "note": "先进球，64' 吃到红牌。"
+    },
+    {
+      "id": "malik-tillman",
+      "name": "Malik Tillman",
+      "team": "United States",
+      "role": "Midfielder",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/80522.vresize.350.350.medium.2.png",
+      "match": "United States 2-0 Bosnia and Herzegovina",
+      "source": "FOX Sports / People",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-xkrf6vsftbz6vhzf",
+      "stats": [
+        { "label": "Goal", "value": "Free kick" },
+        { "label": "Minute", "value": "82'" },
+        { "label": "Lead", "value": "2-0" },
+        { "label": "Stage", "value": "R32" }
+      ],
+      "note": "82' 任意球锁定 2-0。"
+    }
+  ],
+  "cards": [
+    {
+      "id": "lead-video",
+      "kind": "video",
+      "title": "USA 2-0 Bosnia",
+      "subtitle": "Balogun 破门，Tillman 任意球锁定胜局。",
+      "source": "FOX Sports",
+      "videoId": "usa-bosnia",
+      "body": [
+        "美国队 2-0 晋级。Balogun 先得分，64' 被红牌罚下，Tillman 在 82' 任意球破门。"
+      ],
+      "metrics": [
+        { "label": "Score", "value": "2-0" },
+        { "label": "Stage", "value": "R32" },
+        { "label": "Clip", "value": "4:43" },
+        { "label": "Source", "value": "MP4" }
+      ]
+    },
+    {
+      "id": "belgium-report",
+      "kind": "news",
+      "title": "Belgium 3-2 Senegal: 五球逆转战报",
+      "subtitle": "The Guardian 文字战报。",
+      "source": "The Guardian",
+      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/belgium-senegal-2026-world-cup-last-32-match-report",
+      "body": [
+        "Senegal 一度 2-0 领先。比利时在比赛尾段追平，把比赛拖进加时。",
+        "124:44，Tielemans 罚进点球。这个进球把比分定格为 3-2，比利时进入下一轮。",
+        "比利时下一轮将面对 United States。"
+      ]
+    },
+    {
+      "id": "england-news",
+      "kind": "news",
+      "title": "Kane 把英格兰拉回来",
+      "subtitle": "Sky Sports 赛后文字报道。",
+      "source": "Sky Sports",
+      "sourceUrl": "https://www.skysports.com/football/england-vs-dr-congo/report/549847",
+      "body": [
+        "DR Congo 第 7 分钟先得分，英格兰大半场都没找到节奏。",
+        "Kane 在 75' 扳平，又在 86' 打进制胜球。英格兰 2-1 晋级，将面对 Mexico。",
+        "Sky Sports 赛后报道把焦点放在 Kane 的终结能力和英格兰的慢热问题上。"
+      ]
+    },
+    {
+      "id": "tielemans-clip",
+      "kind": "clip",
+      "title": "Tielemans 制胜点球",
+      "subtitle": "0:33 竖屏短视频。",
+      "source": "FOX Sports",
+      "videoId": "tielemans-goal",
+      "body": [
+        "加时最后阶段，Tielemans 主罚命中。"
+      ],
+      "metrics": [
+        { "label": "Type", "value": "Goal" },
+        { "label": "Match", "value": "BEL 3-2 SEN" },
+        { "label": "Clip", "value": "0:33" },
+        { "label": "Source", "value": "FOX" }
+      ]
+    },
+    {
+      "id": "england-card",
+      "kind": "video",
+      "title": "England 2-1 DR Congo",
+      "subtitle": "Kane 最后 15 分钟连进两球。",
+      "source": "FOX Sports / Sky Sports",
+      "videoId": "england-dr-congo",
+      "sourceUrl": "https://www.skysports.com/football/england-vs-dr-congo/549847",
+      "body": [
+        "DR Congo 第 7 分钟领先。Kane 在 75' 扳平，86' 打进制胜球。"
+      ],
+      "metrics": [
+        { "label": "Score", "value": "2-1" },
+        { "label": "Kane", "value": "2 goals" },
+        { "label": "Clip", "value": "4:34" },
+        { "label": "Status", "value": "Final" }
+      ]
+    },
+    {
+      "id": "kane-clip",
+      "kind": "clip",
+      "title": "Kane 扳平球",
+      "subtitle": "1 分 31 秒短视频。",
+      "source": "FOX Sports",
+      "videoId": "kane-goal",
+      "body": [
+        "Kane 门前抢点，英格兰把比赛拉回同一起跑线。"
+      ],
+      "metrics": [
+        { "label": "Type", "value": "Goal" },
+        { "label": "Match", "value": "ENG 2-1 COD" },
+        { "label": "Clip", "value": "1:31" },
+        { "label": "Player", "value": "Kane" }
+      ]
+    },
+    {
+      "id": "fixtures-card",
+      "kind": "schedule",
+      "title": "接下来该看什么",
+      "subtitle": "7 月 2 日还有三场淘汰赛。",
+      "source": "CBS Sports / FIFA",
+      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
+      "body": [
+        "Spain vs Austria、Portugal vs Croatia、Switzerland vs Algeria。时间和球场在下面。"
+      ]
+    },
+    {
+      "id": "stats-card",
+      "kind": "data",
+      "title": "今日球员",
+      "subtitle": "Kane、Tielemans、Balogun、Tillman。",
+      "source": "FOX / Guardian / People / Sky",
+      "body": []
+    }
+  ]
+}

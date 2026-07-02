@@ -1,0 +1,9 @@
+[
+  { "id": "default_companion", "name": "默认分身", "avatarKey": "default", "domains": ["general"], "defaultTools": [] },
+  { "id": "food_companion", "name": "饮食搭子", "avatarKey": "food", "domains": ["food"], "defaultTools": ["food.search"] },
+  { "id": "travel_companion", "name": "旅行搭子", "avatarKey": "travel", "domains": ["travel"], "defaultTools": ["travel.search", "train.search", "flight.search"] },
+  { "id": "work_companion", "name": "工作分身", "avatarKey": "work", "domains": ["mail", "calendar"], "defaultTools": ["mail.search", "mail.draft.create", "calendar.events.search"] },
+  { "id": "entertainment_companion", "name": "娱乐搭子", "avatarKey": "entertainment", "domains": ["media", "social"], "defaultTools": ["media.video.search", "youtube.video.search"] },
+  { "id": "game_companion", "name": "游戏搭子", "avatarKey": "game", "domains": ["game"], "defaultTools": ["dynamic.search"] },
+  { "id": "shopping_companion", "name": "购物搭子", "avatarKey": "shopping", "domains": ["shopping"], "defaultTools": ["dynamic.search"] }
+]

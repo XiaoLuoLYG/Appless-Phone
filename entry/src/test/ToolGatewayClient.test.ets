@@ -1311,6 +1311,73 @@ export default function toolGatewayClientTest() {
       expect(merged.foods[2].name).assertEqual('近距离单源店');
     });
 
+    it('prioritizes preferred Luckin food results without fabricating rows', 0, () => {
+      const merged = aggregateFoodProviderResults([
+        {
+          provider: '高德',
+          foods: [{
+            name: '普通咖啡店',
+            category: '咖啡',
+            address: 'A',
+            distance: '100米',
+            sourceTags: ['高德']
+          }],
+          error: ''
+        },
+        {
+          provider: '瑞幸',
+          foods: [{
+            name: '瑞幸咖啡 深圳店',
+            category: '瑞幸门店',
+            address: 'B',
+            distance: '900米',
+            sourceTags: ['瑞幸']
+          }],
+          error: ''
+        }
+      ], {
+        brandPreference: '瑞幸',
+        sweetness: '半糖'
+      });
+
+      expect(merged.foods.length).assertEqual(2);
+      expect(merged.foods[0].name.indexOf('瑞幸')).assertLarger(-1);
+      expect(merged.foods[0].sourceTags === undefined ? '' : merged.foods[0].sourceTags![0]).assertEqual('瑞幸');
+    });
+
+    it('filters to Luckin rows for strict Luckin-only preference', 0, () => {
+      const merged = aggregateFoodProviderResults([
+        {
+          provider: '高德',
+          foods: [{
+            name: '普通咖啡店',
+            category: '咖啡',
+            address: 'A',
+            distance: '100米',
+            sourceTags: ['高德']
+          }],
+          error: ''
+        },
+        {
+          provider: '瑞幸',
+          foods: [{
+            name: '瑞幸咖啡 深圳店',
+            category: '瑞幸门店',
+            address: 'B',
+            distance: '900米',
+            sourceTags: ['瑞幸']
+          }],
+          error: ''
+        }
+      ], {
+        brandPreference: '瑞幸',
+        brandStrict: true
+      });
+
+      expect(merged.foods.length).assertEqual(1);
+      expect(merged.foods[0].name.indexOf('瑞幸')).assertLarger(-1);
+    });
+
     it('keeps later map provider tags visible when Amap fills the limit first', 0, () => {
       const amapFoods: A2uiFoodData[] = [];
       for (let index = 0; index < 8; index++) {

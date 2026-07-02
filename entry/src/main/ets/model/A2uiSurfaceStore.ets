@@ -12,6 +12,8 @@ import {
   A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
+  A2uiPersonaData,
+  A2uiPersonaMemoryData,
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
   A2uiSummaryData,
@@ -102,7 +104,26 @@ function emptyDataModel(): A2uiRuntimeDataModel {
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
     genericToolResults: [],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: emptyPersona(),
+    personaMemory: emptyPersonaMemory()
+  };
+}
+
+function emptyPersona(): A2uiPersonaData {
+  return {
+    id: '',
+    name: '',
+    avatarKey: '',
+    status: '',
+    reason: ''
+  };
+}
+
+function emptyPersonaMemory(): A2uiPersonaMemoryData {
+  return {
+    summary: '',
+    preferences: []
   };
 }
 
@@ -378,6 +399,29 @@ function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroup
   };
 }
 
+function normalizePersona(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaData): A2uiPersonaData {
+  if (parsed.persona === undefined || parsed.persona === null) {
+    return fallback;
+  }
+  return {
+    id: textOf(parsed.persona.id),
+    name: textOf(parsed.persona.name),
+    avatarKey: textOf(parsed.persona.avatarKey),
+    status: textOf(parsed.persona.status),
+    reason: textOf(parsed.persona.reason)
+  };
+}
+
+function normalizePersonaMemory(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaMemoryData): A2uiPersonaMemoryData {
+  if (parsed.personaMemory === undefined || parsed.personaMemory === null) {
+    return fallback;
+  }
+  return {
+    summary: textOf(parsed.personaMemory.summary),
+    preferences: stringArrayFromDataValue(parsed.personaMemory.preferences)
+  };
+}
+
 function parseDataModel(json: string): A2uiRuntimeDataModel {
   const fallback = emptyDataModel();
   try {
@@ -399,6 +443,8 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
+      persona: normalizePersona(parsed, fallback.persona),
+      personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -521,6 +567,10 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.dynamicToolConnect = value as A2uiDynamicToolConnectData;
   } else if (path === '/genericToolResults') {
     next.genericToolResults = value as A2uiGenericToolResultData[];
+  } else if (path === '/persona') {
+    next.persona = value as A2uiPersonaData;
+  } else if (path === '/personaMemory') {
+    next.personaMemory = value as A2uiPersonaMemoryData;
   } else if (path === '/socialHub') {
     next.socialHub = normalizeSocialHub(value as Object, next.socialHub);
   } else if (path === '/socialHub/items') {
@@ -629,10 +679,16 @@ export class A2uiSurfaceStore {
           'general' : envelope.createSurface.intent;
         const nextStatus = envelope.createSurface.status === undefined || envelope.createSurface.status.length === 0 ?
           'thinking' : envelope.createSurface.status;
-        const preservedThoughts = parseDataModel(this.surface.dataModelJson).thoughts;
+        const currentModel = parseDataModel(this.surface.dataModelJson);
+        const preservedThoughts = currentModel.thoughts;
+        const preservedPersona = currentModel.persona;
+        const preservedPersonaMemory = currentModel.personaMemory;
         if (this.surface.surfaceId === nextSurfaceId && this.surface.components.length > 0) {
           if (envelope.createSurface.sendDataModel === true && nextStatus === 'calling_tool') {
-            this.surface.dataModelJson = JSON.stringify(emptyDataModel());
+            const resetModel = emptyDataModel();
+            resetModel.persona = preservedPersona;
+            resetModel.personaMemory = preservedPersonaMemory;
+            this.surface.dataModelJson = JSON.stringify(resetModel);
           }
           this.surface.rootId = nextRootId;
           this.surface.title = nextTitle;
@@ -646,6 +702,8 @@ export class A2uiSurfaceStore {
         if (preservedThoughts.length > 0) {
           nextDataModel.thoughts = preservedThoughts;
         }
+        nextDataModel.persona = preservedPersona;
+        nextDataModel.personaMemory = preservedPersonaMemory;
         this.surface = {
           surfaceId: nextSurfaceId,
           rootId: nextRootId,

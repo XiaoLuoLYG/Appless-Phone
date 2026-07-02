@@ -52,6 +52,18 @@
           ]
         }
       ]
+    },
+    {
+      "name": "agent_core",
+      "srcPath": "./agent_core",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
     }
   ]
 }

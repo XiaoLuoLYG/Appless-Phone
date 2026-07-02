@@ -57,6 +57,8 @@ function documentFixture(): HtmlHomeDocument {
     }],
     actions: [{ id: 'gmail.open.web', label: 'Gmail Web', prompt: 'https://mail.google.com/', variant: 'secondary', kind: 'client' }],
     history: [],
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] },
     rawSurfaceRoot: null,
     generatedAt: '2026-06-26T00:00:00.000Z'
   };

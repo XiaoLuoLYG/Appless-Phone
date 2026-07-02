@@ -479,5 +479,18 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('dynamic:maps:API Key')).assertLarger(-1);
       expect(serialized.indexOf('Fixture row')).assertLarger(-1);
     });
+
+    it('includes persona metadata when present', 0, () => {
+      const doc = createHtmlHomeDocument({
+        surface: surface('food', 'ready', [root('food_results')],
+          '{"persona":{"id":"food_companion","name":"饮食搭子","avatarKey":"food","status":"online","reason":"用户请求属于饮食场景。"},"personaMemory":{"summary":"根据你的偏好，优先考虑半糖、瑞幸优先。","preferences":["半糖","瑞幸优先"]}}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(doc.persona.name).assertEqual('饮食搭子');
+      expect(doc.personaMemory.summary.indexOf('瑞幸')).assertLarger(-1);
+    });
   });
 }

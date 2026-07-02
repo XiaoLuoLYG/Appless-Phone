@@ -1,0 +1,9 @@
+{
+  "name": "@loop/agent-core",
+  "version": "1.0.0",
+  "description": "Loop ReAct agent shared library",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

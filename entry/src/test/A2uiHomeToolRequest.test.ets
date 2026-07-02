@@ -39,6 +39,11 @@ interface MediaOverrideArgsFixture {
   sources: string[];
 }
 
+interface FoodPreferenceArgsFixture {
+  brandPreference: string;
+  sweetness: string;
+}
+
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
 
@@ -129,7 +134,9 @@ function surfaceWithToolRequest(
       actions: []
     },
     genericToolResults: [],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
   const components: A2uiComponent[] = [];
   return {
@@ -215,6 +222,22 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('food.search');
       expect(resolved.actionId).assertEqual('client_maps_safety_reroute');
+    });
+
+    it('preserves food preference args from model tool request', 0, () => {
+      const args: FoodPreferenceArgsFixture = {
+        brandPreference: '瑞幸',
+        sweetness: '半糖'
+      };
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', '点一杯咖啡', 'model_tool_request', args),
+        '点一杯咖啡',
+        ''
+      );
+
+      expect(resolved.toolId).assertEqual('food.search');
+      expect(argText(resolved.args, 'brandPreference')).assertEqual('瑞幸');
+      expect(argText(resolved.args, 'sweetness')).assertEqual('半糖');
     });
 
     it('keeps explicit gmap requests on Google Maps search', 0, () => {

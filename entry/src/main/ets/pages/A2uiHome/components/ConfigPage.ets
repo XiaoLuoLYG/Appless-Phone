@@ -19,8 +19,10 @@ import {
   statusBackground,
   statusColor
 } from '../style/A2uiHomeTheme';
+import { PersonaPack } from '../../../model/PersonaTypes';
 import { connectionStatusLabel } from '../state/A2uiHomeState';
 import { DebugTextPanel } from './DebugTextPanel';
+import { personaAvatarResource } from './PersonaAvatar';
 
 @Component
 export struct ConfigPage {
@@ -39,8 +41,16 @@ export struct ConfigPage {
   @Prop lastModelOutput: string = '';
   @Prop lastError: string = '';
   @Prop refreshTick: number = 0;
+  @Prop personaPacks: PersonaPack[] = [];
+  @Link selectedPersonaId: string;
+  @Link personaSoulDraft: string;
+  @Link personaMemoryDraft: string;
+  @Prop personaSaveMessage: string = '';
   onBack: () => void = () => {};
   onTestConnection: () => void = () => {};
+  onSelectPersona: (personaId: string) => void = (_personaId: string) => {};
+  onSavePersona: () => void = () => {};
+  onResetPersona: () => void = () => {};
 
   @Builder
   InputLabel(label: string, top: number) {
@@ -60,6 +70,152 @@ export struct ConfigPage {
       .backgroundColor(statusBackground(this.connectionStatus))
       .borderRadius(9)
       .border({ width: 1, color: statusColor(this.connectionStatus) })
+  }
+
+  private selectedPersona(): PersonaPack | null {
+    for (let index = 0; index < this.personaPacks.length; index++) {
+      if (this.personaPacks[index].manifest.id === this.selectedPersonaId) {
+        return this.personaPacks[index];
+      }
+    }
+    return this.personaPacks.length > 0 ? this.personaPacks[0] : null;
+  }
+
+  private selectedPersonaSkills(): string {
+    const pack = this.selectedPersona();
+    return pack === null ? '' : pack.skills;
+  }
+
+  @Builder
+  PersonaChip(pack: PersonaPack) {
+    Row() {
+      Image(personaAvatarResource(pack.manifest.avatarKey))
+        .width(28)
+        .height(28)
+        .objectFit(ImageFit.Contain)
+      Text(pack.manifest.name)
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.selectedPersonaId === pack.manifest.id ? COLOR_BUTTON_TEXT : COLOR_INK)
+        .margin({ left: 6 })
+    }
+    .height(40)
+    .padding({ left: 10, right: 12 })
+    .backgroundColor(this.selectedPersonaId === pack.manifest.id ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
+    .borderRadius(12)
+    .border({ width: 1, color: this.selectedPersonaId === pack.manifest.id ? COLOR_ACCENT : COLOR_CARD_EDGE })
+    .margin({ right: 8, bottom: 8 })
+    .onClick(() => {
+      this.onSelectPersona(pack.manifest.id);
+    })
+  }
+
+  @Builder
+  PersonaEditorSection() {
+    Column() {
+      Row() {
+        Column() {
+          Text('数字分身')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+          Text('编辑 soul 和 memory；skills 只读。保存后下一次请求立即使用。')
+            .fontSize(13)
+            .fontColor(COLOR_MUTED)
+            .lineHeight(19)
+            .margin({ top: 8 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        if (this.personaSaveMessage.length > 0) {
+          Text(this.personaSaveMessage)
+            .fontSize(12)
+            .fontColor(COLOR_ACCENT)
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: 14 })
+
+      Flex({ wrap: FlexWrap.Wrap }) {
+        ForEach(this.personaPacks, (pack: PersonaPack) => {
+          this.PersonaChip(pack)
+        }, (pack: PersonaPack) => pack.manifest.id)
+      }
+      .width('100%')
+      .margin({ bottom: 10 })
+
+      this.InputLabel('soul.md', 0)
+      TextArea({ text: this.personaSoulDraft, placeholder: '这个分身是谁，应该怎样说话' })
+        .height(92)
+        .fontSize(13)
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_FIELD)
+        .borderRadius(9)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .onChange((value: string) => {
+          this.personaSoulDraft = value;
+        })
+
+      this.InputLabel('memory.md', 12)
+      TextArea({ text: this.personaMemoryDraft, placeholder: '例如：用户咖啡偏好：只喝瑞幸咖啡。' })
+        .height(92)
+        .fontSize(13)
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_FIELD)
+        .borderRadius(9)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .onChange((value: string) => {
+          this.personaMemoryDraft = value;
+        })
+
+      Row() {
+        Button('保存')
+          .height(40)
+          .layoutWeight(1)
+          .fontSize(13)
+          .fontColor(COLOR_BUTTON_TEXT)
+          .backgroundColor(COLOR_ACCENT_DEEP)
+          .borderRadius(10)
+          .border({ width: 1, color: COLOR_ACCENT })
+          .onClick(() => {
+            this.onSavePersona();
+          })
+        Button('恢复默认')
+          .height(40)
+          .layoutWeight(1)
+          .fontSize(13)
+          .fontColor(COLOR_INK)
+          .backgroundColor(COLOR_CARD_RAISED)
+          .borderRadius(10)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
+          .margin({ left: 8 })
+          .onClick(() => {
+            this.onResetPersona();
+          })
+      }
+      .width('100%')
+      .margin({ top: 14 })
+
+      DebugTextPanel({
+        label: 'skills.md（只读）',
+        value: this.selectedPersonaSkills(),
+        refreshTick: this.refreshTick
+      })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(18)
+    .backgroundColor(COLOR_PANEL)
+    .borderRadius(16)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 10 })
+    .margin({ bottom: 14 })
   }
 
   build() {
@@ -97,6 +253,8 @@ export struct ConfigPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
         .margin({ bottom: 16 })
+
+        this.PersonaEditorSection()
 
         Column() {
           Text('模型连接')

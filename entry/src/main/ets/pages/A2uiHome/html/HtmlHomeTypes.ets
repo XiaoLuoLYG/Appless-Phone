@@ -61,6 +61,19 @@ export interface HtmlHomeHistoryItem {
   content: string;
 }
 
+export interface HtmlHomePersona {
+  id: string;
+  name: string;
+  avatarKey: string;
+  status: string;
+  reason: string;
+}
+
+export interface HtmlHomePersonaMemory {
+  summary: string;
+  preferences: string[];
+}
+
 export interface HtmlHomeDocument {
   version: number;
   source: HtmlHomeSource;
@@ -73,6 +86,8 @@ export interface HtmlHomeDocument {
   blocks: HtmlHomeBlock[];
   actions: HtmlHomeAction[];
   history: HtmlHomeHistoryItem[];
+  persona: HtmlHomePersona;
+  personaMemory: HtmlHomePersonaMemory;
   rawSurfaceRoot: A2uiComponent | null;
   generatedAt: string;
 }

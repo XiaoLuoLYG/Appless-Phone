@@ -887,6 +887,8 @@ export function renderTravelHomeDocument(document: HtmlHomeDocument, isBusy: boo
     blocks: document.blocks,
     actions: document.actions,
     history: [],
+    persona: document.persona,
+    personaMemory: document.personaMemory,
     rawSurfaceRoot: null,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlTravelHomeDocumentWithBusy).isBusy === true

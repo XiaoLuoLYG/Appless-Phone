@@ -29,7 +29,7 @@ import {
   SocialHubItemData
 } from '../../model/SocialHubTypes';
 import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl } from '../../model/ToolGatewayClient';
+import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '../../model/ToolGatewayClient';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -43,6 +43,10 @@ import {
 import { AssetCredentialStore } from '../../model/DynamicCredentialStore';
 import { buildSystemFoodNavigationUri } from '../../model/FoodNavigation';
 import { officialMediaVideoPlaybackUrl } from '../../model/MediaVideoToolA2ui';
+import { copyPersonaData } from '../../model/PersonaA2ui';
+import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
+import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
+import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
@@ -103,6 +107,10 @@ interface HtmlPinPayload {
   arr?: HtmlActionValue;
 }
 
+interface SocialHubReplyPayload {
+  text?: HtmlActionValue;
+}
+
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
     return text;
@@ -146,6 +154,11 @@ struct Index {
   @State voiceInputMessage: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
+  @State personaPacks: PersonaPack[] = allPersonaPacks();
+  @State selectedPersonaId: string = 'food_companion';
+  @State personaSoulDraft: string = personaPackForId('food_companion').soul;
+  @State personaMemoryDraft: string = personaPackForId('food_companion').memory;
+  @State personaSaveMessage: string = '';
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
@@ -153,6 +166,89 @@ struct Index {
   private voiceBaseInputText: string = '';
   private voiceStopRequested: boolean = false;
   private voiceCompletionHandled: boolean = false;
+
+  aboutToAppear(): void {
+    this.loadPersonaOverrides();
+  }
+
+  private personaPackStore(): PreferencesPersonaPackStore | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    return context === null ? null : new PreferencesPersonaPackStore(context);
+  }
+
+  private refreshPersonaEditor(personaId: string = this.selectedPersonaId): void {
+    this.personaPacks = allPersonaPacks();
+    const pack = personaPackForId(personaId);
+    this.selectedPersonaId = pack.manifest.id;
+    this.personaSoulDraft = pack.soul;
+    this.personaMemoryDraft = pack.memory;
+  }
+
+  private loadPersonaOverrides(): void {
+    const store = this.personaPackStore();
+    if (store !== null) {
+      store.loadSync();
+    }
+    this.refreshPersonaEditor(this.selectedPersonaId);
+  }
+
+  private savePersonaOverrides(): void {
+    const store = this.personaPackStore();
+    if (store !== null) {
+      store.saveSync();
+    }
+  }
+
+  private selectPersonaForEdit(personaId: string): void {
+    this.refreshPersonaEditor(personaId);
+    this.personaSaveMessage = '';
+  }
+
+  private savePersonaDraft(): void {
+    updatePersonaPackText(this.selectedPersonaId, this.personaSoulDraft, this.personaMemoryDraft);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor(this.selectedPersonaId);
+    this.personaSaveMessage = '已保存';
+  }
+
+  private resetPersonaDraft(): void {
+    resetPersonaPackText(this.selectedPersonaId);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor(this.selectedPersonaId);
+    this.personaSaveMessage = '已恢复默认';
+  }
+
+  private applyLuckinOnlyMemory(): void {
+    this.selectedPersonaId = 'food_companion';
+    const pack = personaPackForId('food_companion');
+    this.personaSoulDraft = pack.soul;
+    this.personaMemoryDraft = '用户咖啡偏好：只喝瑞幸咖啡。';
+    updatePersonaPackText('food_companion', this.personaSoulDraft, this.personaMemoryDraft);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor('food_companion');
+    this.personaSaveMessage = '已保存：只喝瑞幸';
+  }
+
+  private isLuckinOnlyMemoryPrompt(prompt: string): boolean {
+    return prompt.indexOf('瑞幸') >= 0 &&
+      (prompt.indexOf('只喝') >= 0 || prompt.indexOf('只买') >= 0 || prompt.indexOf('只点') >= 0);
+  }
+
+  private applyMemoryPrompt(prompt: string): boolean {
+    if (this.isBusy) {
+      return false;
+    }
+    if (!this.isLuckinOnlyMemoryPrompt(prompt)) {
+      return false;
+    }
+    this.applyLuckinOnlyMemory();
+    this.inputText = inputTextAfterPromptSubmit(this.inputText);
+    this.inputPlaceholder = '已记住：只喝瑞幸咖啡';
+    this.appendMessage('user', prompt);
+    this.appendMessage('assistant', '已更新饮食搭子的 memory：只喝瑞幸咖啡。');
+    aiLogInfo('[AIPhone][PersonaMemoryUpdate] personaId=food_companion preference=luckin_only');
+    return true;
+  }
 
   private getSettings(): LocalModelSettings {
     return {
@@ -534,6 +630,46 @@ struct Index {
     this.applySocialHubData('/socialHub/draft', draft);
   }
 
+  private socialHubReplyText(action: A2uiAction): string {
+    if (action.args === undefined || action.args === null) {
+      return '';
+    }
+    const payload = action.args as SocialHubReplyPayload;
+    return this.actionText(payload.text).trim();
+  }
+
+  private async sendSocialHubReply(action: A2uiAction): Promise<void> {
+    const selected = this.currentSocialHubSelected();
+    const itemId = action.prompt.length > 0 ? action.prompt : (selected === null ? '' : selected.id);
+    const item = this.findSocialHubItem(itemId);
+    if (item === null) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(itemId, '未找到这条真实消息，不能发送回复。'));
+      return;
+    }
+    const text = this.socialHubReplyText(action);
+    if (text.length === 0) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(item.id, '请输入要发送的回复内容。'));
+      return;
+    }
+    this.applySocialHubData('/socialHub/selected', item);
+    const pending: SocialHubDraftData = emptySocialHubDraft();
+    pending.itemId = item.id;
+    pending.platform = item.platform;
+    pending.status = 'draft';
+    pending.text = '正在发送到 ' + (item.platform === 'slack' ? 'Slack' : '社交平台') + '...';
+    pending.localOnly = false;
+    this.applySocialHubData('/socialHub/draft', pending);
+    try {
+      this.applySocialHubData('/socialHub/draft', await sendLocalSocialHubReply(item, text));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(item.id, message));
+    }
+  }
+
   private async openSocialHubSource(action: A2uiAction): Promise<void> {
     const item = this.findSocialHubItemByUrl(action.prompt);
     if (item === null) {
@@ -548,7 +684,9 @@ struct Index {
     return action.kind === 'client' &&
       (action.id === 'social_hub_select_item' ||
         action.id === 'social_hub_draft_reply' ||
-        action.id === 'social_hub_open_source');
+        action.id === 'social_hub_send_reply' ||
+        action.id === 'social_hub_open_source' ||
+        action.id === 'x.authorize');
   }
 
   private isSocialHubClientAction(action: A2uiAction): boolean {
@@ -693,7 +831,11 @@ struct Index {
       }));
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
-        await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
+        if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
+          aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+        } else {
+          await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
+        }
       } else {
         const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
         if (fallbackRequest.hasTool) {
@@ -723,6 +865,9 @@ struct Index {
   }
 
   private async sendPrompt(): Promise<void> {
+    if (this.applyMemoryPrompt(this.inputText.trim())) {
+      return;
+    }
     await this.submitPrompt(this.inputText, this.inputText);
   }
 
@@ -1177,6 +1322,10 @@ struct Index {
       this.draftSocialHubReply(action);
       return;
     }
+    if (action.id === 'social_hub_send_reply') {
+      await this.sendSocialHubReply(action);
+      return;
+    }
     if (action.id === 'social_hub_open_source') {
       await this.openSocialHubSource(action);
       return;
@@ -1194,6 +1343,10 @@ struct Index {
     if (action.id === 'gmail.authorize') {
       const authorizeUrl = await prepareGmailOAuthAuthorizationUrl();
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL);
+      return;
+    }
+    if (action.id === 'x.authorize') {
+      await this.openExternalUrl(await prepareXOAuthAuthorizationUrl());
       return;
     }
     if (action.id === 'calendar.authorize') {
@@ -1452,6 +1605,7 @@ struct Index {
       foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs),
       foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
+    const personaSourceSurface = this.currentSurface;
     this.markChecking('正在调用工具：' + toolId);
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
@@ -1460,11 +1614,12 @@ struct Index {
       this.toolSurfaceId(),
       actionId,
       (surface: A2uiSurfaceState, raw: string) => {
-        this.applySurface(surface);
+        const nextSurface = copyPersonaData(personaSourceSurface, surface);
+        this.applySurface(nextSurface);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'checking',
-          message: '工具流式更新：' + surface.title,
+          message: '工具流式更新：' + nextSurface.title,
           requestDebug: this.lastModelRequest,
           assistantDebug: raw,
           error: ''
@@ -1478,11 +1633,12 @@ struct Index {
       ' errorChars=' + result.error.length.toString() +
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
-    this.applySurface(result.surface);
+    const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    this.applySurface(resultSurface);
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
       status: result.ok ? 'ready' : 'error',
-      message: result.ok ? result.surface.title + ' 已返回工具结果。' : '工具返回异常，请到配置页查看详情。',
+      message: result.ok ? resultSurface.title + ' 已返回工具结果。' : '工具返回异常，请到配置页查看详情。',
       requestDebug: result.requestDebug,
       assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
       error: result.error
@@ -1491,7 +1647,7 @@ struct Index {
       this.appendMessage('assistant', '工具返回异常：' + result.error);
       return false;
     }
-    this.appendMessage('assistant', result.surface.title + ' 已返回 A2UI 结果。');
+    this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
     if (toolId === 'gmail.open.web') {
       await this.openExternalUrl(GMAIL_WEB_URL);
     }
@@ -1583,11 +1739,25 @@ struct Index {
         lastModelOutput: this.lastModelOutput,
         lastError: this.lastError,
         refreshTick: this.refreshTick,
+        personaPacks: this.personaPacks,
+        selectedPersonaId: $selectedPersonaId,
+        personaSoulDraft: $personaSoulDraft,
+        personaMemoryDraft: $personaMemoryDraft,
+        personaSaveMessage: this.personaSaveMessage,
         onBack: () => {
           this.showConfigPage = false;
         },
         onTestConnection: () => {
           this.testConnection();
+        },
+        onSelectPersona: (personaId: string) => {
+          this.selectPersonaForEdit(personaId);
+        },
+        onSavePersona: () => {
+          this.savePersonaDraft();
+        },
+        onResetPersona: () => {
+          this.resetPersonaDraft();
         }
       })
     } else {
@@ -1617,9 +1787,9 @@ struct Index {
           this.resetCurrentSession();
         },
         onOpenStyleLab: () => {
-          router.pushUrl({ url: 'pages/A2uiHome/StyleLab' }, (error) => {
+          router.pushUrl({ url: 'pages/A2uiHome/AnythingDemo' }, (error) => {
             if (error) {
-              aiLogError('[AIPhone][A2uiStyleLabRouteFailed] ' + JSON.stringify(error));
+              aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
             }
           });
         },

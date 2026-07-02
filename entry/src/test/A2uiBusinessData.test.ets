@@ -101,7 +101,9 @@ function businessSurface(): A2uiSurfaceState {
       actions: []
     },
     genericToolResults: [],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
   const components: A2uiComponent[] = [];
   return {

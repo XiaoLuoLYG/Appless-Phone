@@ -46,7 +46,9 @@ function baseModel(): A2uiRuntimeDataModel {
         rawPreview: '{"ok":true}'
       }
     ],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
 }
 

@@ -24,6 +24,8 @@ function documentFixture(): HtmlHomeDocument {
     }],
     actions: [{ id: 'doc-action', label: 'Run Action', prompt: 'run it', variant: 'primary', kind: 'prompt' }],
     history: [{ id: 'm1', role: 'user', content: 'make a brief' }],
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] },
     rawSurfaceRoot: null,
     generatedAt: '2026-06-25T00:00:00.000Z'
   };
@@ -721,7 +723,7 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(mailAggregateDocumentFixture());
 
       expect(html.indexOf('data-scene="gmail"')).assertLarger(-1);
-      expect(html.indexOf('Mail Deck')).assertLarger(-1);
+      expect(html.indexOf('收件预览舱')).assertLarger(-1);
       expect(html.indexOf('gmail-hero')).assertLarger(-1);
       expect(html.indexOf('mail-hero-icon')).assertLarger(-1);
       expect(html.indexOf('mail-rail')).assertLarger(-1);
@@ -743,13 +745,13 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
     });
 
-    it('keeps social documents on the legacy frame with actions intact', 0, () => {
+    it('keeps social document actions intact in the enhanced social frame', 0, () => {
       const html = renderHtmlHomeDocument(socialDocumentFixture());
 
-      expect(html.indexOf('data-scene="social"')).assertEqual(-1);
+      expect(html.indexOf('data-scene="social"')).assertLarger(-1);
       expect(html.indexOf('social-hero')).assertEqual(-1);
       expect(html.indexOf('chat-bubble')).assertEqual(-1);
-      expect(html.indexOf('任务结果')).assertLarger(-1);
+      expect(html.indexOf('消息卡片')).assertLarger(-1);
       expect(html.indexOf('social_select_message')).assertLarger(-1);
     });
 

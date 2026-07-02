@@ -2,14 +2,32 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import util from '@ohos.util';
-import { AssetCredentialStore } from '../model/DynamicCredentialStore';
-import { handleGmailOAuthRedirect } from '../model/GmailOAuthClient';
+import { AssetCredentialStore, handleGmailOAuthRedirect, handleXOAuthRedirect, xOAuthConfigFromProvider } from '@loop/agent-core';
 import { configureLocalModelSettingsFromRawJson, localModelSettingsDebugSummary } from '../model/LocalModelSettings';
-import { configureLocalProviderConfigFromRawJson, gmailOAuthConfigFromProvider, localProviderConfigDebugSummary } from '../model/ToolGatewayClient';
+import {
+  configureLocalProviderConfigFromRawJson as configureAgentCoreProviderConfigFromRawJson,
+  gmailOAuthConfigFromProvider,
+  localProviderConfigDebugSummary as agentCoreProviderConfigDebugSummary
+} from '@loop/agent-core';
+import {
+  configureLocalProviderConfigFromRawJson as configureEntryProviderConfigFromRawJson,
+  localProviderConfigDebugSummary as entryProviderConfigDebugSummary
+} from '../model/ToolGatewayClient';
 import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
+import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
+const PERSONA_MANIFEST_RAWFILE = 'personas/personas.json';
+const PERSONA_IDS: string[] = [
+  'default_companion',
+  'food_companion',
+  'travel_companion',
+  'work_companion',
+  'entertainment_companion',
+  'game_companion',
+  'shopping_companion'
+];
 const GMAIL_REVERSED_CLIENT_SCHEME = 'com.googleusercontent.apps.358078200829-covuu6l8dgvs7kaejua7mrkke7e8833b:/oauth2redirect';
 const GMAIL_OAUTH_URI_HINTS: string[] = [
   'com.example.aiphonedemo:/oauth/google',
@@ -17,14 +35,27 @@ const GMAIL_OAUTH_URI_HINTS: string[] = [
   'aiphone://oauth/google',
   GMAIL_REVERSED_CLIENT_SCHEME
 ];
+const X_OAUTH_URI_HINTS: string[] = [
+  'aiphone://oauth/x',
+  'com.example.aiphonedemo:/oauth/x',
+  'com.example.aiphonedemo://oauth/x'
+];
 
-function isGmailOAuthRedirectUri(uri: string): boolean {
-  for (let index = 0; index < GMAIL_OAUTH_URI_HINTS.length; index++) {
-    if (uri.indexOf(GMAIL_OAUTH_URI_HINTS[index]) === 0) {
+function hasUriHint(uri: string, hints: string[]): boolean {
+  for (let index = 0; index < hints.length; index++) {
+    if (uri.indexOf(hints[index]) === 0) {
       return true;
     }
   }
   return false;
+}
+
+function isGmailOAuthRedirectUri(uri: string): boolean {
+  return hasUriHint(uri, GMAIL_OAUTH_URI_HINTS);
+}
+
+function isXOAuthRedirectUri(uri: string): boolean {
+  return hasUriHint(uri, X_OAUTH_URI_HINTS);
 }
 
 function describeError(error: Error | Object | string | number | boolean | null | undefined): string {
@@ -40,9 +71,14 @@ function describeError(error: Error | Object | string | number | boolean | null 
   return JSON.stringify(error);
 }
 
+function allOAuthUriHints(): string[] {
+  return GMAIL_OAUTH_URI_HINTS.concat(X_OAUTH_URI_HINTS);
+}
+
 function shouldInspectPotentialOAuthText(value: string): boolean {
   return value.indexOf('oauth') >= 0 ||
     value.indexOf('google') >= 0 ||
+    value.indexOf('/x') >= 0 ||
     value.indexOf('state=') >= 0 ||
     value.indexOf('code=') >= 0;
 }
@@ -60,8 +96,9 @@ function embeddedUriFromText(value: string): string {
   const variants: string[] = value === decoded ? [value] : [value, decoded];
   for (let valueIndex = 0; valueIndex < variants.length; valueIndex++) {
     const candidateText = variants[valueIndex];
-    for (let hintIndex = 0; hintIndex < GMAIL_OAUTH_URI_HINTS.length; hintIndex++) {
-      const hint = GMAIL_OAUTH_URI_HINTS[hintIndex];
+    const hints = allOAuthUriHints();
+    for (let hintIndex = 0; hintIndex < hints.length; hintIndex++) {
+      const hint = hints[hintIndex];
       const start = candidateText.indexOf(hint);
       if (start < 0) {
         continue;
@@ -80,7 +117,7 @@ function embeddedUriFromText(value: string): string {
   return '';
 }
 
-function appendGmailOAuthUriCandidates(candidates: string[], value: Object | string | number | boolean | null | undefined): void {
+function appendOAuthUriCandidates(candidates: string[], value: Object | string | number | boolean | null | undefined): void {
   if (value === undefined || value === null) {
     return;
   }
@@ -103,7 +140,7 @@ function appendGmailOAuthUriCandidates(candidates: string[], value: Object | str
     return;
   }
   try {
-    appendGmailOAuthUriCandidates(candidates, JSON.stringify(value));
+    appendOAuthUriCandidates(candidates, JSON.stringify(value));
   } catch (_err) {
   }
 }
@@ -120,18 +157,18 @@ function gmailOAuthWantParameterKeys(want: Want): string {
   return keys.join('|').substring(0, 240);
 }
 
-function gmailOAuthUriFromWant(want: Want): string {
+function oauthUriFromWant(want: Want): string {
   const candidates: string[] = [];
-  appendGmailOAuthUriCandidates(candidates, want.uri);
+  appendOAuthUriCandidates(candidates, want.uri);
   const params = want.parameters;
   if (params !== undefined && params !== null) {
     Object.keys(params).forEach((key: string) => {
-      appendGmailOAuthUriCandidates(candidates, params[key]);
+      appendOAuthUriCandidates(candidates, params[key]);
     });
   }
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index];
-    if (isGmailOAuthRedirectUri(candidate)) {
+    if (isGmailOAuthRedirectUri(candidate) || isXOAuthRedirectUri(candidate)) {
       return candidate;
     }
   }
@@ -146,20 +183,45 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     this.loadLocalProviderConfig();
-    this.handleGmailOAuthWant(want);
+    this.loadPersonaPacks();
+    this.handleOAuthWant(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  private rawfileText(path: string): string {
+    const bytes = this.context.resourceManager.getRawFileContentSync(path);
+    const decoder = util.TextDecoder.create('utf-8');
+    return decoder.decodeToString(bytes);
   }
 
   private loadLocalProviderConfig(): void {
     try {
-      const bytes = this.context.resourceManager.getRawFileContentSync(LOCAL_PROVIDER_CONFIG_RAWFILE);
-      const decoder = util.TextDecoder.create('utf-8');
-      const rawJson = decoder.decodeToString(bytes);
-      configureLocalProviderConfigFromRawJson(rawJson);
+      const rawJson = this.rawfileText(LOCAL_PROVIDER_CONFIG_RAWFILE);
+      configureEntryProviderConfigFromRawJson(rawJson);
+      configureAgentCoreProviderConfigFromRawJson(rawJson);
       configureLocalModelSettingsFromRawJson(rawJson);
-      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. %{public}s %{public}s', localProviderConfigDebugSummary(), localModelSettingsDebugSummary());
+      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. entry=%{public}s agentCore=%{public}s %{public}s',
+        entryProviderConfigDebugSummary(),
+        agentCoreProviderConfigDebugSummary(),
+        localModelSettingsDebugSummary());
     } catch (err) {
       hilog.info(DOMAIN, 'testTag', 'Local provider config not loaded from %{public}s. Cause: %{public}s', LOCAL_PROVIDER_CONFIG_RAWFILE, JSON.stringify(err));
+    }
+  }
+
+  private loadPersonaPacks(): void {
+    try {
+      const files: Record<string, string> = {};
+      for (let index = 0; index < PERSONA_IDS.length; index++) {
+        const personaId = PERSONA_IDS[index];
+        files[personaId + '/soul.md'] = this.rawfileText('personas/' + personaId + '/soul.md');
+        files[personaId + '/skills.md'] = this.rawfileText('personas/' + personaId + '/skills.md');
+        files[personaId + '/memory.md'] = this.rawfileText('personas/' + personaId + '/memory.md');
+      }
+      configurePersonaStoreFromRaw(this.rawfileText(PERSONA_MANIFEST_RAWFILE), files);
+      hilog.info(DOMAIN, 'testTag', 'Loaded persona packs. count=%{public}d', PERSONA_IDS.length);
+    } catch (err) {
+      hilog.info(DOMAIN, 'testTag', 'Persona packs not loaded from rawfile. Cause: %{public}s', JSON.stringify(err));
     }
   }
 
@@ -170,12 +232,17 @@ export default class EntryAbility extends UIAbility {
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
     this.loadLocalProviderConfig();
-    this.handleGmailOAuthWant(want);
+    this.loadPersonaPacks();
+    this.handleOAuthWant(want);
   }
 
-  private handleGmailOAuthWant(want: Want): void {
+  private handleOAuthWant(want: Want): void {
     const directUri = want.uri === undefined ? '' : want.uri;
-    const uri = gmailOAuthUriFromWant(want);
+    const uri = oauthUriFromWant(want);
+    if (isXOAuthRedirectUri(uri)) {
+      this.handleXOAuthUri(uri);
+      return;
+    }
     if (!isGmailOAuthRedirectUri(uri)) {
       const parameterKeys = gmailOAuthWantParameterKeys(want);
       if (directUri.indexOf('oauth') >= 0 || directUri.indexOf('google') >= 0 || parameterKeys.length > 0) {
@@ -204,6 +271,26 @@ export default class EntryAbility extends UIAbility {
         const message = describeError(err);
         aiLogError('[AIPhone][GmailOAuthWantFailed] ' + message);
         hilog.error(DOMAIN, 'testTag', 'Gmail OAuth callback failed. Cause: %{public}s', message);
+      });
+  }
+
+  private handleXOAuthUri(uri: string): void {
+    const config = xOAuthConfigFromProvider();
+    aiLogInfo('[AIPhone][XOAuthWantReceived] uriChars=' + uri.length.toString() +
+      ' hasCode=' + (uri.indexOf('code=') >= 0 ? 'true' : 'false') +
+      ' hasState=' + (uri.indexOf('state=') >= 0 ? 'true' : 'false') +
+      ' hasError=' + (uri.indexOf('error=') >= 0 ? 'true' : 'false') +
+      ' clientConfigured=' + (config.clientId.length > 0 ? 'true' : 'false') +
+      ' redirectChars=' + config.redirectUri.length.toString());
+    handleXOAuthRedirect(new AssetCredentialStore(), config, uri)
+      .then(() => {
+        aiLogInfo('[AIPhone][XOAuthWantSaved] ok=true');
+        hilog.info(DOMAIN, 'testTag', '%{public}s', 'X OAuth authorization saved.');
+      })
+      .catch((err: Error | Object | string | number | boolean | null | undefined) => {
+        const message = describeError(err);
+        aiLogError('[AIPhone][XOAuthWantFailed] ' + message);
+        hilog.error(DOMAIN, 'testTag', 'X OAuth callback failed. Cause: %{public}s', message);
       });
   }
 

@@ -79,7 +79,9 @@ function modelJson(
       actions: []
     },
     genericToolResults: [],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
   return JSON.stringify(model);
 }

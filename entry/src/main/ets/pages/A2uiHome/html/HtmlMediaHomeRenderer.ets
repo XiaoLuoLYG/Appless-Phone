@@ -824,6 +824,8 @@ export function renderMediaHomeDocument(document: HtmlHomeDocument, isBusy: bool
     blocks: mediaBlocks,
     actions: document.actions,
     history: [],
+    persona: document.persona,
+    personaMemory: document.personaMemory,
     rawSurfaceRoot: null,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlMediaHomeDocumentWithBusy).isBusy === true

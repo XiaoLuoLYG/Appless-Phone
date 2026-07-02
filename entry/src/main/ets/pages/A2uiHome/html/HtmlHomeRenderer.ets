@@ -3,11 +3,13 @@ import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
+import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
 type HtmlHomeTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy?: boolean;
+  personaAvatarDataUri?: string;
 }
 
 const HTML_HOME_CSS: string = `
@@ -86,6 +88,49 @@ button:disabled {
 .hero {
   padding: 18px 2px 14px;
   border-bottom: 1px solid var(--line);
+}
+.persona-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.persona-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 840;
+}
+.persona-avatar img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.persona-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.persona-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 820;
+  line-height: 1.25;
+}
+.persona-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .eyebrow, .label, .meta {
   color: var(--muted);
@@ -1356,7 +1401,7 @@ const HTML_HOME_JS: string = `
     return 'scene-' + scene.replace(/[^a-z0-9-]/g, '');
   }
   function isEnhancedScene() {
-    return scene === 'gmail';
+    return scene === 'gmail' || scene === 'social';
   }
   function addLegacyHero(parent) {
     var hero = add(parent, 'header', 'hero');
@@ -1745,9 +1790,32 @@ const HTML_HOME_JS: string = `
       });
     });
   }
+  function renderPersonaBanner(parent) {
+    var persona = data.persona || {};
+    var memory = data.personaMemory || {};
+    var name = text(persona.name);
+    if (text(persona.id).length === 0 || name.length === 0) {
+      return;
+    }
+    var banner = add(parent, 'section', 'persona-banner');
+    var avatar = add(banner, 'div', 'persona-avatar');
+    var avatarSrc = text(data.personaAvatarDataUri);
+    if (avatarSrc.length > 0) {
+      var img = add(avatar, 'img');
+      img.src = avatarSrc;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+    } else {
+      avatar.textContent = name.slice(0, 1);
+    }
+    var copy = add(banner, 'div', 'persona-copy');
+    add(copy, 'div', 'persona-title', name + '上线');
+    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
+  }
   app.textContent = '';
   var shell = add(app, 'main', isEnhancedScene() ? 'shell ' + sceneClassName() : 'shell');
   renderSceneHero(shell);
+  renderPersonaBanner(shell);
   var chips = list(data.chips).slice();
   if (chips.length > 0) {
     var chipbar = add(shell, 'nav', 'chipbar');
@@ -1883,13 +1951,16 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
     blocks: document.blocks,
     actions: document.actions,
     history: document.history,
+    persona: document.persona,
+    personaMemory: document.personaMemory,
+    personaAvatarDataUri: personaAvatarDataUri(document.persona.avatarKey),
     rawSurfaceRoot: document.rawSurfaceRoot,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlHomeDocumentWithBusy).isBusy === true
   };
   const json = escapeScriptJson(JSON.stringify(renderDocument));
   const title = escapeHtmlText(document.title.length > 0 ? document.title : document.kind);
-  const enhancedScene: boolean = document.kind === 'gmail';
+  const enhancedScene: boolean = document.kind === 'gmail' || document.kind === 'social';
   const bodyScene = enhancedScene ? ` data-scene="${escapeHtmlText(document.kind)}"` : '';
   return `<!DOCTYPE html>
 <html lang="zh-CN">

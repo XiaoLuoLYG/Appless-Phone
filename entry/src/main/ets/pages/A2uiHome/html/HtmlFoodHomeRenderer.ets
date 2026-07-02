@@ -1,9 +1,11 @@
 import { HtmlHomeDocument } from './HtmlHomeTypes';
+import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
 type HtmlFoodTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlFoodHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy?: boolean;
+  personaAvatarDataUri?: string;
 }
 
 const FOOD_HOME_CSS: string = `
@@ -82,6 +84,51 @@ button:disabled { cursor: default; opacity: 0.5; }
 .editorial-cover-content {
   position: relative;
   z-index: 1;
+}
+.persona-banner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: rgba(23, 18, 13, 0.38);
+  color: #fffaf1;
+  backdrop-filter: blur(16px);
+}
+.persona-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: rgba(255, 250, 241, 0.9);
+  color: var(--food-luckin);
+  font-size: 15px;
+  font-weight: 840;
+}
+.persona-avatar img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.persona-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.persona-title {
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.25;
+}
+.persona-subtitle {
+  margin-top: 4px;
+  color: rgba(255, 250, 241, 0.78);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .editorial-kicker {
   display: inline-flex;
@@ -635,6 +682,28 @@ const FOOD_HOME_JS: string = `
     add(row, 'b', '', label);
     add(row, 'span', '', value);
   }
+  function renderPersonaBanner(parent) {
+    var persona = data.persona || {};
+    var memory = data.personaMemory || {};
+    var name = text(persona.name);
+    if (text(persona.id).length === 0 || name.length === 0) {
+      return;
+    }
+    var banner = add(parent, 'section', 'persona-banner');
+    var avatar = add(banner, 'div', 'persona-avatar');
+    var avatarSrc = text(data.personaAvatarDataUri);
+    if (avatarSrc.length > 0) {
+      var img = add(avatar, 'img');
+      img.src = avatarSrc;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+    } else {
+      avatar.textContent = name.slice(0, 1);
+    }
+    var copy = add(banner, 'div', 'persona-copy');
+    add(copy, 'div', 'persona-title', name + '上线');
+    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
+  }
   app.textContent = '';
   var shell = add(app, 'main', 'editorial-food-shell');
   var blocks = list(data.blocks).filter(function (block) { return text(block && block.kind) === 'food-result'; });
@@ -644,6 +713,7 @@ const FOOD_HOME_JS: string = `
   add(heroContent, 'div', 'editorial-kicker', '附近餐饮 · 今日编辑');
   add(heroContent, 'h1', '', '今日附近值得吃');
   add(heroContent, 'p', '', text(data.subtitle) || text(data.title) || '从真实餐饮结果里挑出今天可以出发的一餐。');
+  renderPersonaBanner(heroContent);
   var sourceCloud = add(hero, 'div', 'source-cloud');
   var seenSources = {};
   blocks.forEach(function (block) {
@@ -777,6 +847,9 @@ export function renderFoodHomeDocument(document: HtmlHomeDocument, isBusy: boole
     blocks: document.blocks,
     actions: document.actions,
     history: [],
+    persona: document.persona,
+    personaMemory: document.personaMemory,
+    personaAvatarDataUri: personaAvatarDataUri(document.persona.avatarKey),
     rawSurfaceRoot: null,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlFoodHomeDocumentWithBusy).isBusy === true

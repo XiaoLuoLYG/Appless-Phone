@@ -1,0 +1,1 @@
+# Consumer obfuscation rules exported with the HAR.

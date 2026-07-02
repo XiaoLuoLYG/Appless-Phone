@@ -39,6 +39,9 @@ export function socialHubPrimaryText(item: SocialHubItemData): string {
 }
 
 export function socialHubAuthorText(item: SocialHubItemData): string {
+  if (item.author.length > 0 && item.author === item.handle) {
+    return item.author;
+  }
   if (item.author.length > 0 && item.handle.length > 0) {
     return item.author + ' · ' + item.handle;
   }
@@ -108,6 +111,9 @@ export function socialHubConnectionMessage(connection: SocialHubConnectionData):
 export function socialHubDraftDisplayText(draft: SocialHubDraftData): string {
   if (draft.status === 'error') {
     return draft.error.length > 0 ? draft.error : '草稿生成失败';
+  }
+  if (draft.sent) {
+    return draft.text.trim().length > 0 ? draft.text : '已发送';
   }
   if (draft.text.trim().length > 0) {
     return draft.text;
