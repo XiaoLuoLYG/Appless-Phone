@@ -7,8 +7,8 @@ import {
   McpToolResultPayload,
   parseMcpJsonRpcResponse,
   summarizeMcpToolResult
-} from '../main/ets/model/GenericMcpClient';
-import { DynamicCredentialSpec } from '../main/ets/model/DynamicToolTypes';
+} from '@loop/agent-core';
+import { DynamicCredentialSpec } from '@loop/agent-core';
 
 interface TestCityArgs {
   city: string;

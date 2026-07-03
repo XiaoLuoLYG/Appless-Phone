@@ -1,8 +1,8 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseA2uiJsonl } from '../main/ets/model/A2uiParser';
-import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
-import { A2uiGenericToolResultData } from '../main/ets/model/A2uiTypes';
-import { componentById, dynamicToolConnect, genericToolResults } from '../main/ets/model/A2uiData';
+import { parseA2uiJsonl } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
+import { A2uiGenericToolResultData } from '@loop/agent-core';
+import { componentById, dynamicToolConnect, genericToolResults } from '@loop/agent-core';
 import {
   gmailAuthRequiredA2ui,
   gmailBlockedSendA2ui,
@@ -11,8 +11,8 @@ import {
   gmailOpenWebA2ui,
   gmailReplyDraftAction,
   gmailThreadResultsA2ui
-} from '../main/ets/model/GmailToolA2ui';
-import { DynamicGenericToolResult } from '../main/ets/model/DynamicToolTypes';
+} from '@loop/agent-core';
+import { DynamicGenericToolResult } from '@loop/agent-core';
 
 function surfaceFromJsonl(jsonl: string): A2uiSurfaceStore {
   const parsed = parseA2uiJsonl(jsonl);

@@ -1,9 +1,9 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveData } from '../main/ets/model/A2uiData';
-import { parseA2uiJsonl } from '../main/ets/model/A2uiParser';
-import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '../main/ets/model/SocialHubTypes';
-import { socialHubDraftA2ui, socialHubFeedA2ui } from '../main/ets/model/SocialHubA2ui';
+import { resolveData } from '@loop/agent-core';
+import { parseA2uiJsonl } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
+import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
+import { socialHubDraftA2ui, socialHubFeedA2ui } from '@loop/agent-core';
 
 function applyJsonl(jsonl: string): A2uiSurfaceStore {
   const parsed = parseA2uiJsonl(jsonl);

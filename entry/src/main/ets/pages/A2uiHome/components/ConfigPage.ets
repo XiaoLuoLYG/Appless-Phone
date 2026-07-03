@@ -20,6 +20,7 @@ import {
   statusColor
 } from '../style/A2uiHomeTheme';
 import { PersonaPack } from '../../../model/PersonaTypes';
+import { parsePersonaMarkdown, PersonaMarkdownSection, PersonaSkillMarkdown } from '../../../model/PersonaMarkdown';
 import { connectionStatusLabel } from '../state/A2uiHomeState';
 import { DebugTextPanel } from './DebugTextPanel';
 import { personaAvatarResource } from './PersonaAvatar';
@@ -46,6 +47,7 @@ export struct ConfigPage {
   @Link personaSoulDraft: string;
   @Link personaMemoryDraft: string;
   @Prop personaSaveMessage: string = '';
+  @State editingPersonaDoc: string = '';
   onBack: () => void = () => {};
   onTestConnection: () => void = () => {};
   onSelectPersona: (personaId: string) => void = (_personaId: string) => {};
@@ -81,9 +83,70 @@ export struct ConfigPage {
     return this.personaPacks.length > 0 ? this.personaPacks[0] : null;
   }
 
-  private selectedPersonaSkills(): string {
+  private sectionBody(sections: PersonaMarkdownSection[], title: string): string {
+    for (let index = 0; index < sections.length; index++) {
+      if (sections[index].title === title) {
+        return sections[index].body.trim();
+      }
+    }
+    return '';
+  }
+
+  private clipped(text: string): string {
+    const value = text.trim();
+    return value.length <= 160 ? value : value.substring(0, 160) + '...';
+  }
+
+  private selectedSoulSummary(): string {
     const pack = this.selectedPersona();
-    return pack === null ? '' : pack.skills;
+    const parsed = parsePersonaMarkdown(pack === null ? this.personaSoulDraft : pack.soul);
+    const identity = this.sectionBody(parsed.sections, 'Identity');
+    const behavior = this.sectionBody(parsed.sections, 'Behavior');
+    const source = identity.length > 0 ? identity : (behavior.length > 0 ? behavior : parsed.body);
+    return this.clipped(source);
+  }
+
+  private selectedMemorySummary(): string {
+    const pack = this.selectedPersona();
+    const parsed = parsePersonaMarkdown(pack === null ? this.personaMemoryDraft : pack.memory);
+    const preferences = this.sectionBody(parsed.sections, 'Stable Preferences');
+    const constraints = this.sectionBody(parsed.sections, 'Constraints');
+    const source = preferences.length > 0 ? preferences : (constraints.length > 0 ? constraints : parsed.body);
+    return this.clipped(source);
+  }
+
+  private selectedPersonaSkillList(): PersonaSkillMarkdown[] {
+    const pack = this.selectedPersona();
+    return pack === null ? [] : pack.skillList;
+  }
+
+  private selectPersonaPack(pack: PersonaPack): void {
+    this.editingPersonaDoc = '';
+    this.selectedPersonaId = pack.manifest.id;
+    this.personaSoulDraft = pack.soul;
+    this.personaMemoryDraft = pack.memory;
+    this.onSelectPersona(pack.manifest.id);
+  }
+
+  private startEditingPersonaDoc(target: string): void {
+    const pack = this.selectedPersona();
+    if (pack !== null) {
+      this.personaSoulDraft = pack.soul;
+      this.personaMemoryDraft = pack.memory;
+    }
+    this.editingPersonaDoc = target;
+  }
+
+  private selectedSummary(target: string): string {
+    return target === 'soul' ? this.selectedSoulSummary() : this.selectedMemorySummary();
+  }
+
+  private skillStatusLabel(skill: PersonaSkillMarkdown): string {
+    return skill.status === 'active' ? '已加载' : '占位';
+  }
+
+  private skillToolsLabel(skill: PersonaSkillMarkdown): string {
+    return skill.tools.length > 0 ? '工具：' + skill.tools.join(', ') : '工具：暂未接入';
   }
 
   @Builder
@@ -106,8 +169,161 @@ export struct ConfigPage {
     .border({ width: 1, color: this.selectedPersonaId === pack.manifest.id ? COLOR_ACCENT : COLOR_CARD_EDGE })
     .margin({ right: 8, bottom: 8 })
     .onClick(() => {
-      this.onSelectPersona(pack.manifest.id);
+      this.selectPersonaPack(pack);
     })
+  }
+
+  @Builder
+  SummaryBlock(label: string, target: string) {
+    Column() {
+      Row() {
+        Text(label)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_ACCENT)
+          .layoutWeight(1)
+        Text(this.editingPersonaDoc === target ? '编辑中' : '点击编辑')
+          .fontSize(11)
+          .fontColor(COLOR_MUTED)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(this.selectedSummary(target).length > 0 ? this.selectedSummary(target) : '未记录')
+        .fontSize(12)
+        .fontColor(COLOR_TEXT)
+        .lineHeight(18)
+        .margin({ top: 6 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(12)
+    .backgroundColor(COLOR_CARD_RAISED)
+    .borderRadius(10)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .margin({ bottom: 8 })
+    .onClick(() => {
+      this.startEditingPersonaDoc(target);
+    })
+  }
+
+  @Builder
+  PersonaSummaryStrip() {
+    Column() {
+      this.SummaryBlock('Soul 摘要', 'soul')
+      this.SummaryBlock('Memory 摘要', 'memory')
+    }
+    .width('100%')
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  PersonaEditorDraft() {
+    if (this.editingPersonaDoc === 'soul') {
+      this.InputLabel('soul.md', 0)
+      TextArea({ text: this.personaSoulDraft, placeholder: '这个分身是谁，应该怎样说话' })
+        .height(132)
+        .fontSize(13)
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_FIELD)
+        .borderRadius(9)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .onChange((value: string) => {
+          this.personaSoulDraft = value;
+        })
+    }
+    if (this.editingPersonaDoc === 'memory') {
+      this.InputLabel('memory.md', 0)
+      TextArea({ text: this.personaMemoryDraft, placeholder: '例如：用户咖啡偏好：只喝瑞幸咖啡。' })
+        .height(132)
+        .fontSize(13)
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_FIELD)
+        .borderRadius(9)
+        .border({ width: 1, color: COLOR_CARD_EDGE })
+        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        .onChange((value: string) => {
+          this.personaMemoryDraft = value;
+        })
+    }
+  }
+
+  @Builder
+  SkillStatusBadge(skill: PersonaSkillMarkdown) {
+    Text(this.skillStatusLabel(skill))
+      .fontSize(11)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(skill.status === 'active' ? COLOR_BUTTON_TEXT : COLOR_MUTED)
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .backgroundColor(skill.status === 'active' ? COLOR_ACCENT_DEEP : COLOR_FIELD)
+      .borderRadius(8)
+      .border({ width: 1, color: skill.status === 'active' ? COLOR_ACCENT : COLOR_CARD_EDGE })
+  }
+
+  @Builder
+  SkillRow(skill: PersonaSkillMarkdown) {
+    Column() {
+      Row() {
+        Column() {
+          Text(skill.name)
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+          Text(skill.description.length > 0 ? skill.description : '待补充描述')
+            .fontSize(12)
+            .fontColor(COLOR_MUTED)
+            .lineHeight(17)
+            .margin({ top: 4 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        this.SkillStatusBadge(skill)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(this.skillToolsLabel(skill))
+        .fontSize(11)
+        .fontColor(COLOR_TEXT)
+        .lineHeight(16)
+        .margin({ top: 8 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(12)
+    .backgroundColor(skill.status === 'active' ? COLOR_GLASS : COLOR_CARD_RAISED)
+    .borderRadius(10)
+    .border({ width: 1, color: skill.status === 'active' ? COLOR_ACCENT : COLOR_CARD_EDGE })
+    .margin({ top: 8 })
+  }
+
+  @Builder
+  SkillChecklist() {
+    Column() {
+      Row() {
+        Text('Skills（只读）')
+          .fontSize(13)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_INK)
+          .layoutWeight(1)
+        Text('active + checklist')
+          .fontSize(11)
+          .fontColor(COLOR_MUTED)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 14 })
+
+      ForEach(this.selectedPersonaSkillList(), (skill: PersonaSkillMarkdown) => {
+        this.SkillRow(skill)
+      }, (skill: PersonaSkillMarkdown) => skill.id + '_' + skill.status)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -146,33 +362,8 @@ export struct ConfigPage {
       .width('100%')
       .margin({ bottom: 10 })
 
-      this.InputLabel('soul.md', 0)
-      TextArea({ text: this.personaSoulDraft, placeholder: '这个分身是谁，应该怎样说话' })
-        .height(92)
-        .fontSize(13)
-        .fontColor(COLOR_TEXT)
-        .placeholderColor(COLOR_MUTED)
-        .backgroundColor(COLOR_FIELD)
-        .borderRadius(9)
-        .border({ width: 1, color: COLOR_CARD_EDGE })
-        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-        .onChange((value: string) => {
-          this.personaSoulDraft = value;
-        })
-
-      this.InputLabel('memory.md', 12)
-      TextArea({ text: this.personaMemoryDraft, placeholder: '例如：用户咖啡偏好：只喝瑞幸咖啡。' })
-        .height(92)
-        .fontSize(13)
-        .fontColor(COLOR_TEXT)
-        .placeholderColor(COLOR_MUTED)
-        .backgroundColor(COLOR_FIELD)
-        .borderRadius(9)
-        .border({ width: 1, color: COLOR_CARD_EDGE })
-        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-        .onChange((value: string) => {
-          this.personaMemoryDraft = value;
-        })
+      this.PersonaSummaryStrip()
+      this.PersonaEditorDraft()
 
       Row() {
         Button('保存')
@@ -200,13 +391,9 @@ export struct ConfigPage {
           })
       }
       .width('100%')
-      .margin({ top: 14 })
+      .margin({ top: this.editingPersonaDoc.length > 0 ? 14 : 0, bottom: 12 })
 
-      DebugTextPanel({
-        label: 'skills.md（只读）',
-        value: this.selectedPersonaSkills(),
-        refreshTick: this.refreshTick
-      })
+      this.SkillChecklist()
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

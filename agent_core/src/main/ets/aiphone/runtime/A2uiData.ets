@@ -9,6 +9,8 @@ import {
   A2uiGenericToolResultData,
   A2uiGenericToolResultRowData,
   A2uiLabelValueData,
+  A2uiPersonaData,
+  A2uiPersonaMemoryData,
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
@@ -86,7 +88,26 @@ function emptyModel(): A2uiRuntimeDataModel {
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
     genericToolResults: [],
-    socialHub: emptySocialHub()
+    socialHub: emptySocialHub(),
+    persona: emptyPersona(),
+    personaMemory: emptyPersonaMemory()
+  };
+}
+
+function emptyPersona(): A2uiPersonaData {
+  return {
+    id: '',
+    name: '',
+    avatarKey: '',
+    status: '',
+    reason: ''
+  };
+}
+
+function emptyPersonaMemory(): A2uiPersonaMemoryData {
+  return {
+    summary: '',
+    preferences: []
   };
 }
 
@@ -216,6 +237,29 @@ function normalizeForm(parsed: A2uiRuntimeDataModel, fallback: A2uiFormData): A2
   return parsed.form;
 }
 
+function normalizePersona(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaData): A2uiPersonaData {
+  if (parsed.persona === undefined || parsed.persona === null) {
+    return fallback;
+  }
+  return {
+    id: textOf(parsed.persona.id),
+    name: textOf(parsed.persona.name),
+    avatarKey: textOf(parsed.persona.avatarKey),
+    status: textOf(parsed.persona.status),
+    reason: textOf(parsed.persona.reason)
+  };
+}
+
+function normalizePersonaMemory(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaMemoryData): A2uiPersonaMemoryData {
+  if (parsed.personaMemory === undefined || parsed.personaMemory === null) {
+    return fallback;
+  }
+  return {
+    summary: textOf(parsed.personaMemory.summary),
+    preferences: stringArrayFrom(parsed.personaMemory.preferences)
+  };
+}
+
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
   if (parsed.rowGroups === undefined || parsed.rowGroups === null) {
     return fallback;
@@ -248,6 +292,8 @@ function parseModel(surface: A2uiSurfaceState): A2uiRuntimeDataModel {
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
+      persona: normalizePersona(parsed, fallback.persona),
+      personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -266,6 +312,20 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
     return value.toString();
   }
   return JSON.stringify(value);
+}
+
+function stringArrayFrom(value: Object | string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  value.forEach((item: Object | string | number | boolean | null) => {
+    const text = textOf(item).trim();
+    if (text.length > 0) {
+      result.push(text);
+    }
+  });
+  return result;
 }
 
 function joinRowParts(first: string, second: string, third: string): string {
@@ -380,6 +440,12 @@ export function resolveData(surface: A2uiSurfaceState, path: string | undefined)
   if (path === '/genericToolResults') {
     return model.genericToolResults;
   }
+  if (path === '/persona') {
+    return model.persona;
+  }
+  if (path === '/personaMemory') {
+    return model.personaMemory;
+  }
   if (path === '/socialHub') {
     return model.socialHub;
   }
@@ -482,6 +548,14 @@ export function dynamicToolConnect(surface: A2uiSurfaceState): A2uiDynamicToolCo
 
 export function genericToolResults(surface: A2uiSurfaceState): A2uiGenericToolResultData[] {
   return parseModel(surface).genericToolResults;
+}
+
+export function personaRuntimeData(surface: A2uiSurfaceState): A2uiPersonaData {
+  return parseModel(surface).persona;
+}
+
+export function personaMemoryData(surface: A2uiSurfaceState): A2uiPersonaMemoryData {
+  return parseModel(surface).personaMemory;
 }
 
 export function socialHubItems(surface: A2uiSurfaceState): SocialHubItemData[] {

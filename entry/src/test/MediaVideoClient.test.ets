@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { DynamicGenericToolResult } from '../main/ets/model/DynamicToolTypes';
-import { callMediaVideoSearch, mediaSourcesFromArgs, mediaVideoQueryFromArgs, mediaVideoSearchQuery, mergeMediaVideoProviderResults } from '../main/ets/model/MediaVideoClient';
+import { DynamicGenericToolResult } from '@loop/agent-core';
+import { callMediaVideoSearch, mediaSourcesFromArgs, mediaVideoQueryFromArgs, mediaVideoSearchQuery, mergeMediaVideoProviderResults } from '@loop/agent-core';
 
 function row(source: string, title: string, status: string = 'success'): DynamicGenericToolResult {
   return {

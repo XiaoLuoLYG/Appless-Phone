@@ -1,4 +1,4 @@
-import { LocalModelSettings, defaultLocalModelSettings } from '../../model/LocalModelSettings';
+import { LocalModelSettings, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -18,18 +18,18 @@ import {
   A2uiSurfaceState,
   A2uiTrainData,
   A2uiTravelOptionData
-} from '../../model/A2uiTypes';
+} from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
-import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '../../model/GmailToolA2ui';
-import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
+import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
+import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
 import {
   emptySocialHubDraft,
   SocialHubConnectionData,
   SocialHubDraftData,
   SocialHubItemData
-} from '../../model/SocialHubTypes';
-import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '../../model/ToolGatewayClient';
+} from '@loop/agent-core';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
+import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -39,11 +39,12 @@ import {
   navigationCardSnapshotFromFoodOption,
   navigationCardSnapshotFromTrainOption,
   navigationCardSnapshotFromTravelOption
-} from '../../model/NavigationCardSnapshot';
-import { AssetCredentialStore } from '../../model/DynamicCredentialStore';
-import { buildSystemFoodNavigationUri } from '../../model/FoodNavigation';
-import { officialMediaVideoPlaybackUrl } from '../../model/MediaVideoToolA2ui';
+} from '@loop/agent-core';
+import { AssetCredentialStore } from '@loop/agent-core';
+import { buildSystemFoodNavigationUri } from '@loop/agent-core';
+import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
 import { copyPersonaData } from '../../model/PersonaA2ui';
+import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
 import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
 import { PersonaPack } from '../../model/PersonaTypes';
@@ -218,36 +219,27 @@ struct Index {
     this.personaSaveMessage = '已恢复默认';
   }
 
-  private applyLuckinOnlyMemory(): void {
-    this.selectedPersonaId = 'food_companion';
-    const pack = personaPackForId('food_companion');
-    this.personaSoulDraft = pack.soul;
-    this.personaMemoryDraft = '用户咖啡偏好：只喝瑞幸咖啡。';
-    updatePersonaPackText('food_companion', this.personaSoulDraft, this.personaMemoryDraft);
+  private applyPersonaMemoryUpdate(update: PersonaMemoryUpdateRequest): void {
+    const pack = personaPackForId(update.personaId);
+    if (pack.manifest.id !== update.personaId) {
+      aiLogError('[AIPhone][PersonaMemoryUpdate] ok=false reason=unknown_persona personaId=' + update.personaId);
+      return;
+    }
+    updatePersonaPackText(update.personaId, pack.soul, update.memoryText);
     this.savePersonaOverrides();
-    this.refreshPersonaEditor('food_companion');
-    this.personaSaveMessage = '已保存：只喝瑞幸';
+    this.refreshPersonaEditor(update.personaId);
+    this.personaSaveMessage = '已保存：' + update.summary;
+    aiLogInfo('[AIPhone][PersonaMemoryUpdate] ok=true personaId=' + update.personaId + ' summary=' + update.summary);
   }
 
-  private isLuckinOnlyMemoryPrompt(prompt: string): boolean {
-    return prompt.indexOf('瑞幸') >= 0 &&
-      (prompt.indexOf('只喝') >= 0 || prompt.indexOf('只买') >= 0 || prompt.indexOf('只点') >= 0);
+  private isPersonaEditorAction(action: A2uiAction): boolean {
+    return action.id === 'persona_memory_edit' || action.id === 'persona_soul_edit';
   }
 
-  private applyMemoryPrompt(prompt: string): boolean {
-    if (this.isBusy) {
-      return false;
-    }
-    if (!this.isLuckinOnlyMemoryPrompt(prompt)) {
-      return false;
-    }
-    this.applyLuckinOnlyMemory();
-    this.inputText = inputTextAfterPromptSubmit(this.inputText);
-    this.inputPlaceholder = '已记住：只喝瑞幸咖啡';
-    this.appendMessage('user', prompt);
-    this.appendMessage('assistant', '已更新饮食搭子的 memory：只喝瑞幸咖啡。');
-    aiLogInfo('[AIPhone][PersonaMemoryUpdate] personaId=food_companion preference=luckin_only');
-    return true;
+  private openPersonaEditor(personaId: string, target: string): void {
+    this.selectPersonaForEdit(personaId);
+    this.showConfigPage = true;
+    this.personaSaveMessage = target === 'soul' ? '正在编辑 soul.md' : '正在编辑 memory.md';
   }
 
   private getSettings(): LocalModelSettings {
@@ -812,7 +804,10 @@ struct Index {
             error: ''
           }));
         },
-        null
+        null,
+        (update: PersonaMemoryUpdateRequest) => {
+          this.applyPersonaMemoryUpdate(update);
+        }
       );
       this.isAwaitingFirstSurface = false;
       this.applySurface(result.surface);
@@ -865,9 +860,6 @@ struct Index {
   }
 
   private async sendPrompt(): Promise<void> {
-    if (this.applyMemoryPrompt(this.inputText.trim())) {
-      return;
-    }
     await this.submitPrompt(this.inputText, this.inputText);
   }
 
@@ -1310,6 +1302,10 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (this.isPersonaEditorAction(action)) {
+      this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
+      return;
+    }
     if (this.isSocialHubActionId(action) && !this.isCurrentSocialHubSurface()) {
       this.logHtmlHomeActionError(action, 'social_hub_surface_required');
       return;
@@ -1537,6 +1533,10 @@ struct Index {
       return;
     }
     if (this.isSocialHubClientAction(action)) {
+      await this.handleClientAction(action);
+      return;
+    }
+    if (this.isPersonaEditorAction(action)) {
       await this.handleClientAction(action);
       return;
     }

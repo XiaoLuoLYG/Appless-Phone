@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '../main/ets/model/A2uiParser';
-import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
+import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
 import {
   componentById,
   dynamicToolConnect,
@@ -11,8 +11,8 @@ import {
   toolRequest,
   trainOptions,
   travelOptions
-} from '../main/ets/model/A2uiData';
-import { SocialHubItemData } from '../main/ets/model/SocialHubTypes';
+} from '@loop/agent-core';
+import { SocialHubItemData } from '@loop/agent-core';
 import { modelThinkCloseSeen } from '../main/ets/model/LocalModelClient';
 
 export default function a2uiParserTest() {

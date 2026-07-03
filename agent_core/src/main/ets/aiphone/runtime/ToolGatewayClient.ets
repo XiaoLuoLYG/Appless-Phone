@@ -6498,6 +6498,7 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
       try {
         const accessToken = await gmailAccessTokenForMcp();
         if (accessToken.length === 0) {
+          aiLogInfo('[AIPhone][GmailAccessMissing] toolId=mail.search provider=gmail');
           statuses.push(mailProviderError('gmail', gmailAuthUnavailableMessage('gmail.mail.search', prompt)));
         } else {
           const gmailRows = await callGmailApiTool('gmail.mail.search', prompt, accessToken, parsed as Object);

@@ -6,7 +6,7 @@ import {
   parseImapEnvelopeList,
   pickDraftMailbox,
   QqMailImapClient
-} from '../main/ets/model/QqMailImapClient';
+} from '@loop/agent-core';
 
 class FakeSearchTransport implements ImapTransport {
   events: string[] = [];

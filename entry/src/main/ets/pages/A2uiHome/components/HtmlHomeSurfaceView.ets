@@ -1,6 +1,6 @@
 import { webview } from '@kit.ArkWeb';
-import { A2uiAction } from '../../../model/A2uiTypes';
-import { aiLogError, aiLogInfo } from '../../../model/AiphoneLogger';
+import { A2uiAction } from '@loop/agent-core';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import { COLOR_PAGE } from '../style/A2uiHomeTheme';
 
 type HtmlHomeActionValue = Object | string | number | boolean | null | undefined;

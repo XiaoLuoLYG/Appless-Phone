@@ -9,15 +9,15 @@ import {
   COLOR_INK,
   COLOR_MUTED,
   COLOR_PAGE,
-  COLOR_TEXT,
-  statusColor
+  COLOR_TEXT
 } from '../style/A2uiHomeTheme';
+import { KeyboardAvoidMode } from '@ohos.arkui.UIContext';
 import {
   A2uiAction,
   A2uiMessage,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
+} from '@loop/agent-core';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { HtmlHomeSurfaceView } from './HtmlHomeSurfaceView';
@@ -38,6 +38,7 @@ const A2UI_SEND_SPINNER_INTERVAL_MS: number = 90;
 const A2UI_HEADER_BUTTON_GAP: number = 4;
 const A2UI_HEADER_BUTTON_SIZE: number = 38;
 const A2UI_HEADER_BUTTON_ICON_SIZE: number = 19;
+const A2UI_HEADER_LOGO_SIZE: number = 28;
 const A2UI_HEADER_TITLE_FONT_SIZE: number = 16;
 const A2UI_VOICE_DOCK_HEIGHT: number = 72;
 const A2UI_VOICE_PULSE_STEPS: number = 12;
@@ -59,6 +60,7 @@ export struct HomePage {
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   private sendSpinnerTimerId: number = -1;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   onToggleHistory: () => void = () => {};
   onOpenConfig: () => void = () => {};
   onOpenSocialHub: () => void = () => {};
@@ -70,10 +72,14 @@ export struct HomePage {
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
+    const uiContext = this.getUIContext();
+    this.previousKeyboardAvoidMode = uiContext.getKeyboardAvoidMode();
+    uiContext.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.startSendSpinnerTimer();
   }
 
   aboutToDisappear(): void {
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
     this.stopSendSpinnerTimer();
   }
 
@@ -234,8 +240,10 @@ export struct HomePage {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
         Row() {
-          Circle({ width: 8, height: 8 })
-            .fill(statusColor(this.currentSurface.status))
+          Image($r('app.media.logo_appless'))
+            .width(A2UI_HEADER_LOGO_SIZE)
+            .height(A2UI_HEADER_LOGO_SIZE)
+            .objectFit(ImageFit.Contain)
             .margin({ right: 8 })
 
           Text('Appless Phone')
@@ -376,11 +384,12 @@ export struct HomePage {
               placeholder: this.inputPlaceholder,
               text: this.inputText
             })
-              .constraintSize({ minHeight: 32, maxHeight: 72 })
+              .constraintSize({ minHeight: 36, maxHeight: 80 })
               .layoutWeight(1)
               .fontSize(16)
               .fontColor(COLOR_TEXT)
               .lineHeight(24)
+              .enterKeyType(EnterKeyType.Send)
               .placeholderColor(COLOR_MUTED)
               .backgroundColor('#00000000')
               .borderRadius(0)
@@ -388,8 +397,8 @@ export struct HomePage {
               .padding({
                 left: 0,
                 right: 0,
-                top: 4,
-                bottom: 4
+                top: 6,
+                bottom: 8
               })
               .enabled(isPromptInputEnabled(this.isBusy))
               .onChange((value: string) => {
@@ -397,6 +406,12 @@ export struct HomePage {
                   return;
                 }
                 this.inputText = value;
+              })
+              .onSubmit(() => {
+                if (!isPromptInputEnabled(this.isBusy)) {
+                  return;
+                }
+                this.onSendPrompt();
               })
 
             A2uiButtonView({

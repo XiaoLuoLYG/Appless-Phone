@@ -4,7 +4,7 @@ import {
   buildGoogleRefreshTokenBody,
   buildGoogleTokenExchangeBody,
   parseGoogleOAuthRedirect
-} from '../main/ets/model/GoogleOAuthClient';
+} from '@loop/agent-core';
 
 export default function googleOAuthClientTest() {
   describe('googleOAuthClient', () => {

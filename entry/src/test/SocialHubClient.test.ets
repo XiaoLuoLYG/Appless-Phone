@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubXPostResult } from '../main/ets/model/SocialHubClient';
+import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubXPostResult } from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {

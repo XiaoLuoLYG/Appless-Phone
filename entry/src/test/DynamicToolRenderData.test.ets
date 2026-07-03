@@ -5,9 +5,9 @@ import {
   A2uiSurfaceState,
   A2uiDynamicToolConnectData,
   A2uiGenericToolResultData
-} from '../main/ets/model/A2uiTypes';
-import { dynamicToolConnect, genericToolResults } from '../main/ets/model/A2uiData';
-import { emptySocialHub } from '../main/ets/model/SocialHubTypes';
+} from '@loop/agent-core';
+import { dynamicToolConnect, genericToolResults } from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 function baseModel(): A2uiRuntimeDataModel {
   return {

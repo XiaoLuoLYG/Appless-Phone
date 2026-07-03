@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { componentById, labelValues } from '../main/ets/model/A2uiData';
-import { A2uiComponent } from '../main/ets/model/A2uiTypes';
+import { componentById, labelValues } from '@loop/agent-core';
+import { A2uiComponent } from '@loop/agent-core';
 import {
   A2UI_STYLE_LAB_CASES,
   A2uiStyleLabCase,

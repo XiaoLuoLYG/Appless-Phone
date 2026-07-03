@@ -5,6 +5,8 @@ import { applyPersonaEditableSnapshots, personaEditableSnapshots } from './Perso
 
 const PERSONA_STORE_NAME: string = 'aiphone_persona_store';
 const PERSONA_STORE_KEY: string = 'editable_personas';
+const PERSONA_STORE_VERSION_KEY: string = 'editable_personas_version';
+const PERSONA_STORE_VERSION: string = 'persona_skill_memory_v2';
 
 function flushPreferences(store: preferences.Preferences): void {
   store.flush().catch((_error: Error) => {});
@@ -52,6 +54,9 @@ export class PreferencesPersonaPackStore {
       return;
     }
     try {
+      if (textFromValue(store.getSync(PERSONA_STORE_VERSION_KEY, '')) !== PERSONA_STORE_VERSION) {
+        return;
+      }
       applyPersonaEditableSnapshots(snapshotsFromJson(textFromValue(store.getSync(PERSONA_STORE_KEY, ''))));
     } catch (_error) {
     }
@@ -64,6 +69,7 @@ export class PreferencesPersonaPackStore {
     }
     try {
       store.putSync(PERSONA_STORE_KEY, JSON.stringify(personaEditableSnapshots()));
+      store.putSync(PERSONA_STORE_VERSION_KEY, PERSONA_STORE_VERSION);
       flushPreferences(store);
     } catch (_error) {
     }

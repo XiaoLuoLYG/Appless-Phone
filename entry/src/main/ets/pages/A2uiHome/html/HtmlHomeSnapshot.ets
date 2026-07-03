@@ -27,7 +27,7 @@ import {
   A2uiSurfaceState,
   A2uiTrainData,
   A2uiTravelOptionData
-} from '../../../model/A2uiTypes';
+} from '@loop/agent-core';
 import {
   actionsOf,
   dynamicToolConnect,
@@ -43,7 +43,7 @@ import {
   socialHubItems,
   trainOptions,
   travelOptions
-} from '../../../model/A2uiData';
+} from '@loop/agent-core';
 import {
   componentBodyOf,
   componentStatusOf,
@@ -51,10 +51,10 @@ import {
   componentTitleOf,
   findA2uiComponent
 } from '../render/A2uiRenderData';
-import { gmailOpenDraftAction, gmailReplyDraftAction } from '../../../model/GmailToolA2ui';
-import { mailReplyDraftAction } from '../../../model/MailToolA2ui';
-import { isMediaVideoResult, mediaVideoPlaybackAction } from '../../../model/MediaVideoToolA2ui';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '../../../model/SocialHubTypes';
+import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
+import { mailReplyDraftAction } from '@loop/agent-core';
+import { isMediaVideoResult, mediaVideoPlaybackAction } from '@loop/agent-core';
+import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
 import {
   HtmlHomeAction,
   HtmlHomeBlock,
@@ -614,6 +614,10 @@ function genericResultRowValue(result: A2uiGenericToolResultData, label: string)
 }
 
 function appendGenericComponentBlock(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  if (component.component === A2UI_COMPONENT_INFO_ROWS && component.id === 'memory_update') {
+    appendPersonaMemoryUpdateBlock(document, surface, component);
+    return;
+  }
   const title = firstText(componentTitleOf(component), componentTextOf(component), component.component + ':' + component.id);
   const block = newBlock(component.id, component.component, title);
   block.subtitle = componentBodyOf(component);
@@ -632,6 +636,21 @@ function appendGenericComponentBlock(document: HtmlHomeDocument, surface: A2uiSu
     component.component === A2UI_COMPONENT_TRAIN_OPTIONS || component.component === A2UI_COMPONENT_FLIGHT_BOARD) {
     document.blocks.push(block);
   }
+}
+
+function appendPersonaMemoryUpdateBlock(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  const persona = personaRuntimeData(surface);
+  const memory = personaMemoryData(surface);
+  const title = firstText(componentTitleOf(component), persona.name.length > 0 ? persona.name + '已更新记忆' : '记忆已更新');
+  const block = newBlock(component.id, 'persona-memory-update', title);
+  block.subtitle = firstText(memory.summary, persona.reason, componentBodyOf(component));
+  block.status = componentStatusOf(component, '');
+  block.source = persona.id;
+  labelValues(surface, component).forEach((row: A2uiLabelValueData) => {
+    appendMetric(block.rows, row.label, row.value);
+  });
+  block.actions = htmlActions(actionsOf(component), component.id);
+  document.blocks.push(block);
 }
 
 function dropCompletedThinkingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {

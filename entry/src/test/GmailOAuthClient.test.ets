@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { MemoryCredentialStore } from '../main/ets/model/DynamicCredentialStore';
+import { MemoryCredentialStore } from '@loop/agent-core';
 import {
   GMAIL_ACCESS_TOKEN_REF,
   GMAIL_REFRESH_TOKEN_REF,
@@ -13,7 +13,7 @@ import {
   loadGmailOAuthTokenSet,
   parseGmailOAuthRedirect,
   saveGmailOAuthTokenSet
-} from '../main/ets/model/GmailOAuthClient';
+} from '@loop/agent-core';
 
 interface GmailSearchArgsFixture {
   query: string;

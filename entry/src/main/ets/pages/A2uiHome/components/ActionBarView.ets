@@ -1,4 +1,4 @@
-import { A2uiAction } from '../../../model/A2uiTypes';
+import { A2uiAction } from '@loop/agent-core';
 import {
   A2UI_DIALOG_ACTION_GAP,
   A2UI_DIALOG_ACTION_SIDE_PADDING,

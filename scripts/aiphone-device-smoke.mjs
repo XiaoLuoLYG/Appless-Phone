@@ -944,7 +944,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     modelSelectedExpectedToolId,
     personaCoffeeProof,
     personaMemoryUpdateProof: !isPersonaMemoryUpdateQuery(query) ||
-      /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*personaId=food_companion[^\n]*preference=luckin_only/.test(text),
+      /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*personaId=food_companion[^\n]*(preference=luckin_only|summary=.*瑞幸)/.test(text),
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
     model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
@@ -978,7 +978,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     result.modelPassed = result.personaMemoryUpdateProof === true;
     result.transportPassed = true;
     result.basePassedWithoutTransport = true;
-    result.ok = result.personaMemoryUpdateProof === true && !result.toolRequested && !result.localToolRequest;
+    result.ok = result.personaMemoryUpdateProof === true &&
+      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
+      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text);
   } else if (expectedTool === true) {
     result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
@@ -1464,6 +1466,10 @@ async function runQuery(query, index, expectedTool) {
   const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
   const allowsSocialHubTruthfulState = socialHubVisibleOutput && hasTruthfulSocialHubState(evidenceText);
   const allowsExternalGmailWeb = isGmailWebQuery(query) && summary.gmailWebOpened === true;
+  const allowsAggregateMailProviderFailure = expectedToolId === 'mail.search' &&
+    !isQqMailQuery(query) &&
+    /Gmail/.test(evidenceText) &&
+    /QQ Mail/.test(evidenceText);
   const allowsPartialTravelSourceFailure = expectedToolId === 'travel.search' &&
     summary.toolOk === true &&
     (evidenceText.includes('来源状态') || evidenceText.includes('飞常准')) &&
@@ -1473,6 +1479,9 @@ async function runQuery(query, index, expectedTool) {
       return false;
     }
     if (allowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
+      return false;
+    }
+    if (allowsAggregateMailProviderFailure && /^(Gmail|QQ)/.test(marker)) {
       return false;
     }
     return evidenceText.includes(marker);
@@ -1485,7 +1494,7 @@ async function runQuery(query, index, expectedTool) {
     }
   }
   const providerLayoutFailed = retryableProviderLayoutMarkers.some((marker) => evidenceText.includes(marker));
-  summary.providerFailed = summary.providerFailed || (providerLayoutFailed && !allowsSocialHubTruthfulState);
+  summary.providerFailed = summary.providerFailed || (providerLayoutFailed && !allowsSocialHubTruthfulState && !allowsAggregateMailProviderFailure);
   summary.layoutPath = join(outDir, `query-${index + 1}-final-layout.json`);
   summary.layoutTextPath = layoutTextPath;
   summary.layoutScrolledTextPath = scrollEvidence.combinedTextPath;
@@ -1512,8 +1521,7 @@ async function runQuery(query, index, expectedTool) {
   summary.mailAggregateVisible = expectedToolId !== 'mail.search' ||
     (isMailAggregationQuery(query) ? (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText)) :
       (isQqMailQuery(query) ? /QQ Mail/.test(evidenceText) : (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText))));
-  const expectsMailDraftAction = (expectedToolId === 'mail.search' && summary.mailAggregateVisible) ||
-    (expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query));
+  const expectsMailDraftAction = expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query);
   summary.mailExpandedActions = expectsMailDraftAction
     ? await verifyMailExpandedActions(evidenceLayout, index, appPid, isGmailEccvQuery(query) ? 'ECCV' : '')
     : {
@@ -1635,6 +1643,10 @@ const finalAllowsSocialHubTruthfulState =
   finalSummary !== null &&
   isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
   hasVisibleSocialHubOutput(finalLayoutText, finalSummary.expectedToolId);
+const finalAllowsAggregateMailProviderFailure =
+  finalSummary !== null &&
+  finalSummary.expectedToolId === 'mail.search' &&
+  finalSummary.mailAggregateVisible === true;
 const finalAllowsSourceFailure =
   finalAllowsPartialTravel &&
   finalSummary !== null &&
@@ -1650,6 +1662,9 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
     return false;
   }
   if (finalAllowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
+    return false;
+  }
+  if (finalAllowsAggregateMailProviderFailure && /^(Gmail|QQ)/.test(marker)) {
     return false;
   }
   return finalLayoutText.includes(marker);

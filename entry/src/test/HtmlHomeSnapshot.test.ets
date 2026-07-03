@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { isHtmlHomeActionAllowed } from '../main/ets/pages/A2uiHome/html/HtmlHomeActionPolicy';
-import { A2uiAction, A2uiComponent, A2uiMessage, A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
+import { A2uiAction, A2uiComponent, A2uiMessage, A2uiSurfaceState } from '@loop/agent-core';
 
 function surface(intent: string, status: string, components: A2uiComponent[], dataModelJson: string): A2uiSurfaceState {
   return {

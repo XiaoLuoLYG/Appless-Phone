@@ -1,5 +1,5 @@
-import { A2uiSurfaceState } from '../../../model/A2uiTypes';
-import { toolRequest } from '../../../model/A2uiData';
+import { A2uiSurfaceState } from '@loop/agent-core';
+import { toolRequest } from '@loop/agent-core';
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;

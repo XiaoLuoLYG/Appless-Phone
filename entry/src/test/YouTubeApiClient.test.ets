@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { youtubeSearchUrl, youtubeVideoResultsFromSearchPayload } from '../main/ets/model/YouTubeApiClient';
+import { youtubeSearchUrl, youtubeVideoResultsFromSearchPayload } from '@loop/agent-core';
 
 export default function youtubeApiClientTest() {
   describe('youTubeApiClient', () => {

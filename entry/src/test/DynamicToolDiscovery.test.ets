@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from '../main/ets/model/DynamicToolDiscovery';
-import { configureDefaultDynamicToolSamplesForTests } from '../main/ets/model/DynamicToolSamples';
+import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from '@loop/agent-core';
+import { configureDefaultDynamicToolSamplesForTests } from '@loop/agent-core';
 
 export default function dynamicToolDiscoveryTest() {
   describe('dynamicToolDiscovery', () => {

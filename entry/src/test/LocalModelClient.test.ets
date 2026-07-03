@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { buildChatCompletionsUrl, resolveSystemPrompt } from '../main/ets/model/LocalModelClient';
-import { configureLocalModelSettingsFromRawJson, defaultLocalModelSettings } from '../main/ets/model/LocalModelSettings';
+import { configureLocalModelSettingsFromRawJson, defaultLocalModelSettings } from '@loop/agent-core';
 
 export default function localModelClientTest() {
   describe('localModelClient', () => {

@@ -3,18 +3,18 @@ import {
   A2uiComponent,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
+} from '@loop/agent-core';
 import {
   socialHubConnections,
   socialHubDraft,
   socialHubItems,
   socialHubSelected
-} from '../../../model/A2uiData';
+} from '@loop/agent-core';
 import {
   SocialHubConnectionData,
   SocialHubItemData,
   SocialHubPlatform
-} from '../../../model/SocialHubTypes';
+} from '@loop/agent-core';
 import {
   COLOR_CARD,
   COLOR_CARD_EDGE,

@@ -10,7 +10,7 @@ import {
   calendarSearchQueryText,
   calendarUpdateBody,
   normalizedCalendarArgsForPrompt
-} from '../main/ets/model/CalendarApiClient';
+} from '@loop/agent-core';
 
 export default function calendarApiClientTest() {
   describe('calendarApiClient', () => {

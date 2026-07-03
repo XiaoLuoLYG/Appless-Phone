@@ -4,9 +4,9 @@ import {
   A2uiDynamicToolConnectData,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
-import { actionsOf, dynamicToolConnect } from '../../../model/A2uiData';
-import { AssetCredentialStore } from '../../../model/DynamicCredentialStore';
+} from '@loop/agent-core';
+import { actionsOf, dynamicToolConnect } from '@loop/agent-core';
+import { AssetCredentialStore } from '@loop/agent-core';
 import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,

@@ -1,4 +1,5 @@
-import { PersonaMemoryRuntimeData, PersonaRuntimeData } from './PersonaTypes';
+import { PersonaMemoryRuntimeData, PersonaPack, PersonaRuntimeData } from './PersonaTypes';
+import { markdownSectionValue, parsePersonaMarkdown, PersonaSkillMarkdown } from './PersonaMarkdown';
 import { personaPackForId } from './PersonaStore';
 import { routePersonaForPrompt } from './PersonaRouter';
 
@@ -10,16 +11,23 @@ export interface PreparedPersonaPrompt {
   toolArgs?: Object;
 }
 
+function preferenceMemoryText(memory: string): string {
+  const parsed = parsePersonaMarkdown(memory);
+  const stablePreferences = markdownSectionValue(parsed.sections, 'Stable Preferences').trim();
+  return stablePreferences.length > 0 ? stablePreferences : parsed.body;
+}
+
 function memoryPreferences(memory: string): string[] {
+  const preferenceText = preferenceMemoryText(memory);
   const values: string[] = [];
-  if ((memory.indexOf('只喝瑞幸') >= 0 || memory.indexOf('只买瑞幸') >= 0 || memory.indexOf('只点瑞幸') >= 0) &&
+  if ((preferenceText.indexOf('只喝瑞幸') >= 0 || preferenceText.indexOf('只买瑞幸') >= 0 || preferenceText.indexOf('只点瑞幸') >= 0) &&
     values.indexOf('只喝瑞幸') < 0) {
     values.push('只喝瑞幸');
   }
-  if (memory.indexOf('半糖') >= 0) {
+  if (preferenceText.indexOf('半糖') >= 0) {
     values.push('半糖');
   }
-  if (memory.indexOf('瑞幸') >= 0 && values.indexOf('只喝瑞幸') < 0) {
+  if (preferenceText.indexOf('瑞幸') >= 0 && values.indexOf('只喝瑞幸') < 0) {
     values.push('瑞幸优先');
   }
   return values;
@@ -47,6 +55,14 @@ function memoryToolArgs(preferences: string[]): Object | undefined {
   return Object.keys(args).length > 0 ? args : undefined;
 }
 
+function skillSummaries(pack: PersonaPack): string {
+  const lines: string[] = [];
+  pack.skillList.forEach((skill: PersonaSkillMarkdown) => {
+    lines.push('- ' + skill.id + ' [' + skill.status + ']: ' + skill.description);
+  });
+  return lines.join('\n');
+}
+
 export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
   const route = routePersonaForPrompt(prompt);
   const pack = personaPackForId(route.personaId);
@@ -68,12 +84,16 @@ export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
     'Persona reason: ' + route.reason,
     'Soul:',
     pack.soul,
-    'Skills:',
-    pack.skills,
+    'Active skill:',
+    pack.activeSkill.body,
+    'Available persona skills:',
+    skillSummaries(pack),
     'Memory:',
     pack.memory,
     'Tool args instruction:',
     'Call exactly one best-fit tool when a tool is needed. Preserve the original user task. For food.search, include brandPreference and sweetness JSON args when memory says 瑞幸 or 半糖. Include brandStrict=true when memory says 只喝瑞幸.',
+    'Memory update instruction:',
+    'When the user states a durable preference, identity fact, or stable constraint for the active persona, call memory.update with JSON { personaId, summary, memoryText, reason, suggestedAction }. Do not call search tools in the same turn. For the coffee preference example, suggestedAction should let the user rerun the previous coffee task, such as label=按新偏好重新查咖啡 and prompt=点一杯咖啡.',
     'User task:',
     prompt
   ].join('\n');

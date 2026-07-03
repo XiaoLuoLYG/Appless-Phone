@@ -47,6 +47,8 @@ import personaStoreTest from './PersonaStore.test';
 import personaRouterTest from './PersonaRouter.test';
 import personaPromptTest from './PersonaPrompt.test';
 import personaA2uiTest from './PersonaA2ui.test';
+import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
+import personaMarkdownTest from './PersonaMarkdown.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -91,10 +93,12 @@ export default function testsuite() {
   socialHubA2uiTest();
   socialHubClientTest();
   voiceInputBridgeTest();
+  personaMarkdownTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
   personaA2uiTest();
+  personaMemoryUpdateTest();
   htmlHomeSnapshotTest();
   htmlHomeRendererTest();
   htmlHomeActionPolicyTest();

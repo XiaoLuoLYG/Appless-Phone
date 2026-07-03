@@ -1,0 +1,6 @@
+{
+  "activeSkillId": "default-general",
+  "skills": [
+    { "id": "default-general", "path": "skills/default-general/SKILL.md", "status": "active" }
+  ]
+}

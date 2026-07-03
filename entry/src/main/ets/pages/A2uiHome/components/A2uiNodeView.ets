@@ -23,8 +23,8 @@ import {
   A2uiTravelOptionData,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
-import { actionsOf } from '../../../model/A2uiData';
+} from '@loop/agent-core';
+import { actionsOf } from '@loop/agent-core';
 import {
   COLOR_ERROR,
   COLOR_ERROR_SOFT,
@@ -48,6 +48,7 @@ import { FoodChoicesView } from './FoodChoicesView';
 import { GenericToolResultsView } from './GenericToolResultsView';
 import { SocialHubView } from './SocialHubView';
 import { InfoRowsView } from './InfoRowsView';
+import { PersonaMemoryUpdateView } from './PersonaMemoryUpdateView';
 import { ThinkingStreamView } from './ThinkingStreamView';
 import { ToolConnectCardView } from './ToolConnectCardView';
 import { TrainOptionsView } from './TrainOptionsView';
@@ -161,13 +162,23 @@ export struct A2uiNodeView {
           .margin({ bottom: 10 })
           .transition(a2uiEnterTransition())
       } else if (this.component()?.component === A2UI_COMPONENT_INFO_ROWS) {
-        InfoRowsView({
-          surface: this.surface,
-          component: this.component() as A2uiComponent,
-          renderTick: this.renderTick,
-          isBusy: this.isBusy,
-          onAction: this.onAction
-        })
+        if (this.component()?.id === 'memory_update') {
+          PersonaMemoryUpdateView({
+            surface: this.surface,
+            component: this.component() as A2uiComponent,
+            renderTick: this.renderTick,
+            isBusy: this.isBusy,
+            onAction: this.onAction
+          })
+        } else {
+          InfoRowsView({
+            surface: this.surface,
+            component: this.component() as A2uiComponent,
+            renderTick: this.renderTick,
+            isBusy: this.isBusy,
+            onAction: this.onAction
+          })
+        }
       } else if (this.component()?.component === A2UI_COMPONENT_TRAIN_OPTIONS) {
         TrainOptionsView({
           surface: this.surface,

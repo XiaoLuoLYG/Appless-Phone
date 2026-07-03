@@ -1,4 +1,4 @@
-import { A2uiPersonaData, A2uiPersonaMemoryData } from '../../../model/A2uiTypes';
+import { A2uiPersonaData, A2uiPersonaMemoryData } from '@loop/agent-core';
 import {
   COLOR_ACCENT_SOFT,
   COLOR_CARD_EDGE,

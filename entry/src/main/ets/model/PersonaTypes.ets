@@ -1,3 +1,5 @@
+import { PersonaMarkdownSection, PersonaSkillMarkdown } from './PersonaMarkdown';
+
 export interface PersonaManifest {
   id: string;
   name: string;
@@ -6,11 +8,27 @@ export interface PersonaManifest {
   defaultTools: string[];
 }
 
+export interface PersonaSkillRef {
+  id: string;
+  path: string;
+  status: string;
+}
+
+export interface PersonaSkillManifest {
+  activeSkillId: string;
+  skills: PersonaSkillRef[];
+}
+
 export interface PersonaPack {
   manifest: PersonaManifest;
   soul: string;
+  soulSections: PersonaMarkdownSection[];
   skills: string;
+  skillManifest: PersonaSkillManifest;
+  skillList: PersonaSkillMarkdown[];
+  activeSkill: PersonaSkillMarkdown;
   memory: string;
+  memorySections: PersonaMarkdownSection[];
 }
 
 export interface PersonaEditableSnapshot {

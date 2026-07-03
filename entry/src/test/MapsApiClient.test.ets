@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { mapsFoodRecordFromResult, mapsTextSearchBody, mapsTextSearchResultsFromPayload } from '../main/ets/model/MapsApiClient';
+import { mapsFoodRecordFromResult, mapsTextSearchBody, mapsTextSearchResultsFromPayload } from '@loop/agent-core';
 
 export default function mapsApiClientTest() {
   describe('mapsApiClient', () => {

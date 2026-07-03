@@ -1,9 +1,9 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { genericToolResults } from '../main/ets/model/A2uiData';
-import { parseA2uiJsonl } from '../main/ets/model/A2uiParser';
-import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
-import { mailReplyDraftAction, mailResultsA2ui } from '../main/ets/model/MailToolA2ui';
-import { MailProviderStatus, MailThreadResult } from '../main/ets/model/MailToolTypes';
+import { genericToolResults } from '@loop/agent-core';
+import { parseA2uiJsonl } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
+import { mailReplyDraftAction, mailResultsA2ui } from '@loop/agent-core';
+import { MailProviderStatus, MailThreadResult } from '@loop/agent-core';
 
 function surfaceFromJsonl(jsonl: string): A2uiSurfaceStore {
   const parsed = parseA2uiJsonl(jsonl);

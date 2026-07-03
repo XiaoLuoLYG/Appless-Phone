@@ -1,4 +1,4 @@
-import { A2uiComponent } from '../../../model/A2uiTypes';
+import { A2uiComponent } from '@loop/agent-core';
 
 export type HtmlHomeSource = 'welcome' | 'pending' | 'model' | 'tool';
 export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'generic';

@@ -1,4 +1,4 @@
-import { A2uiSurfaceState } from '../../../model/A2uiTypes';
+import { A2uiSurfaceState } from '@loop/agent-core';
 
 export const A2UI_SEND_SPINNER_STEP_DEG: number = 24;
 

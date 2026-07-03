@@ -3,8 +3,8 @@ import {
   A2uiPersonaMemoryData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState
-} from './A2uiTypes';
-import { personaMemoryData, personaRuntimeData } from './A2uiData';
+} from '@loop/agent-core';
+import { personaMemoryData, personaRuntimeData } from '@loop/agent-core';
 
 function cloneSurface(surface: A2uiSurfaceState, dataModelJson: string): A2uiSurfaceState {
   return {
