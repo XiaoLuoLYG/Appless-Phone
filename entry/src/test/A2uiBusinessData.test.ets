@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { flightOptions, foodOptions, foodVisualSourceTag, trainOptions } from '../main/ets/model/A2uiData';
+import { flightOptions, foodOptions, foodVisualSourceTag, trainOptions } from '@loop/agent-core';
 import {
   A2uiComponent,
   A2uiFlightData,
@@ -13,8 +13,8 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData,
   A2uiTripData
-} from '../main/ets/model/A2uiTypes';
-import { emptySocialHub } from '../main/ets/model/SocialHubTypes';
+} from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 function businessSurface(): A2uiSurfaceState {
   const trains: A2uiTrainData[] = [{

@@ -2,18 +2,19 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import util from '@ohos.util';
-import { AssetCredentialStore, handleGmailOAuthRedirect, handleXOAuthRedirect, xOAuthConfigFromProvider } from '@loop/agent-core';
-import { configureLocalModelSettingsFromRawJson, localModelSettingsDebugSummary } from '../model/LocalModelSettings';
 import {
-  configureLocalProviderConfigFromRawJson as configureAgentCoreProviderConfigFromRawJson,
+  aiLogError,
+  aiLogInfo,
+  AssetCredentialStore,
+  configureLocalModelSettingsFromRawJson,
+  configureLocalProviderConfigFromRawJson,
   gmailOAuthConfigFromProvider,
-  localProviderConfigDebugSummary as agentCoreProviderConfigDebugSummary
+  handleGmailOAuthRedirect,
+  handleXOAuthRedirect,
+  localModelSettingsDebugSummary,
+  localProviderConfigDebugSummary,
+  xOAuthConfigFromProvider
 } from '@loop/agent-core';
-import {
-  configureLocalProviderConfigFromRawJson as configureEntryProviderConfigFromRawJson,
-  localProviderConfigDebugSummary as entryProviderConfigDebugSummary
-} from '../model/ToolGatewayClient';
-import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
 import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
 
 const DOMAIN = 0x0000;
@@ -28,6 +29,15 @@ const PERSONA_IDS: string[] = [
   'game_companion',
   'shopping_companion'
 ];
+const PERSONA_SKILL_PATHS: Record<string, string[]> = {
+  'default_companion': ['skills/default-general/SKILL.md'],
+  'food_companion': ['skills/food-search/SKILL.md', 'skills/coffee-order/SKILL.md', 'skills/milk-tea/SKILL.md'],
+  'travel_companion': ['skills/travel-planning/SKILL.md', 'skills/train-planning/SKILL.md', 'skills/flight-planning/SKILL.md'],
+  'work_companion': ['skills/work-assistant/SKILL.md', 'skills/mail-draft/SKILL.md', 'skills/calendar-planning/SKILL.md'],
+  'entertainment_companion': ['skills/media-search/SKILL.md', 'skills/worldcup-night/SKILL.md', 'skills/youtube-search/SKILL.md'],
+  'game_companion': ['skills/game-research/SKILL.md', 'skills/build-guide/SKILL.md'],
+  'shopping_companion': ['skills/shopping-research/SKILL.md', 'skills/budget-compare/SKILL.md']
+};
 const GMAIL_REVERSED_CLIENT_SCHEME = 'com.googleusercontent.apps.358078200829-covuu6l8dgvs7kaejua7mrkke7e8833b:/oauth2redirect';
 const GMAIL_OAUTH_URI_HINTS: string[] = [
   'com.example.aiphonedemo:/oauth/google',
@@ -194,15 +204,21 @@ export default class EntryAbility extends UIAbility {
     return decoder.decodeToString(bytes);
   }
 
+  private optionalRawfileText(path: string): string {
+    try {
+      return this.rawfileText(path);
+    } catch (_err) {
+      return '';
+    }
+  }
+
   private loadLocalProviderConfig(): void {
     try {
       const rawJson = this.rawfileText(LOCAL_PROVIDER_CONFIG_RAWFILE);
-      configureEntryProviderConfigFromRawJson(rawJson);
-      configureAgentCoreProviderConfigFromRawJson(rawJson);
+      configureLocalProviderConfigFromRawJson(rawJson);
       configureLocalModelSettingsFromRawJson(rawJson);
-      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. entry=%{public}s agentCore=%{public}s %{public}s',
-        entryProviderConfigDebugSummary(),
-        agentCoreProviderConfigDebugSummary(),
+      hilog.info(DOMAIN, 'testTag', 'Loaded local provider config. agentCore=%{public}s %{public}s',
+        localProviderConfigDebugSummary(),
         localModelSettingsDebugSummary());
     } catch (err) {
       hilog.info(DOMAIN, 'testTag', 'Local provider config not loaded from %{public}s. Cause: %{public}s', LOCAL_PROVIDER_CONFIG_RAWFILE, JSON.stringify(err));
@@ -217,6 +233,20 @@ export default class EntryAbility extends UIAbility {
         files[personaId + '/soul.md'] = this.rawfileText('personas/' + personaId + '/soul.md');
         files[personaId + '/skills.md'] = this.rawfileText('personas/' + personaId + '/skills.md');
         files[personaId + '/memory.md'] = this.rawfileText('personas/' + personaId + '/memory.md');
+        const skillManifest = this.optionalRawfileText('personas/' + personaId + '/skills.json');
+        if (skillManifest.length > 0) {
+          files[personaId + '/skills.json'] = skillManifest;
+        }
+        const skillPaths = PERSONA_SKILL_PATHS[personaId];
+        if (skillPaths !== undefined) {
+          for (let skillIndex = 0; skillIndex < skillPaths.length; skillIndex++) {
+            const skillPath = skillPaths[skillIndex];
+            const skillText = this.optionalRawfileText('personas/' + personaId + '/' + skillPath);
+            if (skillText.length > 0) {
+              files[personaId + '/' + skillPath] = skillText;
+            }
+          }
+        }
       }
       configurePersonaStoreFromRaw(this.rawfileText(PERSONA_MANIFEST_RAWFILE), files);
       hilog.info(DOMAIN, 'testTag', 'Loaded persona packs. count=%{public}d', PERSONA_IDS.length);

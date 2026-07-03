@@ -1,4 +1,4 @@
-import { A2uiAction, A2uiSurfaceState } from '../../model/A2uiTypes';
+import { A2uiAction, A2uiSurfaceState } from '@loop/agent-core';
 import router from '@ohos.router';
 import {
   COLOR_ACCENT,

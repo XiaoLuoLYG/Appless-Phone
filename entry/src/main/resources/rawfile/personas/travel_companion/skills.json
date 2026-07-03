@@ -1,0 +1,8 @@
+{
+  "activeSkillId": "travel-planning",
+  "skills": [
+    { "id": "travel-planning", "path": "skills/travel-planning/SKILL.md", "status": "active" },
+    { "id": "train-planning", "path": "skills/train-planning/SKILL.md", "status": "placeholder" },
+    { "id": "flight-planning", "path": "skills/flight-planning/SKILL.md", "status": "placeholder" }
+  ]
+}

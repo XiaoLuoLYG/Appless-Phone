@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
-import { A2uiSurfaceThrottle } from '../main/ets/model/A2uiSurfaceThrottle';
+import { A2uiSurfaceState } from '@loop/agent-core';
+import { A2uiSurfaceThrottle } from '@loop/agent-core';
 
 function throttleSurface(sequence: number): A2uiSurfaceState {
   return {

@@ -1,4 +1,4 @@
-import { AgentEvent, LoopBackend, LoopBackendRequest, LoopMessage } from '@loop/agent-core';
+import { AgentEvent, LoopBackend, LoopBackendRequest, LoopMessage, LoopToolTrace } from '@loop/agent-core';
 import {
   A2uiCallResult,
   A2uiEnvelope,
@@ -8,12 +8,17 @@ import {
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
   A2uiToolRequestData
-} from './A2uiTypes';
-import { parseA2uiJsonl } from './A2uiParser';
-import { A2uiSurfaceStore } from './A2uiSurfaceStore';
-import { LocalModelSettings } from './LocalModelSettings';
-import { aiLogError, aiLogInfo } from './AiphoneLogger';
+} from '@loop/agent-core';
+import { parseA2uiJsonl } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
+import { LocalModelSettings } from '@loop/agent-core';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import { attachPersonaDataToSurface } from './PersonaA2ui';
+import {
+  memoryUpdateSurface,
+  parsePersonaMemoryUpdateInput,
+  PersonaMemoryUpdateRequest
+} from './PersonaMemoryUpdate';
 import { preparePersonaPrompt } from './PersonaPrompt';
 import { PersonaMemoryRuntimeData, PersonaRuntimeData } from './PersonaTypes';
 
@@ -22,6 +27,7 @@ export interface A2uiStreamMeta {
 }
 
 export type A2uiSurfaceCallback = (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => void;
+export type PersonaMemoryUpdateCallback = (update: PersonaMemoryUpdateRequest) => void;
 
 export function modelThinkCloseSeen(text: string): boolean {
   const lower = text.toLowerCase();
@@ -136,12 +142,23 @@ function a2uiPersonaMemoryData(memory: PersonaMemoryRuntimeData): A2uiPersonaMem
   };
 }
 
+function firstPersonaMemoryUpdate(toolCalls: LoopToolTrace[], activePersonaId: string): PersonaMemoryUpdateRequest | null {
+  for (let index = 0; index < toolCalls.length; index++) {
+    const toolCall = toolCalls[index];
+    if (toolCall.toolId === 'memory.update') {
+      return parsePersonaMemoryUpdateInput(toolCall.input, activePersonaId);
+    }
+  }
+  return null;
+}
+
 export async function callLocalModel(
   settings: LocalModelSettings,
   prompt: string,
   history: A2uiMessage[],
   onSurface: A2uiSurfaceCallback,
-  initialSurface: A2uiSurfaceState | null = null
+  initialSurface: A2uiSurfaceState | null = null,
+  onPersonaMemoryUpdate: PersonaMemoryUpdateCallback | null = null
 ): Promise<A2uiCallResult> {
   const store = new A2uiSurfaceStore();
   if (initialSurface !== null) {
@@ -218,6 +235,22 @@ export async function callLocalModel(
     }
     if (raw.trim().length === 0 && error.length > 0) {
       store.applyError('Loopy 后端异常', error);
+    }
+    const memoryUpdate = firstPersonaMemoryUpdate(result.toolCalls, preparedPersona.runtime.id);
+    if (memoryUpdate !== null && error.length === 0) {
+      if (onPersonaMemoryUpdate !== null) {
+        onPersonaMemoryUpdate(memoryUpdate);
+      }
+      const updateSurface = clearExecutedToolRequests(memoryUpdateSurface('surface_model', memoryUpdate));
+      onSurface(updateSurface, raw, { thinkClosed: true });
+      return {
+        ok: result.ok,
+        raw: raw,
+        error: error,
+        requestDebug: debug,
+        assistantDebug: memoryUpdate.personaId + ' memory updated: ' + memoryUpdate.summary,
+        surface: updateSurface
+      };
     }
     return {
       ok: result.ok && error.length === 0,

@@ -1,4 +1,4 @@
-import { A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
+import { A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_CARD_EDGE,

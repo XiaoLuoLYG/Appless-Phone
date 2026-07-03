@@ -1,6 +1,6 @@
-import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
-import { actionsOf, trainOptions, A2uiTrainOption } from '../../../model/A2uiData';
-import { canCreateNavigationCardFromTrainOption } from '../../../model/NavigationCardSnapshot';
+import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '@loop/agent-core';
+import { actionsOf, trainOptions, A2uiTrainOption } from '@loop/agent-core';
+import { canCreateNavigationCardFromTrainOption } from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,

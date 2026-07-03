@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiFlightData, A2uiFoodData, A2uiTrainData, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
+import { A2uiFlightData, A2uiFoodData, A2uiTrainData, A2uiTravelOptionData } from '@loop/agent-core';
 import {
   CARD_SNAPSHOT_KIND_NAVIGATION_DESTINATION,
   NAVIGATION_CARD_PIN_ACTION_ID,
@@ -21,7 +21,7 @@ import {
   navigationCardSnapshotFromTravelOption,
   resolveNavigationCardMapUri,
   sanitizeNavigationCardSourceTags
-} from '../main/ets/model/NavigationCardSnapshot';
+} from '@loop/agent-core';
 
 function foodOptionWithLocation(): A2uiFoodData {
   return {

@@ -6,8 +6,8 @@ import {
   normalizeModelScopeMcpDetail,
   selectBestRemoteTransport,
   DynamicToolRegistry
-} from '../main/ets/model/DynamicToolRegistry';
-import { DynamicToolManifest, DynamicToolRegistration, DynamicToolTransport, ModelScopeMcpDetail } from '../main/ets/model/DynamicToolTypes';
+} from '@loop/agent-core';
+import { DynamicToolManifest, DynamicToolRegistration, DynamicToolTransport, ModelScopeMcpDetail } from '@loop/agent-core';
 
 function amapDetail(): ModelScopeMcpDetail {
   const raw =

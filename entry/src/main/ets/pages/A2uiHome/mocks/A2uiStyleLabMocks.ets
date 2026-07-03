@@ -13,8 +13,8 @@ import {
   A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState
-} from '../../../model/A2uiTypes';
-import { emptySocialHub } from '../../../model/SocialHubTypes';
+} from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 export interface A2uiStyleLabCase {
   id: string;

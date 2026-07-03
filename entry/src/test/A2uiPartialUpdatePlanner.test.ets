@@ -1,12 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiComponent, A2uiLabelValueData, A2uiSummaryData } from '../main/ets/model/A2uiTypes';
-import { parseA2uiJsonl } from '../main/ets/model/A2uiParser';
+import { A2uiComponent, A2uiLabelValueData, A2uiSummaryData } from '@loop/agent-core';
+import { parseA2uiJsonl } from '@loop/agent-core';
 import {
   A2uiPartialDataPatch,
   A2uiPartialRenderState,
   A2uiPartialUpdateResult,
   planA2uiPartialUpdate
-} from '../main/ets/model/A2uiPartialUpdatePlanner';
+} from '@loop/agent-core';
 
 function foodComponents(status: string): A2uiComponent[] {
   return [

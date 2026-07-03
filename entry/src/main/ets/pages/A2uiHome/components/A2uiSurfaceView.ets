@@ -6,8 +6,8 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
-import { personaMemoryData, personaRuntimeData } from '../../../model/A2uiData';
+} from '@loop/agent-core';
+import { personaMemoryData, personaRuntimeData } from '@loop/agent-core';
 import { rootComponentIdOf } from '../render/A2uiRenderData';
 import { A2uiNodeView } from './A2uiNodeView';
 import { PersonaStatusView } from './PersonaStatusView';

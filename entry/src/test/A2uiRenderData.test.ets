@@ -6,7 +6,7 @@ import {
   rootComponentIdOf,
   thinkingTextOf
 } from '../main/ets/pages/A2uiHome/render/A2uiRenderData';
-import { A2uiComponent, A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
+import { A2uiComponent, A2uiSurfaceState } from '@loop/agent-core';
 
 function sampleSurface(): A2uiSurfaceState {
   const root: A2uiComponent = {

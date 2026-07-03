@@ -3,7 +3,7 @@ import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
 import router from '@ohos.router';
 import util from '@ohos.util';
-import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import {
   COLOR_CARD_EDGE,
   COLOR_INK,

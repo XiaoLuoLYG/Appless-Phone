@@ -1,12 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { DynamicGenericToolResult } from '../main/ets/model/DynamicToolTypes';
+import { DynamicGenericToolResult } from '@loop/agent-core';
 import {
   bilibiliApiSearchUrl,
   bilibiliPlayerUrl,
   bilibiliSearchUrl,
   bilibiliVideoResultsFromSearchHtml,
   bilibiliVideoResultsFromSearchPayload
-} from '../main/ets/model/BilibiliApiClient';
+} from '@loop/agent-core';
 
 export default function bilibiliApiClientTest() {
   describe('bilibiliApiClient', () => {

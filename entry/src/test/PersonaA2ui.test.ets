@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
-import { personaMemoryData, personaRuntimeData } from '../main/ets/model/A2uiData';
+import { A2uiSurfaceState } from '@loop/agent-core';
+import { personaMemoryData, personaRuntimeData } from '@loop/agent-core';
 import { attachPersonaDataToSurface, copyPersonaData } from '../main/ets/model/PersonaA2ui';
 
 function baseSurface(): A2uiSurfaceState {

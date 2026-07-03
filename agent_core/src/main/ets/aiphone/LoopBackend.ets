@@ -34,6 +34,9 @@ class AiphoneTool implements AgentTool {
   }
 
   async run(input: string): Promise<string> {
+    if (this.toolId === 'memory.update') {
+      return this.runMemoryUpdate(input);
+    }
     const parsedArgs = this.parseInputArgs(input);
     const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
     const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
@@ -79,6 +82,14 @@ class AiphoneTool implements AgentTool {
       return null;
     }
     return null;
+  }
+
+  private runMemoryUpdate(input: string): string {
+    const jsonl = aiphoneInfoJsonl(this.request.surfaceId, '记忆更新请求', input);
+    for (const line of splitJsonl(jsonl)) {
+      this.callbacks.onA2uiJsonl?.(line);
+    }
+    return jsonl;
   }
 }
 
@@ -179,6 +190,12 @@ export class LoopBackend {
         callbacks
       ));
     }
+    registry.register(new AiphoneTool(
+      'memory.update',
+      'memory.update inputSchema=personaMemoryUpdate outputSchema=personaMemoryUpdateCard. Use only when the user states a durable preference, identity fact, or stable constraint that should affect future turns for the active persona. Do not use for one-off tasks. Input must be JSON with personaId, summary, memoryText, reason, and optional suggestedAction { label, prompt, toolId }. Default to the active persona when the user does not name another persona. This tool only records memory; it does not search providers or fabricate results.',
+      request,
+      callbacks
+    ));
     registry.register(new AiphoneTool(
       'dynamic.search',
       'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',

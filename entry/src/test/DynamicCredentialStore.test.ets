@@ -8,7 +8,7 @@ import {
   assetCredentialPutMap,
   credentialRefFor,
   MemoryCredentialStore
-} from '../main/ets/model/DynamicCredentialStore';
+} from '@loop/agent-core';
 
 function textFromAssetValue(value: asset.Value | undefined): string {
   if (value === undefined) {

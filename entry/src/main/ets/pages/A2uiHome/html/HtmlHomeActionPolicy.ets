@@ -1,4 +1,4 @@
-import { A2uiAction } from '../../../model/A2uiTypes';
+import { A2uiAction } from '@loop/agent-core';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
 
 type HtmlHomePolicyValue = Object | string | number | boolean | null | undefined;

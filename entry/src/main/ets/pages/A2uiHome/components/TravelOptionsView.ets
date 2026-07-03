@@ -1,6 +1,6 @@
-import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
-import { actionsOf, travelOptions, A2uiTravelOption } from '../../../model/A2uiData';
-import { canCreateNavigationCardFromTravelOption } from '../../../model/NavigationCardSnapshot';
+import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '@loop/agent-core';
+import { actionsOf, travelOptions, A2uiTravelOption } from '@loop/agent-core';
+import { canCreateNavigationCardFromTravelOption } from '@loop/agent-core';
 import {
   COLOR_CARD_EDGE,
   COLOR_CARD_GLOW,

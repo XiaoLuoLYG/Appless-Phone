@@ -1,0 +1,8 @@
+{
+  "activeSkillId": "media-search",
+  "skills": [
+    { "id": "media-search", "path": "skills/media-search/SKILL.md", "status": "active" },
+    { "id": "worldcup-night", "path": "skills/worldcup-night/SKILL.md", "status": "placeholder" },
+    { "id": "youtube-search", "path": "skills/youtube-search/SKILL.md", "status": "placeholder" }
+  ]
+}

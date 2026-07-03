@@ -13,8 +13,8 @@ import {
   isYouTubeToolId,
   resolveBackendForTool,
   toolDefinitionForToolId
-} from '../main/ets/model/ToolDefinitionRegistry';
-import { BackendAvailability, BackendResolution, ToolBackendType, ToolDefinition } from '../main/ets/model/ToolDefinitionTypes';
+} from '@loop/agent-core';
+import { BackendAvailability, BackendResolution, ToolBackendType, ToolDefinition } from '@loop/agent-core';
 
 function availability(
   backend: ToolBackendType,

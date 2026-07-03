@@ -290,6 +290,18 @@ h3 {
   --kind-accent: var(--amber);
   --kind-soft: rgba(154, 100, 24, 0.12);
 }
+.block[data-kind="persona-memory-update"] {
+  --kind-accent: var(--accent);
+  --kind-soft: var(--accent-soft);
+  padding: 0;
+  border-color: rgba(153, 95, 76, 0.26);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.98) 0%, rgba(255, 255, 255, 0.96) 100%);
+  box-shadow: 0 18px 42px rgba(71, 48, 35, 0.12);
+}
+.block[data-kind="persona-memory-update"]::before {
+  width: 0;
+}
 .block[data-kind="social-hub-item"],
 .block[data-kind="social-hub-connection"],
 .block[data-kind="social-hub-draft"] {
@@ -417,6 +429,119 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   display: grid;
   gap: 7px;
   margin-top: 8px;
+}
+.memory-update-card {
+  padding: 14px;
+}
+.memory-update-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.memory-update-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 840;
+  box-shadow: inset 0 0 0 1px rgba(153, 95, 76, 0.12);
+}
+.memory-update-avatar img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+.memory-update-title {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.memory-update-title h3 {
+  font-size: 18px;
+  line-height: 1.22;
+}
+.memory-update-kicker {
+  width: fit-content;
+  margin-top: 5px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1;
+}
+.memory-update-reason {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.memory-update-hero {
+  margin-top: 13px;
+  border: 1px solid rgba(153, 95, 76, 0.18);
+  border-radius: 15px;
+  padding: 13px 14px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(153, 95, 76, 0.14), transparent 44%),
+    #f9eee8;
+}
+.memory-update-hero .label,
+.memory-panel .label {
+  color: var(--accent);
+  font-weight: 780;
+}
+.memory-update-preference {
+  margin-top: 7px;
+  color: #251a16;
+  font-size: 20px;
+  font-weight: 820;
+  line-height: 1.35;
+}
+.memory-update-note {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.memory-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 11px;
+}
+.memory-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 12px 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+.memory-lines {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.memory-line {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.memory-line::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  vertical-align: 2px;
 }
 .timeline {
   border-left: 1px solid var(--line);
@@ -1074,6 +1199,7 @@ body[data-scene] .media-player {
   .shell { padding: 24px 22px calc(112px + env(safe-area-inset-bottom, 0px)); }
   h1 { font-size: 34px; }
   .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .memory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body[data-scene] .shell { padding: 18px 18px calc(112px + env(safe-area-inset-bottom, 0px)); }
   body[data-scene] .hero {
     grid-template-columns: minmax(0, 1.1fr) minmax(230px, 0.72fr);
@@ -1169,6 +1295,7 @@ const HTML_HOME_JS: string = `
     if (kind === 'train-option') { return '高铁'; }
     if (kind === 'flight-option') { return '航班'; }
     if (kind === 'food-result') { return '餐饮'; }
+    if (kind === 'persona-memory-update') { return '记忆更新'; }
     if (kind === 'dynamic-tool-connect') { return '授权'; }
     if (kind === 'generic-tool-result') { return '工具结果'; }
     if (kind === 'social-hub-item') { return '社交'; }
@@ -1207,6 +1334,9 @@ const HTML_HOME_JS: string = `
   }
   function sourceKey(block) {
     var kind = text(block && block.kind).toLowerCase();
+    if (kind === 'persona-memory-update') {
+      return 'persona-memory';
+    }
     if (kind === 'food-result' && text(block && block.source).indexOf(' / ') >= 0) {
       return 'food-local';
     }
@@ -1268,6 +1398,9 @@ const HTML_HOME_JS: string = `
   }
 	  function isExpandable(block) {
 	    var kind = text(block && block.kind);
+	    if (kind === 'persona-memory-update') {
+	      return false;
+	    }
 	    if (kind === 'generic-tool-result') {
 	      return list(block && block.metrics).length > 0 ||
 	        list(block && block.rows).length > 0 ||
@@ -1698,6 +1831,86 @@ const HTML_HOME_JS: string = `
     updateVisibleCount(visibleCount, cards.length);
     updateMailFilterButtons();
   }
+  function rowValue(block, label) {
+    var rows = list(block && block.rows);
+    for (var index = 0; index < rows.length; index += 1) {
+      if (text(rows[index] && rows[index].label) === label) {
+        return text(rows[index] && rows[index].value);
+      }
+    }
+    return '';
+  }
+  function cleanMemoryLine(value) {
+    var line = text(value).trim();
+    while (line.indexOf('#') === 0) {
+      line = line.slice(1).trim();
+    }
+    if (line.indexOf('- [ ]') === 0 || line.indexOf('- [x]') === 0 || line.indexOf('- [X]') === 0) {
+      line = line.slice(5).trim();
+    }
+    if (line.indexOf('- ') === 0 || line.indexOf('* ') === 0) {
+      line = line.slice(2).trim();
+    }
+    return line;
+  }
+  function memoryLines(value) {
+    var raw = text(value).replace(/\\r/g, '\\n').split('\\n');
+    var lines = [];
+    raw.forEach(function (item) {
+      var line = cleanMemoryLine(item);
+      if (line.length > 0 && lines.length < 4) {
+        lines.push(line);
+      }
+    });
+    if (lines.length === 0) {
+      lines.push('暂无摘要');
+    }
+    return lines;
+  }
+  function addMemoryPanel(parent, title, value) {
+    var panel = add(parent, 'div', 'memory-panel');
+    add(panel, 'div', 'label', title);
+    var lines = add(panel, 'div', 'memory-lines');
+    memoryLines(value).forEach(function (line) {
+      add(lines, 'div', 'memory-line', line);
+    });
+  }
+  function addMemoryAvatar(parent) {
+    var persona = data.persona || {};
+    var name = text(persona.name) || '分';
+    var avatar = add(parent, 'div', 'memory-update-avatar');
+    var avatarSrc = text(data.personaAvatarDataUri);
+    if (avatarSrc.length > 0) {
+      var img = add(avatar, 'img');
+      img.src = avatarSrc;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+    } else {
+      avatar.textContent = name.slice(0, 1);
+    }
+  }
+  function addPersonaMemoryUpdateCard(parent, block) {
+    var wrap = add(parent, 'div', 'memory-update-card');
+    var head = add(wrap, 'div', 'memory-update-head');
+    addMemoryAvatar(head);
+    var title = add(head, 'div', 'memory-update-title');
+    add(title, 'h3', '', text(block.title) || '记忆已更新');
+    add(title, 'div', 'memory-update-kicker', '记忆已写入');
+    var reason = rowValue(block, '原因') || text(block.subtitle);
+    if (reason.length > 0) {
+      add(title, 'div', 'memory-update-reason', reason);
+    }
+
+    var hero = add(wrap, 'div', 'memory-update-hero');
+    add(hero, 'div', 'label', '已记录偏好');
+    add(hero, 'div', 'memory-update-preference', rowValue(block, '已记录') || text(block.subtitle) || '已写入新的长期偏好');
+    add(hero, 'div', 'memory-update-note', '后续同类请求会优先按这条偏好重新筛选结果。');
+
+    var grid = add(wrap, 'div', 'memory-grid');
+    addMemoryPanel(grid, 'Memory 摘要', rowValue(block, 'Memory 摘要'));
+    addMemoryPanel(grid, 'Soul 摘要', rowValue(block, 'Soul 摘要'));
+    addActions(wrap, block.actions);
+  }
   function addPairs(parent, items, className) {
     var kept = list(items).filter(function (item) {
       return text(item && item.label).length > 0 && text(item && item.value).length > 0;
@@ -1863,33 +2076,37 @@ const HTML_HOME_JS: string = `
         metricValue(block, ['availability', 'status']),
         metricValue(block, ['seats', 'business', 'first', 'second', 'noSeat', 'hardSeat', 'sleeperSoft'])
       ].join(' '));
-      var top = add(card, 'div', 'block-top');
-      var titleWrap = add(top, 'div', 'block-title');
-      addBlockTag(titleWrap, block, blockSourceKey);
-      add(titleWrap, 'h3', '', text(block.title) || text(block.kind) || text(block.id));
-      add(titleWrap, 'p', 'subtitle', text(block.subtitle));
-      if (expandable) {
-        var expandButton = add(top, 'button', 'expand-button', '展开');
-        expandButton.type = 'button';
-        expandButton.addEventListener('click', function (event) {
-          event.stopPropagation();
-          setExpandedCard(card);
-        });
-      }
-      addGoogleMapPreview(card, block);
-      var detailHost = expandable ? add(card, 'div', 'details') : card;
-      addMediaEmbed(detailHost, block);
-      if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
-        addMailExpandedDetails(detailHost, block);
+      if (text(block.kind) === 'persona-memory-update') {
+        addPersonaMemoryUpdateCard(card, block);
       } else {
-        addActions(detailHost, block.actions);
-        addPairs(detailHost, block.metrics, 'metrics');
-        addPairs(detailHost, block.rows, 'rows');
-        if (text(block.rawPreview).length > 0) {
-          add(detailHost, 'pre', 'raw', block.rawPreview);
+        var top = add(card, 'div', 'block-top');
+        var titleWrap = add(top, 'div', 'block-title');
+        addBlockTag(titleWrap, block, blockSourceKey);
+        add(titleWrap, 'h3', '', text(block.title) || text(block.kind) || text(block.id));
+        add(titleWrap, 'p', 'subtitle', text(block.subtitle));
+        if (expandable) {
+          var expandButton = add(top, 'button', 'expand-button', '展开');
+          expandButton.type = 'button';
+          expandButton.addEventListener('click', function (event) {
+            event.stopPropagation();
+            setExpandedCard(card);
+          });
         }
+        addGoogleMapPreview(card, block);
+        var detailHost = expandable ? add(card, 'div', 'details') : card;
+        addMediaEmbed(detailHost, block);
+        if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
+          addMailExpandedDetails(detailHost, block);
+        } else {
+          addActions(detailHost, block.actions);
+          addPairs(detailHost, block.metrics, 'metrics');
+          addPairs(detailHost, block.rows, 'rows');
+          if (text(block.rawPreview).length > 0) {
+            add(detailHost, 'pre', 'raw', block.rawPreview);
+          }
+        }
+        addCredentialForm(detailHost, block);
       }
-      addCredentialForm(detailHost, block);
     });
     var firstMediaCard = blocksSection.querySelector('[data-has-media="true"]');
     if (firstMediaCard && !localState.expandedKey) {

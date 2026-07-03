@@ -1,12 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { DynamicGenericToolResult } from '../main/ets/model/DynamicToolTypes';
-import { GmailDraftPreview, GmailThreadPreview } from '../main/ets/model/GmailToolTypes';
+import { DynamicGenericToolResult } from '@loop/agent-core';
+import { GmailDraftPreview, GmailThreadPreview } from '@loop/agent-core';
 import {
   compactPreviewText,
   draftReplyResultFromPreview,
   mailThreadRowsFromPreviews,
   redactEmailAddress
-} from '../main/ets/model/GmailToolNormalizer';
+} from '@loop/agent-core';
 
 function gmailThread(): GmailThreadPreview {
   return {

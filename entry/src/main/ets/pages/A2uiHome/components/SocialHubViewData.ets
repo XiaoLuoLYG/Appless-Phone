@@ -5,7 +5,7 @@ import {
   SocialHubItemData,
   SocialHubItemKind,
   SocialHubPlatform
-} from '../../../model/SocialHubTypes';
+} from '@loop/agent-core';
 
 export function socialHubPlatformLabel(platform: SocialHubPlatform | string): string {
   if (platform === 'x') {

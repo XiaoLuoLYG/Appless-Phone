@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiGenericToolResultData } from '../main/ets/model/A2uiTypes';
-import { isMediaVideoResult, mediaVideoPlaybackAction } from '../main/ets/model/MediaVideoToolA2ui';
+import { A2uiGenericToolResultData } from '@loop/agent-core';
+import { isMediaVideoResult, mediaVideoPlaybackAction } from '@loop/agent-core';
 
 function result(sourceTag: string, toolName: string, status: string, url: string): A2uiGenericToolResultData {
   return {

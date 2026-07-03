@@ -5,11 +5,11 @@ import {
   A2uiGenericToolResultRowData,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
-import { actionsOf, genericToolResults } from '../../../model/A2uiData';
-import { gmailOpenDraftAction, gmailReplyDraftAction } from '../../../model/GmailToolA2ui';
-import { mailReplyDraftAction } from '../../../model/MailToolA2ui';
-import { mediaVideoPlaybackAction } from '../../../model/MediaVideoToolA2ui';
+} from '@loop/agent-core';
+import { actionsOf, genericToolResults } from '@loop/agent-core';
+import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
+import { mailReplyDraftAction } from '@loop/agent-core';
+import { mediaVideoPlaybackAction } from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,

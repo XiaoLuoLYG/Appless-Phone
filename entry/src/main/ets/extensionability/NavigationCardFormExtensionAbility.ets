@@ -1,12 +1,12 @@
 import { Want } from '@kit.AbilityKit';
 import { FormExtensionAbility, formBindingData, formInfo, formProvider } from '@kit.FormKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { aiLogError, aiLogInfo } from '../model/AiphoneLogger';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import {
   PreferencesNavigationCardSnapshotStore,
   buildNavigationCardBindingData,
   navigationCardFormEventFromMessage
-} from '../model/NavigationCardSnapshot';
+} from '@loop/agent-core';
 
 function textParam(want: Want, key: string): string {
   if (want.parameters === undefined || want.parameters === null) {

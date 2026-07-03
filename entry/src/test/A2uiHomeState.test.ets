@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiSurfaceState } from '../main/ets/model/A2uiTypes';
+import { A2uiSurfaceState } from '@loop/agent-core';
 import {
   A2UI_SEND_SPINNER_STEP_DEG,
   createInitialConnectionPanelState,

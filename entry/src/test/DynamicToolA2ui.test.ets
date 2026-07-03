@@ -1,11 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseA2uiJsonl } from '../main/ets/model/A2uiParser';
+import { parseA2uiJsonl } from '@loop/agent-core';
 import {
   connectCardA2ui,
   genericToolResultsA2ui,
   unsupportedTransportA2ui
-} from '../main/ets/model/DynamicToolA2ui';
-import { DynamicGenericToolResult, DynamicToolManifest } from '../main/ets/model/DynamicToolTypes';
+} from '@loop/agent-core';
+import { DynamicGenericToolResult, DynamicToolManifest } from '@loop/agent-core';
 
 function manifest(): DynamicToolManifest {
   return {

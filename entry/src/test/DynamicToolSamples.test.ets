@@ -3,8 +3,8 @@ import {
   configureDefaultDynamicToolSamplesForTests,
   sampleManifestForToolId,
   sampleManifestIds
-} from '../main/ets/model/DynamicToolSamples';
-import { DynamicToolManifest } from '../main/ets/model/DynamicToolTypes';
+} from '@loop/agent-core';
+import { DynamicToolManifest } from '@loop/agent-core';
 
 export default function dynamicToolSamplesTest() {
   describe('dynamicToolSamples', () => {

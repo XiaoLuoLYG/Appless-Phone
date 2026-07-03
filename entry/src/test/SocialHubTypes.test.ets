@@ -4,7 +4,7 @@ import {
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
   normalizeSocialHubItem
-} from '../main/ets/model/SocialHubTypes';
+} from '@loop/agent-core';
 
 export default function socialHubTypesTest() {
   describe('socialHubTypes', () => {

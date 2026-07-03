@@ -1,13 +1,13 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
-import { genericToolResults, dynamicToolConnect } from '../main/ets/model/A2uiData';
-import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
-import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
-import { MemoryCredentialStore } from '../main/ets/model/DynamicCredentialStore';
-import { saveGmailOAuthTokenSet } from '../main/ets/model/GmailOAuthClient';
-import { DynamicGenericToolResult, DynamicToolRegistration } from '../main/ets/model/DynamicToolTypes';
-import { GenericMcpClient } from '../main/ets/model/GenericMcpClient';
-import { MailDraftArgs, MailSearchArgs } from '../main/ets/model/MailToolTypes';
+import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '@loop/agent-core';
+import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
+import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
+import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
+import { MemoryCredentialStore } from '@loop/agent-core';
+import { saveGmailOAuthTokenSet } from '@loop/agent-core';
+import { DynamicGenericToolResult, DynamicToolRegistration } from '@loop/agent-core';
+import { GenericMcpClient } from '@loop/agent-core';
+import { MailDraftArgs, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
@@ -36,7 +36,7 @@ import {
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
   FoodProviderResult
-} from '../main/ets/model/ToolGatewayClient';
+} from '@loop/agent-core';
 
 class FixtureGmailMcpClient extends GenericMcpClient {
   lastToolName: string = '';
@@ -265,6 +265,42 @@ export default function toolGatewayClientTest() {
         expect(rendered[0].summary.indexOf('QQ_MAIL_ADDRESS')).assertLarger(-1);
         expect(result.raw.indexOf('auth code')).assertEqual(-1);
       } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('continues aggregate mail after Gmail auth is missing', 0, async () => {
+      try {
+        configureGmailCredentialStoreForTests(new MemoryCredentialStore());
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: MailSearchArgs = {
+          query: 'newer_than:30d',
+          pageSize: 10,
+          providers: ['gmail', 'qq'],
+          intentSummary: ''
+        };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'mail.search',
+          '帮我查看邮箱里的最新的重要邮件',
+          'surface_mail_gmail_auth',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered.length).assertEqual(2);
+        expect(rendered[0].sourceTag).assertEqual('Gmail');
+        expect(rendered[0].toolName).assertEqual('mail.provider.status');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('Google Workspace MCP OAuth')).assertLarger(-1);
+        expect(rendered[1].sourceTag).assertEqual('QQ Mail');
+        expect(rendered[1].toolName).assertEqual('mail.provider.status');
+      } finally {
+        configureGmailCredentialStoreForTests(null);
         configureLocalProviderConfigFromRawJson('{}');
       }
     });

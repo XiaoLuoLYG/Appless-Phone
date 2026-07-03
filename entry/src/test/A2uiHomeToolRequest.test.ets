@@ -14,8 +14,8 @@ import {
   A2uiTravelOptionData,
   A2uiTrainData,
   A2uiTripData
-} from '../main/ets/model/A2uiTypes';
-import { emptySocialHub } from '../main/ets/model/SocialHubTypes';
+} from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 interface ToolRequestArgsFixture {
   query: string;

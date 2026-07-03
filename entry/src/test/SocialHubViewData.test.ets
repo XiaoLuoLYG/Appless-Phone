@@ -4,7 +4,7 @@ import {
   socialHubPlatformLabel,
   socialHubPrimaryText
 } from '../main/ets/pages/A2uiHome/components/SocialHubViewData';
-import { normalizeSocialHubItem } from '../main/ets/model/SocialHubTypes';
+import { normalizeSocialHubItem } from '@loop/agent-core';
 
 export default function socialHubViewDataTest() {
   describe('socialHubViewData', () => {
