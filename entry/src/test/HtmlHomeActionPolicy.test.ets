@@ -114,5 +114,26 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('gmail.ai.reply.draft', 'reply', 'prompt', expectedArgs))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('gmail.ai.reply.draft', 'reply', 'prompt', blockedArgs))).assertFalse();
     });
+
+    it('allows only matching payment actions from the current HTML document', 0, () => {
+      const doc = documentFixture();
+      const expectedArgs: ThreadOnlyArgsFixture = {
+        threadId: 'payment-123'
+      };
+      const blockedArgs: ThreadOnlyArgsFixture = {
+        threadId: 'payment-999'
+      };
+      doc.actions.push({
+        id: 'payment.confirm',
+        label: '确认支付',
+        prompt: 'confirm',
+        variant: 'primary',
+        kind: 'prompt',
+        args: expectedArgs
+      });
+
+      expect(isHtmlHomeActionAllowed(doc, action('payment.confirm', 'confirm', 'prompt', expectedArgs))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('payment.confirm', 'confirm', 'prompt', blockedArgs))).assertFalse();
+    });
   });
 }
