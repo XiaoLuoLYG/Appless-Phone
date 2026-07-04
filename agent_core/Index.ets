@@ -68,3 +68,5 @@ export * from './src/main/ets/aiphone/runtime/XOAuthClient';
 export * from './src/main/ets/aiphone/runtime/YouTubeApiClient';
 export * from './src/main/ets/aiphone/payment/PaymentCore';
 export * from './src/main/ets/aiphone/payment/PaymentA2ui';
+export * from './src/main/ets/aiphone/payment/PayPalPaymentClient';
+export * from './src/main/ets/aiphone/payment/StripePaymentClient';

@@ -237,6 +237,31 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('loads payment config from local provider raw JSON without exposing secrets', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          PAYPAL_CLIENT_ID: 'paypal-client',
+          PAYPAL_CLIENT_SECRET: 'paypal-secret',
+          PAYPAL_ENVIRONMENT: 'sandbox',
+          STRIPE_SECRET_KEY: 'sk_test_secret',
+          STRIPE_PUBLISHABLE_KEY: 'pk_test_public',
+          PAYMENT_ACCOUNT_BOOK_JSON: '[{"id":"alex"}]',
+          PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS: 'acct_live_ok',
+          PAYMENT_LIVE_MAX_AMOUNT_MINOR: '100'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('paypalClientId=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('paypalClientSecret=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('stripeSecretKey=present(14)')).assertLarger(-1);
+        expect(summary.indexOf('paymentAccountBookJson=present')).assertLarger(-1);
+        expect(summary.indexOf('paypal-secret')).assertEqual(-1);
+        expect(summary.indexOf('sk_test_secret')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('renders aggregate mail missing QQ config as real provider status', 0, async () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');

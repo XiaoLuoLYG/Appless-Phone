@@ -206,6 +206,20 @@ interface LocalProviderConfig {
   qqMailImapHost: string;
   qqMailImapPort: string;
   qqMailDraftsMailbox: string;
+  paypalClientId: string;
+  paypalClientSecret: string;
+  paypalEnvironment: string;
+  paypalReturnUrl: string;
+  paypalCancelUrl: string;
+  stripeSecretKey: string;
+  stripePublishableKey: string;
+  stripeSuccessUrl: string;
+  stripeCancelUrl: string;
+  paymentAccountBookJson: string;
+  paymentDefaultCurrency: string;
+  paymentMode: string;
+  paymentLiveAllowedStripeAccountIds: string;
+  paymentLiveMaxAmountMinor: string;
 }
 
 interface LocalProviderRawConfig {
@@ -259,6 +273,20 @@ interface LocalProviderRawConfig {
   QQ_MAIL_IMAP_HOST?: string;
   QQ_MAIL_IMAP_PORT?: string;
   QQ_MAIL_DRAFTS_MAILBOX?: string;
+  PAYPAL_CLIENT_ID?: string;
+  PAYPAL_CLIENT_SECRET?: string;
+  PAYPAL_ENVIRONMENT?: string;
+  PAYPAL_RETURN_URL?: string;
+  PAYPAL_CANCEL_URL?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_SUCCESS_URL?: string;
+  STRIPE_CANCEL_URL?: string;
+  PAYMENT_ACCOUNT_BOOK_JSON?: string;
+  PAYMENT_DEFAULT_CURRENCY?: string;
+  PAYMENT_MODE?: string;
+  PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS?: string;
+  PAYMENT_LIVE_MAX_AMOUNT_MINOR?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
   amapKey?: string;
@@ -294,6 +322,20 @@ interface LocalProviderRawConfig {
   qqMailImapHost?: string;
   qqMailImapPort?: string;
   qqMailDraftsMailbox?: string;
+  paypalClientId?: string;
+  paypalClientSecret?: string;
+  paypalEnvironment?: string;
+  paypalReturnUrl?: string;
+  paypalCancelUrl?: string;
+  stripeSecretKey?: string;
+  stripePublishableKey?: string;
+  stripeSuccessUrl?: string;
+  stripeCancelUrl?: string;
+  paymentAccountBookJson?: string;
+  paymentDefaultCurrency?: string;
+  paymentMode?: string;
+  paymentLiveAllowedStripeAccountIds?: string;
+  paymentLiveMaxAmountMinor?: string;
   toolGatewayApiKey?: string;
   xBearerToken?: string;
   xUsername?: string;
@@ -1046,7 +1088,21 @@ let localProviderConfig: LocalProviderConfig = {
   qqMailAuthCode: '',
   qqMailImapHost: 'imap.qq.com',
   qqMailImapPort: '993',
-  qqMailDraftsMailbox: ''
+  qqMailDraftsMailbox: '',
+  paypalClientId: '',
+  paypalClientSecret: '',
+  paypalEnvironment: 'sandbox',
+  paypalReturnUrl: 'aiphone://payment/paypal/success',
+  paypalCancelUrl: 'aiphone://payment/paypal/cancel',
+  stripeSecretKey: '',
+  stripePublishableKey: '',
+  stripeSuccessUrl: 'aiphone://payment/stripe/success',
+  stripeCancelUrl: 'aiphone://payment/stripe/cancel',
+  paymentAccountBookJson: '',
+  paymentDefaultCurrency: 'USD',
+  paymentMode: 'test',
+  paymentLiveAllowedStripeAccountIds: '',
+  paymentLiveMaxAmountMinor: '100'
 };
 
 export interface LocalToolDebugConfig {
@@ -1204,7 +1260,21 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     qqMailAuthCode: config.qqMailAuthCode.trim(),
     qqMailImapHost: config.qqMailImapHost.trim().length > 0 ? config.qqMailImapHost.trim() : 'imap.qq.com',
     qqMailImapPort: config.qqMailImapPort.trim().length > 0 ? config.qqMailImapPort.trim() : '993',
-    qqMailDraftsMailbox: config.qqMailDraftsMailbox.trim()
+    qqMailDraftsMailbox: config.qqMailDraftsMailbox.trim(),
+    paypalClientId: config.paypalClientId.trim(),
+    paypalClientSecret: config.paypalClientSecret.trim(),
+    paypalEnvironment: config.paypalEnvironment.trim().toLowerCase() === 'live' ? 'live' : 'sandbox',
+    paypalReturnUrl: config.paypalReturnUrl.trim().length > 0 ? config.paypalReturnUrl.trim() : 'aiphone://payment/paypal/success',
+    paypalCancelUrl: config.paypalCancelUrl.trim().length > 0 ? config.paypalCancelUrl.trim() : 'aiphone://payment/paypal/cancel',
+    stripeSecretKey: config.stripeSecretKey.trim(),
+    stripePublishableKey: config.stripePublishableKey.trim(),
+    stripeSuccessUrl: config.stripeSuccessUrl.trim().length > 0 ? config.stripeSuccessUrl.trim() : 'aiphone://payment/stripe/success',
+    stripeCancelUrl: config.stripeCancelUrl.trim().length > 0 ? config.stripeCancelUrl.trim() : 'aiphone://payment/stripe/cancel',
+    paymentAccountBookJson: config.paymentAccountBookJson.trim(),
+    paymentDefaultCurrency: config.paymentDefaultCurrency.trim().length > 0 ? config.paymentDefaultCurrency.trim().toUpperCase() : 'USD',
+    paymentMode: config.paymentMode.trim().toLowerCase() === 'live' ? 'live' : 'test',
+    paymentLiveAllowedStripeAccountIds: config.paymentLiveAllowedStripeAccountIds.trim(),
+    paymentLiveMaxAmountMinor: config.paymentLiveMaxAmountMinor.trim().length > 0 ? config.paymentLiveMaxAmountMinor.trim() : '100'
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ' toolGatewayApiKeyChars=' + localProviderConfig.toolGatewayApiKey.length.toString() +
@@ -1230,6 +1300,11 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' gmailMcpUserProjectPresent=' + (localProviderConfig.gmailMcpUserProject.length > 0 ? 'true' : 'false') +
     ' qqMailAddressPresent=' + (localProviderConfig.qqMailAddress.length > 0 ? 'true' : 'false') +
     ' qqMailAuthCodeChars=' + localProviderConfig.qqMailAuthCode.length.toString() +
+    ' paypalClientIdChars=' + localProviderConfig.paypalClientId.length.toString() +
+    ' paypalClientSecretChars=' + localProviderConfig.paypalClientSecret.length.toString() +
+    ' stripeSecretKeyChars=' + localProviderConfig.stripeSecretKey.length.toString() +
+    ' stripePublishableKeyChars=' + localProviderConfig.stripePublishableKey.length.toString() +
+    ' paymentAccountBookJsonChars=' + localProviderConfig.paymentAccountBookJson.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
 }
 
@@ -1277,7 +1352,21 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     qqMailAuthCode: firstText([parsed.QQ_MAIL_AUTH_CODE, parsed.qqMailAuthCode]),
     qqMailImapHost: firstText([parsed.QQ_MAIL_IMAP_HOST, parsed.qqMailImapHost]),
     qqMailImapPort: firstText([parsed.QQ_MAIL_IMAP_PORT, parsed.qqMailImapPort]),
-    qqMailDraftsMailbox: firstText([parsed.QQ_MAIL_DRAFTS_MAILBOX, parsed.qqMailDraftsMailbox])
+    qqMailDraftsMailbox: firstText([parsed.QQ_MAIL_DRAFTS_MAILBOX, parsed.qqMailDraftsMailbox]),
+    paypalClientId: firstText([parsed.PAYPAL_CLIENT_ID, parsed.paypalClientId]),
+    paypalClientSecret: firstText([parsed.PAYPAL_CLIENT_SECRET, parsed.paypalClientSecret]),
+    paypalEnvironment: firstText([parsed.PAYPAL_ENVIRONMENT, parsed.paypalEnvironment]),
+    paypalReturnUrl: firstText([parsed.PAYPAL_RETURN_URL, parsed.paypalReturnUrl]),
+    paypalCancelUrl: firstText([parsed.PAYPAL_CANCEL_URL, parsed.paypalCancelUrl]),
+    stripeSecretKey: firstText([parsed.STRIPE_SECRET_KEY, parsed.stripeSecretKey]),
+    stripePublishableKey: firstText([parsed.STRIPE_PUBLISHABLE_KEY, parsed.stripePublishableKey]),
+    stripeSuccessUrl: firstText([parsed.STRIPE_SUCCESS_URL, parsed.stripeSuccessUrl]),
+    stripeCancelUrl: firstText([parsed.STRIPE_CANCEL_URL, parsed.stripeCancelUrl]),
+    paymentAccountBookJson: firstText([parsed.PAYMENT_ACCOUNT_BOOK_JSON, parsed.paymentAccountBookJson]),
+    paymentDefaultCurrency: firstText([parsed.PAYMENT_DEFAULT_CURRENCY, parsed.paymentDefaultCurrency]),
+    paymentMode: firstText([parsed.PAYMENT_MODE, parsed.paymentMode]),
+    paymentLiveAllowedStripeAccountIds: firstText([parsed.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS, parsed.paymentLiveAllowedStripeAccountIds]),
+    paymentLiveMaxAmountMinor: firstText([parsed.PAYMENT_LIVE_MAX_AMOUNT_MINOR, parsed.paymentLiveMaxAmountMinor])
   });
 }
 
@@ -1308,6 +1397,15 @@ export function localProviderConfigDebugSummary(): string {
     ', qqMailAuthCode=' + (localProviderConfig.qqMailAuthCode.length > 0 ? 'present(' + localProviderConfig.qqMailAuthCode.length.toString() + ')' : 'missing') +
     ', qqMailImapHost=' + (localProviderConfig.qqMailImapHost.length > 0 ? 'present' : 'missing') +
     ', qqMailDraftsMailbox=' + (localProviderConfig.qqMailDraftsMailbox.length > 0 ? 'present' : 'missing') +
+    ', paypalClientId=' + (localProviderConfig.paypalClientId.length > 0 ? 'present(' + localProviderConfig.paypalClientId.length.toString() + ')' : 'missing') +
+    ', paypalClientSecret=' + (localProviderConfig.paypalClientSecret.length > 0 ? 'present(' + localProviderConfig.paypalClientSecret.length.toString() + ')' : 'missing') +
+    ', paypalEnvironment=' + localProviderConfig.paypalEnvironment +
+    ', stripeSecretKey=' + (localProviderConfig.stripeSecretKey.length > 0 ? 'present(' + localProviderConfig.stripeSecretKey.length.toString() + ')' : 'missing') +
+    ', stripePublishableKey=' + (localProviderConfig.stripePublishableKey.length > 0 ? 'present(' + localProviderConfig.stripePublishableKey.length.toString() + ')' : 'missing') +
+    ', paymentAccountBookJson=' + (localProviderConfig.paymentAccountBookJson.length > 0 ? 'present' : 'missing') +
+    ', paymentMode=' + localProviderConfig.paymentMode +
+    ', paymentLiveAllowedStripeAccountIds=' + (localProviderConfig.paymentLiveAllowedStripeAccountIds.length > 0 ? 'present' : 'missing') +
+    ', paymentLiveMaxAmountMinor=' + localProviderConfig.paymentLiveMaxAmountMinor +
     ', defaultLocation=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'present' : 'missing');
 }
 

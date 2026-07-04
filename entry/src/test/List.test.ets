@@ -35,6 +35,8 @@ import bilibiliApiClientTest from './BilibiliApiClient.test';
 import mediaVideoClientTest from './MediaVideoClient.test';
 import paymentCoreTest from './PaymentCore.test';
 import paymentA2uiTest from './PaymentA2ui.test';
+import payPalPaymentClientTest from './PayPalPaymentClient.test';
+import stripePaymentClientTest from './StripePaymentClient.test';
 import htmlHomeSnapshotTest from './HtmlHomeSnapshot.test';
 import htmlHomeRendererTest from './HtmlHomeRenderer.test';
 import htmlHomeActionPolicyTest from './HtmlHomeActionPolicy.test';
@@ -90,6 +92,8 @@ export default function testsuite() {
   mediaVideoClientTest();
   paymentCoreTest();
   paymentA2uiTest();
+  payPalPaymentClientTest();
+  stripePaymentClientTest();
   calendarApiClientTest();
   mapsApiClientTest();
   socialHubTypesTest();
