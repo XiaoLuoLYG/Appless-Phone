@@ -323,6 +323,18 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['calendar.authorize']
   },
   {
+    toolId: 'payment.send',
+    domain: 'payment',
+    intent: 'payment.send',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'web_session'],
+    inputSchema: 'paymentSendRequest',
+    outputSchema: 'paymentCheckout',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['payment.confirm', 'payment.cancel', 'payment.amount.select', 'payment.provider.select', 'payment.checkout.open']
+  },
+  {
     toolId: 'maps.place.search',
     domain: 'maps',
     intent: 'maps.place.search',

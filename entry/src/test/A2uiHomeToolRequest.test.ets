@@ -44,6 +44,10 @@ interface FoodPreferenceArgsFixture {
   sweetness: string;
 }
 
+interface PaymentFallbackArgsFixture {
+  provider: string;
+}
+
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
 
@@ -210,6 +214,31 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('maps.place.search');
       expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('infers PayPal payment only for explicit payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '用 PayPal 给 Alex 转 5 美元',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+      expect(args.provider).assertEqual('paypal');
+    });
+
+    it('does not infer payment for generic provider setup questions', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        'Stripe 是不是必须要商户账号',
+        ''
+      );
+
+      expect(resolved.hasTool).assertFalse();
+      expect(resolved.toolId).assertEqual('');
     });
 
     it('reroutes model-selected maps to food search when Google Maps is not explicit', 0, () => {

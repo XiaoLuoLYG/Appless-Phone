@@ -249,6 +249,8 @@ export class LoopBackend {
       description += '. Use for reading Google Calendar events or schedules.';
     } else if (definition.toolId === 'calendar.event.create') {
       description += '. Use for drafting or creating Google Calendar events; confirm_required.';
+    } else if (definition.toolId === 'payment.send') {
+      description += '. Use for explicit PayPal account payments, Stripe connected merchant Checkout, or opening a stored Stripe Payment Link. Always produce a confirmation/payment UI before checkout. Never claim money was sent without a real provider confirmation.';
     }
     return description;
   }

@@ -21,6 +21,15 @@ interface YouTubeFallbackArgs {
   query: string;
 }
 
+interface PaymentFallbackArgs {
+  provider: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  originalQuery: string;
+}
+
 export interface A2uiHomeResolvedToolRequest {
   hasTool: boolean;
   toolId: string;
@@ -174,6 +183,52 @@ function inferredCalendarToolIdForPrompt(prompt: string): string {
   return 'calendar.events.search';
 }
 
+function paymentProviderForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('paypal') >= 0 || prompt.indexOf('贝宝') >= 0) {
+    return 'paypal';
+  }
+  if (lowerPrompt.indexOf('stripe') >= 0) {
+    return 'stripe';
+  }
+  return '';
+}
+
+function hasExplicitPaymentIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  const provider = paymentProviderForPrompt(prompt);
+  const hasProvider = provider.length > 0;
+  const hasPaymentVerb = containsAny(prompt, ['转账', '付款', '支付', '打款', '付钱', '收款', '付款页', '支付台']) ||
+    lowerPrompt.indexOf('pay') >= 0 ||
+    lowerPrompt.indexOf('payment') >= 0 ||
+    lowerPrompt.indexOf('transfer') >= 0 ||
+    lowerPrompt.indexOf('checkout') >= 0;
+  if (hasProvider && hasPaymentVerb) {
+    return true;
+  }
+  const hasRecipientHint = prompt.indexOf('给') >= 0 || lowerPrompt.indexOf(' to ') >= 0;
+  return hasRecipientHint && containsAny(prompt, ['转账', '打款', '付款', '付钱']);
+}
+
+function paymentArgsForPrompt(prompt: string): Object | null {
+  if (!hasExplicitPaymentIntent(prompt)) {
+    return null;
+  }
+  const args: PaymentFallbackArgs = {
+    provider: paymentProviderForPrompt(prompt),
+    recipient: '',
+    amountText: '',
+    currency: '',
+    note: '',
+    originalQuery: prompt.trim()
+  };
+  return args;
+}
+
+function inferredPaymentToolIdForPrompt(prompt: string): string {
+  return paymentArgsForPrompt(prompt) === null ? '' : 'payment.send';
+}
+
 function inferredMapsToolIdForPrompt(prompt: string): string {
   if (!hasExplicitMapsIntent(prompt)) {
     return '';
@@ -283,6 +338,10 @@ function inferredToolIdForPrompt(prompt: string): string {
   if (mailToolId.length > 0) {
     return mailToolId;
   }
+  const paymentToolId = inferredPaymentToolIdForPrompt(prompt);
+  if (paymentToolId.length > 0) {
+    return paymentToolId;
+  }
   const gmailToolId = inferredGmailToolIdForPrompt(prompt);
   if (gmailToolId.length > 0) {
     return gmailToolId;
@@ -326,6 +385,13 @@ function inferredToolIdForPrompt(prompt: string): string {
 function toolIdForActionId(actionId: string): string {
   if (actionId === 'gmail.ai.reply.draft') {
     return 'gmail.draft.create';
+  }
+  if (actionId === 'payment.confirm' ||
+    actionId === 'payment.cancel' ||
+    actionId === 'payment.amount.select' ||
+    actionId === 'payment.provider.select' ||
+    actionId === 'payment.checkout.open') {
+    return 'payment.send';
   }
   return '';
 }
@@ -490,6 +556,9 @@ export function resolveA2uiHomeToolRequest(
   }
   if (toolId === 'youtube.video.search') {
     args = mergeArgs(youtubeArgsForPrompt(prompt), args);
+  }
+  if (toolId === 'payment.send') {
+    args = mergeArgs(paymentArgsForPrompt(prompt), args);
   }
   if (toolId === 'gmail.draft.create') {
     args = mergeArgs(draftFormArgs(surface), args);

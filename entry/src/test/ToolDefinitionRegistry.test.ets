@@ -10,6 +10,8 @@ import {
   isMailToolId,
   isMapsToolId,
   isMediaToolId,
+  isPaymentToolId,
+  isRegisteredAiphoneToolId,
   isYouTubeToolId,
   resolveBackendForTool,
   toolDefinitionForToolId
@@ -169,6 +171,23 @@ export default function toolDefinitionRegistryTest() {
       expect(media.outputSchema).assertEqual('mediaVideos');
       expect(media.a2uiComponent).assertEqual('GenericToolResults');
       expect(media.actions[0]).assertEqual('media.open.web');
+    });
+
+    it('registers payment send as a confirm-required local adapter', 0, () => {
+      const payment = toolDefinitionForToolId('payment.send') as ToolDefinition;
+
+      expect(isKnownDomainToolId('payment.send')).assertTrue();
+      expect(isLocalAdapterToolId('payment.send')).assertTrue();
+      expect(isPaymentToolId('payment.send')).assertTrue();
+      expect(isRegisteredAiphoneToolId('payment.send')).assertTrue();
+      expect(payment.domain).assertEqual('payment');
+      expect(payment.riskLevel).assertEqual('confirm_required');
+      expect(payment.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(payment.authModes.join(',')).assertEqual('provider_key,web_session');
+      expect(payment.inputSchema).assertEqual('paymentSendRequest');
+      expect(payment.outputSchema).assertEqual('paymentCheckout');
+      expect(payment.a2uiComponent).assertEqual('GenericToolResults');
+      expect(payment.actions[0]).assertEqual('payment.confirm');
     });
 
     it('resolves available Gmail backends before returning an auth-needed reason', 0, () => {
