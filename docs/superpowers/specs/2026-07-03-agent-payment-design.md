@@ -8,7 +8,7 @@ Status: approved design, implementation pending
 Add two clearly separated payment scenarios to AIPhoneDemo:
 
 1. **PayPal account payment**: for requests like `用 PayPal 给 Alex 转 5 美元`.
-2. **Stripe merchant payment**: for requests like `用 Stripe 给 Demo Vendor 付 5 美元`.
+2. **Stripe merchant payment**: for requests like `用 Stripe 给 Demo Vendor 付 5 美元`, and later `用 Stripe 给 <真实商户名> 支付 1 美元`.
 
 This is a real-payment demo path, not a wallet product. The app must never create an external payment session or capture a payment without a visible user confirmation tap.
 
@@ -30,6 +30,8 @@ Stripe remains the merchant/platform payment path. It uses Stripe Checkout/Conne
 
 Stripe should not be described as personal-account P2P.
 
+Stripe real-merchant payment is feasible only when the merchant is represented by a real live connected account that has completed the required onboarding/capabilities. The app cannot pay an arbitrary external merchant by email or name unless that merchant is first added as a Stripe connected account or otherwise exposes a compatible Stripe payment path.
+
 ## Approved Decisions
 
 - One user-facing tool remains enough: `payment.send`.
@@ -44,6 +46,7 @@ Stripe should not be described as personal-account P2P.
 - Payment UI stays in app as much as the provider permits:
   - Stripe uses Embedded Checkout in ArkWeb.
   - PayPal uses PayPal approval/Checkout inside ArkWeb if allowed; if PayPal blocks WebView approval on device, report the exact blocker instead of claiming full in-app completion.
+- Stripe must support both sandbox demo merchants and real live connected merchants, guarded by a low live amount cap and connected-account allowlist.
 - Credentials and real account IDs remain local-only and untracked.
 
 ## Product Scope
@@ -58,6 +61,7 @@ In scope:
 - Confirmation cards that show provider, recipient, account hint, amount, currency, mode, and note.
 - PayPal Order creation, approval, capture, status/receipt rendering.
 - Stripe Embedded Checkout session creation, status/receipt rendering.
+- Stripe live merchant payment for allowlisted connected accounts after setup.
 - One runnable unit check for provider selection and validation.
 - Device smoke for one PayPal query and one Stripe query.
 
@@ -170,6 +174,9 @@ Stripe rules:
 
 - Account must have `stripeAccountId`.
 - `stripeAccountId` must start with `acct_`.
+- Sandbox mode can use test connected accounts.
+- Live mode can only use allowlisted live connected accounts.
+- Live merchant accounts must have completed Stripe onboarding and be able to accept charges/payouts according to Stripe account status.
 - Use the existing connected-account allowlist and live cap.
 
 ## Provider Clients
@@ -278,6 +285,13 @@ Manual/device smoke queries:
    - Expected after confirm: Stripe Embedded Checkout opens in app.
    - Expected completion: sandbox test payment returns receipt, or the visible Stripe Checkout/test-mode page is captured if card completion is not available in the smoke harness.
 
+3. Stripe real merchant readiness, only after live credentials and a real connected merchant are configured:
+   - Query: `用 Stripe 给 <真实商户名> 支付 1 美元`
+   - Expected: `payment.send` with provider `stripe`.
+   - Expected card: `Stripe 商户支付`, real merchant name, live mode, connected account hint, `USD 1.00`, confirm required.
+   - Expected safety: if the merchant is not allowlisted, onboarding is incomplete, or the amount exceeds the live cap, block before Checkout.
+   - Expected after confirm: live Stripe Checkout opens in app and charges the payer only after explicit provider confirmation.
+
 Regression queries:
 
 - `给 Alex 转账` shows amount completion.
@@ -292,6 +306,7 @@ Detailed credential walkthrough comes after implementation shape is finalized. A
 - PayPal sandbox personal payer account.
 - PayPal sandbox payee account email or merchant ID.
 - Stripe test keys and connected account IDs.
+- Stripe live keys and real connected merchant account ID, only when the user is ready for tiny live merchant payment.
 - Local ignored config sync into HAP rawfile.
 
 If PayPal live credentials require a merchant, verified, or approved-partner account that the user cannot obtain, state live PayPal is blocked and keep only sandbox/device demo.
