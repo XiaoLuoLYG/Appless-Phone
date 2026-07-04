@@ -33,6 +33,7 @@ import youtubeApiClientTest from './YouTubeApiClient.test';
 import mediaVideoToolA2uiTest from './MediaVideoToolA2ui.test';
 import bilibiliApiClientTest from './BilibiliApiClient.test';
 import mediaVideoClientTest from './MediaVideoClient.test';
+import paymentCoreTest from './PaymentCore.test';
 import htmlHomeSnapshotTest from './HtmlHomeSnapshot.test';
 import htmlHomeRendererTest from './HtmlHomeRenderer.test';
 import htmlHomeActionPolicyTest from './HtmlHomeActionPolicy.test';
@@ -86,6 +87,7 @@ export default function testsuite() {
   mediaVideoToolA2uiTest();
   bilibiliApiClientTest();
   mediaVideoClientTest();
+  paymentCoreTest();
   calendarApiClientTest();
   mapsApiClientTest();
   socialHubTypesTest();

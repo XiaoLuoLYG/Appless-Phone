@@ -66,3 +66,4 @@ export * from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export * from './src/main/ets/aiphone/runtime/Utf8Bytes';
 export * from './src/main/ets/aiphone/runtime/XOAuthClient';
 export * from './src/main/ets/aiphone/runtime/YouTubeApiClient';
+export * from './src/main/ets/aiphone/payment/PaymentCore';
