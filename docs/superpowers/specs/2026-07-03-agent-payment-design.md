@@ -1,45 +1,76 @@
 # AIPhoneDemo Agent Payment Design
 
-Date: 2026-07-03
-Status: approved design, implementation not started
+Date: 2026-07-04
+Status: approved design, implementation pending
 
 ## Goal
 
-Add a demo-first payment capability to AIPhoneDemo so the user can say things like "给 Alex 转 5 美元" and complete a real Stripe payment inside the app. The recipient can be a normal saved account, not necessarily an agent.
+Add two clearly separated payment scenarios to AIPhoneDemo:
 
-This is a real-payment demo path, not a full wallet product. It must never create a Stripe payment session without explicit user confirmation.
+1. **PayPal account payment**: for requests like `用 PayPal 给 Alex 转 5 美元`.
+2. **Stripe merchant payment**: for requests like `用 Stripe 给 Demo Vendor 付 5 美元`.
+
+This is a real-payment demo path, not a wallet product. The app must never create an external payment session or capture a payment without a visible user confirmation tap.
+
+## Product Boundary
+
+### PayPal account payment
+
+PayPal is the default path for "account-to-account" language in this demo.
+
+The precise model is: the payer uses their personal PayPal account, card, or bank option in PayPal approval UI, and the PayPal Order specifies a different `payee` by `email_address` or `merchant_id`.
+
+This is **not** a PayPal Friends & Family private P2P API. PayPal does not expose a generic third-party API that silently transfers from a user's personal PayPal account to any other personal account. The payer must approve through PayPal-controlled UI.
+
+For live API credentials, PayPal may still require a merchant or verified API caller account. That is a credential/setup constraint, not the payer identity. If the user cannot obtain the required live credentials, live PayPal payment is blocked; sandbox testing can still use PayPal developer sandbox accounts.
+
+### Stripe merchant payment
+
+Stripe remains the merchant/platform payment path. It uses Stripe Checkout/Connect semantics and is appropriate for paying a merchant, seller, or connected account.
+
+Stripe should not be described as personal-account P2P.
 
 ## Approved Decisions
 
-- Funding flow: user pays a saved recipient account.
-- Recipient identity: local account book maps names, aliases, or emails to Stripe connected account IDs.
-- Account creation in MVP: manual local entry only, with a few preseeded demo accounts.
-- Payment UI: fully inside the app, using Stripe Embedded Checkout in ArkWeb.
-- Stripe integration shape: HAP direct Stripe, demo-first.
-- Mode: test/live switch, default test.
-- Amount behavior: if the query includes an amount, show preview; if amount is missing, show quick amount buttons and custom input.
-- First implementation option: one fixed `payment.send` tool, not generic Stripe MCP.
+- One user-facing tool remains enough: `payment.send`.
+- Add an explicit provider dimension: `paypal` or `stripe`.
+- A saved account can contain PayPal fields, Stripe fields, or both.
+- Provider selection rules:
+  - PayPal-only target defaults to PayPal account payment.
+  - Stripe-only target defaults to Stripe merchant payment.
+  - Targets with both providers show a provider choice before checkout.
+  - Explicit prompts like `用 PayPal...` or `用 Stripe...` override the default when the target supports that provider.
+- Amount behavior stays unchanged: if amount is present, show preview; if missing, show amount completion.
+- Payment UI stays in app as much as the provider permits:
+  - Stripe uses Embedded Checkout in ArkWeb.
+  - PayPal uses PayPal approval/Checkout inside ArkWeb if allowed; if PayPal blocks WebView approval on device, report the exact blocker instead of claiming full in-app completion.
+- Credentials and real account IDs remain local-only and untracked.
 
 ## Product Scope
 
 In scope:
 
-- `payment.send` tool with `recipient`, `amount`, `currency`, and optional `note`.
-- Local `PaymentAccountBook` with preseeded accounts and manual add/edit.
-- Payment amount validation, currency normalization, and live-mode amount cap.
-- A2UI payment cards for missing account, missing amount, confirmation, receipt, cancel, and error states.
-- Stripe Embedded Checkout rendered in app WebView.
-- Stripe test/live configuration stored like the existing local provider credentials.
-- Idempotency key per confirmed payment attempt.
+- `payment.send` tool with `recipient`, optional `provider`, `amount`, `currency`, and optional `note`.
+- Local account book with preseeded demo accounts and manual add/edit.
+- PayPal account fields: `paypalEmail`, `paypalMerchantId`.
+- Stripe account field: `stripeAccountId`.
+- Provider-aware validation, amount normalization, and live-mode caps.
+- Confirmation cards that show provider, recipient, account hint, amount, currency, mode, and note.
+- PayPal Order creation, approval, capture, status/receipt rendering.
+- Stripe Embedded Checkout session creation, status/receipt rendering.
+- One runnable unit check for provider selection and validation.
+- Device smoke for one PayPal query and one Stripe query.
 
 Out of scope:
 
-- Wallet balance, stored value, or internal ledger.
-- Refunds, disputes, payouts, subscriptions, invoices, or recurring payments.
-- Stripe Connect onboarding for new recipients.
+- Wallet balance, stored value, internal ledger, or app-side custody.
+- PayPal Friends & Family automation.
+- PayPal Payouts.
+- Refunds, disputes, subscriptions, invoices, or recurring payments.
+- Automatic onboarding for PayPal sellers or Stripe connected accounts.
 - Unlisted recipient payments.
-- Model-initiated payment without a visible confirmation tap.
-- Generic Stripe MCP execution for money movement.
+- Generic payment provider framework.
+- Generic Stripe or PayPal MCP execution for money movement.
 - Automatic retry after failure.
 
 ## Architecture
@@ -47,22 +78,23 @@ Out of scope:
 The smallest stable path is:
 
 1. The model selects `payment.send` and emits structured args.
-2. The payment tool normalizes and validates recipient, amount, currency, mode, and note.
-3. If recipient is unknown, the tool returns an account selection/add card.
-4. If amount is missing, the tool returns an amount completion card.
-5. If all inputs are valid, the tool returns a payment confirmation card.
-6. User taps "继续支付".
-7. The app creates a Stripe Embedded Checkout Session using the configured Stripe mode and the recipient connected account ID.
-8. The app opens a Stripe checkout WebView using only the publishable key and Checkout Session client secret.
-9. On completion, cancel, or failure, the app renders an A2UI receipt or error card.
+2. The local payment tool normalizes recipient, provider, amount, currency, mode, and note.
+3. If recipient is unknown, return an account selection/add card.
+4. If provider is missing and the account supports both providers, return a provider choice card.
+5. If amount is missing, return an amount completion card.
+6. If all inputs are valid, return a provider-aware confirmation card.
+7. User taps `继续支付`.
+8. The app creates exactly one provider session/order:
+   - PayPal: create Order with `purchase_units[].payee`.
+   - Stripe: create Embedded Checkout Session for the connected account.
+9. The app opens the provider checkout UI.
+10. On completion, cancel, or failure, render an A2UI receipt or error card.
 
-This follows AIPhoneDemo's existing pattern: fixed ArkUI/A2UI components plus runtime data binding. The payment-specific logic belongs under `agent_core/src/main/ets/aiphone/payment`; ArkUI rendering and WebView handling stay under `entry`.
+Payment-specific core logic belongs under `agent_core/src/main/ets/aiphone/payment`. ArkUI rendering and ArkWeb handling stay under `entry`.
 
-## Components
+## Tool Definition
 
-### Tool definition
-
-Add a registered tool:
+Use the existing local tool shape:
 
 - `toolId`: `payment.send`
 - `domain`: `payment`
@@ -73,13 +105,18 @@ Add a registered tool:
 - `inputSchema`: `paymentSendRequest`
 - `outputSchema`: `paymentSession`
 - `a2uiComponent`: `PaymentIntentCard`
-- `actions`: `payment.confirm`, `payment.cancel`, `payment.account.add`
+- `actions`: `payment.confirm`, `payment.cancel`, `payment.amount.select`, `payment.provider.select`, `payment.account.add`
 
-The model prompt should describe it as: use for explicit payment or transfer requests to saved accounts; never infer an amount; never use for unknown recipients; expect a confirmation card before Stripe session creation.
+Prompt guidance:
 
-### Account book
+- Use this only for explicit payment/transfer requests to saved accounts.
+- Never infer an amount.
+- Never claim payment succeeded before provider confirmation/capture.
+- PayPal wording means account payment; Stripe wording means merchant payment.
 
-`PaymentAccountBook` stores local records:
+## Account Book
+
+The account book stays local and simple:
 
 ```json
 {
@@ -87,133 +124,193 @@ The model prompt should describe it as: use for explicit payment or transfer req
   "displayName": "Alex Chen",
   "aliases": ["Alex", "alex@example.com"],
   "email": "alex@example.com",
+  "paypalEmail": "alex-paypal@example.com",
+  "paypalMerchantId": "",
+  "stripeAccountId": "",
+  "enabled": true
+}
+```
+
+Stripe merchant example:
+
+```json
+{
+  "id": "demo-vendor",
+  "displayName": "Demo Vendor",
+  "aliases": ["商户", "vendor"],
+  "email": "vendor@example.com",
+  "paypalEmail": "",
+  "paypalMerchantId": "",
   "stripeAccountId": "acct_...",
   "enabled": true
 }
 ```
 
-The MVP can persist this in the same local configuration style used by existing provider setup. Do not track local secrets or real account IDs in git.
+Do not track local secrets, real PayPal emails, real merchant IDs, or real Stripe account IDs in git.
 
-### Payment validation
+## Validation
 
-Validation rules:
+Common rules:
 
 - Recipient must resolve to exactly one enabled account.
-- `stripeAccountId` must start with `acct_`.
 - Amount must be positive and converted to minor units.
-- Currency defaults to `USD` only when the user did not specify a currency and the UI explicitly shows that default.
-- Live mode requires recipient allowlist and `STRIPE_LIVE_MAX_AMOUNT_MINOR`.
-- The confirmation card must show recipient, account hint, amount, currency, mode, and note before creating the Stripe session.
+- Currency defaults to `USD` only when the UI explicitly shows that default.
+- Live mode requires a provider-specific low amount cap.
+- Confirmation must happen before any external session/order creation.
+
+PayPal rules:
+
+- Account must have `paypalEmail` or `paypalMerchantId`.
+- `payee.email_address` uses the mapped PayPal email when present.
+- `payee.merchant_id` uses the mapped merchant ID when present.
+- If both are present, prefer `merchant_id`.
+- Capture only after PayPal approval returns.
+
+Stripe rules:
+
+- Account must have `stripeAccountId`.
+- `stripeAccountId` must start with `acct_`.
+- Use the existing connected-account allowlist and live cap.
+
+## Provider Clients
+
+### PayPal client
+
+`PayPalPaymentClient` is a tiny wrapper around PayPal REST APIs:
+
+- Create access token from local `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
+- Create Order with `intent: CAPTURE`.
+- Set `purchase_units[].amount`.
+- Set `purchase_units[].payee.email_address` or `purchase_units[].payee.merchant_id`.
+- Return approval URL or SDK client token data needed by ArkWeb.
+- Capture approved Order.
+- Retrieve Order for receipt/status.
+
+No PayPal secret is injected into HTML.
 
 ### Stripe client
 
-`StripePaymentClient` is a tiny wrapper around Stripe HTTP APIs:
+Keep the existing Stripe shape:
 
 - Create Embedded Checkout Session.
 - Retrieve Checkout Session for receipt status.
 - Use idempotency key on session creation.
-- Pass `payment_intent_data[transfer_data][destination] = acct_...`.
-- Use latest Stripe API version from the Stripe skill baseline: `2026-02-25.clover`, unless Stripe account compatibility forces a pinned version.
+- Pass destination connected account using the current working Stripe path.
 
-No Stripe secret or restricted key is injected into HTML. The key is only used by native app-side HTTP code.
-
-### WebView checkout
-
-Use a dedicated payment WebView or reuse the existing ArkWeb loading pattern from `HtmlHomeSurfaceView`.
-
-The HTML loads Stripe.js, initializes Embedded Checkout with the publishable key and `client_secret`, then posts completion/cancel events back through an app bridge. The WebView does not receive the restricted key.
+No Stripe secret or restricted key is injected into HTML.
 
 ## UI States
 
 ### Missing recipient
 
-Shown when the query recipient is unknown or ambiguous. The user can select a saved account or add a local account with `displayName`, optional `email`, aliases, and `stripeAccountId`.
+Shown when the query recipient is unknown or ambiguous. The user can select a saved account or add one with display name, aliases, and at least one provider account field.
+
+### Provider choice
+
+Shown when a saved target supports both PayPal and Stripe and the prompt did not name the provider.
+
+Buttons:
+
+- `PayPal 账号支付`
+- `Stripe 商户支付`
 
 ### Missing amount
 
-Shown when the query names a valid recipient but not an amount. It offers quick amounts and a custom input. Selecting an amount returns to the confirmation card.
+Shown when the query names a valid recipient/provider but no amount. It offers quick amounts and a custom input.
 
 ### Confirmation
 
-Shown for every valid payment request before any Stripe session is created. Primary action is "继续支付"; secondary action is "取消".
+Shown for every valid payment request before any provider session/order is created.
 
-### Embedded checkout
+Provider labels:
 
-Shows Stripe Embedded Checkout inside the app. The app does not collect raw card data.
+- PayPal: `PayPal 账号支付`
+- Stripe: `Stripe 商户支付`
+
+### Checkout
+
+PayPal shows approval/Checkout inside ArkWeb if PayPal allows it on the device. Stripe shows Embedded Checkout inside ArkWeb.
 
 ### Receipt or error
 
-Success shows the Checkout Session ID, PaymentIntent ID if available, recipient, amount, currency, mode, and timestamp. Cancel and failure states show plain recovery actions. The app does not auto-retry.
+Success shows provider, provider session/order ID, recipient, amount, currency, mode, and timestamp. Cancel and failure states show plain recovery actions. The app does not auto-retry.
 
 ## Error Handling
 
-- Missing Stripe config: show a setup card with exact missing keys.
+- Missing provider config: show setup card with exact missing keys.
 - Unknown recipient: show account card.
+- Unsupported provider for target: show provider/account edit card.
+- Ambiguous provider: show provider choice card.
 - Missing amount: show amount card.
-- Live amount above cap: block before Stripe session creation.
-- Stripe API error: show error card with sanitized Stripe error type/message, no secret values.
-- WebView load failure: show retry action that reuses the same pending payment attempt where possible.
-- Duplicate confirm tap: disable the confirm button while a session is being created.
-- Repeated request: idempotency key prevents duplicate Checkout Session creation for the same confirmed attempt.
-
-## Stripe Setup Steps
-
-1. Create or open a Stripe account.
-2. In the Stripe Dashboard, keep **Test mode** on for the first demo.
-3. Open **Developers > API keys**.
-4. Copy the test publishable key `pk_test_...`.
-5. Create a restricted test key, or use `sk_test_...` only for local demo if restricted permissions block Checkout Session creation.
-6. For a restricted key, start with the minimum useful permissions:
-   - Checkout Sessions: write and read.
-   - PaymentIntents: write and read.
-   - Connect Accounts: read.
-7. Open **Connect > Accounts** in test mode.
-8. Create or select test connected accounts and copy their IDs, each beginning with `acct_`.
-9. Add local config:
-
-```env
-STRIPE_MODE=test
-STRIPE_TEST_PUBLISHABLE_KEY=pk_test_...
-STRIPE_TEST_RESTRICTED_KEY=rk_test_...
-STRIPE_LIVE_PUBLISHABLE_KEY=
-STRIPE_LIVE_RESTRICTED_KEY=
-STRIPE_DEFAULT_CURRENCY=USD
-STRIPE_LIVE_MAX_AMOUNT_MINOR=500
-```
-
-10. Add local account records mapping display names or emails to `acct_...`.
-11. Run test mode with Stripe test cards.
-12. Only after test mode works, add live publishable and restricted keys, keep the live amount cap low, and test with a tiny amount.
+- Live amount above cap: block before provider session/order creation.
+- PayPal API error: show sanitized PayPal error name/message/debug ID, no secrets.
+- Stripe API error: show sanitized Stripe error type/message, no secrets.
+- WebView load or provider approval blocked: show the exact blocker and do not mark payment complete.
+- Duplicate confirm tap: disable confirm while a provider session/order is being created.
+- Repeated request: idempotency key prevents duplicate provider session/order creation for the same confirmed attempt.
 
 ## Testing
 
-Add one small runnable check for non-UI logic:
+Unit checks:
 
-- account alias resolution.
-- unknown recipient blocked.
-- missing amount returns needs-amount state.
-- live mode above cap blocked.
-- amount converts to minor units correctly.
+- PayPal-only account defaults to PayPal.
+- Stripe-only account defaults to Stripe.
+- Account with both providers returns provider choice when provider is missing.
+- Explicit `paypal` or `stripe` provider validates only if the account supports it.
+- Unknown recipient is blocked.
+- Missing amount returns needs-amount state.
+- Live mode above cap is blocked before provider session/order creation.
+- Amount converts to minor units correctly.
 
-Manual smoke:
+Manual/device smoke queries:
 
-- "给 Alex 转 5 美元" shows confirmation before Stripe.
-- "给 Alex 转账" shows amount completion.
-- "给 unknown@example.com 转 5 美元" shows account add/select.
-- In test mode, completing Embedded Checkout returns a receipt.
-- In live mode, amount above cap is blocked before Stripe.
+1. PayPal account payment:
+   - Query: `用 PayPal 给 Alex 转 5 美元`
+   - Expected: `payment.send` with provider `paypal`.
+   - Expected card: `PayPal 账号支付`, Alex, PayPal email or merchant ID hint, `USD 5.00`, confirm required.
+   - Expected after confirm: PayPal approval/Checkout opens in app if allowed.
+   - Expected completion: sandbox capture returns receipt. If PayPal blocks ArkWeb approval, record that exact provider/WebView blocker.
+
+2. Stripe merchant payment:
+   - Query: `用 Stripe 给 Demo Vendor 付 5 美元`
+   - Expected: `payment.send` with provider `stripe`.
+   - Expected card: `Stripe 商户支付`, Demo Vendor, `acct_...` hint, `USD 5.00`, confirm required.
+   - Expected after confirm: Stripe Embedded Checkout opens in app.
+   - Expected completion: sandbox test payment returns receipt, or the visible Stripe Checkout/test-mode page is captured if card completion is not available in the smoke harness.
+
+Regression queries:
+
+- `给 Alex 转账` shows amount completion.
+- `给 Alex 转 5 美元` shows provider choice if Alex supports both providers.
+- `给 unknown@example.com 转 5 美元` shows account add/select.
+
+## Credential Guidance Timing
+
+Detailed credential walkthrough comes after implementation shape is finalized. At that point guide the user through:
+
+- PayPal sandbox app credentials.
+- PayPal sandbox personal payer account.
+- PayPal sandbox payee account email or merchant ID.
+- Stripe test keys and connected account IDs.
+- Local ignored config sync into HAP rawfile.
+
+If PayPal live credentials require a merchant, verified, or approved-partner account that the user cannot obtain, state live PayPal is blocked and keep only sandbox/device demo.
 
 ## Implementation Notes
 
-- Prefer deletion and reuse: use existing A2UI action handling and ArkWeb bridge patterns.
-- Keep payment code out of dynamic MCP discovery for MVP.
-- Do not add a wallet abstraction.
-- Do not add a backend abstraction until the demo-first HAP path is verified.
-- Keep all real keys and real connected account IDs out of tracked source.
+- Reuse the existing `payment.send`, A2UI action handling, account book, and ArkWeb bridge patterns.
+- Add `provider` and PayPal account fields before adding any new abstraction.
+- Do not add a provider framework until a third provider exists.
+- Do not add PayPal Payouts for this request.
+- Do not place payment inside dynamic MCP discovery for MVP.
+- Keep all real keys and real account identifiers out of tracked source.
 
 ## References
 
+- PayPal Pay another account: https://developer.paypal.com/docs/checkout/standard/customize/pay-another-account/
+- PayPal Orders API: https://developer.paypal.com/docs/api/orders/v2/
+- PayPal seller onboarding: https://developer.paypal.com/docs/multiparty/seller-onboarding/
+- PayPal production credentials: https://developer.paypal.com/reference/production/
 - Stripe Embedded Checkout: https://docs.stripe.com/checkout/embedded/quickstart
-- Stripe Connect Accounts v2: https://docs.stripe.com/connect/accounts-v2
+- Stripe Connect Accounts: https://docs.stripe.com/connect/accounts
 - Stripe restricted API keys: https://docs.stripe.com/keys/restricted-api-keys
-- Stripe MCP: https://docs.stripe.com/mcp
