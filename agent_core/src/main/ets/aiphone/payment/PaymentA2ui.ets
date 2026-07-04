@@ -25,6 +25,8 @@ export interface PaymentActionArgs {
   phase: string;
   accountId: string;
   targetType: PaymentTargetType;
+  checkoutUrl: string;
+  providerSessionId: string;
 }
 
 function envelopeWithVersion(envelope: A2uiEnvelope): A2uiEnvelope {
@@ -114,6 +116,9 @@ function titleForStatus(status: PaymentValidationStatus): string {
   if (status === 'checkout') {
     return '打开支付确认页';
   }
+  if (status === 'completed') {
+    return '支付已完成';
+  }
   if (status === 'cancelled') {
     return '支付已取消';
   }
@@ -127,6 +132,9 @@ function surfaceStatusFor(status: PaymentValidationStatus): string {
   if (status === 'cancelled') {
     return 'ready';
   }
+  if (status === 'completed') {
+    return 'ready';
+  }
   return 'needs_input';
 }
 
@@ -136,6 +144,9 @@ function resultStatusFor(status: PaymentValidationStatus): string {
   }
   if (status === 'cancelled') {
     return 'cancelled';
+  }
+  if (status === 'completed') {
+    return 'success';
   }
   return 'needs_user';
 }
@@ -169,6 +180,16 @@ function targetAccount(result: PaymentValidationResult): string {
   return '';
 }
 
+function checkoutUrlFor(result: PaymentValidationResult): string {
+  if (result.checkoutUrl !== undefined && result.checkoutUrl.trim().length > 0) {
+    return result.checkoutUrl.trim();
+  }
+  if (result.targetType === 'stripe_payment_link') {
+    return result.stripePaymentLinkUrl;
+  }
+  return '';
+}
+
 function row(label: string, value: string): A2uiGenericToolResultRowData {
   return {
     label: label,
@@ -187,6 +208,10 @@ function rowsFor(result: PaymentValidationResult): A2uiGenericToolResultRowData[
   const account = targetAccount(result);
   if (account.length > 0) {
     rows.push(row('账号', account));
+  }
+  const checkoutUrl = checkoutUrlFor(result);
+  if (checkoutUrl.length > 0 && result.status === 'checkout') {
+    rows.push(row('确认页', checkoutUrl));
   }
   if (result.note.length > 0) {
     rows.push(row('备注', result.note));
@@ -211,6 +236,9 @@ function summaryFor(result: PaymentValidationResult): string {
   if (result.status === 'checkout') {
     return '将在 app 内打开 ' + providerLabel(result) + ' 确认页面。';
   }
+  if (result.status === 'completed') {
+    return '支付供应商已确认这笔支付完成。';
+  }
   if (result.status === 'cancelled') {
     return '这笔支付已经取消，没有发起扣款。';
   }
@@ -226,7 +254,9 @@ function actionArgs(result: PaymentValidationResult, phase: string, provider: Pa
     note: result.note,
     phase: phase,
     accountId: result.accountId,
-    targetType: result.targetType
+    targetType: result.targetType,
+    checkoutUrl: checkoutUrlFor(result),
+    providerSessionId: result.providerSessionId === undefined ? '' : result.providerSessionId
   };
 }
 
@@ -280,8 +310,9 @@ function confirmActions(result: PaymentValidationResult): A2uiAction[] {
 
 function checkoutActions(result: PaymentValidationResult): A2uiAction[] {
   const provider = providerFromTarget(result);
+  const checkoutUrl = checkoutUrlFor(result);
   return [
-    paymentAction('payment.checkout.open', '打开确认页', '打开支付确认页', 'primary', 'client', actionArgs(result, 'checkout', provider, result.amountText)),
+    paymentAction('payment.checkout.open', '打开确认页', checkoutUrl.length > 0 ? checkoutUrl : '打开支付确认页', 'primary', 'client', actionArgs(result, 'checkout', provider, result.amountText)),
     paymentAction('payment.cancel', '取消', '取消支付', 'secondary', 'prompt', actionArgs(result, 'cancel', provider, result.amountText))
   ];
 }
@@ -396,7 +427,9 @@ export function paymentCancelledA2ui(surfaceId: string, result: PaymentValidatio
     paypalEmail: result.paypalEmail,
     paypalMerchantId: result.paypalMerchantId,
     stripeAccountId: result.stripeAccountId,
-    stripePaymentLinkUrl: result.stripePaymentLinkUrl
+    stripePaymentLinkUrl: result.stripePaymentLinkUrl,
+    checkoutUrl: result.checkoutUrl,
+    providerSessionId: result.providerSessionId
   };
   return paymentValidationA2ui(surfaceId, cancelled);
 }

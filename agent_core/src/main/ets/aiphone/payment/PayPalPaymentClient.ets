@@ -20,6 +20,12 @@ export interface PayPalOrderRequestInput {
   note: string;
 }
 
+export interface PayPalCaptureRequestInput {
+  environment: PayPalEnvironment;
+  accessToken: string;
+  orderId: string;
+}
+
 export interface PayPalHttpHeaders {
   Authorization: string;
   'Content-Type': string;
@@ -158,6 +164,15 @@ export function buildPayPalOrderRequest(input: PayPalOrderRequestInput): PayPalH
     url: paypalBaseUrl(input.environment) + '/v2/checkout/orders',
     headers: bearerHeaders(input.accessToken.trim()),
     body: JSON.stringify(orderPayload(input))
+  };
+}
+
+export function buildPayPalCaptureRequest(input: PayPalCaptureRequestInput): PayPalHttpRequest {
+  return {
+    method: 'POST',
+    url: paypalBaseUrl(input.environment) + '/v2/checkout/orders/' + encodeURIComponent(input.orderId.trim()) + '/capture',
+    headers: bearerHeaders(input.accessToken.trim()),
+    body: '{}'
   };
 }
 

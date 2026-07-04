@@ -507,10 +507,11 @@ export function resolveA2uiHomeToolRequest(
 ): A2uiHomeResolvedToolRequest {
   const request = toolRequest(surface);
   let toolId = request.toolId;
-  const prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
+  let prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
   const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
   const forcedGmailToolId = forcedGmailToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
+  const forcedPaymentToolId = inferredPaymentToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedMapsToolId = inferredMapsToolIdForPrompt(prompt);
   const forcedMediaToolId = inferredMediaToolIdForPrompt(prompt);
   const actionToolId = toolIdForActionId(fallbackActionId);
@@ -527,6 +528,10 @@ export function resolveA2uiHomeToolRequest(
       actionId = 'client_intent_fallback';
     }
     toolId = forcedGmailToolId;
+  } else if (forcedPaymentToolId.length > 0 && request.toolId !== forcedPaymentToolId) {
+    actionId = request.toolId.length > 0 ? 'client_payment_explicit_reroute' : 'client_intent_fallback';
+    toolId = forcedPaymentToolId;
+    prompt = originalPrompt;
   } else if (actionToolId.length > 0) {
     if (actionId.length === 0) {
       actionId = 'client_action_fallback';
@@ -558,7 +563,7 @@ export function resolveA2uiHomeToolRequest(
     args = mergeArgs(youtubeArgsForPrompt(prompt), args);
   }
   if (toolId === 'payment.send') {
-    args = mergeArgs(paymentArgsForPrompt(prompt), args);
+    args = mergeArgs(paymentArgsForPrompt(originalPrompt), args);
   }
   if (toolId === 'gmail.draft.create') {
     args = mergeArgs(draftFormArgs(surface), args);

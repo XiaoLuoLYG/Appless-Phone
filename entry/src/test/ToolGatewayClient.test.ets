@@ -94,6 +94,13 @@ interface MediaVideoSearchArgsFixture {
   sources: string[];
 }
 
+interface PaymentTestArgs {
+  provider?: string;
+  recipient?: string;
+  phase?: string;
+  originalQuery?: string;
+}
+
 interface McDonaldsStoreFixture {
   storeName: string;
   address: string;
@@ -1628,6 +1635,83 @@ export default function toolGatewayClientTest() {
       expect(emittedAt.length).assertEqual(3);
       expect(emittedAt[1] - emittedAt[0]).assertLarger(10);
       expect(emittedAt[2] - emittedAt[1]).assertLarger(10);
+    });
+
+    it('renders payment amount completion before provider checkout', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给 Alex 转账' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '用 PayPal 给 Alex 转账',
+          'surface_payment_amount',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.toolName).assertEqual('payment.send');
+        expect(rendered.title).assertEqual('补充金额');
+        expect(result.raw.indexOf('payment.amount.select')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders payment confirmation without creating provider session first', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const query = '用 PayPal 给 Alex 转 5 美元';
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: query };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          query,
+          'surface_payment_confirm',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('确认支付');
+        expect(rendered.summary.indexOf('Alex')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.confirm')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('turns Stripe Payment Link confirmation into app checkout action', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'stripe', recipient: 'External Cafe', phase: 'confirm' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '打开 External Cafe 的 Stripe 付款页',
+          'surface_payment_checkout',
+          'payment.confirm',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('打开支付确认页');
+        expect(JSON.stringify(rendered.rows).indexOf('https://buy.stripe.com/')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.checkout.open')).assertLarger(-1);
+        expect(result.raw.indexOf('client')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
   });
 }

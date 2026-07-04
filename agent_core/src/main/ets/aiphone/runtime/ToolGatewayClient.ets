@@ -77,7 +77,32 @@ import { SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './Soci
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import {
+  PaymentAccount,
+  PaymentMode,
+  PaymentPolicy,
+  PaymentProvider,
+  PaymentRequestDraft,
+  PaymentValidationResult,
+  PaymentValidationStatus,
+  defaultPaymentAccountBook,
+  isStripePaymentLinkUrl,
+  paymentIdempotencyKey,
+  validatePaymentRequest
+} from '../payment/PaymentCore';
+import { paymentCancelledA2ui, paymentValidationA2ui } from '../payment/PaymentA2ui';
+import {
+  PayPalEnvironment,
+  buildPayPalCaptureRequest,
+  buildPayPalOrderRequest,
+  buildPayPalTokenRequest,
+  paypalApprovalUrlFromOrder
+} from '../payment/PayPalPaymentClient';
+import {
+  buildStripeCheckoutSessionRequest,
+  stripeCheckoutUrlFromResponse
+} from '../payment/StripePaymentClient';
 import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
@@ -125,6 +150,7 @@ interface HttpRequestHeaders {
   'Cookie'?: string;
   'Content-Type'?: string;
   'Authorization'?: string;
+  'Idempotency-Key'?: string;
   'MCP-Protocol-Version'?: string;
   'Mcp-Session-Id'?: string;
   'X-VARIFLIGHT-KEY'?: string;
@@ -1125,6 +1151,44 @@ interface MapsToolArgs {
   keyword?: string;
   placeId?: string;
   id?: string;
+}
+
+type PaymentToolArgValue = Object | string | number | boolean | null | undefined;
+type PaymentToolArgRecord = Record<string, PaymentToolArgValue>;
+
+interface PaymentToolActionArgs {
+  recipient?: PaymentToolArgValue;
+  provider?: PaymentToolArgValue;
+  amountText?: PaymentToolArgValue;
+  currency?: PaymentToolArgValue;
+  note?: PaymentToolArgValue;
+  phase?: PaymentToolArgValue;
+  accountId?: PaymentToolArgValue;
+  targetType?: PaymentToolArgValue;
+  checkoutUrl?: PaymentToolArgValue;
+  providerSessionId?: PaymentToolArgValue;
+  originalQuery?: PaymentToolArgValue;
+}
+
+interface PaymentAccountRaw {
+  id?: PaymentToolArgValue;
+  displayName?: PaymentToolArgValue;
+  aliases?: string[];
+  email?: PaymentToolArgValue;
+  paypalEmail?: PaymentToolArgValue;
+  paypalMerchantId?: PaymentToolArgValue;
+  stripeAccountId?: PaymentToolArgValue;
+  stripePaymentLinkUrl?: PaymentToolArgValue;
+  enabled?: PaymentToolArgValue;
+}
+
+interface PayPalTokenResponsePayload {
+  access_token?: string;
+}
+
+interface PayPalAccessTokenResult {
+  accessToken: string;
+  error: string;
 }
 
 function userAgentHeaders(): HttpRequestHeaders {
@@ -6774,6 +6838,491 @@ async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: stri
   return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceSearch(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey));
 }
 
+function paymentArgs(args: Object | null): PaymentToolActionArgs {
+  if (args === null) {
+    return JSON.parse('{}') as PaymentToolActionArgs;
+  }
+  return args as PaymentToolActionArgs;
+}
+
+function paymentArgText(args: PaymentToolActionArgs, key: string): string {
+  const record = args as PaymentToolArgRecord;
+  return textOf(record[key]).trim();
+}
+
+function paymentProviderFromText(value: string): PaymentProvider {
+  const lower = value.trim().toLowerCase();
+  if (lower === 'paypal' || lower.indexOf('paypal') >= 0 || lower.indexOf('贝宝') >= 0) {
+    return 'paypal';
+  }
+  if (lower === 'stripe' || lower.indexOf('stripe') >= 0) {
+    return 'stripe';
+  }
+  return '';
+}
+
+function paymentCurrencyFromPrompt(source: string, fallback: string): string {
+  const lower = source.toLowerCase();
+  if (lower.indexOf('usd') >= 0 || source.indexOf('$') >= 0 || source.indexOf('美元') >= 0 || source.indexOf('美金') >= 0) {
+    return 'USD';
+  }
+  if (lower.indexOf('cny') >= 0 || lower.indexOf('rmb') >= 0 || source.indexOf('人民币') >= 0 || source.indexOf('元') >= 0) {
+    return 'CNY';
+  }
+  if (lower.indexOf('hkd') >= 0 || source.indexOf('港币') >= 0 || source.indexOf('港元') >= 0) {
+    return 'HKD';
+  }
+  if (lower.indexOf('jpy') >= 0 || source.indexOf('日元') >= 0) {
+    return 'JPY';
+  }
+  const cleaned = fallback.trim().toUpperCase();
+  return cleaned.length > 0 ? cleaned : 'USD';
+}
+
+function isAmountChar(char: string): boolean {
+  if (char === '.' || char === ',') {
+    return true;
+  }
+  const code = char.charCodeAt(0);
+  return code >= 48 && code <= 57;
+}
+
+function paymentAmountFromPrompt(source: string): string {
+  let started = false;
+  let amount = '';
+  for (let index = 0; index < source.length; index++) {
+    const char = source.charAt(index);
+    const code = char.charCodeAt(0);
+    if (!started) {
+      if (code >= 48 && code <= 57) {
+        started = true;
+        amount += char;
+      }
+      continue;
+    }
+    if (!isAmountChar(char)) {
+      break;
+    }
+    amount += char;
+  }
+  return amount;
+}
+
+function paymentAliasesForAccount(account: PaymentAccount): string[] {
+  const aliases: string[] = [account.id, account.displayName, account.email, account.paypalEmail, account.paypalMerchantId];
+  for (let index = 0; index < account.aliases.length; index++) {
+    aliases.push(account.aliases[index]);
+  }
+  return aliases;
+}
+
+function paymentRecipientFromPrompt(source: string, book: PaymentAccount[]): string {
+  const lower = source.toLowerCase();
+  const matches: PaymentAccount[] = [];
+  for (let accountIndex = 0; accountIndex < book.length; accountIndex++) {
+    const account = book[accountIndex];
+    if (!account.enabled) {
+      continue;
+    }
+    const aliases = paymentAliasesForAccount(account);
+    for (let aliasIndex = 0; aliasIndex < aliases.length; aliasIndex++) {
+      const alias = aliases[aliasIndex].trim();
+      if (alias.length < 2) {
+        continue;
+      }
+      if (lower.indexOf(alias.toLowerCase()) >= 0) {
+        matches.push(account);
+        break;
+      }
+    }
+  }
+  return matches.length === 1 ? matches[0].displayName : '';
+}
+
+function paymentAccountForId(id: string, book: PaymentAccount[]): PaymentAccount | null {
+  const normalized = id.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+  for (let index = 0; index < book.length; index++) {
+    if (book[index].id.trim().toLowerCase() === normalized) {
+      return book[index];
+    }
+  }
+  return null;
+}
+
+function paymentProviderFromPrompt(source: string): PaymentProvider {
+  return paymentProviderFromText(source);
+}
+
+function stringArray(value: string[] | undefined): string[] {
+  if (value === undefined || !Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const item = textOf(value[index]).trim();
+    if (item.length > 0) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+function normalizePaymentAccount(raw: PaymentAccountRaw): PaymentAccount | null {
+  const id = textOf(raw.id).trim();
+  const displayName = textOf(raw.displayName).trim();
+  const name = displayName.length > 0 ? displayName : id;
+  if (id.length === 0 || name.length === 0) {
+    return null;
+  }
+  const enabledText = textOf(raw.enabled).trim().toLowerCase();
+  return {
+    id: id,
+    displayName: name,
+    aliases: stringArray(raw.aliases),
+    email: textOf(raw.email).trim(),
+    paypalEmail: textOf(raw.paypalEmail).trim(),
+    paypalMerchantId: textOf(raw.paypalMerchantId).trim(),
+    stripeAccountId: textOf(raw.stripeAccountId).trim(),
+    stripePaymentLinkUrl: textOf(raw.stripePaymentLinkUrl).trim(),
+    enabled: enabledText.length === 0 || enabledText === 'true' || enabledText === '1'
+  };
+}
+
+function upsertPaymentAccount(accounts: PaymentAccount[], account: PaymentAccount): void {
+  for (let index = 0; index < accounts.length; index++) {
+    if (accounts[index].id === account.id) {
+      accounts[index] = account;
+      return;
+    }
+  }
+  accounts.push(account);
+}
+
+function paymentAccountBookFromConfig(): PaymentAccount[] {
+  const accounts = defaultPaymentAccountBook();
+  const raw = localProviderConfig.paymentAccountBookJson.trim();
+  if (raw.length === 0) {
+    return accounts;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Object;
+    if (!Array.isArray(parsed)) {
+      return accounts;
+    }
+    const customAccounts = parsed as PaymentAccountRaw[];
+    for (let index = 0; index < customAccounts.length; index++) {
+      const account = normalizePaymentAccount(customAccounts[index]);
+      if (account !== null) {
+        upsertPaymentAccount(accounts, account);
+      }
+    }
+  } catch (error) {
+    aiLogError('[AIPhone][PaymentConfig] accountBook parse failed: ' + describeThrown(error));
+  }
+  return accounts;
+}
+
+function paymentModeFromConfig(): PaymentMode {
+  return localProviderConfig.paymentMode.trim().toLowerCase() === 'live' ? 'live' : 'test';
+}
+
+function paymentAllowedStripeAccounts(): string[] {
+  const parts = localProviderConfig.paymentLiveAllowedStripeAccountIds.split(',');
+  const result: string[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const value = parts[index].trim();
+    if (value.length > 0) {
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+function paymentLiveMaxAmountMinor(): number {
+  const value = Number(localProviderConfig.paymentLiveMaxAmountMinor.trim());
+  if (isNaN(value) || value <= 0) {
+    return 100;
+  }
+  return Math.floor(value);
+}
+
+function paymentPolicyFromConfig(): PaymentPolicy {
+  return {
+    mode: paymentModeFromConfig(),
+    defaultCurrency: localProviderConfig.paymentDefaultCurrency.trim().length > 0 ? localProviderConfig.paymentDefaultCurrency.trim().toUpperCase() : 'USD',
+    liveMaxAmountMinor: paymentLiveMaxAmountMinor(),
+    liveAllowedStripeAccountIds: paymentAllowedStripeAccounts()
+  };
+}
+
+function paymentDraftFromArgs(prompt: string, args: Object | null, book: PaymentAccount[]): PaymentRequestDraft {
+  const parsed = paymentArgs(args);
+  const originalQuery = paymentArgText(parsed, 'originalQuery');
+  const source = originalQuery.length > 0 ? originalQuery : prompt;
+  const account = paymentAccountForId(paymentArgText(parsed, 'accountId'), book);
+  let recipient = paymentArgText(parsed, 'recipient');
+  if (recipient.length === 0 && account !== null) {
+    recipient = account.displayName;
+  }
+  if (recipient.length === 0) {
+    recipient = paymentRecipientFromPrompt(source, book);
+  }
+  let amountText = paymentArgText(parsed, 'amountText');
+  if (amountText.length === 0) {
+    amountText = paymentAmountFromPrompt(source);
+  }
+  let currency = paymentArgText(parsed, 'currency').toUpperCase();
+  if (currency.length === 0) {
+    currency = paymentCurrencyFromPrompt(source, localProviderConfig.paymentDefaultCurrency);
+  }
+  let provider = paymentProviderFromText(paymentArgText(parsed, 'provider'));
+  if (provider.length === 0) {
+    provider = paymentProviderFromPrompt(source);
+  }
+  return {
+    recipient: recipient,
+    provider: provider,
+    amountText: amountText,
+    currency: currency,
+    note: paymentArgText(parsed, 'note'),
+    phase: paymentArgText(parsed, 'phase')
+  };
+}
+
+function paymentAmountForProvider(result: PaymentValidationResult): string {
+  if (result.currency === 'JPY' || result.currency === 'KRW' || result.currency === 'VND') {
+    return result.amountMinor.toString();
+  }
+  const whole = Math.floor(result.amountMinor / 100);
+  const cents = result.amountMinor % 100;
+  return whole.toString() + '.' + (cents < 10 ? '0' : '') + cents.toString();
+}
+
+function paymentResultWithState(
+  result: PaymentValidationResult,
+  status: PaymentValidationStatus,
+  reason: string,
+  checkoutUrl: string,
+  providerSessionId: string
+): PaymentValidationResult {
+  return {
+    status: status,
+    targetType: result.targetType,
+    reason: reason,
+    recipient: result.recipient,
+    accountId: result.accountId,
+    displayName: result.displayName,
+    provider: result.provider,
+    amountMinor: result.amountMinor,
+    amountText: result.amountText,
+    currency: result.currency,
+    note: result.note,
+    mode: result.mode,
+    paypalEmail: result.paypalEmail,
+    paypalMerchantId: result.paypalMerchantId,
+    stripeAccountId: result.stripeAccountId,
+    stripePaymentLinkUrl: result.stripePaymentLinkUrl,
+    checkoutUrl: checkoutUrl,
+    providerSessionId: providerSessionId
+  } as PaymentValidationResult;
+}
+
+function paymentBlocked(result: PaymentValidationResult, reason: string): PaymentValidationResult {
+  return paymentResultWithState(result, 'blocked', reason, '', '');
+}
+
+function paymentCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
+  return paymentResultWithState(result, 'checkout', 'Provider checkout page is ready.', checkoutUrl, providerSessionId);
+}
+
+function isHttpSuccess(response: HttpTextResponse): boolean {
+  return response.code >= 200 && response.code < 300;
+}
+
+function providerFailure(provider: string, action: string, response: HttpTextResponse): string {
+  const snippet = response.text.length > 280 ? response.text.substring(0, 280) + '...' : response.text;
+  return provider + ' ' + action + ' failed with HTTP ' + response.code.toString() + ': ' + snippet;
+}
+
+function jsonStringField(rawJson: string, key: string): string {
+  try {
+    const parsed = JSON.parse(rawJson) as PaymentToolArgRecord;
+    return textOf(parsed[key]).trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+function paypalEnvironmentFromConfig(): PayPalEnvironment {
+  return localProviderConfig.paypalEnvironment === 'live' ? 'live' : 'sandbox';
+}
+
+async function createPayPalAccessToken(): Promise<PayPalAccessTokenResult> {
+  if (localProviderConfig.paypalClientId.length === 0 || localProviderConfig.paypalClientSecret.length === 0) {
+    return {
+      accessToken: '',
+      error: 'Missing PayPal credentials. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in the provider config.'
+    };
+  }
+  const environment = paypalEnvironmentFromConfig();
+  const tokenRequest = buildPayPalTokenRequest({
+    environment: environment,
+    clientId: localProviderConfig.paypalClientId,
+    clientSecret: localProviderConfig.paypalClientSecret
+  });
+  const tokenHeaders: HttpRequestHeaders = {
+    'Authorization': tokenRequest.headers.Authorization,
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Accept': tokenRequest.headers.Accept
+  };
+  const tokenResponse = await postFormText(tokenRequest.url, tokenHeaders, tokenRequest.body);
+  if (!isHttpSuccess(tokenResponse)) {
+    return { accessToken: '', error: providerFailure('PayPal', 'token request', tokenResponse) };
+  }
+  let tokenPayload: PayPalTokenResponsePayload;
+  try {
+    tokenPayload = JSON.parse(tokenResponse.text) as PayPalTokenResponsePayload;
+  } catch (_error) {
+    return { accessToken: '', error: 'PayPal token response was not valid JSON.' };
+  }
+  const accessToken = tokenPayload.access_token === undefined ? '' : tokenPayload.access_token.trim();
+  if (accessToken.length === 0) {
+    return { accessToken: '', error: 'PayPal token response did not include access_token.' };
+  }
+  return { accessToken: accessToken, error: '' };
+}
+
+async function createPayPalCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
+  const token = await createPayPalAccessToken();
+  if (token.error.length > 0) {
+    return paymentBlocked(result, token.error);
+  }
+  const environment = paypalEnvironmentFromConfig();
+  const orderRequest = buildPayPalOrderRequest({
+    environment: environment,
+    accessToken: token.accessToken,
+    amountText: paymentAmountForProvider(result),
+    currency: result.currency,
+    payeeEmail: result.paypalEmail,
+    payeeMerchantId: result.paypalMerchantId,
+    returnUrl: localProviderConfig.paypalReturnUrl,
+    cancelUrl: localProviderConfig.paypalCancelUrl,
+    note: result.note
+  });
+  const orderHeaders: HttpRequestHeaders = {
+    'Authorization': orderRequest.headers.Authorization,
+    'Content-Type': 'application/json',
+    'Accept': orderRequest.headers.Accept
+  };
+  const orderResponse = await postJsonText(orderRequest.url, orderHeaders, orderRequest.body);
+  if (!isHttpSuccess(orderResponse)) {
+    return paymentBlocked(result, providerFailure('PayPal', 'order create', orderResponse));
+  }
+  const approvalUrl = paypalApprovalUrlFromOrder(orderResponse.text);
+  if (approvalUrl.length === 0) {
+    return paymentBlocked(result, 'PayPal order response did not include an approve URL.');
+  }
+  return paymentCheckout(result, approvalUrl, jsonStringField(orderResponse.text, 'id'));
+}
+
+async function capturePayPalPayment(result: PaymentValidationResult, orderId: string): Promise<PaymentValidationResult> {
+  const cleanedOrderId = orderId.trim();
+  if (cleanedOrderId.length === 0) {
+    return paymentBlocked(result, 'Missing PayPal order id for capture.');
+  }
+  const token = await createPayPalAccessToken();
+  if (token.error.length > 0) {
+    return paymentBlocked(result, token.error);
+  }
+  const captureRequest = buildPayPalCaptureRequest({
+    environment: paypalEnvironmentFromConfig(),
+    accessToken: token.accessToken,
+    orderId: cleanedOrderId
+  });
+  const captureHeaders: HttpRequestHeaders = {
+    'Authorization': captureRequest.headers.Authorization,
+    'Content-Type': 'application/json',
+    'Accept': captureRequest.headers.Accept
+  };
+  const captureResponse = await postJsonText(captureRequest.url, captureHeaders, captureRequest.body);
+  if (!isHttpSuccess(captureResponse)) {
+    return paymentBlocked(result, providerFailure('PayPal', 'order capture', captureResponse));
+  }
+  return paymentResultWithState(result, 'completed', 'PayPal capture completed.', '', cleanedOrderId);
+}
+
+async function createStripeCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
+  if (result.targetType === 'stripe_payment_link') {
+    if (!isStripePaymentLinkUrl(result.stripePaymentLinkUrl)) {
+      return paymentBlocked(result, 'Stripe Payment Link URL is not valid.');
+    }
+    return paymentCheckout(result, result.stripePaymentLinkUrl, '');
+  }
+  if (localProviderConfig.stripeSecretKey.length === 0) {
+    return paymentBlocked(result, 'Missing Stripe secret key. Set STRIPE_SECRET_KEY in the provider config.');
+  }
+  const checkoutRequest = buildStripeCheckoutSessionRequest({
+    secretKey: localProviderConfig.stripeSecretKey,
+    connectedAccountId: result.stripeAccountId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    merchantName: result.displayName,
+    successUrl: localProviderConfig.stripeSuccessUrl,
+    cancelUrl: localProviderConfig.stripeCancelUrl,
+    idempotencyKey: paymentIdempotencyKey(result),
+    note: result.note
+  });
+  const response = await postFormText(checkoutRequest.url, {
+    'Authorization': checkoutRequest.headers.Authorization,
+    'Content-Type': checkoutRequest.headers.ContentType,
+    'Idempotency-Key': checkoutRequest.headers.IdempotencyKey
+  }, checkoutRequest.body);
+  if (!isHttpSuccess(response)) {
+    return paymentBlocked(result, providerFailure('Stripe', 'Checkout Session create', response));
+  }
+  const checkoutUrl = stripeCheckoutUrlFromResponse(response.text);
+  if (checkoutUrl.length === 0) {
+    return paymentBlocked(result, 'Stripe Checkout Session response did not include a checkout URL.');
+  }
+  return paymentCheckout(result, checkoutUrl, jsonStringField(response.text, 'id'));
+}
+
+async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const book = paymentAccountBookFromConfig();
+  const policy = paymentPolicyFromConfig();
+  const draft = paymentDraftFromArgs(prompt, args, book);
+  const validation = validatePaymentRequest(draft, book, policy);
+  const phase = draft.phase === undefined ? '' : draft.phase;
+  if (phase === 'cancel') {
+    return paymentCancelledA2ui(surfaceId, validation);
+  }
+  if (phase === 'capture') {
+    const parsed = paymentArgs(args);
+    if (validation.status !== 'confirm' || validation.targetType !== 'paypal') {
+      return paymentValidationA2ui(surfaceId, paymentBlocked(validation, 'PayPal capture requires a confirmed PayPal payment target.'));
+    }
+    return paymentValidationA2ui(surfaceId, await capturePayPalPayment(validation, paymentArgText(parsed, 'providerSessionId')));
+  }
+  if (phase !== 'confirm') {
+    return paymentValidationA2ui(surfaceId, validation);
+  }
+  if (validation.status !== 'confirm') {
+    return paymentValidationA2ui(surfaceId, validation);
+  }
+  let checkout: PaymentValidationResult;
+  if (validation.targetType === 'paypal') {
+    checkout = await createPayPalCheckout(validation);
+  } else if (validation.targetType === 'stripe_connected' || validation.targetType === 'stripe_payment_link') {
+    checkout = await createStripeCheckout(validation);
+  } else {
+    checkout = paymentBlocked(validation, 'Payment target is not executable.');
+  }
+  return paymentValidationA2ui(surfaceId, checkout);
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   if (isCalendarToolId(toolId)) {
     return callLocalCalendarTool(toolId, prompt, surfaceId, args);
@@ -6795,6 +7344,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isSocialHubToolId(toolId)) {
     return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+  }
+  if (isPaymentToolId(toolId)) {
+    return callLocalPaymentTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);

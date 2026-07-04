@@ -2,7 +2,7 @@ export type PaymentProvider = '' | 'paypal' | 'stripe';
 export type PaymentTargetType = 'none' | 'paypal' | 'stripe_connected' | 'stripe_payment_link' | 'choice';
 export type PaymentMode = 'test' | 'live';
 export type PaymentValidationStatus =
-  'needs_recipient' | 'needs_provider' | 'needs_amount' | 'confirm' | 'checkout' | 'blocked' | 'cancelled';
+  'needs_recipient' | 'needs_provider' | 'needs_amount' | 'confirm' | 'checkout' | 'completed' | 'blocked' | 'cancelled';
 export type PaymentRecipientResolutionStatus = 'resolved' | 'unknown' | 'ambiguous';
 
 export interface PaymentAccount {
@@ -68,6 +68,8 @@ export interface PaymentValidationResult {
   paypalMerchantId: string;
   stripeAccountId: string;
   stripePaymentLinkUrl: string;
+  checkoutUrl?: string;
+  providerSessionId?: string;
 }
 
 function cleanText(value: string): string {

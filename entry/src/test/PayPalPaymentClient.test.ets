@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  buildPayPalCaptureRequest,
   buildPayPalOrderRequest,
   buildPayPalTokenRequest,
   paypalApprovalUrlFromOrder
@@ -64,6 +65,18 @@ export default function payPalPaymentClientTest() {
       expect(body.intent).assertEqual('CAPTURE');
       expect(body.purchase_units[0].amount.value).assertEqual('5.00');
       expect(body.purchase_units[0].payee.email_address).assertEqual('alex@example.com');
+    });
+
+    it('builds PayPal capture request for approved orders', 0, () => {
+      const capture = buildPayPalCaptureRequest({
+        environment: 'sandbox',
+        accessToken: 'access',
+        orderId: 'ORDER-1'
+      });
+
+      expect(capture.url).assertEqual('https://api-m.sandbox.paypal.com/v2/checkout/orders/ORDER-1/capture');
+      expect(capture.headers.Authorization).assertEqual('Bearer access');
+      expect(capture.body).assertEqual('{}');
     });
 
     it('extracts the PayPal approval URL from order links', 0, () => {

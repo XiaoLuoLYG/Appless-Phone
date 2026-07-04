@@ -230,6 +230,20 @@ export default function a2uiHomeToolRequestTest() {
       expect(args.provider).assertEqual('paypal');
     });
 
+    it('reroutes model note tool to payment for explicit Stripe payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('note', '请确认支付信息', 'model_tool_request'),
+        '用 Stripe 给真实商户付款',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(resolved.actionId).assertEqual('client_payment_explicit_reroute');
+      expect(args.provider).assertEqual('stripe');
+    });
+
     it('does not infer payment for generic provider setup questions', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),

@@ -22,6 +22,7 @@ import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { HtmlHomeSurfaceView } from './HtmlHomeSurfaceView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
+import { PaymentCheckoutOverlay } from './PaymentCheckoutOverlay';
 import {
   isPromptInputEnabled,
   nextSendSpinnerRotation
@@ -57,6 +58,8 @@ export struct HomePage {
   @Prop isVoiceListening: boolean = false;
   @Prop voiceInputMessage: string = '';
   @Prop showWelcome: boolean = false;
+  @Prop showPaymentCheckout: boolean = false;
+  @Prop paymentCheckoutUrl: string = '';
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   private sendSpinnerTimerId: number = -1;
@@ -69,6 +72,8 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
+  onClosePaymentCheckout: () => void = () => {};
+  onPaymentCheckoutReturn: (url: string) => void = (_url: string): void => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
@@ -486,6 +491,14 @@ export struct HomePage {
       .height('100%')
       .padding({ left: 16, right: 16, top: 16, bottom: 14 })
       .backgroundColor(COLOR_PAGE)
+
+      if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
+        PaymentCheckoutOverlay({
+          url: this.paymentCheckoutUrl,
+          onClose: this.onClosePaymentCheckout,
+          onReturnUrl: this.onPaymentCheckoutReturn
+        })
+      }
     }
     .width('100%')
     .height('100%')

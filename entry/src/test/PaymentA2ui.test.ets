@@ -67,5 +67,23 @@ export default function paymentA2uiTest() {
       expect(actions[1].id).assertEqual('payment.amount.select');
       expect(actions[2].id).assertEqual('payment.amount.select');
     });
+
+    it('renders checkout action with provider url', 0, () => {
+      const checkout = validation('checkout', 'stripe_payment_link', 0, '');
+      checkout.provider = 'stripe';
+      checkout.stripePaymentLinkUrl = 'https://buy.stripe.com/test_external_cafe';
+      checkout.checkoutUrl = 'https://buy.stripe.com/test_external_cafe';
+      const store = applyJsonl(paymentValidationA2ui('surface_payment', checkout));
+      const surface = store.getSurface();
+      const result = genericToolResults(surface)[0];
+      const actions = actionsOf(surface.components[1]);
+
+      expect(result.title).assertEqual('打开支付确认页');
+      expect(JSON.stringify(result.rows).indexOf('https://buy.stripe.com/')).assertLarger(-1);
+      expect(actions[0].id).assertEqual('payment.checkout.open');
+      expect(actions[0].kind).assertEqual('client');
+      expect(actions[0].prompt.indexOf('https://buy.stripe.com/test_external_cafe')).assertLarger(-1);
+      expect(JSON.stringify(actions[0].args).indexOf('https://buy.stripe.com/test_external_cafe')).assertLarger(-1);
+    });
   });
 }

@@ -94,13 +94,17 @@ function normalizeActions(value: A2uiAction[] | undefined | null): A2uiAction[] 
     if (variant !== 'primary' && variant !== 'secondary' && variant !== 'danger') {
       throw new Error('A2UI action variant is not registered');
     }
-    result.push({
+    const normalized: A2uiAction = {
       id: normalizeString(action.id, 'action_' + index.toString()),
       label: label,
       prompt: prompt,
       variant: variant,
       kind: kind
-    });
+    };
+    if (action.args !== undefined && action.args !== null) {
+      normalized.args = action.args;
+    }
+    result.push(normalized);
   });
   return result;
 }

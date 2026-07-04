@@ -112,6 +112,26 @@ interface SocialHubReplyPayload {
   text?: HtmlActionValue;
 }
 
+interface PaymentCheckoutActionPayload {
+  provider?: HtmlActionValue;
+  recipient?: HtmlActionValue;
+  amountText?: HtmlActionValue;
+  currency?: HtmlActionValue;
+  note?: HtmlActionValue;
+  checkoutUrl?: HtmlActionValue;
+  providerSessionId?: HtmlActionValue;
+}
+
+interface PaymentCaptureArgs {
+  provider: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  phase: string;
+  providerSessionId: string;
+}
+
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
     return text;
@@ -153,6 +173,14 @@ struct Index {
   @State inputText: string = '';
   @State isVoiceListening: boolean = false;
   @State voiceInputMessage: string = '';
+  @State showPaymentCheckout: boolean = false;
+  @State paymentCheckoutUrl: string = '';
+  @State paymentCheckoutProvider: string = '';
+  @State paymentCheckoutProviderSessionId: string = '';
+  @State paymentCheckoutRecipient: string = '';
+  @State paymentCheckoutAmountText: string = '';
+  @State paymentCheckoutCurrency: string = '';
+  @State paymentCheckoutNote: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
   @State personaPacks: PersonaPack[] = allPersonaPacks();
@@ -1245,6 +1273,110 @@ struct Index {
     return '';
   }
 
+  private isPaymentCheckoutUrl(url: string): boolean {
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith('https://checkout.stripe.com/') ||
+      lower.startsWith('https://buy.stripe.com/') ||
+      lower.startsWith('https://www.paypal.com/') ||
+      lower.startsWith('https://www.sandbox.paypal.com/');
+  }
+
+  private paymentCheckoutUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as PaymentCheckoutActionPayload;
+      fromArgs = this.actionText(payload.checkoutUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
+  private paymentCheckoutPayload(action: A2uiAction): PaymentCheckoutActionPayload {
+    if (action.args === undefined) {
+      return JSON.parse('{}') as PaymentCheckoutActionPayload;
+    }
+    return action.args as PaymentCheckoutActionPayload;
+  }
+
+  private rememberPaymentCheckout(action: A2uiAction, checkoutUrl: string): void {
+    const payload = this.paymentCheckoutPayload(action);
+    this.paymentCheckoutUrl = checkoutUrl;
+    this.paymentCheckoutProvider = this.actionText(payload.provider).trim().toLowerCase();
+    this.paymentCheckoutProviderSessionId = this.actionText(payload.providerSessionId).trim();
+    this.paymentCheckoutRecipient = this.actionText(payload.recipient).trim();
+    this.paymentCheckoutAmountText = this.actionText(payload.amountText).trim();
+    this.paymentCheckoutCurrency = this.actionText(payload.currency).trim();
+    this.paymentCheckoutNote = this.actionText(payload.note).trim();
+  }
+
+  private queryValue(url: string, key: string): string {
+    const marker = key + '=';
+    const queryIndex = url.indexOf('?');
+    if (queryIndex < 0) {
+      return '';
+    }
+    const query = url.substring(queryIndex + 1);
+    const parts = query.split('&');
+    for (let index = 0; index < parts.length; index++) {
+      if (parts[index].startsWith(marker)) {
+        return decodeURIComponent(parts[index].substring(marker.length));
+      }
+    }
+    return '';
+  }
+
+  private async handlePaymentCheckoutReturn(url: string): Promise<void> {
+    this.showPaymentCheckout = false;
+    const lower = url.toLowerCase();
+    if (lower.indexOf('/cancel') >= 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已取消，没有完成扣款。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    if (this.paymentCheckoutProvider !== 'paypal') {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已返回 app，请在供应商页面确认支付状态。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    const orderId = this.paymentCheckoutProviderSessionId.length > 0 ?
+      this.paymentCheckoutProviderSessionId : this.queryValue(url, 'token');
+    if (orderId.length === 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: 'PayPal 已返回 app，但缺少 order id，不能 capture。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: url
+      }));
+      return;
+    }
+    const args: PaymentCaptureArgs = {
+      provider: 'paypal',
+      recipient: this.paymentCheckoutRecipient,
+      amountText: this.paymentCheckoutAmountText,
+      currency: this.paymentCheckoutCurrency,
+      note: this.paymentCheckoutNote,
+      phase: 'capture',
+      providerSessionId: orderId
+    };
+    await this.callToolById('payment.send', 'PayPal payment approved, capture order ' + orderId, 'payment.capture', args);
+  }
+
   private async saveDynamicCredentialAndTest(action: A2uiAction): Promise<void> {
     let payload: HtmlDynamicCredentialPayload;
     try {
@@ -1334,6 +1466,17 @@ struct Index {
     }
     if (action.id === 'html_dynamic_save_and_test') {
       await this.saveDynamicCredentialAndTest(action);
+      return;
+    }
+    if (action.id === 'payment.checkout.open') {
+      const checkoutUrl = this.paymentCheckoutUrlForAction(action);
+      if (!this.isPaymentCheckoutUrl(checkoutUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_payment_checkout_url');
+        return;
+      }
+      this.rememberPaymentCheckout(action, checkoutUrl);
+      this.showPaymentCheckout = true;
+      aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
       return;
     }
     if (action.id === 'gmail.authorize') {
@@ -1774,6 +1917,8 @@ struct Index {
         isVoiceListening: this.isVoiceListening,
         voiceInputMessage: this.voiceInputMessage,
         showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
+        showPaymentCheckout: this.showPaymentCheckout,
+        paymentCheckoutUrl: this.paymentCheckoutUrl,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -1801,6 +1946,12 @@ struct Index {
         },
         onStopVoiceInput: () => {
           this.stopVoiceInput();
+        },
+        onClosePaymentCheckout: () => {
+          this.showPaymentCheckout = false;
+        },
+        onPaymentCheckoutReturn: (url: string) => {
+          this.handlePaymentCheckoutReturn(url);
         },
         onAction: (action: A2uiAction) => {
           this.sendAction(action);
