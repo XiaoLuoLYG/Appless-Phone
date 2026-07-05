@@ -79,6 +79,9 @@ function actionsFor(card: StripeReceivingAccountCardData): A2uiAction[] {
     return [action('stripe.account.create', '重试绑定', '重新创建 Stripe 收款账户并打开认证', 'primary', args)];
   }
   if (card.status === 'onboarding_required') {
+    if (!card.onboardingUrl.startsWith('https://connect.stripe.com/')) {
+      return [action('stripe.account.onboard', '打开 Stripe 托管认证', '重新创建 Stripe 认证链接', 'primary', args)];
+    }
     return [action('stripe.account.open', '打开 Stripe 托管认证', card.onboardingUrl, 'primary', args)];
   }
   return [action('stripe.account.refresh', '刷新状态', '刷新 Stripe 收款状态', 'secondary', args)];

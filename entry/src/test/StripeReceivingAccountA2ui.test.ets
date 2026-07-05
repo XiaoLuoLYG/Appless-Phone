@@ -75,6 +75,11 @@ export default function stripeReceivingAccountA2uiTest() {
       expect(onboarding.actions[0].prompt).assertEqual('https://connect.stripe.com/setup/test');
       expect(onboarding.currentlyDue[0]).assertEqual('individual.dob.day');
 
+      card.onboardingUrl = '';
+      const relink = stripeReceivingAccount(surfaceFromJsonl(stripeReceivingAccountA2ui('stripe_receiving_relink', card)).getSurface());
+      expect(relink.actions[0].id).assertEqual('stripe.account.onboard');
+      expect(relink.actions[0].label).assertEqual('打开 Stripe 托管认证');
+
       card.status = 'receivable';
       const receivable = stripeReceivingAccount(surfaceFromJsonl(stripeReceivingAccountA2ui('stripe_receiving_ready', card)).getSurface());
       expect(receivable.actions[0].id).assertEqual('stripe.account.refresh');

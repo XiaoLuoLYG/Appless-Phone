@@ -81,6 +81,10 @@ interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy: boolean;
 }
 
+interface StripeOnboardingActionArgs {
+  onboardingUrl: string;
+}
+
 export interface CreateHtmlHomeDocumentParams {
   surface?: A2uiSurfaceState;
   messages: A2uiMessage[];
@@ -683,7 +687,32 @@ function appendStripeReceivingBlock(document: HtmlHomeDocument, surface: A2uiSur
   };
   block.stripeReceiving = receiving;
   block.actions = htmlActions(actionsOf(component), component.id);
+  if (account.onboardingUrl.startsWith('https://connect.stripe.com/')) {
+    const args: StripeOnboardingActionArgs = { onboardingUrl: account.onboardingUrl };
+    const openAction: HtmlHomeAction = {
+      id: 'stripe.account.open',
+      label: '打开 Stripe 托管认证',
+      prompt: account.onboardingUrl,
+      variant: 'primary',
+      kind: 'client',
+      sourceComponentId: component.id,
+      args: args
+    };
+    block.actions = [openAction];
+    removeStripeReceivingActions(document.actions);
+    appendAction(document.actions, openAction);
+  }
   document.blocks.push(block);
+}
+
+function removeStripeReceivingActions(actions: HtmlHomeAction[]): void {
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    if (actions[index].id === 'stripe.account.open' ||
+      actions[index].id === 'stripe.account.onboard' ||
+      actions[index].id === 'stripe.account.create') {
+      actions.splice(index, 1);
+    }
+  }
 }
 
 function dropCompletedThinkingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {

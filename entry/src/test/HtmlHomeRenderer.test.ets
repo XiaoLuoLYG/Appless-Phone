@@ -805,17 +805,28 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('保存后可以直接说')).assertEqual(-1);
     });
 
-    it('renders PayPal Google Pay checkout as an in-app SDK panel', 0, () => {
+    it('renders PayPal Google Pay checkout inline with the payment actions', 0, () => {
       const html = renderHtmlHomeDocument(googlePayCheckoutDocumentFixture());
 
-      expect(html.indexOf('google-pay-panel')).assertLarger(-1);
+      expect(html.indexOf('google-pay-action')).assertLarger(-1);
+      expect(html.indexOf('google-pay-placeholder')).assertLarger(-1);
+      expect(html.indexOf('Pay with G Pay')).assertLarger(-1);
       expect(html.indexOf('paypal.Googlepay')).assertLarger(-1);
       expect(html.indexOf('https://pay.google.com/gp/p/js/pay.js')).assertLarger(-1);
       expect(html.indexOf('components=googlepay')).assertLarger(-1);
       expect(html.indexOf('payment.capture')).assertLarger(-1);
-      expect(html.indexOf('PayPal Google Pay · app 内确认')).assertLarger(-1);
-      expect(html.indexOf('如果 Google Pay 面板空白')).assertLarger(-1);
+      expect(html.indexOf('检测并显示')).assertEqual(-1);
+      expect(html.indexOf('google-pay-panel')).assertEqual(-1);
+      expect(html.indexOf('mountGooglePayButton(slot, status, config, true)')).assertLarger(-1);
+      expect(html.indexOf('openAfterReady === true')).assertLarger(-1);
+      expect(html.indexOf('Google Pay 已准备好，请点上方按钮打开确认面板。')).assertLarger(-1);
+      expect(html.indexOf('window.setTimeout(function () {\\n      mountGooglePayButton')).assertEqual(-1);
+      expect(html.indexOf('document.head.appendChild(script);')).assertLarger(-1);
+      expect(html.indexOf('if (!existing) {\\n        document.head.appendChild(script);')).assertEqual(-1);
+      expect(html.indexOf('手机 WebView 当前访问不了 Google Pay SDK')).assertLarger(-1);
       expect(html.indexOf('Google Pay 确认面板')).assertLarger(-1);
+      expect(html.indexOf('PAYER_ACTION_REQUIRED')).assertLarger(-1);
+      expect(html.indexOf('initiatePayerAction')).assertLarger(-1);
     });
 
     it('auto-opens Stripe onboarding links after account setup', 0, () => {
@@ -826,6 +837,35 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
       expect(html.indexOf('window.location.href = url')).assertEqual(-1);
+    });
+
+    it('uses Stripe receiving action URL in the payment scene', 0, () => {
+      const doc = stripeReceivingDocumentFixture();
+      const staleAction: HtmlHomeAction = {
+        id: 'stripe.account.open',
+        label: '打开 Stripe 托管认证',
+        prompt: '打开 Stripe 托管认证',
+        variant: 'primary',
+        kind: 'client'
+      };
+      doc.kind = 'payment';
+      doc.actions = [staleAction];
+      doc.blocks.unshift({
+        id: 'payment-summary',
+        kind: 'generic-tool-result',
+        title: 'Stripe 收款',
+        subtitle: 'summary',
+        status: 'needs_user',
+        source: 'payment',
+        metrics: [],
+        rows: [{ label: 'toolName', value: 'payment.send' }],
+        actions: [staleAction]
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("blocks[index].kind === 'StripeReceivingAccountCard'")).assertLarger(-1);
+      expect(html.indexOf('actionForBlock(action, block)')).assertLarger(-1);
+      expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
     });
 
     it('keeps non-food documents on the generic renderer', 0, () => {

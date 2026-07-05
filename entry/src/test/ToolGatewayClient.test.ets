@@ -30,8 +30,11 @@ import {
   isReadonlyBrandMcpTool,
   isLocalToolGatewayUrl,
   isRegisteredToolId,
+  isTransientPayPalRequestErrorForTest,
   localProviderConfigDebugSummary,
   mailSearchArgs,
+  payPalApiFallbackUrlForTest,
+  paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
@@ -273,6 +276,18 @@ export default function toolGatewayClientTest() {
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
       }
+    });
+
+    it('classifies transient PayPal DNS and timeout errors for retry', 0, () => {
+      expect(isTransientPayPalRequestErrorForTest('Failed to resolve the host name')).assertTrue();
+      expect(isTransientPayPalRequestErrorForTest('Operation timeout')).assertTrue();
+      expect(isTransientPayPalRequestErrorForTest('HTTP 422 payer action required')).assertFalse();
+      expect(payPalApiFallbackUrlForTest('https://api-m.paypal.com/v1/oauth2/token')).assertEqual('https://api.paypal.com/v1/oauth2/token');
+      expect(payPalApiFallbackUrlForTest('https://api-m.sandbox.paypal.com/v2/checkout/orders')).assertEqual('https://api.sandbox.paypal.com/v2/checkout/orders');
+      const help = paypalGooglePayNetworkHelpForTest('paypal', 'google_pay', 'Failed to resolve the host name');
+      expect(help.indexOf('先关闭 VPN')).assertLarger(-1);
+      expect(help.indexOf('Pay with G Pay')).assertLarger(-1);
+      expect(paypalGooglePayNetworkHelpForTest('paypal', 'google_pay', 'HTTP 422 payer action required')).assertEqual('HTTP 422 payer action required');
     });
 
     it('renders aggregate mail missing QQ config as real provider status', 0, async () => {

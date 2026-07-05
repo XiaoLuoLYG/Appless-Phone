@@ -2095,6 +2095,50 @@ function postFormText(url: string, headers: HttpRequestHeaders, body: string): P
   return postJsonText(url, headers, body);
 }
 
+export function isTransientPayPalRequestErrorForTest(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.indexOf('failed to resolve') >= 0 ||
+    lower.indexOf('resolve the host name') >= 0 ||
+    lower.indexOf('operation timeout') >= 0 ||
+    lower.indexOf('timed out') >= 0 ||
+    lower.indexOf('internal error') >= 0 ||
+    lower.indexOf('2300028') >= 0 ||
+    lower.indexOf('2300999') >= 0;
+}
+
+export function payPalApiFallbackUrlForTest(url: string): string {
+  if (url.startsWith('https://api-m.paypal.com/')) {
+    return 'https://api.paypal.com/' + url.substring('https://api-m.paypal.com/'.length);
+  }
+  if (url.startsWith('https://api-m.sandbox.paypal.com/')) {
+    return 'https://api.sandbox.paypal.com/' + url.substring('https://api-m.sandbox.paypal.com/'.length);
+  }
+  return '';
+}
+
+async function postPayPalTextWithRetry(action: string, url: string, headers: HttpRequestHeaders, body: string): Promise<HttpTextResponse> {
+  let lastError = '';
+  const fallbackUrl = payPalApiFallbackUrlForTest(url);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const requestUrl = attempt > 0 && fallbackUrl.length > 0 ? fallbackUrl : url;
+    try {
+      return await postJsonText(requestUrl, headers, body);
+    } catch (error) {
+      lastError = describeThrown(error);
+      if (!isTransientPayPalRequestErrorForTest(lastError) || attempt >= 2) {
+        const suffix = attempt >= 2 ? ' failed after 3 attempts: ' : ' failed: ';
+        throw new Error(action + suffix + lastError);
+      }
+      aiLogInfo('[AIPhone][PayPalHttpRetry] action=' + action +
+        ' attempt=' + (attempt + 2).toString() +
+        ' fallback=' + (requestUrl !== url ? 'true' : 'false') +
+        ' reason=' + lastError.substring(0, 160));
+      await waitForDebugDelay(500 * (attempt + 1));
+    }
+  }
+  throw new Error(action + ' failed after 3 attempts: ' + lastError);
+}
+
 function mcpHeaders(token: string, sessionId: string = ''): HttpRequestHeaders {
   if (sessionId.length > 0) {
     return {
@@ -7256,8 +7300,18 @@ function paymentResultWithState(
   } as PaymentValidationResult;
 }
 
+export function paypalGooglePayNetworkHelpForTest(provider: string, fundingSource: string, reason: string): string {
+  if (provider !== 'paypal' || fundingSource !== 'google_pay') {
+    return reason;
+  }
+  if (!isTransientPayPalRequestErrorForTest(reason)) {
+    return reason;
+  }
+  return reason + ' 手机当前网络/VPN 无法连接 PayPal API。请先关闭 VPN 点“确认支付”创建 PayPal 订单；看到 Pay with G Pay 后，再打开 VPN 并点击 Google Pay。';
+}
+
 function paymentBlocked(result: PaymentValidationResult, reason: string): PaymentValidationResult {
-  return paymentResultWithState(result, 'blocked', reason, '', '');
+  return paymentResultWithState(result, 'blocked', paypalGooglePayNetworkHelpForTest(result.provider, result.fundingSource, reason), '', '');
 }
 
 function paymentCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
@@ -7373,7 +7427,12 @@ async function createPayPalAccessToken(): Promise<PayPalAccessTokenResult> {
     'Content-Type': 'application/x-www-form-urlencoded',
     'Accept': tokenRequest.headers.Accept
   };
-  const tokenResponse = await postFormText(tokenRequest.url, tokenHeaders, tokenRequest.body);
+  let tokenResponse: HttpTextResponse;
+  try {
+    tokenResponse = await postPayPalTextWithRetry('token request', tokenRequest.url, tokenHeaders, tokenRequest.body);
+  } catch (error) {
+    return { accessToken: '', error: 'PayPal token request failed: ' + describeThrown(error) };
+  }
   if (!isHttpSuccess(tokenResponse)) {
     return { accessToken: '', error: providerFailure('PayPal', 'token request', tokenResponse) };
   }
@@ -7416,7 +7475,12 @@ async function createPayPalCheckout(result: PaymentValidationResult): Promise<Pa
     'Content-Type': 'application/json',
     'Accept': orderRequest.headers.Accept
   };
-  const orderResponse = await postJsonText(orderRequest.url, orderHeaders, orderRequest.body);
+  let orderResponse: HttpTextResponse;
+  try {
+    orderResponse = await postPayPalTextWithRetry('order create', orderRequest.url, orderHeaders, orderRequest.body);
+  } catch (error) {
+    return paymentBlocked(result, 'PayPal order create failed: ' + describeThrown(error));
+  }
   if (!isHttpSuccess(orderResponse)) {
     return paymentBlocked(result, providerFailure('PayPal', 'order create', orderResponse));
   }
@@ -7450,7 +7514,12 @@ async function capturePayPalPayment(result: PaymentValidationResult, orderId: st
     'Content-Type': 'application/json',
     'Accept': captureRequest.headers.Accept
   };
-  const captureResponse = await postJsonText(captureRequest.url, captureHeaders, captureRequest.body);
+  let captureResponse: HttpTextResponse;
+  try {
+    captureResponse = await postPayPalTextWithRetry('order capture', captureRequest.url, captureHeaders, captureRequest.body);
+  } catch (error) {
+    return paymentBlocked(result, 'PayPal order capture failed: ' + describeThrown(error));
+  }
   if (!isHttpSuccess(captureResponse)) {
     return paymentBlocked(result, providerFailure('PayPal', 'order capture', captureResponse));
   }
