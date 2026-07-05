@@ -451,6 +451,45 @@ function paymentDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function stripeReceivingDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'generic';
+  doc.title = 'Stripe 收款账户';
+  doc.subtitle = '继续 Stripe 托管认证。';
+  doc.blocks = [{
+    id: 'stripe-receiving',
+    kind: 'StripeReceivingAccountCard',
+    title: 'Stripe 收款账户',
+    subtitle: 'Stripe 收款账户已创建。请继续 Stripe 托管认证。',
+    status: 'onboarding_required',
+    source: 'individual',
+    metrics: [],
+    rows: [
+      { label: 'Agent', value: 'My Agent' },
+      { label: 'Email', value: 'owner@example.com' },
+      { label: 'Country', value: 'US' },
+      { label: 'Stripe', value: 'acct_123' }
+    ],
+    actions: [{
+      id: 'stripe.account.onboard',
+      label: '继续认证',
+      prompt: '打开 Stripe 认证',
+      variant: 'primary',
+      kind: 'client'
+    }],
+    stripeReceiving: {
+      status: 'onboarding_required',
+      message: '请继续 Stripe 托管认证。',
+      stripeAccountId: 'acct_123',
+      onboardingUrl: 'https://connect.stripe.com/setup/s/acct_123',
+      currentlyDue: []
+    }
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function socialHubDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'social';
@@ -714,6 +753,13 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('任务结果')).assertEqual(-1);
       expect(html.indexOf('保存后可以直接说')).assertEqual(-1);
+    });
+
+    it('auto-opens Stripe onboarding links after account setup', 0, () => {
+      const html = renderHtmlHomeDocument(stripeReceivingDocumentFixture());
+
+      expect(html.indexOf('autoOpenStripeReceivingOnboarding')).assertLarger(-1);
+      expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
     });
 
     it('keeps non-food documents on the generic renderer', 0, () => {

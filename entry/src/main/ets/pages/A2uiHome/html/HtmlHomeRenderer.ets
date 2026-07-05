@@ -1757,6 +1757,18 @@ const HTML_HOME_JS: string = `
     link.addEventListener('click', function (event) {
       event.stopPropagation();
     });
+    autoOpenStripeReceivingOnboarding(receiving, url);
+  }
+  function autoOpenStripeReceivingOnboarding(receiving, url) {
+    if (text(receiving.status) !== 'onboarding_required') { return; }
+    var key = 'aiphone.stripe.onboarding.' + url;
+    try {
+      if (window.sessionStorage && window.sessionStorage.getItem(key) === '1') { return; }
+      if (window.sessionStorage) { window.sessionStorage.setItem(key, '1'); }
+    } catch (_error) {}
+    window.setTimeout(function () {
+      window.location.href = url;
+    }, 0);
   }
   function numberIn(value) {
     var match = text(value).replace(/,/g, '').match(/[0-9]+(?:\\.[0-9]+)?/);
