@@ -104,6 +104,9 @@ function targetLabel(targetType: PaymentTargetType): string {
 }
 
 function titleForStatus(status: PaymentValidationStatus): string {
+  if (status === 'needs_recipient') {
+    return '补充收款方';
+  }
   if (status === 'needs_amount') {
     return '补充金额';
   }
@@ -224,6 +227,9 @@ function rowsFor(result: PaymentValidationResult): A2uiGenericToolResultRowData[
 
 function summaryFor(result: PaymentValidationResult): string {
   const recipient = result.displayName.length > 0 ? result.displayName : result.recipient;
+  if (result.status === 'needs_recipient') {
+    return result.reason.length > 0 ? result.reason : '需要先选择一个收款方。';
+  }
   if (result.status === 'needs_amount') {
     return '需要补充金额后才能继续支付给 ' + recipient + '。';
   }
@@ -300,6 +306,12 @@ function providerActions(result: PaymentValidationResult): A2uiAction[] {
   return actions;
 }
 
+function cancelActions(result: PaymentValidationResult): A2uiAction[] {
+  return [
+    paymentAction('payment.cancel', '取消', '取消支付', 'secondary', 'prompt', actionArgs(result, 'cancel', providerFromTarget(result), result.amountText))
+  ];
+}
+
 function confirmActions(result: PaymentValidationResult): A2uiAction[] {
   const provider = providerFromTarget(result);
   return [
@@ -318,6 +330,9 @@ function checkoutActions(result: PaymentValidationResult): A2uiAction[] {
 }
 
 function actionsFor(result: PaymentValidationResult): A2uiAction[] {
+  if (result.status === 'needs_recipient') {
+    return cancelActions(result);
+  }
   if (result.status === 'needs_amount') {
     return amountActions(result);
   }

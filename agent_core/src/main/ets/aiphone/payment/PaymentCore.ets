@@ -236,11 +236,11 @@ function validationForAccount(
 export function defaultPaymentAccountBook(): PaymentAccount[] {
   return [
     {
-      id: 'alex',
-      displayName: 'Alex',
-      aliases: ['Alex', '小明', '朋友 Alex'],
-      email: '',
-      paypalEmail: 'alex.paypal@example.com',
+      id: 'luoyige',
+      displayName: '罗一格',
+      aliases: ['罗一格', 'luoyige', '一格', 'yl732'],
+      email: 'yl732@cantab.ac.uk',
+      paypalEmail: 'yl732@cantab.ac.uk',
       paypalMerchantId: '',
       stripeAccountId: '',
       stripePaymentLinkUrl: '',
@@ -318,6 +318,11 @@ export function isStripePaymentLinkUrl(url: string): boolean {
   }
   const lower = trimmed.toLowerCase();
   return lower.startsWith('https://buy.stripe.com/') || lower.startsWith('https://checkout.stripe.com/');
+}
+
+function isStripeTestPaymentLinkUrl(url: string): boolean {
+  const lower = cleanText(url).toLowerCase();
+  return lower.indexOf('buy.stripe.com/test_') >= 0 || lower.indexOf('cs_test_') >= 0;
 }
 
 export function paymentProviderForAccount(account: PaymentAccount, requestedProvider: PaymentProvider): PaymentProviderSelection {
@@ -404,6 +409,17 @@ export function validatePaymentRequest(
     return validationForAccount(
       'blocked',
       'Stripe payment URL must be an HTTPS Stripe Checkout or Payment Link URL.',
+      draft,
+      policy,
+      account,
+      selection.targetType,
+      { ok: false, amountMinor: 0, currency: currencyOrDefault(draft.currency, policy.defaultCurrency), reason: '' }
+    );
+  }
+  if (policy.mode === 'live' && selection.targetType === 'stripe_payment_link' && isStripeTestPaymentLinkUrl(account.stripePaymentLinkUrl)) {
+    return validationForAccount(
+      'blocked',
+      'Live mode cannot use a Stripe test Payment Link.',
       draft,
       policy,
       account,

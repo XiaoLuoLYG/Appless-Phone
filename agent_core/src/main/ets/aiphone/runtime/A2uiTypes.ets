@@ -25,6 +25,7 @@ export const A2UI_COMPONENT_INFO_ROWS: string = 'InfoRows';
 export const A2UI_COMPONENT_TOOL_CONNECT_CARD: string = 'ToolConnectCard';
 export const A2UI_COMPONENT_GENERIC_TOOL_RESULTS: string = 'GenericToolResults';
 export const A2UI_COMPONENT_SOCIAL_HUB: string = 'SocialHub';
+export const A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD: string = 'StripeReceivingAccountCard';
 
 export interface A2uiAction {
   id: string;
@@ -170,6 +171,22 @@ export interface A2uiPersonaMemoryData {
   preferences: string[];
 }
 
+export interface StripeReceivingAccountCardData {
+  status: string;
+  title: string;
+  message: string;
+  agentId: string;
+  deviceId: string;
+  displayName: string;
+  email: string;
+  country: string;
+  businessType: string;
+  stripeAccountId: string;
+  onboardingUrl: string;
+  currentlyDue: string[];
+  actions: A2uiAction[];
+}
+
 export interface A2uiRuntimeDataModel {
   rows: A2uiLabelValueData[];
   trains: A2uiTrainData[];
@@ -187,6 +204,7 @@ export interface A2uiRuntimeDataModel {
   socialHub: SocialHubData;
   persona: A2uiPersonaData;
   personaMemory: A2uiPersonaMemoryData;
+  stripeReceivingAccount?: StripeReceivingAccountCardData;
   toolRequests?: A2uiToolRequestData[];
 }
 
@@ -207,6 +225,7 @@ export type A2uiDataValue =
   A2uiGenericToolResultData[] |
   A2uiPersonaData |
   A2uiPersonaMemoryData |
+  StripeReceivingAccountCardData |
   SocialHubData |
   SocialHubItemData[] |
   SocialHubItemData |
@@ -350,7 +369,8 @@ export function defaultA2uiCapabilities(): A2uiClientCapabilities {
       A2UI_COMPONENT_INFO_ROWS,
       A2UI_COMPONENT_TOOL_CONNECT_CARD,
       A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
-      A2UI_COMPONENT_SOCIAL_HUB
+      A2UI_COMPONENT_SOCIAL_HUB,
+      A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD
     ],
     transport: ['jsonl', 'openai-compatible-sse']
   };

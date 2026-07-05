@@ -70,3 +70,6 @@ export * from './src/main/ets/aiphone/payment/PaymentCore';
 export * from './src/main/ets/aiphone/payment/PaymentA2ui';
 export * from './src/main/ets/aiphone/payment/PayPalPaymentClient';
 export * from './src/main/ets/aiphone/payment/StripePaymentClient';
+export * from './src/main/ets/aiphone/payment/StripeConnectClient';
+export * from './src/main/ets/aiphone/payment/StripeReceivingAccountA2ui';
+export * from './src/main/ets/aiphone/payment/StripeReceivingAccountCore';

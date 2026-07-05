@@ -76,6 +76,23 @@ export default function paymentCoreTest() {
       expect(result.reason.indexOf('Stripe payment URL')).assertLarger(-1);
     });
 
+    it('blocks Stripe test Payment Links in live mode', 0, () => {
+      const result = validatePaymentRequest({
+        recipient: 'Cafe',
+        provider: 'stripe',
+        amountText: '',
+        currency: 'USD',
+        note: ''
+      } as PaymentRequestDraft, [acct('cafe', 'Cafe', ['Cafe'], '', '', 'https://buy.stripe.com/test_123')], {
+        mode: 'live',
+        defaultCurrency: 'USD',
+        liveMaxAmountMinor: 500,
+        liveAllowedStripeAccountIds: []
+      } as PaymentPolicy);
+      expect(result.status).assertEqual('blocked');
+      expect(result.reason.indexOf('test Payment Link')).assertLarger(-1);
+    });
+
     it('keeps seeded demo accounts local and nonempty', 0, () => {
       expect(defaultPaymentAccountBook().length).assertLarger(0);
     });

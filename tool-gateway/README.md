@@ -41,8 +41,38 @@ launchctl remove com.aiphone.toolgateway
 - `GET /mcp/tools`
 - `POST /mcp/call`
 - `POST /api/aiphone/tool`
+- `POST /api/payment/stripe/checkout`
+- `POST /api/payment/paypal/checkout`
+- `POST /api/payment/paypal/capture`
 - `GET /api/social/feed?q=<query>`
 - `POST /api/social/draft`
+
+## Live Payment Checkout
+
+Use the gateway for live payment provider calls so Stripe/PayPal secrets stay out of the HAP:
+
+```bash
+cd tool-gateway
+TOOL_GATEWAY_PORT=8787 npm start
+hdc -t <target> rport tcp:8787 tcp:8787
+```
+
+Set these in `tool-gateway/.env.local`:
+
+```env
+PAYMENT_MODE=live
+PAYPAL_CLIENT_ID=live_client_id
+PAYPAL_CLIENT_SECRET=live_secret
+PAYPAL_ENVIRONMENT=live
+PAYPAL_CHECKOUT_GATEWAY_URL=http://127.0.0.1:8787
+STRIPE_SECRET_KEY=sk_live_or_rk_live_here
+STRIPE_PUBLISHABLE_KEY=pk_live_here
+STRIPE_CHECKOUT_GATEWAY_URL=http://127.0.0.1:8787
+PAYMENT_LIVE_MAX_AMOUNT_MINOR=500
+PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS=acct_...
+```
+
+Then run `node scripts/sync-provider-config.mjs` and rebuild the HAP. The sync script intentionally skips live Stripe and PayPal secret keys when writing `aiphone_provider_config.json`.
 - `POST /api/social/wecom/callback`
 
 ## Social Bridge

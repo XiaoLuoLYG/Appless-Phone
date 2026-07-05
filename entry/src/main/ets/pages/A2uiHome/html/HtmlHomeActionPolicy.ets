@@ -10,12 +10,24 @@ interface HtmlDynamicCredentialPayload {
   prompt?: string;
 }
 
+interface HtmlPaymentAccountPayload {
+  displayName?: HtmlHomePolicyValue;
+  aliases?: HtmlHomePolicyValue;
+  paypalEmail?: HtmlHomePolicyValue;
+  paypalMerchantId?: HtmlHomePolicyValue;
+  stripeAccountId?: HtmlHomePolicyValue;
+  stripePaymentLinkUrl?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
   }
   if (action.id === 'flight_retry_date') {
     return hasBlockKind(document, 'flight-option');
+  }
+  if (action.id === 'payment.account.save' && paymentAccountSaveAllowed(document, action)) {
+    return true;
   }
   for (let index = 0; index < document.actions.length; index++) {
     if (sameAction(document.actions[index], action)) {
@@ -74,6 +86,44 @@ function dynamicCredentialAllowed(block: HtmlHomeBlock, action: A2uiAction): boo
     policyText(payload.credentialRef) === policyText(block.credentialRef) &&
     policyText(payload.toolId) === policyText(block.toolId) &&
     policyText(payload.prompt) === policyText(block.prompt);
+}
+
+function paymentAccountSaveAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'payment' || !hasPaymentSendBlock(document)) {
+    return false;
+  }
+  let payload: HtmlPaymentAccountPayload;
+  try {
+    payload = JSON.parse(action.prompt) as HtmlPaymentAccountPayload;
+  } catch (_error) {
+    return false;
+  }
+  return policyText(payload.displayName).trim().length > 0 &&
+    (policyText(payload.paypalEmail).trim().length > 0 ||
+      policyText(payload.paypalMerchantId).trim().length > 0 ||
+      policyText(payload.stripeAccountId).trim().length > 0 ||
+      policyText(payload.stripePaymentLinkUrl).trim().length > 0);
+}
+
+function hasPaymentSendBlock(document: HtmlHomeDocument): boolean {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const block = document.blocks[index];
+    if (block.kind === 'generic-tool-result' && blockHasMetric(block, 'toolName', 'payment.send')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function blockHasMetric(block: HtmlHomeBlock, label: string, value: string): boolean {
+  const rows = block.rows.concat(block.metrics);
+  for (let index = 0; index < rows.length; index++) {
+    if (policyText(rows[index].label).trim().toLowerCase() === label.toLowerCase() &&
+      policyText(rows[index].value).trim() === value) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function policyText(value: HtmlHomePolicyValue): string {

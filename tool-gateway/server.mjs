@@ -42,6 +42,7 @@ const PORT = Number.parseInt(process.env.TOOL_GATEWAY_PORT || '8787', 10);
 const HOST = process.env.TOOL_GATEWAY_HOST || '127.0.0.1';
 const GATEWAY_API_KEY = (process.env.TOOL_GATEWAY_API_KEY || '').trim();
 const MAX_BODY_BYTES = 1024 * 1024;
+const STRIPE_CHECKOUT_ENDPOINT = 'https://api.stripe.com/v1/checkout/sessions';
 const A2UI_VERSION = 'v0.9.1';
 const A2UI_MIME = 'application/a2ui+json';
 const TRAIN_RESULT_LIMIT = Math.min(Math.max(Number.parseInt(process.env.TRAIN_RESULT_LIMIT || '30', 10) || 30, 6), 50);
@@ -300,6 +301,299 @@ function hasEnv(name) {
 
 function describeError(error) {
   return error instanceof Error ? error.message : textOf(error);
+}
+
+function stripeCheckoutAllowedAccounts() {
+  return textOf(process.env.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS)
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => value.length > 0);
+}
+
+function stripeLiveMaxAmountMinor() {
+  const value = Number.parseInt(textOf(process.env.PAYMENT_LIVE_MAX_AMOUNT_MINOR || '500'), 10);
+  return Number.isFinite(value) && value > 0 ? value : 500;
+}
+
+function stripeCheckoutError(message, status = 400) {
+  return { status, body: { ok: false, error: message } };
+}
+
+function stripeCheckoutInput(body) {
+  const connectedAccountId = textOf(body.connectedAccountId).trim();
+  const amountMinor = Number.parseInt(textOf(body.amountMinor), 10);
+  const currency = textOf(body.currency || 'USD').trim().toLowerCase();
+  const successUrl = textOf(body.successUrl).trim() || 'aiphone://payment/stripe/success';
+  const cancelUrl = textOf(body.cancelUrl).trim() || 'aiphone://payment/stripe/cancel';
+  const merchantName = textOf(body.merchantName || 'AIPhone payment').trim();
+  const note = textOf(body.note).trim();
+  const idempotencyKey = textOf(body.idempotencyKey).trim();
+
+  if (!connectedAccountId.startsWith('acct_')) {
+    return stripeCheckoutError('Stripe connected account must start with acct_.');
+  }
+  const allowed = stripeCheckoutAllowedAccounts();
+  if (allowed.length > 0 && !allowed.includes(connectedAccountId)) {
+    return stripeCheckoutError('Stripe connected account is not allowed.', 403);
+  }
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    return stripeCheckoutError('Amount must be a positive minor-unit integer.');
+  }
+  if (amountMinor > stripeLiveMaxAmountMinor()) {
+    return stripeCheckoutError('Amount exceeds PAYMENT_LIVE_MAX_AMOUNT_MINOR.', 403);
+  }
+  if (!/^[a-z]{3}$/.test(currency)) {
+    return stripeCheckoutError('Currency must be a 3-letter ISO code.');
+  }
+  if (idempotencyKey.length === 0) {
+    return stripeCheckoutError('idempotencyKey is required.');
+  }
+  return {
+    connectedAccountId,
+    amountMinor,
+    currency,
+    successUrl,
+    cancelUrl,
+    merchantName: merchantName.length > 0 ? merchantName : 'AIPhone payment',
+    note,
+    idempotencyKey
+  };
+}
+
+async function handleStripeCheckout(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const secretKey = textOf(process.env.STRIPE_SECRET_KEY).trim();
+  if (!secretKey.startsWith('sk_live_') && !secretKey.startsWith('rk_live_')) {
+    sendJson(res, 400, { ok: false, error: 'Configure a live Stripe secret or restricted key in tool-gateway/.env.local.' });
+    return;
+  }
+  const input = stripeCheckoutInput(await readJson(req));
+  if (input.body !== undefined) {
+    sendJson(res, input.status, input.body);
+    return;
+  }
+
+  const params = new URLSearchParams();
+  params.set('mode', 'payment');
+  params.set('success_url', input.successUrl);
+  params.set('cancel_url', input.cancelUrl);
+  params.set('line_items[0][price_data][currency]', input.currency);
+  params.set('line_items[0][price_data][product_data][name]', input.merchantName + ' payment');
+  params.set('line_items[0][price_data][unit_amount]', String(input.amountMinor));
+  params.set('line_items[0][quantity]', '1');
+  params.set('payment_intent_data[transfer_data][destination]', input.connectedAccountId);
+  if (input.note.length > 0) {
+    params.set('metadata[note]', input.note);
+    params.set('payment_intent_data[metadata][note]', input.note);
+  }
+
+  const response = await fetch(STRIPE_CHECKOUT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${secretKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Idempotency-Key': input.idempotencyKey
+    },
+    body: params.toString()
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    sendJson(res, response.status, { ok: false, error: `Stripe Checkout failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+    return;
+  }
+  const payload = JSON.parse(text);
+  const checkoutUrl = textOf(payload.url).trim();
+  if (!checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+    sendJson(res, 502, { ok: false, error: 'Stripe response did not include a hosted Checkout URL.' });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    checkoutUrl,
+    providerSessionId: textOf(payload.id).trim()
+  });
+}
+
+function paypalBaseUrl() {
+  return textOf(process.env.PAYPAL_ENVIRONMENT).trim().toLowerCase() === 'live'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
+function amountMajorFromMinor(amountMinor, currency) {
+  const zeroDecimal = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
+  if (zeroDecimal.includes(textOf(currency).trim().toUpperCase())) {
+    return String(amountMinor);
+  }
+  return (amountMinor / 100).toFixed(2);
+}
+
+async function paypalAccessToken() {
+  const clientId = textOf(process.env.PAYPAL_CLIENT_ID).trim();
+  const clientSecret = textOf(process.env.PAYPAL_CLIENT_SECRET).trim();
+  if (clientId.length === 0 || clientSecret.length === 0) {
+    throw new Error('Configure PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in tool-gateway/.env.local.');
+  }
+  const response = await fetch(`${paypalBaseUrl()}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json'
+    },
+    body: 'grant_type=client_credentials'
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`PayPal token failed with HTTP ${response.status}: ${text.slice(0, 400)}`);
+  }
+  const payload = JSON.parse(text);
+  const token = textOf(payload.access_token).trim();
+  if (token.length === 0) {
+    throw new Error('PayPal token response did not include access_token.');
+  }
+  return token;
+}
+
+function paypalApprovalUrl(orderPayload) {
+  const links = Array.isArray(orderPayload.links) ? orderPayload.links : [];
+  for (const link of links) {
+    if (textOf(link.rel).toLowerCase() === 'approve' && textOf(link.href).startsWith('https://')) {
+      return textOf(link.href);
+    }
+  }
+  return '';
+}
+
+function paypalCheckoutInput(body) {
+  const payeeEmail = textOf(body.payeeEmail).trim();
+  const payeeMerchantId = textOf(body.payeeMerchantId).trim();
+  const amountMinor = Number.parseInt(textOf(body.amountMinor), 10);
+  const currency = textOf(body.currency || 'USD').trim().toUpperCase();
+  if (payeeEmail.length === 0 && payeeMerchantId.length === 0) {
+    return stripeCheckoutError('PayPal payee email or merchant id is required.');
+  }
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    return stripeCheckoutError('Amount must be a positive minor-unit integer.');
+  }
+  if (amountMinor > stripeLiveMaxAmountMinor()) {
+    return stripeCheckoutError('Amount exceeds PAYMENT_LIVE_MAX_AMOUNT_MINOR.', 403);
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return stripeCheckoutError('Currency must be a 3-letter ISO code.');
+  }
+  return {
+    payeeEmail,
+    payeeMerchantId,
+    amountMinor,
+    currency,
+    returnUrl: textOf(body.returnUrl).trim() || 'aiphone://payment/paypal/success',
+    cancelUrl: textOf(body.cancelUrl).trim() || 'aiphone://payment/paypal/cancel',
+    note: textOf(body.note).trim()
+  };
+}
+
+async function handlePayPalCheckout(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const input = paypalCheckoutInput(await readJson(req));
+  if (input.body !== undefined) {
+    sendJson(res, input.status, input.body);
+    return;
+  }
+  try {
+    const token = await paypalAccessToken();
+    const payee = {};
+    if (input.payeeEmail.length > 0) {
+      payee.email_address = input.payeeEmail;
+    }
+    if (input.payeeMerchantId.length > 0) {
+      payee.merchant_id = input.payeeMerchantId;
+    }
+    const purchaseUnit = {
+      amount: {
+        value: amountMajorFromMinor(input.amountMinor, input.currency),
+        currency_code: input.currency
+      },
+      payee
+    };
+    if (input.note.length > 0) {
+      purchaseUnit.description = input.note;
+    }
+    const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [purchaseUnit],
+        application_context: {
+          return_url: input.returnUrl,
+          cancel_url: input.cancelUrl,
+          user_action: 'PAY_NOW'
+        }
+      })
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      sendJson(res, response.status, { ok: false, error: `PayPal order create failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+      return;
+    }
+    const payload = JSON.parse(text);
+    const checkoutUrl = paypalApprovalUrl(payload);
+    if (checkoutUrl.length === 0) {
+      sendJson(res, 502, { ok: false, error: 'PayPal order response did not include an approve URL.' });
+      return;
+    }
+    sendJson(res, 200, {
+      ok: true,
+      checkoutUrl,
+      providerSessionId: textOf(payload.id).trim()
+    });
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: describeError(error) });
+  }
+}
+
+async function handlePayPalCapture(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = await readJson(req);
+  const orderId = textOf(body.providerSessionId || body.orderId).trim();
+  if (orderId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'PayPal order id is required.' });
+    return;
+  }
+  try {
+    const token = await paypalAccessToken();
+    const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: '{}'
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      sendJson(res, response.status, { ok: false, error: `PayPal capture failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+      return;
+    }
+    sendJson(res, 200, { ok: true, providerSessionId: orderId });
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: describeError(error) });
+  }
 }
 
 function socialConnection(platform, configured, displayName, accountId, configuredMessage, setupMessage) {
@@ -2657,6 +2951,18 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendJson(res, 200, socialDraftResponse(await readJson(req)));
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/stripe/checkout') {
+      await handleStripeCheckout(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/paypal/checkout') {
+      await handlePayPalCheckout(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/paypal/capture') {
+      await handlePayPalCapture(req, res);
       return;
     }
     if (req.method === 'POST' && url.pathname === '/api/social/wecom/callback') {

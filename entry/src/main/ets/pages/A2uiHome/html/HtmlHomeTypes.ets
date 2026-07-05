@@ -1,7 +1,7 @@
 import { A2uiComponent } from '@loop/agent-core';
 
 export type HtmlHomeSource = 'welcome' | 'pending' | 'model' | 'tool';
-export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'generic';
+export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'payment' | 'generic';
 
 export interface HtmlHomeChip {
   label: string;
@@ -37,6 +37,14 @@ export interface HtmlHomeMediaEmbed {
   thumbnail?: string;
 }
 
+export interface HtmlHomeStripeReceiving {
+  status: string;
+  message: string;
+  stripeAccountId: string;
+  onboardingUrl: string;
+  currentlyDue: string[];
+}
+
 export interface HtmlHomeBlock {
   id: string;
   kind: string;
@@ -53,6 +61,7 @@ export interface HtmlHomeBlock {
   actions: HtmlHomeAction[];
   rawPreview?: string;
   mediaEmbed?: HtmlHomeMediaEmbed;
+  stripeReceiving?: HtmlHomeStripeReceiving;
 }
 
 export interface HtmlHomeHistoryItem {

@@ -22,6 +22,7 @@ import {
   A2uiTravelOptionData,
   A2uiTrainData,
   A2uiTripData,
+  StripeReceivingAccountCardData,
   emptyA2uiSurface
 } from './A2uiTypes';
 import {
@@ -106,7 +107,26 @@ function emptyDataModel(): A2uiRuntimeDataModel {
     genericToolResults: [],
     socialHub: emptySocialHub(),
     persona: emptyPersona(),
-    personaMemory: emptyPersonaMemory()
+    personaMemory: emptyPersonaMemory(),
+    stripeReceivingAccount: emptyStripeReceivingAccount()
+  };
+}
+
+function emptyStripeReceivingAccount(): StripeReceivingAccountCardData {
+  return {
+    status: '',
+    title: '',
+    message: '',
+    agentId: '',
+    deviceId: '',
+    displayName: '',
+    email: '',
+    country: '',
+    businessType: '',
+    stripeAccountId: '',
+    onboardingUrl: '',
+    currentlyDue: [],
+    actions: []
   };
 }
 
@@ -388,6 +408,27 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
   return normalized;
 }
 
+function normalizeStripeReceivingAccount(parsed: A2uiRuntimeDataModel, fallback: StripeReceivingAccountCardData): StripeReceivingAccountCardData {
+  if (parsed.stripeReceivingAccount === undefined || parsed.stripeReceivingAccount === null) {
+    return fallback;
+  }
+  return {
+    status: textOf(parsed.stripeReceivingAccount.status),
+    title: textOf(parsed.stripeReceivingAccount.title),
+    message: textOf(parsed.stripeReceivingAccount.message),
+    agentId: textOf(parsed.stripeReceivingAccount.agentId),
+    deviceId: textOf(parsed.stripeReceivingAccount.deviceId),
+    displayName: textOf(parsed.stripeReceivingAccount.displayName),
+    email: textOf(parsed.stripeReceivingAccount.email),
+    country: textOf(parsed.stripeReceivingAccount.country),
+    businessType: textOf(parsed.stripeReceivingAccount.businessType),
+    stripeAccountId: textOf(parsed.stripeReceivingAccount.stripeAccountId),
+    onboardingUrl: textOf(parsed.stripeReceivingAccount.onboardingUrl),
+    currentlyDue: stringArrayFromDataValue(parsed.stripeReceivingAccount.currentlyDue),
+    actions: Array.isArray(parsed.stripeReceivingAccount.actions) ? parsed.stripeReceivingAccount.actions : []
+  };
+}
+
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
   if (parsed.rowGroups === undefined || parsed.rowGroups === null) {
     return fallback;
@@ -445,6 +486,7 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
+      stripeReceivingAccount: normalizeStripeReceivingAccount(parsed, fallback.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : fallback.stripeReceivingAccount),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -571,6 +613,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.persona = value as A2uiPersonaData;
   } else if (path === '/personaMemory') {
     next.personaMemory = value as A2uiPersonaMemoryData;
+  } else if (path === '/stripeReceivingAccount') {
+    next.stripeReceivingAccount = value as StripeReceivingAccountCardData;
   } else if (path === '/socialHub') {
     next.socialHub = normalizeSocialHub(value as Object, next.socialHub);
   } else if (path === '/socialHub/items') {

@@ -13,6 +13,7 @@ import {
   A2uiSurfaceState,
   A2uiTravelOptionData,
   A2uiTrainData,
+  StripeReceivingAccountCardData,
   defaultA2uiCapabilities,
   emptyA2uiSurface
 } from './A2uiTypes';
@@ -103,6 +104,23 @@ import {
   buildStripeCheckoutSessionRequest,
   stripeCheckoutUrlFromResponse
 } from '../payment/StripePaymentClient';
+import { stripeReceivingAccountA2ui } from '../payment/StripeReceivingAccountA2ui';
+import {
+  blankStripeReceivingProfile,
+  mapStripeReceivingStatus,
+  StripeReceivingAccountStatus,
+  StripeReceivingAccountStatusPayload,
+  StripeReceivingProfile,
+  validateStripeReceivingProfile
+} from '../payment/StripeReceivingAccountCore';
+import {
+  createStripeConnectAccount,
+  createStripeConnectOnboardingLink,
+  fetchStripeConnectStatus,
+  StripeConnectAccountResult,
+  StripeConnectOnboardingLinkResult,
+  StripeConnectStatusResult
+} from '../payment/StripeConnectClient';
 import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
@@ -237,10 +255,15 @@ interface LocalProviderConfig {
   paypalEnvironment: string;
   paypalReturnUrl: string;
   paypalCancelUrl: string;
+  paypalCheckoutGatewayUrl: string;
   stripeSecretKey: string;
   stripePublishableKey: string;
   stripeSuccessUrl: string;
   stripeCancelUrl: string;
+  stripeCheckoutGatewayUrl: string;
+  stripeConnectReturnUrl: string;
+  stripeConnectRefreshUrl: string;
+  stripeReceivingAgentJson: string;
   paymentAccountBookJson: string;
   paymentDefaultCurrency: string;
   paymentMode: string;
@@ -304,10 +327,17 @@ interface LocalProviderRawConfig {
   PAYPAL_ENVIRONMENT?: string;
   PAYPAL_RETURN_URL?: string;
   PAYPAL_CANCEL_URL?: string;
+  PAYPAL_CHECKOUT_GATEWAY_URL?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_SUCCESS_URL?: string;
   STRIPE_CANCEL_URL?: string;
+  STRIPE_CHECKOUT_GATEWAY_URL?: string;
+  STRIPE_TEST_SECRET_KEY?: string;
+  STRIPE_LIVE_SECRET_KEY?: string;
+  STRIPE_CONNECT_RETURN_URL?: string;
+  STRIPE_CONNECT_REFRESH_URL?: string;
+  STRIPE_RECEIVING_AGENT_JSON?: string;
   PAYMENT_ACCOUNT_BOOK_JSON?: string;
   PAYMENT_DEFAULT_CURRENCY?: string;
   PAYMENT_MODE?: string;
@@ -353,10 +383,15 @@ interface LocalProviderRawConfig {
   paypalEnvironment?: string;
   paypalReturnUrl?: string;
   paypalCancelUrl?: string;
+  paypalCheckoutGatewayUrl?: string;
   stripeSecretKey?: string;
   stripePublishableKey?: string;
   stripeSuccessUrl?: string;
   stripeCancelUrl?: string;
+  stripeCheckoutGatewayUrl?: string;
+  stripeConnectReturnUrl?: string;
+  stripeConnectRefreshUrl?: string;
+  stripeReceivingAgentJson?: string;
   paymentAccountBookJson?: string;
   paymentDefaultCurrency?: string;
   paymentMode?: string;
@@ -1120,10 +1155,15 @@ let localProviderConfig: LocalProviderConfig = {
   paypalEnvironment: 'sandbox',
   paypalReturnUrl: 'aiphone://payment/paypal/success',
   paypalCancelUrl: 'aiphone://payment/paypal/cancel',
+  paypalCheckoutGatewayUrl: '',
   stripeSecretKey: '',
   stripePublishableKey: '',
   stripeSuccessUrl: 'aiphone://payment/stripe/success',
   stripeCancelUrl: 'aiphone://payment/stripe/cancel',
+  stripeCheckoutGatewayUrl: '',
+  stripeConnectReturnUrl: 'https://example.com/aiphone/stripe_connect_return',
+  stripeConnectRefreshUrl: 'https://example.com/aiphone/stripe_connect_refresh',
+  stripeReceivingAgentJson: '',
   paymentAccountBookJson: '',
   paymentDefaultCurrency: 'USD',
   paymentMode: 'test',
@@ -1189,6 +1229,13 @@ interface PayPalTokenResponsePayload {
 interface PayPalAccessTokenResult {
   accessToken: string;
   error: string;
+}
+
+interface StripeCheckoutGatewayPayload {
+  ok?: boolean;
+  checkoutUrl?: string;
+  providerSessionId?: string;
+  error?: string;
 }
 
 function userAgentHeaders(): HttpRequestHeaders {
@@ -1330,10 +1377,15 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     paypalEnvironment: config.paypalEnvironment.trim().toLowerCase() === 'live' ? 'live' : 'sandbox',
     paypalReturnUrl: config.paypalReturnUrl.trim().length > 0 ? config.paypalReturnUrl.trim() : 'aiphone://payment/paypal/success',
     paypalCancelUrl: config.paypalCancelUrl.trim().length > 0 ? config.paypalCancelUrl.trim() : 'aiphone://payment/paypal/cancel',
+    paypalCheckoutGatewayUrl: config.paypalCheckoutGatewayUrl.trim(),
     stripeSecretKey: config.stripeSecretKey.trim(),
     stripePublishableKey: config.stripePublishableKey.trim(),
     stripeSuccessUrl: config.stripeSuccessUrl.trim().length > 0 ? config.stripeSuccessUrl.trim() : 'aiphone://payment/stripe/success',
     stripeCancelUrl: config.stripeCancelUrl.trim().length > 0 ? config.stripeCancelUrl.trim() : 'aiphone://payment/stripe/cancel',
+    stripeCheckoutGatewayUrl: config.stripeCheckoutGatewayUrl.trim(),
+    stripeConnectReturnUrl: config.stripeConnectReturnUrl.trim().length > 0 ? config.stripeConnectReturnUrl.trim() : 'https://example.com/aiphone/stripe_connect_return',
+    stripeConnectRefreshUrl: config.stripeConnectRefreshUrl.trim().length > 0 ? config.stripeConnectRefreshUrl.trim() : 'https://example.com/aiphone/stripe_connect_refresh',
+    stripeReceivingAgentJson: config.stripeReceivingAgentJson.trim(),
     paymentAccountBookJson: config.paymentAccountBookJson.trim(),
     paymentDefaultCurrency: config.paymentDefaultCurrency.trim().length > 0 ? config.paymentDefaultCurrency.trim().toUpperCase() : 'USD',
     paymentMode: config.paymentMode.trim().toLowerCase() === 'live' ? 'live' : 'test',
@@ -1368,12 +1420,18 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' paypalClientSecretChars=' + localProviderConfig.paypalClientSecret.length.toString() +
     ' stripeSecretKeyChars=' + localProviderConfig.stripeSecretKey.length.toString() +
     ' stripePublishableKeyChars=' + localProviderConfig.stripePublishableKey.length.toString() +
+    ' stripeConnectReturnUrlPresent=' + (localProviderConfig.stripeConnectReturnUrl.length > 0 ? 'true' : 'false') +
+    ' stripeReceivingAgentJsonChars=' + localProviderConfig.stripeReceivingAgentJson.length.toString() +
     ' paymentAccountBookJsonChars=' + localProviderConfig.paymentAccountBookJson.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
 }
 
 export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
   const parsed = JSON.parse(rawJson) as LocalProviderRawConfig;
+  const paymentMode = firstText([parsed.PAYMENT_MODE, parsed.paymentMode]).trim().toLowerCase() === 'live' ? 'live' : 'test';
+  const stripeSecretKey = paymentMode === 'live' ?
+    firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_LIVE_SECRET_KEY, parsed.stripeSecretKey]) :
+    firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_TEST_SECRET_KEY, parsed.stripeSecretKey]);
   configureLocalProviderConfig({
     toolGatewayApiKey: firstText([parsed.TOOL_GATEWAY_API_KEY, parsed.toolGatewayApiKey]),
     xBearerToken: firstText([parsed.X_BEARER_TOKEN, parsed.X_ACCESS_TOKEN, parsed.X_OAUTH_TOKEN, parsed.xBearerToken]),
@@ -1422,13 +1480,18 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     paypalEnvironment: firstText([parsed.PAYPAL_ENVIRONMENT, parsed.paypalEnvironment]),
     paypalReturnUrl: firstText([parsed.PAYPAL_RETURN_URL, parsed.paypalReturnUrl]),
     paypalCancelUrl: firstText([parsed.PAYPAL_CANCEL_URL, parsed.paypalCancelUrl]),
-    stripeSecretKey: firstText([parsed.STRIPE_SECRET_KEY, parsed.stripeSecretKey]),
+    paypalCheckoutGatewayUrl: firstText([parsed.PAYPAL_CHECKOUT_GATEWAY_URL, parsed.paypalCheckoutGatewayUrl]),
+    stripeSecretKey: stripeSecretKey,
     stripePublishableKey: firstText([parsed.STRIPE_PUBLISHABLE_KEY, parsed.stripePublishableKey]),
     stripeSuccessUrl: firstText([parsed.STRIPE_SUCCESS_URL, parsed.stripeSuccessUrl]),
     stripeCancelUrl: firstText([parsed.STRIPE_CANCEL_URL, parsed.stripeCancelUrl]),
+    stripeCheckoutGatewayUrl: firstText([parsed.STRIPE_CHECKOUT_GATEWAY_URL, parsed.stripeCheckoutGatewayUrl]),
+    stripeConnectReturnUrl: firstText([parsed.STRIPE_CONNECT_RETURN_URL, parsed.stripeConnectReturnUrl]),
+    stripeConnectRefreshUrl: firstText([parsed.STRIPE_CONNECT_REFRESH_URL, parsed.stripeConnectRefreshUrl]),
+    stripeReceivingAgentJson: firstText([parsed.STRIPE_RECEIVING_AGENT_JSON, parsed.stripeReceivingAgentJson]),
     paymentAccountBookJson: firstText([parsed.PAYMENT_ACCOUNT_BOOK_JSON, parsed.paymentAccountBookJson]),
     paymentDefaultCurrency: firstText([parsed.PAYMENT_DEFAULT_CURRENCY, parsed.paymentDefaultCurrency]),
-    paymentMode: firstText([parsed.PAYMENT_MODE, parsed.paymentMode]),
+    paymentMode: paymentMode,
     paymentLiveAllowedStripeAccountIds: firstText([parsed.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS, parsed.paymentLiveAllowedStripeAccountIds]),
     paymentLiveMaxAmountMinor: firstText([parsed.PAYMENT_LIVE_MAX_AMOUNT_MINOR, parsed.paymentLiveMaxAmountMinor])
   });
@@ -1464,13 +1527,39 @@ export function localProviderConfigDebugSummary(): string {
     ', paypalClientId=' + (localProviderConfig.paypalClientId.length > 0 ? 'present(' + localProviderConfig.paypalClientId.length.toString() + ')' : 'missing') +
     ', paypalClientSecret=' + (localProviderConfig.paypalClientSecret.length > 0 ? 'present(' + localProviderConfig.paypalClientSecret.length.toString() + ')' : 'missing') +
     ', paypalEnvironment=' + localProviderConfig.paypalEnvironment +
+    ', paypalCheckoutGatewayUrl=' + (localProviderConfig.paypalCheckoutGatewayUrl.length > 0 ? 'present' : 'missing') +
     ', stripeSecretKey=' + (localProviderConfig.stripeSecretKey.length > 0 ? 'present(' + localProviderConfig.stripeSecretKey.length.toString() + ')' : 'missing') +
     ', stripePublishableKey=' + (localProviderConfig.stripePublishableKey.length > 0 ? 'present(' + localProviderConfig.stripePublishableKey.length.toString() + ')' : 'missing') +
+    ', stripeCheckoutGatewayUrl=' + (localProviderConfig.stripeCheckoutGatewayUrl.length > 0 ? 'present' : 'missing') +
+    ', stripeConnectReturnUrl=' + (localProviderConfig.stripeConnectReturnUrl.length > 0 ? 'present' : 'missing') +
+    ', stripeReceivingAgentJson=' + (localProviderConfig.stripeReceivingAgentJson.length > 0 ? 'present(' + localProviderConfig.stripeReceivingAgentJson.length.toString() + ')' : 'missing') +
     ', paymentAccountBookJson=' + (localProviderConfig.paymentAccountBookJson.length > 0 ? 'present' : 'missing') +
     ', paymentMode=' + localProviderConfig.paymentMode +
     ', paymentLiveAllowedStripeAccountIds=' + (localProviderConfig.paymentLiveAllowedStripeAccountIds.length > 0 ? 'present' : 'missing') +
     ', paymentLiveMaxAmountMinor=' + localProviderConfig.paymentLiveMaxAmountMinor +
     ', defaultLocation=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'present' : 'missing');
+}
+
+interface StripeConnectAccountIdRequest {
+  stripeAccountId: string;
+}
+
+type StripeConnectAccountCreator = (secretKey: string, body: Object) => Promise<StripeConnectAccountResult>;
+type StripeConnectOnboardingLinkCreator = (secretKey: string, body: Object, returnUrl: string, refreshUrl: string) => Promise<StripeConnectOnboardingLinkResult>;
+type StripeConnectStatusFetcher = (secretKey: string, body: Object) => Promise<StripeConnectStatusResult>;
+
+let stripeConnectAccountCreator: StripeConnectAccountCreator = createStripeConnectAccount;
+let stripeConnectOnboardingLinkCreator: StripeConnectOnboardingLinkCreator = createStripeConnectOnboardingLink;
+let stripeConnectStatusFetcher: StripeConnectStatusFetcher = fetchStripeConnectStatus;
+
+export function configureStripeConnectClientForTests(
+  accountCreator: StripeConnectAccountCreator | null,
+  onboardingLinkCreator: StripeConnectOnboardingLinkCreator | null,
+  statusFetcher: StripeConnectStatusFetcher | null
+): void {
+  stripeConnectAccountCreator = accountCreator === null ? createStripeConnectAccount : accountCreator;
+  stripeConnectOnboardingLinkCreator = onboardingLinkCreator === null ? createStripeConnectOnboardingLink : onboardingLinkCreator;
+  stripeConnectStatusFetcher = statusFetcher === null ? fetchStripeConnectStatus : statusFetcher;
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -7003,7 +7092,16 @@ function upsertPaymentAccount(accounts: PaymentAccount[], account: PaymentAccoun
 
 function paymentAccountBookFromConfig(): PaymentAccount[] {
   const accounts = defaultPaymentAccountBook();
-  const raw = localProviderConfig.paymentAccountBookJson.trim();
+  const customAccounts = paymentAccountsFromJson(localProviderConfig.paymentAccountBookJson);
+  for (let index = 0; index < customAccounts.length; index++) {
+    upsertPaymentAccount(accounts, customAccounts[index]);
+  }
+  return accounts;
+}
+
+function paymentAccountsFromJson(rawJson: string): PaymentAccount[] {
+  const accounts: PaymentAccount[] = [];
+  const raw = rawJson.trim();
   if (raw.length === 0) {
     return accounts;
   }
@@ -7023,6 +7121,15 @@ function paymentAccountBookFromConfig(): PaymentAccount[] {
     aiLogError('[AIPhone][PaymentConfig] accountBook parse failed: ' + describeThrown(error));
   }
   return accounts;
+}
+
+export function configureLocalPaymentAccountBookJson(rawJson: string): void {
+  const accounts = paymentAccountsFromJson(localProviderConfig.paymentAccountBookJson);
+  const savedAccounts = paymentAccountsFromJson(rawJson);
+  for (let index = 0; index < savedAccounts.length; index++) {
+    upsertPaymentAccount(accounts, savedAccounts[index]);
+  }
+  localProviderConfig.paymentAccountBookJson = JSON.stringify(accounts);
 }
 
 function paymentModeFromConfig(): PaymentMode {
@@ -7160,6 +7267,66 @@ function paypalEnvironmentFromConfig(): PayPalEnvironment {
   return localProviderConfig.paypalEnvironment === 'live' ? 'live' : 'sandbox';
 }
 
+function paypalGatewayBaseEndpoint(): string {
+  let endpoint = localProviderConfig.paypalCheckoutGatewayUrl.trim();
+  if (endpoint.length === 0) {
+    return '';
+  }
+  while (endpoint.endsWith('/')) {
+    endpoint = endpoint.substring(0, endpoint.length - 1);
+  }
+  if (endpoint.endsWith('/api/payment/paypal/checkout')) {
+    return endpoint.substring(0, endpoint.length - '/api/payment/paypal/checkout'.length);
+  }
+  if (endpoint.endsWith('/api/payment/paypal/capture')) {
+    return endpoint.substring(0, endpoint.length - '/api/payment/paypal/capture'.length);
+  }
+  return endpoint;
+}
+
+async function createPayPalGatewayCheckout(result: PaymentValidationResult, baseEndpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(baseEndpoint + '/api/payment/paypal/checkout', stripeGatewayHeaders(), JSON.stringify({
+    payeeEmail: result.paypalEmail,
+    payeeMerchantId: result.paypalMerchantId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    returnUrl: localProviderConfig.paypalReturnUrl,
+    cancelUrl: localProviderConfig.paypalCancelUrl,
+    note: result.note
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'PayPal checkout gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('PayPal checkout gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  const checkoutUrl = payload.checkoutUrl === undefined ? '' : payload.checkoutUrl.trim();
+  if (!checkoutUrl.startsWith('https://www.paypal.com/') && !checkoutUrl.startsWith('https://www.sandbox.paypal.com/')) {
+    return paymentBlocked(result, 'PayPal checkout gateway did not return an approval URL.');
+  }
+  const providerSessionId = payload.providerSessionId === undefined ? '' : payload.providerSessionId.trim();
+  return paymentCheckout(result, checkoutUrl, providerSessionId);
+}
+
+async function capturePayPalGatewayPayment(result: PaymentValidationResult, orderId: string, baseEndpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(baseEndpoint + '/api/payment/paypal/capture', stripeGatewayHeaders(), JSON.stringify({
+    providerSessionId: orderId
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'PayPal capture gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('PayPal capture gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  return paymentResultWithState(result, 'completed', 'PayPal capture completed.', '', orderId);
+}
+
 async function createPayPalAccessToken(): Promise<PayPalAccessTokenResult> {
   if (localProviderConfig.paypalClientId.length === 0 || localProviderConfig.paypalClientSecret.length === 0) {
     return {
@@ -7196,6 +7363,10 @@ async function createPayPalAccessToken(): Promise<PayPalAccessTokenResult> {
 }
 
 async function createPayPalCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
+  const gatewayEndpoint = paypalGatewayBaseEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return createPayPalGatewayCheckout(result, gatewayEndpoint);
+  }
   const token = await createPayPalAccessToken();
   if (token.error.length > 0) {
     return paymentBlocked(result, token.error);
@@ -7233,6 +7404,10 @@ async function capturePayPalPayment(result: PaymentValidationResult, orderId: st
   if (cleanedOrderId.length === 0) {
     return paymentBlocked(result, 'Missing PayPal order id for capture.');
   }
+  const gatewayEndpoint = paypalGatewayBaseEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return capturePayPalGatewayPayment(result, cleanedOrderId, gatewayEndpoint);
+  }
   const token = await createPayPalAccessToken();
   if (token.error.length > 0) {
     return paymentBlocked(result, token.error);
@@ -7254,12 +7429,69 @@ async function capturePayPalPayment(result: PaymentValidationResult, orderId: st
   return paymentResultWithState(result, 'completed', 'PayPal capture completed.', '', cleanedOrderId);
 }
 
+function stripeCheckoutGatewayEndpoint(): string {
+  let endpoint = localProviderConfig.stripeCheckoutGatewayUrl.trim();
+  if (endpoint.length === 0) {
+    return '';
+  }
+  while (endpoint.endsWith('/')) {
+    endpoint = endpoint.substring(0, endpoint.length - 1);
+  }
+  if (endpoint.endsWith('/api/payment/stripe/checkout')) {
+    return endpoint;
+  }
+  return endpoint + '/api/payment/stripe/checkout';
+}
+
+function stripeGatewayHeaders(): HttpRequestHeaders {
+  const headers: HttpRequestHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+  if (localProviderConfig.toolGatewayApiKey.length > 0) {
+    headers.Authorization = 'Bearer ' + localProviderConfig.toolGatewayApiKey;
+  }
+  return headers;
+}
+
+async function createStripeGatewayCheckout(result: PaymentValidationResult, endpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(endpoint, stripeGatewayHeaders(), JSON.stringify({
+    connectedAccountId: result.stripeAccountId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    merchantName: result.displayName,
+    successUrl: localProviderConfig.stripeSuccessUrl,
+    cancelUrl: localProviderConfig.stripeCancelUrl,
+    idempotencyKey: paymentIdempotencyKey(result),
+    note: result.note
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'Stripe checkout gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('Stripe checkout gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  const checkoutUrl = payload.checkoutUrl === undefined ? '' : payload.checkoutUrl.trim();
+  if (!checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+    return paymentBlocked(result, 'Stripe checkout gateway did not return a hosted Checkout URL.');
+  }
+  const providerSessionId = payload.providerSessionId === undefined ? '' : payload.providerSessionId.trim();
+  return paymentCheckout(result, checkoutUrl, providerSessionId);
+}
+
 async function createStripeCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
   if (result.targetType === 'stripe_payment_link') {
     if (!isStripePaymentLinkUrl(result.stripePaymentLinkUrl)) {
       return paymentBlocked(result, 'Stripe Payment Link URL is not valid.');
     }
     return paymentCheckout(result, result.stripePaymentLinkUrl, '');
+  }
+  const gatewayEndpoint = stripeCheckoutGatewayEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return createStripeGatewayCheckout(result, gatewayEndpoint);
   }
   if (localProviderConfig.stripeSecretKey.length === 0) {
     return paymentBlocked(result, 'Missing Stripe secret key. Set STRIPE_SECRET_KEY in the provider config.');
@@ -7288,6 +7520,143 @@ async function createStripeCheckout(result: PaymentValidationResult): Promise<Pa
     return paymentBlocked(result, 'Stripe Checkout Session response did not include a checkout URL.');
   }
   return paymentCheckout(result, checkoutUrl, jsonStringField(response.text, 'id'));
+}
+
+function stripeReceivingProfileRecordFromValue(value: Object | string | number | boolean | null | undefined): Record<string, Object | string | number | boolean | null | undefined> {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return JSON.parse('{}') as Record<string, Object | string | number | boolean | null | undefined>;
+  }
+  return value as Record<string, Object | string | number | boolean | null | undefined>;
+}
+
+function stripeReceivingStatusFromText(value: string, fallback: StripeReceivingAccountStatus): StripeReceivingAccountStatus {
+  if (value === 'not_created' || value === 'onboarding_required' || value === 'pending_review' ||
+    value === 'receivable' || value === 'blocked' || value === 'config_missing') {
+    return value;
+  }
+  return fallback;
+}
+
+function applyStripeReceivingProfileRecord(profile: StripeReceivingProfile, record: Record<string, Object | string | number | boolean | null | undefined>): void {
+  const agentId = textOf(record.agentId).trim();
+  const deviceId = textOf(record.deviceId).trim();
+  const displayName = textOf(record.displayName).trim();
+  const email = textOf(record.email).trim();
+  const country = textOf(record.country).trim().toUpperCase();
+  const businessType = textOf(record.businessType).trim();
+  const stripeAccountId = textOf(record.stripeAccountId).trim();
+  const status = textOf(record.status).trim();
+  profile.agentId = agentId.length > 0 ? agentId : profile.agentId;
+  profile.deviceId = deviceId.length > 0 ? deviceId : profile.deviceId;
+  profile.displayName = displayName.length > 0 ? displayName : profile.displayName;
+  profile.email = email.length > 0 ? email : profile.email;
+  profile.country = country.length > 0 ? country : profile.country;
+  profile.businessType = businessType.length > 0 ? businessType : profile.businessType;
+  profile.stripeAccountId = stripeAccountId.length > 0 ? stripeAccountId : profile.stripeAccountId;
+  profile.status = stripeReceivingStatusFromText(status, profile.status);
+}
+
+function stripeReceivingProfileFromConfig(args: Object | null): StripeReceivingProfile {
+  const profile = blankStripeReceivingProfile();
+  profile.agentId = 'agent_phone_owner';
+  profile.deviceId = 'phone_local_device';
+  profile.displayName = 'My Agent';
+  profile.country = 'US';
+  if (localProviderConfig.stripeReceivingAgentJson.length > 0) {
+    try {
+      applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(JSON.parse(localProviderConfig.stripeReceivingAgentJson) as Object));
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfile] ' + describeThrown(error));
+    }
+  }
+  if (args !== null) {
+    applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(args));
+  }
+  return profile;
+}
+
+function stripeReceivingCard(profile: StripeReceivingProfile, status: string, message: string, onboardingUrl: string = '', currentlyDue: string[] = []): StripeReceivingAccountCardData {
+  return {
+    status: status,
+    title: 'Stripe 收款账户',
+    message: message,
+    agentId: profile.agentId,
+    deviceId: profile.deviceId,
+    displayName: profile.displayName,
+    email: profile.email,
+    country: profile.country,
+    businessType: profile.businessType,
+    stripeAccountId: profile.stripeAccountId,
+    onboardingUrl: onboardingUrl,
+    currentlyDue: currentlyDue.slice(),
+    actions: []
+  };
+}
+
+function stripeReceivingSetupCard(profile: StripeReceivingProfile): StripeReceivingAccountCardData {
+  const validation = validateStripeReceivingProfile(profile);
+  const message = validation.ok ?
+    '为 ' + profile.displayName + ' 创建 Stripe Connect 收款账户。Stripe 会负责实名、税务和银行卡信息收集。' :
+    '请先配置 agent 收款资料：' + validation.reason;
+  return stripeReceivingCard(profile, profile.stripeAccountId.length > 0 ? profile.status : 'not_created', message);
+}
+
+function stripeReceivingConfigMissingCard(profile: StripeReceivingProfile, message: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'config_missing', message);
+}
+
+function stripeReceivingBlockedCard(profile: StripeReceivingProfile, message: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'blocked', message);
+}
+
+function stripeReceivingOnboardingCard(profile: StripeReceivingProfile, onboardingUrl: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'onboarding_required', 'Stripe 收款账户已创建。请继续 Stripe 托管认证，完成实名、税务和银行卡资料。', onboardingUrl);
+}
+
+function stripeReceivingStatusCard(profile: StripeReceivingProfile, payload: StripeReceivingAccountStatusPayload): StripeReceivingAccountCardData {
+  const summary = mapStripeReceivingStatus(payload);
+  profile.stripeAccountId = payload.stripeAccountId.length > 0 ? payload.stripeAccountId : profile.stripeAccountId;
+  profile.status = summary.status;
+  return stripeReceivingCard(profile, summary.status, summary.message, '', payload.currentlyDue);
+}
+
+async function callLocalStripeReceivingTool(_prompt: string, surfaceId: string, actionId: string, args: Object | null = null): Promise<string> {
+  const profile = stripeReceivingProfileFromConfig(args);
+  if (localProviderConfig.stripeSecretKey.length === 0) {
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingConfigMissingCard(profile, '缺少 Stripe secret key。请先把 STRIPE_TEST_SECRET_KEY 或 STRIPE_LIVE_SECRET_KEY 同步进 HAP；AIPhone 不会模拟收款账户创建成功。'));
+  }
+  if (actionId === 'stripe.account.create') {
+    const validation = validateStripeReceivingProfile(profile);
+    if (!validation.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, validation.reason));
+    }
+    const created = await stripeConnectAccountCreator(localProviderConfig.stripeSecretKey, profile);
+    if (!created.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, created.error));
+    }
+    profile.stripeAccountId = created.stripeAccountId;
+    profile.status = 'onboarding_required';
+  }
+  if (actionId === 'stripe.account.create' || actionId === 'stripe.account.onboard') {
+    if (profile.stripeAccountId.length === 0) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, '缺少 Stripe connected account id。'));
+    }
+    const linkRequest: StripeConnectAccountIdRequest = { stripeAccountId: profile.stripeAccountId };
+    const link = await stripeConnectOnboardingLinkCreator(localProviderConfig.stripeSecretKey, linkRequest, localProviderConfig.stripeConnectReturnUrl, localProviderConfig.stripeConnectRefreshUrl);
+    if (!link.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, link.error));
+    }
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingOnboardingCard(profile, link.url));
+  }
+  if (profile.stripeAccountId.length > 0 && actionId === 'stripe.account.refresh') {
+    const statusRequest: StripeConnectAccountIdRequest = { stripeAccountId: profile.stripeAccountId };
+    const status = await stripeConnectStatusFetcher(localProviderConfig.stripeSecretKey, statusRequest);
+    if (!status.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, status.error));
+    }
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingStatusCard(profile, status.payload));
+  }
+  return stripeReceivingAccountA2ui(surfaceId, stripeReceivingSetupCard(profile));
 }
 
 async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -7323,7 +7692,7 @@ async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: 
   return paymentValidationA2ui(surfaceId, checkout);
 }
 
-async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   if (isCalendarToolId(toolId)) {
     return callLocalCalendarTool(toolId, prompt, surfaceId, args);
   }
@@ -7344,6 +7713,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isSocialHubToolId(toolId)) {
     return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+  }
+  if (toolId === 'payment.account.setup') {
+    return callLocalStripeReceivingTool(prompt, surfaceId, actionId, args);
   }
   if (isPaymentToolId(toolId)) {
     return callLocalPaymentTool(toolId, prompt, surfaceId, args);
@@ -7424,7 +7796,7 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
   }
 
   try {
-    const resultJsonl = await buildLocalToolJsonl(toolId, prompt, surfaceId, emitJsonl, args);
+    const resultJsonl = await buildLocalToolJsonl(toolId, prompt, surfaceId, actionId, emitJsonl, args);
     emitJsonl(resultJsonl);
     surfaceThrottle.flush();
     aiLogInfo('[AIPhone][LocalToolResult] ok=' + (streamError.length === 0 ? 'true' : 'false') + ' rawChars=' + rawResponse.length.toString());

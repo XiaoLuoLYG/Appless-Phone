@@ -1,6 +1,7 @@
-import { LocalModelSettings, defaultLocalModelSettings } from '@loop/agent-core';
+import { LocalModelSettings, PaymentAccount, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
 import {
@@ -19,6 +20,7 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData
 } from '@loop/agent-core';
+import { genericToolResults } from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
@@ -29,7 +31,7 @@ import {
   SocialHubItemData
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
+import { callToolGateway, configureLocalPaymentAccountBookJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -80,6 +82,8 @@ const LOG_SNIPPET_LIMIT: number = 1200;
 const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 Appless Phone 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
 const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
+const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
+const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -122,6 +126,15 @@ interface PaymentCheckoutActionPayload {
   providerSessionId?: HtmlActionValue;
 }
 
+interface HtmlPaymentAccountPayload {
+  displayName?: HtmlActionValue;
+  aliases?: HtmlActionValue;
+  paypalEmail?: HtmlActionValue;
+  paypalMerchantId?: HtmlActionValue;
+  stripeAccountId?: HtmlActionValue;
+  stripePaymentLinkUrl?: HtmlActionValue;
+}
+
 interface PaymentCaptureArgs {
   provider: string;
   recipient: string;
@@ -130,6 +143,13 @@ interface PaymentCaptureArgs {
   note: string;
   phase: string;
   providerSessionId: string;
+}
+
+interface PaymentSavedPreviewArgs {
+  accountId: string;
+  recipient: string;
+  provider: string;
+  originalQuery: string;
 }
 
 function logSnippet(text: string): string {
@@ -198,6 +218,7 @@ struct Index {
 
   aboutToAppear(): void {
     this.loadPersonaOverrides();
+    this.loadPaymentAccounts();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -219,6 +240,194 @@ struct Index {
       store.loadSync();
     }
     this.refreshPersonaEditor(this.selectedPersonaId);
+  }
+
+  private paymentAccountPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return preferences.getPreferencesSync(context, { name: PAYMENT_ACCOUNT_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private preferenceText(value: preferences.ValueType | string | number | boolean | null | undefined): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return value.toString();
+    }
+    return '';
+  }
+
+  private savedPaymentAccountsJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(PAYMENT_ACCOUNT_BOOK_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private savedPaymentAccounts(): PaymentAccount[] {
+    const raw = this.savedPaymentAccountsJson().trim();
+    if (raw.length === 0) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw) as PaymentAccount[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  private loadPaymentAccounts(): void {
+    const raw = this.savedPaymentAccountsJson();
+    if (raw.trim().length > 0) {
+      configureLocalPaymentAccountBookJson(raw);
+    }
+  }
+
+  private splitPaymentAliases(rawAliases: string): string[] {
+    const normalized = rawAliases.split('，').join(',');
+    const parts = normalized.split(',');
+    const aliases: string[] = [];
+    for (let index = 0; index < parts.length; index++) {
+      const alias = parts[index].trim();
+      if (alias.length > 0) {
+        aliases.push(alias);
+      }
+    }
+    return aliases;
+  }
+
+  private paymentAccountId(displayName: string): string {
+    const value = displayName.trim().toLowerCase();
+    let result = '';
+    let previousSeparator = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value.charAt(index);
+      const code = value.charCodeAt(index);
+      const isAsciiLetter = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+      if (isAsciiLetter) {
+        result += char;
+        previousSeparator = false;
+      } else if (code > 127) {
+        result += char;
+        previousSeparator = false;
+      } else if (!previousSeparator && result.length > 0) {
+        result += '_';
+        previousSeparator = true;
+      }
+    }
+    while (result.endsWith('_')) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result.length > 0 ? result : 'local_payee';
+  }
+
+  private paymentAccountFromAction(action: A2uiAction): PaymentAccount | null {
+    let payload: HtmlPaymentAccountPayload;
+    try {
+      payload = JSON.parse(action.prompt) as HtmlPaymentAccountPayload;
+    } catch (_error) {
+      return null;
+    }
+    const displayName = this.actionText(payload.displayName).trim();
+    const paypalEmail = this.actionText(payload.paypalEmail).trim();
+    const paypalMerchantId = this.actionText(payload.paypalMerchantId).trim();
+    const stripeAccountId = this.actionText(payload.stripeAccountId).trim();
+    const stripePaymentLinkUrl = this.actionText(payload.stripePaymentLinkUrl).trim();
+    if (displayName.length === 0 ||
+      (paypalEmail.length === 0 && paypalMerchantId.length === 0 && stripeAccountId.length === 0 && stripePaymentLinkUrl.length === 0)) {
+      return null;
+    }
+    return {
+      id: this.paymentAccountId(displayName),
+      displayName: displayName,
+      aliases: this.splitPaymentAliases(this.actionText(payload.aliases)),
+      email: '',
+      paypalEmail: paypalEmail,
+      paypalMerchantId: paypalMerchantId,
+      stripeAccountId: stripeAccountId,
+      stripePaymentLinkUrl: stripePaymentLinkUrl,
+      enabled: true
+    };
+  }
+
+  private upsertSavedPaymentAccount(accounts: PaymentAccount[], account: PaymentAccount): PaymentAccount[] {
+    const next: PaymentAccount[] = [];
+    let replaced = false;
+    for (let index = 0; index < accounts.length; index++) {
+      if (accounts[index].id === account.id) {
+        next.push(account);
+        replaced = true;
+      } else {
+        next.push(accounts[index]);
+      }
+    }
+    if (!replaced) {
+      next.push(account);
+    }
+    return next;
+  }
+
+  private paymentPreferredProvider(account: PaymentAccount): string {
+    const hasPayPal = account.paypalEmail.length > 0 || account.paypalMerchantId.length > 0;
+    const hasStripe = account.stripeAccountId.length > 0 || account.stripePaymentLinkUrl.length > 0;
+    if (hasPayPal && !hasStripe) {
+      return 'paypal';
+    }
+    if (hasStripe && !hasPayPal) {
+      return 'stripe';
+    }
+    return '';
+  }
+
+  private async savePaymentAccount(action: A2uiAction): Promise<void> {
+    const account = this.paymentAccountFromAction(action);
+    const store = this.paymentAccountPreferences();
+    if (account === null || store === null) {
+      this.logHtmlHomeActionError(action, 'invalid_payment_account_payload');
+      return;
+    }
+    try {
+      const accounts = this.upsertSavedPaymentAccount(this.savedPaymentAccounts(), account);
+      const raw = JSON.stringify(accounts);
+      store.putSync(PAYMENT_ACCOUNT_BOOK_KEY, raw);
+      await store.flush();
+      configureLocalPaymentAccountBookJson(raw);
+      aiLogInfo('[AIPhone][PaymentAccountSave] ok=true displayName=' + account.displayName);
+      const previewArgs: PaymentSavedPreviewArgs = {
+        accountId: account.id,
+        recipient: account.displayName,
+        provider: this.paymentPreferredProvider(account),
+        originalQuery: '给 ' + account.displayName + ' 转账'
+      };
+      await this.callToolById('payment.send', '给 ' + account.displayName + ' 转账', 'payment.account.saved', previewArgs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '付款对象保存失败',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][PaymentAccountSave] ok=false reason=' + message);
+    }
   }
 
   private savePersonaOverrides(): void {
@@ -262,6 +471,13 @@ struct Index {
 
   private isPersonaEditorAction(action: A2uiAction): boolean {
     return action.id === 'persona_memory_edit' || action.id === 'persona_soul_edit';
+  }
+
+  private isStripeReceivingActionId(action: A2uiAction): boolean {
+    return action.kind === 'client' &&
+      (action.id === 'stripe.account.create' ||
+        action.id === 'stripe.account.onboard' ||
+        action.id === 'stripe.account.refresh');
   }
 
   private openPersonaEditor(personaId: string, target: string): void {
@@ -855,7 +1071,16 @@ struct Index {
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
+          if (fallbackRequest.hasTool && this.surfaceHasToolResult(result.surface, fallbackRequest.toolId)) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
+          } else if (fallbackRequest.hasTool) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
+              ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
+            await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
+          } else {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+          }
         } else {
           await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
         }
@@ -889,6 +1114,16 @@ struct Index {
 
   private async sendPrompt(): Promise<void> {
     await this.submitPrompt(this.inputText, this.inputText);
+  }
+
+  private surfaceHasToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
+    const results = genericToolResults(surface);
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].toolName === toolId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private currentVoiceSession(seq: number): boolean {
@@ -1438,6 +1673,15 @@ struct Index {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
       return;
     }
+    if (this.isStripeReceivingActionId(action)) {
+      await this.callToolById(
+        'payment.account.setup',
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     if (this.isSocialHubActionId(action) && !this.isCurrentSocialHubSurface()) {
       this.logHtmlHomeActionError(action, 'social_hub_surface_required');
       return;
@@ -1466,6 +1710,10 @@ struct Index {
     }
     if (action.id === 'html_dynamic_save_and_test') {
       await this.saveDynamicCredentialAndTest(action);
+      return;
+    }
+    if (action.id === 'payment.account.save') {
+      await this.savePaymentAccount(action);
       return;
     }
     if (action.id === 'payment.checkout.open') {

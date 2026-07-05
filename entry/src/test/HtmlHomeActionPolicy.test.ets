@@ -135,5 +135,37 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('payment.confirm', 'confirm', 'prompt', expectedArgs))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('payment.confirm', 'confirm', 'prompt', blockedArgs))).assertFalse();
     });
+
+    it('allows payment account saves only on payment pages with a usable target', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'payment';
+      doc.blocks = [{
+        id: 'payment-save',
+        kind: 'generic-tool-result',
+        title: '补充金额',
+        subtitle: 'Payment target resolved.',
+        status: 'ready',
+        source: 'PayPal',
+        metrics: [
+          { label: 'source', value: 'PayPal' },
+          { label: 'toolName', value: 'payment.send' }
+        ],
+        rows: [{ label: '收款方', value: 'Dana' }],
+        actions: []
+      }];
+      const allowed = JSON.stringify({
+        displayName: 'Dana',
+        aliases: '小丹',
+        paypalEmail: 'dana@example.com'
+      });
+      const missingTarget = JSON.stringify({
+        displayName: 'Dana'
+      });
+
+      expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', missingTarget))).assertFalse();
+      doc.kind = 'generic';
+      expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', allowed))).assertFalse();
+    });
   });
 }

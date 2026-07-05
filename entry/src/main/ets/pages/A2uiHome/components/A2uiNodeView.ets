@@ -8,6 +8,7 @@ import {
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_CARD,
@@ -49,6 +50,7 @@ import { GenericToolResultsView } from './GenericToolResultsView';
 import { SocialHubView } from './SocialHubView';
 import { InfoRowsView } from './InfoRowsView';
 import { PersonaMemoryUpdateView } from './PersonaMemoryUpdateView';
+import { StripeReceivingAccountView } from './StripeReceivingAccountView';
 import { ThinkingStreamView } from './ThinkingStreamView';
 import { ToolConnectCardView } from './ToolConnectCardView';
 import { TrainOptionsView } from './TrainOptionsView';
@@ -242,6 +244,13 @@ export struct A2uiNodeView {
         })
       } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_HUB) {
         SocialHubView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+        StripeReceivingAccountView({
           surface: this.surface,
           component: this.component() as A2uiComponent,
           isBusy: this.isBusy,

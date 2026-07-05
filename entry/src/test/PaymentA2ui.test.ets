@@ -22,16 +22,16 @@ function validation(status: string, targetType: string, amountMinor: number, amo
     status: status,
     targetType: targetType,
     reason: '',
-    recipient: 'Alex',
-    accountId: 'alex',
-    displayName: 'Alex',
+    recipient: '罗一格',
+    accountId: 'luoyige',
+    displayName: '罗一格',
     provider: 'paypal',
     amountMinor: amountMinor,
     amountText: amountText,
     currency: 'USD',
     note: 'coffee',
     mode: 'test',
-    paypalEmail: 'alex@example.com',
+    paypalEmail: 'yl732@cantab.ac.uk',
     paypalMerchantId: '',
     stripeAccountId: '',
     stripePaymentLinkUrl: ''
@@ -48,9 +48,9 @@ export default function paymentA2uiTest() {
 
       expect(surface.title).assertEqual('AIPhone Pay');
       expect(result.title).assertEqual('确认支付');
-      expect(result.summary.indexOf('Alex')).assertLarger(-1);
+      expect(result.summary.indexOf('罗一格')).assertLarger(-1);
       expect(result.rows[0].label).assertEqual('收款方');
-      expect(result.rows[0].value).assertEqual('Alex');
+      expect(result.rows[0].value).assertEqual('罗一格');
       expect(actions[0].id).assertEqual('payment.confirm');
       expect(actions[1].id).assertEqual('payment.cancel');
     });
@@ -66,6 +66,19 @@ export default function paymentA2uiTest() {
       expect(actions[0].label.indexOf('1')).assertLarger(-1);
       expect(actions[1].id).assertEqual('payment.amount.select');
       expect(actions[2].id).assertEqual('payment.amount.select');
+    });
+
+    it('does not render missing recipient as a dead confirmation card', 0, () => {
+      const missing = validation('needs_recipient', 'none', 0, '');
+      missing.reason = 'Recipient is required.';
+      const store = applyJsonl(paymentValidationA2ui('surface_payment', missing));
+      const surface = store.getSurface();
+      const result = genericToolResults(surface)[0];
+      const actions = actionsOf(surface.components[1]);
+
+      expect(result.title).assertEqual('补充收款方');
+      expect(actions.length).assertEqual(1);
+      expect(actions[0].id).assertEqual('payment.cancel');
     });
 
     it('renders checkout action with provider url', 0, () => {

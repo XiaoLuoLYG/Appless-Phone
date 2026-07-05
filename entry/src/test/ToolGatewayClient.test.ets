@@ -12,6 +12,7 @@ import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  configureLocalPaymentAccountBookJson,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureLocalProviderConfigFromRawJson,
@@ -250,8 +251,10 @@ export default function toolGatewayClientTest() {
           PAYPAL_CLIENT_ID: 'paypal-client',
           PAYPAL_CLIENT_SECRET: 'paypal-secret',
           PAYPAL_ENVIRONMENT: 'sandbox',
+          PAYPAL_CHECKOUT_GATEWAY_URL: 'http://127.0.0.1:8787/api/payment/paypal/checkout',
           STRIPE_SECRET_KEY: 'sk_test_secret',
           STRIPE_PUBLISHABLE_KEY: 'pk_test_public',
+          STRIPE_CHECKOUT_GATEWAY_URL: 'http://127.0.0.1:8787/api/payment/stripe/checkout',
           PAYMENT_ACCOUNT_BOOK_JSON: '[{"id":"alex"}]',
           PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS: 'acct_live_ok',
           PAYMENT_LIVE_MAX_AMOUNT_MINOR: '100'
@@ -260,10 +263,13 @@ export default function toolGatewayClientTest() {
         const summary = localProviderConfigDebugSummary();
         expect(summary.indexOf('paypalClientId=present(13)')).assertLarger(-1);
         expect(summary.indexOf('paypalClientSecret=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('paypalCheckoutGatewayUrl=present')).assertLarger(-1);
         expect(summary.indexOf('stripeSecretKey=present(14)')).assertLarger(-1);
+        expect(summary.indexOf('stripeCheckoutGatewayUrl=present')).assertLarger(-1);
         expect(summary.indexOf('paymentAccountBookJson=present')).assertLarger(-1);
         expect(summary.indexOf('paypal-secret')).assertEqual(-1);
         expect(summary.indexOf('sk_test_secret')).assertEqual(-1);
+        expect(summary.indexOf('127.0.0.1')).assertEqual(-1);
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
       }
@@ -1641,11 +1647,11 @@ export default function toolGatewayClientTest() {
       try {
         configureLocalProviderConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给 Alex 转账' };
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给罗一格转账' };
         const result = await callToolGateway(
           defaultToolGatewayUrl(),
           'payment.send',
-          '用 PayPal 给 Alex 转账',
+          '用 PayPal 给罗一格转账',
           'surface_payment_amount',
           'model_tool_request',
           noop,
@@ -1662,11 +1668,48 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('uses locally saved payment accounts in payment.send', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureLocalPaymentAccountBookJson(JSON.stringify([{
+          id: 'dana_saved',
+          displayName: 'Dana Saved',
+          aliases: ['Dana Saved', '小丹'],
+          email: '',
+          paypalEmail: 'dana@example.com',
+          paypalMerchantId: '',
+          stripeAccountId: '',
+          stripePaymentLinkUrl: '',
+          enabled: true
+        }]));
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给 Dana Saved 转账' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '用 PayPal 给 Dana Saved 转账',
+          'surface_payment_saved_account',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('补充金额');
+        expect(rendered.summary.indexOf('Dana Saved')).assertLarger(-1);
+        expect(JSON.stringify(rendered.rows).indexOf('dana@example.com')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.amount.select')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('renders payment confirmation without creating provider session first', 0, async () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const query = '用 PayPal 给 Alex 转 5 美元';
+        const query = '用 PayPal 给罗一格转 5 美元';
         const args: PaymentTestArgs = { provider: 'paypal', originalQuery: query };
         const result = await callToolGateway(
           defaultToolGatewayUrl(),
@@ -1681,7 +1724,7 @@ export default function toolGatewayClientTest() {
         const rendered = genericToolResults(result.surface)[0];
 
         expect(rendered.title).assertEqual('确认支付');
-        expect(rendered.summary.indexOf('Alex')).assertLarger(-1);
+        expect(rendered.summary.indexOf('罗一格')).assertLarger(-1);
         expect(result.raw.indexOf('payment.confirm')).assertLarger(-1);
       } finally {
         configureLocalProviderConfigFromRawJson('{}');

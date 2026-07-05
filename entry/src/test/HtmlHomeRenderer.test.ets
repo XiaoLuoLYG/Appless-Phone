@@ -419,6 +419,38 @@ function mediaAggregateDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function paymentDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'payment';
+  doc.title = '确认支付';
+  doc.subtitle = '支付前确认收款方和金额。';
+  doc.blocks = [{
+    id: 'payment-1',
+    kind: 'generic-tool-result',
+    title: '确认支付',
+    subtitle: 'PayPal 将在用户确认后创建 checkout。',
+    status: 'ready',
+    source: 'PayPal',
+    metrics: [
+      { label: 'source', value: 'PayPal' },
+      { label: 'toolName', value: 'payment.send' }
+    ],
+    rows: [
+      { label: '收款方', value: 'Alex' },
+      { label: '支付方式', value: 'paypal' },
+      { label: '金额', value: '5 USD' },
+      { label: '模式', value: 'test' }
+    ],
+    actions: [
+      { id: 'payment.confirm', label: '确认支付', prompt: 'confirm', variant: 'primary', kind: 'prompt' },
+      { id: 'payment.cancel', label: '取消', prompt: 'cancel', variant: 'secondary', kind: 'prompt' }
+    ]
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function socialHubDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'social';
@@ -660,6 +692,28 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('window.AMap')).assertEqual(-1);
       expect(html.indexOf('webapi.amap.com')).assertEqual(-1);
       expect(html.indexOf('ReactDOM')).assertEqual(-1);
+    });
+
+    it('renders payment documents with the app payment workspace and saved payee form', 0, () => {
+      const html = renderHtmlHomeDocument(paymentDocumentFixture());
+
+      expect(html.indexOf('payment-shell')).assertLarger(-1);
+      expect(html.indexOf('pay-hero')).assertLarger(-1);
+      expect(html.indexOf('payment-card')).assertLarger(-1);
+      expect(html.indexOf('payee-card')).assertLarger(-1);
+      expect(html.indexOf('provider-logo')).assertLarger(-1);
+      expect(html.indexOf('addProviderMark')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertLarger(-1);
+      expect(html.indexOf('form-actions')).assertLarger(-1);
+      expect(html.indexOf('AIPhone Pay')).assertLarger(-1);
+      expect(html.indexOf('添加付款对象')).assertLarger(-1);
+      expect(html.indexOf('保存对象')).assertLarger(-1);
+      expect(html.indexOf('payment.account.save')).assertLarger(-1);
+      expect(html.indexOf('payee-paypal')).assertLarger(-1);
+      expect(html.indexOf('payee-stripe-link')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+      expect(html.indexOf('任务结果')).assertEqual(-1);
+      expect(html.indexOf('保存后可以直接说')).assertEqual(-1);
     });
 
     it('keeps non-food documents on the generic renderer', 0, () => {

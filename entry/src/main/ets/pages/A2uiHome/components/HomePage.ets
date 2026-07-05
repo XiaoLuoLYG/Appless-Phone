@@ -359,7 +359,17 @@ export struct HomePage {
       .margin({ top: this.showHistory ? 14 : 0 })
       .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
 
-      if (this.useNativeSurface()) {
+      if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
+        PaymentCheckoutOverlay({
+          url: this.paymentCheckoutUrl,
+          onClose: this.onClosePaymentCheckout,
+          onReturnUrl: this.onPaymentCheckoutReturn
+        })
+          .layoutWeight(1)
+          .margin({ top: 12 })
+          .borderRadius(22)
+          .clip(true)
+      } else if (this.useNativeSurface()) {
         A2uiSurfaceView({
           surface: this.currentSurface,
           renderTick: this.surfaceRenderTick,
@@ -492,13 +502,6 @@ export struct HomePage {
       .padding({ left: 16, right: 16, top: 16, bottom: 14 })
       .backgroundColor(COLOR_PAGE)
 
-      if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
-        PaymentCheckoutOverlay({
-          url: this.paymentCheckoutUrl,
-          onClose: this.onClosePaymentCheckout,
-          onReturnUrl: this.onPaymentCheckoutReturn
-        })
-      }
     }
     .width('100%')
     .height('100%')
