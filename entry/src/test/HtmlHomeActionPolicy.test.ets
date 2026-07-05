@@ -7,6 +7,10 @@ interface ThreadOnlyArgsFixture {
   threadId: string;
 }
 
+interface StripeOnboardingArgsFixture {
+  onboardingUrl: string;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -166,6 +170,38 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', missingTarget))).assertFalse();
       doc.kind = 'generic';
       expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', allowed))).assertFalse();
+    });
+
+    it('allows only the current Stripe onboarding URL to open from HTML', 0, () => {
+      const doc = documentFixture();
+      doc.blocks.push({
+        id: 'stripe-receiving',
+        kind: 'StripeReceivingAccountCard',
+        title: 'Stripe 收款账户',
+        subtitle: '继续认证',
+        status: 'onboarding_required',
+        source: 'stripe',
+        metrics: [],
+        rows: [],
+        actions: [],
+        stripeReceiving: {
+          status: 'onboarding_required',
+          message: '继续认证',
+          stripeAccountId: 'acct_123',
+          onboardingUrl: 'https://connect.stripe.com/setup/s/acct_123',
+          currentlyDue: []
+        }
+      });
+
+      const allowedArgs: StripeOnboardingArgsFixture = {
+        onboardingUrl: 'https://connect.stripe.com/setup/s/acct_123'
+      };
+      const blockedArgs: StripeOnboardingArgsFixture = {
+        onboardingUrl: 'https://evil.example/setup'
+      };
+
+      expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://connect.stripe.com/setup/s/acct_123', 'client', allowedArgs))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://evil.example/setup', 'client', blockedArgs))).assertFalse();
     });
   });
 }

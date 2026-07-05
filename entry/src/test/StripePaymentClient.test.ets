@@ -16,13 +16,16 @@ export default function stripePaymentClientTest() {
         successUrl: 'aiphone://payment/stripe/success',
         cancelUrl: 'aiphone://payment/stripe/cancel',
         idempotencyKey: 'test-key',
-        note: 'coffee'
+        note: 'coffee',
+        fundingSource: 'google_pay'
       });
 
       expect(request.url).assertEqual('https://api.stripe.com/v1/checkout/sessions');
       expect(request.headers.Authorization).assertEqual('Bearer sk_test_123');
       expect(request.headers.IdempotencyKey).assertEqual('test-key');
       expect(request.body.indexOf('mode=payment')).assertLarger(-1);
+      expect(request.body.indexOf('metadata%5Bfunding_source%5D=google_pay')).assertLarger(-1);
+      expect(request.body.indexOf('payment_intent_data%5Bmetadata%5D%5Bfunding_source%5D=google_pay')).assertLarger(-1);
       expect(request.body.indexOf('line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=500')).assertLarger(-1);
       expect(request.body.indexOf('payment_intent_data%5Btransfer_data%5D%5Bdestination%5D=acct_123')).assertLarger(-1);
     });

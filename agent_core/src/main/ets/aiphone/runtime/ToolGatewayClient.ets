@@ -83,6 +83,7 @@ import {
   PaymentAccount,
   PaymentMode,
   PaymentPolicy,
+  PaymentFundingSource,
   PaymentProvider,
   PaymentRequestDraft,
   PaymentValidationResult,
@@ -1199,6 +1200,7 @@ type PaymentToolArgRecord = Record<string, PaymentToolArgValue>;
 interface PaymentToolActionArgs {
   recipient?: PaymentToolArgValue;
   provider?: PaymentToolArgValue;
+  fundingSource?: PaymentToolArgValue;
   amountText?: PaymentToolArgValue;
   currency?: PaymentToolArgValue;
   note?: PaymentToolArgValue;
@@ -7045,6 +7047,15 @@ function paymentProviderFromPrompt(source: string): PaymentProvider {
   return paymentProviderFromText(source);
 }
 
+function paymentFundingSourceFromText(value: string): PaymentFundingSource {
+  const lower = value.trim().toLowerCase();
+  if (lower === 'google_pay' || lower.indexOf('google pay') >= 0 || lower.indexOf('googlepay') >= 0 ||
+    lower.indexOf('google wallet') >= 0 || value.indexOf('谷歌支付') >= 0) {
+    return 'google_pay';
+  }
+  return '';
+}
+
 function stringArray(value: string[] | undefined): string[] {
   if (value === undefined || !Array.isArray(value)) {
     return [];
@@ -7189,9 +7200,14 @@ function paymentDraftFromArgs(prompt: string, args: Object | null, book: Payment
   if (provider.length === 0) {
     provider = paymentProviderFromPrompt(source);
   }
+  let fundingSource = paymentFundingSourceFromText(paymentArgText(parsed, 'fundingSource'));
+  if (fundingSource.length === 0) {
+    fundingSource = paymentFundingSourceFromText(source);
+  }
   return {
     recipient: recipient,
     provider: provider,
+    fundingSource: fundingSource,
     amountText: amountText,
     currency: currency,
     note: paymentArgText(parsed, 'note'),
@@ -7223,6 +7239,7 @@ function paymentResultWithState(
     accountId: result.accountId,
     displayName: result.displayName,
     provider: result.provider,
+    fundingSource: result.fundingSource,
     amountMinor: result.amountMinor,
     amountText: result.amountText,
     currency: result.currency,
@@ -7463,7 +7480,8 @@ async function createStripeGatewayCheckout(result: PaymentValidationResult, endp
     successUrl: localProviderConfig.stripeSuccessUrl,
     cancelUrl: localProviderConfig.stripeCancelUrl,
     idempotencyKey: paymentIdempotencyKey(result),
-    note: result.note
+    note: result.note,
+    fundingSource: result.fundingSource
   }));
   let payload: StripeCheckoutGatewayPayload;
   try {
@@ -7505,7 +7523,8 @@ async function createStripeCheckout(result: PaymentValidationResult): Promise<Pa
     successUrl: localProviderConfig.stripeSuccessUrl,
     cancelUrl: localProviderConfig.stripeCancelUrl,
     idempotencyKey: paymentIdempotencyKey(result),
-    note: result.note
+    note: result.note,
+    fundingSource: result.fundingSource
   });
   const response = await postFormText(checkoutRequest.url, {
     'Authorization': checkoutRequest.headers.Authorization,
@@ -7573,6 +7592,32 @@ function stripeReceivingProfileFromConfig(args: Object | null): StripeReceivingP
     applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(args));
   }
   return profile;
+}
+
+function stripeReceivingProfileJson(profile: StripeReceivingProfile): string {
+  return JSON.stringify({
+    agentId: profile.agentId,
+    deviceId: profile.deviceId,
+    displayName: profile.displayName,
+    email: profile.email,
+    country: profile.country,
+    businessType: profile.businessType,
+    stripeAccountId: profile.stripeAccountId,
+    status: profile.status
+  });
+}
+
+export function configureLocalStripeReceivingAgentJson(rawJson: string): void {
+  const profile = stripeReceivingProfileFromConfig(null);
+  const raw = rawJson.trim();
+  if (raw.length > 0) {
+    try {
+      applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(JSON.parse(raw) as Object));
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfile] saved profile parse failed: ' + describeThrown(error));
+    }
+  }
+  localProviderConfig.stripeReceivingAgentJson = stripeReceivingProfileJson(profile);
 }
 
 function stripeReceivingCard(profile: StripeReceivingProfile, status: string, message: string, onboardingUrl: string = '', currentlyDue: string[] = []): StripeReceivingAccountCardData {

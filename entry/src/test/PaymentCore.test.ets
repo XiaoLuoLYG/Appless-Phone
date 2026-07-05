@@ -56,6 +56,7 @@ export default function paymentCoreTest() {
       const result = validatePaymentRequest({
         recipient: 'Alex',
         provider: '',
+        fundingSource: '',
         amountText: '5',
         currency: 'USD',
         note: ''
@@ -68,6 +69,7 @@ export default function paymentCoreTest() {
       const result = validatePaymentRequest({
         recipient: 'Cafe',
         provider: 'stripe',
+        fundingSource: '',
         amountText: '',
         currency: 'USD',
         note: ''
@@ -80,6 +82,7 @@ export default function paymentCoreTest() {
       const result = validatePaymentRequest({
         recipient: 'Cafe',
         provider: 'stripe',
+        fundingSource: '',
         amountText: '',
         currency: 'USD',
         note: ''

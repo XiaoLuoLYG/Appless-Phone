@@ -1,4 +1,5 @@
 export type PaymentProvider = '' | 'paypal' | 'stripe';
+export type PaymentFundingSource = '' | 'google_pay';
 export type PaymentTargetType = 'none' | 'paypal' | 'stripe_connected' | 'stripe_payment_link' | 'choice';
 export type PaymentMode = 'test' | 'live';
 export type PaymentValidationStatus =
@@ -20,6 +21,7 @@ export interface PaymentAccount {
 export interface PaymentRequestDraft {
   recipient: string;
   provider: PaymentProvider;
+  fundingSource: PaymentFundingSource;
   amountText: string;
   currency: string;
   note: string;
@@ -59,6 +61,7 @@ export interface PaymentValidationResult {
   accountId: string;
   displayName: string;
   provider: PaymentProvider;
+  fundingSource: PaymentFundingSource;
   amountMinor: number;
   amountText: string;
   currency: string;
@@ -192,6 +195,7 @@ function emptyValidation(
     accountId: '',
     displayName: '',
     provider: draft.provider,
+    fundingSource: draft.fundingSource,
     amountMinor: 0,
     amountText: cleanText(draft.amountText),
     currency: currencyOrDefault(draft.currency, policy.defaultCurrency),
@@ -221,6 +225,7 @@ function validationForAccount(
     accountId: account.id,
     displayName: account.displayName,
     provider: draft.provider,
+    fundingSource: draft.fundingSource,
     amountMinor: amount.amountMinor,
     amountText: cleanText(draft.amountText),
     currency: amount.currency,

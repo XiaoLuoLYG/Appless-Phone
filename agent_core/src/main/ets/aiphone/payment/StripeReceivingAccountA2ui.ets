@@ -18,6 +18,7 @@ interface StripeReceivingActionArgs {
   country: string;
   businessType: string;
   stripeAccountId: string;
+  onboardingUrl: string;
 }
 
 function jsonLine(envelope: A2uiEnvelope): string {
@@ -58,7 +59,8 @@ function actionArgs(card: StripeReceivingAccountCardData): StripeReceivingAction
     email: card.email,
     country: card.country,
     businessType: card.businessType,
-    stripeAccountId: card.stripeAccountId
+    stripeAccountId: card.stripeAccountId,
+    onboardingUrl: card.onboardingUrl
   };
 }
 
@@ -67,11 +69,17 @@ function actionsFor(card: StripeReceivingAccountCardData): A2uiAction[] {
     return card.actions;
   }
   const args = actionArgs(card);
-  if (card.status === 'not_created' || card.status === 'config_missing') {
+  if (card.status === 'not_created') {
     return [action('stripe.account.create', '开始绑定', '创建 Stripe 收款账户并打开认证', 'primary', args)];
   }
+  if (card.status === 'blocked' || card.status === 'config_missing') {
+    if (card.stripeAccountId.length > 0) {
+      return [action('stripe.account.onboard', '重试打开认证', '重新创建 Stripe 认证链接', 'primary', args)];
+    }
+    return [action('stripe.account.create', '重试绑定', '重新创建 Stripe 收款账户并打开认证', 'primary', args)];
+  }
   if (card.status === 'onboarding_required') {
-    return [action('stripe.account.onboard', '继续认证', '打开 Stripe 认证', 'primary', args)];
+    return [action('stripe.account.open', '打开 Stripe 托管认证', card.onboardingUrl, 'primary', args)];
   }
   return [action('stripe.account.refresh', '刷新状态', '刷新 Stripe 收款状态', 'secondary', args)];
 }

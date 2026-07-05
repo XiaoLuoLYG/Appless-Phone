@@ -759,7 +759,10 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(stripeReceivingDocumentFixture());
 
       expect(html.indexOf('autoOpenStripeReceivingOnboarding')).assertLarger(-1);
+      expect(html.indexOf('stripe.account.open')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
+      expect(html.indexOf('window.location.href = url')).assertEqual(-1);
     });
 
     it('keeps non-food documents on the generic renderer', 0, () => {

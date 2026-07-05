@@ -46,6 +46,7 @@ interface FoodPreferenceArgsFixture {
 
 interface PaymentFallbackArgsFixture {
   provider: string;
+  fundingSource?: string;
 }
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
@@ -228,6 +229,20 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.toolId).assertEqual('payment.send');
       expect(resolved.actionId).assertEqual('client_intent_fallback');
       expect(args.provider).assertEqual('paypal');
+    });
+
+    it('treats Google Pay as a funding source for payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '用 Google Pay 给罗一格转账 5 美元',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(args.provider).assertEqual('');
+      expect(args.fundingSource).assertEqual('google_pay');
     });
 
     it('routes Stripe receiving-account setup separately from payments', 0, () => {

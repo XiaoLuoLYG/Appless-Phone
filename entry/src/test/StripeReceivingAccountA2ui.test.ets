@@ -71,12 +71,35 @@ export default function stripeReceivingAccountA2uiTest() {
       };
 
       const onboarding = stripeReceivingAccount(surfaceFromJsonl(stripeReceivingAccountA2ui('stripe_receiving_onboard', card)).getSurface());
-      expect(onboarding.actions[0].id).assertEqual('stripe.account.onboard');
+      expect(onboarding.actions[0].id).assertEqual('stripe.account.open');
+      expect(onboarding.actions[0].prompt).assertEqual('https://connect.stripe.com/setup/test');
       expect(onboarding.currentlyDue[0]).assertEqual('individual.dob.day');
 
       card.status = 'receivable';
       const receivable = stripeReceivingAccount(surfaceFromJsonl(stripeReceivingAccountA2ui('stripe_receiving_ready', card)).getSurface());
       expect(receivable.actions[0].id).assertEqual('stripe.account.refresh');
+    });
+
+    it('does not show refresh for blocked profiles without a Stripe account id', 0, () => {
+      const card: StripeReceivingAccountCardData = {
+        status: 'blocked',
+        title: 'Stripe 收款账户',
+        message: 'Stripe Dashboard 还需要确认。',
+        agentId: 'agent_phone_owner',
+        deviceId: 'phone_local_device',
+        displayName: 'My Agent',
+        email: 'owner@example.com',
+        country: 'US',
+        businessType: 'individual',
+        stripeAccountId: '',
+        onboardingUrl: '',
+        currentlyDue: [],
+        actions: []
+      };
+
+      const blocked = stripeReceivingAccount(surfaceFromJsonl(stripeReceivingAccountA2ui('stripe_receiving_blocked', card)).getSurface());
+      expect(blocked.actions[0].id).assertEqual('stripe.account.create');
+      expect(blocked.actions[0].label).assertEqual('重试绑定');
     });
   });
 }

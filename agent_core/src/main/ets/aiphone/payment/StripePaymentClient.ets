@@ -8,6 +8,7 @@ export interface StripeCheckoutSessionInput {
   cancelUrl: string;
   idempotencyKey: string;
   note: string;
+  fundingSource?: string;
 }
 
 export interface StripeCheckoutHeaders {
@@ -74,6 +75,10 @@ export function buildStripeCheckoutSessionRequest(input: StripeCheckoutSessionIn
   if (input.note.trim().length > 0) {
     pairs.push(formPair('metadata[note]', input.note.trim()));
     pairs.push(formPair('payment_intent_data[metadata][note]', input.note.trim()));
+  }
+  if (input.fundingSource !== undefined && input.fundingSource.trim() === 'google_pay') {
+    pairs.push(formPair('metadata[funding_source]', 'google_pay'));
+    pairs.push(formPair('payment_intent_data[metadata][funding_source]', 'google_pay'));
   }
   return {
     method: 'POST',

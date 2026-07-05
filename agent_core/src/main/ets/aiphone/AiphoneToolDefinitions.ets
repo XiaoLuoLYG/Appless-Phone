@@ -344,7 +344,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'stripeReceivingAccountSetupRequest',
     outputSchema: 'stripeReceivingAccountSetupCard',
     a2uiComponent: 'StripeReceivingAccountCard',
-    actions: ['stripe.account.create', 'stripe.account.onboard', 'stripe.account.refresh']
+    actions: ['stripe.account.create', 'stripe.account.open', 'stripe.account.onboard', 'stripe.account.refresh']
   },
   {
     toolId: 'maps.place.search',

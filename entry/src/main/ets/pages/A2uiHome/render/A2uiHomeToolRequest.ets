@@ -23,6 +23,7 @@ interface YouTubeFallbackArgs {
 
 interface PaymentFallbackArgs {
   provider: string;
+  fundingSource: string;
   recipient: string;
   amountText: string;
   currency: string;
@@ -194,6 +195,17 @@ function paymentProviderForPrompt(prompt: string): string {
   return '';
 }
 
+function paymentFundingSourceForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('google pay') >= 0 ||
+    lowerPrompt.indexOf('googlepay') >= 0 ||
+    lowerPrompt.indexOf('google wallet') >= 0 ||
+    prompt.indexOf('谷歌支付') >= 0) {
+    return 'google_pay';
+  }
+  return '';
+}
+
 function hasStripeReceivingAccountIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
   const hasStripe = lowerPrompt.indexOf('stripe') >= 0;
@@ -234,6 +246,7 @@ function paymentArgsForPrompt(prompt: string): Object | null {
   }
   const args: PaymentFallbackArgs = {
     provider: paymentProviderForPrompt(prompt),
+    fundingSource: paymentFundingSourceForPrompt(prompt),
     recipient: '',
     amountText: '',
     currency: '',

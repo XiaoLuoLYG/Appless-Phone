@@ -1755,9 +1755,21 @@ const HTML_HOME_JS: string = `
     link.target = '_self';
     link.rel = 'noreferrer';
     link.addEventListener('click', function (event) {
+      event.preventDefault();
       event.stopPropagation();
+      postStripeReceivingOpen(url);
     });
     autoOpenStripeReceivingOnboarding(receiving, url);
+  }
+  function postStripeReceivingOpen(url) {
+    postAction({
+      id: 'stripe.account.open',
+      label: '打开 Stripe 托管认证',
+      prompt: url,
+      variant: 'primary',
+      kind: 'client',
+      args: { onboardingUrl: url }
+    });
   }
   function autoOpenStripeReceivingOnboarding(receiving, url) {
     if (text(receiving.status) !== 'onboarding_required') { return; }
@@ -1767,7 +1779,7 @@ const HTML_HOME_JS: string = `
       if (window.sessionStorage) { window.sessionStorage.setItem(key, '1'); }
     } catch (_error) {}
     window.setTimeout(function () {
-      window.location.href = url;
+      postStripeReceivingOpen(url);
     }, 0);
   }
   function numberIn(value) {

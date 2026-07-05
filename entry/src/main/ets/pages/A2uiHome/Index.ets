@@ -1,4 +1,4 @@
-import { LocalModelSettings, PaymentAccount, defaultLocalModelSettings } from '@loop/agent-core';
+import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -6,6 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiAction,
   A2uiCallResult,
@@ -20,7 +21,7 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData
 } from '@loop/agent-core';
-import { genericToolResults } from '@loop/agent-core';
+import { genericToolResults, stripeReceivingAccount } from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
@@ -31,7 +32,7 @@ import {
   SocialHubItemData
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
-import { callToolGateway, configureLocalPaymentAccountBookJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
+import { callToolGateway, configureLocalPaymentAccountBookJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -84,6 +85,7 @@ const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，�
 const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
 const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
+const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -124,6 +126,21 @@ interface PaymentCheckoutActionPayload {
   note?: HtmlActionValue;
   checkoutUrl?: HtmlActionValue;
   providerSessionId?: HtmlActionValue;
+}
+
+interface StripeOnboardingActionPayload {
+  onboardingUrl?: HtmlActionValue;
+}
+
+interface StripeReceivingSavedProfile {
+  agentId: string;
+  deviceId: string;
+  displayName: string;
+  email: string;
+  country: string;
+  businessType: string;
+  stripeAccountId: string;
+  status: string;
 }
 
 interface HtmlPaymentAccountPayload {
@@ -219,6 +236,7 @@ struct Index {
   aboutToAppear(): void {
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
+    this.loadStripeReceivingProfile();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -296,6 +314,25 @@ struct Index {
     const raw = this.savedPaymentAccountsJson();
     if (raw.trim().length > 0) {
       configureLocalPaymentAccountBookJson(raw);
+    }
+  }
+
+  private savedStripeReceivingProfileJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(STRIPE_RECEIVING_PROFILE_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private loadStripeReceivingProfile(): void {
+    const raw = this.savedStripeReceivingProfileJson();
+    if (raw.trim().length > 0) {
+      configureLocalStripeReceivingAgentJson(raw);
     }
   }
 
@@ -427,6 +464,52 @@ struct Index {
         error: message
       }));
       aiLogError('[AIPhone][PaymentAccountSave] ok=false reason=' + message);
+    }
+  }
+
+  private hasStripeReceivingAccountComponent(surface: A2uiSurfaceState): boolean {
+    for (let index = 0; index < surface.components.length; index++) {
+      if (surface.components[index].component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private stripeReceivingProfileFromSurface(surface: A2uiSurfaceState): StripeReceivingSavedProfile | null {
+    if (!this.hasStripeReceivingAccountComponent(surface)) {
+      return null;
+    }
+    const account: StripeReceivingAccountCardData = stripeReceivingAccount(surface);
+    if (account.stripeAccountId.trim().length === 0) {
+      return null;
+    }
+    return {
+      agentId: account.agentId,
+      deviceId: account.deviceId,
+      displayName: account.displayName,
+      email: account.email,
+      country: account.country,
+      businessType: account.businessType,
+      stripeAccountId: account.stripeAccountId,
+      status: account.status
+    };
+  }
+
+  private async saveStripeReceivingProfile(surface: A2uiSurfaceState): Promise<void> {
+    const profile = this.stripeReceivingProfileFromSurface(surface);
+    const store = this.paymentAccountPreferences();
+    if (profile === null || store === null) {
+      return;
+    }
+    try {
+      const raw = JSON.stringify(profile);
+      store.putSync(STRIPE_RECEIVING_PROFILE_KEY, raw);
+      await store.flush();
+      configureLocalStripeReceivingAgentJson(raw);
+      aiLogInfo('[AIPhone][StripeReceivingProfileSave] ok=true accountIdPresent=true status=' + profile.status);
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfileSave] ok=false reason=' + (error instanceof Error ? error.message : JSON.stringify(error)));
     }
   }
 
@@ -1516,6 +1599,22 @@ struct Index {
       lower.startsWith('https://www.sandbox.paypal.com/');
   }
 
+  private isStripeOnboardingUrl(url: string): boolean {
+    return url.trim().toLowerCase().startsWith('https://connect.stripe.com/');
+  }
+
+  private stripeOnboardingUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as StripeOnboardingActionPayload;
+      fromArgs = this.actionText(payload.onboardingUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
   private paymentCheckoutUrlForAction(action: A2uiAction): string {
     let fromArgs = '';
     if (action.args !== undefined) {
@@ -1671,6 +1770,15 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
     if (this.isPersonaEditorAction(action)) {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
+      return;
+    }
+    if (action.id === 'stripe.account.open') {
+      const onboardingUrl = this.stripeOnboardingUrlForAction(action);
+      if (!this.isStripeOnboardingUrl(onboardingUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_stripe_onboarding_url');
+        return;
+      }
+      await this.openExternalUrl(onboardingUrl);
       return;
     }
     if (this.isStripeReceivingActionId(action)) {
@@ -2026,6 +2134,9 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
     const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
     this.applySurface(resultSurface);
+    if (toolId === 'payment.account.setup') {
+      await this.saveStripeReceivingProfile(resultSurface);
+    }
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
       status: result.ok ? 'ready' : 'error',

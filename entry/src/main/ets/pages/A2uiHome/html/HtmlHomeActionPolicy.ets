@@ -19,6 +19,10 @@ interface HtmlPaymentAccountPayload {
   stripePaymentLinkUrl?: HtmlHomePolicyValue;
 }
 
+interface HtmlStripeOnboardingPayload {
+  onboardingUrl?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -37,6 +41,9 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
   for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
     const block = document.blocks[blockIndex];
     if (action.id === 'html_dynamic_save_and_test' && dynamicCredentialAllowed(block, action)) {
+      return true;
+    }
+    if (action.id === 'stripe.account.open' && stripeReceivingOpenAllowed(block, action)) {
       return true;
     }
     for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
@@ -113,6 +120,25 @@ function hasPaymentSendBlock(document: HtmlHomeDocument): boolean {
     }
   }
   return false;
+}
+
+function stripeReceivingOpenAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'StripeReceivingAccountCard' || block.stripeReceiving === undefined) {
+    return false;
+  }
+  const expected = policyText(block.stripeReceiving.onboardingUrl).trim();
+  if (!expected.startsWith('https://connect.stripe.com/')) {
+    return false;
+  }
+  let candidate = action.prompt.trim();
+  if (action.args !== undefined) {
+    const payload = action.args as HtmlStripeOnboardingPayload;
+    const fromArgs = policyText(payload.onboardingUrl).trim();
+    if (fromArgs.length > 0) {
+      candidate = fromArgs;
+    }
+  }
+  return candidate === expected;
 }
 
 function blockHasMetric(block: HtmlHomeBlock, label: string, value: string): boolean {

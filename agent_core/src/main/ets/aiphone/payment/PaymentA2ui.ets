@@ -10,6 +10,7 @@ import {
   A2uiSummaryData
 } from '../runtime/A2uiTypes';
 import {
+  PaymentFundingSource,
   PaymentProvider,
   PaymentTargetType,
   PaymentValidationResult,
@@ -19,6 +20,7 @@ import {
 export interface PaymentActionArgs {
   recipient: string;
   provider: PaymentProvider;
+  fundingSource: PaymentFundingSource;
   amountText: string;
   currency: string;
   note: string;
@@ -85,6 +87,13 @@ function providerLabel(result: PaymentValidationResult): string {
     return 'Stripe';
   }
   return '待选择';
+}
+
+function fundingSourceLabel(source: PaymentFundingSource): string {
+  if (source === 'google_pay') {
+    return 'Google Pay';
+  }
+  return '';
 }
 
 function targetLabel(targetType: PaymentTargetType): string {
@@ -212,6 +221,10 @@ function rowsFor(result: PaymentValidationResult): A2uiGenericToolResultRowData[
   if (account.length > 0) {
     rows.push(row('账号', account));
   }
+  const fundingLabel = fundingSourceLabel(result.fundingSource);
+  if (fundingLabel.length > 0) {
+    rows.push(row('付款方式偏好', fundingLabel));
+  }
   const checkoutUrl = checkoutUrlFor(result);
   if (checkoutUrl.length > 0 && result.status === 'checkout') {
     rows.push(row('确认页', checkoutUrl));
@@ -240,7 +253,8 @@ function summaryFor(result: PaymentValidationResult): string {
     return result.reason.length > 0 ? result.reason : '当前支付请求被安全策略拦截。';
   }
   if (result.status === 'checkout') {
-    return '将在 app 内打开 ' + providerLabel(result) + ' 确认页面。';
+    const fundingLabel = fundingSourceLabel(result.fundingSource);
+    return '将在 app 内打开 ' + providerLabel(result) + ' 确认页面' + (fundingLabel.length > 0 ? '，优先使用 ' + fundingLabel : '') + '。';
   }
   if (result.status === 'completed') {
     return '支付供应商已确认这笔支付完成。';
@@ -248,13 +262,15 @@ function summaryFor(result: PaymentValidationResult): string {
   if (result.status === 'cancelled') {
     return '这笔支付已经取消，没有发起扣款。';
   }
-  return '请确认是否通过 ' + providerLabel(result) + ' 向 ' + recipient + ' 支付 ' + amountLabel(result) + '。';
+  const fundingLabel = fundingSourceLabel(result.fundingSource);
+  return '请确认是否通过 ' + providerLabel(result) + (fundingLabel.length > 0 ? '（' + fundingLabel + '）' : '') + ' 向 ' + recipient + ' 支付 ' + amountLabel(result) + '。';
 }
 
 function actionArgs(result: PaymentValidationResult, phase: string, provider: PaymentProvider, amountText: string): PaymentActionArgs {
   return {
     recipient: result.displayName.length > 0 ? result.displayName : result.recipient,
     provider: provider,
+    fundingSource: result.fundingSource,
     amountText: amountText,
     currency: result.currency,
     note: result.note,
@@ -434,6 +450,7 @@ export function paymentCancelledA2ui(surfaceId: string, result: PaymentValidatio
     accountId: result.accountId,
     displayName: result.displayName,
     provider: result.provider,
+    fundingSource: result.fundingSource,
     amountMinor: result.amountMinor,
     amountText: result.amountText,
     currency: result.currency,
