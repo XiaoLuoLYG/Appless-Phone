@@ -73,7 +73,7 @@ import {
   updateConnectionPanelState,
   voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
+import { A2uiHomeResolvedToolRequest, directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
@@ -2041,6 +2041,16 @@ struct Index {
     }
     if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
       this.logHtmlHomeActionError(action, 'not_allowed');
+      return;
+    }
+    const directPaymentToolId = directPaymentToolIdForActionId(action.id);
+    if (directPaymentToolId.length > 0) {
+      await this.callToolById(
+        directPaymentToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
       return;
     }
     const kind = action.kind.length > 0 ? action.kind : 'prompt';

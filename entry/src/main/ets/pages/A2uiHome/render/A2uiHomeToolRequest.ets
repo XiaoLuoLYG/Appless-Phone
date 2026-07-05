@@ -436,6 +436,16 @@ function toolIdForActionId(actionId: string): string {
   return '';
 }
 
+export function directPaymentToolIdForActionId(actionId: string): string {
+  if (actionId === 'payment.confirm' ||
+    actionId === 'payment.cancel' ||
+    actionId === 'payment.amount.select' ||
+    actionId === 'payment.provider.select') {
+    return 'payment.send';
+  }
+  return '';
+}
+
 function mergeArgs(base: Object | null, override: Object | null): Object | null {
   if (base === null) {
     return override;

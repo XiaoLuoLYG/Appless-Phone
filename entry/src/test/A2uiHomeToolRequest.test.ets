@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
+import { directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
 import {
   A2uiComponent,
   A2uiFlightData,
@@ -267,6 +267,11 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('payment.account.setup');
       expect(resolved.actionId).assertEqual('stripe.account.onboard');
+    });
+
+    it('keeps payment confirmation actions off the model path', 0, () => {
+      expect(directPaymentToolIdForActionId('payment.confirm')).assertEqual('payment.send');
+      expect(directPaymentToolIdForActionId('payment.checkout.open')).assertEqual('');
     });
 
     it('reroutes model note tool to payment for explicit Stripe payment prompts', 0, () => {
