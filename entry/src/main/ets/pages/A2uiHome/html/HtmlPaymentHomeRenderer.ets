@@ -309,6 +309,46 @@ h1 {
   color: var(--ink-soft);
 }
 .action:active { transform: translateY(1px); }
+.google-pay-panel {
+  margin: 0 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background: #fff;
+}
+.google-pay-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.google-pay-head b {
+  font-size: 14px;
+  line-height: 1.25;
+}
+.google-pay-head span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.google-pay-status {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.google-pay-status.error { color: var(--bad); }
+.google-pay-status.ready { color: var(--good); }
+.google-pay-help {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.google-pay-button-slot {
+  margin-top: 12px;
+  min-height: 42px;
+}
 .payee-card {
   padding: 16px;
 }
@@ -488,6 +528,220 @@ const PAYMENT_HOME_JS: string = `
       });
     });
   }
+  function actionById(block, id) {
+    var actions = list(block.actions);
+    for (var index = 0; index < actions.length; index += 1) {
+      if (text(actions[index].id) === id) {
+        return actions[index];
+      }
+    }
+    return null;
+  }
+  function actionArg(action, key) {
+    if (!action || !action.args || typeof action.args !== 'object') { return ''; }
+    return text(action.args[key]);
+  }
+  function googlePayCheckoutConfig(block) {
+    var provider = metric(block, ['支付方式']).toLowerCase();
+    var funding = metric(block, ['付款方式偏好']).toLowerCase();
+    var checkout = actionById(block, 'payment.checkout.open');
+    if (provider.indexOf('paypal') < 0 || funding.indexOf('google pay') < 0 || checkout === null) {
+      return null;
+    }
+    return {
+      clientId: actionArg(checkout, 'paypalClientId'),
+      environment: actionArg(checkout, 'paypalEnvironment') === 'live' ? 'live' : 'sandbox',
+      orderId: actionArg(checkout, 'providerSessionId'),
+      amountText: actionArg(checkout, 'amountText') || metric(block, ['金额']).split(' ')[0],
+      currency: (actionArg(checkout, 'currency') || 'USD').toUpperCase(),
+      paypalMerchantId: actionArg(checkout, 'paypalMerchantId'),
+      recipient: actionArg(checkout, 'recipient'),
+      captureAction: {
+        id: 'payment.capture',
+        label: '确认 Google Pay 支付',
+        prompt: 'PayPal Google Pay approved, capture order ' + actionArg(checkout, 'providerSessionId'),
+        variant: 'primary',
+        kind: 'prompt',
+        args: Object.assign({}, checkout.args || {}, { phase: 'capture' })
+      }
+    };
+  }
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var existing = document.querySelector('script[data-src-key="' + src + '"]');
+      if (existing && existing.getAttribute('data-loaded') === 'true') {
+        resolve();
+        return;
+      }
+      var script = existing || document.createElement('script');
+      var settled = false;
+      var timeout = window.setTimeout(function () {
+        if (settled) { return; }
+        settled = true;
+        reject(new Error('脚本加载超时：' + src));
+      }, 12000);
+      script.src = src;
+      script.async = true;
+      script.setAttribute('data-src-key', src);
+      script.onload = function () {
+        if (settled) { return; }
+        settled = true;
+        window.clearTimeout(timeout);
+        script.setAttribute('data-loaded', 'true');
+        resolve();
+      };
+      script.onerror = function () {
+        if (settled) { return; }
+        settled = true;
+        window.clearTimeout(timeout);
+        reject(new Error('脚本加载失败：' + src));
+      };
+      if (!existing) {
+        document.head.appendChild(script);
+      }
+    });
+  }
+  function withTimeout(promise, label) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timeout = window.setTimeout(function () {
+        if (settled) { return; }
+        settled = true;
+        reject(new Error(label + ' 超时。'));
+      }, 12000);
+      promise.then(function (value) {
+        if (settled) { return; }
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve(value);
+      }).catch(function (error) {
+        if (settled) { return; }
+        settled = true;
+        window.clearTimeout(timeout);
+        reject(error);
+      });
+    });
+  }
+  function googlePayErrorText(error) {
+    if (!error) { return 'Google Pay 当前不可用。'; }
+    if (error.message) { return String(error.message); }
+    try { return JSON.stringify(error); } catch (_error) { return String(error); }
+  }
+  function paypalGooglePaySdkUrl(config) {
+    var params = [
+      'client-id=' + encodeURIComponent(config.clientId),
+      'currency=' + encodeURIComponent(config.currency),
+      'components=googlepay'
+    ];
+    if (config.environment !== 'live') {
+      params.push('buyer-country=US');
+    }
+    if (config.paypalMerchantId.length > 0) {
+      params.push('merchant-id=' + encodeURIComponent(config.paypalMerchantId));
+    }
+    return 'https://www.paypal.com/sdk/js?' + params.join('&');
+  }
+  function setGooglePayStatus(node, message, className) {
+    node.textContent = message;
+    node.className = 'google-pay-status' + (className ? ' ' + className : '');
+  }
+  function addGooglePayPanel(parent, block) {
+    var config = googlePayCheckoutConfig(block);
+    if (config === null) { return; }
+    var panel = add(parent, 'section', 'google-pay-panel');
+    var head = add(panel, 'div', 'google-pay-head');
+    var title = add(head, 'div');
+    add(title, 'b', '', 'Google Pay');
+    add(title, 'span', '', 'PayPal Google Pay · app 内确认');
+    var start = add(head, 'button', 'action secondary', '检测并显示');
+    start.type = 'button';
+    start.disabled = isBusy;
+    var status = add(panel, 'p', 'google-pay-status', '会先检测此设备、WebView 和 PayPal 商户配置是否支持 Google Pay。');
+    add(panel, 'p', 'google-pay-help', '如果 Google Pay 面板空白，请确认手机本地网络可访问 Google Pay，并已登录可用的 Google Wallet。');
+    var slot = add(panel, 'div', 'google-pay-button-slot');
+    start.addEventListener('click', function () {
+      if (start.disabled) { return; }
+      if (config.clientId.length === 0 || config.orderId.length === 0) {
+        setGooglePayStatus(status, '缺少 PayPal client id 或 order id，不能启动 Google Pay。', 'error');
+        return;
+      }
+      start.disabled = true;
+      slot.textContent = '';
+      setGooglePayStatus(status, '正在载入 PayPal 和 Google Pay SDK...', '');
+      Promise.all([
+        loadScript(paypalGooglePaySdkUrl(config)),
+        loadScript('https://pay.google.com/gp/p/js/pay.js')
+      ]).then(function () {
+        if (!window.paypal || typeof window.paypal.Googlepay !== 'function') {
+          throw new Error('PayPal Google Pay 组件未加载。');
+        }
+        if (!window.google || !window.google.payments || !window.google.payments.api) {
+          throw new Error('Google Pay Web SDK 未加载。');
+        }
+        var paypalGooglePay = window.paypal.Googlepay();
+        return withTimeout(paypalGooglePay.config(), 'PayPal Google Pay config').then(function (paypalConfig) {
+          var baseRequest = {
+            apiVersion: paypalConfig.apiVersion || 2,
+            apiVersionMinor: paypalConfig.apiVersionMinor || 0,
+            allowedPaymentMethods: paypalConfig.allowedPaymentMethods
+          };
+          var paymentsClient = new window.google.payments.api.PaymentsClient({
+            environment: config.environment === 'live' ? 'PRODUCTION' : 'TEST',
+            paymentDataCallbacks: {
+              onPaymentAuthorized: function (paymentData) {
+                setGooglePayStatus(status, 'Google Pay 已授权，正在交给 PayPal 确认订单...', '');
+                return window.paypal.Googlepay().confirmOrder({
+                  orderId: config.orderId,
+                  paymentMethodData: paymentData.paymentMethodData
+                }).then(function (confirmResult) {
+                  var providerStatus = text(confirmResult && confirmResult.status).toUpperCase();
+                  if (providerStatus === 'APPROVED' || providerStatus === 'COMPLETED' || providerStatus.length === 0) {
+                    setGooglePayStatus(status, 'PayPal 已确认授权，正在 capture 订单。', 'ready');
+                    postAction(config.captureAction);
+                    return { transactionState: 'SUCCESS' };
+                  }
+                  setGooglePayStatus(status, 'PayPal 未批准此 Google Pay 订单：' + providerStatus, 'error');
+                  return { transactionState: 'ERROR' };
+                }).catch(function (error) {
+                  setGooglePayStatus(status, 'PayPal confirmOrder 失败：' + googlePayErrorText(error), 'error');
+                  return { transactionState: 'ERROR' };
+                });
+              }
+            }
+          });
+          return withTimeout(paymentsClient.isReadyToPay(baseRequest), 'Google Pay isReadyToPay').then(function (ready) {
+            if (!ready || ready.result !== true) {
+              throw new Error('此设备或 WebView 当前未通过 Google Pay isReadyToPay。');
+            }
+            var paymentDataRequest = Object.assign({}, baseRequest, {
+              transactionInfo: {
+                currencyCode: config.currency,
+                totalPriceStatus: 'FINAL',
+                totalPrice: config.amountText
+              },
+              merchantInfo: paypalConfig.merchantInfo,
+              callbackIntents: ['PAYMENT_AUTHORIZATION']
+            });
+            var button = paymentsClient.createButton({
+              onClick: function () {
+                setGooglePayStatus(status, '正在打开 Google Pay 确认面板...', '');
+                withTimeout(paymentsClient.loadPaymentData(paymentDataRequest), 'Google Pay 确认面板').catch(function (error) {
+                  setGooglePayStatus(status, 'Google Pay 没有完成授权：' + googlePayErrorText(error), 'error');
+                });
+              },
+              buttonType: 'pay',
+              buttonColor: 'black'
+            });
+            slot.appendChild(button);
+            setGooglePayStatus(status, 'Google Pay 可用，请点击下方按钮继续。', 'ready');
+          });
+        });
+      }).catch(function (error) {
+        setGooglePayStatus(status, googlePayErrorText(error), 'error');
+        start.disabled = false;
+      });
+    });
+  }
   function valueOf(id) {
     var node = document.getElementById(id);
     return node && node.value ? String(node.value).trim() : '';
@@ -556,6 +810,7 @@ const PAYMENT_HOME_JS: string = `
     var grid = add(card, 'div', 'detail-grid');
     addDetailRows(grid, block);
     addActions(card, block.actions);
+    addGooglePayPanel(card, block);
   }
   var form = add(shell, 'section', 'payee-card');
   var head = add(form, 'div', 'payee-head');

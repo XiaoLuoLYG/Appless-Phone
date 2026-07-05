@@ -64,6 +64,20 @@ export default function paymentCoreTest() {
       expect(result.status).assertEqual('needs_provider');
     });
 
+    it('uses PayPal when Google Pay is requested and the account also has Stripe', 0, () => {
+      const result = validatePaymentRequest({
+        recipient: 'Alex',
+        provider: '',
+        fundingSource: 'google_pay',
+        amountText: '5',
+        currency: 'USD',
+        note: ''
+      } as PaymentRequestDraft, [acct('alex', 'Alex', ['Alex'], 'alex@example.com', 'acct_123', '')], policy);
+      expect(result.status).assertEqual('confirm');
+      expect(result.targetType).assertEqual('paypal');
+      expect(result.fundingSource).assertEqual('google_pay');
+    });
+
     it('normalizes amounts and blocks invalid Stripe URLs', 0, () => {
       expect(normalizePaymentAmount('5.25', 'USD').amountMinor).assertEqual(525);
       const result = validatePaymentRequest({

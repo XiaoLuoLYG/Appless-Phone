@@ -271,6 +271,7 @@ export default function a2uiHomeToolRequestTest() {
 
     it('keeps payment confirmation actions off the model path', 0, () => {
       expect(directPaymentToolIdForActionId('payment.confirm')).assertEqual('payment.send');
+      expect(directPaymentToolIdForActionId('payment.capture')).assertEqual('payment.send');
       expect(directPaymentToolIdForActionId('payment.checkout.open')).assertEqual('');
     });
 

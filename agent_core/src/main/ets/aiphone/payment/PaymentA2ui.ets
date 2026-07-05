@@ -29,6 +29,10 @@ export interface PaymentActionArgs {
   targetType: PaymentTargetType;
   checkoutUrl: string;
   providerSessionId: string;
+  paypalClientId: string;
+  paypalEnvironment: string;
+  paypalEmail: string;
+  paypalMerchantId: string;
 }
 
 function envelopeWithVersion(envelope: A2uiEnvelope): A2uiEnvelope {
@@ -278,7 +282,11 @@ function actionArgs(result: PaymentValidationResult, phase: string, provider: Pa
     accountId: result.accountId,
     targetType: result.targetType,
     checkoutUrl: checkoutUrlFor(result),
-    providerSessionId: result.providerSessionId === undefined ? '' : result.providerSessionId
+    providerSessionId: result.providerSessionId === undefined ? '' : result.providerSessionId,
+    paypalClientId: result.paypalClientId === undefined ? '' : result.paypalClientId,
+    paypalEnvironment: result.paypalEnvironment === undefined ? '' : result.paypalEnvironment,
+    paypalEmail: result.paypalEmail,
+    paypalMerchantId: result.paypalMerchantId
   };
 }
 
@@ -461,7 +469,9 @@ export function paymentCancelledA2ui(surfaceId: string, result: PaymentValidatio
     stripeAccountId: result.stripeAccountId,
     stripePaymentLinkUrl: result.stripePaymentLinkUrl,
     checkoutUrl: result.checkoutUrl,
-    providerSessionId: result.providerSessionId
+    providerSessionId: result.providerSessionId,
+    paypalClientId: result.paypalClientId,
+    paypalEnvironment: result.paypalEnvironment
   };
   return paymentValidationA2ui(surfaceId, cancelled);
 }

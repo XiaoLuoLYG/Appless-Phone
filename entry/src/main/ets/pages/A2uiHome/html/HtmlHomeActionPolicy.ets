@@ -23,6 +23,12 @@ interface HtmlStripeOnboardingPayload {
   onboardingUrl?: HtmlHomePolicyValue;
 }
 
+interface HtmlPaymentCapturePayload {
+  provider?: HtmlHomePolicyValue;
+  phase?: HtmlHomePolicyValue;
+  providerSessionId?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -44,6 +50,9 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
       return true;
     }
     if (action.id === 'stripe.account.open' && stripeReceivingOpenAllowed(block, action)) {
+      return true;
+    }
+    if (action.id === 'payment.capture' && paymentCaptureAllowed(block, action)) {
       return true;
     }
     for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
@@ -139,6 +148,37 @@ function stripeReceivingOpenAllowed(block: HtmlHomeBlock, action: A2uiAction): b
     }
   }
   return candidate === expected;
+}
+
+function paymentCaptureAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || !blockHasMetric(block, 'toolName', 'payment.send')) {
+    return false;
+  }
+  if (block.status !== 'needs_user' || !blockHasMetric(block, '付款方式偏好', 'Google Pay')) {
+    return false;
+  }
+  if (action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlPaymentCapturePayload;
+  const actualProvider = policyText(actual.provider).trim().toLowerCase();
+  const actualPhase = policyText(actual.phase).trim().toLowerCase();
+  const actualSession = policyText(actual.providerSessionId).trim();
+  if (actualProvider !== 'paypal' || actualPhase !== 'capture' || actualSession.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < block.actions.length; index++) {
+    const expected = block.actions[index];
+    if (expected.id !== 'payment.checkout.open' || expected.args === undefined) {
+      continue;
+    }
+    const payload = expected.args as HtmlPaymentCapturePayload;
+    if (policyText(payload.provider).trim().toLowerCase() === 'paypal' &&
+      policyText(payload.providerSessionId).trim() === actualSession) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function blockHasMetric(block: HtmlHomeBlock, label: string, value: string): boolean {

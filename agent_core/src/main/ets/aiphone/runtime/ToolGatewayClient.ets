@@ -7250,7 +7250,9 @@ function paymentResultWithState(
     stripeAccountId: result.stripeAccountId,
     stripePaymentLinkUrl: result.stripePaymentLinkUrl,
     checkoutUrl: checkoutUrl,
-    providerSessionId: providerSessionId
+    providerSessionId: providerSessionId,
+    paypalClientId: result.paypalClientId,
+    paypalEnvironment: result.paypalEnvironment
   } as PaymentValidationResult;
 }
 
@@ -7260,6 +7262,15 @@ function paymentBlocked(result: PaymentValidationResult, reason: string): Paymen
 
 function paymentCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
   return paymentResultWithState(result, 'checkout', 'Provider checkout page is ready.', checkoutUrl, providerSessionId);
+}
+
+function paypalGooglePayCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
+  const checkout = paymentCheckout(result, checkoutUrl, providerSessionId);
+  if (result.fundingSource === 'google_pay') {
+    checkout.paypalClientId = localProviderConfig.paypalClientId;
+    checkout.paypalEnvironment = paypalEnvironmentFromConfig();
+  }
+  return checkout;
 }
 
 function isHttpSuccess(response: HttpTextResponse): boolean {
@@ -7325,7 +7336,7 @@ async function createPayPalGatewayCheckout(result: PaymentValidationResult, base
     return paymentBlocked(result, 'PayPal checkout gateway did not return an approval URL.');
   }
   const providerSessionId = payload.providerSessionId === undefined ? '' : payload.providerSessionId.trim();
-  return paymentCheckout(result, checkoutUrl, providerSessionId);
+  return paypalGooglePayCheckout(result, checkoutUrl, providerSessionId);
 }
 
 async function capturePayPalGatewayPayment(result: PaymentValidationResult, orderId: string, baseEndpoint: string): Promise<PaymentValidationResult> {
@@ -7413,7 +7424,7 @@ async function createPayPalCheckout(result: PaymentValidationResult): Promise<Pa
   if (approvalUrl.length === 0) {
     return paymentBlocked(result, 'PayPal order response did not include an approve URL.');
   }
-  return paymentCheckout(result, approvalUrl, jsonStringField(orderResponse.text, 'id'));
+  return paypalGooglePayCheckout(result, approvalUrl, jsonStringField(orderResponse.text, 'id'));
 }
 
 async function capturePayPalPayment(result: PaymentValidationResult, orderId: string): Promise<PaymentValidationResult> {

@@ -1,6 +1,18 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
-import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+
+interface GooglePayCheckoutArgsFixture {
+  provider: string;
+  fundingSource: string;
+  amountText: string;
+  currency: string;
+  providerSessionId: string;
+  paypalClientId: string;
+  paypalEnvironment: string;
+  paypalEmail: string;
+  paypalMerchantId: string;
+}
 
 function documentFixture(): HtmlHomeDocument {
   return {
@@ -451,6 +463,44 @@ function paymentDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function googlePayCheckoutDocumentFixture(): HtmlHomeDocument {
+  const doc = paymentDocumentFixture();
+  doc.title = '打开支付确认页';
+  doc.blocks[0].title = '打开支付确认页';
+  doc.blocks[0].subtitle = '将在 app 内打开 PayPal 确认页面，优先使用 Google Pay。';
+  doc.blocks[0].status = 'needs_user';
+  doc.blocks[0].rows = [
+    { label: '收款方', value: 'Alex' },
+    { label: '支付方式', value: 'PayPal' },
+    { label: '金额', value: '5 USD' },
+    { label: '模式', value: 'Test' },
+    { label: '账号', value: 'alex@example.com' },
+    { label: '付款方式偏好', value: 'Google Pay' },
+    { label: '确认页', value: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER-1' }
+  ];
+  const checkoutArgs: GooglePayCheckoutArgsFixture = {
+    provider: 'paypal',
+    fundingSource: 'google_pay',
+    amountText: '5.00',
+    currency: 'USD',
+    providerSessionId: 'ORDER-1',
+    paypalClientId: 'paypal-client',
+    paypalEnvironment: 'sandbox',
+    paypalEmail: 'alex@example.com',
+    paypalMerchantId: ''
+  };
+  const checkoutAction: HtmlHomeAction = {
+    id: 'payment.checkout.open',
+    label: '打开确认页',
+    prompt: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER-1',
+    variant: 'primary',
+    kind: 'client',
+    args: checkoutArgs
+  };
+  doc.blocks[0].actions = [checkoutAction];
+  return doc;
+}
+
 function stripeReceivingDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'generic';
@@ -753,6 +803,19 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('任务结果')).assertEqual(-1);
       expect(html.indexOf('保存后可以直接说')).assertEqual(-1);
+    });
+
+    it('renders PayPal Google Pay checkout as an in-app SDK panel', 0, () => {
+      const html = renderHtmlHomeDocument(googlePayCheckoutDocumentFixture());
+
+      expect(html.indexOf('google-pay-panel')).assertLarger(-1);
+      expect(html.indexOf('paypal.Googlepay')).assertLarger(-1);
+      expect(html.indexOf('https://pay.google.com/gp/p/js/pay.js')).assertLarger(-1);
+      expect(html.indexOf('components=googlepay')).assertLarger(-1);
+      expect(html.indexOf('payment.capture')).assertLarger(-1);
+      expect(html.indexOf('PayPal Google Pay · app 内确认')).assertLarger(-1);
+      expect(html.indexOf('如果 Google Pay 面板空白')).assertLarger(-1);
+      expect(html.indexOf('Google Pay 确认面板')).assertLarger(-1);
     });
 
     it('auto-opens Stripe onboarding links after account setup', 0, () => {

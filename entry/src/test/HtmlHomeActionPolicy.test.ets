@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiAction } from '@loop/agent-core';
 import { isHtmlHomeActionAllowed } from '../main/ets/pages/A2uiHome/html/HtmlHomeActionPolicy';
-import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
 interface ThreadOnlyArgsFixture {
   threadId: string;
@@ -9,6 +9,17 @@ interface ThreadOnlyArgsFixture {
 
 interface StripeOnboardingArgsFixture {
   onboardingUrl: string;
+}
+
+interface PaymentCaptureArgsFixture {
+  provider: string;
+  phase: string;
+  providerSessionId: string;
+}
+
+interface PaymentCheckoutArgsFixture {
+  provider: string;
+  providerSessionId: string;
 }
 
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
@@ -170,6 +181,53 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', missingTarget))).assertFalse();
       doc.kind = 'generic';
       expect(isHtmlHomeActionAllowed(doc, action('payment.account.save', allowed))).assertFalse();
+    });
+
+    it('allows PayPal Google Pay capture only for the current checkout order', 0, () => {
+      const doc = documentFixture();
+      const checkoutArgs: PaymentCheckoutArgsFixture = {
+        provider: 'paypal',
+        providerSessionId: 'ORDER-1'
+      };
+      const checkoutAction: HtmlHomeAction = {
+        id: 'payment.checkout.open',
+        label: '打开确认页',
+        prompt: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER-1',
+        variant: 'primary',
+        kind: 'client',
+        args: checkoutArgs
+      };
+      doc.kind = 'payment';
+      doc.blocks = [{
+        id: 'payment-google-pay',
+        kind: 'generic-tool-result',
+        title: '打开支付确认页',
+        subtitle: 'PayPal Google Pay',
+        status: 'needs_user',
+        source: 'PayPal',
+        metrics: [
+          { label: 'source', value: 'PayPal' },
+          { label: 'toolName', value: 'payment.send' }
+        ],
+        rows: [
+          { label: '支付方式', value: 'PayPal' },
+          { label: '付款方式偏好', value: 'Google Pay' }
+        ],
+        actions: [checkoutAction]
+      }];
+      const allowed: PaymentCaptureArgsFixture = {
+        provider: 'paypal',
+        phase: 'capture',
+        providerSessionId: 'ORDER-1'
+      };
+      const wrongOrder: PaymentCaptureArgsFixture = {
+        provider: 'paypal',
+        phase: 'capture',
+        providerSessionId: 'ORDER-2'
+      };
+
+      expect(isHtmlHomeActionAllowed(doc, action('payment.capture', 'capture', 'prompt', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('payment.capture', 'capture', 'prompt', wrongOrder))).assertFalse();
     });
 
     it('allows only the current Stripe onboarding URL to open from HTML', 0, () => {

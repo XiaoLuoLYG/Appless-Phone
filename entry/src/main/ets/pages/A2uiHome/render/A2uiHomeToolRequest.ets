@@ -422,6 +422,7 @@ function toolIdForActionId(actionId: string): string {
     return 'gmail.draft.create';
   }
   if (actionId === 'payment.confirm' ||
+    actionId === 'payment.capture' ||
     actionId === 'payment.cancel' ||
     actionId === 'payment.amount.select' ||
     actionId === 'payment.provider.select' ||
@@ -438,6 +439,7 @@ function toolIdForActionId(actionId: string): string {
 
 export function directPaymentToolIdForActionId(actionId: string): string {
   if (actionId === 'payment.confirm' ||
+    actionId === 'payment.capture' ||
     actionId === 'payment.cancel' ||
     actionId === 'payment.amount.select' ||
     actionId === 'payment.provider.select') {

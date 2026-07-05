@@ -73,6 +73,8 @@ export interface PaymentValidationResult {
   stripePaymentLinkUrl: string;
   checkoutUrl?: string;
   providerSessionId?: string;
+  paypalClientId?: string;
+  paypalEnvironment?: string;
 }
 
 function cleanText(value: string): string {
@@ -386,7 +388,11 @@ export function validatePaymentRequest(
   }
 
   const account = resolution.account;
-  const selection = paymentProviderForAccount(account, draft.provider);
+  let requestedProvider = draft.provider;
+  if (requestedProvider.length === 0 && draft.fundingSource === 'google_pay' && hasPayPalTarget(account)) {
+    requestedProvider = 'paypal';
+  }
+  const selection = paymentProviderForAccount(account, requestedProvider);
   if (selection.targetType === 'none') {
     return validationForAccount(
       'blocked',
