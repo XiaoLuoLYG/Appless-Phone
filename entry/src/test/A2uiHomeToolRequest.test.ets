@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
+import { directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
 import {
   A2uiComponent,
   A2uiFlightData,
@@ -42,6 +42,11 @@ interface MediaOverrideArgsFixture {
 interface FoodPreferenceArgsFixture {
   brandPreference: string;
   sweetness: string;
+}
+
+interface PaymentFallbackArgsFixture {
+  provider: string;
+  fundingSource?: string;
 }
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
@@ -210,6 +215,89 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('maps.place.search');
       expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('infers PayPal payment only for explicit payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '用 PayPal 给 Alex 转 5 美元',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+      expect(args.provider).assertEqual('paypal');
+    });
+
+    it('treats Google Pay as a funding source for payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '用 Google Pay 给罗一格转账 5 美元',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(args.provider).assertEqual('');
+      expect(args.fundingSource).assertEqual('google_pay');
+    });
+
+    it('routes Stripe receiving-account setup separately from payments', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '开通 Stripe 收款账户',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.account.setup');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('routes Stripe receiving-account actions back to setup', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '打开 Stripe 认证',
+        'stripe.account.onboard'
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.account.setup');
+      expect(resolved.actionId).assertEqual('stripe.account.onboard');
+    });
+
+    it('keeps payment confirmation actions off the model path', 0, () => {
+      expect(directPaymentToolIdForActionId('payment.confirm')).assertEqual('payment.send');
+      expect(directPaymentToolIdForActionId('payment.capture')).assertEqual('payment.send');
+      expect(directPaymentToolIdForActionId('payment.checkout.open')).assertEqual('');
+    });
+
+    it('reroutes model note tool to payment for explicit Stripe payment prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('note', '请确认支付信息', 'model_tool_request'),
+        '用 Stripe 给真实商户付款',
+        ''
+      );
+      const args = resolved.args as PaymentFallbackArgsFixture;
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('payment.send');
+      expect(resolved.actionId).assertEqual('client_payment_explicit_reroute');
+      expect(args.provider).assertEqual('stripe');
+    });
+
+    it('does not infer payment for generic provider setup questions', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        'Stripe 是不是必须要商户账号',
+        ''
+      );
+
+      expect(resolved.hasTool).assertFalse();
+      expect(resolved.toolId).assertEqual('');
     });
 
     it('reroutes model-selected maps to food search when Google Maps is not explicit', 0, () => {

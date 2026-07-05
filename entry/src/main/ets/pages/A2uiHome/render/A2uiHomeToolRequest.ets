@@ -21,6 +21,16 @@ interface YouTubeFallbackArgs {
   query: string;
 }
 
+interface PaymentFallbackArgs {
+  provider: string;
+  fundingSource: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  originalQuery: string;
+}
+
 export interface A2uiHomeResolvedToolRequest {
   hasTool: boolean;
   toolId: string;
@@ -174,6 +184,82 @@ function inferredCalendarToolIdForPrompt(prompt: string): string {
   return 'calendar.events.search';
 }
 
+function paymentProviderForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('paypal') >= 0 || prompt.indexOf('贝宝') >= 0) {
+    return 'paypal';
+  }
+  if (lowerPrompt.indexOf('stripe') >= 0) {
+    return 'stripe';
+  }
+  return '';
+}
+
+function paymentFundingSourceForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('google pay') >= 0 ||
+    lowerPrompt.indexOf('googlepay') >= 0 ||
+    lowerPrompt.indexOf('google wallet') >= 0 ||
+    prompt.indexOf('谷歌支付') >= 0) {
+    return 'google_pay';
+  }
+  return '';
+}
+
+function hasStripeReceivingAccountIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  const hasStripe = lowerPrompt.indexOf('stripe') >= 0;
+  const hasAccountWord = containsAny(prompt, ['收款账户', '收款账号', '收款', '账户', '账号', '绑定', '开通', '开户']) ||
+    lowerPrompt.indexOf('connected account') >= 0 ||
+    lowerPrompt.indexOf('connect account') >= 0 ||
+    lowerPrompt.indexOf('onboarding') >= 0;
+  const hasSetupWord = containsAny(prompt, ['开通', '绑定', '创建', '新建', '开户', '设置', '配置', '认证', '入驻', '刷新', '状态', '查看']);
+  if (hasStripe && hasAccountWord && hasSetupWord) {
+    return true;
+  }
+  return containsAny(prompt, ['开通 agent 收款', '开通Agent收款', '绑定 agent 收款', '创建 agent 收款', '创建Agent收款']);
+}
+
+function inferredStripeReceivingAccountToolIdForPrompt(prompt: string): string {
+  return hasStripeReceivingAccountIntent(prompt) ? 'payment.account.setup' : '';
+}
+
+function hasExplicitPaymentIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  const provider = paymentProviderForPrompt(prompt);
+  const hasProvider = provider.length > 0;
+  const hasPaymentVerb = containsAny(prompt, ['转账', '付款', '支付', '打款', '付钱', '收款', '付款页', '支付台']) ||
+    lowerPrompt.indexOf('pay') >= 0 ||
+    lowerPrompt.indexOf('payment') >= 0 ||
+    lowerPrompt.indexOf('transfer') >= 0 ||
+    lowerPrompt.indexOf('checkout') >= 0;
+  if (hasProvider && hasPaymentVerb) {
+    return true;
+  }
+  const hasRecipientHint = prompt.indexOf('给') >= 0 || lowerPrompt.indexOf(' to ') >= 0;
+  return hasRecipientHint && containsAny(prompt, ['转账', '打款', '付款', '付钱']);
+}
+
+function paymentArgsForPrompt(prompt: string): Object | null {
+  if (!hasExplicitPaymentIntent(prompt)) {
+    return null;
+  }
+  const args: PaymentFallbackArgs = {
+    provider: paymentProviderForPrompt(prompt),
+    fundingSource: paymentFundingSourceForPrompt(prompt),
+    recipient: '',
+    amountText: '',
+    currency: '',
+    note: '',
+    originalQuery: prompt.trim()
+  };
+  return args;
+}
+
+function inferredPaymentToolIdForPrompt(prompt: string): string {
+  return paymentArgsForPrompt(prompt) === null ? '' : 'payment.send';
+}
+
 function inferredMapsToolIdForPrompt(prompt: string): string {
   if (!hasExplicitMapsIntent(prompt)) {
     return '';
@@ -283,6 +369,14 @@ function inferredToolIdForPrompt(prompt: string): string {
   if (mailToolId.length > 0) {
     return mailToolId;
   }
+  const stripeReceivingToolId = inferredStripeReceivingAccountToolIdForPrompt(prompt);
+  if (stripeReceivingToolId.length > 0) {
+    return stripeReceivingToolId;
+  }
+  const paymentToolId = inferredPaymentToolIdForPrompt(prompt);
+  if (paymentToolId.length > 0) {
+    return paymentToolId;
+  }
   const gmailToolId = inferredGmailToolIdForPrompt(prompt);
   if (gmailToolId.length > 0) {
     return gmailToolId;
@@ -326,6 +420,30 @@ function inferredToolIdForPrompt(prompt: string): string {
 function toolIdForActionId(actionId: string): string {
   if (actionId === 'gmail.ai.reply.draft') {
     return 'gmail.draft.create';
+  }
+  if (actionId === 'payment.confirm' ||
+    actionId === 'payment.capture' ||
+    actionId === 'payment.cancel' ||
+    actionId === 'payment.amount.select' ||
+    actionId === 'payment.provider.select' ||
+    actionId === 'payment.checkout.open') {
+    return 'payment.send';
+  }
+  if (actionId === 'stripe.account.create' ||
+    actionId === 'stripe.account.onboard' ||
+    actionId === 'stripe.account.refresh') {
+    return 'payment.account.setup';
+  }
+  return '';
+}
+
+export function directPaymentToolIdForActionId(actionId: string): string {
+  if (actionId === 'payment.confirm' ||
+    actionId === 'payment.capture' ||
+    actionId === 'payment.cancel' ||
+    actionId === 'payment.amount.select' ||
+    actionId === 'payment.provider.select') {
+    return 'payment.send';
   }
   return '';
 }
@@ -441,10 +559,12 @@ export function resolveA2uiHomeToolRequest(
 ): A2uiHomeResolvedToolRequest {
   const request = toolRequest(surface);
   let toolId = request.toolId;
-  const prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
+  let prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
   const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
   const forcedGmailToolId = forcedGmailToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
+  const forcedStripeReceivingToolId = inferredStripeReceivingAccountToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
+  const forcedPaymentToolId = inferredPaymentToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedMapsToolId = inferredMapsToolIdForPrompt(prompt);
   const forcedMediaToolId = inferredMediaToolIdForPrompt(prompt);
   const actionToolId = toolIdForActionId(fallbackActionId);
@@ -461,6 +581,14 @@ export function resolveA2uiHomeToolRequest(
       actionId = 'client_intent_fallback';
     }
     toolId = forcedGmailToolId;
+  } else if (forcedStripeReceivingToolId.length > 0 && request.toolId !== forcedStripeReceivingToolId) {
+    actionId = request.toolId.length > 0 ? 'client_stripe_receiving_reroute' : 'client_intent_fallback';
+    toolId = forcedStripeReceivingToolId;
+    prompt = originalPrompt;
+  } else if (forcedPaymentToolId.length > 0 && request.toolId !== forcedPaymentToolId) {
+    actionId = request.toolId.length > 0 ? 'client_payment_explicit_reroute' : 'client_intent_fallback';
+    toolId = forcedPaymentToolId;
+    prompt = originalPrompt;
   } else if (actionToolId.length > 0) {
     if (actionId.length === 0) {
       actionId = 'client_action_fallback';
@@ -490,6 +618,9 @@ export function resolveA2uiHomeToolRequest(
   }
   if (toolId === 'youtube.video.search') {
     args = mergeArgs(youtubeArgsForPrompt(prompt), args);
+  }
+  if (toolId === 'payment.send') {
+    args = mergeArgs(paymentArgsForPrompt(originalPrompt), args);
   }
   if (toolId === 'gmail.draft.create') {
     args = mergeArgs(draftFormArgs(surface), args);

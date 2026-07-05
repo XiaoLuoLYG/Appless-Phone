@@ -25,6 +25,10 @@ function root(child: string): A2uiComponent {
   };
 }
 
+interface StripeOnboardingActionArgs {
+  onboardingUrl: string;
+}
+
 export default function htmlHomeSnapshotTest() {
   describe('htmlHomeSnapshot', () => {
     it('creates a welcome document without a surface', 0, () => {
@@ -478,6 +482,48 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('https://provider.example/mcp')).assertLarger(-1);
       expect(serialized.indexOf('dynamic:maps:API Key')).assertLarger(-1);
       expect(serialized.indexOf('Fixture row')).assertLarger(-1);
+    });
+
+    it('maps Stripe receiving open action to the onboarding URL', 0, () => {
+      const staleAction: A2uiAction = {
+        id: 'stripe.account.onboard',
+        label: '打开 Stripe 托管认证',
+        prompt: '打开 Stripe 托管认证',
+        variant: 'primary',
+        kind: 'client'
+      };
+      const card: A2uiComponent = {
+        id: 'stripe_receiving_account',
+        component: 'StripeReceivingAccountCard',
+        title: 'Stripe 收款账户',
+        status: 'onboarding_required',
+        dataPath: '/stripeReceivingAccount',
+        actions: [staleAction]
+      };
+      const url = 'https://connect.stripe.com/setup/s/acct_123';
+      const doc = createHtmlHomeDocument({
+        surface: surface('payment.account.setup', 'needs_input', [root('stripe_receiving_account'), card],
+          '{"stripeReceivingAccount":{"title":"Stripe 收款账户","status":"onboarding_required","message":"继续认证","displayName":"My Agent","email":"owner@example.com","country":"US","businessType":"individual","stripeAccountId":"acct_123","onboardingUrl":"' + url + '","currentlyDue":[]}}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(doc.blocks[0].actions[0].id).assertEqual('stripe.account.open');
+      expect(doc.blocks[0].actions[0].prompt).assertEqual(url);
+      expect(doc.actions[0].id).assertEqual('stripe.account.open');
+      expect(doc.actions[0].prompt).assertEqual(url);
+      expect(JSON.stringify(doc.blocks[0].actions[0].args).indexOf(url)).assertLarger(-1);
+      const actionArgs: StripeOnboardingActionArgs = { onboardingUrl: url };
+      const openAction: A2uiAction = {
+        id: 'stripe.account.open',
+        label: '打开 Stripe 托管认证',
+        prompt: url,
+        variant: 'primary',
+        kind: 'client',
+        args: actionArgs
+      };
+      expect(isHtmlHomeActionAllowed(doc, openAction)).assertTrue();
     });
 
     it('includes persona metadata when present', 0, () => {

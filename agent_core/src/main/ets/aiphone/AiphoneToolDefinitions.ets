@@ -323,6 +323,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['calendar.authorize']
   },
   {
+    toolId: 'payment.send',
+    domain: 'payment',
+    intent: 'payment.send',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'web_session'],
+    inputSchema: 'paymentSendRequest',
+    outputSchema: 'paymentCheckout',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['payment.confirm', 'payment.cancel', 'payment.amount.select', 'payment.provider.select', 'payment.checkout.open']
+  },
+  {
+    toolId: 'payment.account.setup',
+    domain: 'payment',
+    intent: 'payment.account.setup',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'stripeReceivingAccountSetupRequest',
+    outputSchema: 'stripeReceivingAccountSetupCard',
+    a2uiComponent: 'StripeReceivingAccountCard',
+    actions: ['stripe.account.create', 'stripe.account.open', 'stripe.account.onboard', 'stripe.account.refresh']
+  },
+  {
     toolId: 'maps.place.search',
     domain: 'maps',
     intent: 'maps.place.search',

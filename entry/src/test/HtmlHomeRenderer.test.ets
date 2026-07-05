@@ -1,6 +1,18 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
-import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+
+interface GooglePayCheckoutArgsFixture {
+  provider: string;
+  fundingSource: string;
+  amountText: string;
+  currency: string;
+  providerSessionId: string;
+  paypalClientId: string;
+  paypalEnvironment: string;
+  paypalEmail: string;
+  paypalMerchantId: string;
+}
 
 function documentFixture(): HtmlHomeDocument {
   return {
@@ -419,6 +431,115 @@ function mediaAggregateDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function paymentDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'payment';
+  doc.title = '确认支付';
+  doc.subtitle = '支付前确认收款方和金额。';
+  doc.blocks = [{
+    id: 'payment-1',
+    kind: 'generic-tool-result',
+    title: '确认支付',
+    subtitle: 'PayPal 将在用户确认后创建 checkout。',
+    status: 'ready',
+    source: 'PayPal',
+    metrics: [
+      { label: 'source', value: 'PayPal' },
+      { label: 'toolName', value: 'payment.send' }
+    ],
+    rows: [
+      { label: '收款方', value: 'Alex' },
+      { label: '支付方式', value: 'paypal' },
+      { label: '金额', value: '5 USD' },
+      { label: '模式', value: 'test' }
+    ],
+    actions: [
+      { id: 'payment.confirm', label: '确认支付', prompt: 'confirm', variant: 'primary', kind: 'prompt' },
+      { id: 'payment.cancel', label: '取消', prompt: 'cancel', variant: 'secondary', kind: 'prompt' }
+    ]
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
+function googlePayCheckoutDocumentFixture(): HtmlHomeDocument {
+  const doc = paymentDocumentFixture();
+  doc.title = '打开支付确认页';
+  doc.blocks[0].title = '打开支付确认页';
+  doc.blocks[0].subtitle = '将在 app 内打开 PayPal 确认页面，优先使用 Google Pay。';
+  doc.blocks[0].status = 'needs_user';
+  doc.blocks[0].rows = [
+    { label: '收款方', value: 'Alex' },
+    { label: '支付方式', value: 'PayPal' },
+    { label: '金额', value: '5 USD' },
+    { label: '模式', value: 'Test' },
+    { label: '账号', value: 'alex@example.com' },
+    { label: '付款方式偏好', value: 'Google Pay' },
+    { label: '确认页', value: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER-1' }
+  ];
+  const checkoutArgs: GooglePayCheckoutArgsFixture = {
+    provider: 'paypal',
+    fundingSource: 'google_pay',
+    amountText: '5.00',
+    currency: 'USD',
+    providerSessionId: 'ORDER-1',
+    paypalClientId: 'paypal-client',
+    paypalEnvironment: 'sandbox',
+    paypalEmail: 'alex@example.com',
+    paypalMerchantId: ''
+  };
+  const checkoutAction: HtmlHomeAction = {
+    id: 'payment.checkout.open',
+    label: '打开确认页',
+    prompt: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER-1',
+    variant: 'primary',
+    kind: 'client',
+    args: checkoutArgs
+  };
+  doc.blocks[0].actions = [checkoutAction];
+  return doc;
+}
+
+function stripeReceivingDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'generic';
+  doc.title = 'Stripe 收款账户';
+  doc.subtitle = '继续 Stripe 托管认证。';
+  doc.blocks = [{
+    id: 'stripe-receiving',
+    kind: 'StripeReceivingAccountCard',
+    title: 'Stripe 收款账户',
+    subtitle: 'Stripe 收款账户已创建。请继续 Stripe 托管认证。',
+    status: 'onboarding_required',
+    source: 'individual',
+    metrics: [],
+    rows: [
+      { label: 'Agent', value: 'My Agent' },
+      { label: 'Email', value: 'owner@example.com' },
+      { label: 'Country', value: 'US' },
+      { label: 'Stripe', value: 'acct_123' }
+    ],
+    actions: [{
+      id: 'stripe.account.onboard',
+      label: '继续认证',
+      prompt: '打开 Stripe 认证',
+      variant: 'primary',
+      kind: 'client'
+    }],
+    stripeReceiving: {
+      status: 'onboarding_required',
+      message: '请继续 Stripe 托管认证。',
+      stripeAccountId: 'acct_123',
+      onboardingUrl: 'https://connect.stripe.com/setup/s/acct_123',
+      currentlyDue: []
+    }
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function socialHubDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'social';
@@ -660,6 +781,91 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('window.AMap')).assertEqual(-1);
       expect(html.indexOf('webapi.amap.com')).assertEqual(-1);
       expect(html.indexOf('ReactDOM')).assertEqual(-1);
+    });
+
+    it('renders payment documents with the app payment workspace and saved payee form', 0, () => {
+      const html = renderHtmlHomeDocument(paymentDocumentFixture());
+
+      expect(html.indexOf('payment-shell')).assertLarger(-1);
+      expect(html.indexOf('pay-hero')).assertLarger(-1);
+      expect(html.indexOf('payment-card')).assertLarger(-1);
+      expect(html.indexOf('payee-card')).assertLarger(-1);
+      expect(html.indexOf('provider-logo')).assertLarger(-1);
+      expect(html.indexOf('addProviderMark')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertLarger(-1);
+      expect(html.indexOf('form-actions')).assertLarger(-1);
+      expect(html.indexOf('AIPhone Pay')).assertLarger(-1);
+      expect(html.indexOf('添加付款对象')).assertLarger(-1);
+      expect(html.indexOf('保存对象')).assertLarger(-1);
+      expect(html.indexOf('payment.account.save')).assertLarger(-1);
+      expect(html.indexOf('payee-paypal')).assertLarger(-1);
+      expect(html.indexOf('payee-stripe-link')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+      expect(html.indexOf('任务结果')).assertEqual(-1);
+      expect(html.indexOf('保存后可以直接说')).assertEqual(-1);
+    });
+
+    it('renders PayPal Google Pay checkout inline with the payment actions', 0, () => {
+      const html = renderHtmlHomeDocument(googlePayCheckoutDocumentFixture());
+
+      expect(html.indexOf('google-pay-action')).assertLarger(-1);
+      expect(html.indexOf('google-pay-placeholder')).assertLarger(-1);
+      expect(html.indexOf('Pay with G Pay')).assertLarger(-1);
+      expect(html.indexOf('paypal.Googlepay')).assertLarger(-1);
+      expect(html.indexOf('https://pay.google.com/gp/p/js/pay.js')).assertLarger(-1);
+      expect(html.indexOf('components=googlepay')).assertLarger(-1);
+      expect(html.indexOf('payment.capture')).assertLarger(-1);
+      expect(html.indexOf('检测并显示')).assertEqual(-1);
+      expect(html.indexOf('google-pay-panel')).assertEqual(-1);
+      expect(html.indexOf('mountGooglePayButton(slot, status, config, true)')).assertLarger(-1);
+      expect(html.indexOf('openAfterReady === true')).assertLarger(-1);
+      expect(html.indexOf('Google Pay 已准备好，请点上方按钮打开确认面板。')).assertLarger(-1);
+      expect(html.indexOf('window.setTimeout(function () {\\n      mountGooglePayButton')).assertEqual(-1);
+      expect(html.indexOf('document.head.appendChild(script);')).assertLarger(-1);
+      expect(html.indexOf('if (!existing) {\\n        document.head.appendChild(script);')).assertEqual(-1);
+      expect(html.indexOf('手机 WebView 当前访问不了 Google Pay SDK')).assertLarger(-1);
+      expect(html.indexOf('Google Pay 确认面板')).assertLarger(-1);
+      expect(html.indexOf('PAYER_ACTION_REQUIRED')).assertLarger(-1);
+      expect(html.indexOf('initiatePayerAction')).assertLarger(-1);
+    });
+
+    it('auto-opens Stripe onboarding links after account setup', 0, () => {
+      const html = renderHtmlHomeDocument(stripeReceivingDocumentFixture());
+
+      expect(html.indexOf('autoOpenStripeReceivingOnboarding')).assertLarger(-1);
+      expect(html.indexOf('stripe.account.open')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+      expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
+      expect(html.indexOf('window.location.href = url')).assertEqual(-1);
+    });
+
+    it('uses Stripe receiving action URL in the payment scene', 0, () => {
+      const doc = stripeReceivingDocumentFixture();
+      const staleAction: HtmlHomeAction = {
+        id: 'stripe.account.open',
+        label: '打开 Stripe 托管认证',
+        prompt: '打开 Stripe 托管认证',
+        variant: 'primary',
+        kind: 'client'
+      };
+      doc.kind = 'payment';
+      doc.actions = [staleAction];
+      doc.blocks.unshift({
+        id: 'payment-summary',
+        kind: 'generic-tool-result',
+        title: 'Stripe 收款',
+        subtitle: 'summary',
+        status: 'needs_user',
+        source: 'payment',
+        metrics: [],
+        rows: [{ label: 'toolName', value: 'payment.send' }],
+        actions: [staleAction]
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("blocks[index].kind === 'StripeReceivingAccountCard'")).assertLarger(-1);
+      expect(html.indexOf('actionForBlock(action, block)')).assertLarger(-1);
+      expect(html.indexOf('https://connect.stripe.com/setup/s/acct_123')).assertLarger(-1);
     });
 
     it('keeps non-food documents on the generic renderer', 0, () => {

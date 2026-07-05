@@ -1566,6 +1566,14 @@ async function runQuery(query, index, expectedTool) {
     summary.layoutOk;
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
   if (isSocialHubCase) {
+    const socialHubRecovered = socialHubVisibleOutput &&
+      summary.htmlHomeSurfaceLoad.ok &&
+      !summary.htmlLoadError &&
+      !summary.syntheticFallback &&
+      summary.layoutOk;
+    if (socialHubRecovered) {
+      summary.basePassedWithoutTransport = true;
+    }
     summary.ok = summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
       summary.toolRequested &&

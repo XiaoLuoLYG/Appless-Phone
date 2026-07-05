@@ -22,6 +22,7 @@ import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { HtmlHomeSurfaceView } from './HtmlHomeSurfaceView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
+import { PaymentCheckoutOverlay } from './PaymentCheckoutOverlay';
 import {
   isPromptInputEnabled,
   nextSendSpinnerRotation
@@ -57,6 +58,8 @@ export struct HomePage {
   @Prop isVoiceListening: boolean = false;
   @Prop voiceInputMessage: string = '';
   @Prop showWelcome: boolean = false;
+  @Prop showPaymentCheckout: boolean = false;
+  @Prop paymentCheckoutUrl: string = '';
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   private sendSpinnerTimerId: number = -1;
@@ -69,6 +72,8 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
+  onClosePaymentCheckout: () => void = () => {};
+  onPaymentCheckoutReturn: (url: string) => void = (_url: string): void => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
@@ -354,7 +359,17 @@ export struct HomePage {
       .margin({ top: this.showHistory ? 14 : 0 })
       .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
 
-      if (this.useNativeSurface()) {
+      if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
+        PaymentCheckoutOverlay({
+          url: this.paymentCheckoutUrl,
+          onClose: this.onClosePaymentCheckout,
+          onReturnUrl: this.onPaymentCheckoutReturn
+        })
+          .layoutWeight(1)
+          .margin({ top: 12 })
+          .borderRadius(22)
+          .clip(true)
+      } else if (this.useNativeSurface()) {
         A2uiSurfaceView({
           surface: this.currentSurface,
           renderTick: this.surfaceRenderTick,
@@ -486,6 +501,7 @@ export struct HomePage {
       .height('100%')
       .padding({ left: 16, right: 16, top: 16, bottom: 14 })
       .backgroundColor(COLOR_PAGE)
+
     }
     .width('100%')
     .height('100%')

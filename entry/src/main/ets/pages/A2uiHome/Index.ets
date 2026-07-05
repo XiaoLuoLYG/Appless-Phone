@@ -1,10 +1,12 @@
-import { LocalModelSettings, defaultLocalModelSettings } from '@loop/agent-core';
+import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiAction,
   A2uiCallResult,
@@ -19,6 +21,7 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData
 } from '@loop/agent-core';
+import { genericToolResults, stripeReceivingAccount } from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
@@ -29,7 +32,7 @@ import {
   SocialHubItemData
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
+import { callToolGateway, configureLocalPaymentAccountBookJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -70,7 +73,7 @@ import {
   updateConnectionPanelState,
   voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
+import { A2uiHomeResolvedToolRequest, directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
@@ -80,6 +83,9 @@ const LOG_SNIPPET_LIMIT: number = 1200;
 const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 Appless Phone 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
 const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
+const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
+const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
+const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -110,6 +116,57 @@ interface HtmlPinPayload {
 
 interface SocialHubReplyPayload {
   text?: HtmlActionValue;
+}
+
+interface PaymentCheckoutActionPayload {
+  provider?: HtmlActionValue;
+  recipient?: HtmlActionValue;
+  amountText?: HtmlActionValue;
+  currency?: HtmlActionValue;
+  note?: HtmlActionValue;
+  checkoutUrl?: HtmlActionValue;
+  providerSessionId?: HtmlActionValue;
+}
+
+interface StripeOnboardingActionPayload {
+  onboardingUrl?: HtmlActionValue;
+}
+
+interface StripeReceivingSavedProfile {
+  agentId: string;
+  deviceId: string;
+  displayName: string;
+  email: string;
+  country: string;
+  businessType: string;
+  stripeAccountId: string;
+  status: string;
+}
+
+interface HtmlPaymentAccountPayload {
+  displayName?: HtmlActionValue;
+  aliases?: HtmlActionValue;
+  paypalEmail?: HtmlActionValue;
+  paypalMerchantId?: HtmlActionValue;
+  stripeAccountId?: HtmlActionValue;
+  stripePaymentLinkUrl?: HtmlActionValue;
+}
+
+interface PaymentCaptureArgs {
+  provider: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  phase: string;
+  providerSessionId: string;
+}
+
+interface PaymentSavedPreviewArgs {
+  accountId: string;
+  recipient: string;
+  provider: string;
+  originalQuery: string;
 }
 
 function logSnippet(text: string): string {
@@ -153,6 +210,14 @@ struct Index {
   @State inputText: string = '';
   @State isVoiceListening: boolean = false;
   @State voiceInputMessage: string = '';
+  @State showPaymentCheckout: boolean = false;
+  @State paymentCheckoutUrl: string = '';
+  @State paymentCheckoutProvider: string = '';
+  @State paymentCheckoutProviderSessionId: string = '';
+  @State paymentCheckoutRecipient: string = '';
+  @State paymentCheckoutAmountText: string = '';
+  @State paymentCheckoutCurrency: string = '';
+  @State paymentCheckoutNote: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
   @State personaPacks: PersonaPack[] = allPersonaPacks();
@@ -170,6 +235,8 @@ struct Index {
 
   aboutToAppear(): void {
     this.loadPersonaOverrides();
+    this.loadPaymentAccounts();
+    this.loadStripeReceivingProfile();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -191,6 +258,259 @@ struct Index {
       store.loadSync();
     }
     this.refreshPersonaEditor(this.selectedPersonaId);
+  }
+
+  private paymentAccountPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return preferences.getPreferencesSync(context, { name: PAYMENT_ACCOUNT_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private preferenceText(value: preferences.ValueType | string | number | boolean | null | undefined): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return value.toString();
+    }
+    return '';
+  }
+
+  private savedPaymentAccountsJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(PAYMENT_ACCOUNT_BOOK_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private savedPaymentAccounts(): PaymentAccount[] {
+    const raw = this.savedPaymentAccountsJson().trim();
+    if (raw.length === 0) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw) as PaymentAccount[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  private loadPaymentAccounts(): void {
+    const raw = this.savedPaymentAccountsJson();
+    if (raw.trim().length > 0) {
+      configureLocalPaymentAccountBookJson(raw);
+    }
+  }
+
+  private savedStripeReceivingProfileJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(STRIPE_RECEIVING_PROFILE_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private loadStripeReceivingProfile(): void {
+    const raw = this.savedStripeReceivingProfileJson();
+    if (raw.trim().length > 0) {
+      configureLocalStripeReceivingAgentJson(raw);
+    }
+  }
+
+  private splitPaymentAliases(rawAliases: string): string[] {
+    const normalized = rawAliases.split('，').join(',');
+    const parts = normalized.split(',');
+    const aliases: string[] = [];
+    for (let index = 0; index < parts.length; index++) {
+      const alias = parts[index].trim();
+      if (alias.length > 0) {
+        aliases.push(alias);
+      }
+    }
+    return aliases;
+  }
+
+  private paymentAccountId(displayName: string): string {
+    const value = displayName.trim().toLowerCase();
+    let result = '';
+    let previousSeparator = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value.charAt(index);
+      const code = value.charCodeAt(index);
+      const isAsciiLetter = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+      if (isAsciiLetter) {
+        result += char;
+        previousSeparator = false;
+      } else if (code > 127) {
+        result += char;
+        previousSeparator = false;
+      } else if (!previousSeparator && result.length > 0) {
+        result += '_';
+        previousSeparator = true;
+      }
+    }
+    while (result.endsWith('_')) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result.length > 0 ? result : 'local_payee';
+  }
+
+  private paymentAccountFromAction(action: A2uiAction): PaymentAccount | null {
+    let payload: HtmlPaymentAccountPayload;
+    try {
+      payload = JSON.parse(action.prompt) as HtmlPaymentAccountPayload;
+    } catch (_error) {
+      return null;
+    }
+    const displayName = this.actionText(payload.displayName).trim();
+    const paypalEmail = this.actionText(payload.paypalEmail).trim();
+    const paypalMerchantId = this.actionText(payload.paypalMerchantId).trim();
+    const stripeAccountId = this.actionText(payload.stripeAccountId).trim();
+    const stripePaymentLinkUrl = this.actionText(payload.stripePaymentLinkUrl).trim();
+    if (displayName.length === 0 ||
+      (paypalEmail.length === 0 && paypalMerchantId.length === 0 && stripeAccountId.length === 0 && stripePaymentLinkUrl.length === 0)) {
+      return null;
+    }
+    return {
+      id: this.paymentAccountId(displayName),
+      displayName: displayName,
+      aliases: this.splitPaymentAliases(this.actionText(payload.aliases)),
+      email: '',
+      paypalEmail: paypalEmail,
+      paypalMerchantId: paypalMerchantId,
+      stripeAccountId: stripeAccountId,
+      stripePaymentLinkUrl: stripePaymentLinkUrl,
+      enabled: true
+    };
+  }
+
+  private upsertSavedPaymentAccount(accounts: PaymentAccount[], account: PaymentAccount): PaymentAccount[] {
+    const next: PaymentAccount[] = [];
+    let replaced = false;
+    for (let index = 0; index < accounts.length; index++) {
+      if (accounts[index].id === account.id) {
+        next.push(account);
+        replaced = true;
+      } else {
+        next.push(accounts[index]);
+      }
+    }
+    if (!replaced) {
+      next.push(account);
+    }
+    return next;
+  }
+
+  private paymentPreferredProvider(account: PaymentAccount): string {
+    const hasPayPal = account.paypalEmail.length > 0 || account.paypalMerchantId.length > 0;
+    const hasStripe = account.stripeAccountId.length > 0 || account.stripePaymentLinkUrl.length > 0;
+    if (hasPayPal && !hasStripe) {
+      return 'paypal';
+    }
+    if (hasStripe && !hasPayPal) {
+      return 'stripe';
+    }
+    return '';
+  }
+
+  private async savePaymentAccount(action: A2uiAction): Promise<void> {
+    const account = this.paymentAccountFromAction(action);
+    const store = this.paymentAccountPreferences();
+    if (account === null || store === null) {
+      this.logHtmlHomeActionError(action, 'invalid_payment_account_payload');
+      return;
+    }
+    try {
+      const accounts = this.upsertSavedPaymentAccount(this.savedPaymentAccounts(), account);
+      const raw = JSON.stringify(accounts);
+      store.putSync(PAYMENT_ACCOUNT_BOOK_KEY, raw);
+      await store.flush();
+      configureLocalPaymentAccountBookJson(raw);
+      aiLogInfo('[AIPhone][PaymentAccountSave] ok=true displayName=' + account.displayName);
+      const previewArgs: PaymentSavedPreviewArgs = {
+        accountId: account.id,
+        recipient: account.displayName,
+        provider: this.paymentPreferredProvider(account),
+        originalQuery: '给 ' + account.displayName + ' 转账'
+      };
+      await this.callToolById('payment.send', '给 ' + account.displayName + ' 转账', 'payment.account.saved', previewArgs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '付款对象保存失败',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][PaymentAccountSave] ok=false reason=' + message);
+    }
+  }
+
+  private hasStripeReceivingAccountComponent(surface: A2uiSurfaceState): boolean {
+    for (let index = 0; index < surface.components.length; index++) {
+      if (surface.components[index].component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private stripeReceivingProfileFromSurface(surface: A2uiSurfaceState): StripeReceivingSavedProfile | null {
+    if (!this.hasStripeReceivingAccountComponent(surface)) {
+      return null;
+    }
+    const account: StripeReceivingAccountCardData = stripeReceivingAccount(surface);
+    if (account.stripeAccountId.trim().length === 0) {
+      return null;
+    }
+    return {
+      agentId: account.agentId,
+      deviceId: account.deviceId,
+      displayName: account.displayName,
+      email: account.email,
+      country: account.country,
+      businessType: account.businessType,
+      stripeAccountId: account.stripeAccountId,
+      status: account.status
+    };
+  }
+
+  private async saveStripeReceivingProfile(surface: A2uiSurfaceState): Promise<void> {
+    const profile = this.stripeReceivingProfileFromSurface(surface);
+    const store = this.paymentAccountPreferences();
+    if (profile === null || store === null) {
+      return;
+    }
+    try {
+      const raw = JSON.stringify(profile);
+      store.putSync(STRIPE_RECEIVING_PROFILE_KEY, raw);
+      await store.flush();
+      configureLocalStripeReceivingAgentJson(raw);
+      aiLogInfo('[AIPhone][StripeReceivingProfileSave] ok=true accountIdPresent=true status=' + profile.status);
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfileSave] ok=false reason=' + (error instanceof Error ? error.message : JSON.stringify(error)));
+    }
   }
 
   private savePersonaOverrides(): void {
@@ -234,6 +554,13 @@ struct Index {
 
   private isPersonaEditorAction(action: A2uiAction): boolean {
     return action.id === 'persona_memory_edit' || action.id === 'persona_soul_edit';
+  }
+
+  private isStripeReceivingActionId(action: A2uiAction): boolean {
+    return action.kind === 'client' &&
+      (action.id === 'stripe.account.create' ||
+        action.id === 'stripe.account.onboard' ||
+        action.id === 'stripe.account.refresh');
   }
 
   private openPersonaEditor(personaId: string, target: string): void {
@@ -827,7 +1154,16 @@ struct Index {
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
+          if (fallbackRequest.hasTool && this.surfaceHasToolResult(result.surface, fallbackRequest.toolId)) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
+          } else if (fallbackRequest.hasTool) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
+              ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
+            await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
+          } else {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+          }
         } else {
           await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
         }
@@ -861,6 +1197,16 @@ struct Index {
 
   private async sendPrompt(): Promise<void> {
     await this.submitPrompt(this.inputText, this.inputText);
+  }
+
+  private surfaceHasToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
+    const results = genericToolResults(surface);
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].toolName === toolId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private currentVoiceSession(seq: number): boolean {
@@ -1245,6 +1591,126 @@ struct Index {
     return '';
   }
 
+  private isPaymentCheckoutUrl(url: string): boolean {
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith('https://checkout.stripe.com/') ||
+      lower.startsWith('https://buy.stripe.com/') ||
+      lower.startsWith('https://www.paypal.com/') ||
+      lower.startsWith('https://www.sandbox.paypal.com/');
+  }
+
+  private isStripeOnboardingUrl(url: string): boolean {
+    return url.trim().toLowerCase().startsWith('https://connect.stripe.com/');
+  }
+
+  private stripeOnboardingUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as StripeOnboardingActionPayload;
+      fromArgs = this.actionText(payload.onboardingUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
+  private paymentCheckoutUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as PaymentCheckoutActionPayload;
+      fromArgs = this.actionText(payload.checkoutUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
+  private paymentCheckoutPayload(action: A2uiAction): PaymentCheckoutActionPayload {
+    if (action.args === undefined) {
+      return JSON.parse('{}') as PaymentCheckoutActionPayload;
+    }
+    return action.args as PaymentCheckoutActionPayload;
+  }
+
+  private rememberPaymentCheckout(action: A2uiAction, checkoutUrl: string): void {
+    const payload = this.paymentCheckoutPayload(action);
+    this.paymentCheckoutUrl = checkoutUrl;
+    this.paymentCheckoutProvider = this.actionText(payload.provider).trim().toLowerCase();
+    this.paymentCheckoutProviderSessionId = this.actionText(payload.providerSessionId).trim();
+    this.paymentCheckoutRecipient = this.actionText(payload.recipient).trim();
+    this.paymentCheckoutAmountText = this.actionText(payload.amountText).trim();
+    this.paymentCheckoutCurrency = this.actionText(payload.currency).trim();
+    this.paymentCheckoutNote = this.actionText(payload.note).trim();
+  }
+
+  private queryValue(url: string, key: string): string {
+    const marker = key + '=';
+    const queryIndex = url.indexOf('?');
+    if (queryIndex < 0) {
+      return '';
+    }
+    const query = url.substring(queryIndex + 1);
+    const parts = query.split('&');
+    for (let index = 0; index < parts.length; index++) {
+      if (parts[index].startsWith(marker)) {
+        return decodeURIComponent(parts[index].substring(marker.length));
+      }
+    }
+    return '';
+  }
+
+  private async handlePaymentCheckoutReturn(url: string): Promise<void> {
+    this.showPaymentCheckout = false;
+    const lower = url.toLowerCase();
+    if (lower.indexOf('/cancel') >= 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已取消，没有完成扣款。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    if (this.paymentCheckoutProvider !== 'paypal') {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已返回 app，请在供应商页面确认支付状态。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    const orderId = this.paymentCheckoutProviderSessionId.length > 0 ?
+      this.paymentCheckoutProviderSessionId : this.queryValue(url, 'token');
+    if (orderId.length === 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: 'PayPal 已返回 app，但缺少 order id，不能 capture。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: url
+      }));
+      return;
+    }
+    const args: PaymentCaptureArgs = {
+      provider: 'paypal',
+      recipient: this.paymentCheckoutRecipient,
+      amountText: this.paymentCheckoutAmountText,
+      currency: this.paymentCheckoutCurrency,
+      note: this.paymentCheckoutNote,
+      phase: 'capture',
+      providerSessionId: orderId
+    };
+    await this.callToolById('payment.send', 'PayPal payment approved, capture order ' + orderId, 'payment.capture', args);
+  }
+
   private async saveDynamicCredentialAndTest(action: A2uiAction): Promise<void> {
     let payload: HtmlDynamicCredentialPayload;
     try {
@@ -1306,6 +1772,24 @@ struct Index {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
       return;
     }
+    if (action.id === 'stripe.account.open') {
+      const onboardingUrl = this.stripeOnboardingUrlForAction(action);
+      if (!this.isStripeOnboardingUrl(onboardingUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_stripe_onboarding_url');
+        return;
+      }
+      await this.openExternalUrl(onboardingUrl);
+      return;
+    }
+    if (this.isStripeReceivingActionId(action)) {
+      await this.callToolById(
+        'payment.account.setup',
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     if (this.isSocialHubActionId(action) && !this.isCurrentSocialHubSurface()) {
       this.logHtmlHomeActionError(action, 'social_hub_surface_required');
       return;
@@ -1334,6 +1818,21 @@ struct Index {
     }
     if (action.id === 'html_dynamic_save_and_test') {
       await this.saveDynamicCredentialAndTest(action);
+      return;
+    }
+    if (action.id === 'payment.account.save') {
+      await this.savePaymentAccount(action);
+      return;
+    }
+    if (action.id === 'payment.checkout.open') {
+      const checkoutUrl = this.paymentCheckoutUrlForAction(action);
+      if (!this.isPaymentCheckoutUrl(checkoutUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_payment_checkout_url');
+        return;
+      }
+      this.rememberPaymentCheckout(action, checkoutUrl);
+      this.showPaymentCheckout = true;
+      aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
       return;
     }
     if (action.id === 'gmail.authorize') {
@@ -1544,6 +2043,16 @@ struct Index {
       this.logHtmlHomeActionError(action, 'not_allowed');
       return;
     }
+    const directPaymentToolId = directPaymentToolIdForActionId(action.id);
+    if (directPaymentToolId.length > 0) {
+      await this.callToolById(
+        directPaymentToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);
@@ -1635,6 +2144,9 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
     const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
     this.applySurface(resultSurface);
+    if (toolId === 'payment.account.setup') {
+      await this.saveStripeReceivingProfile(resultSurface);
+    }
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
       status: result.ok ? 'ready' : 'error',
@@ -1774,6 +2286,8 @@ struct Index {
         isVoiceListening: this.isVoiceListening,
         voiceInputMessage: this.voiceInputMessage,
         showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
+        showPaymentCheckout: this.showPaymentCheckout,
+        paymentCheckoutUrl: this.paymentCheckoutUrl,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -1801,6 +2315,12 @@ struct Index {
         },
         onStopVoiceInput: () => {
           this.stopVoiceInput();
+        },
+        onClosePaymentCheckout: () => {
+          this.showPaymentCheckout = false;
+        },
+        onPaymentCheckoutReturn: (url: string) => {
+          this.handlePaymentCheckoutReturn(url);
         },
         onAction: (action: A2uiAction) => {
           this.sendAction(action);

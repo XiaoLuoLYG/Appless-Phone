@@ -2,6 +2,7 @@ import { HtmlHomeDocument } from './HtmlHomeTypes';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
+import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
@@ -286,7 +287,8 @@ h3 {
   --kind-soft: var(--luckin-soft);
 }
 .block[data-kind="dynamic-tool-connect"],
-.block[data-kind="generic-tool-result"] {
+.block[data-kind="generic-tool-result"],
+.block[data-kind="StripeReceivingAccountCard"] {
   --kind-accent: var(--amber);
   --kind-soft: rgba(154, 100, 24, 0.12);
 }
@@ -586,6 +588,20 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   background: var(--panel-strong);
   color: var(--kind-accent);
   box-shadow: none;
+}
+.stripe-onboarding-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 9px 13px;
+  color: var(--kind-accent);
+  background: var(--panel-strong);
+  font-weight: 650;
+  text-decoration: none;
 }
 .credential {
   display: grid;
@@ -1298,6 +1314,7 @@ const HTML_HOME_JS: string = `
     if (kind === 'persona-memory-update') { return '记忆更新'; }
     if (kind === 'dynamic-tool-connect') { return '授权'; }
     if (kind === 'generic-tool-result') { return '工具结果'; }
+    if (kind === 'StripeReceivingAccountCard') { return 'Stripe 收款'; }
     if (kind === 'social-hub-item') { return '社交'; }
     if (kind === 'social-hub-draft') { return '草稿'; }
     if (kind === 'social-hub-connection') { return '连接'; }
@@ -1728,6 +1745,43 @@ const HTML_HOME_JS: string = `
     iframe.src = embedUrl;
     preview.appendChild(iframe);
   }
+  function addStripeReceivingOnboarding(parent, block) {
+    var receiving = block && block.stripeReceiving ? block.stripeReceiving : null;
+    if (!receiving) { return; }
+    var url = text(receiving.onboardingUrl);
+    if (url.indexOf('https://') !== 0) { return; }
+    var link = add(parent, 'a', 'stripe-onboarding-link', '打开 Stripe 托管认证');
+    link.href = url;
+    link.target = '_self';
+    link.rel = 'noreferrer';
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      postStripeReceivingOpen(url);
+    });
+    autoOpenStripeReceivingOnboarding(receiving, url);
+  }
+  function postStripeReceivingOpen(url) {
+    postAction({
+      id: 'stripe.account.open',
+      label: '打开 Stripe 托管认证',
+      prompt: url,
+      variant: 'primary',
+      kind: 'client',
+      args: { onboardingUrl: url }
+    });
+  }
+  function autoOpenStripeReceivingOnboarding(receiving, url) {
+    if (text(receiving.status) !== 'onboarding_required') { return; }
+    var key = 'aiphone.stripe.onboarding.' + url;
+    try {
+      if (window.sessionStorage && window.sessionStorage.getItem(key) === '1') { return; }
+      if (window.sessionStorage) { window.sessionStorage.setItem(key, '1'); }
+    } catch (_error) {}
+    window.setTimeout(function () {
+      postStripeReceivingOpen(url);
+    }, 0);
+  }
   function numberIn(value) {
     var match = text(value).replace(/,/g, '').match(/[0-9]+(?:\\.[0-9]+)?/);
     return match ? Number(match[0]) : Number.NaN;
@@ -2095,6 +2149,7 @@ const HTML_HOME_JS: string = `
         addGoogleMapPreview(card, block);
         var detailHost = expandable ? add(card, 'div', 'details') : card;
         addMediaEmbed(detailHost, block);
+        addStripeReceivingOnboarding(detailHost, block);
         if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
           addMailExpandedDetails(detailHost, block);
         } else {
@@ -2155,6 +2210,9 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
   }
   if (shouldRenderFoodHomeDocument(document)) {
     return renderFoodHomeDocument(document, isBusy);
+  }
+  if (shouldRenderPaymentHomeDocument(document)) {
+    return renderPaymentHomeDocument(document, isBusy);
   }
   const renderDocument: HtmlHomeDocumentWithBusy = {
     version: document.version,

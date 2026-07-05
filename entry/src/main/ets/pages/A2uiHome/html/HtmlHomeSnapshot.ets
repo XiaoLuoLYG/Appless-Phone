@@ -8,6 +8,7 @@ import {
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_CARD,
@@ -26,7 +27,8 @@ import {
   A2uiSummaryData,
   A2uiSurfaceState,
   A2uiTrainData,
-  A2uiTravelOptionData
+  A2uiTravelOptionData,
+  StripeReceivingAccountCardData
 } from '@loop/agent-core';
 import {
   actionsOf,
@@ -41,6 +43,7 @@ import {
   socialHubConnections,
   socialHubDraft,
   socialHubItems,
+  stripeReceivingAccount,
   trainOptions,
   travelOptions
 } from '@loop/agent-core';
@@ -66,6 +69,7 @@ import {
   HtmlHomePersona,
   HtmlHomePersonaMemory,
   HtmlHomeSource,
+  HtmlHomeStripeReceiving,
   HtmlHomeTimelineItem
 } from './HtmlHomeTypes';
 
@@ -75,6 +79,10 @@ type HtmlHomeTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy: boolean;
+}
+
+interface StripeOnboardingActionArgs {
+  onboardingUrl: string;
 }
 
 export interface CreateHtmlHomeDocumentParams {
@@ -235,6 +243,10 @@ function appendBlocksForComponent(document: HtmlHomeDocument, surface: A2uiSurfa
   }
   if (component.component === A2UI_COMPONENT_SOCIAL_HUB) {
     appendSocialHubBlocks(document, surface, component);
+    return;
+  }
+  if (component.component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+    appendStripeReceivingBlock(document, surface, component);
     return;
   }
   if (component.component === A2UI_COMPONENT_ACTION_BAR ||
@@ -653,6 +665,56 @@ function appendPersonaMemoryUpdateBlock(document: HtmlHomeDocument, surface: A2u
   document.blocks.push(block);
 }
 
+function appendStripeReceivingBlock(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  const account: StripeReceivingAccountCardData = stripeReceivingAccount(surface);
+  const block = newBlock(component.id, A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD, firstText(account.title, componentTitleOf(component), 'Stripe 收款账户'));
+  block.subtitle = account.message;
+  block.status = firstText(account.status, surface.status);
+  block.source = account.businessType;
+  appendMetric(block.rows, 'Agent', account.displayName);
+  appendMetric(block.rows, 'Email', account.email);
+  appendMetric(block.rows, 'Country', account.country);
+  appendMetric(block.rows, 'Stripe', account.stripeAccountId.length > 0 ? account.stripeAccountId : '未创建');
+  if (account.currentlyDue.length > 0) {
+    appendMetric(block.rows, '仍需资料', account.currentlyDue.join(', '));
+  }
+  const receiving: HtmlHomeStripeReceiving = {
+    status: account.status,
+    message: account.message,
+    stripeAccountId: account.stripeAccountId,
+    onboardingUrl: account.onboardingUrl,
+    currentlyDue: account.currentlyDue.slice()
+  };
+  block.stripeReceiving = receiving;
+  block.actions = htmlActions(actionsOf(component), component.id);
+  if (account.onboardingUrl.startsWith('https://connect.stripe.com/')) {
+    const args: StripeOnboardingActionArgs = { onboardingUrl: account.onboardingUrl };
+    const openAction: HtmlHomeAction = {
+      id: 'stripe.account.open',
+      label: '打开 Stripe 托管认证',
+      prompt: account.onboardingUrl,
+      variant: 'primary',
+      kind: 'client',
+      sourceComponentId: component.id,
+      args: args
+    };
+    block.actions = [openAction];
+    removeStripeReceivingActions(document.actions);
+    appendAction(document.actions, openAction);
+  }
+  document.blocks.push(block);
+}
+
+function removeStripeReceivingActions(actions: HtmlHomeAction[]): void {
+  for (let index = actions.length - 1; index >= 0; index -= 1) {
+    if (actions[index].id === 'stripe.account.open' ||
+      actions[index].id === 'stripe.account.onboard' ||
+      actions[index].id === 'stripe.account.create') {
+      actions.splice(index, 1);
+    }
+  }
+}
+
 function dropCompletedThinkingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {
   if (isBusy || !hasNonThinkingBlock(document.blocks)) {
     return;
@@ -693,6 +755,9 @@ function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
   if (surface.intent === 'media' || hasMediaVideoData(surface)) {
     return 'media';
   }
+  if (surface.intent === 'payment' || surface.intent === 'payment.account.setup' || hasPaymentData(surface)) {
+    return 'payment';
+  }
   if (hasComponent(surface, A2UI_COMPONENT_TOOL_CONNECT_CARD) ||
     hasComponent(surface, A2UI_COMPONENT_GENERIC_TOOL_RESULTS) ||
     surface.intent === 'dynamic_tool' ||
@@ -711,7 +776,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media') {
+  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment') {
     return 'tool';
   }
   return 'model';
@@ -735,6 +800,19 @@ function hasMediaVideoData(surface: A2uiSurfaceState): boolean {
   const results = genericToolResults(surface);
   for (let index = 0; index < results.length; index++) {
     if (isMediaVideoResult(results[index])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasPaymentData(surface: A2uiSurfaceState): boolean {
+  if (hasComponent(surface, A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD)) {
+    return true;
+  }
+  const results = genericToolResults(surface);
+  for (let index = 0; index < results.length; index++) {
+    if (results[index].toolName === 'payment.send') {
       return true;
     }
   }
