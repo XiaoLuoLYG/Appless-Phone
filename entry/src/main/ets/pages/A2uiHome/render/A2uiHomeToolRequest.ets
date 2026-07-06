@@ -19,6 +19,8 @@ interface MediaFallbackArgs {
 
 interface YouTubeFallbackArgs {
   query: string;
+  order?: string;
+  maxResults?: number;
 }
 
 interface PaymentFallbackArgs {
@@ -364,12 +366,31 @@ function inferredSocialHubToolIdForPrompt(prompt: string): string {
   return '';
 }
 
+function hasHotVideoIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  return containsAny(prompt, ['最火', '最热门', '热门', '播放量最高']) ||
+    lowerPrompt.indexOf('popular') >= 0 ||
+    lowerPrompt.indexOf('most viewed') >= 0;
+}
+
+function requestedYouTubeResultCount(prompt: string): number {
+  const lowerPrompt = prompt.toLowerCase();
+  if (containsAny(prompt, ['五个', '5个', '5 个']) || lowerPrompt.indexOf('five') >= 0) {
+    return 5;
+  }
+  return 10;
+}
+
 function youtubeArgsForPrompt(prompt: string): Object | null {
   if (hasExplicitYouTubeIntent(prompt) &&
     !hasBilibiliIntent(prompt) &&
     !hasMediaAggregationIntent(prompt) &&
     (hasMediaSearchVerb(prompt) || containsAny(prompt, ['视频']))) {
     const args: YouTubeFallbackArgs = { query: prompt.trim() };
+    if (hasHotVideoIntent(prompt)) {
+      args.order = 'viewCount';
+      args.maxResults = requestedYouTubeResultCount(prompt);
+    }
     return args;
   }
   return null;

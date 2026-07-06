@@ -68,6 +68,14 @@ function argText(args: Object | null, key: string): string {
   return '';
 }
 
+function argNumber(args: Object | null, key: string): number {
+  if (args === null) {
+    return 0;
+  }
+  const value = (args as ToolRequestArgRecord)[key];
+  return typeof value === 'number' ? value : 0;
+}
+
 function argSources(args: Object | null): string[] {
   if (args === null) {
     return [];
@@ -479,6 +487,19 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.toolId).assertEqual('youtube.video.search');
       expect(argText(resolved.args, 'query')).assertEqual('帮我在 YouTube 搜索 qwen max 官方介绍视频');
       expect(argSources(resolved.args).length).assertEqual(0);
+    });
+
+    it('adds YouTube hotness fallback args for five hottest videos', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('youtube.video.search', '帮我在 YouTube 上搜索五个最火的世界杯视频', 'model_tool_request', null),
+        '帮我在 YouTube 上搜索五个最火的世界杯视频',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('youtube.video.search');
+      expect(argText(resolved.args, 'order')).assertEqual('viewCount');
+      expect(argNumber(resolved.args, 'maxResults')).assertEqual(5);
     });
 
     it('infers SocialHub feed, X public search, and social drafts conservatively', 0, () => {

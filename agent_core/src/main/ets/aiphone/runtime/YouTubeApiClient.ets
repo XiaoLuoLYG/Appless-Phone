@@ -34,6 +34,11 @@ interface YouTubeThumbnail {
   url?: string;
 }
 
+export interface YouTubeSearchOptions {
+  order: string;
+  maxResults: number;
+}
+
 function textOf(value: Object | string | number | boolean | null | undefined): string {
   if (value === undefined || value === null) {
     return '';
@@ -47,11 +52,37 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
   return JSON.stringify(value);
 }
 
-export function youtubeSearchUrl(query: string, apiKey: string): string {
+function normalizedYouTubeOrder(order: string): string {
+  const trimmed = order.trim();
+  if (trimmed === 'viewCount' || trimmed === 'date' || trimmed === 'rating' || trimmed === 'relevance' || trimmed === 'title') {
+    return trimmed;
+  }
+  return 'relevance';
+}
+
+function normalizedYouTubeMaxResults(value: number): number {
+  if (value < 1) {
+    return 1;
+  }
+  if (value > 10) {
+    return 10;
+  }
+  return value;
+}
+
+export function defaultYouTubeSearchOptions(): YouTubeSearchOptions {
+  return {
+    order: 'relevance',
+    maxResults: 10
+  };
+}
+
+export function youtubeSearchUrl(query: string, apiKey: string, order: string = 'relevance', maxResults: number = 10): string {
   const params = [
     ['part', 'snippet'],
     ['type', 'video'],
-    ['maxResults', '10'],
+    ['maxResults', normalizedYouTubeMaxResults(maxResults).toString()],
+    ['order', normalizedYouTubeOrder(order)],
     ['q', query],
     ['key', apiKey]
   ];
@@ -127,7 +158,7 @@ function responseText(result: Object | string | number | boolean | ArrayBuffer):
   return textOf(result);
 }
 
-export async function callYouTubeVideoSearch(query: string, apiKey: string): Promise<DynamicGenericToolResult[]> {
+export async function callYouTubeVideoSearch(query: string, apiKey: string, options: YouTubeSearchOptions = defaultYouTubeSearchOptions()): Promise<DynamicGenericToolResult[]> {
   if (apiKey.trim().length === 0) {
     return [{
       sourceTag: 'YouTube Data API',
@@ -141,7 +172,7 @@ export async function callYouTubeVideoSearch(query: string, apiKey: string): Pro
   }
   const request = http.createHttp();
   try {
-    const response = await request.request(youtubeSearchUrl(query, apiKey.trim()), {
+    const response = await request.request(youtubeSearchUrl(query, apiKey.trim(), options.order, options.maxResults), {
       method: http.RequestMethod.GET,
       header: { 'Accept': 'application/json' },
       usingProtocol: http.HttpProtocol.HTTP1_1,

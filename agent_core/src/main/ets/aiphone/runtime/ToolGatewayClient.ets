@@ -67,7 +67,7 @@ import {
 } from './XOAuthClient';
 import { GenericMcpClient } from './GenericMcpClient';
 import { callGmailApiTool } from './GmailApiClient';
-import { callYouTubeVideoSearch } from './YouTubeApiClient';
+import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { callCalendarTool } from './CalendarApiClient';
 import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
@@ -6628,6 +6628,19 @@ function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
   return mediaVideoQueryFromArgs(prompt, args);
 }
 
+function youtubeSearchOptionsFromArgs(args: Object | null): YouTubeSearchOptions {
+  if (args === null) {
+    return defaultYouTubeSearchOptions();
+  }
+  const record = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const order = textOf(record.order).trim();
+  const rawMaxResults = record.maxResults;
+  return {
+    order: order.length > 0 ? order : 'relevance',
+    maxResults: typeof rawMaxResults === 'number' ? rawMaxResults : 10
+  };
+}
+
 interface SocialHubDraftRequestArgs {
   itemId?: Object | string | number | boolean | null;
   platform?: Object | string | number | boolean | null;
@@ -6699,7 +6712,7 @@ async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: s
     return genericToolResultsA2ui(
       surfaceId,
       toolId,
-      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey)
+      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
     );
   }
   return genericToolResultsA2ui(surfaceId, toolId, [{
