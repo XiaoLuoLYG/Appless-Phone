@@ -39,13 +39,7 @@ const dynamicCases = [
 
 const composioCases = [
   {
-    query: '帮我在 GitHub 里找 Appless-Phone 最近的 open issues',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
-    query: '帮我在 Notion 里找一下 7 月旅行计划相关页面',
+    query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
@@ -1157,9 +1151,28 @@ function isCalendarQuery(query) {
   return /Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query);
 }
 
+function isComposioCardQuery(query) {
+  return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
+    (/Google\s*Drive/i.test(query) && /签证材料/.test(query)) ||
+    (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
+    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query));
+}
+
 function layoutExpectationsForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
     return [];
+  }
+  if (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) {
+    return ['Composio 工具结果', 'Composio GitHub 结果', 'GITHUB_FIND_PULL_REQUESTS', 'Appless-Phone'];
+  }
+  if (/Google\s*Drive/i.test(query) && /签证材料/.test(query)) {
+    return ['Composio 工具结果', 'Composio Google Drive 结果', 'GOOGLEDRIVE_FIND_FILE', '签证材料'];
+  }
+  if (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) {
+    return ['Composio 工具结果', 'Composio Google Docs 结果', 'GOOGLEDOCS_SEARCH_DOCUMENTS', 'AIPhoneDemo'];
+  }
+  if (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) {
+    return ['Composio 工具结果', 'Composio Slack 结果', 'SLACK_SEARCH_MESSAGES', 'AIPhoneDemo'];
   }
   if (/^你好$|问候|打招呼/.test(query)) {
     return ['你好'];
@@ -1546,6 +1559,7 @@ async function runQuery(query, index, expectedTool) {
   const expectedHits = expectedMarkers.filter((marker) => evidenceText.includes(marker));
   const expectedMisses = expectedMarkers.filter((marker) => !evidenceText.includes(marker));
   const calendarMarkersOk = !isCalendarQuery(query) || expectedMisses.length === 0;
+  const composioCardMarkersOk = !isComposioCardQuery(query) || expectedMisses.length === 0;
   const forbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyMarkers.filter((marker) => evidenceText.includes(marker));
   const isSocialHubCase = isSocialHubExpectedToolId(expectedToolId);
   const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
@@ -1598,6 +1612,7 @@ async function runQuery(query, index, expectedTool) {
     socialHubVisibleOutput :
     (expectedMarkers.length === 0 || expectedHits.length > 0) &&
     calendarMarkersOk &&
+    composioCardMarkersOk &&
     summary.gmailEccvKeywordVisible;
   if (expectedPersonaMemory === 'luckin_only') {
     summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);

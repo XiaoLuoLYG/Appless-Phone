@@ -40,6 +40,18 @@ function genericResult(): DynamicGenericToolResult {
   };
 }
 
+function composioResult(): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio',
+    toolName: 'GITHUB_FIND_PULL_REQUESTS',
+    title: 'Composio GitHub 结果',
+    status: 'success',
+    summary: 'Composio 已执行 GITHUB_FIND_PULL_REQUESTS，返回 1 条可展示结果。',
+    rows: [{ label: 'Add Composio dynamic backend', value: '#39 | merged | https://github.com/XiaoLuoLYG/Appless-Phone/pull/39' }],
+    rawPreview: '{"data":{"pull_requests":[]}}'
+  };
+}
+
 export default function dynamicToolA2uiTest() {
   describe('dynamicToolA2ui', () => {
     it('builds a connect card surface', 0, () => {
@@ -80,6 +92,16 @@ export default function dynamicToolA2uiTest() {
       expect(parsed.error).assertEqual('');
       expect(serialized.indexOf('"title":"Google Calendar"')).assertLarger(-1);
       expect(serialized.indexOf('"title":"动态工具结果"')).assertEqual(-1);
+    });
+
+    it('uses a Composio surface title for Composio generic results', 0, () => {
+      const parsed = parseA2uiJsonl(genericToolResultsA2ui('surface_model', 'dynamic.search', [composioResult()]));
+      const serialized = JSON.stringify(parsed.envelopes);
+
+      expect(parsed.error).assertEqual('');
+      expect(serialized.indexOf('"title":"Composio 工具结果"')).assertLarger(-1);
+      expect(serialized.indexOf('"title":"动态工具结果"')).assertEqual(-1);
+      expect(serialized.indexOf('GITHUB_FIND_PULL_REQUESTS')).assertLarger(-1);
     });
   });
 }

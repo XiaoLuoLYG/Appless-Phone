@@ -30,6 +30,7 @@ export default function composioDynamicBackendTest() {
     it('blocks likely side-effect execute requests', 0, () => {
       expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertTrue();
       expect(isUnsafeComposioExecute('NOTION_SEARCH', '{"query":"visa"}')).assertFalse();
+      expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
     });
 
     it('maps a Composio search observation to a generic result', 0, () => {
@@ -41,6 +42,22 @@ export default function composioDynamicBackendTest() {
       expect(result.status).assertEqual('success');
       expect(result.summary.indexOf('NOTION_SEARCH')).assertLarger(-1);
       expect(result.rawPreview.indexOf('authorizedToolkits')).assertLarger(-1);
+    });
+
+    it('maps a Composio execute observation to display rows', 0, () => {
+      const observation = '{"data":{"pull_requests":[{"number":39,"title":"Add Composio dynamic backend","state":"merged","html_url":"https://github.com/XiaoLuoLYG/Appless-Phone/pull/39","author":{"login":"XiaoLuoLYG"},"updated_at":"2026-07-06T09:00:00Z"}]}}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GITHUB_FIND_PULL_REQUESTS',
+        '帮我在 GitHub 里找 Appless-Phone 最近的 pr'
+      );
+
+      expect(result.sourceTag).assertEqual('Composio');
+      expect(result.toolName).assertEqual('GITHUB_FIND_PULL_REQUESTS');
+      expect(result.title).assertEqual('Composio GitHub 结果');
+      expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('Add Composio dynamic backend')).assertLarger(-1);
     });
   });
 }

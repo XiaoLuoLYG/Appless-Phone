@@ -205,12 +205,17 @@ function resultOf(result: DynamicGenericToolResult): A2uiGenericToolResultData {
   };
 }
 
-function genericResultTitle(toolId: string): string {
-  return toolId.indexOf('calendar.') === 0 ? 'Google Calendar' : '动态工具结果';
+function genericResultTitle(toolId: string, results: DynamicGenericToolResult[] = []): string {
+  if (toolId.indexOf('calendar.') === 0) {
+    return 'Google Calendar';
+  }
+  if (results.length > 0 && results[0].sourceTag === 'Composio') {
+    return 'Composio 工具结果';
+  }
+  return '动态工具结果';
 }
 
-function genericResultComponents(toolId: string): A2uiComponent[] {
-  const title = genericResultTitle(toolId);
+function genericResultComponents(toolId: string, title: string): A2uiComponent[] {
   const retryAction: A2uiAction = {
     id: 'dynamic_retry',
     label: '重新查询',
@@ -238,7 +243,7 @@ function genericResultComponents(toolId: string): A2uiComponent[] {
 }
 
 export function genericToolResultsA2ui(surfaceId: string, toolId: string, results: DynamicGenericToolResult[]): string {
-  const title = genericResultTitle(toolId);
+  const title = genericResultTitle(toolId, results);
   const a2uiResults: A2uiGenericToolResultData[] = results.map((result: DynamicGenericToolResult): A2uiGenericToolResultData => resultOf(result));
   const summary: A2uiSummaryData = {
     text: a2uiResults.length > 0 ? a2uiResults[0].summary : '动态工具没有返回可展示结果。',
@@ -260,7 +265,7 @@ export function genericToolResultsA2ui(surfaceId: string, toolId: string, result
     {
       updateComponents: {
         surfaceId: surfaceId,
-        components: genericResultComponents(toolId)
+        components: genericResultComponents(toolId, title)
       }
     },
     {

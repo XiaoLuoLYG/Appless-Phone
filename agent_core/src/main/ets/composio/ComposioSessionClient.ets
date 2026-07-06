@@ -8,6 +8,8 @@ const CONNECT_TIMEOUT_MS: number = 15000;
 const READ_TIMEOUT_MS: number = 30000;
 const MAX_OBSERVATION_CHARS: number = 16000;
 const MAX_ACCOUNT_PAGES: number = 10;
+const MAX_SEARCH_DESCRIPTION_CHARS: number = 600;
+const MAX_SEARCH_SCHEMA_CHARS: number = 3000;
 
 interface ConnectedAccountToolkit {
   slug?: string;
@@ -392,8 +394,8 @@ export class ComposioSessionClient {
       const schema = schemas[slug] ?? schemas[normalized];
       candidates.push({
         toolSlug: normalized,
-        description: schema?.description ?? '',
-        inputSchema: schema?.input_schema === undefined ? '{}' : JSON.stringify(schema.input_schema)
+        description: (schema?.description ?? '').substring(0, MAX_SEARCH_DESCRIPTION_CHARS),
+        inputSchema: this.searchSchemaText(schema?.input_schema)
       });
     });
     if (candidates.length === 0) {
@@ -406,6 +408,14 @@ export class ComposioSessionClient {
       instruction: 'Choose one returned toolSlug and call composio with operation=execute and arguments matching inputSchema.'
     };
     return this.limitObservation(JSON.stringify(observation));
+  }
+
+  private searchSchemaText(schema: Object | undefined): string {
+    if (schema === undefined) {
+      return '{}';
+    }
+    const text = JSON.stringify(schema);
+    return text.length > MAX_SEARCH_SCHEMA_CHARS ? '{}' : text;
   }
 
   private authorizedToolkits(): string[] {
