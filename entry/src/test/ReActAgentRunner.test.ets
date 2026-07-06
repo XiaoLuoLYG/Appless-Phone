@@ -4,9 +4,12 @@ import {
   AgentEventKind,
   AgentTool,
   ConversationContext,
+  DynamicGenericToolResult,
+  genericToolResultsA2ui,
   LocalModel,
   parseLoopToolInputArgs,
   ReActAgentRunner,
+  summarizeA2uiObservation,
   ToolRegistry
 } from '@loop/agent-core';
 
@@ -41,6 +44,22 @@ class CaptureTool implements AgentTool {
   }
 }
 
+function mediaResult(status: string = 'success'): DynamicGenericToolResult {
+  return {
+    sourceTag: 'YouTube API',
+    toolName: 'youtube.video.search',
+    title: 'Qwen demo',
+    status: status,
+    summary: 'Found a real provider video result.',
+    rows: [
+      { label: 'Watch URL', value: 'https://youtube.example/watch?v=abc123' },
+      { label: 'Video ID', value: 'abc123' },
+      { label: 'Thumbnail', value: 'https://images.example/thumb.jpg' }
+    ],
+    rawPreview: '{"raw":"must not leak"}'
+  };
+}
+
 export default function reActAgentRunnerTest() {
   describe('reActAgentRunner', () => {
     it('parses parenthesized JSON actions that contain arrays', 0, async () => {
@@ -69,6 +88,44 @@ export default function reActAgentRunnerTest() {
 
       expect(JSON.stringify(parsed).indexOf('"to":["a@example.com"]')).assertLarger(-1);
       expect(JSON.stringify(parsed).indexOf('hello\\nworld')).assertLarger(-1);
+    });
+
+    it('summarizes A2UI observations without leaking raw JSONL or thumbnails', 0, () => {
+      const jsonl = genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult()]);
+      const digest = summarizeA2uiObservation(jsonl);
+
+      expect(digest.isA2ui).assertTrue();
+      expect(digest.shouldStop).assertFalse();
+      expect(digest.failureKey).assertEqual('');
+      expect(digest.text.indexOf('ObservationDigest')).assertLarger(-1);
+      expect(digest.text.indexOf('toolId: youtube.video.search')).assertLarger(-1);
+      expect(digest.text.indexOf('surface status: ready')).assertLarger(-1);
+      expect(digest.text.indexOf('result count: 1')).assertLarger(-1);
+      expect(digest.text.indexOf('Qwen demo')).assertLarger(-1);
+      expect(digest.text.indexOf('status=success')).assertLarger(-1);
+      expect(digest.text.indexOf('source=YouTube API')).assertLarger(-1);
+      expect(digest.text.indexOf('Found a real provider video result.')).assertLarger(-1);
+      expect(digest.text.indexOf('Watch URL: https://youtube.example/watch?v=abc123')).assertLarger(-1);
+      expect(digest.text.indexOf('Video ID: abc123')).assertLarger(-1);
+      expect(digest.text.indexOf('"createSurface"')).assertEqual(-1);
+      expect(digest.text.indexOf('Thumbnail')).assertEqual(-1);
+      expect(digest.text.indexOf('thumb.jpg')).assertEqual(-1);
+      expect(digest.text.indexOf('must not leak')).assertEqual(-1);
+    });
+
+    it('marks terminal A2UI statuses and failure keys', 0, () => {
+      const stopStatuses: string[] = ['blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required'];
+      stopStatuses.forEach((status: string) => {
+        const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
+        expect(digest.shouldStop).assertTrue();
+      });
+
+      const failureStatuses: string[] = ['error', 'blocked', 'auth_required'];
+      failureStatuses.forEach((status: string) => {
+        const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
+        expect(digest.failureKey.indexOf('youtube.video.search')).assertLarger(-1);
+        expect(digest.failureKey.indexOf(status)).assertLarger(-1);
+      });
     });
   });
 }

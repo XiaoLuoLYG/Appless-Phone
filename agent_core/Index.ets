@@ -1,6 +1,7 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
+export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
 export { ToolRegistry, createLoopToolRegistry } from './src/main/ets/agent/ToolRegistry';
 export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
 export { LocalModel } from './src/main/ets/model/LocalModel';
