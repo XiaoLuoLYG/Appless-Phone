@@ -23,8 +23,18 @@ export interface A2uiObservationDigest {
   failureKey: string;
 }
 
-const STOP_STATUSES: string[] = ['blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required'];
-const FAILURE_STATUSES: string[] = ['error', 'blocked', 'auth_required'];
+const STOP_STATUSES: string[] = [
+  'blocked',
+  'confirm_required',
+  'needs_input',
+  'needs_user',
+  'auth_required',
+  'needs_auth',
+  'unsafe_action_blocked'
+];
+const FAILURE_STATUSES: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
+const MAX_DETAILED_RESULTS: number = 5;
+const MAX_TEXT_LENGTH: number = 180;
 const USEFUL_ROW_LABELS: string[] = [
   'Watch URL',
   'Video ID',
@@ -65,6 +75,14 @@ function firstResultToolName(results: A2uiGenericToolResultData[]): string {
   return '';
 }
 
+function compact(value: string, limit: number = MAX_TEXT_LENGTH): string {
+  const normalized = value.split('\n').join(' ').split('\r').join(' ').trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return normalized.substring(0, limit);
+}
+
 function statusMatches(status: string, statuses: string[]): boolean {
   return statuses.indexOf(status.trim()) >= 0;
 }
@@ -84,7 +102,7 @@ function usefulRow(label: string): boolean {
 function appendUsefulRows(lines: string[], rows: A2uiGenericToolResultRowData[]): void {
   for (let index = 0; index < rows.length; index++) {
     const label = rows[index].label.trim();
-    const value = rows[index].value.trim();
+    const value = compact(rows[index].value);
     if (label.length > 0 && value.length > 0 && usefulRow(label)) {
       lines.push(label + ': ' + value);
     }
@@ -94,7 +112,7 @@ function appendUsefulRows(lines: string[], rows: A2uiGenericToolResultRowData[])
 function appendConnectCredential(lines: string[], connect: A2uiDynamicToolConnectData): void {
   const credential = firstText([connect.credentialName, connect.credentialRef]);
   if (credential.length > 0) {
-    lines.push('Credential: ' + credential);
+    lines.push('Credential: ' + compact(credential));
   }
 }
 
@@ -121,7 +139,7 @@ function componentFailureKey(toolId: string, surface: A2uiSurfaceState): string 
   for (let index = 0; index < surface.components.length; index++) {
     const component: A2uiComponent = surface.components[index];
     if (component.status !== undefined && failureForStatus(component.status)) {
-      return firstText([toolId, surface.surfaceId, component.id, 'a2ui']) + ':' + component.status;
+      return firstText([toolId, component.id, 'a2ui']) + ':' + component.status;
     }
   }
   return '';
@@ -129,10 +147,10 @@ function componentFailureKey(toolId: string, surface: A2uiSurfaceState): string 
 
 function failureKeyFor(toolId: string, surface: A2uiSurfaceState, connect: A2uiDynamicToolConnectData, results: A2uiGenericToolResultData[]): string {
   if (failureForStatus(surface.status)) {
-    return firstText([toolId, surface.surfaceId, 'a2ui']) + ':' + surface.status;
+    return firstText([toolId, 'a2ui']) + ':' + surface.status;
   }
   if (failureForStatus(connect.status)) {
-    return firstText([toolId, connect.toolId, surface.surfaceId, 'a2ui']) + ':' + connect.status;
+    return firstText([toolId, connect.toolId, 'dynamic_connect']) + ':' + connect.status;
   }
   const componentKey = componentFailureKey(toolId, surface);
   if (componentKey.length > 0) {
@@ -140,16 +158,17 @@ function failureKeyFor(toolId: string, surface: A2uiSurfaceState, connect: A2uiD
   }
   for (let index = 0; index < results.length; index++) {
     if (failureForStatus(results[index].status)) {
-      return firstText([toolId, results[index].toolName, surface.surfaceId, 'a2ui']) + ':' + results[index].status;
+      return firstText([toolId, results[index].toolName, 'generic_result']) + ':' + results[index].status;
     }
   }
   return '';
 }
 
 function appendResults(lines: string[], results: A2uiGenericToolResultData[]): void {
-  for (let index = 0; index < results.length; index++) {
+  const count = results.length > MAX_DETAILED_RESULTS ? MAX_DETAILED_RESULTS : results.length;
+  for (let index = 0; index < count; index++) {
     const result = results[index];
-    lines.push('result ' + (index + 1).toString() + ': ' + result.title + ' | status=' + result.status + ' | source=' + result.sourceTag + ' | summary=' + result.summary);
+    lines.push('result ' + (index + 1).toString() + ': ' + compact(result.title) + ' | status=' + compact(result.status) + ' | source=' + compact(result.sourceTag) + ' | summary=' + compact(result.summary));
     appendUsefulRows(lines, result.rows);
   }
 }
@@ -182,12 +201,12 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
   const lines: string[] = [
     'ObservationDigest',
     'toolId: ' + toolId,
-    'surface status: ' + surface.status,
+    'surface status: ' + compact(surface.status),
     'result count: ' + results.length.toString()
   ];
 
   if (connect.status.length > 0) {
-    lines.push('connect status: ' + connect.status);
+    lines.push('connect status: ' + compact(connect.status));
     appendConnectCredential(lines, connect);
   }
   appendResults(lines, results);

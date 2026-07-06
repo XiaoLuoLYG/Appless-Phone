@@ -100,11 +100,11 @@ function mediaResult(status: string = 'success'): DynamicGenericToolResult {
   };
 }
 
-function componentOnlyStatusJsonl(status: string): string {
+function componentOnlyStatusJsonl(status: string, surfaceId: string = 'surface_component_only'): string {
   const envelopes: A2uiEnvelope[] = [
     {
       createSurface: {
-        surfaceId: 'surface_component_only',
+        surfaceId: surfaceId,
         root: 'root',
         title: 'Component-only failure',
         intent: 'dynamic_tool',
@@ -114,7 +114,7 @@ function componentOnlyStatusJsonl(status: string): string {
     },
     {
       updateComponents: {
-        surfaceId: 'surface_component_only',
+        surfaceId: surfaceId,
         components: [
           {
             id: 'root',
@@ -137,6 +137,14 @@ function componentOnlyStatusJsonl(status: string): string {
   let jsonl = '';
   envelopes.forEach((envelope: A2uiEnvelope) => jsonl += JSON.stringify(envelope) + '\n');
   return jsonl;
+}
+
+function longText(prefix: string): string {
+  let value = prefix;
+  for (let index = 0; index < 40; index++) {
+    value += '0123456789';
+  }
+  return value + '-tail-marker';
 }
 
 export default function reActAgentRunnerTest() {
@@ -193,13 +201,13 @@ export default function reActAgentRunnerTest() {
     });
 
     it('marks terminal A2UI statuses and failure keys', 0, () => {
-      const stopStatuses: string[] = ['blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required'];
+      const stopStatuses: string[] = ['blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
       stopStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
         expect(digest.shouldStop).assertTrue();
       });
 
-      const failureStatuses: string[] = ['error', 'blocked', 'auth_required'];
+      const failureStatuses: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
       failureStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
         expect(digest.failureKey.indexOf('youtube.video.search')).assertLarger(-1);
@@ -218,6 +226,35 @@ export default function reActAgentRunnerTest() {
           expect(digest.shouldStop).assertTrue();
         }
       });
+    });
+
+    it('keeps component failure keys stable across generated surface ids', 0, () => {
+      const first = summarizeA2uiObservation(componentOnlyStatusJsonl('blocked', 'surface_one'));
+      const second = summarizeA2uiObservation(componentOnlyStatusJsonl('blocked', 'surface_two'));
+
+      expect(first.failureKey).assertEqual(second.failureKey);
+    });
+
+    it('compacts large A2UI digest text and caps detailed result rows', 0, () => {
+      const results: DynamicGenericToolResult[] = [];
+      for (let index = 0; index < 7; index++) {
+        results.push({
+          sourceTag: longText('source-' + index.toString()),
+          toolName: 'youtube.video.search',
+          title: index === 6 ? 'Result 6 should not be detailed' : longText('title-' + index.toString()),
+          status: 'success',
+          summary: longText('summary-' + index.toString()),
+          rows: [{ label: 'Watch URL', value: longText('https://youtube.example/watch-' + index.toString()) }],
+          rawPreview: longText('raw-' + index.toString())
+        });
+      }
+      const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_large', 'youtube.video.search', results));
+
+      expect(digest.text.indexOf('result count: 7')).assertLarger(-1);
+      expect(digest.text.indexOf('result 6')).assertEqual(-1);
+      expect(digest.text.indexOf('Result 6 should not be detailed')).assertEqual(-1);
+      expect(digest.text.indexOf('tail-marker')).assertEqual(-1);
+      expect(digest.text.indexOf('raw-')).assertEqual(-1);
     });
 
     it('continues after an A2UI observation and lets the model decide final', 0, async () => {
