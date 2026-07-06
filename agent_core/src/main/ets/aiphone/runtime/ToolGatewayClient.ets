@@ -75,6 +75,7 @@ import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { SocialHubClient, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
+import { callComposioDynamic } from './ComposioDynamicBackend';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
@@ -6247,9 +6248,14 @@ function dynamicDiscoveryMissingManifest(prompt: string): DynamicToolManifest {
   return manifest;
 }
 
-async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string): Promise<string> {
+async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   const discovery: DynamicToolDiscoveryResult | null = discoverDynamicToolForPrompt(prompt);
   if (discovery === null) {
+    const composioResult = await callComposioDynamic(prompt, args);
+    if (composioResult !== null) {
+      aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=dynamic.search source=composio status=' + composioResult.status);
+      return genericToolResultsA2ui(surfaceId, 'dynamic.search', [composioResult]);
+    }
     aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=none source=modelscope-local-catalog');
     return connectCardA2ui(
       surfaceId,
@@ -6269,9 +6275,9 @@ async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string
   return buildDynamicToolJsonlWithManifest(discovery.toolId, prompt, surfaceId, discovery.manifest);
 }
 
-async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string): Promise<string> {
+async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'dynamic.search') {
-    return buildDiscoveredDynamicToolJsonl(prompt, surfaceId);
+    return buildDiscoveredDynamicToolJsonl(prompt, surfaceId, args);
   }
 
   const registration = dynamicToolRegistry.registrationForToolId(toolId);
@@ -7857,7 +7863,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   if (toolId === 'food.search') {
     return callLocalFoodSearch(prompt, surfaceId, emitJsonl, args);
   }
-  return buildDynamicToolJsonl(toolId, prompt, surfaceId);
+  return buildDynamicToolJsonl(toolId, prompt, surfaceId, args);
 }
 
 async function callLocalTool(toolId: string, prompt: string, surfaceId: string, actionId: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null, args: Object | null = null): Promise<A2uiCallResult> {

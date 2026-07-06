@@ -198,7 +198,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));

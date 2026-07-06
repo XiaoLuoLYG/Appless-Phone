@@ -12,6 +12,7 @@ import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  configureComposioConfigFromRawJson,
   configureLocalPaymentAccountBookJson,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
@@ -217,6 +218,27 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('ppt.generate')).assertTrue();
       expect(isRegisteredToolId('weather.search')).assertFalse();
       expect(isRegisteredToolId('ferry.ticket.search')).assertFalse();
+    });
+
+    it('uses Composio missing-config result for unsupported app dynamic queries', 0, async () => {
+      configureComposioConfigFromRawJson('{}');
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+
+      const result: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'dynamic.search',
+        '帮我在 Notion 里找一下 7 月旅行计划相关页面',
+        'surface_composio',
+        '',
+        noop
+      );
+
+      const rendered = genericToolResults(result.surface);
+      expect(result.ok).assertTrue();
+      expect(rendered.length).assertLarger(0);
+      expect(rendered[0].sourceTag).assertEqual('Composio');
+      expect(rendered[0].status).assertEqual('needs_auth');
+      expect(rendered[0].rawPreview.indexOf('Notion')).assertLarger(-1);
     });
 
     it('registers Gmail tools on the same local tool framework without enabling silent send', 0, () => {
