@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { ComposioConfig } from '@loop/agent-core';
+import { ComposioConfig, describeComposioFailure } from '@loop/agent-core';
 
 export default function composioConfigTest() {
   describe('composioConfig', () => {
@@ -20,6 +20,14 @@ export default function composioConfigTest() {
       expect(config.userId).assertEqual('');
       expect(config.isConfigured()).assertFalse();
       expect(config.missingConfiguration()).assertEqual('apiKey, userId');
+    });
+
+    it('formats object failures without object placeholder text', 0, () => {
+      const failure = JSON.parse('{"code":2300028,"message":{"name":"NetworkError","message":"request timeout"}}') as Object;
+      const message = describeComposioFailure(failure);
+
+      expect(message.indexOf('[object Object]')).assertEqual(-1);
+      expect(message.indexOf('request timeout')).assertLarger(-1);
     });
   });
 }

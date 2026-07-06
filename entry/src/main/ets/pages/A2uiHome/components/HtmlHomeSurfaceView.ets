@@ -25,10 +25,13 @@ export struct HtmlHomeSurfaceView {
   @Prop renderTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   private controller: webview.WebviewController = new webview.WebviewController();
+  private popupController: webview.WebviewController = new webview.WebviewController();
   private bridge: HtmlHomeActionBridge = new HtmlHomeActionBridge();
   private loadedKey: string = '';
   private webReady: boolean = false;
   private busyFrameLoaded: boolean = false;
+  @State private popupVisible: boolean = false;
+  @State private popupTitle: string = '支付确认';
 
   aboutToAppear(): void {
     this.bridge.onAction = (action: A2uiAction): void => {
@@ -71,6 +74,8 @@ export struct HtmlHomeSurfaceView {
       Web({ src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23F5F2EE"></body>', controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
+        .multiWindowAccess(true)
+        .allowWindowOpenMethod(true)
         .javaScriptProxy({
           object: this.bridge,
           name: 'AIPhoneHome',
@@ -85,6 +90,67 @@ export struct HtmlHomeSurfaceView {
           this.webReady = true;
           this.loadHtmlIfNeeded();
         })
+        .onWindowNew((event: OnWindowNewEvent) => {
+          this.popupTitle = popupTitleFromUrl(event.targetUrl);
+          this.popupVisible = true;
+          event.handler.setWebController(this.popupController);
+          aiLogInfo('[AIPhone][HtmlHomeWindowNew] targetChars=' + event.targetUrl.length.toString() +
+            ' userTrigger=' + event.isUserTrigger.toString());
+        })
+
+      if (this.popupVisible) {
+        Column() {
+          Row() {
+            Column() {
+              Text(this.popupTitle)
+                .fontSize(15)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#211B17')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text('安全弹窗 · 仍在 App 内')
+                .fontSize(12)
+                .fontColor('#786E66')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 3 })
+            }
+            .layoutWeight(1)
+
+            Button('关闭')
+              .height(36)
+              .width(68)
+              .fontSize(13)
+              .fontColor('#493F38')
+              .backgroundColor('#F5F2EE')
+              .borderRadius(18)
+              .onClick(() => {
+                this.popupVisible = false;
+              })
+          }
+          .width('100%')
+          .height(64)
+          .padding({ left: 14, right: 12 })
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor('#FFFAF4')
+
+          Web({ src: 'about:blank', controller: this.popupController })
+            .javaScriptAccess(true)
+            .domStorageAccess(true)
+            .multiWindowAccess(true)
+            .allowWindowOpenMethod(true)
+            .width('100%')
+            .layoutWeight(1)
+            .backgroundColor(COLOR_PAGE)
+            .onWindowExit(() => {
+              this.popupVisible = false;
+              aiLogInfo('[AIPhone][HtmlHomeWindowExit]');
+            })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(COLOR_PAGE)
+      }
 
       Row()
         .width('100%')
@@ -140,4 +206,15 @@ function actionObject(value: HtmlHomeActionValue): Object | undefined {
     return undefined;
   }
   return value;
+}
+
+function popupTitleFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.indexOf('google') >= 0 || lower.indexOf('gpay') >= 0) {
+    return 'Google Pay 确认';
+  }
+  if (lower.indexOf('paypal') >= 0) {
+    return 'PayPal 确认';
+  }
+  return '支付确认';
 }

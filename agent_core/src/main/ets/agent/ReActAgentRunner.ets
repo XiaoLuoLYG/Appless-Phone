@@ -117,6 +117,7 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
+    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -210,14 +211,14 @@ export class ReActAgentRunner {
       return null;
     }
 
-    const bracketCall = this.parseDelimitedAction(action, '[', ']');
-    if (bracketCall !== null) {
-      return bracketCall;
-    }
-
     const parenCall = this.parseDelimitedAction(action, '(', ')');
     if (parenCall !== null) {
       return parenCall;
+    }
+
+    const bracketCall = this.parseDelimitedAction(action, '[', ']');
+    if (bracketCall !== null) {
+      return bracketCall;
     }
 
     return null;

@@ -1,5 +1,5 @@
 import { A2uiSurfaceState } from '@loop/agent-core';
-import { toolRequest } from '@loop/agent-core';
+import { genericToolResults, summaryData, toolRequest } from '@loop/agent-core';
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
@@ -80,6 +80,22 @@ function hasMediaAggregationIntent(prompt: string): boolean {
     (prompt.indexOf('聚合') >= 0 && containsAny(prompt, ['视频', '短视频', '媒体']));
 }
 
+function hasComposioDynamicIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  const explicitComposio = lowerPrompt.indexOf('composio') >= 0;
+  const unsupportedToolkit = lowerPrompt.indexOf('notion') >= 0 ||
+    lowerPrompt.indexOf('google drive') >= 0 ||
+    lowerPrompt.indexOf('google docs') >= 0 ||
+    lowerPrompt.indexOf('google doc') >= 0 ||
+    lowerPrompt.indexOf('linear') >= 0 ||
+    lowerPrompt.indexOf('github') >= 0 ||
+    lowerPrompt.indexOf('asana') >= 0 ||
+    lowerPrompt.indexOf('trello') >= 0 ||
+    lowerPrompt.indexOf('hubspot') >= 0 ||
+    lowerPrompt.indexOf('salesforce') >= 0;
+  return explicitComposio || unsupportedToolkit;
+}
+
 function mediaArgsForPrompt(prompt: string): Object | null {
   const bilibiliIntent = hasBilibiliIntent(prompt);
   const youtubeIntent = hasExplicitYouTubeIntent(prompt);
@@ -102,6 +118,9 @@ function mediaArgsForPrompt(prompt: string): Object | null {
 function forcedDynamicToolIdForPrompt(prompt: string): string {
   if (prompt.length === 0) {
     return '';
+  }
+  if (hasComposioDynamicIntent(prompt)) {
+    return 'dynamic.search';
   }
   if (containsAny(prompt, ['船票', '轮渡', '客船', '渡轮', '码头']) &&
     containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '票', '余票', '班次'])) {
@@ -446,6 +465,24 @@ export function directPaymentToolIdForActionId(actionId: string): string {
     return 'payment.send';
   }
   return '';
+}
+
+export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
+  const results = genericToolResults(surface);
+  for (let index = 0; index < results.length; index++) {
+    if (results[index].toolName === toolId) {
+      return true;
+    }
+  }
+  if (toolId === 'social.feed.search' || toolId === 'x.post.search') {
+    for (let index = 0; index < surface.components.length; index++) {
+      if (surface.components[index].component === 'SocialHub') {
+        return true;
+      }
+    }
+  }
+  // ponytail: Loopy Gmail rows expose users.threads.*, while summary keeps the app-level tool id.
+  return summaryData(surface).toolName === toolId;
 }
 
 function mergeArgs(base: Object | null, override: Object | null): Object | null {

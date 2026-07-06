@@ -21,7 +21,7 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData
 } from '@loop/agent-core';
-import { genericToolResults, stripeReceivingAccount } from '@loop/agent-core';
+import { stripeReceivingAccount } from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
@@ -73,7 +73,12 @@ import {
   updateConnectionPanelState,
   voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
+import {
+  A2uiHomeResolvedToolRequest,
+  directPaymentToolIdForActionId,
+  resolveA2uiHomeToolRequest,
+  surfaceHasSatisfiedToolResult
+} from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
@@ -1134,7 +1139,8 @@ struct Index {
         null,
         (update: PersonaMemoryUpdateRequest) => {
           this.applyPersonaMemoryUpdate(update);
-        }
+        },
+        actionArgs
       );
       this.isAwaitingFirstSurface = false;
       this.applySurface(result.surface);
@@ -1155,7 +1161,7 @@ struct Index {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
           const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
-          if (fallbackRequest.hasTool && this.surfaceHasToolResult(result.surface, fallbackRequest.toolId)) {
+          if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
           } else if (fallbackRequest.hasTool) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
@@ -1197,16 +1203,6 @@ struct Index {
 
   private async sendPrompt(): Promise<void> {
     await this.submitPrompt(this.inputText, this.inputText);
-  }
-
-  private surfaceHasToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
-    const results = genericToolResults(surface);
-    for (let index = 0; index < results.length; index++) {
-      if (results[index].toolName === toolId) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private currentVoiceSession(seq: number): boolean {

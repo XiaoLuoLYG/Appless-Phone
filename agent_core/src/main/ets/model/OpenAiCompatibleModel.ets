@@ -111,7 +111,7 @@ export class OpenAiCompatibleModel implements LocalModel {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool[input] or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.'
+        content: 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool(JSON object) or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.'
       }
     ];
 

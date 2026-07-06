@@ -198,6 +198,31 @@ export default function gmailOAuthClientTest() {
       expect(searchJson.indexOf('ECCV')).assertLarger(-1);
     });
 
+    it('derives Gmail search terms from the user prompt when model args are missing', 0, () => {
+      const searchArgs = gmailMcpArgsForPrompt('gmail.mail.search', '帮我查看我Gmail里和我eccv论文相关的邮件');
+      const searchJson = JSON.stringify(searchArgs);
+
+      expect(searchJson.indexOf('eccv')).assertLarger(-1);
+      expect(searchJson.indexOf('论文')).assertLarger(-1);
+      expect(searchJson.indexOf('eccv 论文')).assertEqual(-1);
+      expect(searchJson.indexOf('{eccv OR 论文}')).assertLarger(-1);
+      expect(searchJson.indexOf('"query":"newer_than:30d -in:draft"')).assertEqual(-1);
+      expect(searchJson.indexOf('-in:draft')).assertLarger(-1);
+    });
+
+    it('normalizes mixed-language bare Gmail query args to OR instead of space AND', 0, () => {
+      const providedSearchArgs: GmailSearchArgsFixture = {
+        query: 'eccv 论文',
+        pageSize: 10
+      };
+      const searchArgs = gmailMcpArgsForPrompt('gmail.mail.search', '帮我查看我Gmail里和我eccv论文相关的邮件', providedSearchArgs);
+      const searchJson = JSON.stringify(searchArgs);
+
+      expect(searchJson.indexOf('eccv 论文')).assertEqual(-1);
+      expect(searchJson.indexOf('{eccv OR 论文}')).assertLarger(-1);
+      expect(searchJson.indexOf('-in:draft')).assertLarger(-1);
+    });
+
     it('accepts scalar Gmail draft recipients from model structured args', 0, () => {
       const providedDraftArgs: GmailDraftScalarRecipientArgsFixture = {
         threadId: 'thread-123',

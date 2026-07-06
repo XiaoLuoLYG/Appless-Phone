@@ -173,6 +173,96 @@ function pageSizeArg(args: GmailArgRecord): number {
   return value > 10 ? 10 : value;
 }
 
+function isAsciiSearchChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    char === '_' || char === '-' || char === '.';
+}
+
+function isCjkSearchChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code >= 0x4e00 && code <= 0x9fff;
+}
+
+function stripCjkMailScaffold(value: string): string {
+  const stops = [
+    '帮我', '请', '一下', '查看', '看看', '看', '搜索', '查询', '查找', '查',
+    'Gmail', '谷歌邮箱', '谷歌邮件', '邮箱', '邮件', '收件箱',
+    '里面', '里', '中', '关于', '有关', '相关', '最新', '最近', '重要', '和我', '我的', '我', '的'
+  ];
+  let text = value;
+  stops.forEach((stop: string) => {
+    text = text.split(stop).join('');
+  });
+  return text.trim();
+}
+
+function gmailSearchTermsFromPrompt(prompt: string): string {
+  const tokens: string[] = [];
+  let token = '';
+  let tokenKind = '';
+  const pushToken = (): void => {
+    if (token.length === 0) {
+      return;
+    }
+    const cleaned = tokenKind === 'cjk' ? stripCjkMailScaffold(token) : token.trim();
+    const lower = cleaned.toLowerCase();
+    if (cleaned.length > 0 && lower !== 'gmail' && lower !== 'mail' && lower !== 'email') {
+      tokens.push(cleaned);
+    }
+    token = '';
+    tokenKind = '';
+  };
+
+  for (let index = 0; index < prompt.length; index++) {
+    const char = prompt.charAt(index);
+    const kind = isAsciiSearchChar(char) ? 'ascii' : (isCjkSearchChar(char) ? 'cjk' : '');
+    if (kind.length === 0) {
+      pushToken();
+      continue;
+    }
+    if (tokenKind.length > 0 && tokenKind !== kind) {
+      pushToken();
+    }
+    tokenKind = kind;
+    token += char;
+  }
+  pushToken();
+  // ponytail: fallback only when the model omitted args.query; structured model args remain source of truth.
+  if (tokens.length <= 1) {
+    return tokens.join('');
+  }
+  return '{' + tokens.join(' OR ') + '}';
+}
+
+function hasCjkText(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (isCjkSearchChar(value.charAt(index))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeBareMixedLanguageQuery(query: string): string {
+  const trimmed = query.trim();
+  if (!hasCjkText(trimmed) ||
+    trimmed.indexOf('{') >= 0 ||
+    trimmed.indexOf('}') >= 0 ||
+    trimmed.indexOf('"') >= 0 ||
+    trimmed.indexOf(':') >= 0 ||
+    trimmed.indexOf(' OR ') >= 0) {
+    return query;
+  }
+  const terms = trimmed.split(' ').filter((term: string) => term.length > 0);
+  if (terms.length <= 1) {
+    return query;
+  }
+  return '{' + terms.join(' OR ') + '}';
+}
+
 function charCount(value: string, target: string): number {
   let count = 0;
   for (let index = 0; index < value.length; index++) {
@@ -219,9 +309,22 @@ function removeDanglingQuoteAfterClosedGroup(query: string): string {
 
 function gmailSearchQueryFromArgs(args: GmailArgRecord): string {
   let query = stringArg(args, 'query').trim();
+  let usedPromptFallback = false;
+  if (query.length === 0) {
+    const prompt = stringArg(args, 'prompt').trim();
+    query = prompt.length > 0 ? gmailSearchTermsFromPrompt(prompt) : '';
+    usedPromptFallback = query.length > 0;
+  }
   if (query.length === 0) {
     query = 'newer_than:30d';
+  } else if (usedPromptFallback &&
+    query.indexOf('newer_than:') < 0 &&
+    query.indexOf('older_than:') < 0 &&
+    query.indexOf('after:') < 0 &&
+    query.indexOf('before:') < 0) {
+    query = 'newer_than:30d ' + query;
   }
+  query = normalizeBareMixedLanguageQuery(query);
   query = removeDanglingQuoteAfterClosedGroup(query);
   if (query.indexOf('-in:draft') < 0) {
     query += ' -in:draft';
@@ -599,6 +702,9 @@ export function gmailMcpToolNameForToolId(toolId: string): string {
 
 export function gmailMcpArgsForPrompt(toolId: string, prompt: string, args: Object | null = null): Object {
   const record = gmailArgRecord(args);
+  if (textOf(record.prompt).trim().length === 0) {
+    record.prompt = prompt;
+  }
   if (toolId === 'gmail.mail.search') {
     return new GmailSearchThreadsArgs(gmailSearchQueryFromArgs(record), pageSizeArg(record));
   }

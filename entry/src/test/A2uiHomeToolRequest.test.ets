@@ -1,10 +1,15 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { directPaymentToolIdForActionId, resolveA2uiHomeToolRequest } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
+import {
+  directPaymentToolIdForActionId,
+  resolveA2uiHomeToolRequest,
+  surfaceHasSatisfiedToolResult
+} from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
 import {
   A2uiComponent,
   A2uiFlightData,
   A2uiFormData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
   A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiRowGroupsData,
@@ -157,6 +162,37 @@ function surfaceWithToolRequest(
   };
 }
 
+function surfaceWithSummaryToolResult(summaryToolName: string, resultToolName: string): A2uiSurfaceState {
+  const surface = surfaceWithToolRequest('', '', '');
+  const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+  model.summary.toolName = summaryToolName;
+  const result: A2uiGenericToolResultData = {
+    sourceTag: 'Gmail API',
+    toolName: resultToolName,
+    title: 'Search results',
+    status: 'success',
+    summary: '',
+    rows: [],
+    rawPreview: ''
+  };
+  model.genericToolResults = [result];
+  surface.dataModelJson = JSON.stringify(model);
+  return surface;
+}
+
+function surfaceWithSocialHubComponent(): A2uiSurfaceState {
+  const surface = surfaceWithToolRequest('', '', '');
+  const component: A2uiComponent = {
+    id: 'social_hub',
+    component: 'SocialHub',
+    title: '社交工作台',
+    dataPath: '/socialHub/items',
+    status: 'ready'
+  };
+  surface.components = [component];
+  return surface;
+}
+
 export default function a2uiHomeToolRequestTest() {
   describe('a2uiHomeToolRequest', () => {
     it('uses the model tool request when present', 0, () => {
@@ -190,6 +226,19 @@ export default function a2uiHomeToolRequestTest() {
 
       expect(resolved.hasTool).assertFalse();
       expect(resolved.toolId).assertEqual('');
+    });
+
+    it('treats summary toolName as a satisfied tool result', 0, () => {
+      const surface = surfaceWithSummaryToolResult('gmail.mail.search', 'users.threads.list');
+
+      expect(surfaceHasSatisfiedToolResult(surface, 'gmail.mail.search')).assertTrue();
+    });
+
+    it('treats SocialHub surfaces as satisfied social tool results', 0, () => {
+      const surface = surfaceWithSocialHubComponent();
+
+      expect(surfaceHasSatisfiedToolResult(surface, 'social.feed.search')).assertTrue();
+      expect(surfaceHasSatisfiedToolResult(surface, 'x.post.search')).assertTrue();
     });
 
     it('infers food search when the model omits a tool request for nearby food', 0, () => {
@@ -464,6 +513,30 @@ export default function a2uiHomeToolRequestTest() {
       expect(standaloneX.toolId).assertEqual('x.post.search');
       expect(draft.toolId).assertEqual('social.reply.draft');
       expect(notDraft.toolId).assertEqual('mail.draft.create');
+    });
+
+    it('routes Composio-backed SaaS prompts to dynamic search before fixed social fallbacks', 0, () => {
+      const googleDocs = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我在 Google Docs 里找 AIPhoneDemo 设计文档',
+        ''
+      );
+      const composioSlack = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('social.feed.search', '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息', 'model_tool_request'),
+        '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
+        ''
+      );
+      const plainSlack = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我查看 Slack 最近的消息',
+        ''
+      );
+
+      expect(googleDocs.toolId).assertEqual('dynamic.search');
+      expect(googleDocs.actionId).assertEqual('client_intent_fallback');
+      expect(composioSlack.toolId).assertEqual('dynamic.search');
+      expect(composioSlack.actionId).assertEqual('model_tool_request');
+      expect(plainSlack.toolId).assertEqual('social.feed.search');
     });
 
     it('does not infer X post search from Xcode or generic post text', 0, () => {

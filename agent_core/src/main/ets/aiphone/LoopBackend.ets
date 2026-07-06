@@ -69,19 +69,7 @@ class AiphoneTool implements AgentTool {
   }
 
   private parseInputArgs(input: string): Object | null {
-    const trimmed = input.trim();
-    if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(trimmed) as Object | null;
-      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch (_error) {
-      return null;
-    }
-    return null;
+    return parseLoopToolInputArgs(input);
   }
 
   private runMemoryUpdate(input: string): string {
@@ -91,6 +79,61 @@ class AiphoneTool implements AgentTool {
     }
     return jsonl;
   }
+}
+
+function escapeRawLineBreaksInJsonStrings(value: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index++) {
+    const char = value.charAt(index);
+    if (escaped) {
+      result += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      result += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    if (inString && (char === '\n' || char === '\r')) {
+      if (char === '\r' && index + 1 < value.length && value.charAt(index + 1) === '\n') {
+        index++;
+      }
+      result += '\\n';
+      continue;
+    }
+    result += char;
+  }
+  return result;
+}
+
+export function parseLoopToolInputArgs(input: string): Object | null {
+  const trimmed = input.trim();
+  if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Object | null;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (_error) {
+    try {
+      const parsed = JSON.parse(escapeRawLineBreaksInJsonStrings(trimmed)) as Object | null;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_repairError) {
+    }
+  }
+  return null;
 }
 
 export class LoopBackend {
@@ -198,7 +241,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, or Salesforce. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social inbox requests use SocialHub. For weather, dynamic.search discovers weather.query/maps.weather. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -216,7 +259,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'food.search') {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
     } else if (definition.toolId === 'social.feed.search') {
-      description += '. Use for SocialHub aggregate X/Twitter, Slack, and WeCom feed or connection-state requests. Never fabricate social messages.';
+      description += '. Use for ordinary SocialHub aggregate X/Twitter, Slack, and WeCom feed or connection-state requests. If the user explicitly says Composio Slack, use dynamic.search instead. Never fabricate social messages.';
     } else if (definition.toolId === 'social.reply.draft') {
       description += '. Use only to draft a reply after a real SocialHub item is selected. Include itemId, platform, and instruction when available. Do not send.';
     } else if (definition.toolId === 'x.post.search') {
@@ -230,7 +273,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Generate args.query from the user request; never fabricate Gmail messages. For Chinese academic or application queries, expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping such as {eccv OR paper OR manuscript OR submission OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query; do not pass plain keywords. Generate args.query from the user request; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR submission OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {

@@ -52,6 +52,21 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
   return cleaned + '/v1/chat/completions';
 }
 
+function mergeToolArgs(baseArgs: Object | undefined, overrideArgs: Object | null): Object | undefined {
+  if (overrideArgs === null) {
+    return baseArgs;
+  }
+  if (baseArgs === undefined) {
+    return overrideArgs;
+  }
+  const merged = JSON.parse(JSON.stringify(baseArgs)) as Record<string, Object | string | number | boolean | null | undefined>;
+  const overrides = overrideArgs as Record<string, Object | string | number | boolean | null | undefined>;
+  Object.keys(overrides).forEach((key: string) => {
+    merged[key] = overrides[key];
+  });
+  return merged;
+}
+
 function loopHistory(history: A2uiMessage[]): LoopMessage[] {
   const messages: LoopMessage[] = [];
   history.forEach((item: A2uiMessage) => {
@@ -158,7 +173,8 @@ export async function callLocalModel(
   history: A2uiMessage[],
   onSurface: A2uiSurfaceCallback,
   initialSurface: A2uiSurfaceState | null = null,
-  onPersonaMemoryUpdate: PersonaMemoryUpdateCallback | null = null
+  onPersonaMemoryUpdate: PersonaMemoryUpdateCallback | null = null,
+  toolArgs: Object | null = null
 ): Promise<A2uiCallResult> {
   const store = new A2uiSurfaceStore();
   if (initialSurface !== null) {
@@ -189,7 +205,7 @@ export async function callLocalModel(
     },
     surfaceId: 'surface_model',
     actionId: 'model_tool_request',
-    args: preparedPersona.toolArgs,
+    args: mergeToolArgs(preparedPersona.toolArgs, toolArgs),
     persona: preparedPersona.runtime as Object,
     maxSteps: 6
   };

@@ -123,6 +123,42 @@ interface ComposioErrorResponse {
   request_id?: string;
 }
 
+function safeText(value: Object | string | number | boolean | null | undefined): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value.toString();
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (_error) {
+    return `${value}`;
+  }
+}
+
+export function describeComposioFailure(error: Error | Object | string): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  const record = error as Record<string, Object | string | number | boolean | null | undefined>;
+  const directMessage = safeText(record.message).trim();
+  if (directMessage.length > 0) {
+    return directMessage;
+  }
+  const directError = safeText(record.error).trim();
+  if (directError.length > 0) {
+    return directError;
+  }
+  return safeText(error);
+}
+
 export class ComposioSessionClient {
   private config: ComposioConfig;
   private toolkitAccounts: Map<string, string> = new Map();
@@ -460,7 +496,7 @@ export class ComposioSessionClient {
   }
 
   private safeFailure(action: string, error: Error | Object | string): string {
-    const message = error instanceof Error ? error.message : `${error}`;
+    const message = describeComposioFailure(error);
     return `Composio ${action}失败：${message}`;
   }
 

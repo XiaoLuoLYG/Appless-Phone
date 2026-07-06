@@ -1,4 +1,5 @@
 import localUnitTest from './LocalUnit.test';
+import reActAgentRunnerTest from './ReActAgentRunner.test';
 import a2uiParserTest from './A2uiParser.test';
 import localModelClientTest from './LocalModelClient.test';
 import toolGatewayClientTest from './ToolGatewayClient.test';
@@ -61,6 +62,7 @@ import personaMarkdownTest from './PersonaMarkdown.test';
 
 export default function testsuite() {
   localUnitTest();
+  reActAgentRunnerTest();
   a2uiParserTest();
   localModelClientTest();
   toolGatewayClientTest();

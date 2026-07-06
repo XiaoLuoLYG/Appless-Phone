@@ -11,7 +11,9 @@ export default function composioDynamicBackendTest() {
   describe('composioDynamicBackend', () => {
     it('recognizes unsupported high-frequency app queries', 0, () => {
       expect(isComposioDynamicPrompt('帮我在 Notion 里找一下 7 月旅行计划相关页面')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我在 Google Docs 里找 AIPhoneDemo 设计文档')).assertTrue();
       expect(isComposioDynamicPrompt('帮我查 Linear 里分配给我的高优先级 bug')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息')).assertTrue();
       expect(isComposioDynamicPrompt('帮我查最近重要邮件')).assertFalse();
     });
 

@@ -14,6 +14,7 @@ import {
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
+  A2uiSummaryData,
   A2uiToolRequestData,
   A2uiTravelOptionData,
   A2uiTrainData,
@@ -593,6 +594,10 @@ export function dynamicToolConnect(surface: A2uiSurfaceState): A2uiDynamicToolCo
 
 export function genericToolResults(surface: A2uiSurfaceState): A2uiGenericToolResultData[] {
   return parseModel(surface).genericToolResults;
+}
+
+export function summaryData(surface: A2uiSurfaceState): A2uiSummaryData {
+  return parseModel(surface).summary;
 }
 
 export function stripeReceivingAccount(surface: A2uiSurfaceState): StripeReceivingAccountCardData {

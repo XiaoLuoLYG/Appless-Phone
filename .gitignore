@@ -20,6 +20,9 @@ tool-gateway/.env.local
 tool-gateway/.env
 tool-gateway/.smoke/
 tool-gateway/.map-smoke/
+tool-gateway/.composio/
+tool-gateway/.gpay-debug/
+tool-gateway/.payment-layout/
 entry/src/main/resources/rawfile/aiphone_provider_config.json
 entry/src/main/resources/rawfile/composio_config.json
 entry/src/main/resources/rawfile/agconnect-services.json
