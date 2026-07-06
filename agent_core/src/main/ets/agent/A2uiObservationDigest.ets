@@ -117,12 +117,26 @@ function terminalResultStatus(results: A2uiGenericToolResultData[]): boolean {
   return false;
 }
 
+function componentFailureKey(toolId: string, surface: A2uiSurfaceState): string {
+  for (let index = 0; index < surface.components.length; index++) {
+    const component: A2uiComponent = surface.components[index];
+    if (component.status !== undefined && failureForStatus(component.status)) {
+      return firstText([toolId, surface.surfaceId, component.id, 'a2ui']) + ':' + component.status;
+    }
+  }
+  return '';
+}
+
 function failureKeyFor(toolId: string, surface: A2uiSurfaceState, connect: A2uiDynamicToolConnectData, results: A2uiGenericToolResultData[]): string {
   if (failureForStatus(surface.status)) {
     return firstText([toolId, surface.surfaceId, 'a2ui']) + ':' + surface.status;
   }
   if (failureForStatus(connect.status)) {
     return firstText([toolId, connect.toolId, surface.surfaceId, 'a2ui']) + ':' + connect.status;
+  }
+  const componentKey = componentFailureKey(toolId, surface);
+  if (componentKey.length > 0) {
+    return componentKey;
   }
   for (let index = 0; index < results.length; index++) {
     if (failureForStatus(results[index].status)) {

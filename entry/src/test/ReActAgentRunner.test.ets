@@ -3,6 +3,7 @@ import {
   AgentEvent,
   AgentEventKind,
   AgentTool,
+  A2uiEnvelope,
   ConversationContext,
   DynamicGenericToolResult,
   genericToolResultsA2ui,
@@ -58,6 +59,45 @@ function mediaResult(status: string = 'success'): DynamicGenericToolResult {
     ],
     rawPreview: '{"raw":"must not leak"}'
   };
+}
+
+function componentOnlyStatusJsonl(status: string): string {
+  const envelopes: A2uiEnvelope[] = [
+    {
+      createSurface: {
+        surfaceId: 'surface_component_only',
+        root: 'root',
+        title: 'Component-only failure',
+        intent: 'dynamic_tool',
+        status: 'ready',
+        sendDataModel: true
+      }
+    },
+    {
+      updateComponents: {
+        surfaceId: 'surface_component_only',
+        components: [
+          {
+            id: 'root',
+            component: 'SurfaceRoot',
+            child: 'notice',
+            title: 'Component-only failure',
+            status: 'ready'
+          },
+          {
+            id: 'notice',
+            component: 'ErrorNotice',
+            title: 'Needs attention',
+            body: 'Component status carries the terminal state.',
+            status: status
+          }
+        ]
+      }
+    }
+  ];
+  let jsonl = '';
+  envelopes.forEach((envelope: A2uiEnvelope) => jsonl += JSON.stringify(envelope) + '\n');
+  return jsonl;
 }
 
 export default function reActAgentRunnerTest() {
@@ -126,6 +166,14 @@ export default function reActAgentRunnerTest() {
         expect(digest.failureKey.indexOf('youtube.video.search')).assertLarger(-1);
         expect(digest.failureKey.indexOf(status)).assertLarger(-1);
       });
+    });
+
+    it('sets failure keys from component-only terminal statuses', 0, () => {
+      const digest = summarizeA2uiObservation(componentOnlyStatusJsonl('blocked'));
+
+      expect(digest.isA2ui).assertTrue();
+      expect(digest.shouldStop).assertTrue();
+      expect(digest.failureKey.indexOf('blocked')).assertLarger(-1);
     });
   });
 }
