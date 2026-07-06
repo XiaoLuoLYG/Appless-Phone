@@ -37,6 +37,33 @@ const dynamicCases = [
   }
 ];
 
+const composioCases = [
+  {
+    query: '帮我在 Notion 里找一下 7 月旅行计划相关页面',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Google Drive 里找签证材料',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查 Linear 里分配给我的高优先级 bug',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我给本周发布创建一个 checklist',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  }
+];
+
 const gmailCases = [
   { query: '帮我看 Gmail 里最新的重要邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
   { query: '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了', expectsTool: true, expectedToolId: 'gmail.draft.create' },
@@ -106,6 +133,11 @@ const visibleDomainMarkers = [
   '华为',
   '接入工具',
   'dynamic.search',
+  'Composio',
+  'Notion',
+  'Google Drive',
+  'Linear',
+  'needs_auth',
   'ferry.ticket.search',
   'weather.query',
   'statistics.search',
@@ -225,10 +257,11 @@ const socialHubTruthfulBlockingMarkers = [
 const argv = process.argv.slice(2);
 const cleanData = process.env.AIPHONE_SMOKE_CLEAN_DATA === '1' || argv.includes('--clean-data');
 const runDynamicCases = argv.includes('--dynamic-tools');
+const runComposioCases = argv.includes('--composio-tools');
 const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
-const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--google-apps' && arg !== '--full-regression');
-const selectedDefaultCases = runFullRegression ? fullRegressionCases : (runGoogleApps ? defaultCases.concat(googleAppCases) : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases));
+const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--composio-tools' && arg !== '--google-apps' && arg !== '--full-regression');
+const selectedDefaultCases = runComposioCases ? composioCases : (runFullRegression ? fullRegressionCases : (runGoogleApps ? defaultCases.concat(googleAppCases) : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases)));
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
@@ -274,6 +307,13 @@ function expectedCaseForQuery(query) {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
       expectedDiscoveredToolId: 'ppt.generate'
+    };
+  }
+  if (/Notion|Google\s*Drive|Linear|Asana|Trello|HubSpot|Salesforce|checklist/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'dynamic.search'
     };
   }
   if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {

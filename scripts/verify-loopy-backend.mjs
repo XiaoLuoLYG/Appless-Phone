@@ -90,6 +90,9 @@ function verifySourceContracts() {
   const index = read('agent_core/Index.ets');
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const composioConfig = read('agent_core/src/main/ets/composio/ComposioConfig.ets');
+  const composioClient = read('agent_core/src/main/ets/composio/ComposioSessionClient.ets');
+  const composioDynamic = read('agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets');
   const runtimeDir = resolve(repoRoot, 'agent_core/src/main/ets/aiphone/runtime');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
@@ -158,6 +161,7 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalMapsTool', 'runtime includes Maps execution');
   assertContains(runtimeGateway, 'async function callLocalSocialHubTool', 'runtime includes SocialHub execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
+  assertContains(runtimeGateway, 'callComposioDynamic', 'dynamic.search tries Composio fallback');
   assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
@@ -169,16 +173,23 @@ function verifySourceContracts() {
   assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
   assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
+  assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
   assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
   assertContains(runner, 'isA2uiObservation(observation)', 'ReAct runner stops after A2UI tool observations');
 
-  assertContains(index, "export { LoopBackend }", 'public export includes LoopBackend');
+  assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
   assertContains(index, 'configureLocalProviderConfigFromRawJson', 'public export includes provider raw JSON config');
   assertContains(index, 'prepareGmailOAuthAuthorizationUrl', 'public export includes Gmail OAuth helper');
   assertContains(index, 'AssetCredentialStore', 'public export includes dynamic credential store');
+  assertContains(index, 'ComposioConfig', 'public export includes ComposioConfig');
+  assertContains(index, 'ComposioDynamicBackend', 'public export includes Composio dynamic backend');
+  assertContains(composioConfig, 'fromRawJson', 'Composio config can load raw JSON');
+  assertContains(composioClient, 'tool_router/session', 'Composio client uses tool router sessions');
+  assertContains(composioDynamic, 'isComposioDynamicPrompt', 'Composio dynamic backend gates unsupported app queries');
+  assertContains(composioDynamic, 'unsafe_action_blocked', 'Composio dynamic backend blocks unsafe execute');
 }
 
 runHarBuild();
