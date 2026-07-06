@@ -6,6 +6,7 @@ import {
   aiLogError,
   aiLogInfo,
   AssetCredentialStore,
+  configureComposioConfigFromRawJson,
   configureLocalModelSettingsFromRawJson,
   configureLocalProviderConfigFromRawJson,
   gmailOAuthConfigFromProvider,
@@ -19,6 +20,7 @@ import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
+const COMPOSIO_CONFIG_RAWFILE = 'composio_config.json';
 const PERSONA_MANIFEST_RAWFILE = 'personas/personas.json';
 const PERSONA_IDS: string[] = [
   'default_companion',
@@ -193,6 +195,7 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     this.loadLocalProviderConfig();
+    this.loadComposioConfig();
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
@@ -222,6 +225,15 @@ export default class EntryAbility extends UIAbility {
         localModelSettingsDebugSummary());
     } catch (err) {
       hilog.info(DOMAIN, 'testTag', 'Local provider config not loaded from %{public}s. Cause: %{public}s', LOCAL_PROVIDER_CONFIG_RAWFILE, JSON.stringify(err));
+    }
+  }
+
+  private loadComposioConfig(): void {
+    try {
+      configureComposioConfigFromRawJson(this.rawfileText(COMPOSIO_CONFIG_RAWFILE));
+      hilog.info(DOMAIN, 'testTag', 'Loaded Composio config.');
+    } catch (err) {
+      hilog.info(DOMAIN, 'testTag', 'Composio config not loaded from %{public}s. Cause: %{public}s', COMPOSIO_CONFIG_RAWFILE, JSON.stringify(err));
     }
   }
 
@@ -262,6 +274,7 @@ export default class EntryAbility extends UIAbility {
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
     this.loadLocalProviderConfig();
+    this.loadComposioConfig();
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
   }

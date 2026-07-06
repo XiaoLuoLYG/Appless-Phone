@@ -38,6 +38,7 @@ export * from './src/main/ets/aiphone/runtime/A2uiTypes';
 export * from './src/main/ets/aiphone/runtime/AiphoneLogger';
 export * from './src/main/ets/aiphone/runtime/BilibiliApiClient';
 export * from './src/main/ets/aiphone/runtime/CalendarApiClient';
+export * from './src/main/ets/aiphone/runtime/ComposioDynamicBackend';
 export * from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
 export * from './src/main/ets/aiphone/runtime/DynamicToolA2ui';
 export * from './src/main/ets/aiphone/runtime/DynamicToolDiscovery';
