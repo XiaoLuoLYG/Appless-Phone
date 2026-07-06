@@ -502,6 +502,19 @@ export default function a2uiHomeToolRequestTest() {
       expect(argNumber(resolved.args, 'maxResults')).assertEqual(5);
     });
 
+    it('adds YouTube hotness fallback args for English most-viewed prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        'Search YouTube for 5 most viewed World Cup videos',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('youtube.video.search');
+      expect(argText(resolved.args, 'order')).assertEqual('viewCount');
+      expect(argNumber(resolved.args, 'maxResults')).assertEqual(5);
+    });
+
     it('infers SocialHub feed, X public search, and social drafts conservatively', 0, () => {
       const feed = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),

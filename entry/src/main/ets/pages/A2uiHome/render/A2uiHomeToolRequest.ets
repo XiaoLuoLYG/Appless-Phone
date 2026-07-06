@@ -375,17 +375,32 @@ function hasHotVideoIntent(prompt: string): boolean {
 
 function requestedYouTubeResultCount(prompt: string): number {
   const lowerPrompt = prompt.toLowerCase();
-  if (containsAny(prompt, ['五个', '5个', '5 个']) || lowerPrompt.indexOf('five') >= 0) {
+  if (containsAny(prompt, ['五个', '5个', '5 个']) || lowerPrompt.indexOf('five') >= 0 || hasStandaloneFive(prompt)) {
     return 5;
   }
   return 10;
+}
+
+function hasStandaloneFive(prompt: string): boolean {
+  for (let index = 0; index < prompt.length; index++) {
+    if (prompt.charAt(index) !== '5') {
+      continue;
+    }
+    const previous = index === 0 ? '' : prompt.charAt(index - 1);
+    const next = index + 1 >= prompt.length ? '' : prompt.charAt(index + 1);
+    if ((previous.length === 0 || !isAsciiAlphaNumeric(previous)) &&
+      (next.length === 0 || !isAsciiAlphaNumeric(next))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function youtubeArgsForPrompt(prompt: string): Object | null {
   if (hasExplicitYouTubeIntent(prompt) &&
     !hasBilibiliIntent(prompt) &&
     !hasMediaAggregationIntent(prompt) &&
-    (hasMediaSearchVerb(prompt) || containsAny(prompt, ['视频']))) {
+    (hasMediaSearchVerb(prompt) || containsAny(prompt, ['视频']) || hasHotVideoIntent(prompt))) {
     const args: YouTubeFallbackArgs = { query: prompt.trim() };
     if (hasHotVideoIntent(prompt)) {
       args.order = 'viewCount';
