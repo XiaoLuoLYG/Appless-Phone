@@ -84,12 +84,15 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return lower.indexOf('notion') >= 0 ||
     lower.indexOf('google drive') >= 0 ||
+    lower.indexOf('google docs') >= 0 ||
+    lower.indexOf('google doc') >= 0 ||
     lower.indexOf('linear') >= 0 ||
     lower.indexOf('github') >= 0 ||
     lower.indexOf('asana') >= 0 ||
     lower.indexOf('trello') >= 0 ||
     lower.indexOf('hubspot') >= 0 ||
-    lower.indexOf('salesforce') >= 0;
+    lower.indexOf('salesforce') >= 0 ||
+    lower.indexOf('composio') >= 0;
 }
 
 export function isUnsafeComposioExecute(toolSlug: string, argsJson: string): boolean {

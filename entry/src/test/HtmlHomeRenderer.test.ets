@@ -794,6 +794,11 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('addProviderMark')).assertLarger(-1);
       expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertLarger(-1);
       expect(html.indexOf('form-actions')).assertLarger(-1);
+      expect(html.indexOf("add(shell, 'details', 'payee-card')")).assertLarger(-1);
+      expect(html.indexOf('form.open = !block')).assertLarger(-1);
+      expect(html.indexOf("add(parent, 'details', 'detail-more')")).assertLarger(-1);
+      expect(html.indexOf('visibleCount >= 4')).assertLarger(-1);
+      expect(html.indexOf('.detail-more[open] .detail-more-grid')).assertLarger(-1);
       expect(html.indexOf('AIPhone Pay')).assertLarger(-1);
       expect(html.indexOf('添加付款对象')).assertLarger(-1);
       expect(html.indexOf('保存对象')).assertLarger(-1);
@@ -806,7 +811,9 @@ export default function htmlHomeRendererTest() {
     });
 
     it('renders PayPal Google Pay checkout inline with the payment actions', 0, () => {
-      const html = renderHtmlHomeDocument(googlePayCheckoutDocumentFixture());
+      const doc = googlePayCheckoutDocumentFixture();
+      doc.blocks.unshift(paymentDocumentFixture().blocks[0]);
+      const html = renderHtmlHomeDocument(doc);
 
       expect(html.indexOf('google-pay-action')).assertLarger(-1);
       expect(html.indexOf('google-pay-placeholder')).assertLarger(-1);
@@ -817,10 +824,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('payment.capture')).assertLarger(-1);
       expect(html.indexOf('检测并显示')).assertEqual(-1);
       expect(html.indexOf('google-pay-panel')).assertEqual(-1);
-      expect(html.indexOf('mountGooglePayButton(slot, status, config, true)')).assertLarger(-1);
-      expect(html.indexOf('openAfterReady === true')).assertLarger(-1);
+      expect(html.indexOf('mountGooglePayButton(slot, status, config);')).assertLarger(-1);
+      expect(html.indexOf('openAfterReady')).assertEqual(-1);
       expect(html.indexOf('Google Pay 已准备好，请点上方按钮打开确认面板。')).assertLarger(-1);
-      expect(html.indexOf('window.setTimeout(function () {\\n      mountGooglePayButton')).assertEqual(-1);
+      expect(html.indexOf('window.setTimeout(function () {')).assertLarger(-1);
+      expect(html.indexOf("if (state === 'loading' || state === 'ready') { return; }")).assertLarger(-1);
+      expect(html.indexOf("kept.filter(function (action) { return text(action.variant) === 'primary'; }).forEach(addActionButton);")).assertLarger(-1);
+      expect(html.indexOf("kept.filter(function (action) { return text(action.variant) !== 'primary'; }).forEach(addActionButton);")).assertLarger(-1);
+      expect(html.indexOf('.google-pay-action { grid-column: 1 / -1; width: 100%; max-width: none; }')).assertLarger(-1);
       expect(html.indexOf('document.head.appendChild(script);')).assertLarger(-1);
       expect(html.indexOf('if (!existing) {\\n        document.head.appendChild(script);')).assertEqual(-1);
       expect(html.indexOf('手机 WebView 当前访问不了 Google Pay SDK')).assertLarger(-1);

@@ -39,6 +39,12 @@ const dynamicCases = [
 
 const composioCases = [
   {
+    query: '帮我在 GitHub 里找 Appless-Phone 最近的 open issues',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
     query: '帮我在 Notion 里找一下 7 月旅行计划相关页面',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
@@ -51,13 +57,43 @@ const composioCases = [
     expectedDiscoveredToolId: 'dynamic.search'
   },
   {
+    query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
     query: '帮我查 Linear 里分配给我的高优先级 bug',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
   },
   {
-    query: '帮我给本周发布创建一个 checklist',
+    query: '帮我在 Trello 里找本周发布 checklist 相关卡片',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Asana 里查今天到期的任务',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 HubSpot 里找最近更新的 contacts',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Salesforce 里找最近更新的 leads',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
@@ -134,9 +170,15 @@ const visibleDomainMarkers = [
   '接入工具',
   'dynamic.search',
   'Composio',
+  'GitHub',
   'Notion',
   'Google Drive',
+  'Google Docs',
   'Linear',
+  'Trello',
+  'Asana',
+  'HubSpot',
+  'Salesforce',
   'needs_auth',
   'ferry.ticket.search',
   'weather.query',
@@ -309,7 +351,7 @@ function expectedCaseForQuery(query) {
       expectedDiscoveredToolId: 'ppt.generate'
     };
   }
-  if (/Notion|Google\s*Drive|Linear|Asana|Trello|HubSpot|Salesforce|checklist/i.test(query)) {
+  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
@@ -971,6 +1013,10 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
     new RegExp(`toolId=${escapedToolId}`).test(text);
   const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
+  const personaMemoryUpdateProof = !isPersonaMemoryUpdateQuery(query) ||
+    (/\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text) &&
+      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
+      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text));
   const result = {
     query,
     expectedTool,
@@ -983,8 +1029,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     htmlLoadError: /\[AIPhone\]\[HtmlHomeSurfaceLoadError\]/.test(text),
     modelSelectedExpectedToolId,
     personaCoffeeProof,
-    personaMemoryUpdateProof: !isPersonaMemoryUpdateQuery(query) ||
-      /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*personaId=food_companion[^\n]*(preference=luckin_only|summary=.*瑞幸)/.test(text),
+    personaMemoryUpdateProof,
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
     model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),

@@ -288,11 +288,34 @@ h1 {
   line-height: 1.35;
   font-weight: 650;
 }
+.detail-more {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+}
+.detail-more summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 760;
+}
+.detail-more summary::-webkit-details-marker {
+  display: none;
+}
+.detail-more-grid {
+  display: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.detail-more[open] .detail-more-grid {
+  display: grid;
+}
 .actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   padding: 0 16px 16px;
 }
 .action {
@@ -354,6 +377,13 @@ h1 {
 .payee-card {
   padding: 16px;
 }
+.payee-card summary {
+  list-style: none;
+  cursor: pointer;
+}
+.payee-card summary::-webkit-details-marker {
+  display: none;
+}
 .form-actions {
   display: flex;
   gap: 10px;
@@ -414,12 +444,40 @@ h1 {
   line-height: 1.45;
 }
 @media (max-width: 560px) {
-  .payment-shell { padding: 12px 10px calc(96px + env(safe-area-inset-bottom, 0px)); }
-  .pay-hero, .payment-card, .payee-card { border-radius: 22px; }
-  h1 { font-size: 28px; }
-  .pay-route { grid-template-columns: minmax(0, 1fr); }
-  .pay-arrow { width: 44px; justify-self: center; transform: rotate(90deg); }
-  .pay-stats, .detail-grid, .payee-grid { grid-template-columns: 1fr; }
+  .payment-shell { padding: 10px 8px calc(90px + env(safe-area-inset-bottom, 0px)); }
+  .pay-hero, .payment-card, .payee-card { border-radius: 18px; }
+  .pay-hero { padding: 14px; }
+  .pay-kicker { font-size: 11px; }
+  h1 { margin-top: 4px; font-size: 24px; line-height: 1.08; }
+  .pay-summary { margin-top: 6px; font-size: 12px; line-height: 1.38; }
+  .pay-route { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); gap: 6px; margin-top: 12px; }
+  .pay-party { border-radius: 14px; padding: 8px; }
+  .pay-party b { font-size: 13px; }
+  .pay-arrow { width: 30px; height: 30px; font-size: 15px; }
+  .pay-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+  .pay-stat { border-radius: 12px; padding: 7px; }
+  .pay-stat b { font-size: 12px; }
+  .payment-top { gap: 9px; padding: 12px; }
+  .provider-mark { width: 38px; height: 38px; border-radius: 12px; }
+  .payment-title h2 { font-size: 17px; }
+  .payment-title p { font-size: 12px; line-height: 1.35; }
+  .status-pill { padding: 5px 8px; font-size: 11px; }
+  .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; padding: 0 12px 10px; }
+  .detail-row { padding: 7px 0; }
+  .detail-row span { font-size: 12px; line-height: 1.28; }
+  .detail-more summary { padding: 8px 0; font-size: 12px; }
+  .detail-more-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+  .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 12px 12px;
+    gap: 8px;
+  }
+  .action { width: 100%; min-height: 38px; padding: 0 13px; font-size: 13px; }
+  .google-pay-action { grid-column: 1 / -1; width: 100%; max-width: none; }
+  .payee-card { padding: 14px; }
+  .payee-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 12px; }
+  .field input { height: 38px; border-radius: 12px; }
 }
 `;
 
@@ -499,7 +557,14 @@ const PAYMENT_HOME_JS: string = `
         return blocks[index];
       }
     }
-    for (var index = 0; index < blocks.length; index += 1) {
+    for (var index = blocks.length - 1; index >= 0; index -= 1) {
+      if (blocks[index].kind === 'generic-tool-result' &&
+        metric(blocks[index], ['toolName']) === 'payment.send' &&
+        actionById(blocks[index], 'payment.checkout.open') !== null) {
+        return blocks[index];
+      }
+    }
+    for (var index = blocks.length - 1; index >= 0; index -= 1) {
       if (blocks[index].kind === 'generic-tool-result' && metric(blocks[index], ['toolName']) === 'payment.send') {
         return blocks[index];
       }
@@ -513,20 +578,37 @@ const PAYMENT_HOME_JS: string = `
     return '待确认';
   }
   function addDetailRows(parent, block) {
+    var visibleCount = 0;
+    var hiddenRows = [];
     list(block.rows).forEach(function (row) {
       var label = text(row.label);
       if (label === 'toolName' || label === 'source') { return; }
+      if (visibleCount >= 4) {
+        hiddenRows.push(row);
+        return;
+      }
       var item = add(parent, 'div', 'detail-row');
       add(item, 'b', '', label);
       add(item, 'span', '', row.value);
+      visibleCount += 1;
     });
+    if (hiddenRows.length > 0) {
+      var more = add(parent, 'details', 'detail-more');
+      add(more, 'summary', '', '更多详情');
+      var grid = add(more, 'div', 'detail-more-grid');
+      hiddenRows.forEach(function (row) {
+        var item = add(grid, 'div', 'detail-row');
+        add(item, 'b', '', row.label);
+        add(item, 'span', '', row.value);
+      });
+    }
   }
   function addActions(parent, actions, block) {
     var kept = list(actions).filter(function (action) { return text(action.label || action.id).length > 0; });
     var googlePayConfig = block ? googlePayCheckoutConfig(block) : null;
     if (kept.length === 0 && googlePayConfig === null) { return; }
     var row = add(parent, 'div', 'actions');
-    kept.forEach(function (action) {
+    function addActionButton(action) {
       var button = add(row, 'button', text(action.variant) === 'primary' ? 'action' : 'action secondary', action.label || action.id);
       button.type = 'button';
       button.disabled = isBusy;
@@ -534,8 +616,10 @@ const PAYMENT_HOME_JS: string = `
         event.stopPropagation();
         postAction(actionForBlock(action, block));
       });
-    });
+    }
+    kept.filter(function (action) { return text(action.variant) === 'primary'; }).forEach(addActionButton);
     addGooglePayAction(row, googlePayConfig);
+    kept.filter(function (action) { return text(action.variant) !== 'primary'; }).forEach(addActionButton);
   }
   function actionForBlock(action, block) {
     if (block && block.kind === 'StripeReceivingAccountCard' && text(action.id) === 'stripe.account.open') {
@@ -686,12 +770,15 @@ const PAYMENT_HOME_JS: string = `
       setGooglePayStatus(status, 'Google Pay 没有完成授权：' + googlePayErrorText(error), 'error');
     });
   }
-  function mountGooglePayButton(slot, status, config, openAfterReady) {
+  function mountGooglePayButton(slot, status, config) {
+      var state = slot.getAttribute('data-gpay-state') || '';
+      if (state === 'loading' || state === 'ready') { return; }
       var fallback = slot.querySelector('.google-pay-placeholder');
       if (config.clientId.length === 0 || config.orderId.length === 0) {
         setGooglePayStatus(status, '缺少 PayPal client id 或 order id，不能启动 Google Pay。', 'error');
         return;
       }
+      slot.setAttribute('data-gpay-state', 'loading');
       if (fallback) { fallback.disabled = true; }
       setGooglePayStatus(status, '正在准备 Google Pay 按钮（PayPal 负责订单确认）...', '');
       Promise.all([
@@ -747,17 +834,17 @@ const PAYMENT_HOME_JS: string = `
             if (!ready || ready.result !== true) {
               throw new Error('此设备或 WebView 当前未通过 Google Pay isReadyToPay。');
             }
-            var paymentDataRequest = Object.assign({}, baseRequest, {
-              transactionInfo: {
-                currencyCode: config.currency,
-                totalPriceStatus: 'FINAL',
-                totalPrice: config.amountText
-              },
-              merchantInfo: paypalConfig.merchantInfo,
-              callbackIntents: ['PAYMENT_AUTHORIZATION']
-            });
             var button = paymentsClient.createButton({
               onClick: function () {
+                var paymentDataRequest = Object.assign({}, baseRequest, {
+                  transactionInfo: {
+                    currencyCode: config.currency,
+                    totalPriceStatus: 'FINAL',
+                    totalPrice: config.amountText
+                  },
+                  merchantInfo: paypalConfig.merchantInfo,
+                  callbackIntents: ['PAYMENT_AUTHORIZATION']
+                });
                 openGooglePaySheet(paymentsClient, paymentDataRequest, status);
               },
               buttonType: 'pay',
@@ -765,14 +852,12 @@ const PAYMENT_HOME_JS: string = `
             });
             slot.textContent = '';
             slot.appendChild(button);
-            if (openAfterReady === true) {
-              openGooglePaySheet(paymentsClient, paymentDataRequest, status);
-              return;
-            }
+            slot.setAttribute('data-gpay-state', 'ready');
             setGooglePayStatus(status, 'Google Pay 已准备好，请点上方按钮打开确认面板。', 'ready');
           });
         });
       }).catch(function (error) {
+        slot.setAttribute('data-gpay-state', 'error');
         if (fallback) { fallback.disabled = false; }
         setGooglePayStatus(status, googlePayErrorText(error), 'error');
       });
@@ -789,8 +874,11 @@ const PAYMENT_HOME_JS: string = `
     if (isBusy) { return; }
     fallback.addEventListener('click', function (event) {
       event.stopPropagation();
-      mountGooglePayButton(slot, status, config, true);
+      mountGooglePayButton(slot, status, config);
     });
+    window.setTimeout(function () {
+      mountGooglePayButton(slot, status, config);
+    }, 0);
   }
   function valueOf(id) {
     var node = document.getElementById(id);
@@ -861,8 +949,9 @@ const PAYMENT_HOME_JS: string = `
     addDetailRows(grid, block);
     addActions(card, block.actions, block);
   }
-  var form = add(shell, 'section', 'payee-card');
-  var head = add(form, 'div', 'payee-head');
+  var form = add(shell, 'details', 'payee-card');
+  form.open = !block;
+  var head = add(form, 'summary', 'payee-head');
   add(head, 'h2', '', '添加付款对象');
   add(head, 'span', '', '保存在本机');
   var grid = add(form, 'div', 'payee-grid');

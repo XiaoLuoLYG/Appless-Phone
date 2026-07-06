@@ -153,17 +153,21 @@ export struct ConfigPage {
   PersonaChip(pack: PersonaPack) {
     Row() {
       Image(personaAvatarResource(pack.manifest.avatarKey))
-        .width(28)
-        .height(28)
+        .width(24)
+        .height(24)
         .objectFit(ImageFit.Contain)
       Text(pack.manifest.name)
-        .fontSize(12)
+        .fontSize(11)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.selectedPersonaId === pack.manifest.id ? COLOR_BUTTON_TEXT : COLOR_INK)
-        .margin({ left: 6 })
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ left: 4 })
+        .layoutWeight(1)
     }
     .height(40)
-    .padding({ left: 10, right: 12 })
+    .width('30%')
+    .padding({ left: 6, right: 6 })
     .backgroundColor(this.selectedPersonaId === pack.manifest.id ? COLOR_ACCENT_DEEP : COLOR_CARD_RAISED)
     .borderRadius(12)
     .border({ width: 1, color: this.selectedPersonaId === pack.manifest.id ? COLOR_ACCENT : COLOR_CARD_EDGE })
@@ -354,7 +358,7 @@ export struct ConfigPage {
       .alignItems(VerticalAlign.Center)
       .margin({ bottom: 14 })
 
-      Flex({ wrap: FlexWrap.Wrap }) {
+      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
         ForEach(this.personaPacks, (pack: PersonaPack) => {
           this.PersonaChip(pack)
         }, (pack: PersonaPack) => pack.manifest.id)

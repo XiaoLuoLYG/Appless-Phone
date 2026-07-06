@@ -31,11 +31,11 @@
         "material": {
           "certpath": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B6E68F5D4181F7CB6656C8E78BCB3C9FB0E5A2B52DCE7A118D2AE625D7222204464F4390BBADAAB",
+          "keyPassword": "0000001BD1CC2C110B45CD78BE5C9E0B1A011E7090077DF9E9D8406DB1B951F420FF1C2C0F263878776BA1",
           "profile": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "/Users/luoyige/.ohos/config/default_AIPhoneDemo_dlY6wKHLZdqwaFWlwxgsEVDDzY3RBlRpidOe7L6pX_M=.p12",
-          "storePassword": "0000001BF58B1CCEAECAB225B1C21CF291695634AF2C58C2C556692C4DCB4C80B2141ECD247BF136118920"
+          "storePassword": "0000001BEA2EE200E7453EC62354E64B05785A654ECC7D76DD0F49D61D9A1E1D254ADE051869DB4494CE7E"
         }
       }
     ]
