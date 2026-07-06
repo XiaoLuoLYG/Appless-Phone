@@ -21,6 +21,7 @@ tool-gateway/.env
 tool-gateway/.smoke/
 tool-gateway/.map-smoke/
 entry/src/main/resources/rawfile/aiphone_provider_config.json
+entry/src/main/resources/rawfile/composio_config.json
 entry/src/main/resources/rawfile/agconnect-services.json
 
 # Local verification captures
