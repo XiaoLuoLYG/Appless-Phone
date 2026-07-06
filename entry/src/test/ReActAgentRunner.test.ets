@@ -169,11 +169,16 @@ export default function reActAgentRunnerTest() {
     });
 
     it('sets failure keys from component-only terminal statuses', 0, () => {
-      const digest = summarizeA2uiObservation(componentOnlyStatusJsonl('blocked'));
+      const failureStatuses: string[] = ['error', 'blocked', 'auth_required'];
+      failureStatuses.forEach((status: string) => {
+        const digest = summarizeA2uiObservation(componentOnlyStatusJsonl(status));
 
-      expect(digest.isA2ui).assertTrue();
-      expect(digest.shouldStop).assertTrue();
-      expect(digest.failureKey.indexOf('blocked')).assertLarger(-1);
+        expect(digest.isA2ui).assertTrue();
+        expect(digest.failureKey.indexOf(status)).assertLarger(-1);
+        if (status !== 'error') {
+          expect(digest.shouldStop).assertTrue();
+        }
+      });
     });
   });
 }
