@@ -20,7 +20,7 @@
 - Modify `agent_core/src/main/ets/aiphone/runtime/DynamicToolRegistry.ets`: extend existing unsafe action detection with common side-effect verbs.
 - Modify `agent_core/src/main/ets/aiphone/LoopBackend.ets`: make the `dynamic.search` tool description mention the Composio two-phase fallback.
 - Modify `agent_core/Index.ets`: export Composio files and the dynamic adapter test helpers.
-- Modify `entry/src/main/ets/entryability/EntryAbility.ets`: optionally load `composio_config.json`.
+- Modify `entry/src/main/ets/entryability/EntryAbility.ets`: optionally load `composio_config.json` after the dynamic adapter exposes the config function.
 - Create `entry/src/main/resources/rawfile/composio_config.example.json`: tracked schema only.
 - Modify `.gitignore`: ignore the real `entry/src/main/resources/rawfile/composio_config.json`.
 - Create `entry/src/test/ComposioConfig.test.ets`.
@@ -54,7 +54,7 @@ aiphone-composio-loopy-sync
 
 The status includes user-local modified files from the latest payment/runtime work. Do not stage those files unless a task explicitly modifies the same file for Composio.
 
-- [ ] **Step 2: Verify the design commit is the only committed change on this branch**
+- [ ] **Step 2: Verify only planning commits are on this branch**
 
 Run:
 
@@ -63,7 +63,7 @@ git log --oneline --decorate --max-count=3
 git show --stat --name-status --max-count=1 HEAD
 ```
 
-Expected: `HEAD` is `Add Composio Loopy sync design`, and the shown file is only `docs/superpowers/specs/2026-07-06-aiphone-composio-loopy-sync-design.md`.
+Expected: `HEAD` is the Composio sync implementation plan commit, preceded by the design commit. The shown file for `HEAD` is only `docs/superpowers/plans/2026-07-06-aiphone-composio-loopy-sync.md`.
 
 - [ ] **Step 3: Keep staging narrow for every commit**
 
@@ -86,7 +86,6 @@ git restore --staged <path>
 - Create: `agent_core/src/main/ets/composio/ComposioSessionClient.ets`
 - Create: `agent_core/src/main/ets/composio/ComposioTool.ets`
 - Modify: `agent_core/Index.ets`
-- Modify: `entry/src/main/ets/entryability/EntryAbility.ets`
 - Create: `entry/src/main/resources/rawfile/composio_config.example.json`
 - Modify: `.gitignore`
 - Test: `entry/src/test/ComposioConfig.test.ets`
@@ -190,40 +189,7 @@ export { ComposioSessionClient } from './src/main/ets/composio/ComposioSessionCl
 export { ComposioTool } from './src/main/ets/composio/ComposioTool';
 ```
 
-- [ ] **Step 6: Load optional Composio rawfile in EntryAbility**
-
-Modify the import from `@loop/agent-core` in `entry/src/main/ets/entryability/EntryAbility.ets`:
-
-```ts
-  configureComposioConfigFromRawJson,
-```
-
-Add a rawfile constant:
-
-```ts
-const COMPOSIO_CONFIG_RAWFILE = 'composio_config.json';
-```
-
-Call this after `this.loadLocalProviderConfig();` in `onCreate()`:
-
-```ts
-    this.loadComposioConfig();
-```
-
-Add this method next to `loadLocalProviderConfig()`:
-
-```ts
-  private loadComposioConfig(): void {
-    try {
-      configureComposioConfigFromRawJson(this.rawfileText(COMPOSIO_CONFIG_RAWFILE));
-      hilog.info(DOMAIN, 'testTag', 'Loaded Composio config. agentCore=%{public}s', localProviderConfigDebugSummary());
-    } catch (err) {
-      hilog.info(DOMAIN, 'testTag', 'Composio config not loaded from %{public}s. Cause: %{public}s', COMPOSIO_CONFIG_RAWFILE, JSON.stringify(err));
-    }
-  }
-```
-
-- [ ] **Step 7: Add tracked example and ignore real config**
+- [ ] **Step 6: Add tracked example and ignore real config**
 
 Create `entry/src/main/resources/rawfile/composio_config.example.json`:
 
@@ -241,7 +207,7 @@ Add this line to `.gitignore` near the existing rawfile secret ignores:
 entry/src/main/resources/rawfile/composio_config.json
 ```
 
-- [ ] **Step 8: Run config tests**
+- [ ] **Step 7: Run config tests**
 
 Run:
 
@@ -251,12 +217,12 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk /Applications/DevEc
 
 Expected: `ComposioConfig.test.ets` passes. If unrelated existing tests fail, record the failing names and continue only after confirming Composio tests pass.
 
-- [ ] **Step 9: Commit config/vendor work**
+- [ ] **Step 8: Commit config/vendor work**
 
 Run:
 
 ```bash
-git add .gitignore agent_core/src/main/ets/composio agent_core/Index.ets entry/src/main/ets/entryability/EntryAbility.ets entry/src/main/resources/rawfile/composio_config.example.json entry/src/test/ComposioConfig.test.ets entry/src/test/List.test.ets
+git add .gitignore agent_core/src/main/ets/composio agent_core/Index.ets entry/src/main/resources/rawfile/composio_config.example.json entry/src/test/ComposioConfig.test.ets entry/src/test/List.test.ets
 git diff --cached --name-status
 git commit -m "feat: add composio config support"
 ```
@@ -269,6 +235,7 @@ Expected: staged files match this task only.
 - Create: `agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`
 - Modify: `agent_core/src/main/ets/aiphone/runtime/DynamicToolRegistry.ets`
 - Modify: `agent_core/Index.ets`
+- Modify: `entry/src/main/ets/entryability/EntryAbility.ets`
 - Test: `entry/src/test/ComposioDynamicBackend.test.ets`
 - Modify: `entry/src/test/List.test.ets`
 
@@ -557,7 +524,40 @@ Add to `agent_core/Index.ets` near other runtime exports:
 export * from './src/main/ets/aiphone/runtime/ComposioDynamicBackend';
 ```
 
-- [ ] **Step 6: Run adapter tests**
+- [ ] **Step 6: Load optional Composio rawfile in EntryAbility**
+
+Modify the import from `@loop/agent-core` in `entry/src/main/ets/entryability/EntryAbility.ets`:
+
+```ts
+  configureComposioConfigFromRawJson,
+```
+
+Add a rawfile constant:
+
+```ts
+const COMPOSIO_CONFIG_RAWFILE = 'composio_config.json';
+```
+
+Call this after `this.loadLocalProviderConfig();` in `onCreate()` and `onNewWant()`:
+
+```ts
+    this.loadComposioConfig();
+```
+
+Add this method next to `loadLocalProviderConfig()`:
+
+```ts
+  private loadComposioConfig(): void {
+    try {
+      configureComposioConfigFromRawJson(this.rawfileText(COMPOSIO_CONFIG_RAWFILE));
+      hilog.info(DOMAIN, 'testTag', 'Loaded Composio config.');
+    } catch (err) {
+      hilog.info(DOMAIN, 'testTag', 'Composio config not loaded from %{public}s. Cause: %{public}s', COMPOSIO_CONFIG_RAWFILE, JSON.stringify(err));
+    }
+  }
+```
+
+- [ ] **Step 7: Run adapter tests**
 
 Run:
 
@@ -567,12 +567,12 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk /Applications/DevEc
 
 Expected: `ComposioDynamicBackend.test.ets` passes.
 
-- [ ] **Step 7: Commit adapter work**
+- [ ] **Step 8: Commit adapter work**
 
 Run:
 
 ```bash
-git add agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets agent_core/src/main/ets/aiphone/runtime/DynamicToolRegistry.ets agent_core/Index.ets entry/src/test/ComposioDynamicBackend.test.ets entry/src/test/List.test.ets
+git add agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets agent_core/src/main/ets/aiphone/runtime/DynamicToolRegistry.ets agent_core/Index.ets entry/src/main/ets/entryability/EntryAbility.ets entry/src/test/ComposioDynamicBackend.test.ets entry/src/test/List.test.ets
 git diff --cached --name-status
 git commit -m "feat: add composio dynamic adapter"
 ```
@@ -632,10 +632,7 @@ Expected: the new test fails because `dynamic.search` still returns the ModelSco
 Modify imports in `agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets`:
 
 ```ts
-import {
-  callComposioDynamic,
-  configureComposioConfigFromRawJson
-} from './ComposioDynamicBackend';
+import { callComposioDynamic } from './ComposioDynamicBackend';
 ```
 
 Exported `configureComposioConfigFromRawJson` can be re-exported through `Index.ets` from Task 2. If `ToolGatewayClient.ets` already exports config helpers in its explicit export list, do not duplicate the function there.
