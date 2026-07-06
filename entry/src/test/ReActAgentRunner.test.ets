@@ -45,6 +45,45 @@ class CaptureTool implements AgentTool {
   }
 }
 
+class SequenceModel implements LocalModel {
+  responses: string[];
+  prompts: string[] = [];
+
+  constructor(responses: string[]) {
+    this.responses = responses;
+  }
+
+  async complete(prompt: string, _conversation?: ConversationContext): Promise<string> {
+    this.prompts.push(prompt);
+    const index = this.prompts.length - 1;
+    return index < this.responses.length ? this.responses[index] : 'Final: no more responses';
+  }
+}
+
+class FixedTool implements AgentTool {
+  private toolName: string;
+  private output: string;
+  calls: string[] = [];
+
+  constructor(toolName: string, output: string) {
+    this.toolName = toolName;
+    this.output = output;
+  }
+
+  name(): string {
+    return this.toolName;
+  }
+
+  description(): string {
+    return 'fixed tool output';
+  }
+
+  async run(input: string): Promise<string> {
+    this.calls.push(input);
+    return this.output;
+  }
+}
+
 function mediaResult(status: string = 'success'): DynamicGenericToolResult {
   return {
     sourceTag: 'YouTube API',
@@ -179,6 +218,148 @@ export default function reActAgentRunnerTest() {
           expect(digest.shouldStop).assertTrue();
         }
       });
+    });
+
+    it('continues after an A2UI observation and lets the model decide final', 0, async () => {
+      const model = new SequenceModel([
+        'Thought: need video\nAction: youtube.video.search({"query":"world cup"})',
+        'Thought: the video result is enough\nFinal: found video'
+      ]);
+      const youtube = new FixedTool(
+        'youtube.video.search',
+        genericToolResultsA2ui('surface_youtube', 'youtube.video.search', [mediaResult()])
+      );
+      const registry = new ToolRegistry();
+      registry.register(youtube);
+      const runner = new ReActAgentRunner(model, registry, 3);
+      let finalText = '';
+      let observationText = '';
+
+      await runner.run('find a world cup video', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalText = event.text;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observationText = event.text;
+        }
+      });
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(finalText).assertEqual('found video');
+      expect(observationText.indexOf('ObservationDigest')).assertLarger(-1);
+      expect(model.prompts[1].indexOf('Watch URL: https://youtube.example/watch?v=abc123')).assertLarger(-1);
+      expect(model.prompts[1].indexOf('"createSurface"')).assertEqual(-1);
+    });
+
+    it('runs a read tool followed by a draft tool before final', 0, async () => {
+      const model = new SequenceModel([
+        'Thought: search first\nAction: youtube.video.search({"query":"world cup","order":"viewCount","maxResults":5})',
+        'Thought: draft email with video\nAction: gmail.draft.create({"to":["xxx@example.com"],"subject":"World Cup videos","body":"https://youtube.example/watch?v=abc123"})',
+        'Thought: draft exists\nFinal: Gmail draft prepared for review'
+      ]);
+      const youtube = new FixedTool(
+        'youtube.video.search',
+        genericToolResultsA2ui('surface_youtube', 'youtube.video.search', [mediaResult()])
+      );
+      const draft: DynamicGenericToolResult = {
+        sourceTag: 'Gmail API',
+        toolName: 'gmail.draft.create',
+        title: 'Gmail draft created',
+        status: 'success',
+        summary: 'Draft saved in Gmail for user review.',
+        rows: [{ label: 'Draft ID', value: 'draft-1' }],
+        rawPreview: 'draftId=draft-1'
+      };
+      const gmail = new FixedTool(
+        'gmail.draft.create',
+        genericToolResultsA2ui('surface_gmail', 'gmail.draft.create', [draft])
+      );
+      const registry = new ToolRegistry();
+      registry.register(youtube);
+      registry.register(gmail);
+      const runner = new ReActAgentRunner(model, registry, 4);
+      let finalText = '';
+
+      await runner.run('search and draft', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalText = event.text;
+        }
+      });
+
+      expect(youtube.calls.length).assertEqual(1);
+      expect(gmail.calls.length).assertEqual(1);
+      expect(model.prompts.length).assertEqual(3);
+      expect(finalText).assertEqual('Gmail draft prepared for review');
+      expect(model.prompts[2].indexOf('Draft ID: draft-1')).assertLarger(-1);
+    });
+
+    it('stops after blocked A2UI observations without asking the model for another step', 0, async () => {
+      const model = new SequenceModel([
+        'Thought: send directly\nAction: gmail.message.send({"to":["xxx@example.com"],"body":"hi"})',
+        'Thought: should not run\nFinal: bad'
+      ]);
+      const blocked: DynamicGenericToolResult = {
+        sourceTag: 'Gmail API',
+        toolName: 'gmail.message.send',
+        title: 'UnsafeActionBlocked',
+        status: 'blocked',
+        summary: '不会自动发送 Gmail',
+        rows: [{ label: 'Error', value: '不会自动发送 Gmail' }],
+        rawPreview: 'blocked'
+      };
+      const sendTool = new FixedTool(
+        'gmail.message.send',
+        genericToolResultsA2ui('surface_blocked_send', 'gmail.message.send', [blocked])
+      );
+      const registry = new ToolRegistry();
+      registry.register(sendTool);
+      const runner = new ReActAgentRunner(model, registry, 4);
+      let finalText = '';
+
+      await runner.run('send email', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalText = event.text;
+        }
+      });
+
+      expect(model.prompts.length).assertEqual(1);
+      expect(finalText.indexOf('需要用户确认或输入')).assertLarger(-1);
+    });
+
+    it('stops after the same A2UI error repeats twice', 0, async () => {
+      const model = new SequenceModel([
+        'Thought: first try\nAction: youtube.video.search({"query":"world cup"})',
+        'Thought: retry once\nAction: youtube.video.search({"query":"world cup highlights"})',
+        'Thought: should not run\nFinal: bad'
+      ]);
+      const failing: DynamicGenericToolResult = {
+        sourceTag: 'YouTube Data API',
+        toolName: 'youtube.video.search',
+        title: 'YouTube API 调用失败',
+        status: 'error',
+        summary: 'missing YOUTUBE_API_KEY',
+        rows: [{ label: 'Error', value: 'missing YOUTUBE_API_KEY' }],
+        rawPreview: 'missing YOUTUBE_API_KEY'
+      };
+      const youtube = new FixedTool(
+        'youtube.video.search',
+        genericToolResultsA2ui('surface_youtube_error', 'youtube.video.search', [failing])
+      );
+      const registry = new ToolRegistry();
+      registry.register(youtube);
+      const runner = new ReActAgentRunner(model, registry, 5);
+      let finalText = '';
+
+      await runner.run('search videos', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalText = event.text;
+        }
+      });
+
+      expect(youtube.calls.length).assertEqual(2);
+      expect(model.prompts.length).assertEqual(2);
+      expect(finalText.indexOf('工具重复失败')).assertLarger(-1);
+      expect(finalText.indexOf('youtube.video.search')).assertLarger(-1);
     });
   });
 }
