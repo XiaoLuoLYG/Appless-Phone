@@ -1,9 +1,11 @@
 import { HtmlHomeDocument } from './HtmlHomeTypes';
+import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
 type HtmlTravelTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlTravelHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy?: boolean;
+  personaAvatarDataUri?: string;
 }
 
 const TRAVEL_HOME_CSS: string = `
@@ -123,6 +125,52 @@ button:disabled { cursor: default; opacity: 0.52; }
   font-weight: 650;
   line-height: 1.55;
   backdrop-filter: blur(14px);
+}
+.persona-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 14px;
+  border: 1px solid rgba(23, 18, 13, 0.14);
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: rgba(255, 250, 241, 0.78);
+  color: var(--ink);
+  backdrop-filter: blur(18px);
+}
+.persona-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: rgba(255, 250, 241, 0.92);
+  color: var(--air);
+  font-size: 15px;
+  font-weight: 840;
+}
+.persona-avatar img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.persona-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.persona-title {
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.25;
+}
+.persona-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .route-map {
   margin-top: 14px;
@@ -744,6 +792,26 @@ const TRAVEL_HOME_JS: string = `
       });
     });
   }
+  function renderPersonaBanner(parent) {
+    var persona = data.persona || {};
+    var memory = data.personaMemory || {};
+    var name = text(persona.name);
+    if (text(persona.id).length === 0 || name.length === 0) { return; }
+    var banner = add(parent, 'section', 'persona-banner');
+    var avatar = add(banner, 'div', 'persona-avatar');
+    var avatarSrc = text(data.personaAvatarDataUri);
+    if (avatarSrc.length > 0) {
+      var img = add(avatar, 'img');
+      img.src = avatarSrc;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+    } else {
+      avatar.textContent = name.slice(0, 1);
+    }
+    var copy = add(banner, 'div', 'persona-copy');
+    add(copy, 'div', 'persona-title', name + '上线');
+    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
+  }
   app.textContent = '';
   var blocks = list(data.blocks);
   var travelBlocks = blocks.filter(function (block) {
@@ -755,6 +823,7 @@ const TRAVEL_HOME_JS: string = `
   add(hero, 'div', 'route-kicker', '出行方案 · 实时候选');
   add(hero, 'h1', '', text(data.title) || '今日出行方案');
   add(hero, 'p', '', text(data.subtitle) || '高铁和航班结果来自真实工具返回，页面只做本地筛选和展示。');
+  renderPersonaBanner(hero);
   var map = add(hero, 'section', 'route-map');
   var from = firstMetric(travelBlocks, ['from', 'dep']) || '出发';
   var to = firstMetric(travelBlocks, ['to', 'arr']) || '到达';
@@ -889,6 +958,7 @@ export function renderTravelHomeDocument(document: HtmlHomeDocument, isBusy: boo
     history: [],
     persona: document.persona,
     personaMemory: document.personaMemory,
+    personaAvatarDataUri: personaAvatarDataUri(document.persona.avatarKey),
     rawSurfaceRoot: null,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlTravelHomeDocumentWithBusy).isBusy === true

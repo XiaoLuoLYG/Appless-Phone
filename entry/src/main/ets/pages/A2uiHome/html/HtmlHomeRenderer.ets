@@ -62,6 +62,14 @@ const HTML_HOME_CSS: string = `
   --social-slack-soft: rgba(74, 21, 75, 0.12);
   --social-wecom: #2368d8;
   --social-wecom-soft: rgba(35, 104, 216, 0.12);
+  --github: #24292f;
+  --github-soft: rgba(36, 41, 47, 0.1);
+  --drive: #1a73e8;
+  --drive-soft: rgba(26, 115, 232, 0.12);
+  --docs: #2b67d8;
+  --docs-soft: rgba(43, 103, 216, 0.12);
+  --composio: #6f5bd6;
+  --composio-soft: rgba(111, 91, 214, 0.12);
   --mail-inbox-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='22 12 16 12 14 15 10 15 8 12 2 12'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E");
 }
 * { box-sizing: border-box; }
@@ -332,6 +340,31 @@ h3 {
   --kind-soft: var(--bilibili-soft);
   border-color: rgba(45, 143, 189, 0.45);
 }
+.block[data-source-key="composio-github"] {
+  --kind-accent: var(--github);
+  --kind-soft: var(--github-soft);
+  border-color: rgba(36, 41, 47, 0.28);
+}
+.block[data-source-key="composio-drive"] {
+  --kind-accent: var(--drive);
+  --kind-soft: var(--drive-soft);
+  border-color: rgba(26, 115, 232, 0.3);
+}
+.block[data-source-key="composio-docs"] {
+  --kind-accent: var(--docs);
+  --kind-soft: var(--docs-soft);
+  border-color: rgba(43, 103, 216, 0.3);
+}
+.block[data-source-key="composio-slack"] {
+  --kind-accent: var(--social-slack);
+  --kind-soft: var(--social-slack-soft);
+  border-color: rgba(74, 21, 75, 0.28);
+}
+.block[data-source-key="composio"] {
+  --kind-accent: var(--composio);
+  --kind-soft: var(--composio-soft);
+  border-color: rgba(111, 91, 214, 0.28);
+}
 .block[data-source-key="social-x"] {
   --kind-accent: var(--social-x);
   --kind-soft: var(--social-x-soft);
@@ -431,6 +464,83 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   display: grid;
   gap: 7px;
   margin-top: 8px;
+}
+.composio-preview {
+  margin-top: 12px;
+  border: 1px solid rgba(33, 27, 23, 0.11);
+  border-radius: 16px;
+  padding: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 244, 0.78));
+  box-shadow: 0 12px 28px rgba(44, 34, 26, 0.07);
+}
+.composio-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.composio-app-logo {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: white;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(33, 27, 23, 0.1), 0 8px 18px rgba(44, 34, 26, 0.08);
+}
+.composio-app-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.composio-app-name {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.25;
+}
+.composio-app-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.composio-items {
+  display: grid;
+  gap: 8px;
+  margin-top: 11px;
+}
+.composio-item {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 11px;
+  background: rgba(255, 255, 255, 0.74);
+}
+.composio-item-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.composio-item-detail {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+.composio-item-link {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 7px;
+  color: var(--kind-accent);
+  font-size: 12px;
+  font-weight: 720;
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
 .memory-update-card {
   padding: 14px;
@@ -1289,6 +1399,11 @@ const HTML_HOME_JS: string = `
   var MAIL_ICON_QQ = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTUiIGZpbGw9IiMyZDc4YzQiLz48cGF0aCBkPSJNMTQgMjFoMzZhNCA0IDAgMCAxIDQgNHYyNGE0IDQgMCAwIDEtNCA0SDE0YTQgNCAwIDAgMS00LTRWMjVhNCA0IDAgMCAxIDQtNFoiIGZpbGw9IiNmZmYiLz48cGF0aCBkPSJNMTQgMjRsMTggMTUgMTgtMTUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzJkNzhjNCIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHRleHQgeD0iMzIiIHk9IjQ4IiBmaWxsPSIjMmQ3OGM0IiBmb250LWZhbWlseT0iQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UVE8L3RleHQ+PC9zdmc+';
   var MEDIA_ICON_YOUTUBE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%23c4302b%22/%3E%3Cpath d=%22M26 21v22l20-11z%22 fill=%22%23fff%22/%3E%3C/svg%3E';
   var MEDIA_ICON_BILIBILI = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%232d8fbd%22/%3E%3Crect x=%2211%22 y=%2220%22 width=%2242%22 height=%2230%22 rx=%227%22 fill=%22%23fff%22/%3E%3Cpath d=%22M23 13l7 7M41 13l-7 7%22 stroke=%22%23fff%22 stroke-width=%224%22 stroke-linecap=%22round%22/%3E%3Ccircle cx=%2225%22 cy=%2235%22 r=%223%22 fill=%22%232d8fbd%22/%3E%3Ccircle cx=%2239%22 cy=%2235%22 r=%223%22 fill=%22%232d8fbd%22/%3E%3C/svg%3E';
+  var COMPOSIO_ICON_GITHUB = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%2324292f%22/%3E%3Ctext x=%2232%22 y=%2239%22 fill=%22%23fff%22 font-family=%22Arial,sans-serif%22 font-size=%2221%22 font-weight=%22800%22 text-anchor=%22middle%22%3EGH%3C/text%3E%3C/svg%3E';
+  var COMPOSIO_ICON_DRIVE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%23fff%22/%3E%3Cpath d=%22M27 11h13l15 27H42z%22 fill=%22%230f9d58%22/%3E%3Cpath d=%22M24 11h14L22 39H9z%22 fill=%22%23f4b400%22/%3E%3Cpath d=%22M9 39h33l7 14H16z%22 fill=%22%234285f4%22/%3E%3C/svg%3E';
+  var COMPOSIO_ICON_DOCS = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%232b67d8%22/%3E%3Cpath d=%22M20 13h19l8 8v30H20z%22 fill=%22%23fff%22 opacity=%22.96%22/%3E%3Cpath d=%22M39 13v9h8%22 fill=%22%231a73e8%22 opacity=%22.32%22/%3E%3Cpath d=%22M25 30h14M25 36h14M25 42h10%22 stroke=%22%232b67d8%22 stroke-width=%223%22 stroke-linecap=%22round%22/%3E%3C/svg%3E';
+  var COMPOSIO_ICON_SLACK = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%234a154b%22/%3E%3Cpath d=%22M22 16a5 5 0 0 1 10 0v10H22zm10 16h10a5 5 0 0 1 0 10H32zM16 32a5 5 0 0 1 0-10h10v10zm16 6v10a5 5 0 0 1-10 0V38z%22 fill=%22%23fff%22/%3E%3C/svg%3E';
+  var COMPOSIO_ICON_DEFAULT = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%236f5bd6%22/%3E%3Ctext x=%2232%22 y=%2239%22 fill=%22%23fff%22 font-family=%22Arial,sans-serif%22 font-size=%2222%22 font-weight=%22800%22 text-anchor=%22middle%22%3EC%3C/text%3E%3C/svg%3E';
   function kindLabel(value) {
     var kind = text(value);
     if (kind === 'welcome') { return '欢迎'; }
@@ -1321,6 +1436,12 @@ const HTML_HOME_JS: string = `
     return kind;
   }
   function blockTagLabel(block) {
+    var key = sourceKey(block);
+    if (key === 'composio-github') { return 'GitHub'; }
+    if (key === 'composio-drive') { return 'Google Drive'; }
+    if (key === 'composio-docs') { return 'Google Docs'; }
+    if (key === 'composio-slack') { return 'Slack'; }
+    if (key === 'composio') { return 'Composio'; }
     if (text(block && block.kind) === 'food-result' && text(block && block.source).length > 0) {
       return text(block && block.source);
     }
@@ -1334,6 +1455,11 @@ const HTML_HOME_JS: string = `
     if (key === 'mail-qq') { return MAIL_ICON_QQ; }
     if (key === 'media-youtube') { return MEDIA_ICON_YOUTUBE; }
     if (key === 'media-bilibili') { return MEDIA_ICON_BILIBILI; }
+    if (key === 'composio-github') { return COMPOSIO_ICON_GITHUB; }
+    if (key === 'composio-drive') { return COMPOSIO_ICON_DRIVE; }
+    if (key === 'composio-docs') { return COMPOSIO_ICON_DOCS; }
+    if (key === 'composio-slack') { return COMPOSIO_ICON_SLACK; }
+    if (key === 'composio') { return COMPOSIO_ICON_DEFAULT; }
     return '';
   }
   function addBlockTag(parent, block, key) {
@@ -1360,6 +1486,7 @@ const HTML_HOME_JS: string = `
     var raw = [
       text(block && block.source),
       metricValue(block, ['source', 'provider', 'sourceTag']),
+      metricValue(block, ['toolName']),
       text(block && block.title),
       text(block && block.subtitle)
     ].join(' ').toLowerCase();
@@ -1374,6 +1501,16 @@ const HTML_HOME_JS: string = `
     }
     if (raw.indexOf('bilibili') >= 0 || raw.indexOf('哔哩哔哩') >= 0 || raw.indexOf('b 站') >= 0 || raw.indexOf('b站') >= 0) {
       return 'media-bilibili';
+    }
+    if (kind === 'generic-tool-result' && (raw.indexOf('composio') >= 0 ||
+      raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0 ||
+      raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0 ||
+      raw.indexOf('github') >= 0 || raw.indexOf('slack') >= 0)) {
+      if (raw.indexOf('github') >= 0) { return 'composio-github'; }
+      if (raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0) { return 'composio-drive'; }
+      if (raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0) { return 'composio-docs'; }
+      if (raw.indexOf('slack') >= 0) { return 'composio-slack'; }
+      return 'composio';
     }
     if (kind.indexOf('social-hub') === 0) {
       var platform = [text(block && block.source), metricValue(block, ['platform'])].join(' ').toLowerCase();
@@ -1894,6 +2031,88 @@ const HTML_HOME_JS: string = `
     }
     return '';
   }
+  function isComposioSourceKey(key) {
+    return text(key).indexOf('composio') === 0;
+  }
+  function composioAppName(key) {
+    if (key === 'composio-github') { return 'GitHub'; }
+    if (key === 'composio-drive') { return 'Google Drive'; }
+    if (key === 'composio-docs') { return 'Google Docs'; }
+    if (key === 'composio-slack') { return 'Slack'; }
+    return 'Composio';
+  }
+  function isComposioSystemRow(row) {
+    var label = text(row && row.label);
+    return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
+      label === 'toolName' || label === 'source' || label === 'provider';
+  }
+  function composioVisibleRows(block) {
+    return list(block && block.rows).filter(function (row) {
+      return !isComposioSystemRow(row) && text(row && row.label).length > 0;
+    }).slice(0, 3);
+  }
+  function trimUrlTail(value) {
+    var clean = text(value);
+    while (clean.length > 0) {
+      var last = clean.charAt(clean.length - 1);
+      if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
+        clean = clean.slice(0, clean.length - 1);
+      } else {
+        break;
+      }
+    }
+    return clean;
+  }
+  function firstUrl(value) {
+    var parts = text(value).split('|').join(' ').split(' ');
+    for (var index = 0; index < parts.length; index += 1) {
+      var part = trimUrlTail(parts[index]);
+      if (part.indexOf('https://') === 0 || part.indexOf('http://') === 0) {
+        return part;
+      }
+    }
+    return '';
+  }
+  function addComposioPreview(parent, block, key) {
+    if (!isComposioSourceKey(key)) { return; }
+    var wrap = add(parent, 'div', 'composio-preview');
+    var head = add(wrap, 'div', 'composio-preview-head');
+    var icon = document.createElement('img');
+    icon.className = 'composio-app-logo';
+    icon.src = mailIconData(key);
+    icon.alt = '';
+    icon.setAttribute('aria-hidden', 'true');
+    head.appendChild(icon);
+    var copy = add(head, 'div', 'composio-app-copy');
+    add(copy, 'div', 'composio-app-name', composioAppName(key));
+    var count = rowValue(block, '结果数量');
+    var status = statusLabel(block && block.status);
+    add(copy, 'div', 'composio-app-meta', count.length > 0 ? count + ' 条结果 · ' + status : status);
+    var rows = composioVisibleRows(block);
+    var items = add(wrap, 'div', 'composio-items');
+    if (rows.length === 0) {
+      add(items, 'div', 'composio-item-detail', rowValue(block, '结果摘要') || text(block && block.subtitle) || '没有可展示结果');
+      return;
+    }
+    rows.forEach(function (row) {
+      var item = add(items, 'article', 'composio-item');
+      add(item, 'div', 'composio-item-title', text(row && row.label));
+      var detail = text(row && row.value);
+      if (detail.length > 0) {
+        add(item, 'div', 'composio-item-detail', detail);
+      }
+      var url = firstUrl(detail);
+      if (url.length > 0) {
+        var link = add(item, 'a', 'composio-item-link', '打开结果');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.addEventListener('click', function (event) {
+          event.stopPropagation();
+        });
+      }
+    });
+  }
   function cleanMemoryLine(value) {
     var line = text(value).trim();
     while (line.indexOf('#') === 0) {
@@ -2146,6 +2365,7 @@ const HTML_HOME_JS: string = `
             setExpandedCard(card);
           });
         }
+        addComposioPreview(card, block, blockSourceKey);
         addGoogleMapPreview(card, block);
         var detailHost = expandable ? add(card, 'div', 'details') : card;
         addMediaEmbed(detailHost, block);

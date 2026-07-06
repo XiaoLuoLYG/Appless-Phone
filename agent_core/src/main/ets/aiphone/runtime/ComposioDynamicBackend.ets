@@ -266,6 +266,11 @@ function setIfSupported(
   }
 }
 
+function isPaginationTokenName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.indexOf('token') >= 0 || lower.indexOf('cursor') >= 0;
+}
+
 function driveQueryFor(keyword: string): string {
   const escaped = keyword.replace(/'/g, "\\'");
   return "name contains '" + escaped + "' and trashed = false";
@@ -296,6 +301,7 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
   if (lower === 'googledocs_search_documents') {
     setIfSupported(args, schema, 'query', keyword);
     setIfSupported(args, schema, 'order_by', 'modifiedTime desc');
+    setIfSupported(args, schema, 'max_results', 5);
     setIfSupported(args, schema, 'limit', 5);
     setIfSupported(args, schema, 'page_size', 5);
     return args;
@@ -339,7 +345,7 @@ function fallbackValueForProperty(name: string, property: ComposioInputSchemaPro
   if (lower.indexOf('limit') >= 0 || lower.indexOf('count') >= 0 || lower.indexOf('page_size') >= 0 || lower.indexOf('pagesize') >= 0) {
     return 5;
   }
-  if (lower === 'page' || lower.indexOf('page') >= 0) {
+  if (lower === 'page') {
     return 1;
   }
   if (property.type === 'integer' || property.type === 'number') {
@@ -365,8 +371,12 @@ function argumentsForTool(tool: ComposioSearchTool, prompt: string): Object {
       return;
     }
     const lower = name.toLowerCase();
+    if (isPaginationTokenName(lower)) {
+      return;
+    }
     if (lower === 'query' || lower === 'q' || lower.indexOf('search') >= 0 || lower.indexOf('keyword') >= 0 ||
-      lower.indexOf('limit') >= 0 || lower.indexOf('count') >= 0 || lower.indexOf('page') >= 0 ||
+      lower.indexOf('limit') >= 0 || lower.indexOf('count') >= 0 ||
+      lower.indexOf('page_size') >= 0 || lower.indexOf('pagesize') >= 0 || lower === 'page' ||
       lower.indexOf('sort') >= 0 || lower.indexOf('order') >= 0) {
       args[name] = fallbackValueForProperty(name, properties[name], prompt);
     }
@@ -525,6 +535,19 @@ function topLevelMessage(payload: Record<string, Object | string | number | bool
   return stringField(payload, ['message', 'summary', 'error']);
 }
 
+function executionErrorMessage(payload: Object): string {
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  const direct = stringField(record, ['error']);
+  if (direct.length > 0) {
+    return direct;
+  }
+  const data = record.data;
+  if (data !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)) {
+    return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['error', 'message']);
+  }
+  return '';
+}
+
 function rowsForExecute(payload: Object, prompt: string, toolSlug: string): A2uiLabelValueData[] {
   const rows: A2uiLabelValueData[] = [];
   appendRow(rows, '执行工具', toolSlug);
@@ -648,7 +671,19 @@ export function composioDynamicResultFromObservation(
   try {
     const payload = JSON.parse(observation) as ComposioSearchObservation;
     if (phase === 'execute') {
+      const errorMessage = executionErrorMessage(payload as Object);
       const rows = rowsForExecute(payload as Object, prompt, toolSlug.length > 0 ? toolSlug : 'dynamic.search');
+      if (errorMessage.length > 0) {
+        return {
+          sourceTag: 'Composio',
+          toolName: toolSlug.length > 0 ? toolSlug : 'dynamic.search',
+          title: 'Composio 调用失败',
+          status: 'error',
+          summary: 'Composio 执行 ' + (toolSlug.length > 0 ? toolSlug : 'dynamic.search') + ' 失败：' + errorMessage,
+          rows: rows,
+          rawPreview: observation.substring(0, 16000)
+        };
+      }
       return {
         sourceTag: 'Composio',
         toolName: toolSlug.length > 0 ? toolSlug : 'dynamic.search',

@@ -1,9 +1,11 @@
 import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
+import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
 type HtmlMediaTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlMediaHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy?: boolean;
+  personaAvatarDataUri?: string;
 }
 
 const MEDIA_HOME_CSS: string = `
@@ -116,6 +118,52 @@ img { display: block; }
   color: rgba(23, 18, 13, 0.76);
   font-size: 14px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.persona-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 14px;
+  border: 1px solid rgba(23, 18, 13, 0.14);
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: rgba(255, 250, 241, 0.82);
+  color: var(--ink);
+  backdrop-filter: blur(18px);
+}
+.persona-avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: rgba(255, 250, 241, 0.94);
+  color: var(--bilibili);
+  font-size: 15px;
+  font-weight: 840;
+}
+.persona-avatar img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.persona-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.persona-title {
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.25;
+}
+.persona-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 .media-hero-stats {
@@ -704,6 +752,26 @@ const MEDIA_HOME_JS: string = `
     add(stat, 'b', '', value);
     add(stat, 'span', '', label);
   }
+  function renderPersonaBanner(parent) {
+    var persona = data.persona || {};
+    var memory = data.personaMemory || {};
+    var name = text(persona.name);
+    if (text(persona.id).length === 0 || name.length === 0) { return; }
+    var banner = add(parent, 'section', 'persona-banner');
+    var avatar = add(banner, 'div', 'persona-avatar');
+    var avatarSrc = text(data.personaAvatarDataUri);
+    if (avatarSrc.length > 0) {
+      var img = add(avatar, 'img');
+      img.src = avatarSrc;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+    } else {
+      avatar.textContent = name.slice(0, 1);
+    }
+    var copy = add(banner, 'div', 'persona-copy');
+    add(copy, 'div', 'persona-title', name + '上线');
+    add(copy, 'div', 'persona-subtitle', text(memory.summary) || text(persona.reason));
+  }
   app.textContent = '';
   var shell = add(app, 'main', 'media-shell');
   var blocks = list(data.blocks).filter(isMediaBlock);
@@ -717,6 +785,7 @@ const MEDIA_HOME_JS: string = `
   add(kicker, 'span', '', '媒体聚合 · 视频来源');
   add(heroCopy, 'h1', '', heroTitle());
   add(heroCopy, 'p', '', heroSubtitle());
+  renderPersonaBanner(heroCopy);
   var stats = add(heroCopy, 'div', 'media-hero-stats');
   addHeroStat(stats, '结果', String(blocks.length));
   addHeroStat(stats, 'YouTube', String(countBySource(blocks, 'media-youtube')));
@@ -826,6 +895,7 @@ export function renderMediaHomeDocument(document: HtmlHomeDocument, isBusy: bool
     history: [],
     persona: document.persona,
     personaMemory: document.personaMemory,
+    personaAvatarDataUri: personaAvatarDataUri(document.persona.avatarKey),
     rawSurfaceRoot: null,
     generatedAt: '',
     isBusy: isBusy || (document as HtmlMediaHomeDocumentWithBusy).isBusy === true

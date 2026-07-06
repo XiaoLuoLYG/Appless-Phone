@@ -232,6 +232,77 @@ function googleMapsDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function composioResultsDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'dynamic-tools';
+  doc.title = 'Composio 工具结果';
+  doc.subtitle = 'GitHub, Drive, Docs, Slack';
+  doc.blocks = [{
+    id: 'composio-github-0',
+    kind: 'generic-tool-result',
+    title: 'Composio GitHub 结果',
+    subtitle: 'Composio 已执行 GITHUB_LIST_PULL_REQUESTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'GITHUB_LIST_PULL_REQUESTS' }],
+    rows: [
+      { label: '执行工具', value: 'GITHUB_LIST_PULL_REQUESTS' },
+      { label: '查询', value: 'Appless-Phone 最近的 pr' },
+      { label: '结果数量', value: '1' },
+      { label: 'Add Composio result cards', value: '#40 | open | https://github.com/XiaoLuoLYG/Appless-Phone/pull/40' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-drive-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Google Drive 结果',
+    subtitle: 'Composio 已执行 GOOGLEDRIVE_SEARCH_FILES，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'GOOGLEDRIVE_SEARCH_FILES' }],
+    rows: [
+      { label: '执行工具', value: 'GOOGLEDRIVE_SEARCH_FILES' },
+      { label: '查询', value: '签证材料' },
+      { label: '结果数量', value: '1' },
+      { label: '签证材料.pdf', value: 'application/pdf | https://drive.google.com/file/d/file_1/view' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-docs-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Google Docs 结果',
+    subtitle: 'Composio 已执行 GOOGLEDOCS_SEARCH_DOCUMENTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'GOOGLEDOCS_SEARCH_DOCUMENTS' }],
+    rows: [
+      { label: '执行工具', value: 'GOOGLEDOCS_SEARCH_DOCUMENTS' },
+      { label: '查询', value: 'AIPhoneDemo 设计文档' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo 设计文档', value: '2026-07-06T12:41:26.011Z | https://docs.google.com/document/d/doc_1/edit' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-slack-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Slack 结果',
+    subtitle: 'Composio 已执行 SLACK_SEARCH_MESSAGES，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'SLACK_SEARCH_MESSAGES' }],
+    rows: [
+      { label: '执行工具', value: 'SLACK_SEARCH_MESSAGES' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo demo ready', value: '#aiphone-demo | https://example.slack.com/archives/C1/p1' }
+    ],
+    actions: []
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function calendarSearchDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -368,6 +439,13 @@ function mediaAggregateDocumentFixture(): HtmlHomeDocument {
   doc.kind = 'media';
   doc.title = 'Qwen Max 官方视频';
   doc.subtitle = '聚合展示 YouTube 和 Bilibili';
+  doc.persona = {
+    id: 'entertainment_companion',
+    name: '娱乐搭子',
+    avatarKey: 'entertainment',
+    status: 'online',
+    reason: '用户请求属于娱乐或媒体内容场景。'
+  };
   doc.blocks = [{
     id: 'youtube-1',
     kind: 'generic-tool-result',
@@ -672,7 +750,15 @@ export default function htmlHomeRendererTest() {
     });
 
     it('keeps travel and food card details collapsed behind source aware expansion hooks', 0, () => {
-      const html = renderHtmlHomeDocument(travelFoodCardsDocumentFixture());
+      const doc = travelFoodCardsDocumentFixture();
+      doc.persona = {
+        id: 'travel_companion',
+        name: '旅行搭子',
+        avatarKey: 'travel',
+        status: 'online',
+        reason: '用户请求属于旅行或出行规划场景。'
+      };
+      const html = renderHtmlHomeDocument(doc);
 
       expect(html.indexOf('itinerary-shell')).assertLarger(-1);
       expect(html.indexOf('route-hero')).assertLarger(-1);
@@ -685,6 +771,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('journey-board')).assertLarger(-1);
       expect(html.indexOf('journey-card')).assertLarger(-1);
       expect(html.indexOf('出行方案 · 实时候选')).assertLarger(-1);
+      expect(html.indexOf('"name":"旅行搭子"')).assertLarger(-1);
+      expect(html.indexOf('用户请求属于旅行或出行规划场景。')).assertLarger(-1);
+      expect(html.indexOf('renderPersonaBanner(hero)')).assertLarger(-1);
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
       expect(html.indexOf('html_pin_travel')).assertLarger(-1);
@@ -903,6 +992,22 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-shell')).assertEqual(-1);
     });
 
+    it('renders Composio results with app logos and visible preview cards', 0, () => {
+      const html = renderHtmlHomeDocument(composioResultsDocumentFixture());
+
+      expect(html.indexOf('composio-preview')).assertLarger(-1);
+      expect(html.indexOf('composio-app-logo')).assertLarger(-1);
+      expect(html.indexOf('composio-github')).assertLarger(-1);
+      expect(html.indexOf('composio-drive')).assertLarger(-1);
+      expect(html.indexOf('composio-docs')).assertLarger(-1);
+      expect(html.indexOf('composio-slack')).assertLarger(-1);
+      expect(html.indexOf('Add Composio result cards')).assertLarger(-1);
+      expect(html.indexOf('签证材料.pdf')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo demo ready')).assertLarger(-1);
+      expect(html.indexOf('打开结果')).assertLarger(-1);
+    });
+
     it('renders Google Calendar search results as a day week month workspace', 0, () => {
       const html = renderHtmlHomeDocument(calendarSearchDocumentFixture());
 
@@ -996,6 +1101,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('media-inline-mount')).assertEqual(-1);
       expect(html.indexOf('media-logo-mark')).assertLarger(-1);
       expect(html.indexOf('Qwen Max 官方视频')).assertLarger(-1);
+      expect(html.indexOf('"name":"娱乐搭子"')).assertLarger(-1);
+      expect(html.indexOf('用户请求属于娱乐或媒体内容场景。')).assertLarger(-1);
+      expect(html.indexOf('renderPersonaBanner(heroCopy)')).assertLarger(-1);
       expect(html.indexOf('YouTube video')).assertLarger(-1);
       expect(html.indexOf('Bilibili video')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-youtube"')).assertLarger(-1);

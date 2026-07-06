@@ -59,5 +59,33 @@ export default function composioDynamicBackendTest() {
       expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
       expect(JSON.stringify(result.rows).indexOf('Add Composio dynamic backend')).assertLarger(-1);
     });
+
+    it('maps Google Docs file payload to display rows', 0, () => {
+      const observation = '{"data":{"files":[{"id":"doc_1","name":"AIPhoneDemo 设计文档","modifiedTime":"2026-07-06T12:41:26.011Z","webViewLink":"https://docs.google.com/document/d/doc_1/edit"}]}}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GOOGLEDOCS_SEARCH_DOCUMENTS',
+        '帮我在 Google Docs 里找 AIPhoneDemo 设计文档'
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('docs.google.com')).assertLarger(-1);
+    });
+
+    it('does not treat Composio execute errors as successful results', 0, () => {
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":null,"error":"Invalid request data provided","log_id":"log_1"}',
+        'GOOGLEDOCS_SEARCH_DOCUMENTS',
+        '帮我在 Google Docs 里找 AIPhoneDemo 设计文档'
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.summary.indexOf('Invalid request data provided')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('Invalid request data provided')).assertLarger(-1);
+    });
   });
 }
