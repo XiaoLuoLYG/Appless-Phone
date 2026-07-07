@@ -1,134 +1,43 @@
-# 当前工具和测试 query 清单
+# 当前工具能力总表
 
-更新时间：2026-07-06
+更新时间：2026-07-07
 
-来源：
+来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-- 静态工具：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets` 和 `agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`
-- Agent 额外工具：`agent_core/src/main/ets/aiphone/LoopBackend.ets`
-- 动态工具样例：`agent_core/src/main/ets/aiphone/runtime/DynamicToolSamples.ets`
-- 设备测试 query：`scripts/aiphone-device-smoke.mjs`
-- 支付专项测试：`entry/src/test/ToolGatewayClient.test.ets`、`entry/src/test/PaymentCore.test.ets`、`entry/src/test/PaymentA2ui.test.ets`、`entry/src/test/StripeReceivingAccountA2ui.test.ets`
+当前 agent 工具箱：27 个静态工具 + `memory.update` + `dynamic.search` = 29 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`，少量 Outlook/SocialHub 结果会作为 extra 追加。
 
-## 工具总览
-
-当前 app 的 agent 工具箱里有 29 个可被模型选择的工具：27 个静态工具，加上 `memory.update` 和 `dynamic.search`。
-
-| 领域 | toolId | 能力 | 风险 | 后端/授权 | UI/动作 |
-| --- | --- | --- | --- | --- | --- |
-| 出行 | `travel.search` | 综合出行方案，混排高铁/航班候选 | `read` | `local_adapter` / 无 | `TravelOptions` |
-| 出行 | `train.search` | 高铁、火车、12306 相关查询 | `read` | `local_adapter` / 无 | `TrainOptions` |
-| 出行 | `flight.search` | 航班、机票、机场相关查询 | `read` | `local_adapter` / provider key | `FlightBoard` |
-| 餐饮 | `food.search` | 附近咖啡、奶茶、餐厅、麦当劳、瑞幸、菜单/优惠/外卖查询 | `read` | `local_adapter` / provider key | `FoodChoices` |
-| 社交 | `social.feed.search` | 聚合读取 X、Slack、企业微信 feed 或连接状态 | `read` | `local_adapter` / OAuth 或 provider key | `SocialHub`; 可起草回复 |
-| 社交 | `social.reply.draft` | 对已选真实社交消息生成回复草稿 | `draft` | `local_adapter` / OAuth 或 provider key | `SocialHub` |
-| X | `x.post.search` | 搜索 X/Twitter/x.com 公开 post | `read` | `local_adapter` / OAuth 或 provider key | `SocialHub`; 可起草回复 |
-| 邮箱 | `mail.search` | 通用邮箱聚合搜索，当前覆盖 Gmail + QQ Mail | `read` | OAuth API, IMAP, Workspace MCP / 对应授权 | `GenericToolResults`; 可读线程/写草稿 |
-| 邮箱 | `mail.thread.read` | 读取已选通用邮箱线程 | `read` | OAuth API, IMAP / 对应授权 | `GenericToolResults`; 可写草稿 |
-| 邮箱 | `mail.draft.create` | 基于真实邮件创建通用邮箱回复草稿 | `draft` | OAuth API, IMAP / 对应授权 | `GenericToolResults` |
-| Gmail | `gmail.mail.search` | 搜索/查看 Gmail 邮件列表或关键词邮件 | `read` | OAuth API, Workspace MCP, Web session / 对应授权 | `GenericToolResults`; 授权、读线程、写草稿、打开 Web |
-| Gmail | `gmail.thread.read` | 读取指定 Gmail thread | `read` | OAuth API, Workspace MCP, Web session / 对应授权 | `GenericToolResults`; 写草稿、打开 Web |
-| Gmail | `gmail.draft.create` | 创建 Gmail 邮件/回复草稿 | `draft` | OAuth API, Workspace MCP, Web session / 对应授权 | `GenericToolResults`; 可 apply 或打开 Web |
-| Gmail | `gmail.draft.apply` | 用户确认后应用已有 Gmail 草稿 | `confirm_required` | OAuth API, Workspace MCP, Web session, system intent / 对应授权 | `GenericToolResults` |
-| Gmail | `gmail.open.web` | 打开 Gmail Web 给用户继续处理 | `confirm_required` | system intent / 系统 | `GenericToolResults` |
-| Gmail | `gmail.message.send` | 直接发送 Gmail 的安全阻断兜底 | `blocked` | system intent / 系统 | `GenericToolResults`; 不会自动发送 |
-| 视频 | `media.video.search` | 多源视频搜索，尤其 B 站 + YouTube 聚合 | `read` | `local_adapter` / provider key | `GenericToolResults`; 打开媒体页 |
-| YouTube | `youtube.video.search` | YouTube-only 公开视频搜索；可用 `order=viewCount` 做 API 支持的热门排序 | `read` | `local_adapter` / provider key | `GenericToolResults`; 打开 YouTube |
-| YouTube | `youtube.mine.playlists` | 查看用户 YouTube 播放列表 | `read` | OAuth API, Web session / 对应授权 | `GenericToolResults`; 授权、打开 Web |
-| YouTube | `youtube.mine.subscriptions` | 查看用户 YouTube 订阅 | `read` | OAuth API, Web session / 对应授权 | `GenericToolResults`; 授权、打开 Web |
-| 日历 | `calendar.events.search` | 查询 Google Calendar 日程 | `read` | OAuth API / OAuth | `GenericToolResults`; 授权 |
-| 日历 | `calendar.event.create` | 创建 Google Calendar 日程 | `confirm_required` | OAuth API / OAuth | `GenericToolResults`; 授权 |
-| 日历 | `calendar.event.update` | 更新 Google Calendar 日程 | `confirm_required` | OAuth API / OAuth | `GenericToolResults`; 授权 |
-| 支付 | `payment.send` | PayPal/Stripe 付款确认流；Google Pay 只是 funding source，不是独立 provider | `confirm_required` | `local_adapter` / provider key 或 web session | `GenericToolResults`; 补金额、选 provider、确认、取消、打开 checkout |
-| 支付 | `payment.account.setup` | 创建/打开/刷新当前 agent 的 Stripe 收款账户 | `confirm_required` | `local_adapter` / provider key | `StripeReceivingAccountCard`; Stripe Connect 托管认证 |
-| 地图 | `maps.place.search` | 显式 Google Maps/Google Places 地点搜索 | `read` | `local_adapter` / provider key | `GenericToolResults` |
-| 地图 | `maps.place.details` | Google Places 地点详情 | `read` | `local_adapter` / provider key | `GenericToolResults` |
-| 数字分身 | `memory.update` | 记录当前分身的长期偏好、身份事实或稳定约束 | `draft` | agent runtime / 无 | 记忆更新卡；可重新执行建议 query |
-| 动态工具 | `dynamic.search` | 在本机 ModelScope-derived catalog 里搜索可接入 MCP/API | `read` | dynamic catalog / 视工具而定 | `ToolConnectCard` 或动态工具结果 |
-
-## 动态工具入口
-
-这些不是主工具箱里的固定业务工具，但 `dynamic.search` 或本地工具宿主可以发现/接受它们。
-
-| toolId | 来源/用途 | 当前状态 |
-| --- | --- | --- |
-| `weather.query` | 高德天气查询 alias | 可由天气 query 通过 `dynamic.search` 发现 |
-| `maps.weather` | 高德天气兼容 alias | 可注册；测试里要求为真 |
-| `statistics.search` | 中国国家统计局数据查询 | 可由 GDP/CPI/人口/经济数据 query 发现 |
-| `ppt.generate` | 歌者 PPT MCP | 可由 PPT/幻灯片 query 发现，需要凭据或受 transport 限制 |
-| `fixture.echo` | Fixture Echo MCP | 开发/测试 fixture，不算用户侧正式能力 |
-| `ferry.ticket.search` | 船票示例 | 当前不注册；船票 query 会走 `dynamic.search` 并真实返回 `no_tool_found` |
-
-Composio 授权页只管理 Composio connected accounts，不替换现有静态工具的数据来源。App 端只保存 `proxyBaseUrl`、`TOOL_GATEWAY_API_KEY` 和 app-scoped `userId`，Composio API key 只存在于 `tool-gateway`。发送、创建、更新类 Composio 工具允许执行；默认 query 先由当前用户 session search 选择工具，execute 模式按传入 tool slug 交给 Composio 代理并返回真实结果或错误。
-
-## 设备 smoke query
-
-运行：
-
-```bash
-node scripts/aiphone-device-smoke.mjs
-```
-
-| query | 预期 toolId | 覆盖点 |
-| --- | --- | --- |
-| `我明天要从北京去上海，帮我搜索出行方案` | `travel.search` | 综合出行 |
-| `帮我搜索深圳坂田华为基地附近的咖啡店` | `food.search` | 餐饮/附近 POI 默认走 food，不走 Maps |
-| `帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐` | `maps.place.search` | 显式 Google Maps 才走 Maps |
-| `帮我查看邮箱里最新的重要邮件` | `mail.search` | Gmail + QQ Mail 聚合邮箱 |
-| `帮我查看我Gmail里和我eccv论文相关的邮件` | `gmail.mail.search` | Gmail ECCV 关键词搜索和可见证据链 |
-| `帮我在b站和youtube里搜索qwen max 的官方视频` | `media.video.search` | B 站 + YouTube 多源视频 |
-| `帮我查看我今天 X 和 Slack 上的消息` | `social.feed.search` | SocialHub 聚合 feed/连接状态 |
-| `帮我查看 X 上 openai 最近的公开 post` | `x.post.search` | X 公开 post 搜索 |
-| `点一杯咖啡` | `food.search` | 分身默认饮食查询 |
-| `把饮食搭子的 memory 改成：用户咖啡偏好：只喝瑞幸咖啡。` | 无业务搜索工具 | `memory.update`/分身记忆更新链路 |
-| `点一杯咖啡` | `food.search` | 记忆更新后再次查询，预期体现瑞幸偏好 |
-
-### 可选 smoke 组
-
-| 命令 | query | 预期 toolId | 预期发现 |
-| --- | --- | --- | --- |
-| `--dynamic-tools` | `帮我查明天深圳到珠海的船票` | `dynamic.search` | `none` |
-| `--dynamic-tools` | `帮我查明天深圳天气` | `dynamic.search` | `weather.query` |
-| `--composio-auth` | 直接打开配置页里的 `Composio 授权` | 无工具 | 授权页显示当前用户和 Auth Config/授权卡片状态 |
-| full regression | `你好` | 无工具 | - |
-| full regression | `帮我查明天北京到上海航班` | `flight.search` | - |
-| full regression | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | `train.search` | - |
-| full regression | `帮我查附近咖啡` | `food.search` | - |
-| full regression | `帮我查深圳坂田附近麦当劳门店和菜单` | `food.search` | - |
-| Gmail/full regression | `帮我看 Gmail 里最新的重要邮件` | `gmail.mail.search` | - |
-| Gmail/full regression | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | `gmail.draft.create` | - |
-| Gmail/full regression | `帮我查看我Gmail里和我eccv论文相关的邮件` | `gmail.mail.search` | - |
-| mail/full regression | `帮我看邮箱里最新的重要邮件` | `mail.search` | - |
-| mail/full regression | `帮我看 QQ 邮箱里最新邮件` | `mail.search` | - |
-| `--google-apps`/full regression | `帮我在 YouTube 搜索 qwen max 官方介绍视频` | `youtube.video.search` | - |
-| `--google-apps`/manual follow-up smoke | `帮我在 YouTube 上搜索五个最火的世界杯视频，并给 xxx@example.com 创建一封 Gmail 草稿` | `youtube.video.search` then `gmail.draft.create` | 多工具 ReAct loop；不自动发送 |
-| `--google-apps`/full regression | `帮我查看我的 YouTube 播放列表` | `youtube.mine.playlists` | - |
-| `--google-apps`/full regression | `帮我看今天的 Google Calendar 日程` | `calendar.events.search` | - |
-| `--google-apps`/full regression | `帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程` | `calendar.event.create` | - |
-| `--google-apps`/full regression | `帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店` | `maps.place.search` | - |
-
-支付工具当前没有加入设备 smoke 默认或 full regression。
-
-## 支付专项测试 prompt
-
-这些是代码级测试 prompt，不是 `scripts/aiphone-device-smoke.mjs` 的默认设备 query。
-
-| 测试文件 | prompt / 场景 | 预期 |
-| --- | --- | --- |
-| `ToolGatewayClient.test.ets` | `用 PayPal 给罗一格转账` | `payment.send` 返回“补充金额” |
-| `ToolGatewayClient.test.ets` | `用 PayPal 给 Dana Saved 转账` | 使用本地保存付款对象，仍先补金额 |
-| `ToolGatewayClient.test.ets` | `用 PayPal 给罗一格转 5 美元` | `payment.send` 返回确认支付卡，不先创建 provider session |
-| `ToolGatewayClient.test.ets` | `打开 External Cafe 的 Stripe 付款页` | Stripe Payment Link 转成 app checkout action |
-| `PaymentCore.test.ets` | Google Pay funding source | Google Pay 走 PayPal target，不作为独立 provider |
-| `PaymentA2ui.test.ets` | confirm / needs amount / checkout / Google Pay rendering | 支付卡动作和展示正确 |
-| `StripeReceivingAccountA2ui.test.ets` | Stripe 收款账户 setup / onboard / refresh | `payment.account.setup` 卡动作正确 |
+| 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 出行 | `travel.search` | `我明天要从北京去上海，帮我搜索出行方案` | 综合高铁/航班候选；不造假，缺 provider 显示真实失败 | `read` | 无；航班源可能要 `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于 12306/飞常准网络 | 否 | 默认 smoke |
+| 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306/铁路结果或真实 provider 错误 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
+| 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
+| 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |
+| 社交 | `social.feed.search` | `帮我查看我今天 X 和 Slack 上的消息` | SocialHub 聚合 X/Slack/企业微信连接状态或真实消息 | `read` | `X_BEARER_TOKEN`、`SLACK_USER_TOKEN`、企业微信缓存/回调 | X/Slack 通常需要；企业微信通常不需要 | 仅社交聚合 query 会追加 Discord/LinkedIn/WhatsApp/Instagram Composio extra | 默认 smoke；`--composio-tools` 社交聚合 |
+| 社交 | `social.reply.draft` | `帮我给这条 Slack 消息起草回复` | 对已选真实 SocialHub item 生成本地草稿，不发送 | `draft` | 需要已有真实 item 上下文 | 起草本身不需要；来源读取按平台 | 否 | 单元/动作链路 |
+| X | `x.post.search` | `帮我查看 X 上 openai 最近的公开 post` | X 公开 post 结果或真实授权/provider 错误 | `read` | `X_BEARER_TOKEN` 或 OAuth | 通常需要 VPN | 否 | 默认 smoke |
+| 邮箱 | `mail.search` | `帮我查看邮箱里最新的重要邮件` | 聚合 Gmail、QQ Mail、Outlook；不模拟邮件 | `read` | Gmail OAuth/MCP、QQ IMAP、Outlook 可经 Composio extra | Gmail/Outlook 通常需要；QQ 通常不需要 | Outlook extra 可走 Composio；普通聚合不替换成 Composio | 默认 smoke；`--composio-tools` 对照 |
+| 邮箱 | `mail.thread.read` | `打开第一封邮件详情` | 读取已选聚合邮箱线程 | `read` | 需要 provider + messageId/threadId | 按邮件 provider | Outlook 线程若来自 Composio extra 取决于后续支持；固定工具本身否 | 单元/动作链路 |
+| 邮箱 | `mail.draft.create` | `帮我给 QQ 邮箱里最近一封邮件起草回复` | 基于真实线程创建草稿，不发送 | `draft` | 需要真实邮件上下文；QQ IMAP/Gmail OAuth | 按邮件 provider | 否 | 规则/动作链路 |
+| Gmail | `gmail.mail.search` | `帮我查看我Gmail里和我eccv论文相关的邮件` | Gmail 搜索结果、可展开详情、可生成回复草稿；无授权则显示授权/失败 | `read` | Google OAuth / Workspace MCP / Web session | 通常需要 VPN | 否 | 默认 smoke + Gmail cases |
+| Gmail | `gmail.thread.read` | `打开第一封 Gmail 详情` | 读取指定 Gmail thread | `read` | Gmail threadId + OAuth/MCP/Web session | 通常需要 VPN | 否 | 单元/动作链路 |
+| Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送 | `draft` | Gmail OAuth/MCP/Web session | 通常需要 VPN | 否 | Gmail cases |
+| Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿 | `confirm_required` | 已有草稿 + Gmail 授权 | 通常需要 VPN | 否 | 单元/动作链路 |
+| Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
+| Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
+| 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen max 的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
+| YouTube | `youtube.video.search` | `帮我在 YouTube 搜索 qwen max 官方介绍视频` | YouTube-only 公开视频搜索；可用 API 热门排序 | `read` | `YOUTUBE_API_KEY` | 通常需要 VPN | 否 | `--google-apps` |
+| YouTube | `youtube.mine.playlists` | `帮我查看我的 YouTube 播放列表` | 用户播放列表或 OAuth 授权卡 | `read` | Google OAuth/Web session | 通常需要 VPN | 否 | `--google-apps` |
+| YouTube | `youtube.mine.subscriptions` | `帮我查看我的 YouTube 订阅` | 用户订阅或 OAuth 授权卡 | `read` | Google OAuth/Web session | 通常需要 VPN | 否 | 注册/单元测试 |
+| 日历 | `calendar.events.search` | `帮我看今天的 Google Calendar 日程` | Google Calendar 日程或授权/失败卡 | `read` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
+| 日历 | `calendar.event.create` | `帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程` | 创建/确认日程；2026-06-30 是当前 smoke 固定 query | `confirm_required` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
+| 日历 | `calendar.event.update` | `把刚才的日程改到下午4点` | 更新指定日程或提示缺少 event id/授权 | `confirm_required` | Google OAuth + event id | 通常需要 VPN | 否 | 注册/单元测试 |
+| 支付 | `payment.send` | `用 PayPal 给罗一格转 5 美元` | 先补金额/确认，再打开 PayPal/Stripe checkout；不会声称已付款除非 provider 确认 | `confirm_required` | `PAYPAL_*`、`STRIPE_*`、付款对象 book；Google Pay 是 fundingSource | PayPal/Google Pay 常需要；Stripe 视网络 | 否 | 支付专项测试 |
+| 支付 | `payment.account.setup` | `帮我创建我的 Stripe 收款账户` | Stripe Connect 收款账户卡、托管认证/刷新状态 | `confirm_required` | `STRIPE_TEST_SECRET_KEY` / `STRIPE_LIVE_SECRET_KEY` + agent profile | Stripe/Connect 通常需要 VPN 或可访问外网 | 否 | 支付专项测试 |
+| 地图 | `maps.place.search` | `帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐` | Google Places 地点列表或缺 key/网络错误 | `read` | `GOOGLE_MAPS_API_KEY` | 通常需要 VPN | 否 | 默认 smoke / `--google-apps` |
+| 地图 | `maps.place.details` | `帮我查这个 Google Places placeId 的详情` | Google Places 详情或缺 placeId/key 错误 | `read` | `GOOGLE_MAPS_API_KEY` + placeId | 通常需要 VPN | 否 | 注册/单元测试 |
+| 数字分身 | `memory.update` | `把饮食搭子的 memory 改成：用户咖啡偏好：只喝瑞幸咖啡。` | 更新当前分身 memory，显示记忆更新卡；不同时搜索 | `draft` | 无 | 不需要 | 否 | 默认 smoke |
+| 动态工具 | `dynamic.search` | `帮我查明天深圳天气` / `帮我在 GitHub 里找 Appless-Phone 最近的 pr` | 本地 catalog 命中天气/统计/PPT；或 Composio 工具结果；找不到就 `no_tool_found` | `read`，Composio execute 可有副作用但只按返回工具执行 | 本地 catalog 凭据；Composio 需 `COMPOSIO_API_KEY` + `COMPOSIO_USER_ID` + app 授权 | 高德天气通常不需要；Composio/SaaS 多数需要外网/VPN | 是：GitHub/Drive/Docs/Slack/Notion/Linear/Trello/Asana/HubSpot/Salesforce/Outlook/Discord/LinkedIn/WhatsApp/Instagram/Spotify/TikTok/Ticketmaster 等 | `--dynamic-tools`、`--composio-tools` |
 
 ## 更新规则
 
-改工具时同步改这份表：
-
-1. 新增/删除静态工具：先改 `AiphoneToolDefinitions.ets` 和 runtime `ToolDefinitionRegistry.ets`，再更新“工具总览”。
-2. 新增 agent-only 工具：改 `LoopBackend.ets` 后更新“工具总览”。
-3. 新增动态 catalog alias：改 `DynamicToolSamples.ets` 后更新“动态工具入口”。
-4. 新增设备 smoke query：改 `scripts/aiphone-device-smoke.mjs` 后更新“设备 smoke query”。
-5. 新增支付/专项 prompt：改对应 `entry/src/test/*` 后更新“支付专项测试 prompt”或新增专项表。
+改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 agent-only 工具看 `LoopBackend.ets`; 新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。
