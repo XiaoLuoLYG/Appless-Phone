@@ -1873,28 +1873,18 @@ async function waitForComposioAuthEvidence() {
   return last;
 }
 
-function ensureDeviceGatewayReachable() {
-  let rportError = '';
+function ensureDeviceGatewayPortForwarded() {
   try {
     hdc(['rport', 'tcp:8787', 'tcp:8787']);
   } catch (error) {
-    rportError = error instanceof Error ? error.message : String(error);
-  }
-  try {
-    const health = hdc(['shell', 'curl', '-sS', '--max-time', '3', 'http://127.0.0.1:8787/health'], { timeout: 10000 });
-    if (!health.includes('AIPhone Tool Gateway')) {
-      throw new Error(`unexpected gateway health body: ${health.slice(0, 200)}`);
-    }
-  } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const rportDetails = rportError.length > 0 ? ` rportError=${rportError.split('\n')[0]}` : '';
-    throw new Error(`Composio auth smoke requires host tool-gateway on device 127.0.0.1:8787.${rportDetails} healthError=${reason}`);
+    throw new Error(`Composio auth smoke requires hdc rport tcp:8787 tcp:8787 before page verification. rportError=${reason.split('\n')[0]}`);
   }
 }
 
 async function runComposioAuthSmoke() {
   clearHilog();
-  ensureDeviceGatewayReachable();
+  ensureDeviceGatewayPortForwarded();
   hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
   if (cleanData) {
     cleanBundleData();
