@@ -4,6 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
+import util from '@ohos.util';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
   A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
@@ -32,7 +33,26 @@ import {
   SocialHubItemData
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
-import { callToolGateway, configureLocalPaymentAccountBookJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, sendLocalSocialHubReply } from '@loop/agent-core';
+import {
+  callToolGateway,
+  COMPOSIO_USER_ID_PREFIX,
+  ComposioAuthConfigItem,
+  ComposioAuthProxyClient,
+  configureComposioConfigFromRawJson,
+  configureComposioUserId,
+  configureLocalPaymentAccountBookJson,
+  configureLocalStripeReceivingAgentJson,
+  configureLocalToolDebugConfig,
+  currentToolGatewayApiKey,
+  defaultToolGatewayUrl,
+  isRegisteredToolId,
+  normalizeComposioUserId,
+  prepareGmailOAuthAuthorizationUrl,
+  prepareGoogleOAuthAuthorizationUrl,
+  prepareXOAuthAuthorizationUrl,
+  sendLocalSocialHubReply,
+  shortComposioUserId
+} from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -52,6 +72,7 @@ import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore
 import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
 import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
+import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
@@ -91,6 +112,8 @@ const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
 const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
+const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
+const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -193,6 +216,7 @@ function modelPromptWithActionContext(prompt: string, actionId: string, args: Ob
 @Component
 struct Index {
   @State showConfigPage: boolean = false;
+  @State showComposioAuthPage: boolean = false;
   @State showAdvancedSettings: boolean = false;
   @State showHistory: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
@@ -230,6 +254,10 @@ struct Index {
   @State personaSoulDraft: string = personaPackForId('food_companion').soul;
   @State personaMemoryDraft: string = personaPackForId('food_companion').memory;
   @State personaSaveMessage: string = '';
+  @State composioUserId: string = '';
+  @State composioAuthItems: ComposioAuthConfigItem[] = [];
+  @State composioAuthMessage: string = '';
+  @State composioAuthBusy: boolean = false;
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
@@ -239,6 +267,7 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
 
   aboutToAppear(): void {
+    this.loadComposioUserId();
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
@@ -272,6 +301,18 @@ struct Index {
     }
     try {
       return preferences.getPreferencesSync(context, { name: PAYMENT_ACCOUNT_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private composioAuthPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return preferences.getPreferencesSync(context, { name: COMPOSIO_AUTH_STORE_NAME });
     } catch (_error) {
       return null;
     }
@@ -313,6 +354,122 @@ struct Index {
     } catch (_error) {
       return [];
     }
+  }
+
+  private savedComposioUserId(): string {
+    const store = this.composioAuthPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return normalizeComposioUserId(this.preferenceText(store.getSync(COMPOSIO_USER_ID_KEY, '')));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private loadComposioUserId(): void {
+    const saved = this.savedComposioUserId();
+    if (saved.length === 0) {
+      return;
+    }
+    this.composioUserId = saved;
+    configureComposioUserId(saved);
+  }
+
+  private async persistComposioUserId(userId: string): Promise<void> {
+    const store = this.composioAuthPreferences();
+    if (store === null) {
+      return;
+    }
+    store.putSync(COMPOSIO_USER_ID_KEY, userId);
+    await store.flush();
+  }
+
+  private createComposioUserId(): string {
+    return normalizeComposioUserId(COMPOSIO_USER_ID_PREFIX + util.generateRandomUUID(false));
+  }
+
+  private ensureComposioUserId(): string {
+    if (this.composioUserId.length > 0) {
+      return this.composioUserId;
+    }
+    const saved = this.savedComposioUserId();
+    if (saved.length > 0) {
+      this.composioUserId = saved;
+      configureComposioUserId(saved);
+      return saved;
+    }
+    const generated = this.createComposioUserId();
+    this.composioUserId = generated;
+    configureComposioUserId(generated);
+    this.persistComposioUserId(generated).catch((_error: Error | Object | string | number | boolean | null | undefined) => {});
+    return generated;
+  }
+
+  private composioProxyBaseUrl(): string {
+    let value = TOOL_GATEWAY_URL.trim();
+    while (value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
+    return value.endsWith('/api/aiphone/tool')
+      ? value.substring(0, value.length - '/api/aiphone/tool'.length)
+      : value;
+  }
+
+  private composioAuthClient(): ComposioAuthProxyClient {
+    return new ComposioAuthProxyClient(this.composioProxyBaseUrl(), currentToolGatewayApiKey());
+  }
+
+  private configureComposioRuntimeForCurrentUser(): string {
+    const userId = this.ensureComposioUserId();
+    configureComposioUserId(userId);
+    configureComposioConfigFromRawJson(JSON.stringify({
+      userId: userId,
+      proxyBaseUrl: this.composioProxyBaseUrl(),
+      proxyApiKey: currentToolGatewayApiKey()
+    }));
+    return userId;
+  }
+
+  private async refreshComposioAuth(): Promise<void> {
+    this.composioAuthBusy = true;
+    try {
+      const userId = this.configureComposioRuntimeForCurrentUser();
+      const result = await this.composioAuthClient().listAuthConfigs(userId);
+      this.composioAuthItems = result.items;
+      this.composioAuthMessage = result.ok ? '已刷新 Composio 授权状态。' : (result.error.length > 0 ? result.error : 'Composio 授权状态刷新失败。');
+    } catch (error) {
+      this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
+    } finally {
+      this.composioAuthBusy = false;
+    }
+  }
+
+  private async openComposioAuthLink(item: ComposioAuthConfigItem): Promise<void> {
+    this.composioAuthBusy = true;
+    try {
+      const link = await this.composioAuthClient().createLink(this.configureComposioRuntimeForCurrentUser(), item.authConfigId, item.toolkitSlug);
+      if (!link.ok) {
+        this.composioAuthMessage = link.error.length > 0 ? link.error : 'Composio 授权链接创建失败。';
+        return;
+      }
+      this.composioAuthMessage = '正在打开授权页。';
+      await this.openExternalUrl(link.redirectUrl);
+    } catch (error) {
+      this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
+    } finally {
+      this.composioAuthBusy = false;
+    }
+  }
+
+  private async resetComposioUser(): Promise<void> {
+    const nextUserId = this.createComposioUserId();
+    this.composioUserId = nextUserId;
+    this.composioAuthItems = [];
+    configureComposioUserId(nextUserId);
+    await this.persistComposioUserId(nextUserId);
+    this.configureComposioRuntimeForCurrentUser();
   }
 
   private loadPaymentAccounts(): void {
@@ -2258,7 +2415,33 @@ struct Index {
   }
 
   build() {
-    if (this.showConfigPage) {
+    if (this.showComposioAuthPage) {
+      ComposioAuthPage({
+        userShortId: shortComposioUserId(this.composioUserId),
+        items: this.composioAuthItems,
+        message: this.composioAuthMessage,
+        isBusy: this.composioAuthBusy,
+        onBack: () => {
+          this.showComposioAuthPage = false;
+        },
+        onRefresh: () => {
+          this.refreshComposioAuth();
+        },
+        onAuthorize: (item: ComposioAuthConfigItem) => {
+          this.openComposioAuthLink(item);
+        },
+        onResetUser: () => {
+          this.resetComposioUser()
+            .then(() => {
+              this.composioAuthMessage = '已切换新的测试用户。';
+              return this.refreshComposioAuth();
+            })
+            .catch((error: Error | Object | string | number | boolean | null | undefined) => {
+              this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
+            });
+        }
+      })
+    } else if (this.showConfigPage) {
       ConfigPage({
         baseUrl: $baseUrl,
         apiKey: $apiKey,
@@ -2285,6 +2468,11 @@ struct Index {
         },
         onTestConnection: () => {
           this.testConnection();
+        },
+        onOpenComposioAuth: () => {
+          this.configureComposioRuntimeForCurrentUser();
+          this.showComposioAuthPage = true;
+          this.refreshComposioAuth();
         },
         onSelectPersona: (personaId: string) => {
           this.selectPersonaForEdit(personaId);

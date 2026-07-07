@@ -52,6 +52,9 @@ const X_OAUTH_URI_HINTS: string[] = [
   'com.example.aiphonedemo:/oauth/x',
   'com.example.aiphonedemo://oauth/x'
 ];
+const COMPOSIO_CALLBACK_URI_HINTS: string[] = [
+  'aiphone://composio/callback'
+];
 
 function hasUriHint(uri: string, hints: string[]): boolean {
   for (let index = 0; index < hints.length; index++) {
@@ -70,6 +73,10 @@ function isXOAuthRedirectUri(uri: string): boolean {
   return hasUriHint(uri, X_OAUTH_URI_HINTS);
 }
 
+function isComposioCallbackUri(uri: string): boolean {
+  return hasUriHint(uri, COMPOSIO_CALLBACK_URI_HINTS);
+}
+
 function describeError(error: Error | Object | string | number | boolean | null | undefined): string {
   if (error === undefined || error === null) {
     return '';
@@ -84,12 +91,14 @@ function describeError(error: Error | Object | string | number | boolean | null 
 }
 
 function allOAuthUriHints(): string[] {
-  return GMAIL_OAUTH_URI_HINTS.concat(X_OAUTH_URI_HINTS);
+  return GMAIL_OAUTH_URI_HINTS.concat(X_OAUTH_URI_HINTS).concat(COMPOSIO_CALLBACK_URI_HINTS);
 }
 
 function shouldInspectPotentialOAuthText(value: string): boolean {
   return value.indexOf('oauth') >= 0 ||
     value.indexOf('google') >= 0 ||
+    value.indexOf('composio') >= 0 ||
+    value.indexOf('callback') >= 0 ||
     value.indexOf('/x') >= 0 ||
     value.indexOf('state=') >= 0 ||
     value.indexOf('code=') >= 0;
@@ -180,7 +189,7 @@ function oauthUriFromWant(want: Want): string {
   }
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index];
-    if (isGmailOAuthRedirectUri(candidate) || isXOAuthRedirectUri(candidate)) {
+    if (isGmailOAuthRedirectUri(candidate) || isXOAuthRedirectUri(candidate) || isComposioCallbackUri(candidate)) {
       return candidate;
     }
   }
@@ -282,6 +291,10 @@ export default class EntryAbility extends UIAbility {
   private handleOAuthWant(want: Want): void {
     const directUri = want.uri === undefined ? '' : want.uri;
     const uri = oauthUriFromWant(want);
+    if (isComposioCallbackUri(uri)) {
+      aiLogInfo('[AIPhone][ComposioCallbackWantReceived] uriChars=' + uri.length.toString());
+      return;
+    }
     if (isXOAuthRedirectUri(uri)) {
       this.handleXOAuthUri(uri);
       return;

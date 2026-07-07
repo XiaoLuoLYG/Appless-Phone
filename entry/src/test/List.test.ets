@@ -14,6 +14,7 @@ import genericMcpClientTest from './GenericMcpClient.test';
 import dynamicToolA2uiTest from './DynamicToolA2ui.test';
 import composioConfigTest from './ComposioConfig.test';
 import composioAuthClientTest from './ComposioAuthClient.test';
+import composioAuthViewDataTest from './ComposioAuthViewData.test';
 import composioDynamicBackendTest from './ComposioDynamicBackend.test';
 import dynamicToolSamplesTest from './DynamicToolSamples.test';
 import dynamicToolDiscoveryTest from './DynamicToolDiscovery.test';
@@ -78,6 +79,7 @@ export default function testsuite() {
   dynamicToolA2uiTest();
   composioConfigTest();
   composioAuthClientTest();
+  composioAuthViewDataTest();
   composioDynamicBackendTest();
   dynamicToolSamplesTest();
   dynamicToolDiscoveryTest();

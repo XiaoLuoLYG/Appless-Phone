@@ -50,6 +50,7 @@ export struct ConfigPage {
   @State editingPersonaDoc: string = '';
   onBack: () => void = () => {};
   onTestConnection: () => void = () => {};
+  onOpenComposioAuth: () => void = () => {};
   onSelectPersona: (personaId: string) => void = (_personaId: string) => {};
   onSavePersona: () => void = () => {};
   onResetPersona: () => void = () => {};
@@ -510,6 +511,19 @@ export struct ConfigPage {
           }
           .width('100%')
           .margin({ bottom: 14 })
+
+          Button('Composio 授权')
+            .height(36)
+            .width('100%')
+            .fontSize(12)
+            .fontColor(COLOR_INK)
+            .backgroundColor(COLOR_CARD_RAISED)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_CARD_EDGE })
+            .margin({ bottom: 14 })
+            .onClick(() => {
+              this.onOpenComposioAuth();
+            })
 
           this.InputLabel('Model', 0)
           TextInput({ text: this.selectedModel, placeholder: 'qwen-max' })
