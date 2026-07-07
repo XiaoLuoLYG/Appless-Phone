@@ -62,6 +62,35 @@ export default function socialHubTypesTest() {
       expect(connection.status).assertEqual('needs_auth');
     });
 
+    it('normalizes Composio social app platforms', 0, () => {
+      const discord = normalizeSocialHubItem({
+        id: 'discord-1',
+        platform: 'discord',
+        kind: 'message',
+        text: 'AIPhoneDemo mentioned'
+      });
+      const linkedin = normalizeSocialHubConnection({
+        platform: 'linkedin',
+        status: 'connected',
+        displayName: 'LinkedIn'
+      });
+      const whatsapp = normalizeSocialHubConnection({
+        platform: 'whatsapp',
+        status: 'needs_auth',
+        displayName: 'WhatsApp'
+      });
+      const instagram = normalizeSocialHubConnection({
+        platform: 'instagram',
+        status: 'error',
+        displayName: 'Instagram'
+      });
+
+      expect(discord.platform).assertEqual('discord');
+      expect(linkedin.platform).assertEqual('linkedin');
+      expect(whatsapp.platform).assertEqual('whatsapp');
+      expect(instagram.platform).assertEqual('instagram');
+    });
+
     it('keeps drafts local and unsent', 0, () => {
       const draft = normalizeSocialHubDraft({
         itemId: 'slack-1',

@@ -14,6 +14,14 @@ export default function composioDynamicBackendTest() {
       expect(isComposioDynamicPrompt('帮我在 Google Docs 里找 AIPhoneDemo 设计文档')).assertTrue();
       expect(isComposioDynamicPrompt('帮我查 Linear 里分配给我的高优先级 bug')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Discord 查最近提到 AIPhoneDemo 的消息')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我在 LinkedIn 查 AIPhoneDemo 相关动态')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 WhatsApp 查最近提到 AIPhoneDemo 的消息')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Instgram 查 AIPhoneDemo 相关评论')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 soptify 搜适合 demo 的播放列表')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 TikTok 搜 AIPhoneDemo 相关短视频')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Ticketmaster 查深圳本周末演唱会')).assertTrue();
       expect(isComposioDynamicPrompt('帮我查最近重要邮件')).assertFalse();
     });
 
@@ -73,6 +81,46 @@ export default function composioDynamicBackendTest() {
       expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
       expect(JSON.stringify(result.rows).indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
       expect(JSON.stringify(result.rows).indexOf('docs.google.com')).assertLarger(-1);
+    });
+
+    it('maps new Composio app payloads to app-specific result cards', 0, () => {
+      const outlookObservation = '{"data":{"messages":[{"subject":"AIPhoneDemo follow-up","from":{"name":"Product Team"},"receivedDateTime":"2026-07-07T08:30:00Z","webLink":"https://outlook.office.com/mail/id/1"}]}}';
+      const outlookResult: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        outlookObservation,
+        'OUTLOOK_SEARCH_MESSAGES',
+        '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件'
+      );
+
+      expect(outlookResult.title).assertEqual('Composio Outlook 结果');
+      expect(outlookResult.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(outlookResult.rows).indexOf('AIPhoneDemo follow-up')).assertLarger(-1);
+
+      const ticketmasterObservation = '{"data":{"events":[{"name":"Shenzhen Live","status":"onsale","start_time":"2026-07-11T20:00:00+08:00","venue":{"name":"Shenzhen Bay Sports Center"},"url":"https://www.ticketmaster.com/event/1"}]}}';
+      const ticketmasterResult: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        ticketmasterObservation,
+        'TICKETMASTER_SEARCH_EVENTS',
+        '帮我用 Ticketmaster 查深圳本周末的演唱会'
+      );
+
+      expect(ticketmasterResult.title).assertEqual('Composio Ticketmaster 结果');
+      expect(ticketmasterResult.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(ticketmasterResult.rows).indexOf('Shenzhen Live')).assertLarger(-1);
+    });
+
+    it('keeps target app identity when Composio has no authorized matching tool', 0, () => {
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'search',
+        'Composio 没有在已授权 Toolkit 中找到匹配工具。',
+        '',
+        '帮我用 Discord 查最近提到 AIPhoneDemo 的消息'
+      );
+
+      expect(result.title).assertEqual('Composio Discord 结果');
+      expect(result.status).assertEqual('error');
+      expect(JSON.stringify(result.rows).indexOf('AIPhoneDemo')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('没有在已授权 Toolkit')).assertLarger(-1);
     });
 
     it('does not treat Composio execute errors as successful results', 0, () => {

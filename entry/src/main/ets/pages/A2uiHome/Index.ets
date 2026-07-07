@@ -743,6 +743,34 @@ struct Index {
         displayName: '企业微信',
         accountId: '',
         message: '等待授权接入'
+      },
+      {
+        platform: 'discord',
+        status: 'needs_auth',
+        displayName: 'Discord',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'linkedin',
+        status: 'needs_auth',
+        displayName: 'LinkedIn',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'whatsapp',
+        status: 'needs_auth',
+        displayName: 'WhatsApp',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'instagram',
+        status: 'needs_auth',
+        displayName: 'Instagram',
+        accountId: '',
+        message: '等待 Composio 授权接入'
       }
     ];
   }

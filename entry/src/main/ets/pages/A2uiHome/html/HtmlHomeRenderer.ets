@@ -70,6 +70,22 @@ const HTML_HOME_CSS: string = `
   --docs-soft: rgba(43, 103, 216, 0.12);
   --composio: #6f5bd6;
   --composio-soft: rgba(111, 91, 214, 0.12);
+  --outlook: #0078d4;
+  --outlook-soft: rgba(0, 120, 212, 0.12);
+  --discord: #5865f2;
+  --discord-soft: rgba(88, 101, 242, 0.12);
+  --linkedin: #0a66c2;
+  --linkedin-soft: rgba(10, 102, 194, 0.12);
+  --whatsapp: #25d366;
+  --whatsapp-soft: rgba(37, 211, 102, 0.13);
+  --instagram: #c13584;
+  --instagram-soft: rgba(193, 53, 132, 0.12);
+  --spotify: #1db954;
+  --spotify-soft: rgba(29, 185, 84, 0.13);
+  --tiktok: #111111;
+  --tiktok-soft: rgba(17, 17, 17, 0.1);
+  --ticketmaster: #026cdf;
+  --ticketmaster-soft: rgba(2, 108, 223, 0.12);
   --mail-inbox-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='22 12 16 12 14 15 10 15 8 12 2 12'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E");
 }
 * { box-sizing: border-box; }
@@ -360,6 +376,46 @@ h3 {
   --kind-soft: var(--social-slack-soft);
   border-color: rgba(74, 21, 75, 0.28);
 }
+.block[data-source-key="composio-outlook"] {
+  --kind-accent: var(--outlook);
+  --kind-soft: var(--outlook-soft);
+  border-color: rgba(0, 120, 212, 0.28);
+}
+.block[data-source-key="composio-discord"] {
+  --kind-accent: var(--discord);
+  --kind-soft: var(--discord-soft);
+  border-color: rgba(88, 101, 242, 0.28);
+}
+.block[data-source-key="composio-linkedin"] {
+  --kind-accent: var(--linkedin);
+  --kind-soft: var(--linkedin-soft);
+  border-color: rgba(10, 102, 194, 0.28);
+}
+.block[data-source-key="composio-whatsapp"] {
+  --kind-accent: var(--whatsapp);
+  --kind-soft: var(--whatsapp-soft);
+  border-color: rgba(37, 211, 102, 0.3);
+}
+.block[data-source-key="composio-instagram"] {
+  --kind-accent: var(--instagram);
+  --kind-soft: var(--instagram-soft);
+  border-color: rgba(193, 53, 132, 0.28);
+}
+.block[data-source-key="composio-spotify"] {
+  --kind-accent: var(--spotify);
+  --kind-soft: var(--spotify-soft);
+  border-color: rgba(29, 185, 84, 0.3);
+}
+.block[data-source-key="composio-tiktok"] {
+  --kind-accent: var(--tiktok);
+  --kind-soft: var(--tiktok-soft);
+  border-color: rgba(17, 17, 17, 0.18);
+}
+.block[data-source-key="composio-ticketmaster"] {
+  --kind-accent: var(--ticketmaster);
+  --kind-soft: var(--ticketmaster-soft);
+  border-color: rgba(2, 108, 223, 0.28);
+}
 .block[data-source-key="composio"] {
   --kind-accent: var(--composio);
   --kind-soft: var(--composio-soft);
@@ -376,6 +432,22 @@ h3 {
 .block[data-source-key="social-wecom"] {
   --kind-accent: var(--social-wecom);
   --kind-soft: var(--social-wecom-soft);
+}
+.block[data-source-key="social-discord"] {
+  --kind-accent: var(--discord);
+  --kind-soft: var(--discord-soft);
+}
+.block[data-source-key="social-linkedin"] {
+  --kind-accent: var(--linkedin);
+  --kind-soft: var(--linkedin-soft);
+}
+.block[data-source-key="social-whatsapp"] {
+  --kind-accent: var(--whatsapp);
+  --kind-soft: var(--whatsapp-soft);
+}
+.block[data-source-key="social-instagram"] {
+  --kind-accent: var(--instagram);
+  --kind-soft: var(--instagram-soft);
 }
 .block::before {
   content: "";
@@ -1403,6 +1475,14 @@ const HTML_HOME_JS: string = `
   var COMPOSIO_ICON_DRIVE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%23fff%22/%3E%3Cpath d=%22M27 11h13l15 27H42z%22 fill=%22%230f9d58%22/%3E%3Cpath d=%22M24 11h14L22 39H9z%22 fill=%22%23f4b400%22/%3E%3Cpath d=%22M9 39h33l7 14H16z%22 fill=%22%234285f4%22/%3E%3C/svg%3E';
   var COMPOSIO_ICON_DOCS = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%232b67d8%22/%3E%3Cpath d=%22M20 13h19l8 8v30H20z%22 fill=%22%23fff%22 opacity=%22.96%22/%3E%3Cpath d=%22M39 13v9h8%22 fill=%22%231a73e8%22 opacity=%22.32%22/%3E%3Cpath d=%22M25 30h14M25 36h14M25 42h10%22 stroke=%22%232b67d8%22 stroke-width=%223%22 stroke-linecap=%22round%22/%3E%3C/svg%3E';
   var COMPOSIO_ICON_SLACK = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%234a154b%22/%3E%3Cpath d=%22M22 16a5 5 0 0 1 10 0v10H22zm10 16h10a5 5 0 0 1 0 10H32zM16 32a5 5 0 0 1 0-10h10v10zm16 6v10a5 5 0 0 1-10 0V38z%22 fill=%22%23fff%22/%3E%3C/svg%3E';
+  var COMPOSIO_ICON_OUTLOOK = 'https://cdn.simpleicons.org/microsoftoutlook/0078D4';
+  var COMPOSIO_ICON_DISCORD = 'https://cdn.simpleicons.org/discord/5865F2';
+  var COMPOSIO_ICON_LINKEDIN = 'https://cdn.simpleicons.org/linkedin/0A66C2';
+  var COMPOSIO_ICON_WHATSAPP = 'https://cdn.simpleicons.org/whatsapp/25D366';
+  var COMPOSIO_ICON_INSTAGRAM = 'https://cdn.simpleicons.org/instagram/C13584';
+  var COMPOSIO_ICON_SPOTIFY = 'https://cdn.simpleicons.org/spotify/1DB954';
+  var COMPOSIO_ICON_TIKTOK = 'https://cdn.simpleicons.org/tiktok/111111';
+  var COMPOSIO_ICON_TICKETMASTER = 'https://cdn.simpleicons.org/ticketmaster/026CDF';
   var COMPOSIO_ICON_DEFAULT = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2215%22 fill=%22%236f5bd6%22/%3E%3Ctext x=%2232%22 y=%2239%22 fill=%22%23fff%22 font-family=%22Arial,sans-serif%22 font-size=%2222%22 font-weight=%22800%22 text-anchor=%22middle%22%3EC%3C/text%3E%3C/svg%3E';
   function kindLabel(value) {
     var kind = text(value);
@@ -1441,6 +1521,14 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-drive') { return 'Google Drive'; }
     if (key === 'composio-docs') { return 'Google Docs'; }
     if (key === 'composio-slack') { return 'Slack'; }
+    if (key === 'composio-outlook') { return 'Outlook'; }
+    if (key === 'composio-discord') { return 'Discord'; }
+    if (key === 'composio-linkedin') { return 'LinkedIn'; }
+    if (key === 'composio-whatsapp') { return 'WhatsApp'; }
+    if (key === 'composio-instagram') { return 'Instagram'; }
+    if (key === 'composio-spotify') { return 'Spotify'; }
+    if (key === 'composio-tiktok') { return 'TikTok'; }
+    if (key === 'composio-ticketmaster') { return 'Ticketmaster'; }
     if (key === 'composio') { return 'Composio'; }
     if (text(block && block.kind) === 'food-result' && text(block && block.source).length > 0) {
       return text(block && block.source);
@@ -1459,7 +1547,19 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-drive') { return COMPOSIO_ICON_DRIVE; }
     if (key === 'composio-docs') { return COMPOSIO_ICON_DOCS; }
     if (key === 'composio-slack') { return COMPOSIO_ICON_SLACK; }
+    if (key === 'composio-outlook') { return COMPOSIO_ICON_OUTLOOK; }
+    if (key === 'composio-discord') { return COMPOSIO_ICON_DISCORD; }
+    if (key === 'composio-linkedin') { return COMPOSIO_ICON_LINKEDIN; }
+    if (key === 'composio-whatsapp') { return COMPOSIO_ICON_WHATSAPP; }
+    if (key === 'composio-instagram') { return COMPOSIO_ICON_INSTAGRAM; }
+    if (key === 'composio-spotify') { return COMPOSIO_ICON_SPOTIFY; }
+    if (key === 'composio-tiktok') { return COMPOSIO_ICON_TIKTOK; }
+    if (key === 'composio-ticketmaster') { return COMPOSIO_ICON_TICKETMASTER; }
     if (key === 'composio') { return COMPOSIO_ICON_DEFAULT; }
+    if (key === 'social-discord') { return COMPOSIO_ICON_DISCORD; }
+    if (key === 'social-linkedin') { return COMPOSIO_ICON_LINKEDIN; }
+    if (key === 'social-whatsapp') { return COMPOSIO_ICON_WHATSAPP; }
+    if (key === 'social-instagram') { return COMPOSIO_ICON_INSTAGRAM; }
     return '';
   }
   function addBlockTag(parent, block, key) {
@@ -1505,17 +1605,35 @@ const HTML_HOME_JS: string = `
     if (kind === 'generic-tool-result' && (raw.indexOf('composio') >= 0 ||
       raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0 ||
       raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0 ||
-      raw.indexOf('github') >= 0 || raw.indexOf('slack') >= 0)) {
+      raw.indexOf('github') >= 0 || raw.indexOf('slack') >= 0 ||
+      raw.indexOf('outlook') >= 0 || raw.indexOf('discord') >= 0 ||
+      raw.indexOf('linkedin') >= 0 || raw.indexOf('whatsapp') >= 0 ||
+      raw.indexOf('instagram') >= 0 || raw.indexOf('instgram') >= 0 ||
+      raw.indexOf('spotify') >= 0 || raw.indexOf('soptify') >= 0 ||
+      raw.indexOf('tiktok') >= 0 || raw.indexOf('tik tok') >= 0 ||
+      raw.indexOf('ticketmaster') >= 0 || raw.indexOf('ticket master') >= 0)) {
       if (raw.indexOf('github') >= 0) { return 'composio-github'; }
       if (raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0) { return 'composio-drive'; }
       if (raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0) { return 'composio-docs'; }
       if (raw.indexOf('slack') >= 0) { return 'composio-slack'; }
+      if (raw.indexOf('outlook') >= 0) { return 'composio-outlook'; }
+      if (raw.indexOf('discord') >= 0) { return 'composio-discord'; }
+      if (raw.indexOf('linkedin') >= 0) { return 'composio-linkedin'; }
+      if (raw.indexOf('whatsapp') >= 0) { return 'composio-whatsapp'; }
+      if (raw.indexOf('instagram') >= 0 || raw.indexOf('instgram') >= 0) { return 'composio-instagram'; }
+      if (raw.indexOf('spotify') >= 0 || raw.indexOf('soptify') >= 0) { return 'composio-spotify'; }
+      if (raw.indexOf('tiktok') >= 0 || raw.indexOf('tik tok') >= 0) { return 'composio-tiktok'; }
+      if (raw.indexOf('ticketmaster') >= 0 || raw.indexOf('ticket master') >= 0) { return 'composio-ticketmaster'; }
       return 'composio';
     }
     if (kind.indexOf('social-hub') === 0) {
       var platform = [text(block && block.source), metricValue(block, ['platform'])].join(' ').toLowerCase();
       if (platform.indexOf('slack') >= 0) { return 'social-slack'; }
       if (platform.indexOf('wecom') >= 0 || platform.indexOf('wework') >= 0 || platform.indexOf('企业微信') >= 0) { return 'social-wecom'; }
+      if (platform.indexOf('discord') >= 0) { return 'social-discord'; }
+      if (platform.indexOf('linkedin') >= 0) { return 'social-linkedin'; }
+      if (platform.indexOf('whatsapp') >= 0) { return 'social-whatsapp'; }
+      if (platform.indexOf('instagram') >= 0 || platform.indexOf('instgram') >= 0) { return 'social-instagram'; }
       if (platform === 'x' || platform.indexOf(' x') >= 0 || platform.indexOf('twitter') >= 0) { return 'social-x'; }
     }
     if (kind === 'train-option' || raw.indexOf('12306') >= 0 || raw.indexOf('train') >= 0 || raw.indexOf('高铁') >= 0) {
@@ -2046,6 +2164,14 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-drive') { return 'Google Drive'; }
     if (key === 'composio-docs') { return 'Google Docs'; }
     if (key === 'composio-slack') { return 'Slack'; }
+    if (key === 'composio-outlook') { return 'Outlook'; }
+    if (key === 'composio-discord') { return 'Discord'; }
+    if (key === 'composio-linkedin') { return 'LinkedIn'; }
+    if (key === 'composio-whatsapp') { return 'WhatsApp'; }
+    if (key === 'composio-instagram') { return 'Instagram'; }
+    if (key === 'composio-spotify') { return 'Spotify'; }
+    if (key === 'composio-tiktok') { return 'TikTok'; }
+    if (key === 'composio-ticketmaster') { return 'Ticketmaster'; }
     return 'Composio';
   }
   function isComposioSystemRow(row) {

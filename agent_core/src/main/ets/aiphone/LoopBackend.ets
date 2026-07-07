@@ -241,7 +241,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, or Salesforce. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social inbox requests use SocialHub. For weather, dynamic.search discovers weather.query/maps.weather. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -259,7 +259,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'food.search') {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
     } else if (definition.toolId === 'social.feed.search') {
-      description += '. Use for ordinary SocialHub aggregate X/Twitter, Slack, and WeCom feed or connection-state requests. If the user explicitly says Composio Slack, use dynamic.search instead. Never fabricate social messages.';
+      description += '. Use for ordinary SocialHub aggregate X/Twitter, Slack, and WeCom feed or connection-state requests. If the user explicitly says Composio Slack, Discord, LinkedIn, WhatsApp, Instagram, TikTok, or another unsupported social toolkit, use dynamic.search instead. Never fabricate social messages.';
     } else if (definition.toolId === 'social.reply.draft') {
       description += '. Use only to draft a reply after a real SocialHub item is selected. Include itemId, platform, and instruction when available. Do not send.';
     } else if (definition.toolId === 'x.post.search') {
@@ -267,7 +267,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
     } else if (definition.toolId === 'mail.search') {
-      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail plus QQ Mail search. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq"]. Never fabricate mail rows.';
+      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
     } else if (definition.toolId === 'mail.thread.read') {
       description += '. Use only when the user opens or reads a specific aggregate mail result and provider plus messageId/threadId are available.';
     } else if (definition.toolId === 'mail.draft.create') {

@@ -384,9 +384,10 @@ export default function toolGatewayClientTest() {
       const parsed = mailSearchArgs('聚合搜索 Gmail 和 QQ 邮箱里关键词 loopy 的邮件', null);
 
       expect(parsed.query).assertEqual('newer_than:30d loopy');
-      expect(parsed.providers.length).assertEqual(2);
+      expect(parsed.providers.length).assertEqual(3);
       expect(parsed.providers[0]).assertEqual('gmail');
       expect(parsed.providers[1]).assertEqual('qq');
+      expect(parsed.providers[2]).assertEqual('outlook');
     });
 
     it('does not claim QQ draft success when config is missing', 0, async () => {

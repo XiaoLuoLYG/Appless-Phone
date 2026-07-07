@@ -94,7 +94,22 @@ function hasComposioDynamicIntent(prompt: string): boolean {
     lowerPrompt.indexOf('asana') >= 0 ||
     lowerPrompt.indexOf('trello') >= 0 ||
     lowerPrompt.indexOf('hubspot') >= 0 ||
-    lowerPrompt.indexOf('salesforce') >= 0;
+    lowerPrompt.indexOf('salesforce') >= 0 ||
+    lowerPrompt.indexOf('outlook') >= 0 ||
+    lowerPrompt.indexOf('微软邮箱') >= 0 ||
+    lowerPrompt.indexOf('discord') >= 0 ||
+    lowerPrompt.indexOf('linkedin') >= 0 ||
+    prompt.indexOf('领英') >= 0 ||
+    lowerPrompt.indexOf('whatsapp') >= 0 ||
+    lowerPrompt.indexOf('whats app') >= 0 ||
+    lowerPrompt.indexOf('instagram') >= 0 ||
+    lowerPrompt.indexOf('instgram') >= 0 ||
+    lowerPrompt.indexOf('spotify') >= 0 ||
+    lowerPrompt.indexOf('soptify') >= 0 ||
+    lowerPrompt.indexOf('tiktok') >= 0 ||
+    lowerPrompt.indexOf('tik tok') >= 0 ||
+    lowerPrompt.indexOf('ticketmaster') >= 0 ||
+    lowerPrompt.indexOf('ticket master') >= 0;
   return explicitComposio || unsupportedToolkit;
 }
 

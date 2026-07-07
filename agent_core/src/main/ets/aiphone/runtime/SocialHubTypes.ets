@@ -1,4 +1,4 @@
-export type SocialHubPlatform = 'x' | 'slack' | 'wecom' | 'unknown';
+export type SocialHubPlatform = 'x' | 'slack' | 'wecom' | 'discord' | 'linkedin' | 'whatsapp' | 'instagram' | 'unknown';
 export type SocialHubItemKind = 'message' | 'mention' | 'post' | 'connection';
 export type SocialHubConnectionStatus = 'connected' | 'needs_auth' | 'limited' | 'error' | 'disabled';
 export type SocialHubDraftStatus = 'empty' | 'draft' | 'error';
@@ -108,6 +108,9 @@ function normalizePlatform(value: Object | string | number | boolean | null | un
   }
   if (text === 'wecom' || text === 'wework' || text === '企业微信') {
     return 'wecom';
+  }
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+    return text as SocialHubPlatform;
   }
   return 'unknown';
 }

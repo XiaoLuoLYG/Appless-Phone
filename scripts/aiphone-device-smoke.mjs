@@ -91,6 +91,64 @@ const composioCases = [
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查看邮箱里最新的重要邮件',
+    expectsTool: true,
+    expectedToolId: 'mail.search'
+  },
+  {
+    query: '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 LinkedIn 查 AIPhoneDemo 相关动态',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 WhatsApp 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Instagram 查 AIPhoneDemo 相关评论',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Spotify 搜适合 AIPhoneDemo demo 的播放列表',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 TikTok 搜 AIPhoneDemo 相关短视频',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Ticketmaster 查深圳本周末的演唱会',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查看今天的社交聚合消息',
+    expectsTool: true,
+    expectedToolId: 'social.feed.search'
   }
 ];
 
@@ -173,6 +231,14 @@ const visibleDomainMarkers = [
   'Asana',
   'HubSpot',
   'Salesforce',
+  'Outlook',
+  'Discord',
+  'LinkedIn',
+  'WhatsApp',
+  'Instagram',
+  'Spotify',
+  'TikTok',
+  'Ticketmaster',
   'needs_auth',
   'ferry.ticket.search',
   'weather.query',
@@ -345,7 +411,7 @@ function expectedCaseForQuery(query) {
       expectedDiscoveredToolId: 'ppt.generate'
     };
   }
-  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce/i.test(query)) {
+  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
@@ -1104,7 +1170,7 @@ function isYouTubeBilibiliQuery(query) {
 }
 
 function isSocialFeedQuery(query) {
-  return /社交|消息聚合|多平台消息|Slack|企业微信/i.test(query);
+  return /社交|消息聚合|多平台消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
 }
 
 function isSocialHubExpectedToolId(expectedToolId) {
@@ -1142,7 +1208,8 @@ function hasVisibleSocialHubOutput(text, expectedToolId) {
     return /\bX\b/.test(text) &&
       /Slack/.test(text) &&
       /企业微信/.test(text) &&
-      (/回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
+      ((/Discord/.test(text) && /LinkedIn/.test(text) && /WhatsApp/.test(text) && /Instagram/.test(text)) ||
+        /回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
   }
   return false;
 }
@@ -1155,7 +1222,8 @@ function isComposioCardQuery(query) {
   return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
     (/Google\s*Drive/i.test(query) && /签证材料/.test(query)) ||
     (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query));
+    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
+    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query));
 }
 
 function layoutExpectationsForQuery(query) {
@@ -1173,6 +1241,30 @@ function layoutExpectationsForQuery(query) {
   }
   if (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) {
     return ['Composio 工具结果', 'Composio Slack 结果', 'SLACK_SEARCH_MESSAGES', 'AIPhoneDemo'];
+  }
+  if (/Outlook/i.test(query)) {
+    return ['Composio Outlook 结果', 'Outlook'];
+  }
+  if (/Discord/i.test(query)) {
+    return ['Composio Discord 结果', 'Discord'];
+  }
+  if (/LinkedIn/i.test(query)) {
+    return ['Composio LinkedIn 结果', 'LinkedIn'];
+  }
+  if (/WhatsApp/i.test(query)) {
+    return ['Composio WhatsApp 结果', 'WhatsApp'];
+  }
+  if (/Instagram|Instgram/i.test(query)) {
+    return ['Composio Instagram 结果', 'Instagram'];
+  }
+  if (/Spotify|Soptify/i.test(query)) {
+    return ['Composio Spotify 结果', 'Spotify'];
+  }
+  if (/TikTok/i.test(query)) {
+    return ['Composio TikTok 结果', 'TikTok'];
+  }
+  if (/Ticketmaster/i.test(query)) {
+    return ['Composio Ticketmaster 结果', 'Ticketmaster'];
   }
   if (/^你好$|问候|打招呼/.test(query)) {
     return ['你好'];
@@ -1193,16 +1285,19 @@ function layoutExpectationsForQuery(query) {
     return ['SocialHub', '公开 post', 'x.post.search', 'X'];
   }
   if (isSocialFeedQuery(query)) {
+    if (/社交聚合|消息聚合|多平台消息/.test(query)) {
+      return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'Discord', 'LinkedIn', 'WhatsApp', 'Instagram'];
+    }
     return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'social.feed.search'];
   }
   if (isMailAggregationQuery(query)) {
-    return ['mail.search', 'Gmail', 'QQ Mail', '不会模拟'];
+    return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
   }
   if (isQqMailQuery(query)) {
     return ['mail.search', 'QQ Mail', '不会模拟'];
   }
   if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
-    return ['mail.search', 'Gmail', 'QQ Mail', '不会模拟'];
+    return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
   }
   if (isGmailWebQuery(query)) {
     return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
@@ -1269,7 +1364,7 @@ function requiredScrolledMarkersForQuery(query, expectedToolId) {
     if (isQqMailQuery(query)) {
       return ['QQ Mail'];
     }
-    return ['Gmail', 'QQ Mail'];
+    return ['Gmail', 'QQ Mail', 'Outlook'];
   }
   if (expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query)) {
     return ['ECCV'];
@@ -1568,7 +1663,8 @@ async function runQuery(query, index, expectedTool) {
   const allowsAggregateMailProviderFailure = expectedToolId === 'mail.search' &&
     !isQqMailQuery(query) &&
     /Gmail/.test(evidenceText) &&
-    /QQ Mail/.test(evidenceText);
+    /QQ Mail/.test(evidenceText) &&
+    /Outlook/.test(evidenceText);
   const allowsPartialTravelSourceFailure = expectedToolId === 'travel.search' &&
     summary.toolOk === true &&
     (evidenceText.includes('来源状态') || evidenceText.includes('飞常准')) &&
@@ -1619,8 +1715,8 @@ async function runQuery(query, index, expectedTool) {
     summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
   }
   summary.mailAggregateVisible = expectedToolId !== 'mail.search' ||
-    (isMailAggregationQuery(query) ? (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText)) :
-      (isQqMailQuery(query) ? /QQ Mail/.test(evidenceText) : (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText))));
+    (isMailAggregationQuery(query) ? (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText) && /Outlook/.test(evidenceText)) :
+      (isQqMailQuery(query) ? /QQ Mail/.test(evidenceText) : (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText) && /Outlook/.test(evidenceText))));
   const expectsMailDraftAction = expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query);
   summary.mailExpandedActions = expectsMailDraftAction
     ? await verifyMailExpandedActions(evidenceLayout, index, appPid, isGmailEccvQuery(query) ? 'ECCV' : '')

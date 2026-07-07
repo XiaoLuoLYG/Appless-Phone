@@ -568,6 +568,16 @@ export default function a2uiHomeToolRequestTest() {
         '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
         ''
       );
+      const outlook = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
+        ''
+      );
+      const discord = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
+        ''
+      );
       const plainSlack = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
         '帮我查看 Slack 最近的消息',
@@ -578,6 +588,8 @@ export default function a2uiHomeToolRequestTest() {
       expect(googleDocs.actionId).assertEqual('client_intent_fallback');
       expect(composioSlack.toolId).assertEqual('dynamic.search');
       expect(composioSlack.actionId).assertEqual('model_tool_request');
+      expect(outlook.toolId).assertEqual('dynamic.search');
+      expect(discord.toolId).assertEqual('dynamic.search');
       expect(plainSlack.toolId).assertEqual('social.feed.search');
     });
 

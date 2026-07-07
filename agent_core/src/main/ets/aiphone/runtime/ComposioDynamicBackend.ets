@@ -43,6 +43,7 @@ interface ComposioArrayHit {
 
 let composioConfig: ComposioConfig = new ComposioConfig('', 'https://backend.composio.dev/api/v3.1', '');
 let composioClient: ComposioSessionClient | null = null;
+let scopedComposioClients: Map<string, ComposioSessionClient> = new Map();
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
   if (value === undefined || value === null) {
@@ -96,6 +97,65 @@ function containsAny(value: string, needles: string[]): boolean {
   return false;
 }
 
+function composioToolkitFromPrompt(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  if (lower.indexOf('google drive') >= 0) {
+    return 'googledrive';
+  }
+  if (lower.indexOf('google docs') >= 0 || lower.indexOf('google doc') >= 0) {
+    return 'googledocs';
+  }
+  if (lower.indexOf('outlook') >= 0 || lower.indexOf('微软邮箱') >= 0) {
+    return 'outlook';
+  }
+  if (lower.indexOf('discord') >= 0) {
+    return 'discord';
+  }
+  if (lower.indexOf('linkedin') >= 0 || prompt.indexOf('领英') >= 0) {
+    return 'linkedin';
+  }
+  if (lower.indexOf('whatsapp') >= 0 || lower.indexOf('whats app') >= 0) {
+    return 'whatsapp';
+  }
+  if (lower.indexOf('instagram') >= 0 || lower.indexOf('instgram') >= 0 || lower.indexOf(' ig ') >= 0) {
+    return 'instagram';
+  }
+  if (lower.indexOf('spotify') >= 0 || lower.indexOf('soptify') >= 0) {
+    return 'spotify';
+  }
+  if (lower.indexOf('tiktok') >= 0 || lower.indexOf('tik tok') >= 0) {
+    return 'tiktok';
+  }
+  if (lower.indexOf('ticketmaster') >= 0 || lower.indexOf('ticket master') >= 0) {
+    return 'ticketmaster';
+  }
+  if (lower.indexOf('github') >= 0) {
+    return 'github';
+  }
+  if (lower.indexOf('slack') >= 0) {
+    return 'slack';
+  }
+  if (lower.indexOf('notion') >= 0) {
+    return 'notion';
+  }
+  if (lower.indexOf('linear') >= 0) {
+    return 'linear';
+  }
+  if (lower.indexOf('asana') >= 0) {
+    return 'asana';
+  }
+  if (lower.indexOf('trello') >= 0) {
+    return 'trello';
+  }
+  if (lower.indexOf('hubspot') >= 0) {
+    return 'hubspot';
+  }
+  if (lower.indexOf('salesforce') >= 0) {
+    return 'salesforce';
+  }
+  return '';
+}
+
 function promptSearchKeyword(prompt: string): string {
   const trimmed = prompt.trim();
   const mentionedIndex = trimmed.indexOf('提到');
@@ -142,6 +202,31 @@ function ownerNameFromPrompt(prompt: string): string {
 
 function normalizedComposioUseCase(prompt: string): string {
   const keyword = promptSearchKeyword(prompt);
+  const toolkit = composioToolkitFromPrompt(prompt);
+  if (toolkit === 'outlook') {
+    return 'Search Outlook mail messages for ' + keyword;
+  }
+  if (toolkit === 'discord') {
+    return 'Search Discord messages mentioning ' + keyword;
+  }
+  if (toolkit === 'linkedin') {
+    return 'Find LinkedIn profile or post information about ' + keyword;
+  }
+  if (toolkit === 'whatsapp') {
+    return 'Search WhatsApp messages mentioning ' + keyword;
+  }
+  if (toolkit === 'instagram') {
+    return 'Search Instagram messages, comments, or media about ' + keyword;
+  }
+  if (toolkit === 'spotify') {
+    return 'Search Spotify tracks, albums, or playlists for ' + keyword;
+  }
+  if (toolkit === 'tiktok') {
+    return 'Search TikTok videos for ' + keyword;
+  }
+  if (toolkit === 'ticketmaster') {
+    return 'Search Ticketmaster events for ' + keyword;
+  }
   if (containsAny(prompt, ['slack']) && containsAny(prompt, ['消息', 'message', 'mention', '提到'])) {
     return 'Search Slack messages mentioning ' + keyword;
   }
@@ -175,6 +260,26 @@ function preferredToolScore(prompt: string, tool: ComposioSearchTool): number {
   }
   if (description.indexOf('search') >= 0 || description.indexOf('find') >= 0) {
     score += 6;
+  }
+  const toolkit = composioToolkitFromPrompt(prompt);
+  if (toolkit.length > 0 && slug.indexOf(toolkit) >= 0) {
+    score += 160;
+  }
+  if (toolkit === 'outlook' && (slug.indexOf('mail') >= 0 || slug.indexOf('message') >= 0 || description.indexOf('mail') >= 0)) {
+    score += 90;
+  }
+  if ((toolkit === 'discord' || toolkit === 'whatsapp' || toolkit === 'instagram') &&
+    (slug.indexOf('message') >= 0 || slug.indexOf('comment') >= 0 || description.indexOf('message') >= 0)) {
+    score += 80;
+  }
+  if (toolkit === 'spotify' && (slug.indexOf('track') >= 0 || slug.indexOf('playlist') >= 0 || slug.indexOf('album') >= 0)) {
+    score += 70;
+  }
+  if (toolkit === 'tiktok' && slug.indexOf('video') >= 0) {
+    score += 70;
+  }
+  if (toolkit === 'ticketmaster' && (slug.indexOf('event') >= 0 || description.indexOf('event') >= 0)) {
+    score += 80;
   }
   if (containsAny(prompt, ['github']) && containsAny(prompt, ['pr', 'pull request', 'pull requests'])) {
     if (slug === 'github_find_pull_requests') {
@@ -312,6 +417,19 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
     setIfSupported(args, schema, 'count', 5);
     return args;
   }
+  const toolkit = composioToolkitFromPrompt(prompt);
+  if (toolkit === 'outlook' || toolkit === 'discord' || toolkit === 'linkedin' || toolkit === 'whatsapp' ||
+    toolkit === 'instagram' || toolkit === 'spotify' || toolkit === 'tiktok' || toolkit === 'ticketmaster') {
+    setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'q', keyword);
+    setIfSupported(args, schema, 'search', keyword);
+    setIfSupported(args, schema, 'keyword', keyword);
+    setIfSupported(args, schema, 'limit', 5);
+    setIfSupported(args, schema, 'count', 5);
+    setIfSupported(args, schema, 'page_size', 5);
+    setIfSupported(args, schema, 'pageSize', 5);
+    return args;
+  }
   return args;
 }
 
@@ -429,11 +547,11 @@ function nestedStringField(record: Record<string, Object | string | number | boo
 
 function itemTitle(item: Object, index: number): string {
   const record = item as Record<string, Object | string | number | boolean | null | undefined>;
-  const title = stringField(record, ['title', 'name', 'subject', 'filename', 'file_name']);
+  const title = stringField(record, ['title', 'name', 'subject', 'filename', 'file_name', 'display_name', 'event_name']);
   if (title.length > 0) {
     return title;
   }
-  const text = stringField(record, ['text', 'message', 'body', 'snippet']);
+  const text = stringField(record, ['text', 'message', 'body', 'snippet', 'content', 'description']);
   if (text.length > 0) {
     return text.substring(0, 80);
   }
@@ -455,19 +573,23 @@ function itemDetail(item: Object): string {
   if (state.length > 0) {
     parts.push(state);
   }
-  const author = nestedStringField(record, ['author', 'user', 'from', 'owner']);
+  const author = nestedStringField(record, ['author', 'user', 'from', 'owner', 'sender', 'creator', 'artist']);
   if (author.length > 0) {
     parts.push(author);
   }
-  const time = stringField(record, ['updated_at', 'updatedAt', 'modifiedTime', 'created_at', 'createdTime', 'timestamp', 'ts']);
+  const time = stringField(record, ['updated_at', 'updatedAt', 'modifiedTime', 'created_at', 'createdTime', 'timestamp', 'ts', 'date', 'start_time', 'startDateTime', 'receivedDateTime']);
   if (time.length > 0) {
     parts.push(time);
   }
-  const url = stringField(record, ['html_url', 'url', 'web_url', 'webViewLink', 'permalink']);
+  const channel = nestedStringField(record, ['channel', 'guild', 'server', 'conversation', 'chat', 'venue', 'location']);
+  if (channel.length > 0) {
+    parts.push(channel);
+  }
+  const url = stringField(record, ['html_url', 'url', 'web_url', 'webViewLink', 'webLink', 'permalink']);
   if (url.length > 0) {
     parts.push(url);
   }
-  const snippet = stringField(record, ['snippet', 'text', 'message', 'body']);
+  const snippet = stringField(record, ['snippet', 'text', 'message', 'body', 'content', 'description']);
   if (snippet.length > 0 && parts.join(' ').indexOf(snippet.substring(0, 40)) < 0) {
     parts.push(snippet.substring(0, 180));
   }
@@ -502,7 +624,7 @@ function firstArrayHit(value: Object | string | number | boolean | null | undefi
     return { found: false, label: '', items: [] };
   }
   const record = value as Record<string, Object | string | number | boolean | null | undefined>;
-  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents'];
+  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents', 'messages', 'emails', 'mails', 'posts', 'comments', 'tracks', 'playlists', 'videos', 'events'];
   for (let index = 0; index < preferred.length; index++) {
     const hit = arrayHit(preferred[index], record[preferred[index]]);
     if (hit.found) {
@@ -590,7 +712,36 @@ function resultTitleForTool(toolSlug: string): string {
   if (lower.indexOf('slack') >= 0) {
     return 'Composio Slack 结果';
   }
+  if (lower.indexOf('outlook') >= 0) {
+    return 'Composio Outlook 结果';
+  }
+  if (lower.indexOf('discord') >= 0) {
+    return 'Composio Discord 结果';
+  }
+  if (lower.indexOf('linkedin') >= 0) {
+    return 'Composio LinkedIn 结果';
+  }
+  if (lower.indexOf('whatsapp') >= 0) {
+    return 'Composio WhatsApp 结果';
+  }
+  if (lower.indexOf('instagram') >= 0) {
+    return 'Composio Instagram 结果';
+  }
+  if (lower.indexOf('spotify') >= 0) {
+    return 'Composio Spotify 结果';
+  }
+  if (lower.indexOf('tiktok') >= 0) {
+    return 'Composio TikTok 结果';
+  }
+  if (lower.indexOf('ticketmaster') >= 0) {
+    return 'Composio Ticketmaster 结果';
+  }
   return 'Composio 工具结果';
+}
+
+function resultTitleForPrompt(prompt: string): string {
+  const toolkit = composioToolkitFromPrompt(prompt);
+  return toolkit.length > 0 ? resultTitleForTool(toolkit) : 'Composio 工具候选';
 }
 
 function executeSummary(toolSlug: string, rows: A2uiLabelValueData[]): string {
@@ -608,6 +759,7 @@ function executeSummary(toolSlug: string, rows: A2uiLabelValueData[]): string {
 export function configureComposioConfigFromRawJson(rawJson: string): void {
   composioConfig = ComposioConfig.fromRawJson(rawJson);
   composioClient = null;
+  scopedComposioClients.clear();
 }
 
 export function isComposioConfigured(): boolean {
@@ -626,6 +778,19 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('trello') >= 0 ||
     lower.indexOf('hubspot') >= 0 ||
     lower.indexOf('salesforce') >= 0 ||
+    lower.indexOf('outlook') >= 0 ||
+    lower.indexOf('discord') >= 0 ||
+    lower.indexOf('linkedin') >= 0 ||
+    lower.indexOf('whatsapp') >= 0 ||
+    lower.indexOf('whats app') >= 0 ||
+    lower.indexOf('instagram') >= 0 ||
+    lower.indexOf('instgram') >= 0 ||
+    lower.indexOf('spotify') >= 0 ||
+    lower.indexOf('soptify') >= 0 ||
+    lower.indexOf('tiktok') >= 0 ||
+    lower.indexOf('tik tok') >= 0 ||
+    lower.indexOf('ticketmaster') >= 0 ||
+    lower.indexOf('ticket master') >= 0 ||
     lower.indexOf('composio') >= 0;
 }
 
@@ -651,13 +816,17 @@ export function isUnsafeComposioExecute(toolSlug: string, argsJson: string): boo
 }
 
 export function composioDynamicMissingConfigResult(prompt: string): DynamicGenericToolResult {
+  const title = composioToolkitFromPrompt(prompt).length > 0 ? resultTitleForPrompt(prompt) : 'Composio 未配置';
   return {
     sourceTag: 'Composio',
     toolName: 'dynamic.search',
-    title: 'Composio 未配置',
+    title: title,
     status: 'needs_auth',
     summary: 'Composio 未配置 apiKey/userId，无法查询已授权应用工具。',
-    rows: [{ label: '请求', value: prompt.substring(0, 240) }],
+    rows: [
+      { label: '请求', value: prompt.substring(0, 240) },
+      { label: '结果摘要', value: 'Composio 未配置 apiKey/userId，无法查询已授权应用工具。' }
+    ],
     rawPreview: prompt
   };
 }
@@ -695,24 +864,34 @@ export function composioDynamicResultFromObservation(
       };
     }
     const slug = firstToolSlug(payload);
+    const rows = rowsForSearch(payload);
+    if (prompt.length > 0) {
+      appendRow(rows, '查询', promptSearchKeyword(prompt));
+    }
     return {
       sourceTag: 'Composio',
       toolName: 'dynamic.search',
-      title: phase === 'execute' ? 'Composio 执行结果' : 'Composio 工具候选',
+      title: phase === 'execute' ? 'Composio 执行结果' : resultTitleForPrompt(prompt),
       status: 'success',
       summary: slug.length > 0 ? 'Composio 找到候选工具：' + slug : 'Composio 返回了真实结果。',
-      rows: rowsForSearch(payload),
+      rows: rows,
       rawPreview: observation.substring(0, 16000)
     };
   } catch (_error) {
-    const failed = observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 || observation.indexOf('未配置') >= 0;
+    const failed = observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 ||
+      observation.indexOf('未配置') >= 0 || observation.indexOf('没有') >= 0;
+    const rows: A2uiLabelValueData[] = [{ label: '阶段', value: phase }];
+    if (prompt.length > 0) {
+      appendRow(rows, '查询', promptSearchKeyword(prompt));
+    }
+    appendRow(rows, '结果摘要', observation);
     return {
       sourceTag: 'Composio',
       toolName: 'dynamic.search',
-      title: failed ? 'Composio 调用失败' : 'Composio 返回',
+      title: prompt.length > 0 ? resultTitleForPrompt(prompt) : (failed ? 'Composio 调用失败' : 'Composio 返回'),
       status: failed ? 'error' : 'success',
       summary: observation.substring(0, 240),
-      rows: [{ label: '阶段', value: phase }],
+      rows: rows,
       rawPreview: observation.substring(0, 16000)
     };
   }
@@ -724,11 +903,11 @@ async function callComposioSearchAndExecute(current: ComposioSessionClient, prom
   try {
     payload = JSON.parse(searchObservation) as ComposioSearchObservation;
   } catch (_error) {
-    return composioDynamicResultFromObservation('search', searchObservation);
+    return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   const tool = bestToolForPrompt(payload, prompt);
   if (tool === null) {
-    return composioDynamicResultFromObservation('search', searchObservation);
+    return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   const slug = textOf(tool.toolSlug).trim();
   const args = argumentsForTool(tool, prompt);
@@ -755,6 +934,20 @@ async function client(): Promise<ComposioSessionClient> {
   return composioClient;
 }
 
+async function clientForPrompt(prompt: string): Promise<ComposioSessionClient> {
+  const toolkit = composioToolkitFromPrompt(prompt);
+  if (toolkit.length === 0) {
+    return client();
+  }
+  let scoped = scopedComposioClients.get(toolkit);
+  if (scoped === undefined) {
+    scoped = new ComposioSessionClient(composioConfig, [toolkit]);
+    await scoped.initialize();
+    scopedComposioClients.set(toolkit, scoped);
+  }
+  return scoped;
+}
+
 export async function callComposioDynamic(prompt: string, args: Object | null): Promise<DynamicGenericToolResult | null> {
   const parsed = parsedExecuteArgs(args);
   const operation = textOf(parsed.operation).trim();
@@ -764,7 +957,7 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
   if (!composioConfig.isConfigured()) {
     return composioDynamicMissingConfigResult(prompt);
   }
-  const current = await client();
+  const current = await clientForPrompt(prompt);
   if (operation === 'execute') {
     const slug = textOf(parsed.toolSlug).trim();
     const argText = JSON.stringify(parsed.arguments ?? new Object());
