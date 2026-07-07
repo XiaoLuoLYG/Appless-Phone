@@ -418,6 +418,12 @@ function expectedCaseForQuery(query) {
       expectedDiscoveredToolId: 'dynamic.search'
     };
   }
+  if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'payment.send'
+    };
+  }
   if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
     return {
       expectsTool: true,
@@ -1344,6 +1350,9 @@ function layoutExpectationsForQuery(query) {
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
     return ['Gmail', 'gmail.mail.search', 'Google Workspace MCP OAuth', '授权 Gmail', '不会模拟 Gmail 邮件', '没有找到匹配邮件'];
+  }
+  if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
+    return ['AIPhone Pay', 'PayPal', 'Google Pay', '5 USD', '确认支付'];
   }
   if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
     return ['YouTube', 'youtube.mine.playlists', 'OAuth', '不会模拟播放列表'];

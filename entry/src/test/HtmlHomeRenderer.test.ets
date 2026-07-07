@@ -1253,6 +1253,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('mail_filter_qq')).assertLarger(-1);
       expect(html.indexOf('mail_filter_outlook')).assertLarger(-1);
       expect(html.indexOf('data-mail-filter')).assertLarger(-1);
+      expect(html.indexOf('grid-template-columns: repeat(4, minmax(0, 1fr))')).assertLarger(-1);
+      expect(html.indexOf('mail-rail[data-mail-filter="composio-outlook"]::before')).assertLarger(-1);
       expect(html.indexOf('星标')).assertEqual(-1);
       expect(html.indexOf('草稿</button>')).assertEqual(-1);
       expect(html.indexOf('Gmail message')).assertLarger(-1);
@@ -1261,6 +1263,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('OUTLOOK_SEARCH_MESSAGES')).assertLarger(-1);
       expect(html.indexOf('MAIL_ICON_GMAIL')).assertLarger(-1);
       expect(html.indexOf('MAIL_ICON_QQ')).assertLarger(-1);
+      expect(html.indexOf('data:image/png;base64')).assertLarger(-1);
       expect(html.indexOf('COMPOSIO_ICON_OUTLOOK')).assertLarger(-1);
       expect(html.indexOf('mail-source-icon')).assertLarger(-1);
       expect(html.indexOf("if (key === 'mail-gmail')")).assertLarger(-1);
