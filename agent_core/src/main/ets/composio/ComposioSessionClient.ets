@@ -1,6 +1,7 @@
 import http from '@ohos.net.http';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposioConfig } from './ComposioConfig';
+import { normalizeComposioAuthConfigsResponse } from './ComposioAuthClient';
 
 const LOG_DOMAIN: number = 0x1200;
 const LOG_TAG: string = 'LoopComposio';
@@ -27,6 +28,8 @@ interface ConnectedAccountsResponse {
   items?: ConnectedAccount[];
   next_cursor?: string;
 }
+
+type ToolkitAccountMap = Record<string, string>;
 
 interface SessionToolkits {
   enable: string[];
@@ -161,6 +164,34 @@ export function describeComposioFailure(error: Error | Object | string): string 
   return safeText(error);
 }
 
+export function proxyToolkitAccountsFromAuthConfigs(payload: Object, toolkitAllowlist: string[] = []): ToolkitAccountMap {
+  const allowed: string[] = [];
+  toolkitAllowlist.forEach((toolkit: string) => {
+    const slug = toolkit.trim().toLowerCase();
+    if (slug.length > 0 && allowed.indexOf(slug) < 0) {
+      allowed.push(slug);
+    }
+  });
+  const result: ToolkitAccountMap = {};
+  const normalized = normalizeComposioAuthConfigsResponse(payload);
+  for (let index = 0; index < normalized.items.length; index++) {
+    const item = normalized.items[index];
+    const toolkit = item.toolkitSlug.trim().toLowerCase();
+    const accountId = item.connectedAccountId.trim();
+    if (toolkit.length === 0 || accountId.length === 0 || item.canExecute !== true ||
+      item.status.trim().toLowerCase() !== 'connected') {
+      continue;
+    }
+    if (allowed.length > 0 && allowed.indexOf(toolkit) < 0) {
+      continue;
+    }
+    if (result[toolkit] === undefined) {
+      result[toolkit] = accountId;
+    }
+  }
+  return result;
+}
+
 export class ComposioSessionClient {
   private config: ComposioConfig;
   private toolkitAllowlist: string[] = [];
@@ -281,6 +312,11 @@ export class ComposioSessionClient {
   }
 
   private async discoverConnectedAccounts(): Promise<void> {
+    if (this.config.proxyBaseUrl.length > 0) {
+      await this.discoverProxyConnectedAccounts();
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'authorized toolkits=%{public}d', this.toolkitAccounts.size);
+      return;
+    }
     let cursor = '';
     for (let page = 0; page < MAX_ACCOUNT_PAGES; page++) {
       let path = `/connected_accounts?user_ids=${encodeURIComponent(this.config.userId)}` +
@@ -317,6 +353,29 @@ export class ComposioSessionClient {
       }
     }
     hilog.info(LOG_DOMAIN, LOG_TAG, 'authorized toolkits=%{public}d', this.toolkitAccounts.size);
+  }
+
+  private async discoverProxyConnectedAccounts(): Promise<void> {
+    const response = await this.request(
+      http.RequestMethod.GET,
+      `/v1/composio/auth-configs?userId=${encodeURIComponent(this.config.userId)}`,
+      ''
+    );
+    if (!this.isSuccess(response.code)) {
+      throw new Error(this.httpError('查询 Auth Configs', response));
+    }
+    let parsed: Object;
+    try {
+      parsed = JSON.parse(response.text) as Object;
+    } catch (_error) {
+      throw new Error('Composio Auth Configs 返回了非 JSON 响应');
+    }
+    const accounts = proxyToolkitAccountsFromAuthConfigs(parsed, this.toolkitAllowlist);
+    Object.keys(accounts).forEach((toolkit: string) => {
+      if (!this.toolkitAccounts.has(toolkit)) {
+        this.toolkitAccounts.set(toolkit, accounts[toolkit]);
+      }
+    });
   }
 
   private async ensureSession(): Promise<string> {

@@ -2,6 +2,8 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   composioDynamicMissingConfigResult,
   composioDynamicResultFromObservation,
+  proxyToolkitAccountsPreview,
+  shouldAttemptComposioDynamic,
   configureComposioUserId,
   currentComposioUserId,
   isComposioDynamicPrompt,
@@ -46,6 +48,21 @@ export default function composioDynamicBackendTest() {
     it('keeps configured app user id for Composio dynamic calls', 0, () => {
       configureComposioUserId('aiphone-user-device-1');
       expect(currentComposioUserId()).assertEqual('aiphone-user-device-1');
+    });
+
+    it('keeps generic dynamic.search fallback eligible once Composio is configured', 0, () => {
+      expect(isComposioDynamicPrompt('帮我查最近重要邮件')).assertFalse();
+      expect(shouldAttemptComposioDynamic('帮我查最近重要邮件', '', false)).assertFalse();
+      expect(shouldAttemptComposioDynamic('帮我查最近重要邮件', '', true)).assertTrue();
+      expect(shouldAttemptComposioDynamic('随便什么都行', 'execute', false)).assertTrue();
+    });
+
+    it('maps proxy auth configs to executable toolkit accounts only', 0, () => {
+      const payload = JSON.parse('{"ok":true,"userId":"app-user-1","items":[{"authConfigId":"ac_1","toolkitSlug":"github","status":"connected","connectedAccountId":"ca_1","canExecute":true},{"authConfigId":"ac_2","toolkitSlug":"slack","status":"connected","connectedAccountId":"ca_2","canExecute":false},{"authConfigId":"ac_3","toolkitSlug":"notion","status":"needs_auth","connectedAccountId":"ca_3","canExecute":true},{"authConfigId":"ac_4","toolkitSlug":"discord","status":"connected","canExecute":true}]}') as Object;
+      const accounts: Record<string, string> = proxyToolkitAccountsPreview(payload, ['github', 'slack', 'notion', 'discord']);
+
+      expect(accounts['github']).assertEqual('ca_1');
+      expect(Object.keys(accounts).length).assertEqual(1);
     });
 
     it('maps a Composio search observation to a generic result', 0, () => {

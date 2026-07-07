@@ -1,5 +1,5 @@
 import { ComposioConfig } from '../../composio/ComposioConfig';
-import { ComposioSessionClient } from '../../composio/ComposioSessionClient';
+import { ComposioSessionClient, proxyToolkitAccountsFromAuthConfigs } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 
@@ -814,6 +814,17 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('composio') >= 0;
 }
 
+export function shouldAttemptComposioDynamic(prompt: string, operation: string, configured: boolean): boolean {
+  if (operation === 'execute') {
+    return true;
+  }
+  return configured || isComposioDynamicPrompt(prompt);
+}
+
+export function proxyToolkitAccountsPreview(payload: Object, toolkitAllowlist: string[] = []): Record<string, string> {
+  return proxyToolkitAccountsFromAuthConfigs(payload, toolkitAllowlist);
+}
+
 export function isUnsafeComposioExecute(_toolSlug: string, _argsJson: string): boolean {
   return false;
 }
@@ -944,7 +955,7 @@ async function clientForPrompt(prompt: string): Promise<ComposioSessionClient> {
 export async function callComposioDynamic(prompt: string, args: Object | null): Promise<DynamicGenericToolResult | null> {
   const parsed = parsedExecuteArgs(args);
   const operation = textOf(parsed.operation).trim();
-  if (!isComposioDynamicPrompt(prompt) && operation !== 'execute') {
+  if (!shouldAttemptComposioDynamic(prompt, operation, composioConfig.isConfigured())) {
     return null;
   }
   if (!composioConfig.isConfigured()) {
