@@ -1550,6 +1550,10 @@ const HTML_HOME_JS: string = `
     }
     return kind || 'generic';
   }
+  function isMailBlock(block) {
+    var key = sourceKey(block);
+    return key === 'mail-gmail' || key === 'mail-qq';
+  }
 	  function isExpandable(block) {
 	    var kind = text(block && block.kind);
 	    if (kind === 'persona-memory-update') {
@@ -1640,7 +1644,8 @@ const HTML_HOME_JS: string = `
     return 'Result Board';
   }
   function previewBlocks() {
-    var blocks = list(data.blocks).slice(0, 3);
+    var blocks = scene === 'gmail' ? list(data.blocks).filter(isMailBlock) : list(data.blocks);
+    blocks = blocks.slice(0, 3);
     if (blocks.length > 0) { return blocks; }
     var timeline = list(data.timeline).slice(0, 3);
     if (timeline.length > 0) {
@@ -1738,8 +1743,10 @@ const HTML_HOME_JS: string = `
     var deck = add(hero, 'aside', 'mail-deck');
     var title = add(deck, 'div', 'mail-deck-title');
     add(title, 'span', '', '收件预览舱');
-    add(title, 'span', 'mail-deck-kicker', String(list(data.blocks).length || previewBlocks().length) + ' 封');
-    previewBlocks().slice(0, 3).forEach(function (block, index) {
+    var mailBlocks = previewBlocks().slice(0, 3);
+    var mailCount = list(data.blocks).filter(isMailBlock).length;
+    add(title, 'span', 'mail-deck-kicker', String(mailCount) + ' 封');
+    mailBlocks.forEach(function (block, index) {
       addMailThread(deck, block, index);
     });
     var rail = add(hero, 'nav', 'mail-rail');

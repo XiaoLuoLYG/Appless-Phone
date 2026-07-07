@@ -1067,6 +1067,30 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
     });
 
+    it('filters Gmail hero preview counts to mail blocks', 0, () => {
+      const doc = mailAggregateDocumentFixture();
+      doc.blocks.unshift({
+        id: 'youtube-1',
+        kind: 'generic-tool-result',
+        title: 'World Cup video',
+        subtitle: 'YouTube result',
+        status: 'success',
+        source: 'YouTube Data API',
+        metrics: [
+          { label: 'source', value: 'YouTube Data API' },
+          { label: 'toolName', value: 'youtube.video.search' }
+        ],
+        rows: [],
+        actions: []
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("function isMailBlock(block)")).assertLarger(-1);
+      expect(html.indexOf("var blocks = scene === 'gmail' ? list(data.blocks).filter(isMailBlock) : list(data.blocks);")).assertLarger(-1);
+      expect(html.indexOf("var mailCount = list(data.blocks).filter(isMailBlock).length;")).assertLarger(-1);
+      expect(html.indexOf("String(mailCount) + ' 封'")).assertLarger(-1);
+    });
+
     it('keeps social document actions intact in the enhanced social frame', 0, () => {
       const html = renderHtmlHomeDocument(socialDocumentFixture());
 
