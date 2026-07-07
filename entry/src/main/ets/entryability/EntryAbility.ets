@@ -282,8 +282,11 @@ export default class EntryAbility extends UIAbility {
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
+    const uri = oauthUriFromWant(want);
     this.loadLocalProviderConfig();
-    this.loadComposioConfig();
+    if (!isComposioCallbackUri(uri)) {
+      this.loadComposioConfig();
+    }
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
   }

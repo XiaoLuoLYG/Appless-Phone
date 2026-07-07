@@ -53,8 +53,9 @@ export default function composioDynamicBackendTest() {
     it('keeps generic dynamic.search fallback eligible once Composio is configured', 0, () => {
       expect(isComposioDynamicPrompt('帮我查最近重要邮件')).assertFalse();
       expect(shouldAttemptComposioDynamic('帮我查最近重要邮件', '', false)).assertFalse();
-      expect(shouldAttemptComposioDynamic('帮我查最近重要邮件', '', true)).assertTrue();
-      expect(shouldAttemptComposioDynamic('随便什么都行', 'execute', false)).assertTrue();
+      expect(shouldAttemptComposioDynamic('帮我查最近重要邮件', '', true)).assertFalse();
+      expect(shouldAttemptComposioDynamic('随便什么都行', 'execute', false)).assertFalse();
+      expect(shouldAttemptComposioDynamic('帮我在 GitHub 里找 Appless-Phone 最近的 pr', 'execute', false)).assertTrue();
     });
 
     it('maps proxy auth configs to executable toolkit accounts only', 0, () => {

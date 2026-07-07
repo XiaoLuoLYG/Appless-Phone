@@ -100,8 +100,7 @@ const composioCases = [
   {
     query: '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
     expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedToolId: 'dynamic.search'
   },
   {
     query: '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
@@ -1934,7 +1933,12 @@ console.log(`cleanData: ${cleanData ? 'true' : 'false'}`);
 if (runComposioAuthCases) {
   const summary = await runComposioAuthSmoke();
   console.log(JSON.stringify(summary, null, 2));
-  process.exit(summary.ok ? 0 : 1);
+  if (!summary.ok) {
+    process.exit(1);
+  }
+  if (!runComposioCases && queryArgs.length === 0) {
+    process.exit(0);
+  }
 }
 const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);

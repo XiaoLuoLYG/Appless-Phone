@@ -814,11 +814,11 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('composio') >= 0;
 }
 
-export function shouldAttemptComposioDynamic(prompt: string, operation: string, configured: boolean): boolean {
+export function shouldAttemptComposioDynamic(prompt: string, operation: string, _configured: boolean): boolean {
   if (operation === 'execute') {
-    return true;
+    return isComposioDynamicPrompt(prompt);
   }
-  return configured || isComposioDynamicPrompt(prompt);
+  return isComposioDynamicPrompt(prompt);
 }
 
 export function proxyToolkitAccountsPreview(payload: Object, toolkitAllowlist: string[] = []): Record<string, string> {

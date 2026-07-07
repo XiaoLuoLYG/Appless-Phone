@@ -599,7 +599,6 @@ async function main() {
     throw new Error(`Gateway health failed: HTTP ${healthResponse.status} ${health}`);
   }
   if (args.has('--composio-auth')) {
-    process.env.COMPOSIO_AUTH_MOCK = process.env.COMPOSIO_AUTH_MOCK || '1';
     await runComposioAuthCases();
     return;
   }
