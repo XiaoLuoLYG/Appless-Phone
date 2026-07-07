@@ -242,6 +242,14 @@ export default function a2uiHomeToolRequestTest() {
       expect(surfaceHasSatisfiedToolResult(surface, 'gmail.mail.search')).assertTrue();
     });
 
+    it('treats Gmail API tool names as satisfied Gmail app tools', 0, () => {
+      const draftSurface = surfaceWithSummaryToolResult('', 'users.drafts.create');
+      const searchSurface = surfaceWithSummaryToolResult('', 'users.threads.list');
+
+      expect(surfaceHasSatisfiedToolResult(draftSurface, 'gmail.draft.create')).assertTrue();
+      expect(surfaceHasSatisfiedToolResult(searchSurface, 'gmail.mail.search')).assertTrue();
+    });
+
     it('treats SocialHub surfaces as satisfied social tool results', 0, () => {
       const surface = surfaceWithSocialHubComponent();
 

@@ -506,7 +506,7 @@ export function directPaymentToolIdForActionId(actionId: string): string {
 export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
   const results = genericToolResults(surface);
   for (let index = 0; index < results.length; index++) {
-    if (results[index].toolName === toolId) {
+    if (toolNameSatisfied(toolId, results[index].toolName)) {
       return true;
     }
   }
@@ -517,8 +517,21 @@ export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId:
       }
     }
   }
-  // ponytail: Loopy Gmail rows expose users.threads.*, while summary keeps the app-level tool id.
-  return summaryData(surface).toolName === toolId;
+  // ponytail: Gmail surfaces can expose raw Google tool names; add aliases here when real providers need them.
+  return toolNameSatisfied(toolId, summaryData(surface).toolName);
+}
+
+function toolNameSatisfied(expectedToolId: string, actualToolName: string): boolean {
+  if (actualToolName === expectedToolId) {
+    return true;
+  }
+  if (expectedToolId === 'gmail.mail.search') {
+    return actualToolName.indexOf('users.threads') === 0 || actualToolName === 'search_threads';
+  }
+  if (expectedToolId === 'gmail.draft.create') {
+    return actualToolName.indexOf('users.drafts') === 0 || actualToolName === 'create_draft';
+  }
+  return false;
 }
 
 function mergeArgs(base: Object | null, override: Object | null): Object | null {
