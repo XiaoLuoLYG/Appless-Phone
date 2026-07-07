@@ -20,7 +20,6 @@ export struct ComposioAuthPage {
   onBack: () => void = () => {};
   onRefresh: () => void = () => {};
   onAuthorize: (item: ComposioAuthConfigItem) => void = (_item: ComposioAuthConfigItem) => {};
-  onResetUser: () => void = () => {};
 
   private visibleItems(): ComposioAuthConfigItem[] {
     return sortedComposioAuthConfigs(this.items);
@@ -163,34 +162,18 @@ export struct ComposioAuthPage {
         .margin({ bottom: 16 })
 
         Column() {
-          Row() {
-            Button('刷新')
-              .height(36)
-              .layoutWeight(1)
-              .fontSize(12)
-              .fontColor(COLOR_INK)
-              .backgroundColor(COLOR_CARD_RAISED)
-              .borderRadius(9)
-              .border({ width: 1, color: COLOR_CARD_EDGE })
-              .enabled(!this.isBusy)
-              .onClick(() => {
-                this.onRefresh();
-              })
-            Button('重置测试用户')
-              .height(36)
-              .layoutWeight(1)
-              .fontSize(12)
-              .fontColor(COLOR_INK)
-              .backgroundColor(COLOR_CARD_RAISED)
-              .borderRadius(9)
-              .border({ width: 1, color: COLOR_CARD_EDGE })
-              .margin({ left: 8 })
-              .enabled(!this.isBusy)
-              .onClick(() => {
-                this.onResetUser();
-              })
-          }
-          .width('100%')
+          Button('刷新')
+            .height(36)
+            .width('100%')
+            .fontSize(12)
+            .fontColor(COLOR_INK)
+            .backgroundColor(COLOR_CARD_RAISED)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_CARD_EDGE })
+            .enabled(!this.isBusy)
+            .onClick(() => {
+              this.onRefresh();
+            })
 
           if (this.message.length > 0) {
             Text(this.message)

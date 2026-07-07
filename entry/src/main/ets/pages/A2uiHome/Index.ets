@@ -114,6 +114,7 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+const DEFAULT_COMPOSIO_PROXY_BASE_URL: string = 'http://127.0.0.1:8787';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -412,6 +413,9 @@ struct Index {
     while (value.endsWith('/')) {
       value = value.substring(0, value.length - 1);
     }
+    if (!(value.startsWith('http://') || value.startsWith('https://'))) {
+      return DEFAULT_COMPOSIO_PROXY_BASE_URL;
+    }
     return value.endsWith('/api/aiphone/tool')
       ? value.substring(0, value.length - '/api/aiphone/tool'.length)
       : value;
@@ -461,15 +465,6 @@ struct Index {
     } finally {
       this.composioAuthBusy = false;
     }
-  }
-
-  private async resetComposioUser(): Promise<void> {
-    const nextUserId = this.createComposioUserId();
-    this.composioUserId = nextUserId;
-    this.composioAuthItems = [];
-    configureComposioUserId(nextUserId);
-    await this.persistComposioUserId(nextUserId);
-    this.configureComposioRuntimeForCurrentUser();
   }
 
   private loadPaymentAccounts(): void {
@@ -2429,16 +2424,6 @@ struct Index {
         },
         onAuthorize: (item: ComposioAuthConfigItem) => {
           this.openComposioAuthLink(item);
-        },
-        onResetUser: () => {
-          this.resetComposioUser()
-            .then(() => {
-              this.composioAuthMessage = '已切换新的测试用户。';
-              return this.refreshComposioAuth();
-            })
-            .catch((error: Error | Object | string | number | boolean | null | undefined) => {
-              this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
-            });
         }
       })
     } else if (this.showConfigPage) {
