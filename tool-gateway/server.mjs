@@ -303,6 +303,191 @@ function describeError(error) {
   return error instanceof Error ? error.message : textOf(error);
 }
 
+function composioBaseUrl() {
+  return textOf(process.env.COMPOSIO_BASE_URL || 'https://backend.composio.dev/api/v3.1').replace(/\/+$/, '');
+}
+
+function composioApiKey() {
+  return textOf(process.env.COMPOSIO_API_KEY).trim();
+}
+
+function composioMockEnabled() {
+  return textOf(process.env.COMPOSIO_AUTH_MOCK).trim() === '1';
+}
+
+function composioHeaders() {
+  const apiKey = composioApiKey();
+  if (apiKey.length === 0) {
+    throw new Error('Configure COMPOSIO_API_KEY in tool-gateway/.env.local.');
+  }
+  return {
+    'x-api-key': apiKey,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+}
+
+function normalizeComposioAuthItem(item, connectedByToolkit) {
+  const toolkit = item.toolkit || {};
+  const toolkitSlug = textOf(toolkit.slug || item.toolkit_slug || item.toolkit).trim().toLowerCase();
+  const connected = connectedByToolkit.get(toolkitSlug) || {};
+  return {
+    authConfigId: textOf(item.id || item.auth_config_id).trim(),
+    toolkitSlug,
+    toolkitName: textOf(toolkit.name || item.name || toolkitSlug).trim(),
+    logoUrl: textOf(toolkit.logo || toolkit.logo_url || item.logo_url).trim(),
+    authScheme: textOf(item.auth_scheme || item.scheme).trim(),
+    management: textOf(item.management || item.type).trim(),
+    status: textOf(connected.id).length > 0 ? 'connected' : 'needs_auth',
+    connectedAccountId: textOf(connected.id).trim(),
+    connectedAccountLabel: textOf(connected.account_id || connected.email || connected.name).trim(),
+    lastConnectedAt: textOf(connected.updated_at || connected.created_at).trim(),
+    canExecute: textOf(connected.id).length > 0
+  };
+}
+
+function mockComposioAuthConfigs(userId) {
+  return {
+    ok: true,
+    userId,
+    items: [
+      {
+        authConfigId: 'ac_mock_github',
+        toolkitSlug: 'github',
+        toolkitName: 'GitHub',
+        logoUrl: '',
+        authScheme: 'OAuth2',
+        management: 'managed',
+        status: 'needs_auth',
+        connectedAccountId: '',
+        connectedAccountLabel: '',
+        lastConnectedAt: '',
+        canExecute: false
+      }
+    ]
+  };
+}
+
+function mockComposioSessionResponse(pathname) {
+  if (pathname === '/tool_router/session') {
+    return { session_id: 'mock-session' };
+  }
+  if (pathname.endsWith('/search')) {
+    return {
+      success: true,
+      results: [{ primary_tool_slugs: ['GITHUB_FIND_PULL_REQUESTS'], related_tool_slugs: [] }],
+      tool_schemas: {
+        GITHUB_FIND_PULL_REQUESTS: {
+          tool_slug: 'GITHUB_FIND_PULL_REQUESTS',
+          description: 'Find GitHub pull requests',
+          input_schema: { type: 'object', properties: {} }
+        }
+      }
+    };
+  }
+  if (pathname.endsWith('/execute')) {
+    return { ok: true, message: 'mock Composio execute' };
+  }
+  return { ok: true };
+}
+
+async function composioFetch(pathname, options = {}) {
+  const response = await fetch(`${composioBaseUrl()}${pathname}`, {
+    ...options,
+    headers: {
+      ...composioHeaders(),
+      ...(options.headers || {})
+    },
+    signal: AbortSignal.timeout(20000)
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Composio HTTP ${response.status}: ${text.slice(0, 500)}`);
+  }
+  return text.length > 0 ? JSON.parse(text) : {};
+}
+
+async function handleComposioAuthConfigs(req, res, url) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const userId = textOf(url.searchParams.get('userId')).trim();
+  if (userId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'userId is required.' });
+    return;
+  }
+  if (composioMockEnabled()) {
+    sendJson(res, 200, mockComposioAuthConfigs(userId));
+    return;
+  }
+  const accounts = await composioFetch(`/connected_accounts?user_ids=${encodeURIComponent(userId)}&statuses=ACTIVE&limit=100`);
+  const connectedByToolkit = new Map();
+  for (const account of accounts.items || []) {
+    const slug = textOf(account.toolkit?.slug || account.toolkit_slug).trim().toLowerCase();
+    if (slug.length > 0 && !connectedByToolkit.has(slug)) {
+      connectedByToolkit.set(slug, account);
+    }
+  }
+  const authConfigs = await composioFetch('/auth_configs?limit=100');
+  const items = (authConfigs.items || [])
+    .filter(item => textOf(item.status || 'enabled').toLowerCase() !== 'disabled')
+    .map(item => normalizeComposioAuthItem(item, connectedByToolkit))
+    .filter(item => item.authConfigId.length > 0 && item.toolkitSlug.length > 0);
+  sendJson(res, 200, { ok: true, userId, items });
+}
+
+async function handleComposioLink(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = await readJson(req);
+  const userId = textOf(body.userId).trim();
+  const authConfigId = textOf(body.authConfigId).trim();
+  const toolkitSlug = textOf(body.toolkitSlug).trim().toLowerCase();
+  if (userId.length === 0 || authConfigId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'userId and authConfigId are required.' });
+    return;
+  }
+  if (composioMockEnabled()) {
+    sendJson(res, 200, { ok: true, redirectUrl: `https://mock.composio.local/connect/${toolkitSlug || 'toolkit'}` });
+    return;
+  }
+  const payload = await composioFetch('/connected_accounts/link', {
+    method: 'POST',
+    body: JSON.stringify({
+      auth_config_id: authConfigId,
+      user_id: userId,
+      callback_url: textOf(process.env.COMPOSIO_CALLBACK_URL || 'aiphone://composio/callback'),
+      alias: toolkitSlug.length > 0 ? `${toolkitSlug}:${userId}` : userId
+    })
+  });
+  const redirectUrl = textOf(payload.redirect_url || payload.link || payload.url).trim();
+  if (!redirectUrl.startsWith('https://')) {
+    sendJson(res, 502, { ok: false, error: 'Composio did not return an HTTPS redirect URL.' });
+    return;
+  }
+  sendJson(res, 200, { ok: true, redirectUrl });
+}
+
+async function handleComposioProxyJson(req, res, composioPath, successStatus = 200) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = req.method === 'DELETE' ? null : await readJson(req);
+  if (composioMockEnabled()) {
+    sendJson(res, successStatus, mockComposioSessionResponse(composioPath));
+    return;
+  }
+  const payload = await composioFetch(composioPath, {
+    method: req.method,
+    body: body === null ? undefined : JSON.stringify(body)
+  });
+  sendJson(res, successStatus, payload);
+}
+
 function stripeCheckoutAllowedAccounts() {
   return textOf(process.env.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS)
     .split(',')
@@ -2984,6 +3169,31 @@ const server = http.createServer(async (req, res) => {
         item
       });
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/v1/composio/auth-configs') {
+      await handleComposioAuthConfigs(req, res, url);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/composio/link') {
+      await handleComposioLink(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/composio/session') {
+      await handleComposioProxyJson(req, res, '/tool_router/session', 200);
+      return;
+    }
+    const composioSessionRoute = url.pathname.match(/^\/v1\/composio\/session\/([^/]+)(\/search|\/execute)?$/);
+    if (composioSessionRoute !== null) {
+      const sessionId = decodeURIComponent(composioSessionRoute[1]);
+      const suffix = composioSessionRoute[2] ?? '';
+      if (req.method === 'DELETE' && suffix.length === 0) {
+        await handleComposioProxyJson(req, res, `/tool_router/session/${encodeURIComponent(sessionId)}`, 200);
+        return;
+      }
+      if (req.method === 'POST' && (suffix === '/search' || suffix === '/execute')) {
+        await handleComposioProxyJson(req, res, `/tool_router/session/${encodeURIComponent(sessionId)}${suffix}`, 200);
+        return;
+      }
     }
     if (req.method === 'POST' && url.pathname === '/mcp/call') {
       if (!isGatewayAuthorized(req)) {

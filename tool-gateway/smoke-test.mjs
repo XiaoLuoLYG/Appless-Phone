@@ -116,6 +116,56 @@ const SOCIAL_BRIDGE_CASES = [
   }
 ];
 
+const COMPOSIO_AUTH_CASES = [
+  {
+    name: 'composio_auth_configs',
+    path: '/v1/composio/auth-configs?userId=app-user-smoke',
+    method: 'GET',
+    expect: ['"ok":true', '"toolkitSlug":"github"', '"authConfigId":"ac_mock_github"']
+  },
+  {
+    name: 'composio_link',
+    path: '/v1/composio/link',
+    method: 'POST',
+    body: {
+      userId: 'app-user-smoke',
+      authConfigId: 'ac_mock_github',
+      toolkitSlug: 'github'
+    },
+    expect: ['"ok":true', '"redirectUrl":"https://mock.composio.local/connect/github"']
+  },
+  {
+    name: 'composio_proxy_session',
+    path: '/v1/composio/session',
+    method: 'POST',
+    body: {
+      user_id: 'app-user-smoke',
+      toolkits: { enable: ['github'] },
+      connected_accounts: { github: ['ca_mock_github'] },
+      manage_connections: { enable: false },
+      workbench: { enable: false },
+      multi_account: { enable: false },
+      search: { enable: true },
+      execute: { enable_multi_execute: false }
+    },
+    expect: ['"session_id":"mock-session"']
+  },
+  {
+    name: 'composio_proxy_search',
+    path: '/v1/composio/session/mock-session/search',
+    method: 'POST',
+    body: { queries: [{ use_case: 'find recent Appless-Phone pull requests' }] },
+    expect: ['"success":true', '"GITHUB_FIND_PULL_REQUESTS"']
+  },
+  {
+    name: 'composio_proxy_execute',
+    path: '/v1/composio/session/mock-session/execute',
+    method: 'POST',
+    body: { tool_slug: 'GITHUB_FIND_PULL_REQUESTS', arguments: {} },
+    expect: ['"ok":true', '"mock Composio execute"']
+  }
+];
+
 function textOf(value) {
   if (value === undefined || value === null) {
     return '';
@@ -248,6 +298,31 @@ async function runSocialBridgeCases() {
     throw new Error(`social_cached_draft failed: HTTP ${draftResponse.status} ${draftText}`);
   }
   console.log('PASS host/social_cached_draft');
+}
+
+async function runComposioAuthCases() {
+  const baseHeaders = {
+    ...(gatewayApiKey.length > 0 ? { 'X-API-Key': gatewayApiKey } : {}),
+    'Content-Type': 'application/json'
+  };
+  for (const testCase of COMPOSIO_AUTH_CASES) {
+    const response = await fetch(`${gatewayUrl}${testCase.path}`, {
+      method: testCase.method,
+      headers: baseHeaders,
+      body: testCase.body ? JSON.stringify(testCase.body) : undefined,
+      signal: AbortSignal.timeout(5000)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${testCase.name} failed: HTTP ${response.status} ${text}`);
+    }
+    testCase.expect.forEach(marker => {
+      if (!text.includes(marker)) {
+        throw new Error(`${testCase.name} missing marker: ${marker}`);
+      }
+    });
+    console.log(`PASS host/${testCase.name}`);
+  }
 }
 
 async function runSocialBridgeAuthNegativeCases() {
@@ -517,9 +592,13 @@ async function main() {
   if (!healthResponse.ok) {
     throw new Error(`Gateway health failed: HTTP ${healthResponse.status} ${health}`);
   }
+  if (args.has('--composio-auth')) {
+    process.env.COMPOSIO_AUTH_MOCK = process.env.COMPOSIO_AUTH_MOCK || '1';
+    await runComposioAuthCases();
+    return;
+  }
   await runSocialBridgeAuthNegativeCases();
   await runSocialBridgeCases();
-
   const beforeLogs = useDevice ? captureHilog(target, 'before') : '';
   const suites = [
     ['host', postFromHost]
