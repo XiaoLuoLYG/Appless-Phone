@@ -163,6 +163,12 @@ const COMPOSIO_AUTH_CASES = [
     method: 'POST',
     body: { tool_slug: 'GITHUB_FIND_PULL_REQUESTS', arguments: {} },
     expect: ['"ok":true', '"mock Composio execute"']
+  },
+  {
+    name: 'composio_proxy_delete_session',
+    path: '/v1/composio/session/mock-session',
+    method: 'DELETE',
+    expect: ['"ok":true']
   }
 ];
 
