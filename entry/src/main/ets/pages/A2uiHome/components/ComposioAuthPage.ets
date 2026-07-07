@@ -9,6 +9,7 @@ import {
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
 import { composioAuthActionLabel, composioAuthStatusLabel, sortedComposioAuthConfigs } from './ComposioAuthViewData';
+import { composioToolkitLogoResource } from './ComposioLogoResource';
 import { StatusBadgeView } from './StatusBadgeView';
 
 @Component
@@ -29,11 +30,6 @@ export struct ComposioAuthPage {
     return item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug;
   }
 
-  private badgeInitial(item: ComposioAuthConfigItem): string {
-    const name = this.displayToolkitName(item).trim();
-    return name.length > 0 ? name.substring(0, 1).toUpperCase() : '?';
-  }
-
   private subtitle(item: ComposioAuthConfigItem): string {
     if (item.connectedAccountLabel.length > 0) {
       return item.connectedAccountLabel;
@@ -46,25 +42,11 @@ export struct ComposioAuthPage {
 
   @Builder
   ToolkitBadge(item: ComposioAuthConfigItem) {
-    if (item.logoUrl.length > 0) {
-      Image(item.logoUrl)
-        .width(36)
-        .height(36)
-        .borderRadius(10)
-    } else {
-      Row() {
-        Text(this.badgeInitial(item))
-          .fontSize(14)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_ACCENT)
-      }
+    Image(composioToolkitLogoResource(item.toolkitSlug))
       .width(36)
       .height(36)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor('#F1E5DE')
+      .objectFit(ImageFit.Contain)
       .borderRadius(10)
-      .border({ width: 1, color: COLOR_CARD_EDGE })
-    }
   }
 
   @Builder

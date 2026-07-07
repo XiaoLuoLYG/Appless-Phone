@@ -93,6 +93,26 @@ export default function mailToolA2uiTest() {
       expect(rows[1].toolName).assertEqual('OUTLOOK_SEARCH_MESSAGES');
     });
 
+    it('hides Gmail search summary cards from aggregate mail results', 0, () => {
+      const summary: DynamicGenericToolResult = {
+        sourceTag: 'Gmail API',
+        toolName: 'users.threads.list',
+        title: 'Gmail 搜索条件',
+        status: 'success',
+        summary: '已使用真实 Gmail API 搜索邮件线程；下面展示匹配结果。',
+        rows: [{ label: 'Query', value: 'newer_than:30d' }],
+        rawPreview: 'query=newer_than:30d returned=1 resultSize=1'
+      };
+      const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [
+        thread('qq', '2026-06-30T09:00:00+08:00', 'QQ thread')
+      ], [], [summary]));
+      const rows = genericToolResults(store.getSurface());
+
+      expect(rows.length).assertEqual(1);
+      expect(rows[0].sourceTag).assertEqual('QQ Mail');
+      expect(rows[0].title).assertEqual('QQ thread');
+    });
+
     it('builds provider-aware reply draft actions', 0, () => {
       const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [
         thread('qq', '2026-06-30T09:00:00+08:00', 'QQ thread')

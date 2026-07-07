@@ -24,21 +24,21 @@
 | Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿 | `confirm_required` | 已有草稿 + Gmail 授权 | 通常需要 VPN | 否 | 单元/动作链路 |
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
 | Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
-| 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen max 的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
-| YouTube | `youtube.video.search` | `帮我在 YouTube 搜索 qwen max 官方介绍视频` | YouTube-only 公开视频搜索；可用 API 热门排序 | `read` | `YOUTUBE_API_KEY` | 通常需要 VPN | 否 | `--google-apps` |
+| 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
+| YouTube | `youtube.video.search` | `帮我在 YouTube 搜索 世界杯相关视频` | YouTube-only 公开视频搜索；可用 API 热门排序 | `read` | `YOUTUBE_API_KEY` | 通常需要 VPN | 否 | `--google-apps` |
 | YouTube | `youtube.mine.playlists` | `帮我查看我的 YouTube 播放列表` | 用户播放列表或 OAuth 授权卡 | `read` | Google OAuth/Web session | 通常需要 VPN | 否 | `--google-apps` |
 | YouTube | `youtube.mine.subscriptions` | `帮我查看我的 YouTube 订阅` | 用户订阅或 OAuth 授权卡 | `read` | Google OAuth/Web session | 通常需要 VPN | 否 | 注册/单元测试 |
-| 日历 | `calendar.events.search` | `帮我看今天的 Google Calendar 日程` | Google Calendar 日程或授权/失败卡 | `read` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
-| 日历 | `calendar.event.create` | `帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程` | 创建/确认日程；2026-06-30 是当前 smoke 固定 query | `confirm_required` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
+| 日历 | `calendar.events.search` | `帮我看本月的 Google Calendar 日程` | Google Calendar 日程或授权/失败卡 | `read` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
+| 日历 | `calendar.event.create` | `帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程` | 创建/确认日程；2026-07-30 是当前 smoke 固定 query | `confirm_required` | Google OAuth | 通常需要 VPN | 否 | `--google-apps` |
 | 日历 | `calendar.event.update` | `把刚才的日程改到下午4点` | 更新指定日程或提示缺少 event id/授权 | `confirm_required` | Google OAuth + event id | 通常需要 VPN | 否 | 注册/单元测试 |
-| 支付 | `payment.send` | `用 PayPal 给罗一格转 5 美元` | 先补金额/确认，再打开 PayPal/Stripe checkout；不会声称已付款除非 provider 确认 | `confirm_required` | `PAYPAL_*`、`STRIPE_*`、付款对象 book；Google Pay 是 fundingSource | PayPal/Google Pay 常需要；Stripe 视网络 | 否 | 支付专项测试 |
+| 支付 | `payment.send` | `用 PayPal/Google Pay 给罗一格转 5 美元` | 先补金额/确认，再打开 PayPal/Stripe checkout；不会声称已付款除非 provider 确认 | `confirm_required` | `PAYPAL_*`、`STRIPE_*`、付款对象 book；Google Pay 是 fundingSource | PayPal/Google Pay 常需要；Stripe 视网络 | 否 | 支付专项测试 |
 | 支付 | `payment.account.setup` | `帮我创建我的 Stripe 收款账户` | Stripe Connect 收款账户卡、托管认证/刷新状态 | `confirm_required` | `STRIPE_TEST_SECRET_KEY` / `STRIPE_LIVE_SECRET_KEY` + agent profile | Stripe/Connect 通常需要 VPN 或可访问外网 | 否 | 支付专项测试 |
 | 地图 | `maps.place.search` | `帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐` | Google Places 地点列表或缺 key/网络错误 | `read` | `GOOGLE_MAPS_API_KEY` | 通常需要 VPN | 否 | 默认 smoke / `--google-apps` |
 | 地图 | `maps.place.details` | `帮我查这个 Google Places placeId 的详情` | Google Places 详情或缺 placeId/key 错误 | `read` | `GOOGLE_MAPS_API_KEY` + placeId | 通常需要 VPN | 否 | 注册/单元测试 |
-| 数字分身 | `memory.update` | `把饮食搭子的 memory 改成：用户咖啡偏好：只喝瑞幸咖啡。` | 更新当前分身 memory，显示记忆更新卡；不同时搜索 | `draft` | 无 | 不需要 | 否 | 默认 smoke |
+| 数字分身 | `memory.update` | `我只喝瑞幸咖啡` | 更新当前分身 memory，显示记忆更新卡；不同时搜索 | `draft` | 无 | 不需要 | 否 | 默认 smoke |
 | 动态工具/本地 | `dynamic.search` | `帮我查明天深圳天气` | 本地 catalog 命中 `weather.query`；找不到就 `no_tool_found` | `read` | 本地 catalog 凭据；天气通常走高德 key | 高德天气通常不需要 VPN | 否 | `--dynamic-tools` |
 | Composio/GitHub | `dynamic.search` | `帮我在 GitHub 里找 Appless-Phone 最近的 pr` | Composio GitHub 结果；优先 `GITHUB_FIND_PULL_REQUESTS`，展示 Appless-Phone PR | `read` | `COMPOSIO_API_KEY` + `COMPOSIO_USER_ID` + GitHub connected account | 通常需要外网/VPN | 是 | `--composio-tools` |
-| Composio/Google Drive | `dynamic.search` | `帮我在 Google Drive 里找签证材料` | Composio Google Drive 结果；优先 `GOOGLEDRIVE_FIND_FILE`，查文件名/内容 | `read` | Composio 配置 + Google Drive connected account | 通常需要外网/VPN | 是 | `--composio-tools` |
+| Composio/Google Drive | `dynamic.search` | `帮我在 Google Drive 里找专利交底书` | Composio Google Drive 结果；优先 `GOOGLEDRIVE_FIND_FILE`，查文件名/内容 | `read` | Composio 配置 + Google Drive connected account | 通常需要外网/VPN | 是 | `--composio-tools` |
 | Composio/Google Docs | `dynamic.search` | `帮我在 Google Docs 里找 AIPhoneDemo 设计文档` | Composio Google Docs 结果；优先 `GOOGLEDOCS_SEARCH_DOCUMENTS` | `read` | Composio 配置 + Google Docs connected account | 通常需要外网/VPN | 是 | `--composio-tools` |
 | Composio/Linear | `dynamic.search` | `帮我查 Linear 里分配给我的高优先级 bug` | Composio Linear 工具结果或真实授权/无结果 | `read` | Composio 配置 + Linear connected account | 通常需要外网/VPN | 是 | `--composio-tools` |
 | Composio/Trello | `dynamic.search` | `帮我在 Trello 里找本周发布 checklist 相关卡片` | Composio Trello 工具结果或真实授权/无结果 | `read` | Composio 配置 + Trello connected account | 通常需要外网/VPN | 是 | `--composio-tools` |

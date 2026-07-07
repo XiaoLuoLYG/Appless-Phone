@@ -390,6 +390,18 @@ export default function toolGatewayClientTest() {
       expect(parsed.providers[2]).assertEqual('outlook');
     });
 
+    it('does not treat latest important as aggregate mail keyword text', 0, () => {
+      const args = JSON.parse('{"query":"最新 重要","providers":["gmail","qq","outlook"]}') as Object;
+      const parsed = mailSearchArgs('帮我查看邮箱里最新的重要邮件', args);
+      const englishArgs = JSON.parse('{"query":"latest important","providers":["gmail","qq","outlook"]}') as Object;
+      const englishParsed = mailSearchArgs('帮我查看邮箱里最新的重要邮件', englishArgs);
+
+      expect(parsed.query).assertEqual('newer_than:30d');
+      expect(englishParsed.query).assertEqual('newer_than:30d');
+      expect(parsed.providers.length).assertEqual(3);
+      expect(parsed.providers[1]).assertEqual('qq');
+    });
+
     it('does not claim QQ draft success when config is missing', 0, async () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');

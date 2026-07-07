@@ -173,6 +173,15 @@ function dynamicResult(result: DynamicGenericToolResult): A2uiGenericToolResultD
   };
 }
 
+function isTechnicalGmailSearchSummary(result: A2uiGenericToolResultData): boolean {
+  const source = result.sourceTag.toLowerCase();
+  if (source.indexOf('gmail') < 0 || result.toolName === 'mail.thread') {
+    return false;
+  }
+  return result.title.trim() === 'Gmail 搜索条件' ||
+    (result.toolName === 'users.threads.list' && result.rawPreview.indexOf(' returned=') >= 0);
+}
+
 export function mailResultsA2ui(
   surfaceId: string,
   toolId: string,
@@ -185,7 +194,8 @@ export function mailResultsA2ui(
   statuses.forEach((status: MailProviderStatus) => results.push(statusResult(status)));
   sorted.forEach((thread: MailThreadResult) => results.push(threadResult(thread)));
   extras.forEach((result: DynamicGenericToolResult) => results.push(dynamicResult(result)));
-  const count = results.length;
+  const visibleResults = results.filter((result: A2uiGenericToolResultData) => !isTechnicalGmailSearchSummary(result));
+  const count = visibleResults.length;
   const title = '邮箱';
   const summary: A2uiSummaryData = {
     text: count.toString() + (count === 1 ? ' mail result returned for review.' : ' mail results returned for review.'),
@@ -195,7 +205,7 @@ export function mailResultsA2ui(
   };
   return createSurfaceLine(surfaceId, title, 'ready') +
     componentsLine(surfaceId, title, 'ready') +
-    dataLine(surfaceId, GENERIC_RESULTS_PATH, results) +
+    dataLine(surfaceId, GENERIC_RESULTS_PATH, visibleResults) +
     dataLine(surfaceId, SUMMARY_PATH, summary);
 }
 

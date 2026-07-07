@@ -182,7 +182,7 @@ export default function reActAgentRunnerTest() {
       const digest = summarizeA2uiObservation(jsonl);
 
       expect(digest.isA2ui).assertTrue();
-      expect(digest.shouldStop).assertFalse();
+      expect(digest.shouldStop).assertTrue();
       expect(digest.failureKey).assertEqual('');
       expect(digest.text.indexOf('ObservationDigest')).assertLarger(-1);
       expect(digest.text.indexOf('toolId: youtube.video.search')).assertLarger(-1);
@@ -222,9 +222,7 @@ export default function reActAgentRunnerTest() {
 
         expect(digest.isA2ui).assertTrue();
         expect(digest.failureKey.indexOf(status)).assertLarger(-1);
-        if (status !== 'error') {
-          expect(digest.shouldStop).assertTrue();
-        }
+        expect(digest.shouldStop).assertTrue();
       });
     });
 
@@ -257,7 +255,7 @@ export default function reActAgentRunnerTest() {
       expect(digest.text.indexOf('raw-')).assertEqual(-1);
     });
 
-    it('continues after an A2UI observation and lets the model decide final', 0, async () => {
+    it('stops after an A2UI observation instead of asking the model for another step', 0, async () => {
       const model = new SequenceModel([
         'Thought: need video\nAction: youtube.video.search({"query":"world cup"})',
         'Thought: the video result is enough\nFinal: found video'
@@ -281,14 +279,12 @@ export default function reActAgentRunnerTest() {
         }
       });
 
-      expect(model.prompts.length).assertEqual(2);
-      expect(finalText).assertEqual('found video');
+      expect(model.prompts.length).assertEqual(1);
+      expect(finalText).assertEqual('工具结果已更新到主页。');
       expect(observationText.indexOf('ObservationDigest')).assertLarger(-1);
-      expect(model.prompts[1].indexOf('Watch URL: https://youtube.example/watch?v=abc123')).assertLarger(-1);
-      expect(model.prompts[1].indexOf('"createSurface"')).assertEqual(-1);
     });
 
-    it('runs a read tool followed by a draft tool before final', 0, async () => {
+    it('does not chain a second A2UI tool over the first displayed result', 0, async () => {
       const model = new SequenceModel([
         'Thought: search first\nAction: youtube.video.search({"query":"world cup","order":"viewCount","maxResults":5})',
         'Thought: draft email with video\nAction: gmail.draft.create({"to":["xxx@example.com"],"subject":"World Cup videos","body":"https://youtube.example/watch?v=abc123"})',
@@ -324,10 +320,9 @@ export default function reActAgentRunnerTest() {
       });
 
       expect(youtube.calls.length).assertEqual(1);
-      expect(gmail.calls.length).assertEqual(1);
-      expect(model.prompts.length).assertEqual(3);
-      expect(finalText).assertEqual('Gmail draft prepared for review');
-      expect(model.prompts[2].indexOf('Draft ID: draft-1')).assertLarger(-1);
+      expect(gmail.calls.length).assertEqual(0);
+      expect(model.prompts.length).assertEqual(1);
+      expect(finalText).assertEqual('工具结果已更新到主页。');
     });
 
     it('stops after blocked A2UI observations without asking the model for another step', 0, async () => {
@@ -360,10 +355,10 @@ export default function reActAgentRunnerTest() {
       });
 
       expect(model.prompts.length).assertEqual(1);
-      expect(finalText.indexOf('需要用户确认或输入')).assertLarger(-1);
+      expect(finalText.indexOf('需要用户确认或授权')).assertLarger(-1);
     });
 
-    it('stops after the same A2UI error repeats twice', 0, async () => {
+    it('stops after the first A2UI error without retrying through the model', 0, async () => {
       const model = new SequenceModel([
         'Thought: first try\nAction: youtube.video.search({"query":"world cup"})',
         'Thought: retry once\nAction: youtube.video.search({"query":"world cup highlights"})',
@@ -393,10 +388,9 @@ export default function reActAgentRunnerTest() {
         }
       });
 
-      expect(youtube.calls.length).assertEqual(2);
-      expect(model.prompts.length).assertEqual(2);
-      expect(finalText.indexOf('工具重复失败')).assertLarger(-1);
-      expect(finalText.indexOf('youtube.video.search')).assertLarger(-1);
+      expect(youtube.calls.length).assertEqual(1);
+      expect(model.prompts.length).assertEqual(1);
+      expect(finalText.indexOf('工具执行失败')).assertLarger(-1);
     });
   });
 }

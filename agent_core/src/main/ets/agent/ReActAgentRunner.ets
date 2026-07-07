@@ -40,7 +40,6 @@ export class ReActAgentRunner {
 
   async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
     const scratchpad: string[] = [];
-    const failureCounts: Map<string, number> = new Map();
 
     for (let step = 0; step < this.maxSteps; step++) {
       let response: string;
@@ -92,18 +91,14 @@ export class ReActAgentRunner {
       listener(new AgentEvent(AgentEventKind.OBSERVATION, observationForModel));
 
       if (digest.isA2ui && digest.shouldStop) {
-        listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或输入，工具结果已更新到主页。'));
-        return;
-      }
-
-      if (digest.isA2ui && digest.failureKey.length > 0) {
-        const seen = failureCounts.get(digest.failureKey);
-        const nextCount = seen === undefined ? 1 : seen + 1;
-        failureCounts.set(digest.failureKey, nextCount);
-        if (nextCount >= 2) {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具重复失败：' + digest.failureKey));
-          return;
+        if (digest.failureKey.indexOf(':error') >= 0) {
+          listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
+        } else if (digest.failureKey.length > 0) {
+          listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
+        } else {
+          listener(new AgentEvent(AgentEventKind.FINAL, '工具结果已更新到主页。'));
         }
+        return;
       }
     }
 
@@ -139,8 +134,8 @@ export class ReActAgentRunner {
       prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output, return Final with a concise summary.\n';
     }
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
-    prompt += 'After each ObservationDigest, decide whether the user task is complete. If complete, return Final. If incomplete, call the next useful tool with JSON args. Do not call display-only tools for results already shown in A2UI.\n';
-    prompt += 'Read and draft tools may continue automatically. Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
+    prompt += 'If a tool observation already contains UI or A2UI protocol output, return Final; the visible result is already on screen.\n';
+    prompt += 'Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {

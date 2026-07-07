@@ -488,7 +488,7 @@ function mailAggregateDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'gmail';
   doc.title = '邮箱';
-  doc.subtitle = '聚合展示 Gmail 和 QQ 邮箱';
+  doc.subtitle = '聚合展示 Gmail、QQ Mail 和 Outlook 邮箱';
   doc.blocks = [{
     id: 'gmail-1',
     kind: 'generic-tool-result',
@@ -519,6 +519,22 @@ function mailAggregateDocumentFixture(): HtmlHomeDocument {
     rows: [
       { label: 'Provider', value: 'qq' },
       { label: 'Thread ID', value: 'qq-thread' }
+    ],
+    actions: []
+  }, {
+    id: 'outlook-1',
+    kind: 'generic-tool-result',
+    title: 'Composio 调用失败',
+    subtitle: 'Composio 执行 OUTLOOK_SEARCH_MESSAGES 失败。',
+    status: 'error',
+    source: 'Composio Outlook',
+    metrics: [
+      { label: 'source', value: 'Composio Outlook' },
+      { label: 'toolName', value: 'OUTLOOK_SEARCH_MESSAGES' }
+    ],
+    rows: [
+      { label: 'provider', value: 'Outlook' },
+      { label: '结果摘要', value: 'Composio 执行 OUTLOOK_SEARCH_MESSAGES 失败。' }
     ],
     actions: []
   }];
@@ -1157,10 +1173,16 @@ export default function htmlHomeRendererTest() {
 
       expect(html.indexOf('composio-preview')).assertLarger(-1);
       expect(html.indexOf('composio-app-logo')).assertLarger(-1);
+      expect(html.indexOf('cdn.simpleicons.org')).assertEqual(-1);
+      expect(html.indexOf('logos.composio.dev')).assertEqual(-1);
       expect(html.indexOf('composio-github')).assertLarger(-1);
       expect(html.indexOf('composio-drive')).assertLarger(-1);
       expect(html.indexOf('composio-docs')).assertLarger(-1);
       expect(html.indexOf('composio-slack')).assertLarger(-1);
+      expect(html.indexOf('composio-notion')).assertLarger(-1);
+      expect(html.indexOf('composio-linear')).assertLarger(-1);
+      expect(html.indexOf('composio-asana')).assertLarger(-1);
+      expect(html.indexOf('composio-trello')).assertLarger(-1);
       expect(html.indexOf('composio-outlook')).assertLarger(-1);
       expect(html.indexOf('composio-discord')).assertLarger(-1);
       expect(html.indexOf('composio-linkedin')).assertLarger(-1);
@@ -1169,6 +1191,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('composio-spotify')).assertLarger(-1);
       expect(html.indexOf('composio-tiktok')).assertLarger(-1);
       expect(html.indexOf('composio-ticketmaster')).assertLarger(-1);
+      expect(html.indexOf('composio-hubspot')).assertLarger(-1);
+      expect(html.indexOf('composio-salesforce')).assertLarger(-1);
       expect(html.indexOf('Add Composio result cards')).assertLarger(-1);
       expect(html.indexOf('签证材料.pdf')).assertLarger(-1);
       expect(html.indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
@@ -1217,7 +1241,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('已写入')).assertLarger(-1);
     });
 
-    it('renders Gmail and QQ mail sources with app icons and separate card frames', 0, () => {
+    it('renders Gmail, QQ, and Outlook mail sources with app icons and separate card frames', 0, () => {
       const html = renderHtmlHomeDocument(mailAggregateDocumentFixture());
 
       expect(html.indexOf('data-scene="gmail"')).assertLarger(-1);
@@ -1227,18 +1251,24 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('mail-rail')).assertLarger(-1);
       expect(html.indexOf('mail_filter_gmail')).assertLarger(-1);
       expect(html.indexOf('mail_filter_qq')).assertLarger(-1);
+      expect(html.indexOf('mail_filter_outlook')).assertLarger(-1);
       expect(html.indexOf('data-mail-filter')).assertLarger(-1);
       expect(html.indexOf('星标')).assertEqual(-1);
       expect(html.indexOf('草稿</button>')).assertEqual(-1);
       expect(html.indexOf('Gmail message')).assertLarger(-1);
       expect(html.indexOf('QQ message')).assertLarger(-1);
+      expect(html.indexOf('Composio 调用失败')).assertLarger(-1);
+      expect(html.indexOf('OUTLOOK_SEARCH_MESSAGES')).assertLarger(-1);
       expect(html.indexOf('MAIL_ICON_GMAIL')).assertLarger(-1);
       expect(html.indexOf('MAIL_ICON_QQ')).assertLarger(-1);
+      expect(html.indexOf('COMPOSIO_ICON_OUTLOOK')).assertLarger(-1);
       expect(html.indexOf('mail-source-icon')).assertLarger(-1);
       expect(html.indexOf("if (key === 'mail-gmail')")).assertLarger(-1);
       expect(html.indexOf("if (key === 'mail-qq')")).assertLarger(-1);
+      expect(html.indexOf("key === 'composio-outlook'")).assertLarger(-1);
       expect(html.indexOf(".block[data-source-key=\"mail-gmail\"]")).assertLarger(-1);
       expect(html.indexOf(".block[data-source-key=\"mail-qq\"]")).assertLarger(-1);
+      expect(html.indexOf(".block[data-source-key=\"composio-outlook\"]")).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(194, 70, 54, 0.45)')).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
     });

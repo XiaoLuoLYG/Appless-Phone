@@ -22,6 +22,10 @@ export const COLOR_CARD_SHADOW: string = '#9F8D7C22';
 export const COLOR_PANEL_SHADOW: string = '#9F8D7C24';
 export const COLOR_CARD_GLOW: string = '#9F8D7C24';
 export const COLOR_ACCENT_SHADOW: string = '#995F4C33';
+export const COLOR_SUCCESS: string = '#2F7754';
+export const COLOR_SUCCESS_SOFT: string = '#E4F1E8';
+export const COLOR_WARNING: string = '#A77816';
+export const COLOR_WARNING_SOFT: string = '#F6ECCD';
 export const COLOR_ACTION_ACTIVATED: string = COLOR_ACCENT_DEEP;
 export const COLOR_ACTION_ACTIVATED_TEXT: string = COLOR_BUTTON_TEXT;
 export const COLOR_ACTION_ACTIVATED_EDGE: string = COLOR_ACCENT;
@@ -80,6 +84,12 @@ export const COLOR_FOOD_LUCKIN_CARD: string = '#F3F7FD';
 export const COLOR_FOOD_LUCKIN_GLOW: string = '#466EB824';
 
 export function statusColor(status: string): string {
+  if (status === 'connected' || status === 'success') {
+    return COLOR_SUCCESS;
+  }
+  if (status === 'needs_auth' || status === 'pending' || status === 'auth_required') {
+    return COLOR_WARNING;
+  }
   if (status === 'ready') {
     return COLOR_ACCENT_DARK;
   }
@@ -96,6 +106,12 @@ export function statusColor(status: string): string {
 }
 
 export function statusBackground(status: string): string {
+  if (status === 'connected' || status === 'success') {
+    return COLOR_SUCCESS_SOFT;
+  }
+  if (status === 'needs_auth' || status === 'pending' || status === 'auth_required') {
+    return COLOR_WARNING_SOFT;
+  }
   if (status === 'ready') {
     return COLOR_ACCENT_SOFT;
   }

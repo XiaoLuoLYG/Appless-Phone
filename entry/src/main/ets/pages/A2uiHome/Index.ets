@@ -38,12 +38,12 @@ import {
   COMPOSIO_USER_ID_PREFIX,
   ComposioAuthConfigItem,
   ComposioAuthProxyClient,
-  configureComposioConfigFromRawJson,
   configureComposioUserId,
   configureLocalPaymentAccountBookJson,
   configureLocalStripeReceivingAgentJson,
   configureLocalToolDebugConfig,
-  currentToolGatewayApiKey,
+  currentComposioConfig,
+  currentComposioUserId,
   defaultToolGatewayUrl,
   isRegisteredToolId,
   normalizeComposioUserId,
@@ -98,7 +98,8 @@ import {
   A2uiHomeResolvedToolRequest,
   directPaymentToolIdForActionId,
   resolveA2uiHomeToolRequest,
-  surfaceHasSatisfiedToolResult
+  surfaceHasSatisfiedToolResult,
+  surfaceHasVisibleToolResult
 } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
@@ -114,7 +115,6 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
-const DEFAULT_COMPOSIO_PROXY_BASE_URL: string = 'http://127.0.0.1:8787';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -387,6 +387,13 @@ struct Index {
     if (this.composioUserId.length > 0) {
       return this.composioUserId;
     }
+    const configuredRaw = currentComposioUserId().trim();
+    if (configuredRaw.length > 0) {
+      const configured = normalizeComposioUserId(configuredRaw);
+      this.composioUserId = configured;
+      configureComposioUserId(configured);
+      return configured;
+    }
     const saved = this.savedComposioUserId();
     if (saved.length > 0) {
       this.composioUserId = saved;
@@ -400,31 +407,17 @@ struct Index {
     return generated;
   }
 
-  private composioProxyBaseUrl(): string {
-    let value = TOOL_GATEWAY_URL.trim();
-    while (value.endsWith('/')) {
-      value = value.substring(0, value.length - 1);
-    }
-    if (!(value.startsWith('http://') || value.startsWith('https://'))) {
-      return DEFAULT_COMPOSIO_PROXY_BASE_URL;
-    }
-    return value.endsWith('/api/aiphone/tool')
-      ? value.substring(0, value.length - '/api/aiphone/tool'.length)
-      : value;
-  }
-
   private composioAuthClient(): ComposioAuthProxyClient {
-    return new ComposioAuthProxyClient(this.composioProxyBaseUrl(), currentToolGatewayApiKey());
+    const config = currentComposioConfig();
+    if (config.proxyBaseUrl.length > 0) {
+      return new ComposioAuthProxyClient(config.proxyBaseUrl, config.proxyApiKey);
+    }
+    return new ComposioAuthProxyClient(config.baseUrl, config.apiKey, true);
   }
 
   private configureComposioRuntimeForCurrentUser(): string {
     const userId = this.ensureComposioUserId();
     configureComposioUserId(userId);
-    configureComposioConfigFromRawJson(JSON.stringify({
-      userId: userId,
-      proxyBaseUrl: this.composioProxyBaseUrl(),
-      proxyApiKey: currentToolGatewayApiKey()
-    }));
     return userId;
   }
 
@@ -1335,6 +1328,8 @@ struct Index {
           const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
           if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
+          } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_visible source=loopy_adapter toolId=' + fallbackRequest.toolId);
           } else if (fallbackRequest.hasTool) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
               ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
@@ -2404,7 +2399,7 @@ struct Index {
   build() {
     if (this.showComposioAuthPage) {
       ComposioAuthPage({
-        userShortId: shortComposioUserId(this.composioUserId),
+        userShortId: this.composioUserId,
         items: this.composioAuthItems,
         message: this.composioAuthMessage,
         isBusy: this.composioAuthBusy,
@@ -2440,6 +2435,10 @@ struct Index {
         personaSoulDraft: $personaSoulDraft,
         personaMemoryDraft: $personaMemoryDraft,
         personaSaveMessage: this.personaSaveMessage,
+        composioUserId: this.composioUserId,
+        composioAuthItems: this.composioAuthItems,
+        composioAuthMessage: this.composioAuthMessage,
+        composioAuthBusy: this.composioAuthBusy,
         onBack: () => {
           this.showConfigPage = false;
         },
@@ -2449,6 +2448,9 @@ struct Index {
         onOpenComposioAuth: () => {
           this.configureComposioRuntimeForCurrentUser();
           this.showComposioAuthPage = true;
+          this.refreshComposioAuth();
+        },
+        onRefreshComposioAuth: () => {
           this.refreshComposioAuth();
         },
         onSelectPersona: (personaId: string) => {
@@ -2481,7 +2483,9 @@ struct Index {
           this.showHistory = !this.showHistory;
         },
         onOpenConfig: () => {
+          this.configureComposioRuntimeForCurrentUser();
           this.showConfigPage = true;
+          this.refreshComposioAuth();
         },
         onOpenSocialHub: () => {
           this.openSocialHub();

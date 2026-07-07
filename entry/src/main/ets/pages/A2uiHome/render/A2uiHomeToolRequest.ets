@@ -536,6 +536,18 @@ export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId:
   return toolNameSatisfied(toolId, summaryData(surface).toolName);
 }
 
+export function surfaceHasVisibleToolResult(surface: A2uiSurfaceState): boolean {
+  if (genericToolResults(surface).length > 0) {
+    return true;
+  }
+  for (let index = 0; index < surface.components.length; index++) {
+    if (surface.components[index].component === 'SocialHub') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function toolNameSatisfied(expectedToolId: string, actualToolName: string): boolean {
   if (actualToolName === expectedToolId) {
     return true;

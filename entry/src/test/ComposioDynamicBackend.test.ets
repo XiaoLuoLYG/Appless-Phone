@@ -2,9 +2,11 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   composioDynamicMissingConfigResult,
   composioDynamicResultFromObservation,
+  configureComposioConfigFromRawJson,
   proxyToolkitAccountsPreview,
   shouldAttemptComposioDynamic,
   configureComposioUserId,
+  currentComposioConfig,
   currentComposioUserId,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute
@@ -48,6 +50,15 @@ export default function composioDynamicBackendTest() {
     it('keeps configured app user id for Composio dynamic calls', 0, () => {
       configureComposioUserId('aiphone-user-device-1');
       expect(currentComposioUserId()).assertEqual('aiphone-user-device-1');
+    });
+
+    it('uses raw Composio config without forcing a proxy', 0, () => {
+      configureComposioConfigFromRawJson('{"apiKey":"ak_test","baseUrl":"https://backend.composio.dev/api/v3.1","userId":"aiphone-luoyige"}');
+      configureComposioUserId('');
+
+      expect(currentComposioUserId()).assertEqual('aiphone-luoyige');
+      expect(currentComposioConfig().apiKey).assertEqual('ak_test');
+      expect(currentComposioConfig().proxyBaseUrl).assertEqual('');
     });
 
     it('keeps generic dynamic.search fallback eligible once Composio is configured', 0, () => {

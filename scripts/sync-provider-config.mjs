@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const envPath = join(rootDir, 'tool-gateway', '.env.local');
 const outPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'aiphone_provider_config.json');
+const composioOutPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'composio_config.json');
+const defaultComposioBaseUrl = 'https://backend.composio.dev/api/v3.1';
 
 const providerKeys = [
   'TOOL_GATEWAY_API_KEY',
@@ -177,4 +179,17 @@ console.log(maskedStatus(config, [
   'STRIPE_RECEIVING_AGENT_JSON',
   'PAYMENT_ACCOUNT_BOOK_JSON',
   'GOOGLE_CLOUD_PROJECT'
+]));
+
+const composioConfig = {
+  apiKey: env.COMPOSIO_API_KEY || '',
+  baseUrl: env.COMPOSIO_BASE_URL || defaultComposioBaseUrl,
+  userId: env.COMPOSIO_USER_ID || ''
+};
+writeFileSync(composioOutPath, JSON.stringify(composioConfig, null, 2) + '\n');
+console.log(`Wrote ${composioOutPath}`);
+console.log(maskedStatus(composioConfig, [
+  'apiKey',
+  'baseUrl',
+  'userId'
 ]));

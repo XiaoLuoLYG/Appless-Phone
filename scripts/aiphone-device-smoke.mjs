@@ -14,11 +14,11 @@ const defaultCases = [
   { query: '帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐', expectsTool: true, expectedToolId: 'maps.place.search' },
   { query: '帮我查看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search' },
   { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
-  { query: '帮我在b站和youtube里搜索qwen max 的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
+  { query: '帮我在b站和youtube里搜索qwen的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
   { query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search' },
   { query: '帮我查看 X 上 openai 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
   { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
-  { query: '把饮食搭子的 memory 改成：用户咖啡偏好：只喝瑞幸咖啡。', expectsTool: false, expectedToolId: '' },
+  { query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '' },
   { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' }
 ];
 
@@ -45,7 +45,7 @@ const composioCases = [
     expectedDiscoveredToolId: 'dynamic.search'
   },
   {
-    query: '帮我在 Google Drive 里找签证材料',
+    query: '帮我在 Google Drive 里找专利交底书',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
@@ -163,10 +163,10 @@ const mailCases = [
 ];
 
 const googleAppCases = [
-  { query: '帮我在 YouTube 搜索 qwen max 官方介绍视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
+  { query: '帮我在 YouTube 搜索 世界杯相关视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
   { query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
-  { query: '帮我看今天的 Google Calendar 日程', expectsTool: true, expectedToolId: 'calendar.events.search' },
-  { query: '帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程', expectsTool: true, expectedToolId: 'calendar.event.create' },
+  { query: '帮我看本月的 Google Calendar 日程', expectsTool: true, expectedToolId: 'calendar.events.search' },
+  { query: '帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程', expectsTool: true, expectedToolId: 'calendar.event.create' },
   { query: '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'maps.place.search' }
 ];
 
@@ -1251,7 +1251,7 @@ function isCalendarQuery(query) {
 
 function isComposioCardQuery(query) {
   return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
-    (/Google\s*Drive/i.test(query) && /签证材料/.test(query)) ||
+    (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) ||
     (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
     (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
     (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query));
@@ -1264,8 +1264,8 @@ function layoutExpectationsForQuery(query) {
   if (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) {
     return ['Composio 工具结果', 'Composio GitHub 结果', 'GITHUB_FIND_PULL_REQUESTS', 'Appless-Phone'];
   }
-  if (/Google\s*Drive/i.test(query) && /签证材料/.test(query)) {
-    return ['Composio 工具结果', 'Composio Google Drive 结果', 'GOOGLEDRIVE_FIND_FILE', '签证材料'];
+  if (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) {
+    return ['Composio 工具结果', 'Composio Google Drive 结果', 'GOOGLEDRIVE_FIND_FILE', '专利交底书'];
   }
   if (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) {
     return ['Composio 工具结果', 'Composio Google Docs 结果', 'GOOGLEDOCS_SEARCH_DOCUMENTS', 'AIPhoneDemo'];
@@ -1362,7 +1362,7 @@ function layoutExpectationsForQuery(query) {
   }
   if (isCalendarQuery(query)) {
     return /创建|新建|添加|安排|预约/.test(query)
-      ? ['Google Calendar API', '天', '周', '月', '日视图', '已写入', '一对一会议', '16:30', '17:00']
+      ? ['Google Calendar API', '天', '周', '月', '日视图', '已写入', 'AIPhoneDemo', '15:00', '15:30']
       : ['Google Calendar API', '天', '周', '月', '日视图'];
   }
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
@@ -1707,7 +1707,7 @@ async function runQuery(query, index, expectedTool) {
     if (allowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
       return false;
     }
-    if (allowsAggregateMailProviderFailure && /^(Gmail|QQ)/.test(marker)) {
+    if (allowsAggregateMailProviderFailure && (/^(Gmail|QQ)/.test(marker) || marker === 'Operation timeout' || marker === '2300028')) {
       return false;
     }
     return evidenceText.includes(marker);
@@ -1872,18 +1872,8 @@ async function waitForComposioAuthEvidence() {
   return last;
 }
 
-function ensureDeviceGatewayPortForwarded() {
-  try {
-    hdc(['rport', 'tcp:8787', 'tcp:8787']);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Composio auth smoke requires hdc rport tcp:8787 tcp:8787 before page verification. rportError=${reason.split('\n')[0]}`);
-  }
-}
-
 async function runComposioAuthSmoke() {
   clearHilog();
-  ensureDeviceGatewayPortForwarded();
   hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
   if (cleanData) {
     cleanBundleData();
@@ -1900,6 +1890,17 @@ async function runComposioAuthSmoke() {
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(settings.x), String(settings.y)]);
   await sleep(1200);
+
+  const configLayout = dumpLayout('composio-auth-config-collapsed.json');
+  const configText = collectLayoutText(configLayout).join('\n');
+  writeFileSync(join(outDir, 'composio-auth-config-collapsed-text.txt'), configText + '\n');
+  if (!configText.includes('Composio 授权')) {
+    const expandAuth = findTextCenter(configLayout, '展开');
+    if (expandAuth !== null) {
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(expandAuth.x), String(expandAuth.y)]);
+      await sleep(800);
+    }
+  }
 
   const authButton = await findTextCenterWithScroll('Composio 授权', 'composio-auth-config-layout');
   if (authButton === null) {

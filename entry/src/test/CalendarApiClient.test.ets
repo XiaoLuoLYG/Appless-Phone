@@ -101,6 +101,18 @@ export default function calendarApiClientTest() {
       expect(args.calendarId).assertEqual('primary');
     });
 
+    it('normalizes current week search prompts before calling Calendar', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search', '帮我查看我本周的calendar日程', {
+        timeRange: 'this week',
+        timezone: 'Asia/Shanghai',
+        calendarId: 'primary'
+      }, new Date('2026-07-07T09:00:00+08:00'));
+
+      expect(args.timeMin).assertEqual('2026-07-06T00:00:00+08:00');
+      expect(args.timeMax).assertEqual('2026-07-13T00:00:00+08:00');
+      expect(args.calendarId).assertEqual('primary');
+    });
+
     it('normalizes stale model dates for relative create prompts without changing time', 0, () => {
       const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.event.create', '帮我在明天下午创建一个一对一会议的日程，4:30开始持续半个小时', {
         title: '一对一会议',

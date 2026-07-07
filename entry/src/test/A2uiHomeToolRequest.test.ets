@@ -2,7 +2,8 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   directPaymentToolIdForActionId,
   resolveA2uiHomeToolRequest,
-  surfaceHasSatisfiedToolResult
+  surfaceHasSatisfiedToolResult,
+  surfaceHasVisibleToolResult
 } from '../main/ets/pages/A2uiHome/render/A2uiHomeToolRequest';
 import {
   A2uiComponent,
@@ -255,6 +256,12 @@ export default function a2uiHomeToolRequestTest() {
 
       expect(surfaceHasSatisfiedToolResult(surface, 'social.feed.search')).assertTrue();
       expect(surfaceHasSatisfiedToolResult(surface, 'x.post.search')).assertTrue();
+    });
+
+    it('detects visible tool results before intent fallback reruns another tool', 0, () => {
+      expect(surfaceHasVisibleToolResult(surfaceWithToolRequest('', '', ''))).assertFalse();
+      expect(surfaceHasVisibleToolResult(surfaceWithSummaryToolResult('', 'mail.search'))).assertTrue();
+      expect(surfaceHasVisibleToolResult(surfaceWithSocialHubComponent())).assertTrue();
     });
 
     it('infers food search when the model omits a tool request for nearby food', 0, () => {

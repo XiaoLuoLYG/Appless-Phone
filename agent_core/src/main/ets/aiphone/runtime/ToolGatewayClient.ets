@@ -6561,6 +6561,24 @@ function fallbackMailSearchQuery(prompt: string): string {
   return last.length > 0 ? last : text;
 }
 
+function stripGenericMailQueryTerms(query: string): string {
+  const stops = [
+    '帮我', '请', '一下', '查看', '看看', '看', '搜索', '查询', '查找', '查',
+    'Gmail', '谷歌邮箱', '谷歌邮件', 'QQ邮箱', 'QQ 邮箱', 'QQ邮件', 'QQ 邮件',
+    '邮箱', '邮件', '收件箱', '里面', '里', '中', '关于', '有关', '相关',
+    '最新', '最近', '重要', '和我', '我的', '我', '的'
+  ];
+  let text = query.trim();
+  stops.forEach((stop: string) => {
+    text = text.split(stop).join(' ');
+  });
+  return text.split(/\s+/).filter((term: string) => {
+    const trimmed = term.trim();
+    const lower = trimmed.toLowerCase();
+    return trimmed.length > 0 && lower !== 'latest' && lower !== 'recent' && lower !== 'important';
+  }).join(' ').trim();
+}
+
 function defaultMailSearchWindow(query: string): string {
   const trimmed = query.trim();
   if (trimmed.length === 0 || hasMailTimeOperator(trimmed)) {
@@ -6569,15 +6587,20 @@ function defaultMailSearchWindow(query: string): string {
   return 'newer_than:30d ' + trimmed;
 }
 
+function isGmailSearchSummaryRow(row: DynamicGenericToolResult): boolean {
+  return row.title.trim() === 'Gmail 搜索条件' ||
+    (row.toolName === 'users.threads.list' && row.rawPreview.indexOf(' returned=') >= 0);
+}
+
 export function mailSearchArgs(prompt: string, args: Object | null): MailSearchArgs {
   const record = mailArgs(args);
   const providers: string[] = [];
   stringListArg(record.providers).forEach((provider: string) => providers.push(provider.toLowerCase()));
   const explicitQuery = textOf(record.query).trim();
-  const query = explicitQuery.length > 0 ? explicitQuery : fallbackMailSearchQuery(prompt);
+  const query = stripGenericMailQueryTerms(explicitQuery.length > 0 ? explicitQuery : fallbackMailSearchQuery(prompt));
   const normalizedQuery = defaultMailSearchWindow(query);
   return {
-    query: normalizedQuery.length > 0 ? normalizedQuery : defaultMailSearchWindow(prompt.trim()),
+    query: normalizedQuery.length > 0 ? normalizedQuery : 'newer_than:30d',
     pageSize: typeof record.pageSize === 'number' && record.pageSize > 0 ? Math.min(record.pageSize, 10) : 10,
     providers: providers.length > 0 ? providers : ['gmail', 'qq', 'outlook'],
     intentSummary: textOf(record.intentSummary)
@@ -6631,6 +6654,8 @@ async function composioAppResult(appName: string, query: string, kind: string): 
   try {
     const result = await callComposioDynamic(prompt, null);
     if (result !== null) {
+      result.sourceTag = 'Composio ' + appName;
+      result.rows.push({ label: 'provider', value: appName });
       return result;
     }
     return {
@@ -6971,7 +6996,7 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
         } else {
           const gmailRows = await callGmailApiTool('gmail.mail.search', prompt, accessToken, parsed as Object);
           gmailRows.forEach((row: DynamicGenericToolResult) => {
-            if (row.status === 'success' && row.toolName.indexOf('users.threads') === 0) {
+            if (row.status === 'success' && row.toolName === 'users.threads.get') {
               const threadId = dynamicRowValue(row, 'Thread ID');
               const labels = dynamicRowValue(row, 'Labels');
               threads.push({
@@ -6990,7 +7015,7 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
                 sourceUrl: '',
                 rawProviderRef: threadId
               });
-            } else if (row.title !== 'Gmail 搜索条件') {
+            } else if (!isGmailSearchSummaryRow(row)) {
               statuses.push({
                 provider: 'gmail',
                 status: row.status,
@@ -7010,6 +7035,14 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
         const qq = new QqMailImapClient(qqMailConfig());
         const qqRows = await qq.search(parsed);
         qqRows.forEach((row: MailThreadResult) => threads.push(row));
+        if (qqRows.length === 0) {
+          statuses.push({
+            provider: 'qq',
+            status: 'success',
+            title: 'QQ Mail 没有找到匹配邮件',
+            message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
+          });
+        }
       } catch (error) {
         statuses.push(mailProviderError('qq', describeThrown(error)));
       }

@@ -23,15 +23,6 @@ export interface A2uiObservationDigest {
   failureKey: string;
 }
 
-const STOP_STATUSES: string[] = [
-  'blocked',
-  'confirm_required',
-  'needs_input',
-  'needs_user',
-  'auth_required',
-  'needs_auth',
-  'unsafe_action_blocked'
-];
 const FAILURE_STATUSES: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
 const MAX_DETAILED_RESULTS: number = 5;
 const MAX_TEXT_LENGTH: number = 180;
@@ -87,10 +78,6 @@ function statusMatches(status: string, statuses: string[]): boolean {
   return statuses.indexOf(status.trim()) >= 0;
 }
 
-function shouldStopForStatus(status: string): boolean {
-  return statusMatches(status, STOP_STATUSES);
-}
-
 function failureForStatus(status: string): boolean {
   return statusMatches(status, FAILURE_STATUSES);
 }
@@ -114,25 +101,6 @@ function appendConnectCredential(lines: string[], connect: A2uiDynamicToolConnec
   if (credential.length > 0) {
     lines.push('Credential: ' + compact(credential));
   }
-}
-
-function terminalComponentStatus(surface: A2uiSurfaceState): boolean {
-  for (let index = 0; index < surface.components.length; index++) {
-    const component: A2uiComponent = surface.components[index];
-    if (component.status !== undefined && shouldStopForStatus(component.status)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function terminalResultStatus(results: A2uiGenericToolResultData[]): boolean {
-  for (let index = 0; index < results.length; index++) {
-    if (shouldStopForStatus(results[index].status)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function componentFailureKey(toolId: string, surface: A2uiSurfaceState): string {
@@ -187,7 +155,7 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
       return {
         isA2ui: true,
         text: 'ObservationDigest\nerror: ' + applied.error,
-        shouldStop: false,
+        shouldStop: true,
         failureKey: 'a2ui:error'
       };
     }
@@ -214,7 +182,7 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
   return {
     isA2ui: true,
     text: lines.join('\n'),
-    shouldStop: shouldStopForStatus(surface.status) || shouldStopForStatus(connect.status) || terminalComponentStatus(surface) || terminalResultStatus(results),
+    shouldStop: true,
     failureKey: failureKeyFor(toolId, surface, connect, results)
   };
 }

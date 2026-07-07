@@ -19,11 +19,39 @@ import {
   statusBackground,
   statusColor
 } from '../style/A2uiHomeTheme';
+import { ComposioAuthConfigItem } from '@loop/agent-core';
 import { PersonaPack } from '../../../model/PersonaTypes';
 import { parsePersonaMarkdown, PersonaMarkdownSection, PersonaSkillMarkdown } from '../../../model/PersonaMarkdown';
 import { connectionStatusLabel } from '../state/A2uiHomeState';
 import { DebugTextPanel } from './DebugTextPanel';
 import { personaAvatarResource } from './PersonaAvatar';
+import { composioToolkitLogoResource } from './ComposioLogoResource';
+
+interface ComposioToolkitSummary {
+  slug: string;
+  name: string;
+}
+
+const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
+  { slug: 'github', name: 'GitHub' },
+  { slug: 'googledrive', name: 'Google Drive' },
+  { slug: 'googledocs', name: 'Google Docs' },
+  { slug: 'slack', name: 'Slack' },
+  { slug: 'notion', name: 'Notion' },
+  { slug: 'linear', name: 'Linear' },
+  { slug: 'asana', name: 'Asana' },
+  { slug: 'trello', name: 'Trello' },
+  { slug: 'outlook', name: 'Outlook' },
+  { slug: 'discord', name: 'Discord' },
+  { slug: 'linkedin', name: 'LinkedIn' },
+  { slug: 'whatsapp', name: 'WhatsApp' },
+  { slug: 'instagram', name: 'Instagram' },
+  { slug: 'spotify', name: 'Spotify' },
+  { slug: 'tiktok', name: 'TikTok' },
+  { slug: 'ticketmaster', name: 'Ticketmaster' },
+  { slug: 'hubspot', name: 'HubSpot' },
+  { slug: 'salesforce', name: 'Salesforce' }
+];
 
 @Component
 export struct ConfigPage {
@@ -47,10 +75,16 @@ export struct ConfigPage {
   @Link personaSoulDraft: string;
   @Link personaMemoryDraft: string;
   @Prop personaSaveMessage: string = '';
+  @Prop composioUserId: string = '';
+  @Prop composioAuthItems: ComposioAuthConfigItem[] = [];
+  @Prop composioAuthMessage: string = '';
+  @Prop composioAuthBusy: boolean = false;
   @State editingPersonaDoc: string = '';
+  @State showComposioAuthPanel: boolean = false;
   onBack: () => void = () => {};
   onTestConnection: () => void = () => {};
   onOpenComposioAuth: () => void = () => {};
+  onRefreshComposioAuth: () => void = () => {};
   onSelectPersona: (personaId: string) => void = (_personaId: string) => {};
   onSavePersona: () => void = () => {};
   onResetPersona: () => void = () => {};
@@ -148,6 +182,218 @@ export struct ConfigPage {
 
   private skillToolsLabel(skill: PersonaSkillMarkdown): string {
     return skill.tools.length > 0 ? '工具：' + skill.tools.join(', ') : '工具：暂未接入';
+  }
+
+  private authItemForToolkit(slug: string): ComposioAuthConfigItem | null {
+    const normalized = slug.trim().toLowerCase();
+    for (let index = 0; index < this.composioAuthItems.length; index++) {
+      if (this.composioAuthItems[index].toolkitSlug.trim().toLowerCase() === normalized) {
+        return this.composioAuthItems[index];
+      }
+    }
+    return null;
+  }
+
+  private hasToolkit(previews: ComposioToolkitSummary[], slug: string): boolean {
+    const normalized = slug.trim().toLowerCase();
+    for (let index = 0; index < previews.length; index++) {
+      if (previews[index].slug === normalized) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private composioToolkits(): ComposioToolkitSummary[] {
+    const previews: ComposioToolkitSummary[] = COMPOSIO_SUPPORTED_TOOLKITS.slice();
+    for (let index = 0; index < this.composioAuthItems.length; index++) {
+      const item = this.composioAuthItems[index];
+      const slug = item.toolkitSlug.trim().toLowerCase();
+      if (slug.length > 0 && !this.hasToolkit(previews, slug)) {
+        previews.push({
+          slug: slug,
+          name: item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug
+        });
+      }
+    }
+    return previews;
+  }
+
+  private composioStatus(slug: string): string {
+    const item = this.authItemForToolkit(slug);
+    if (item !== null && (item.status === 'connected' || item.connectedAccountId.length > 0)) {
+      return 'connected';
+    }
+    return 'needs_auth';
+  }
+
+  private composioStatusLabel(slug: string): string {
+    return this.composioStatus(slug) === 'connected' ? '已连接' : '待授权';
+  }
+
+  private composioConnectedCount(): number {
+    let count = 0;
+    const previews = this.composioToolkits();
+    for (let index = 0; index < previews.length; index++) {
+      if (this.composioStatus(previews[index].slug) === 'connected') {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  @Builder
+  ComposioToolkitTile(summary: ComposioToolkitSummary) {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Column() {
+        Image(composioToolkitLogoResource(summary.slug))
+          .width(30)
+          .height(30)
+          .objectFit(ImageFit.Contain)
+          .borderRadius(8)
+        Text(summary.name)
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 7 })
+        Text(this.composioStatusLabel(summary.slug))
+          .fontSize(10)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(statusColor(this.composioStatus(summary.slug)))
+          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+          .backgroundColor(statusBackground(this.composioStatus(summary.slug)))
+          .borderRadius(7)
+          .margin({ top: 6 })
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .padding({ left: 6, right: 6 })
+
+      if (this.composioStatus(summary.slug) === 'connected') {
+        Text('✓')
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+          .textAlign(TextAlign.Center)
+          .width(18)
+          .height(18)
+          .backgroundColor(statusColor('connected'))
+          .borderRadius(9)
+          .border({ width: 1, color: COLOR_CARD_RAISED })
+          .margin({ right: 5, bottom: 5 })
+      }
+    }
+    .width('31%')
+    .height(94)
+    .backgroundColor(COLOR_CARD_RAISED)
+    .borderRadius(12)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .margin({ right: 6, bottom: 8 })
+  }
+
+  @Builder
+  ComposioAuthSummarySection() {
+    Column() {
+      Row() {
+        Column() {
+          Text('应用授权')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+          Text('当前用户 ' + (this.composioUserId.length > 0 ? this.composioUserId : '未初始化'))
+            .fontSize(13)
+            .fontColor(COLOR_MUTED)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 6 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text(this.composioConnectedCount().toString() + '/' + this.composioToolkits().length.toString() + ' 已连接')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(statusColor(this.composioConnectedCount() > 0 ? 'connected' : 'needs_auth'))
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(statusBackground(this.composioConnectedCount() > 0 ? 'connected' : 'needs_auth'))
+          .borderRadius(8)
+          .margin({ right: 8 })
+
+        Text(this.showComposioAuthPanel ? '收起' : '展开')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_ACCENT)
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .backgroundColor(COLOR_CARD_RAISED)
+          .borderRadius(8)
+          .border({ width: 1, color: COLOR_CARD_EDGE })
+          .onClick(() => {
+            this.showComposioAuthPanel = !this.showComposioAuthPanel;
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.showComposioAuthPanel) {
+        Row() {
+          Button('刷新')
+            .height(38)
+            .layoutWeight(1)
+            .fontSize(12)
+            .fontColor(COLOR_INK)
+            .backgroundColor(COLOR_CARD_RAISED)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_CARD_EDGE })
+            .enabled(!this.composioAuthBusy)
+            .onClick(() => {
+              this.onRefreshComposioAuth();
+            })
+          Button('Composio 授权')
+            .height(38)
+            .layoutWeight(1)
+            .fontSize(12)
+            .fontColor(COLOR_BUTTON_TEXT)
+            .backgroundColor(COLOR_ACCENT_DEEP)
+            .borderRadius(9)
+            .border({ width: 1, color: COLOR_ACCENT })
+            .margin({ left: 8 })
+            .onClick(() => {
+              this.onOpenComposioAuth();
+            })
+        }
+        .width('100%')
+        .margin({ top: 14 })
+
+        if (this.composioAuthMessage.length > 0) {
+          Text(this.composioAuthMessage)
+            .fontSize(11)
+            .fontColor(COLOR_MUTED)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 10 })
+        }
+
+        Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
+          ForEach(this.composioToolkits(), (summary: ComposioToolkitSummary) => {
+            this.ComposioToolkitTile(summary)
+          }, (summary: ComposioToolkitSummary) => summary.slug)
+        }
+        .width('100%')
+        .margin({ top: 14 })
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(18)
+    .backgroundColor(COLOR_PANEL)
+    .borderRadius(16)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .shadow({ radius: 22, color: COLOR_PANEL_SHADOW, offsetX: 0, offsetY: 10 })
+    .margin({ bottom: 14 })
   }
 
   @Builder
@@ -431,28 +677,30 @@ export struct ConfigPage {
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
               .fontColor(COLOR_INK)
-            Text('测试模型连接，并观察本页状态是否实时刷新')
-              .fontSize(13)
-              .fontColor(COLOR_MUTED)
-              .margin({ top: 4 })
           }
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 12 })
           .layoutWeight(1)
-
-          this.StatusBadge()
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
         .margin({ bottom: 16 })
 
+        this.ComposioAuthSummarySection()
+
         this.PersonaEditorSection()
 
         Column() {
-          Text('模型连接')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_INK)
+          Row() {
+            Text('模型连接')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_INK)
+              .layoutWeight(1)
+            this.StatusBadge()
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
           Text('这里是最小刷新实验：点击测试连接后，状态、错误、请求和响应面板应立即更新，不需要切页。')
             .fontSize(13)
             .fontColor(COLOR_MUTED)
@@ -511,19 +759,6 @@ export struct ConfigPage {
           }
           .width('100%')
           .margin({ bottom: 14 })
-
-          Button('Composio 授权')
-            .height(36)
-            .width('100%')
-            .fontSize(12)
-            .fontColor(COLOR_INK)
-            .backgroundColor(COLOR_CARD_RAISED)
-            .borderRadius(9)
-            .border({ width: 1, color: COLOR_CARD_EDGE })
-            .margin({ bottom: 14 })
-            .onClick(() => {
-              this.onOpenComposioAuth();
-            })
 
           this.InputLabel('Model', 0)
           TextInput({ text: this.selectedModel, placeholder: 'qwen-max' })

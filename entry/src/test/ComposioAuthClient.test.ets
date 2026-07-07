@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  normalizeDirectComposioAuthConfigsResponse,
   normalizeComposioHttpResponse,
   normalizeComposioAuthConfigsResponse,
   normalizeComposioLinkResponse,
@@ -24,8 +25,21 @@ export default function composioAuthClientTest() {
       expect(result.items[1].status).assertEqual('needs_auth');
     });
 
+    it('normalizes direct Composio auth configs with connected accounts', 0, () => {
+      const authConfigs = parseObject('{"items":[{"id":"ac_github","name":"GitHub","auth_scheme":"OAUTH2","toolkit":{"slug":"github","name":"GitHub"}},{"id":"ac_slack","name":"Slack","auth_scheme":"OAUTH2","toolkit":{"slug":"slack","name":"Slack"}}]}');
+      const accounts = parseObject('{"items":[{"id":"ca_github","toolkit":{"slug":"github"},"account_id":"luoyige"}]}');
+      const result = normalizeDirectComposioAuthConfigsResponse('aiphone-luoyige', authConfigs, accounts);
+
+      expect(result.ok).assertTrue();
+      expect(result.userId).assertEqual('aiphone-luoyige');
+      expect(result.items.length).assertEqual(2);
+      expect(result.items[0].status).assertEqual('connected');
+      expect(result.items[0].connectedAccountId).assertEqual('ca_github');
+      expect(result.items[1].status).assertEqual('needs_auth');
+    });
+
     it('keeps valid redirect URLs and rejects missing links', 0, () => {
-      const ok = normalizeComposioLinkResponse(parseObject('{"ok":true,"redirectUrl":"https://mock.composio.local/connect/github"}'));
+      const ok = normalizeComposioLinkResponse(parseObject('{"ok":true,"redirect_url":"https://mock.composio.local/connect/github"}'));
       const bad = normalizeComposioLinkResponse(parseObject('{"ok":true}'));
 
       expect(ok.redirectUrl).assertEqual('https://mock.composio.local/connect/github');

@@ -37,8 +37,6 @@ import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import {
   socialHubAuthorText,
-  socialHubConnectionMessage,
-  socialHubConnectionStatusLabel,
   socialHubDraftDisplayText,
   socialHubItemMetaText,
   socialHubKindLabel,
@@ -46,8 +44,8 @@ import {
   socialHubPrimaryText
 } from './SocialHubViewData';
 
-const SOCIAL_HUB_CONNECTION_HEIGHT: number = 64;
-const SOCIAL_HUB_CONNECTION_CARD_WIDTH: string = '48%';
+const SOCIAL_HUB_CONNECTION_HEIGHT: number = 82;
+const SOCIAL_HUB_CONNECTION_CARD_WIDTH: string = '30%';
 
 interface SocialHubSendReplyArgs {
   text: string;
@@ -208,22 +206,6 @@ export struct SocialHubView {
     return '#F5F1EB';
   }
 
-  private connectionDetail(connection: SocialHubConnectionData): string {
-    if (connection.platform === 'x' && connection.status === 'limited') {
-      return socialHubConnectionMessage(connection);
-    }
-    if (connection.platform === 'slack' && connection.status === 'connected') {
-      return '可搜索你有权限看到的消息';
-    }
-    if (connection.platform === 'wecom' && connection.status === 'needs_auth') {
-      return '需要应用凭证和回调配置';
-    }
-    if (connection.status === 'disabled') {
-      return '还没有添加凭证';
-    }
-    return socialHubConnectionMessage(connection);
-  }
-
   private isDraftForItem(item: SocialHubItemData): boolean {
     const draft = socialHubDraft(this.surface);
     return draft.itemId === item.id && draft.status !== 'empty';
@@ -276,44 +258,36 @@ export struct SocialHubView {
 
   @Builder
   private ConnectionCell(platform: SocialHubPlatform) {
-    Row() {
+    Column() {
       this.PlatformLogo(platform, 24)
-      Column() {
-        Text(socialHubPlatformLabel(platform))
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_INK)
-          .maxLines(1)
-        Text(this.connectionDetail(this.connection(platform)))
-          .fontSize(11)
-          .fontColor(COLOR_MUTED)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 2 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .margin({ left: 8, right: 8 })
+      Text(socialHubPlatformLabel(platform))
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(COLOR_INK)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 7 })
 
       Text(this.connectionStatusText(this.connection(platform)))
-        .fontSize(11)
+        .fontSize(10)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.connectionStatusColor(this.connection(platform)))
         .textAlign(TextAlign.Center)
-        .width(46)
-        .height(24)
+        .padding({ left: 7, right: 7, top: 3, bottom: 3 })
         .backgroundColor(this.connectionStatusBackground(this.connection(platform)))
-        .borderRadius(9)
+        .borderRadius(7)
         .border({ width: 1, color: this.connectionStatusColor(this.connection(platform)) })
+        .margin({ top: 6 })
     }
     .width(SOCIAL_HUB_CONNECTION_CARD_WIDTH)
     .height(SOCIAL_HUB_CONNECTION_HEIGHT)
-    .alignItems(VerticalAlign.Center)
-    .padding({ left: 10, right: 9 })
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .padding({ left: 6, right: 6 })
     .backgroundColor(COLOR_CARD_RAISED)
     .borderRadius(16)
     .border({ width: 1, color: COLOR_LINE })
-    .margin({ right: 8, top: 8 })
+    .margin({ right: 6, top: 8 })
     .onClick(() => {
       if (this.canAuthorize(this.connection(platform))) {
         this.onAction(this.authorizeAction(platform));

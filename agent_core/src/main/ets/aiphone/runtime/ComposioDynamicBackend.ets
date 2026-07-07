@@ -782,6 +782,10 @@ function configForCurrentUser(): ComposioConfig {
   );
 }
 
+export function currentComposioConfig(): ComposioConfig {
+  return configForCurrentUser();
+}
+
 export function isComposioConfigured(): boolean {
   return composioConfig.isConfigured();
 }

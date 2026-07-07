@@ -291,7 +291,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'calendar.events.search') {
       description += '. Use for reading Google Calendar events or schedules.';
     } else if (definition.toolId === 'calendar.event.create') {
-      description += '. Use for drafting or creating Google Calendar events; confirm_required.';
+      description += '. Use for drafting or creating Google Calendar events; confirm_required. Input must be JSON with args.title, args.start, args.end, args.timezone, and optional args.calendarId; extract title from phrases like "标题为 X" or the meeting name.';
     } else if (definition.toolId === 'payment.send') {
       description += '. Use for explicit PayPal account payments, Stripe connected merchant Checkout, or opening a stored Stripe Payment Link. If the user says Google Pay, treat it as args.fundingSource="google_pay" with provider still PayPal or Stripe; Google Pay is not a separate provider/tool. Always produce a confirmation/payment UI before checkout. Never claim money was sent without a real provider confirmation.';
     } else if (definition.toolId === 'payment.account.setup') {

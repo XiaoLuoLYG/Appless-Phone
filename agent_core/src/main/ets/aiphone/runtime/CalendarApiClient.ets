@@ -14,6 +14,7 @@ export interface CalendarEventArgs {
   timezone?: string;
   calendarId?: string;
   query?: string;
+  timeRange?: string;
   timeMin?: string;
   timeMax?: string;
 }
@@ -176,6 +177,7 @@ function cloneCalendarArgs(args: CalendarEventArgs): CalendarEventArgs {
     timezone: textOf(args.timezone),
     calendarId: textOf(args.calendarId),
     query: textOf(args.query),
+    timeRange: textOf(args.timeRange),
     timeMin: textOf(args.timeMin),
     timeMax: textOf(args.timeMax)
   };
@@ -213,6 +215,24 @@ function relativeMonthOffset(prompt: string): number | null {
   return null;
 }
 
+function relativeWeekOffset(prompt: string): number | null {
+  const lower = prompt.toLowerCase();
+  if (prompt.indexOf('下下周') >= 0 || prompt.indexOf('下下星期') >= 0 || prompt.indexOf('下下礼拜') >= 0) {
+    return 2;
+  }
+  if (prompt.indexOf('下周') >= 0 || prompt.indexOf('下星期') >= 0 || prompt.indexOf('下礼拜') >= 0 || lower.indexOf('next week') >= 0) {
+    return 1;
+  }
+  if (prompt.indexOf('上周') >= 0 || prompt.indexOf('上星期') >= 0 || prompt.indexOf('上礼拜') >= 0 || lower.indexOf('last week') >= 0) {
+    return -1;
+  }
+  if (prompt.indexOf('本周') >= 0 || prompt.indexOf('这周') >= 0 || prompt.indexOf('本星期') >= 0 || prompt.indexOf('这个星期') >= 0 ||
+    prompt.indexOf('本礼拜') >= 0 || prompt.indexOf('这礼拜') >= 0 || lower.indexOf('this week') >= 0 || lower.indexOf('current week') >= 0) {
+    return 0;
+  }
+  return null;
+}
+
 function pad2Date(value: number): string {
   return value < 10 ? '0' + value.toString() : value.toString();
 }
@@ -223,6 +243,11 @@ function localDateAfter(now: Date, offset: number): Date {
 
 function localMonthAfter(now: Date, offset: number): Date {
   return new Date(now.getFullYear(), now.getMonth() + offset, 1);
+}
+
+function startOfLocalWeek(now: Date): Date {
+  const day = now.getDay() === 0 ? 7 : now.getDay();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
 }
 
 function localDateString(date: Date): string {
@@ -247,7 +272,8 @@ function replaceDatePart(value: string, date: string): string {
 
 export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, args: CalendarEventArgs, now: Date = new Date()): CalendarEventArgs {
   const normalized = cloneCalendarArgs(args);
-  const offset = relativeDayOffset(prompt);
+  const relativeText = prompt + ' ' + textOf(normalized.timeRange);
+  const offset = relativeDayOffset(relativeText);
   if (offset >= 0) {
     const targetDate = localDateAfter(now, offset);
     const targetDateText = localDateString(targetDate);
@@ -266,7 +292,18 @@ export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, 
     return normalized;
   }
 
-  const monthOffset = relativeMonthOffset(prompt);
+  const weekOffset = relativeWeekOffset(relativeText);
+  if (weekOffset !== null && toolId === 'calendar.events.search') {
+    const weekStart = localDateAfter(startOfLocalWeek(now), weekOffset * 7);
+    if (textOf(normalized.timezone).length === 0) {
+      normalized.timezone = 'Asia/Shanghai';
+    }
+    normalized.timeMin = startOfLocalDay(weekStart);
+    normalized.timeMax = startOfLocalDay(localDateAfter(weekStart, 7));
+    return normalized;
+  }
+
+  const monthOffset = relativeMonthOffset(relativeText);
   if (monthOffset !== null) {
     const monthStart = localMonthAfter(now, monthOffset);
     const monthEnd = localMonthAfter(now, monthOffset + 1);
