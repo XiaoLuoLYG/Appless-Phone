@@ -2,7 +2,6 @@ import { ComposioConfig } from '../../composio/ComposioConfig';
 import { ComposioSessionClient } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
-import { currentToolGatewayApiKey } from './ToolGatewayClient';
 
 interface ComposioExecuteArgs {
   operation?: string;
@@ -774,13 +773,12 @@ export function currentComposioUserId(): string {
 }
 
 function configForCurrentUser(): ComposioConfig {
-  const proxyApiKey = composioConfig.proxyApiKey.length > 0 ? composioConfig.proxyApiKey : currentToolGatewayApiKey();
   return new ComposioConfig(
     composioConfig.apiKey,
     composioConfig.baseUrl,
     currentComposioUserId(),
     composioConfig.proxyBaseUrl,
-    proxyApiKey
+    composioConfig.proxyApiKey
   );
 }
 
