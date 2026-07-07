@@ -59,6 +59,8 @@
 | `fixture.echo` | Fixture Echo MCP | 开发/测试 fixture，不算用户侧正式能力 |
 | `ferry.ticket.search` | 船票示例 | 当前不注册；船票 query 会走 `dynamic.search` 并真实返回 `no_tool_found` |
 
+Composio 授权页只管理 Composio connected accounts，不替换现有静态工具的数据来源。App 端只保存 `proxyBaseUrl`、`TOOL_GATEWAY_API_KEY` 和 app-scoped `userId`，Composio API key 只存在于 `tool-gateway`。发送、创建、更新类 Composio 工具允许执行，但必须来自当前 session search 返回的 tool slug。
+
 ## 设备 smoke query
 
 运行：
@@ -87,6 +89,7 @@ node scripts/aiphone-device-smoke.mjs
 | --- | --- | --- | --- |
 | `--dynamic-tools` | `帮我查明天深圳到珠海的船票` | `dynamic.search` | `none` |
 | `--dynamic-tools` | `帮我查明天深圳天气` | `dynamic.search` | `weather.query` |
+| `--composio-auth` | 直接打开配置页里的 `Composio 授权` | 无工具 | 授权页显示当前用户和 Auth Config/授权卡片状态 |
 | full regression | `你好` | 无工具 | - |
 | full regression | `帮我查明天北京到上海航班` | `flight.search` | - |
 | full regression | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | `train.search` | - |
