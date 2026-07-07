@@ -1829,12 +1829,15 @@ async function runQuery(query, index, expectedTool) {
 }
 
 async function waitForComposioAuthEvidence() {
-  const requiredMarkers = ['Composio 授权', '当前用户', '授权'];
-  const authConfigMarkers = [
-    'Auth Config',
+  const requiredMarkers = ['Composio 授权', '当前用户'];
+  const authActionLabels = ['授权', '重新授权'];
+  const authStatusLabels = [
     '待授权',
     '已连接',
-    'connected',
+    '异常',
+    '已停用'
+  ];
+  const toolkitMarkers = [
     'GitHub',
     'Notion',
     'Google Drive',
@@ -1846,7 +1849,8 @@ async function waitForComposioAuthEvidence() {
   let last = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const layout = dumpLayout(`composio-auth-page-${attempt + 1}.json`);
-    const text = collectLayoutText(layout).join('\n');
+    const layoutTextValues = collectLayoutText(layout);
+    const text = layoutTextValues.join('\n');
     const textPath = join(outDir, `composio-auth-page-${attempt + 1}-text.txt`);
     writeFileSync(textPath, text + '\n');
     last = {
@@ -1855,9 +1859,13 @@ async function waitForComposioAuthEvidence() {
       layoutPath: join(outDir, `composio-auth-page-${attempt + 1}.json`),
       textPath,
       markerHits: requiredMarkers.filter((marker) => text.includes(marker)),
-      authConfigMarkerHits: authConfigMarkers.filter((marker) => text.includes(marker))
+      authActionHits: authActionLabels.filter((marker) => layoutTextValues.includes(marker)),
+      authStatusHits: authStatusLabels.filter((marker) => layoutTextValues.includes(marker)),
+      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker))
     };
-    if (last.markerHits.length === requiredMarkers.length && last.authConfigMarkerHits.length > 0) {
+    if (last.markerHits.length === requiredMarkers.length &&
+      last.authActionHits.length > 0 &&
+      last.authStatusHits.length > 0) {
       return last;
     }
     await sleep(1000);
@@ -1865,13 +1873,28 @@ async function waitForComposioAuthEvidence() {
   return last;
 }
 
-async function runComposioAuthSmoke() {
-  clearHilog();
+function ensureDeviceGatewayReachable() {
+  let rportError = '';
   try {
     hdc(['rport', 'tcp:8787', 'tcp:8787']);
   } catch (error) {
-    console.warn(`WARN device/rport ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+    rportError = error instanceof Error ? error.message : String(error);
   }
+  try {
+    const health = hdc(['shell', 'curl', '-sS', '--max-time', '3', 'http://127.0.0.1:8787/health'], { timeout: 10000 });
+    if (!health.includes('AIPhone Tool Gateway')) {
+      throw new Error(`unexpected gateway health body: ${health.slice(0, 200)}`);
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const rportDetails = rportError.length > 0 ? ` rportError=${rportError.split('\n')[0]}` : '';
+    throw new Error(`Composio auth smoke requires host tool-gateway on device 127.0.0.1:8787.${rportDetails} healthError=${reason}`);
+  }
+}
+
+async function runComposioAuthSmoke() {
+  clearHilog();
+  ensureDeviceGatewayReachable();
   hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
   if (cleanData) {
     cleanBundleData();
@@ -1902,10 +1925,12 @@ async function runComposioAuthSmoke() {
   const screenPath = captureScreen('composio-auth-page-screen.png');
   const summary = {
     mode: 'composio-auth',
-    ok: evidence.markerHits.length === 3 && evidence.authConfigMarkerHits.length > 0,
-    requiredMarkers: ['Composio 授权', '当前用户', '授权'],
+    ok: evidence.markerHits.length === 2 && evidence.authActionHits.length > 0 && evidence.authStatusHits.length > 0,
+    requiredMarkers: ['Composio 授权', '当前用户'],
     markerHits: evidence.markerHits,
-    authConfigMarkerHits: evidence.authConfigMarkerHits,
+    authActionHits: evidence.authActionHits,
+    authStatusHits: evidence.authStatusHits,
+    toolkitHits: evidence.toolkitHits,
     layoutPath: evidence.layoutPath,
     textPath: evidence.textPath,
     screenPath

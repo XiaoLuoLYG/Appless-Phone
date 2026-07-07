@@ -59,7 +59,7 @@
 | `fixture.echo` | Fixture Echo MCP | 开发/测试 fixture，不算用户侧正式能力 |
 | `ferry.ticket.search` | 船票示例 | 当前不注册；船票 query 会走 `dynamic.search` 并真实返回 `no_tool_found` |
 
-Composio 授权页只管理 Composio connected accounts，不替换现有静态工具的数据来源。App 端只保存 `proxyBaseUrl`、`TOOL_GATEWAY_API_KEY` 和 app-scoped `userId`，Composio API key 只存在于 `tool-gateway`。发送、创建、更新类 Composio 工具允许执行，但必须来自当前 session search 返回的 tool slug。
+Composio 授权页只管理 Composio connected accounts，不替换现有静态工具的数据来源。App 端只保存 `proxyBaseUrl`、`TOOL_GATEWAY_API_KEY` 和 app-scoped `userId`，Composio API key 只存在于 `tool-gateway`。发送、创建、更新类 Composio 工具允许执行；默认 query 先由当前用户 session search 选择工具，execute 模式按传入 tool slug 交给 Composio 代理并返回真实结果或错误。
 
 ## 设备 smoke query
 
