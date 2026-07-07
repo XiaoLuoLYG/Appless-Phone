@@ -36,6 +36,11 @@ interface ComposioLinkRequest {
   toolkitSlug: string;
 }
 
+interface ComposioHttpErrorPayload {
+  ok: boolean;
+  error: string;
+}
+
 type AnyRecord = Record<string, Object | string | number | boolean | null | undefined>;
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -72,6 +77,33 @@ function trimTrailingSlash(value: string): string {
     result = result.substring(0, result.length - 1);
   }
   return result;
+}
+
+export function normalizeComposioHttpResponse(statusCode: number, text: string): Object {
+  const trimmed = text.trim();
+  let payload: Object = new Object();
+  if (trimmed.length > 0) {
+    try {
+      payload = JSON.parse(trimmed) as Object;
+    } catch (_error) {
+      const invalidJsonPayload: ComposioHttpErrorPayload = {
+        ok: false,
+        error: trimmed
+      };
+      payload = invalidJsonPayload as Object;
+    }
+  }
+  if (statusCode >= 200 && statusCode < 300) {
+    return payload;
+  }
+  const record = payload as AnyRecord;
+  const error = textOf(record.error).trim();
+  const message = textOf(record.message).trim();
+  const errorPayload: ComposioHttpErrorPayload = {
+    ok: false,
+    error: error.length > 0 ? error : (message.length > 0 ? message : ('HTTP ' + statusCode.toString()))
+  };
+  return errorPayload as Object;
 }
 
 export function normalizeComposioAuthConfigsResponse(payload: Object): ComposioAuthConfigsResult {
@@ -147,7 +179,7 @@ export class ComposioAuthProxyClient {
       }
       const response = await request.request(this.baseUrl + path, options);
       const text = typeof response.result === 'string' ? response.result : `${response.result ?? ''}`;
-      return text.length > 0 ? JSON.parse(text) as Object : new Object();
+      return normalizeComposioHttpResponse(response.responseCode, text);
     } finally {
       request.destroy();
     }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  normalizeComposioHttpResponse,
   normalizeComposioAuthConfigsResponse,
   normalizeComposioLinkResponse,
   normalizeComposioUserId,
@@ -30,6 +31,24 @@ export default function composioAuthClientTest() {
       expect(ok.redirectUrl).assertEqual('https://mock.composio.local/connect/github');
       expect(bad.ok).assertFalse();
       expect(bad.error.indexOf('redirectUrl')).assertLarger(-1);
+    });
+
+    it('preserves proxy error text for non-2xx auth-config responses', 0, () => {
+      const payload = normalizeComposioHttpResponse(400, '{"error":"userId is required."}');
+      const result = normalizeComposioAuthConfigsResponse(payload);
+
+      expect(result.ok).assertFalse();
+      expect(result.error).assertEqual('userId is required.');
+      expect(result.items.length).assertEqual(0);
+    });
+
+    it('preserves proxy error text for non-2xx link responses', 0, () => {
+      const payload = normalizeComposioHttpResponse(400, '{"error":"userId is required."}');
+      const result = normalizeComposioLinkResponse(payload);
+
+      expect(result.ok).assertFalse();
+      expect(result.error).assertEqual('userId is required.');
+      expect(result.redirectUrl).assertEqual('');
     });
 
     it('normalizes and shortens app user ids', 0, () => {
