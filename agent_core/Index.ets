@@ -11,8 +11,10 @@ export { ScriptedA2uiModel, buildTaskCardComponents } from './src/main/ets/a2ui/
 export { OpenAiCompatibleModel } from './src/main/ets/model/OpenAiCompatibleModel';
 export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/ets/model/LoopModelFactory';
 export { ComposioConfig } from './src/main/ets/composio/ComposioConfig';
+export * from './src/main/ets/composio/ComposioAuthClient';
 export { ComposioSessionClient, describeComposioFailure } from './src/main/ets/composio/ComposioSessionClient';
 export { ComposioTool } from './src/main/ets/composio/ComposioTool';
+export * from './src/main/ets/composio/ComposioUserId';
 export { A2UI_VERSION, AGENUI_CATALOG_ID, buildCreateSurface, buildDeleteSurface, parseJsonl, extractJsonObjects, newSurfaceId } from './src/main/ets/a2ui/A2uiProtocol';
 export { A2uiComponentDef, CreateSurfaceBody, UpdateComponentsBody } from './src/main/ets/a2ui/A2uiTypes';
 export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';
