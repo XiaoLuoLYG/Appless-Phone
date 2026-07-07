@@ -268,7 +268,7 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
 
   aboutToAppear(): void {
-    this.loadComposioUserId();
+    this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
@@ -363,19 +363,11 @@ struct Index {
       return '';
     }
     try {
-      return normalizeComposioUserId(this.preferenceText(store.getSync(COMPOSIO_USER_ID_KEY, '')));
+      const saved = this.preferenceText(store.getSync(COMPOSIO_USER_ID_KEY, '')).trim();
+      return saved.length > 0 ? normalizeComposioUserId(saved) : '';
     } catch (_error) {
       return '';
     }
-  }
-
-  private loadComposioUserId(): void {
-    const saved = this.savedComposioUserId();
-    if (saved.length === 0) {
-      return;
-    }
-    this.composioUserId = saved;
-    configureComposioUserId(saved);
   }
 
   private async persistComposioUserId(userId: string): Promise<void> {
