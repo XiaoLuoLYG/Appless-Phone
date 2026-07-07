@@ -1833,12 +1833,15 @@ async function waitForComposioAuthEvidence() {
   const authConfigMarkers = [
     'Auth Config',
     '待授权',
-    '已授权',
+    '已连接',
     'connected',
     'GitHub',
+    'Notion',
     'Google Drive',
     'Google Docs',
-    'Slack'
+    'Slack',
+    'OAuth',
+    'Composio ·'
   ];
   let last = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
