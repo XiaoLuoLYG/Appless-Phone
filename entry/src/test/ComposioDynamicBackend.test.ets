@@ -2,6 +2,8 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   composioDynamicMissingConfigResult,
   composioDynamicResultFromObservation,
+  configureComposioUserId,
+  currentComposioUserId,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute
 } from '@loop/agent-core';
@@ -35,10 +37,15 @@ export default function composioDynamicBackendTest() {
       expect(result.rawPreview.indexOf('Notion')).assertLarger(-1);
     });
 
-    it('blocks likely side-effect execute requests', 0, () => {
-      expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertTrue();
-      expect(isUnsafeComposioExecute('NOTION_SEARCH', '{"query":"visa"}')).assertFalse();
+    it('allows Composio side-effect execute after session search selection', 0, () => {
+      expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertFalse();
+      expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertFalse();
       expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
+    });
+
+    it('keeps configured app user id for Composio dynamic calls', 0, () => {
+      configureComposioUserId('aiphone-user-device-1');
+      expect(currentComposioUserId()).assertEqual('aiphone-user-device-1');
     });
 
     it('maps a Composio search observation to a generic result', 0, () => {

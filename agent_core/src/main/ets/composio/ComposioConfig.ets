@@ -8,34 +8,44 @@ interface ComposioConfigJson {
   apiKey?: string;
   baseUrl?: string;
   userId?: string;
+  proxyBaseUrl?: string;
+  proxyApiKey?: string;
 }
 
 export class ComposioConfig {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly userId: string;
+  readonly proxyBaseUrl: string;
+  readonly proxyApiKey: string;
 
-  constructor(apiKey: string, baseUrl: string, userId: string) {
+  constructor(apiKey: string, baseUrl: string, userId: string, proxyBaseUrl: string = '', proxyApiKey: string = '') {
     this.apiKey = apiKey.trim();
     this.baseUrl = ComposioConfig.trimTrailingSlash(
       baseUrl.trim().length > 0 ? baseUrl : DEFAULT_COMPOSIO_URL
     );
     this.userId = userId.trim();
+    this.proxyBaseUrl = ComposioConfig.trimTrailingSlash(proxyBaseUrl.trim());
+    this.proxyApiKey = proxyApiKey.trim();
   }
 
   isConfigured(): boolean {
-    return this.apiKey.length > 0 &&
-      this.baseUrl.length > 0 &&
-      this.userId.length > 0;
+    if (this.userId.length === 0) {
+      return false;
+    }
+    if (this.proxyBaseUrl.length > 0) {
+      return true;
+    }
+    return this.apiKey.length > 0 && this.baseUrl.length > 0;
   }
 
   missingConfiguration(): string {
     const missing: string[] = [];
-    if (this.apiKey.length === 0) {
-      missing.push('apiKey');
-    }
     if (this.userId.length === 0) {
       missing.push('userId');
+    }
+    if (this.proxyBaseUrl.length === 0 && this.apiKey.length === 0) {
+      missing.push('apiKey or proxyBaseUrl');
     }
     return missing.join(', ');
   }
@@ -49,10 +59,12 @@ export class ComposioConfig {
       return new ComposioConfig(
         parsed.apiKey ?? '',
         parsed.baseUrl ?? DEFAULT_COMPOSIO_URL,
-        parsed.userId ?? ''
+        parsed.userId ?? '',
+        parsed.proxyBaseUrl ?? '',
+        parsed.proxyApiKey ?? ''
       );
     } catch (_error) {
-      return new ComposioConfig('', DEFAULT_COMPOSIO_URL, '');
+      return new ComposioConfig('', DEFAULT_COMPOSIO_URL, '', '', '');
     }
   }
 
@@ -62,10 +74,12 @@ export class ComposioConfig {
       return new ComposioConfig(
         parsed.apiKey ?? '',
         parsed.baseUrl ?? DEFAULT_COMPOSIO_URL,
-        parsed.userId ?? ''
+        parsed.userId ?? '',
+        parsed.proxyBaseUrl ?? '',
+        parsed.proxyApiKey ?? ''
       );
     } catch (_error) {
-      return new ComposioConfig('', DEFAULT_COMPOSIO_URL, '');
+      return new ComposioConfig('', DEFAULT_COMPOSIO_URL, '', '', '');
     }
   }
 

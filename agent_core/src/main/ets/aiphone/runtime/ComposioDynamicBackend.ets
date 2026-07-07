@@ -2,7 +2,7 @@ import { ComposioConfig } from '../../composio/ComposioConfig';
 import { ComposioSessionClient } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
-import { isUnsafeMcpTool } from './DynamicToolRegistry';
+import { currentToolGatewayApiKey } from './ToolGatewayClient';
 
 interface ComposioExecuteArgs {
   operation?: string;
@@ -41,9 +41,10 @@ interface ComposioArrayHit {
   items: Object[];
 }
 
-let composioConfig: ComposioConfig = new ComposioConfig('', 'https://backend.composio.dev/api/v3.1', '');
+let composioConfig: ComposioConfig = new ComposioConfig('', 'https://backend.composio.dev/api/v3.1', '', '', '');
 let composioClient: ComposioSessionClient | null = null;
 let scopedComposioClients: Map<string, ComposioSessionClient> = new Map();
+let runtimeComposioUserId: string = '';
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
   if (value === undefined || value === null) {
@@ -762,6 +763,27 @@ export function configureComposioConfigFromRawJson(rawJson: string): void {
   scopedComposioClients.clear();
 }
 
+export function configureComposioUserId(userId: string): void {
+  runtimeComposioUserId = userId.trim();
+  composioClient = null;
+  scopedComposioClients.clear();
+}
+
+export function currentComposioUserId(): string {
+  return runtimeComposioUserId.length > 0 ? runtimeComposioUserId : composioConfig.userId;
+}
+
+function configForCurrentUser(): ComposioConfig {
+  const proxyApiKey = composioConfig.proxyApiKey.length > 0 ? composioConfig.proxyApiKey : currentToolGatewayApiKey();
+  return new ComposioConfig(
+    composioConfig.apiKey,
+    composioConfig.baseUrl,
+    currentComposioUserId(),
+    composioConfig.proxyBaseUrl,
+    proxyApiKey
+  );
+}
+
 export function isComposioConfigured(): boolean {
   return composioConfig.isConfigured();
 }
@@ -794,38 +816,23 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('composio') >= 0;
 }
 
-function isReadOnlyComposioTool(toolSlug: string): boolean {
-  const lower = toolSlug.toLowerCase();
-  return lower === 'github_find_pull_requests' ||
-    lower === 'googledrive_find_file' ||
-    lower === 'googledocs_search_documents' ||
-    lower === 'slack_search_messages' ||
-    lower.indexOf('_search') >= 0 ||
-    lower.indexOf('_find') >= 0 ||
-    lower.indexOf('_list') >= 0 ||
-    lower.indexOf('_get') >= 0 ||
-    lower.indexOf('_fetch') >= 0 ||
-    lower.indexOf('_retrieve') >= 0;
-}
-
-export function isUnsafeComposioExecute(toolSlug: string, argsJson: string): boolean {
-  if (isReadOnlyComposioTool(toolSlug)) {
-    return false;
-  }
-  return isUnsafeMcpTool(toolSlug, argsJson);
+export function isUnsafeComposioExecute(_toolSlug: string, _argsJson: string): boolean {
+  return false;
 }
 
 export function composioDynamicMissingConfigResult(prompt: string): DynamicGenericToolResult {
   const title = composioToolkitFromPrompt(prompt).length > 0 ? resultTitleForPrompt(prompt) : 'Composio 未配置';
+  const missing = composioConfig.missingConfiguration();
+  const summary = 'Composio 未配置' + (missing.length > 0 ? '：' + missing : '') + '，无法查询已授权应用工具。';
   return {
     sourceTag: 'Composio',
     toolName: 'dynamic.search',
     title: title,
     status: 'needs_auth',
-    summary: 'Composio 未配置 apiKey/userId，无法查询已授权应用工具。',
+    summary: summary,
     rows: [
       { label: '请求', value: prompt.substring(0, 240) },
-      { label: '结果摘要', value: 'Composio 未配置 apiKey/userId，无法查询已授权应用工具。' }
+      { label: '结果摘要', value: summary }
     ],
     rawPreview: prompt
   };
@@ -911,24 +918,12 @@ async function callComposioSearchAndExecute(current: ComposioSessionClient, prom
   }
   const slug = textOf(tool.toolSlug).trim();
   const args = argumentsForTool(tool, prompt);
-  const argText = JSON.stringify(args);
-  if (isUnsafeComposioExecute(slug, argText)) {
-    return {
-      sourceTag: 'Composio',
-      toolName: 'dynamic.search',
-      title: 'Composio 高风险动作已阻断',
-      status: 'unsafe_action_blocked',
-      summary: '该 Composio 工具可能会创建、发送、更新或删除外部数据，当前版本不会自动执行。',
-      rows: [{ label: 'toolSlug', value: slug }],
-      rawPreview: argText.substring(0, 16000)
-    };
-  }
   return composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
 }
 
 async function client(): Promise<ComposioSessionClient> {
   if (composioClient === null) {
-    composioClient = new ComposioSessionClient(composioConfig);
+    composioClient = new ComposioSessionClient(configForCurrentUser());
     await composioClient.initialize();
   }
   return composioClient;
@@ -941,7 +936,7 @@ async function clientForPrompt(prompt: string): Promise<ComposioSessionClient> {
   }
   let scoped = scopedComposioClients.get(toolkit);
   if (scoped === undefined) {
-    scoped = new ComposioSessionClient(composioConfig, [toolkit]);
+    scoped = new ComposioSessionClient(configForCurrentUser(), [toolkit]);
     await scoped.initialize();
     scopedComposioClients.set(toolkit, scoped);
   }
@@ -960,18 +955,6 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
   const current = await clientForPrompt(prompt);
   if (operation === 'execute') {
     const slug = textOf(parsed.toolSlug).trim();
-    const argText = JSON.stringify(parsed.arguments ?? new Object());
-    if (isUnsafeComposioExecute(slug, argText)) {
-      return {
-        sourceTag: 'Composio',
-        toolName: 'dynamic.search',
-        title: 'Composio 高风险动作已阻断',
-        status: 'unsafe_action_blocked',
-        summary: '该 Composio 工具可能会创建、发送、更新或删除外部数据，当前版本不会自动执行。',
-        rows: [{ label: 'toolSlug', value: slug }],
-        rawPreview: argText.substring(0, 16000)
-      };
-    }
     return composioDynamicResultFromObservation('execute', await current.execute(slug, parsed.arguments ?? new Object()), slug, prompt);
   }
   return callComposioSearchAndExecute(current, prompt);

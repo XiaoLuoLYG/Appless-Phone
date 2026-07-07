@@ -448,18 +448,47 @@ export class ComposioSessionClient {
     }
   }
 
+  private requestBaseUrl(): string {
+    return this.config.proxyBaseUrl.length > 0 ? this.config.proxyBaseUrl : this.config.baseUrl;
+  }
+
+  private requestPath(path: string): string {
+    if (this.config.proxyBaseUrl.length === 0) {
+      return path;
+    }
+    if (path === '/tool_router/session') {
+      return '/v1/composio/session';
+    }
+    if (path.startsWith('/tool_router/session/')) {
+      return '/v1/composio/session/' + path.substring('/tool_router/session/'.length);
+    }
+    return path;
+  }
+
+  private requestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Accept': 'application/json'
+    };
+    if (this.config.proxyBaseUrl.length > 0) {
+      if (this.config.proxyApiKey.length > 0) {
+        headers.Authorization = 'Bearer ' + this.config.proxyApiKey;
+      }
+      return headers;
+    }
+    headers['x-api-key'] = this.config.apiKey;
+    return headers;
+  }
+
   private async request(method: http.RequestMethod, path: string, body: string): Promise<HttpResult> {
     const request = http.createHttp();
-    const url = `${this.config.baseUrl}${path}`;
+    const requestPath = this.requestPath(path);
+    const url = `${this.requestBaseUrl()}${requestPath}`;
     hilog.info(LOG_DOMAIN, LOG_TAG, 'request method=%{public}s path=%{public}s', `${method}`, path);
     try {
       const response = await request.request(url, {
         method: method,
-        header: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Accept': 'application/json',
-          'x-api-key': this.config.apiKey
-        },
+        header: this.requestHeaders(),
         extraData: body,
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: CONNECT_TIMEOUT_MS,

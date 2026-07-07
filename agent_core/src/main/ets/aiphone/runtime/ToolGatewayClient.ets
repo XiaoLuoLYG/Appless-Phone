@@ -1280,6 +1280,10 @@ export function defaultToolGatewayUrl(): string {
   return LOCAL_TOOL_GATEWAY_URL;
 }
 
+export function currentToolGatewayApiKey(): string {
+  return localProviderConfig.toolGatewayApiKey;
+}
+
 export function isLocalToolGatewayUrl(baseUrl: string): boolean {
   return baseUrl.trim().toLowerCase() === LOCAL_TOOL_GATEWAY_URL;
 }
