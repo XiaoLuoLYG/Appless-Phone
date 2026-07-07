@@ -13,6 +13,14 @@ export default function youtubeApiClientTest() {
       expect(url.indexOf('key=api-key-123')).assertLarger(-1);
     });
 
+    it('supports view-count ordering and five-result searches', 0, () => {
+      const url = youtubeSearchUrl('world cup', 'api-key-123', 'viewCount', 5);
+
+      expect(url.indexOf('order=viewCount')).assertLarger(-1);
+      expect(url.indexOf('maxResults=5')).assertLarger(-1);
+      expect(url.indexOf('q=world%20cup')).assertLarger(-1);
+    });
+
     it('maps YouTube search payload into generic tool rows', 0, () => {
       const payload = '{"items":[{"id":{"videoId":"abc123"},"snippet":{"title":"Qwen Max official intro","channelTitle":"Qwen Channel","publishedAt":"2026-06-01T00:00:00Z","thumbnails":{"medium":{"url":"https://i.ytimg.com/vi/abc123/mqdefault.jpg"}}}}]}';
       const results = youtubeVideoResultsFromSearchPayload(payload, 'qwen max');

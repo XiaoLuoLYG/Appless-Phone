@@ -17,6 +17,18 @@ export function socialHubPlatformLabel(platform: SocialHubPlatform | string): st
   if (platform === 'wecom') {
     return '企业微信';
   }
+  if (platform === 'discord') {
+    return 'Discord';
+  }
+  if (platform === 'linkedin') {
+    return 'LinkedIn';
+  }
+  if (platform === 'whatsapp') {
+    return 'WhatsApp';
+  }
+  if (platform === 'instagram') {
+    return 'Instagram';
+  }
   return '未知';
 }
 

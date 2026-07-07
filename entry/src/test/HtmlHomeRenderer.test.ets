@@ -236,7 +236,7 @@ function composioResultsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
   doc.title = 'Composio 工具结果';
-  doc.subtitle = 'GitHub, Drive, Docs, Slack';
+  doc.subtitle = 'GitHub, Drive, Docs, Slack, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, Ticketmaster';
   doc.blocks = [{
     id: 'composio-github-0',
     kind: 'generic-tool-result',
@@ -295,6 +295,126 @@ function composioResultsDocumentFixture(): HtmlHomeDocument {
       { label: '查询', value: 'AIPhoneDemo' },
       { label: '结果数量', value: '1' },
       { label: 'AIPhoneDemo demo ready', value: '#aiphone-demo | https://example.slack.com/archives/C1/p1' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-outlook-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Outlook 结果',
+    subtitle: 'Composio 已执行 OUTLOOK_SEARCH_MESSAGES，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'OUTLOOK_SEARCH_MESSAGES' }],
+    rows: [
+      { label: '执行工具', value: 'OUTLOOK_SEARCH_MESSAGES' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo follow-up', value: 'Product Team | 2026-07-07T08:30:00Z | https://outlook.office.com/mail/id/1' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-discord-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Discord 结果',
+    subtitle: 'Composio 已执行 DISCORD_SEARCH_MESSAGES，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'DISCORD_SEARCH_MESSAGES' }],
+    rows: [
+      { label: '执行工具', value: 'DISCORD_SEARCH_MESSAGES' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'Discord AIPhoneDemo thread', value: '#demo-lab | https://discord.com/channels/1/2/3' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-linkedin-0',
+    kind: 'generic-tool-result',
+    title: 'Composio LinkedIn 结果',
+    subtitle: 'Composio 已执行 LINKEDIN_SEARCH_POSTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'LINKEDIN_SEARCH_POSTS' }],
+    rows: [
+      { label: '执行工具', value: 'LINKEDIN_SEARCH_POSTS' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo launch note', value: 'Yige | https://www.linkedin.com/feed/update/1' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-whatsapp-0',
+    kind: 'generic-tool-result',
+    title: 'Composio WhatsApp 结果',
+    subtitle: 'Composio 已执行 WHATSAPP_SEARCH_MESSAGES，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'WHATSAPP_SEARCH_MESSAGES' }],
+    rows: [
+      { label: '执行工具', value: 'WHATSAPP_SEARCH_MESSAGES' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo WhatsApp note', value: 'Demo Group | 2026-07-07 09:00' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-instagram-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Instagram 结果',
+    subtitle: 'Composio 已执行 INSTAGRAM_SEARCH_COMMENTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'INSTAGRAM_SEARCH_COMMENTS' }],
+    rows: [
+      { label: '执行工具', value: 'INSTAGRAM_SEARCH_COMMENTS' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo reel comment', value: '@demo_user | https://www.instagram.com/p/demo/' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-spotify-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Spotify 结果',
+    subtitle: 'Composio 已执行 SPOTIFY_SEARCH_PLAYLISTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'SPOTIFY_SEARCH_PLAYLISTS' }],
+    rows: [
+      { label: '执行工具', value: 'SPOTIFY_SEARCH_PLAYLISTS' },
+      { label: '查询', value: 'AIPhoneDemo demo playlist' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo Demo Flow', value: '48 tracks | https://open.spotify.com/playlist/demo' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-tiktok-0',
+    kind: 'generic-tool-result',
+    title: 'Composio TikTok 结果',
+    subtitle: 'Composio 已执行 TIKTOK_SEARCH_VIDEOS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'TIKTOK_SEARCH_VIDEOS' }],
+    rows: [
+      { label: '执行工具', value: 'TIKTOK_SEARCH_VIDEOS' },
+      { label: '查询', value: 'AIPhoneDemo' },
+      { label: '结果数量', value: '1' },
+      { label: 'AIPhoneDemo short demo', value: '@demo_creator | https://www.tiktok.com/@demo/video/1' }
+    ],
+    actions: []
+  }, {
+    id: 'composio-ticketmaster-0',
+    kind: 'generic-tool-result',
+    title: 'Composio Ticketmaster 结果',
+    subtitle: 'Composio 已执行 TICKETMASTER_SEARCH_EVENTS，返回 1 条可展示结果。',
+    status: 'success',
+    source: 'Composio',
+    metrics: [{ label: 'toolName', value: 'TICKETMASTER_SEARCH_EVENTS' }],
+    rows: [
+      { label: '执行工具', value: 'TICKETMASTER_SEARCH_EVENTS' },
+      { label: '查询', value: '深圳本周末演唱会' },
+      { label: '结果数量', value: '1' },
+      { label: 'Shenzhen Live', value: 'Shenzhen Bay Sports Center | https://www.ticketmaster.com/event/1' }
     ],
     actions: []
   }];
@@ -655,6 +775,46 @@ function socialHubDocumentFixture(): HtmlHomeDocument {
     rows: [{ label: 'message', value: 'Slack token required' }],
     actions: []
   }, {
+    id: 'social_hub-connection-1',
+    kind: 'social-hub-connection',
+    title: 'Discord',
+    subtitle: 'Composio Discord auth required',
+    status: 'needs_auth',
+    source: 'discord',
+    metrics: [{ label: 'platform', value: 'discord' }],
+    rows: [{ label: 'message', value: 'Composio Discord auth required' }],
+    actions: []
+  }, {
+    id: 'social_hub-connection-2',
+    kind: 'social-hub-connection',
+    title: 'LinkedIn',
+    subtitle: 'Composio LinkedIn connected',
+    status: 'connected',
+    source: 'linkedin',
+    metrics: [{ label: 'platform', value: 'linkedin' }],
+    rows: [{ label: 'message', value: 'Composio LinkedIn connected' }],
+    actions: []
+  }, {
+    id: 'social_hub-connection-3',
+    kind: 'social-hub-connection',
+    title: 'WhatsApp',
+    subtitle: 'Composio WhatsApp auth required',
+    status: 'needs_auth',
+    source: 'whatsapp',
+    metrics: [{ label: 'platform', value: 'whatsapp' }],
+    rows: [{ label: 'message', value: 'Composio WhatsApp auth required' }],
+    actions: []
+  }, {
+    id: 'social_hub-connection-4',
+    kind: 'social-hub-connection',
+    title: 'Instagram',
+    subtitle: 'Composio Instagram connected',
+    status: 'connected',
+    source: 'instagram',
+    metrics: [{ label: 'platform', value: 'instagram' }],
+    rows: [{ label: 'message', value: 'Composio Instagram connected' }],
+    actions: []
+  }, {
     id: 'social_hub-draft',
     kind: 'social-hub-draft',
     title: '回复草稿',
@@ -1001,10 +1161,26 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('composio-drive')).assertLarger(-1);
       expect(html.indexOf('composio-docs')).assertLarger(-1);
       expect(html.indexOf('composio-slack')).assertLarger(-1);
+      expect(html.indexOf('composio-outlook')).assertLarger(-1);
+      expect(html.indexOf('composio-discord')).assertLarger(-1);
+      expect(html.indexOf('composio-linkedin')).assertLarger(-1);
+      expect(html.indexOf('composio-whatsapp')).assertLarger(-1);
+      expect(html.indexOf('composio-instagram')).assertLarger(-1);
+      expect(html.indexOf('composio-spotify')).assertLarger(-1);
+      expect(html.indexOf('composio-tiktok')).assertLarger(-1);
+      expect(html.indexOf('composio-ticketmaster')).assertLarger(-1);
       expect(html.indexOf('Add Composio result cards')).assertLarger(-1);
       expect(html.indexOf('签证材料.pdf')).assertLarger(-1);
       expect(html.indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
       expect(html.indexOf('AIPhoneDemo demo ready')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo follow-up')).assertLarger(-1);
+      expect(html.indexOf('Discord AIPhoneDemo thread')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo launch note')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo WhatsApp note')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo reel comment')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo Demo Flow')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneDemo short demo')).assertLarger(-1);
+      expect(html.indexOf('Shenzhen Live')).assertLarger(-1);
       expect(html.indexOf('打开结果')).assertLarger(-1);
     });
 
@@ -1065,6 +1241,30 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf(".block[data-source-key=\"mail-qq\"]")).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(194, 70, 54, 0.45)')).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
+    });
+
+    it('filters Gmail hero preview counts to mail blocks', 0, () => {
+      const doc = mailAggregateDocumentFixture();
+      doc.blocks.unshift({
+        id: 'youtube-1',
+        kind: 'generic-tool-result',
+        title: 'World Cup video',
+        subtitle: 'YouTube result',
+        status: 'success',
+        source: 'YouTube Data API',
+        metrics: [
+          { label: 'source', value: 'YouTube Data API' },
+          { label: 'toolName', value: 'youtube.video.search' }
+        ],
+        rows: [],
+        actions: []
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("function isMailBlock(block)")).assertLarger(-1);
+      expect(html.indexOf("var blocks = scene === 'gmail' ? list(data.blocks).filter(isMailBlock) : list(data.blocks);")).assertLarger(-1);
+      expect(html.indexOf("var mailCount = list(data.blocks).filter(isMailBlock).length;")).assertLarger(-1);
+      expect(html.indexOf("String(mailCount) + ' 封'")).assertLarger(-1);
     });
 
     it('keeps social document actions intact in the enhanced social frame', 0, () => {
@@ -1187,6 +1387,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('data-kind="social-hub-item"')).assertLarger(-1);
       expect(html.indexOf('social-x')).assertLarger(-1);
       expect(html.indexOf('social-slack')).assertLarger(-1);
+      expect(html.indexOf('social-discord')).assertLarger(-1);
+      expect(html.indexOf('social-linkedin')).assertLarger(-1);
+      expect(html.indexOf('social-whatsapp')).assertLarger(-1);
+      expect(html.indexOf('social-instagram')).assertLarger(-1);
       expect(html.indexOf('social_select_message')).assertEqual(-1);
     });
 

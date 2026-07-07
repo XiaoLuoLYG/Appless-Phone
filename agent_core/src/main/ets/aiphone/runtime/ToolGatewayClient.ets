@@ -67,14 +67,14 @@ import {
 } from './XOAuthClient';
 import { GenericMcpClient } from './GenericMcpClient';
 import { callGmailApiTool } from './GmailApiClient';
-import { callYouTubeVideoSearch } from './YouTubeApiClient';
+import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { callCalendarTool } from './CalendarApiClient';
 import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { SocialHubClient, SocialHubProviderConfig } from './SocialHubClient';
-import { SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
+import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
+import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import { callComposioDynamic } from './ComposioDynamicBackend';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
@@ -6567,14 +6567,15 @@ function defaultMailSearchWindow(query: string): string {
 
 export function mailSearchArgs(prompt: string, args: Object | null): MailSearchArgs {
   const record = mailArgs(args);
-  const providers = stringListArg(record.providers);
+  const providers: string[] = [];
+  stringListArg(record.providers).forEach((provider: string) => providers.push(provider.toLowerCase()));
   const explicitQuery = textOf(record.query).trim();
   const query = explicitQuery.length > 0 ? explicitQuery : fallbackMailSearchQuery(prompt);
   const normalizedQuery = defaultMailSearchWindow(query);
   return {
     query: normalizedQuery.length > 0 ? normalizedQuery : defaultMailSearchWindow(prompt.trim()),
     pageSize: typeof record.pageSize === 'number' && record.pageSize > 0 ? Math.min(record.pageSize, 10) : 10,
-    providers: providers.length > 0 ? providers : ['gmail', 'qq'],
+    providers: providers.length > 0 ? providers : ['gmail', 'qq', 'outlook'],
     intentSummary: textOf(record.intentSummary)
   };
 }
@@ -6608,9 +6609,112 @@ function mailProviderError(provider: string, message: string): MailProviderStatu
   return {
     provider: provider,
     status: 'error',
-    title: provider === 'qq' ? 'QQ 邮箱调用失败' : 'Gmail 调用失败',
+    title: provider === 'qq' ? 'QQ 邮箱调用失败' : (provider === 'outlook' ? 'Outlook 调用失败' : 'Gmail 调用失败'),
     message: message
   };
+}
+
+function composioResultTitle(appName: string): string {
+  return 'Composio ' + appName + ' 结果';
+}
+
+function composioProviderPrompt(appName: string, query: string, kind: string): string {
+  return '帮我用 Composio ' + appName + ' 查 ' + query + kind;
+}
+
+async function composioAppResult(appName: string, query: string, kind: string): Promise<DynamicGenericToolResult> {
+  const prompt = composioProviderPrompt(appName, query, kind);
+  try {
+    const result = await callComposioDynamic(prompt, null);
+    if (result !== null) {
+      return result;
+    }
+    return {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: 'Composio 没有处理该请求。',
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    };
+  } catch (error) {
+    return {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    };
+  }
+}
+
+function firstUrlInText(value: string): string {
+  const parts = value.split('|').join(' ').split(' ');
+  for (let index = 0; index < parts.length; index++) {
+    let part = parts[index].trim();
+    while (part.length > 0) {
+      const last = part.charAt(part.length - 1);
+      if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
+        part = part.substring(0, part.length - 1);
+      } else {
+        break;
+      }
+    }
+    if (part.indexOf('https://') === 0 || part.indexOf('http://') === 0) {
+      return part;
+    }
+  }
+  return '';
+}
+
+function isComposioSystemLabel(label: string): boolean {
+  return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
+    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段';
+}
+
+function socialConnectionStatus(status: string): string {
+  if (status === 'success') {
+    return 'connected';
+  }
+  if (status === 'needs_auth' || status === 'auth_required') {
+    return 'needs_auth';
+  }
+  return 'error';
+}
+
+function composioSocialFeedResult(platform: SocialHubPlatform, displayName: string, result: DynamicGenericToolResult): SocialHubFeedResult {
+  const connections: SocialHubConnectionData[] = [{
+    platform: platform,
+    status: socialConnectionStatus(result.status),
+    displayName: displayName,
+    accountId: '',
+    message: result.summary
+  } as SocialHubConnectionData];
+  const items: SocialHubItemData[] = [];
+  result.rows.forEach((row: A2uiLabelValueData, index: number) => {
+    if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
+      return;
+    }
+    items.push({
+      id: 'composio-' + platform + '-' + index.toString(),
+      platform: platform,
+      kind: platform === 'linkedin' || platform === 'instagram' ? 'post' : 'message',
+      author: row.label,
+      handle: displayName,
+      text: row.value,
+      timestamp: '',
+      url: firstUrlInText(row.value),
+      mediaUrl: '',
+      channel: 'Composio',
+      channelId: '',
+      threadId: '',
+      unread: false
+    } as SocialHubItemData);
+  });
+  return { items: items, connections: connections };
 }
 
 function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
@@ -6626,6 +6730,19 @@ function gmailResultErrorSummary(results: DynamicGenericToolResult[]): string {
 
 function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
   return mediaVideoQueryFromArgs(prompt, args);
+}
+
+function youtubeSearchOptionsFromArgs(args: Object | null): YouTubeSearchOptions {
+  if (args === null) {
+    return defaultYouTubeSearchOptions();
+  }
+  const record = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const order = textOf(record.order).trim();
+  const rawMaxResults = record.maxResults;
+  return {
+    order: order.length > 0 ? order : 'relevance',
+    maxResults: typeof rawMaxResults === 'number' ? rawMaxResults : 10
+  };
 }
 
 interface SocialHubDraftRequestArgs {
@@ -6653,6 +6770,9 @@ function socialHubPlatformFromText(value: string): SocialHubPlatform {
   if (text === 'wecom' || text === 'wework' || text === '企业微信') {
     return 'wecom';
   }
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+    return text as SocialHubPlatform;
+  }
   return 'unknown';
 }
 
@@ -6668,6 +6788,41 @@ function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProvid
     slackUserToken: localProviderConfig.slackUserToken,
     slackBotToken: localProviderConfig.slackBotToken
   };
+}
+
+function shouldUseComposioSocialAggregate(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return prompt.indexOf('社交') >= 0 ||
+    prompt.indexOf('消息聚合') >= 0 ||
+    prompt.indexOf('多平台') >= 0 ||
+    lower.indexOf('discord') >= 0 ||
+    lower.indexOf('linkedin') >= 0 ||
+    prompt.indexOf('领英') >= 0 ||
+    lower.indexOf('whatsapp') >= 0 ||
+    lower.indexOf('whats app') >= 0 ||
+    lower.indexOf('instagram') >= 0 ||
+    lower.indexOf('instgram') >= 0;
+}
+
+async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
+  const query = prompt.trim().length > 0 ? prompt.trim() : '最近消息';
+  const items: SocialHubItemData[] = [];
+  const connections: SocialHubConnectionData[] = [];
+  const results: SocialHubFeedResult[] = await Promise.all([
+    composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('discord', 'Discord', result)),
+    composioAppResult('LinkedIn', query, '相关动态').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('linkedin', 'LinkedIn', result)),
+    composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
+    composioAppResult('Instagram', query, '相关评论').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('instagram', 'Instagram', result))
+  ]);
+  results.forEach((result: SocialHubFeedResult) => {
+    result.items.forEach((item: SocialHubItemData) => items.push(item));
+    result.connections.forEach((connection: SocialHubConnectionData) => connections.push(connection));
+  });
+  return { items: items, connections: connections };
 }
 
 export async function sendLocalSocialHubReply(item: SocialHubItemData, text: string): Promise<SocialHubDraftData> {
@@ -6691,6 +6846,11 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
   const result = toolId === 'x.post.search' ?
     await socialHubClient.xPostSearch(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig()) :
     await socialHubClient.feed(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig(await safeXAccessTokenForDm()));
+  if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
+    const composio = await composioSocialAggregate(prompt);
+    composio.items.forEach((item: SocialHubItemData) => result.items.push(item));
+    composio.connections.forEach((connection: SocialHubConnectionData) => result.connections.push(connection));
+  }
   return socialHubFeedA2ui(surfaceId, result.items, result.connections);
 }
 
@@ -6699,7 +6859,7 @@ async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: s
     return genericToolResultsA2ui(
       surfaceId,
       toolId,
-      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey)
+      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
     );
   }
   return genericToolResultsA2ui(surfaceId, toolId, [{
@@ -6796,6 +6956,7 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
     const parsed = mailSearchArgs(prompt, args);
     const threads: MailThreadResult[] = [];
     const statuses: MailProviderStatus[] = [];
+    const extras: DynamicGenericToolResult[] = [];
 
     if (parsed.providers.indexOf('gmail') >= 0) {
       try {
@@ -6850,7 +7011,11 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
       }
     }
 
-    return mailResultsA2ui(surfaceId, toolId, threads, statuses);
+    if (parsed.providers.indexOf('outlook') >= 0) {
+      extras.push(await composioAppResult('Outlook', parsed.query, '的邮件'));
+    }
+
+    return mailResultsA2ui(surfaceId, toolId, threads, statuses, extras);
   }
 
   if (toolId === 'mail.draft.create') {

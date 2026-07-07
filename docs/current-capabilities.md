@@ -33,7 +33,7 @@
 | Gmail | `gmail.open.web` | 打开 Gmail Web 给用户继续处理 | `confirm_required` | system intent / 系统 | `GenericToolResults` |
 | Gmail | `gmail.message.send` | 直接发送 Gmail 的安全阻断兜底 | `blocked` | system intent / 系统 | `GenericToolResults`; 不会自动发送 |
 | 视频 | `media.video.search` | 多源视频搜索，尤其 B 站 + YouTube 聚合 | `read` | `local_adapter` / provider key | `GenericToolResults`; 打开媒体页 |
-| YouTube | `youtube.video.search` | YouTube-only 公开视频搜索 | `read` | `local_adapter` / provider key | `GenericToolResults`; 打开 YouTube |
+| YouTube | `youtube.video.search` | YouTube-only 公开视频搜索；可用 `order=viewCount` 做 API 支持的热门排序 | `read` | `local_adapter` / provider key | `GenericToolResults`; 打开 YouTube |
 | YouTube | `youtube.mine.playlists` | 查看用户 YouTube 播放列表 | `read` | OAuth API, Web session / 对应授权 | `GenericToolResults`; 授权、打开 Web |
 | YouTube | `youtube.mine.subscriptions` | 查看用户 YouTube 订阅 | `read` | OAuth API, Web session / 对应授权 | `GenericToolResults`; 授权、打开 Web |
 | 日历 | `calendar.events.search` | 查询 Google Calendar 日程 | `read` | OAuth API / OAuth | `GenericToolResults`; 授权 |
@@ -98,6 +98,7 @@ node scripts/aiphone-device-smoke.mjs
 | mail/full regression | `帮我看邮箱里最新的重要邮件` | `mail.search` | - |
 | mail/full regression | `帮我看 QQ 邮箱里最新邮件` | `mail.search` | - |
 | `--google-apps`/full regression | `帮我在 YouTube 搜索 qwen max 官方介绍视频` | `youtube.video.search` | - |
+| `--google-apps`/manual follow-up smoke | `帮我在 YouTube 上搜索五个最火的世界杯视频，并给 xxx@example.com 创建一封 Gmail 草稿` | `youtube.video.search` then `gmail.draft.create` | 多工具 ReAct loop；不自动发送 |
 | `--google-apps`/full regression | `帮我查看我的 YouTube 播放列表` | `youtube.mine.playlists` | - |
 | `--google-apps`/full regression | `帮我看今天的 Google Calendar 日程` | `calendar.events.search` | - |
 | `--google-apps`/full regression | `帮我在 2026年6月30日下午3点创建一个标题为 AIPhoneDemo smoke 的30分钟日程` | `calendar.event.create` | - |

@@ -4,6 +4,7 @@ import { parseA2uiJsonl } from '@loop/agent-core';
 import { A2uiSurfaceStore } from '@loop/agent-core';
 import { mailReplyDraftAction, mailResultsA2ui } from '@loop/agent-core';
 import { MailProviderStatus, MailThreadResult } from '@loop/agent-core';
+import { DynamicGenericToolResult } from '@loop/agent-core';
 
 function surfaceFromJsonl(jsonl: string): A2uiSurfaceStore {
   const parsed = parseA2uiJsonl(jsonl);
@@ -67,6 +68,29 @@ export default function mailToolA2uiTest() {
       expect(rows[0].toolName).assertEqual('mail.provider.status');
       expect(rows[1].sourceTag).assertEqual('QQ Mail');
       expect(rows[1].toolName).assertEqual('mail.thread');
+    });
+
+    it('keeps Outlook Composio extras in aggregate mail results', 0, () => {
+      const outlook: DynamicGenericToolResult = {
+        sourceTag: 'Composio',
+        toolName: 'OUTLOOK_SEARCH_MESSAGES',
+        title: 'Composio Outlook 结果',
+        status: 'success',
+        summary: 'Composio 已执行 OUTLOOK_SEARCH_MESSAGES，返回 1 条可展示结果。',
+        rows: [
+          { label: '执行工具', value: 'OUTLOOK_SEARCH_MESSAGES' },
+          { label: 'AIPhoneDemo follow-up', value: 'Product Team | https://outlook.office.com/mail/id/1' }
+        ],
+        rawPreview: 'outlook'
+      };
+      const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [
+        thread('gmail', '2026-06-29T08:00:00+08:00', 'Gmail thread')
+      ], [], [outlook]));
+      const rows = genericToolResults(store.getSurface());
+
+      expect(rows.length).assertEqual(2);
+      expect(rows[1].title).assertEqual('Composio Outlook 结果');
+      expect(rows[1].toolName).assertEqual('OUTLOOK_SEARCH_MESSAGES');
     });
 
     it('builds provider-aware reply draft actions', 0, () => {

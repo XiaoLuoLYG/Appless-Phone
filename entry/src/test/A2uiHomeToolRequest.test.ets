@@ -68,6 +68,14 @@ function argText(args: Object | null, key: string): string {
   return '';
 }
 
+function argNumber(args: Object | null, key: string): number {
+  if (args === null) {
+    return 0;
+  }
+  const value = (args as ToolRequestArgRecord)[key];
+  return typeof value === 'number' ? value : 0;
+}
+
 function argSources(args: Object | null): string[] {
   if (args === null) {
     return [];
@@ -232,6 +240,14 @@ export default function a2uiHomeToolRequestTest() {
       const surface = surfaceWithSummaryToolResult('gmail.mail.search', 'users.threads.list');
 
       expect(surfaceHasSatisfiedToolResult(surface, 'gmail.mail.search')).assertTrue();
+    });
+
+    it('treats Gmail API tool names as satisfied Gmail app tools', 0, () => {
+      const draftSurface = surfaceWithSummaryToolResult('', 'users.drafts.create');
+      const searchSurface = surfaceWithSummaryToolResult('', 'users.threads.list');
+
+      expect(surfaceHasSatisfiedToolResult(draftSurface, 'gmail.draft.create')).assertTrue();
+      expect(surfaceHasSatisfiedToolResult(searchSurface, 'gmail.mail.search')).assertTrue();
     });
 
     it('treats SocialHub surfaces as satisfied social tool results', 0, () => {
@@ -481,6 +497,32 @@ export default function a2uiHomeToolRequestTest() {
       expect(argSources(resolved.args).length).assertEqual(0);
     });
 
+    it('adds YouTube hotness fallback args for five hottest videos', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('youtube.video.search', '帮我在 YouTube 上搜索五个最火的世界杯视频', 'model_tool_request', null),
+        '帮我在 YouTube 上搜索五个最火的世界杯视频',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('youtube.video.search');
+      expect(argText(resolved.args, 'order')).assertEqual('viewCount');
+      expect(argNumber(resolved.args, 'maxResults')).assertEqual(5);
+    });
+
+    it('adds YouTube hotness fallback args for English most-viewed prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        'Search YouTube for 5 most viewed World Cup videos',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('youtube.video.search');
+      expect(argText(resolved.args, 'order')).assertEqual('viewCount');
+      expect(argNumber(resolved.args, 'maxResults')).assertEqual(5);
+    });
+
     it('infers SocialHub feed, X public search, and social drafts conservatively', 0, () => {
       const feed = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
@@ -526,6 +568,16 @@ export default function a2uiHomeToolRequestTest() {
         '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
         ''
       );
+      const outlook = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
+        ''
+      );
+      const discord = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
+        ''
+      );
       const plainSlack = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
         '帮我查看 Slack 最近的消息',
@@ -536,6 +588,8 @@ export default function a2uiHomeToolRequestTest() {
       expect(googleDocs.actionId).assertEqual('client_intent_fallback');
       expect(composioSlack.toolId).assertEqual('dynamic.search');
       expect(composioSlack.actionId).assertEqual('model_tool_request');
+      expect(outlook.toolId).assertEqual('dynamic.search');
+      expect(discord.toolId).assertEqual('dynamic.search');
       expect(plainSlack.toolId).assertEqual('social.feed.search');
     });
 

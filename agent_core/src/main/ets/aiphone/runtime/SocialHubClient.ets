@@ -172,11 +172,36 @@ function responseText(value: Object | string | number | boolean | ArrayBuffer): 
   return textOf(value);
 }
 
+function platformDisplayName(platform: SocialHubPlatform): string {
+  if (platform === 'x') {
+    return 'X';
+  }
+  if (platform === 'slack') {
+    return 'Slack';
+  }
+  if (platform === 'wecom') {
+    return '企业微信';
+  }
+  if (platform === 'discord') {
+    return 'Discord';
+  }
+  if (platform === 'linkedin') {
+    return 'LinkedIn';
+  }
+  if (platform === 'whatsapp') {
+    return 'WhatsApp';
+  }
+  if (platform === 'instagram') {
+    return 'Instagram';
+  }
+  return 'SocialHub';
+}
+
 function connection(platform: SocialHubPlatform, status: string, message: string): SocialHubConnectionData {
   return {
     platform: platform,
     status: status,
-    displayName: platform === 'x' ? 'X' : (platform === 'slack' ? 'Slack' : '企业微信'),
+    displayName: platformDisplayName(platform),
     accountId: '',
     message: message
   } as SocialHubConnectionData;

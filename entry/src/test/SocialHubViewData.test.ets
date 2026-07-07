@@ -12,6 +12,10 @@ export default function socialHubViewDataTest() {
       expect(socialHubPlatformLabel('x')).assertEqual('X');
       expect(socialHubPlatformLabel('slack')).assertEqual('Slack');
       expect(socialHubPlatformLabel('wecom')).assertEqual('企业微信');
+      expect(socialHubPlatformLabel('discord')).assertEqual('Discord');
+      expect(socialHubPlatformLabel('linkedin')).assertEqual('LinkedIn');
+      expect(socialHubPlatformLabel('whatsapp')).assertEqual('WhatsApp');
+      expect(socialHubPlatformLabel('instagram')).assertEqual('Instagram');
     });
 
     it('labels post kind as public post', 0, () => {

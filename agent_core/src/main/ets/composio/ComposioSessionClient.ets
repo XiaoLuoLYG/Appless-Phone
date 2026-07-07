@@ -163,6 +163,7 @@ export function describeComposioFailure(error: Error | Object | string): string 
 
 export class ComposioSessionClient {
   private config: ComposioConfig;
+  private toolkitAllowlist: string[] = [];
   private toolkitAccounts: Map<string, string> = new Map();
   private discoveryError: string = '';
   private initialized: boolean = false;
@@ -170,8 +171,14 @@ export class ComposioSessionClient {
   private sessionPromise: Promise<string> | null = null;
   private discoveredTools: Set<string> = new Set();
 
-  constructor(config: ComposioConfig) {
+  constructor(config: ComposioConfig, toolkitAllowlist: string[] = []) {
     this.config = config;
+    toolkitAllowlist.forEach((toolkit: string) => {
+      const slug = toolkit.trim().toLowerCase();
+      if (slug.length > 0 && this.toolkitAllowlist.indexOf(slug) < 0) {
+        this.toolkitAllowlist.push(slug);
+      }
+    });
   }
 
   async initialize(): Promise<void> {
@@ -191,6 +198,10 @@ export class ComposioSessionClient {
     } catch (error) {
       this.discoveryError = this.safeFailure('发现授权 Toolkit', error);
     }
+  }
+
+  private allowsToolkit(toolkit: string): boolean {
+    return this.toolkitAllowlist.length === 0 || this.toolkitAllowlist.indexOf(toolkit) >= 0;
   }
 
   toolDescription(): string {
@@ -292,7 +303,8 @@ export class ComposioSessionClient {
         const account = items[index];
         const toolkit = account.toolkit?.slug?.trim().toLowerCase() ?? '';
         const accountId = account.id?.trim() ?? '';
-        if (toolkit.length === 0 || accountId.length === 0 || account.is_disabled === true) {
+        if (toolkit.length === 0 || accountId.length === 0 || account.is_disabled === true ||
+          !this.allowsToolkit(toolkit)) {
           continue;
         }
         if (!this.toolkitAccounts.has(toolkit)) {

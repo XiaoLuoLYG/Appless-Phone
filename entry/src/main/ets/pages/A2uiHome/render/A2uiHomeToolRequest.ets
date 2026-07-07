@@ -19,6 +19,8 @@ interface MediaFallbackArgs {
 
 interface YouTubeFallbackArgs {
   query: string;
+  order?: string;
+  maxResults?: number;
 }
 
 interface PaymentFallbackArgs {
@@ -92,7 +94,22 @@ function hasComposioDynamicIntent(prompt: string): boolean {
     lowerPrompt.indexOf('asana') >= 0 ||
     lowerPrompt.indexOf('trello') >= 0 ||
     lowerPrompt.indexOf('hubspot') >= 0 ||
-    lowerPrompt.indexOf('salesforce') >= 0;
+    lowerPrompt.indexOf('salesforce') >= 0 ||
+    lowerPrompt.indexOf('outlook') >= 0 ||
+    lowerPrompt.indexOf('微软邮箱') >= 0 ||
+    lowerPrompt.indexOf('discord') >= 0 ||
+    lowerPrompt.indexOf('linkedin') >= 0 ||
+    prompt.indexOf('领英') >= 0 ||
+    lowerPrompt.indexOf('whatsapp') >= 0 ||
+    lowerPrompt.indexOf('whats app') >= 0 ||
+    lowerPrompt.indexOf('instagram') >= 0 ||
+    lowerPrompt.indexOf('instgram') >= 0 ||
+    lowerPrompt.indexOf('spotify') >= 0 ||
+    lowerPrompt.indexOf('soptify') >= 0 ||
+    lowerPrompt.indexOf('tiktok') >= 0 ||
+    lowerPrompt.indexOf('tik tok') >= 0 ||
+    lowerPrompt.indexOf('ticketmaster') >= 0 ||
+    lowerPrompt.indexOf('ticket master') >= 0;
   return explicitComposio || unsupportedToolkit;
 }
 
@@ -364,12 +381,46 @@ function inferredSocialHubToolIdForPrompt(prompt: string): string {
   return '';
 }
 
+function hasHotVideoIntent(prompt: string): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+  return containsAny(prompt, ['最火', '最热门', '热门', '播放量最高']) ||
+    lowerPrompt.indexOf('popular') >= 0 ||
+    lowerPrompt.indexOf('most viewed') >= 0;
+}
+
+function requestedYouTubeResultCount(prompt: string): number {
+  const lowerPrompt = prompt.toLowerCase();
+  if (containsAny(prompt, ['五个', '5个', '5 个']) || lowerPrompt.indexOf('five') >= 0 || hasStandaloneFive(prompt)) {
+    return 5;
+  }
+  return 10;
+}
+
+function hasStandaloneFive(prompt: string): boolean {
+  for (let index = 0; index < prompt.length; index++) {
+    if (prompt.charAt(index) !== '5') {
+      continue;
+    }
+    const previous = index === 0 ? '' : prompt.charAt(index - 1);
+    const next = index + 1 >= prompt.length ? '' : prompt.charAt(index + 1);
+    if ((previous.length === 0 || !isAsciiAlphaNumeric(previous)) &&
+      (next.length === 0 || !isAsciiAlphaNumeric(next))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function youtubeArgsForPrompt(prompt: string): Object | null {
   if (hasExplicitYouTubeIntent(prompt) &&
     !hasBilibiliIntent(prompt) &&
     !hasMediaAggregationIntent(prompt) &&
-    (hasMediaSearchVerb(prompt) || containsAny(prompt, ['视频']))) {
+    (hasMediaSearchVerb(prompt) || containsAny(prompt, ['视频']) || hasHotVideoIntent(prompt))) {
     const args: YouTubeFallbackArgs = { query: prompt.trim() };
+    if (hasHotVideoIntent(prompt)) {
+      args.order = 'viewCount';
+      args.maxResults = requestedYouTubeResultCount(prompt);
+    }
     return args;
   }
   return null;
@@ -470,7 +521,7 @@ export function directPaymentToolIdForActionId(actionId: string): string {
 export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
   const results = genericToolResults(surface);
   for (let index = 0; index < results.length; index++) {
-    if (results[index].toolName === toolId) {
+    if (toolNameSatisfied(toolId, results[index].toolName)) {
       return true;
     }
   }
@@ -481,8 +532,21 @@ export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId:
       }
     }
   }
-  // ponytail: Loopy Gmail rows expose users.threads.*, while summary keeps the app-level tool id.
-  return summaryData(surface).toolName === toolId;
+  // ponytail: Gmail surfaces can expose raw Google tool names; add aliases here when real providers need them.
+  return toolNameSatisfied(toolId, summaryData(surface).toolName);
+}
+
+function toolNameSatisfied(expectedToolId: string, actualToolName: string): boolean {
+  if (actualToolName === expectedToolId) {
+    return true;
+  }
+  if (expectedToolId === 'gmail.mail.search') {
+    return actualToolName.indexOf('users.threads') === 0 || actualToolName === 'search_threads';
+  }
+  if (expectedToolId === 'gmail.draft.create') {
+    return actualToolName.indexOf('users.drafts') === 0 || actualToolName === 'create_draft';
+  }
+  return false;
 }
 
 function mergeArgs(base: Object | null, override: Object | null): Object | null {

@@ -47,6 +47,7 @@ import {
 } from './SocialHubViewData';
 
 const SOCIAL_HUB_CONNECTION_HEIGHT: number = 64;
+const SOCIAL_HUB_CONNECTION_CARD_WIDTH: string = '48%';
 
 interface SocialHubSendReplyArgs {
   text: string;
@@ -245,6 +246,26 @@ export struct SocialHubView {
         .width(size)
         .height(size)
         .objectFit(ImageFit.Contain)
+    } else if (platform === 'discord') {
+      Image($r('app.media.logo_discord'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'linkedin') {
+      Image($r('app.media.logo_linkedin'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'whatsapp') {
+      Image($r('app.media.logo_whatsapp'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
+    } else if (platform === 'instagram') {
+      Image($r('app.media.logo_instagram'))
+        .width(size)
+        .height(size)
+        .objectFit(ImageFit.Contain)
     } else {
       Image($r('app.media.icon_social'))
         .width(size)
@@ -256,43 +277,43 @@ export struct SocialHubView {
   @Builder
   private ConnectionCell(platform: SocialHubPlatform) {
     Row() {
-      this.PlatformLogo(platform, 28)
+      this.PlatformLogo(platform, 24)
       Column() {
         Text(socialHubPlatformLabel(platform))
-          .fontSize(14)
+          .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(COLOR_INK)
           .maxLines(1)
         Text(this.connectionDetail(this.connection(platform)))
-          .fontSize(12)
+          .fontSize(11)
           .fontColor(COLOR_MUTED)
-          .maxLines(2)
+          .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-      .margin({ left: 10, right: 10 })
+      .margin({ left: 8, right: 8 })
 
       Text(this.connectionStatusText(this.connection(platform)))
-        .fontSize(12)
+        .fontSize(11)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.connectionStatusColor(this.connection(platform)))
         .textAlign(TextAlign.Center)
-        .width(54)
-        .height(28)
+        .width(46)
+        .height(24)
         .backgroundColor(this.connectionStatusBackground(this.connection(platform)))
-        .borderRadius(10)
+        .borderRadius(9)
         .border({ width: 1, color: this.connectionStatusColor(this.connection(platform)) })
     }
-    .width('100%')
+    .width(SOCIAL_HUB_CONNECTION_CARD_WIDTH)
     .height(SOCIAL_HUB_CONNECTION_HEIGHT)
     .alignItems(VerticalAlign.Center)
-    .padding({ left: 12, right: 12 })
+    .padding({ left: 10, right: 9 })
     .backgroundColor(COLOR_CARD_RAISED)
     .borderRadius(16)
     .border({ width: 1, color: COLOR_LINE })
-    .margin({ top: platform === 'x' ? 0 : 8 })
+    .margin({ right: 8, top: 8 })
     .onClick(() => {
       if (this.canAuthorize(this.connection(platform))) {
         this.onAction(this.authorizeAction(platform));
@@ -634,10 +655,14 @@ export struct SocialHubView {
         .height(34)
         .alignItems(VerticalAlign.Center)
 
-        Column() {
+        Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
           this.ConnectionCell('x')
           this.ConnectionCell('slack')
           this.ConnectionCell('wecom')
+          this.ConnectionCell('discord')
+          this.ConnectionCell('linkedin')
+          this.ConnectionCell('whatsapp')
+          this.ConnectionCell('instagram')
         }
         .width('100%')
         .margin({ top: 8 })

@@ -161,11 +161,30 @@ function statusResult(status: MailProviderStatus): A2uiGenericToolResultData {
   };
 }
 
-export function mailResultsA2ui(surfaceId: string, toolId: string, threads: MailThreadResult[], statuses: MailProviderStatus[]): string {
+function dynamicResult(result: DynamicGenericToolResult): A2uiGenericToolResultData {
+  return {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview
+  };
+}
+
+export function mailResultsA2ui(
+  surfaceId: string,
+  toolId: string,
+  threads: MailThreadResult[],
+  statuses: MailProviderStatus[],
+  extras: DynamicGenericToolResult[] = []
+): string {
   const sorted = threads.slice().sort((left: MailThreadResult, right: MailThreadResult) => dateMs(right.receivedAt) - dateMs(left.receivedAt));
   const results: A2uiGenericToolResultData[] = [];
   statuses.forEach((status: MailProviderStatus) => results.push(statusResult(status)));
   sorted.forEach((thread: MailThreadResult) => results.push(threadResult(thread)));
+  extras.forEach((result: DynamicGenericToolResult) => results.push(dynamicResult(result)));
   const count = results.length;
   const title = '邮箱';
   const summary: A2uiSummaryData = {
