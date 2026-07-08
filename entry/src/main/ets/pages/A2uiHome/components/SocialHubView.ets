@@ -45,6 +45,7 @@ import {
   SocialHubMessageGroup,
   socialHubPlatformLabel,
   socialHubPrimaryText,
+  socialHubVisibleMessageCount,
   socialHubRecentMessageGroups
 } from './SocialHubViewData';
 
@@ -74,6 +75,10 @@ export struct SocialHubView {
 
   private selected(): SocialHubItemData {
     return socialHubSelected(this.surface);
+  }
+
+  private messageGroups(): SocialHubMessageGroup[] {
+    return socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5);
   }
 
   private isSelected(item: SocialHubItemData): boolean {
@@ -560,6 +565,8 @@ export struct SocialHubView {
 
   @Builder
   private MessageList() {
+    const groups = this.messageGroups();
+    const visibleCount = socialHubVisibleMessageCount(groups);
     Column() {
       Row() {
         Text('消息')
@@ -567,7 +574,7 @@ export struct SocialHubView {
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
           .layoutWeight(1)
-        Text(this.items().length.toString())
+        Text(visibleCount.toString())
           .fontSize(12)
           .fontColor(COLOR_MUTED)
       }
@@ -576,7 +583,7 @@ export struct SocialHubView {
       .alignItems(VerticalAlign.Center)
       .padding({ left: 12, right: 12 })
 
-      if (this.items().length === 0) {
+      if (visibleCount === 0) {
         Column() {
           Text('还没有真实消息')
             .fontSize(15)
@@ -595,7 +602,7 @@ export struct SocialHubView {
       } else {
         Scroll() {
           Column() {
-            ForEach(socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5), (group: SocialHubMessageGroup) => {
+            ForEach(groups, (group: SocialHubMessageGroup) => {
               Text(socialHubPlatformLabel(group.platform))
                 .fontSize(13)
                 .fontWeight(FontWeight.Bold)

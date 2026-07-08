@@ -5,7 +5,8 @@ import {
   socialHubKindLabel,
   socialHubPlatformLabel,
   socialHubPrimaryText,
-  socialHubRecentMessageGroups
+  socialHubRecentMessageGroups,
+  socialHubVisibleMessageCount
 } from '../main/ets/pages/A2uiHome/components/SocialHubViewData';
 import { normalizeSocialHubItem } from '@loop/agent-core';
 
@@ -57,6 +58,17 @@ export default function socialHubViewDataTest() {
       expect(groups[0].platform).assertEqual('slack');
       expect(groups[0].visibleItems.length).assertEqual(2);
       expect(groups[0].hiddenCount).assertEqual(1);
+    });
+
+    it('treats filtered-out message groups as empty for rendering', 0, () => {
+      const items = [
+        normalizeSocialHubItem({ id: 'x-old', platform: 'x', kind: 'message', text: 'old', timestamp: '2026-05-01T00:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'x-post', platform: 'x', kind: 'post', text: 'public', timestamp: '2026-07-08T00:00:00.000Z' })
+      ];
+      const groups = socialHubRecentMessageGroups(items, '2026-07-08T12:00:00.000Z', 5);
+
+      expect(groups.length).assertEqual(0);
+      expect(socialHubVisibleMessageCount(groups)).assertEqual(0);
     });
 
     it('maps SocialHub platforms to Composio toolkit candidates', 0, () => {

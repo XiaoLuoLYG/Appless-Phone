@@ -87,6 +87,14 @@ export function socialHubRecentMessageGroups(items: SocialHubItemData[], nowIso:
   return result;
 }
 
+export function socialHubVisibleMessageCount(groups: SocialHubMessageGroup[]): number {
+  let count = 0;
+  groups.forEach((group: SocialHubMessageGroup) => {
+    count += group.visibleItems.length;
+  });
+  return count;
+}
+
 export function socialHubAuthorText(item: SocialHubItemData): string {
   if (item.author.length > 0 && item.author === item.handle) {
     return item.author;
