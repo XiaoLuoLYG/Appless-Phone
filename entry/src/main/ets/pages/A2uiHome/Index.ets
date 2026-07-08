@@ -29,8 +29,10 @@ import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
 import {
   emptySocialHubDraft,
   SocialHubConnectionData,
+  SocialHubConnectionStatus,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPlatform
 } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import {
@@ -454,13 +456,30 @@ struct Index {
   }
 
   private composioAuthItemForToolkit(slug: string): ComposioAuthConfigItem | null {
-    const normalized = slug.trim().toLowerCase();
+    const normalized = this.normalizedComposioToolkitSlug(slug);
     for (let index = 0; index < this.composioAuthItems.length; index++) {
-      if (this.composioAuthItems[index].toolkitSlug.trim().toLowerCase() === normalized) {
+      if (this.normalizedComposioToolkitSlug(this.composioAuthItems[index].toolkitSlug) === normalized) {
         return this.composioAuthItems[index];
       }
     }
     return null;
+  }
+
+  private normalizedComposioToolkitSlug(slug: string): string {
+    const normalized = slug.trim().toLowerCase();
+    if (normalized === 'twitter') {
+      return 'x';
+    }
+    if (normalized === 'calendar') {
+      return 'googlecalendar';
+    }
+    if (normalized === 'microsoftoutlook') {
+      return 'outlook';
+    }
+    if (normalized === 'youtubev3' || normalized === 'youtubedata') {
+      return 'youtube';
+    }
+    return normalized;
   }
 
   private showComposioAuthList(message: string = ''): void {
@@ -893,22 +912,45 @@ struct Index {
       ' renderTick=' + this.surfaceRenderTick.toString());
   }
 
+  private socialHubComposioAuthItem(platform: SocialHubPlatform): ComposioAuthConfigItem | null {
+    const candidates = socialHubComposioToolkitCandidates(platform);
+    for (let index = 0; index < candidates.length; index++) {
+      const item = this.composioAuthItemForToolkit(candidates[index]);
+      if (item !== null) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  private composioSocialHubConnection(platform: SocialHubPlatform, displayName: string): SocialHubConnectionData {
+    const item = this.socialHubComposioAuthItem(platform);
+    if (item === null) {
+      return {
+        platform: platform,
+        status: 'needs_auth',
+        displayName: displayName,
+        accountId: '',
+        message: platform === 'wecom' ? '等待企业微信接入' : '等待 Composio 授权接入'
+      };
+    }
+    const status: SocialHubConnectionStatus = (item.status === 'connected' || item.connectedAccountId.length > 0 || item.canExecute) ?
+      'connected' : 'needs_auth';
+    return {
+      platform: platform,
+      status: status,
+      displayName: displayName,
+      accountId: item.connectedAccountId,
+      message: status === 'connected' ?
+        ('Composio 已授权' + (item.connectedAccountLabel.length > 0 ? '：' + item.connectedAccountLabel : '')) :
+        '等待 Composio 授权接入'
+    };
+  }
+
   private defaultSocialHubConnections(): SocialHubConnectionData[] {
     return [
-      {
-        platform: 'x',
-        status: 'needs_auth',
-        displayName: 'X',
-        accountId: '',
-        message: '等待授权接入'
-      },
-      {
-        platform: 'slack',
-        status: 'needs_auth',
-        displayName: 'Slack',
-        accountId: '',
-        message: '等待授权接入'
-      },
+      this.composioSocialHubConnection('x', 'X'),
+      this.composioSocialHubConnection('slack', 'Slack'),
       {
         platform: 'wecom',
         status: 'needs_auth',
@@ -916,34 +958,10 @@ struct Index {
         accountId: '',
         message: '等待授权接入'
       },
-      {
-        platform: 'discord',
-        status: 'needs_auth',
-        displayName: 'Discord',
-        accountId: '',
-        message: '等待 Composio 授权接入'
-      },
-      {
-        platform: 'linkedin',
-        status: 'needs_auth',
-        displayName: 'LinkedIn',
-        accountId: '',
-        message: '等待 Composio 授权接入'
-      },
-      {
-        platform: 'whatsapp',
-        status: 'needs_auth',
-        displayName: 'WhatsApp',
-        accountId: '',
-        message: '等待 Composio 授权接入'
-      },
-      {
-        platform: 'instagram',
-        status: 'needs_auth',
-        displayName: 'Instagram',
-        accountId: '',
-        message: '等待 Composio 授权接入'
-      }
+      this.composioSocialHubConnection('discord', 'Discord'),
+      this.composioSocialHubConnection('linkedin', 'LinkedIn'),
+      this.composioSocialHubConnection('whatsapp', 'WhatsApp'),
+      this.composioSocialHubConnection('instagram', 'Instagram')
     ];
   }
 
@@ -993,20 +1011,22 @@ struct Index {
     return store.getSurface();
   }
 
-  private openSocialHub(): void {
+  private async openSocialHub(): Promise<void> {
     this.showHistory = false;
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    await this.refreshComposioAuth();
     this.applySurface(this.createSocialHubSurface());
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: true,
       status: 'ready',
-      message: 'SocialHub 已打开；等待真实社交数据接入。',
+      message: 'SocialHub 已打开；正在加载近 30 天私信。',
       requestDebug: this.lastModelRequest,
       assistantDebug: this.lastModelOutput,
       error: ''
     }));
+    await this.callToolById('social.feed.search', '帮我查看最近30天所有已授权应用收到的私信消息', 'social_hub_default');
   }
 
   private applySocialHubData(path: string, value: A2uiDataValue): void {

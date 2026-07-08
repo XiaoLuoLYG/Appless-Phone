@@ -626,7 +626,7 @@ function mergeFeedResults(results: SocialHubFeedResult[]): SocialHubFeedResult {
 export function socialHubPrivateItems(items: SocialHubItemData[]): SocialHubItemData[] {
   const result: SocialHubItemData[] = [];
   items.forEach((item: SocialHubItemData) => {
-    if (item.kind === 'message' || item.kind === 'mention' || item.kind === 'connection') {
+    if (item.kind === 'message') {
       result.push(item);
     }
   });

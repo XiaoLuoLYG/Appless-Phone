@@ -13,7 +13,8 @@ import {
   currentComposioUserId,
   ComposioSearchTool,
   isComposioDynamicPrompt,
-  isUnsafeComposioExecute
+  isUnsafeComposioExecute,
+  slackSearchQueryForPrompt
 } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
 
@@ -86,6 +87,18 @@ export default function composioDynamicBackendTest() {
         looseObject('{"threadId":"thread-999"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(threadArgs.threadId).assertEqual('thread-999');
+
+      const searchTool = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},\\"max_results\\":{\\"type\\":\\"number\\"},\\"include_payload\\":{\\"type\\":\\"boolean\\"},\\"verbose\\":{\\"type\\":\\"boolean\\"}}}"}');
+      const searchArgs = composioArgumentsForTool(
+        searchTool,
+        '帮我查看我Gmail里和我eccv论文相关的邮件',
+        'gmail.mail.search',
+        looseObject('{"query":"ECCV OR paper OR manuscript OR submission OR review"}')
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(searchArgs.query).assertEqual('ECCV OR paper OR manuscript OR submission OR review');
+      expect(searchArgs.max_results).assertEqual(5);
+      expect(searchArgs.include_payload).assertFalse();
+      expect(searchArgs.verbose).assertTrue();
     });
 
     it('maps Calendar fixed-tool args into create and update schemas', 0, () => {
@@ -112,6 +125,44 @@ export default function composioDynamicBackendTest() {
       expect(updateArgs.summary).assertEqual('AIPhoneDemo sync');
       expect(updateArgs.start).assertEqual('2026-07-30T16:00:00+08:00');
       expect(updateArgs.end).assertEqual('2026-07-30T16:30:00+08:00');
+    });
+
+    it('uses a bounded Slack query for default recent-message SocialHub prompts', 0, () => {
+      const searchTool = composioTool('{"toolSlug":"SLACK_SEARCH_MESSAGES","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},\\"sort\\":{\\"type\\":\\"string\\"},\\"count\\":{\\"type\\":\\"number\\"}}}"}');
+      const args = composioArgumentsForTool(
+        searchTool,
+        '帮我用 Composio Slack 查最近30天所有已授权应用收到的私信消息',
+        '',
+        null
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(slackSearchQueryForPrompt('帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息')).assertEqual('AIPhoneDemo');
+      expect((args.query as string).indexOf('after:')).assertEqual(0);
+      expect(args.sort).assertEqual('timestamp');
+      expect(args.count).assertEqual(5);
+    });
+
+    it('keeps Composio Gmail execute previews compact and parseable', 0, () => {
+      const observation = JSON.stringify({
+        data: {
+          messages: [{
+            threadId: 'thread-1',
+            messageId: 'message-1',
+            sender: 'OpenReview <noreply@openreview.net>',
+            subject: '[ECCV 2026] Paper Decision Notification',
+            messageText: 'ECCV decision '.repeat(2000),
+            payload: { headers: [{ name: 'X-Large', value: 'x'.repeat(20000) }] }
+          }]
+        },
+        error: null
+      });
+      const result = composioDynamicResultFromObservation('execute', observation, 'GMAIL_FETCH_EMAILS', 'Gmail ECCV');
+      const preview = JSON.parse(result.rawPreview) as Record<string, Object[]>;
+
+      expect(result.status).assertEqual('success');
+      expect(preview.messages.length).assertEqual(1);
+      expect(JSON.stringify(preview).indexOf('[ECCV 2026]')).assertLarger(-1);
+      expect(result.rawPreview.length).assertLess(16000);
     });
 
     it('does not synthesize missing fixed write args from prompt text', 0, () => {
@@ -203,8 +254,20 @@ export default function composioDynamicBackendTest() {
 
       const gmailRead = composioTool('{"toolSlug":"GMAIL_GET_THREAD","description":"Read Gmail thread"}');
       const gmailDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
+      const gmailEmails = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","description":"Fetch Gmail emails"}');
+      const gmailThreads = composioTool('{"toolSlug":"GMAIL_LIST_THREADS","description":"List Gmail threads"}');
+      const gmailPeople = composioTool('{"toolSlug":"GMAIL_SEARCH_PEOPLE","description":"Search Gmail people and contacts"}');
       expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailRead, 'gmail.thread.read'))
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
+        .assertLarger(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailThreads, 'gmail.mail.search'));
+      expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
+        .assertLarger(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailPeople, 'gmail.mail.search'));
+
+      const playlistList = composioTool('{"toolSlug":"YOUTUBE_LIST_USER_PLAYLISTS","description":"List user playlists"}');
+      const playlistItems = composioTool('{"toolSlug":"YOUTUBE_LIST_PLAYLIST_ITEMS","description":"List playlist items"}');
+      expect(composioPreferredToolScore('帮我查看我的 YouTube 播放列表', playlistList, 'youtube.mine.playlists'))
+        .assertLarger(composioPreferredToolScore('帮我查看我的 YouTube 播放列表', playlistItems, 'youtube.mine.playlists'));
     });
 
     it('prefers safe Gmail draft slugs over send or delete draft slugs', 0, () => {
@@ -290,6 +353,20 @@ export default function composioDynamicBackendTest() {
       expect(result.title).assertEqual('Composio GitHub 结果');
       expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
       expect(JSON.stringify(result.rows).indexOf('Add Composio dynamic backend')).assertLarger(-1);
+    });
+
+    it('treats Gmail draft payloads with draft ids as successful execute results', 0, () => {
+      const observation = '{"data":{"display_url":"https://mail.google.com/mail/u/0/#drafts/r-1","id":"draft-1","threadId":"thread-1"},"error":{"display_url":"https://mail.google.com/mail/u/0/#drafts/r-1","id":"draft-1","threadId":"thread-1"}}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 回复草稿'
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.summary.indexOf('GMAIL_CREATE_EMAIL_DRAFT')).assertLarger(-1);
+      expect(result.rawPreview.indexOf('mail.google.com')).assertLarger(-1);
     });
 
     it('maps Google Docs file payload to display rows', 0, () => {

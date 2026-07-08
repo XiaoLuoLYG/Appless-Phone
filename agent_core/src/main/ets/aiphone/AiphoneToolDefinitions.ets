@@ -126,9 +126,9 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     backendPriority: ['local_adapter'],
     authModes: ['oauth', 'provider_key'],
     inputSchema: 'xPostSearchQuery',
-    outputSchema: 'socialHubFeed',
-    a2uiComponent: 'SocialHub',
-    actions: ['social.reply.draft']
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
   },
   {
     toolId: 'mail.search',

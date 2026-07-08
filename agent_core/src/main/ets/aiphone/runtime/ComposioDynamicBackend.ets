@@ -156,6 +156,24 @@ function containsAny(value: string, needles: string[]): boolean {
 
 function composioToolkitFromPrompt(prompt: string): string {
   const lower = prompt.toLowerCase();
+  if (lower.indexOf('composio twitter') >= 0 || lower.indexOf('composio x') >= 0) {
+    return 'twitter';
+  }
+  if (lower.indexOf('composio slack') >= 0) {
+    return 'slack';
+  }
+  if (lower.indexOf('composio discord') >= 0) {
+    return 'discord';
+  }
+  if (lower.indexOf('composio linkedin') >= 0) {
+    return 'linkedin';
+  }
+  if (lower.indexOf('composio whatsapp') >= 0 || lower.indexOf('composio whats app') >= 0) {
+    return 'whatsapp';
+  }
+  if (lower.indexOf('composio instagram') >= 0 || lower.indexOf('composio instgram') >= 0) {
+    return 'instagram';
+  }
   if (lower.indexOf('gmail') >= 0 || prompt.indexOf('谷歌邮箱') >= 0 || prompt.indexOf('谷歌邮件') >= 0) {
     return 'gmail';
   }
@@ -165,9 +183,6 @@ function composioToolkitFromPrompt(prompt: string): string {
   if (lower.indexOf('youtube') >= 0 || prompt.indexOf('油管') >= 0) {
     return 'youtube';
   }
-  if (lower.indexOf('twitter') >= 0 || lower.indexOf(' x ') >= 0 || lower.indexOf('x/twitter') >= 0) {
-    return 'twitter';
-  }
   if (lower.indexOf('google drive') >= 0) {
     return 'googledrive';
   }
@@ -176,6 +191,9 @@ function composioToolkitFromPrompt(prompt: string): string {
   }
   if (lower.indexOf('outlook') >= 0 || lower.indexOf('微软邮箱') >= 0) {
     return 'outlook';
+  }
+  if (lower.indexOf('slack') >= 0) {
+    return 'slack';
   }
   if (lower.indexOf('discord') >= 0) {
     return 'discord';
@@ -189,6 +207,9 @@ function composioToolkitFromPrompt(prompt: string): string {
   if (lower.indexOf('instagram') >= 0 || lower.indexOf('instgram') >= 0 || lower.indexOf(' ig ') >= 0) {
     return 'instagram';
   }
+  if (lower.indexOf('twitter') >= 0 || lower.indexOf(' x ') >= 0 || lower.indexOf('x/twitter') >= 0) {
+    return 'twitter';
+  }
   if (lower.indexOf('spotify') >= 0 || lower.indexOf('soptify') >= 0) {
     return 'spotify';
   }
@@ -200,9 +221,6 @@ function composioToolkitFromPrompt(prompt: string): string {
   }
   if (lower.indexOf('github') >= 0) {
     return 'github';
-  }
-  if (lower.indexOf('slack') >= 0) {
-    return 'slack';
   }
   if (lower.indexOf('notion') >= 0) {
     return 'notion';
@@ -255,6 +273,21 @@ function promptSearchKeyword(prompt: string): string {
   return trimmed;
 }
 
+function isoDateDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+}
+
+export function slackSearchQueryForPrompt(prompt: string): string {
+  const keyword = promptSearchKeyword(prompt).trim();
+  if (prompt.indexOf('提到') >= 0 && keyword.length > 0) {
+    return keyword;
+  }
+  if (containsAny(prompt, ['最近30', '最近 30', '近30', '近 30', '私信', '消息', 'dm', 'direct message'])) {
+    return 'after:' + isoDateDaysAgo(30);
+  }
+  return keyword;
+}
+
 function repoNameFromPrompt(prompt: string): string {
   if (prompt.indexOf('Appless-Phone') >= 0) {
     return 'Appless-Phone';
@@ -269,9 +302,18 @@ function ownerNameFromPrompt(prompt: string): string {
   return '';
 }
 
-function normalizedComposioUseCase(prompt: string): string {
+function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): string {
   const keyword = promptSearchKeyword(prompt);
   const toolkit = composioToolkitFromPrompt(prompt);
+  if (fixedToolId === 'youtube.mine.playlists') {
+    return 'List my YouTube playlists for the authenticated user';
+  }
+  if (fixedToolId === 'youtube.mine.subscriptions') {
+    return 'List my YouTube subscriptions for the authenticated user';
+  }
+  if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
+    return 'Create a Gmail draft for review';
+  }
   if (toolkit === 'gmail') {
     return 'Search Gmail messages for ' + keyword;
   }
@@ -308,8 +350,11 @@ function normalizedComposioUseCase(prompt: string): string {
   if (toolkit === 'ticketmaster') {
     return 'Search Ticketmaster events for ' + keyword;
   }
+  if (containsAny(prompt, ['slack']) && containsAny(prompt, ['最近30', '最近 30', '近30', '近 30', '私信', 'dm', 'direct message'])) {
+    return 'List recent Slack direct messages and channel messages from the last 30 days';
+  }
   if (containsAny(prompt, ['slack']) && containsAny(prompt, ['消息', 'message', 'mention', '提到'])) {
-    return 'Search Slack messages mentioning ' + keyword;
+    return 'Search Slack messages mentioning ' + slackSearchQueryForPrompt(prompt);
   }
   if (containsAny(prompt, ['github']) && containsAny(prompt, ['pr', 'pull request', 'pull requests'])) {
     const owner = ownerNameFromPrompt(prompt);
@@ -530,6 +575,13 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
     (slugContainsAny(slug, ['search', 'find', 'list']) && slugContainsAny(slug, ['gmail', 'mail', 'message', 'thread']))) {
     score += 260;
   }
+  if (fixedToolId === 'gmail.mail.search' && slug === 'gmail_fetch_emails') {
+    score += 500;
+  }
+  if (fixedToolId === 'gmail.mail.search' &&
+    slugContainsAny(slug, ['people', 'person', 'contact', 'profile'])) {
+    score -= 800;
+  }
   if (fixedToolId === 'gmail.thread.read' &&
     (slugContainsAny(slug, ['get', 'read', 'fetch']) && slugContainsAny(slug, ['gmail', 'thread', 'message']))) {
     score += 400;
@@ -555,6 +607,16 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
   if (fixedToolId === 'youtube.mine.playlists' &&
     (slugContainsAny(slug, ['playlist']) && slugContainsAny(slug, ['list', 'get', 'search']))) {
     score += 400;
+  }
+  if (fixedToolId === 'youtube.mine.playlists' &&
+    (slug.indexOf('user_playlist') >= 0 || slug.indexOf('user_playlists') >= 0 ||
+      slug.indexOf('my_playlist') >= 0 || description.indexOf('user playlist') >= 0)) {
+    score += 700;
+  }
+  if (fixedToolId === 'youtube.mine.playlists' &&
+    (slug.indexOf('playlist_item') >= 0 || slug.indexOf('playlist_items') >= 0 ||
+      description.indexOf('playlist item') >= 0)) {
+    score -= 700;
   }
   if (fixedToolId === 'youtube.mine.subscriptions' &&
     (slugContainsAny(slug, ['subscription']) && slugContainsAny(slug, ['list', 'get', 'search']))) {
@@ -710,8 +772,15 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
     setIfSupported(args, schema, 'page_size', 5);
     return args;
   }
-  if (lower === 'slack_search_messages') {
+  if (lower === 'gmail_fetch_emails') {
     setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'max_results', 5);
+    setIfSupported(args, schema, 'include_payload', false);
+    setIfSupported(args, schema, 'verbose', true);
+    return args;
+  }
+  if (lower === 'slack_search_messages') {
+    setIfSupported(args, schema, 'query', slackSearchQueryForPrompt(prompt));
     setIfSupported(args, schema, 'sort', 'timestamp');
     setIfSupported(args, schema, 'count', 5);
     return args;
@@ -965,7 +1034,49 @@ function topLevelMessage(payload: Record<string, Object | string | number | bool
   return stringField(payload, ['message', 'summary', 'error']);
 }
 
-function executionErrorMessage(payload: Object): string {
+function objectRecord(value: Object | string | number | boolean | null | undefined): Record<string, Object | string | number | boolean | null | undefined> | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, Object | string | number | boolean | null | undefined>;
+  }
+  if (typeof value === 'string' && value.trim().charAt(0) === '{') {
+    try {
+      const parsed = JSON.parse(value) as Object;
+      if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, Object | string | number | boolean | null | undefined>;
+      }
+    } catch (_error) {
+    }
+  }
+  return null;
+}
+
+function valueLooksLikeGmailDraft(value: Object | string | number | boolean | null | undefined): boolean {
+  const record = objectRecord(value);
+  if (record === null) {
+    return false;
+  }
+  const id = stringField(record, ['id', 'draftId', 'draft_id']);
+  const threadId = stringField(record, ['threadId', 'thread_id']);
+  const url = stringField(record, ['display_url', 'url', 'web_url']);
+  return id.length > 0 && (threadId.length > 0 || url.indexOf('mail.google.com') >= 0);
+}
+
+function successfulGmailDraftPayload(payload: Object, toolSlug: string): boolean {
+  const lower = toolSlug.toLowerCase();
+  if (lower.indexOf('gmail') < 0 || lower.indexOf('draft') < 0) {
+    return false;
+  }
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  return valueLooksLikeGmailDraft(record.data) || valueLooksLikeGmailDraft(record.error) || valueLooksLikeGmailDraft(record);
+}
+
+function executionErrorMessage(payload: Object, toolSlug: string = ''): string {
+  if (successfulGmailDraftPayload(payload, toolSlug)) {
+    return '';
+  }
   const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
   const direct = stringField(record, ['error']);
   if (direct.length > 0) {
@@ -976,6 +1087,99 @@ function executionErrorMessage(payload: Object): string {
     return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['error', 'message']);
   }
   return '';
+}
+
+function compactNestedText(record: Record<string, Object | string | number | boolean | null | undefined>, fieldName: string): string {
+  const value = record[fieldName];
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const nested = value as Record<string, Object | string | number | boolean | null | undefined>;
+    return stringField(nested, ['body', 'text', 'snippet', 'summary', 'title', 'url']);
+  }
+  return textOf(value);
+}
+
+function compactComposioItem(item: Object): Object {
+  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const compact: Record<string, Object | string | number | boolean> = {};
+  const fields = [
+    'id', 'threadId', 'thread_id', 'messageId', 'message_id', 'display_url',
+    'sender', 'from', 'to', 'subject', 'title', 'name', 'snippet',
+    'messageTimestamp', 'date', 'timestamp', 'publishedAt', 'url'
+  ];
+  fields.forEach((name: string) => {
+    const value = record[name];
+    if (value !== undefined && value !== null && typeof value !== 'object') {
+      compact[name] = textOf(value).substring(0, 1000);
+    }
+  });
+  const preview = compactNestedText(record, 'preview');
+  if (preview.length > 0) {
+    compact.preview = preview.substring(0, 1000);
+  }
+  const messageText = stringField(record, ['messageText', 'text', 'description']);
+  if (messageText.length > 0) {
+    compact.messageText = messageText.substring(0, 1000);
+  }
+  const snippet = record.snippet;
+  if (snippet !== undefined && snippet !== null && typeof snippet === 'object' && !Array.isArray(snippet)) {
+    const snippetRecord = snippet as Record<string, Object | string | number | boolean | null | undefined>;
+    const title = nestedStringField(snippetRecord, ['localized', 'title']);
+    if (title.length > 0) {
+      compact.title = title;
+    } else {
+      appendCompactString(compact, 'title', stringField(snippetRecord, ['title']));
+    }
+    appendCompactString(compact, 'channelTitle', stringField(snippetRecord, ['channelTitle']));
+    appendCompactString(compact, 'publishedAt', stringField(snippetRecord, ['publishedAt']));
+    const thumbnail = youtubeThumbnailUrl(snippetRecord);
+    if (thumbnail.length > 0) {
+      compact.thumbnail = thumbnail;
+    }
+  }
+  return compact;
+}
+
+function appendCompactString(target: Record<string, Object | string | number | boolean>, key: string, value: string): void {
+  const clean = value.trim();
+  if (clean.length > 0 && target[key] === undefined) {
+    target[key] = clean.substring(0, 1000);
+  }
+}
+
+function youtubeThumbnailUrl(record: Record<string, Object | string | number | boolean | null | undefined>): string {
+  const thumbnails = record.thumbnails;
+  if (thumbnails === undefined || thumbnails === null || typeof thumbnails !== 'object' || Array.isArray(thumbnails)) {
+    return '';
+  }
+  const sizes = thumbnails as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = ['maxres', 'standard', 'high', 'medium', 'default'];
+  for (let index = 0; index < keys.length; index++) {
+    const item = sizes[keys[index]];
+    if (item !== undefined && item !== null && typeof item === 'object' && !Array.isArray(item)) {
+      const url = stringField(item as Record<string, Object | string | number | boolean | null | undefined>, ['url']);
+      if (url.length > 0) {
+        return url;
+      }
+    }
+  }
+  return '';
+}
+
+function rawPreviewForExecute(payload: Object, observation: string): string {
+  const hit = firstArrayHit(payload);
+  if (!hit.found) {
+    return observation.substring(0, 16000);
+  }
+  const items: Object[] = [];
+  for (let index = 0; index < hit.items.length && index < 10; index++) {
+    items.push(compactComposioItem(hit.items[index]));
+  }
+  const compact: Record<string, Object[]> = {};
+  compact[hit.label] = items;
+  return JSON.stringify(compact).substring(0, 16000);
 }
 
 function rowsForExecute(payload: Object, prompt: string, toolSlug: string): A2uiLabelValueData[] {
@@ -1191,7 +1395,7 @@ export function composioDynamicResultFromObservation(
   try {
     const payload = JSON.parse(observation) as ComposioSearchObservation;
     if (phase === 'execute') {
-      const errorMessage = executionErrorMessage(payload as Object);
+      const errorMessage = executionErrorMessage(payload as Object, toolSlug);
       const rows = rowsForExecute(payload as Object, prompt, toolSlug.length > 0 ? toolSlug : 'dynamic.search');
       if (errorMessage.length > 0) {
         return {
@@ -1211,7 +1415,7 @@ export function composioDynamicResultFromObservation(
         status: 'success',
         summary: executeSummary(toolSlug.length > 0 ? toolSlug : 'dynamic.search', rows),
         rows: rows,
-        rawPreview: observation.substring(0, 16000)
+        rawPreview: rawPreviewForExecute(payload as Object, observation)
       };
     }
     const slug = firstToolSlug(payload);
@@ -1253,14 +1457,14 @@ async function callComposioSearchAndExecute(
   prompt: string,
   parsed: ComposioExecuteArgs
 ): Promise<DynamicGenericToolResult> {
-  const searchObservation = await current.search(normalizedComposioUseCase(prompt));
+  const fixedToolId = textOf(parsed.fixedToolId).trim();
+  const searchObservation = await current.search(normalizedComposioUseCase(prompt, fixedToolId));
   let payload: ComposioSearchObservation;
   try {
     payload = JSON.parse(searchObservation) as ComposioSearchObservation;
   } catch (_error) {
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
-  const fixedToolId = textOf(parsed.fixedToolId).trim();
   const tool = bestToolForPrompt(payload, prompt, fixedToolId);
   if (tool === null) {
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);

@@ -142,6 +142,68 @@ export default function gmailToolA2uiTest() {
       expect(store.getSurface().dataModelJson.indexOf('FULL BODY SHOULD NOT LEAK')).assertEqual(-1);
     });
 
+    it('adapts Composio Gmail list results into the old per-message cards', 0, () => {
+      const composio: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail 结果',
+        status: 'success',
+        summary: 'Composio 已执行 GMAIL_LIST_THREADS，返回 2 条可展示结果。',
+        rows: [{ label: '结果数量', value: '2' }],
+        rawPreview: '{"data":{"threads":[{"id":"thread-1","subject":"Paper review update","from":"Chair <chair@example.edu>","date":"Wed, 8 Jul 2026 10:00:00 +0800","snippet":"Please check the latest review note.","body":"FULL BODY SHOULD NOT LEAK"},{"id":"thread-2","subject":"Camera ready","from":"Editor <editor@example.edu>","date":"Wed, 8 Jul 2026 11:00:00 +0800","snippet":"Camera ready reminder."}]}}'
+      };
+      const store = surfaceFromJsonl(gmailThreadResultsA2ui('gmail_results', 'gmail.mail.search', [composio]));
+      const rendered = genericToolResults(store.getSurface());
+
+      expect(rendered.length).assertEqual(2);
+      expect(rendered[0].sourceTag).assertEqual('Gmail API');
+      expect(rendered[0].toolName).assertEqual('users.threads.get');
+      expect(rendered[0].title).assertEqual('Paper review update');
+      expect(rowValue(rendered[0], 'Thread ID')).assertEqual('thread-1');
+      expect(rowValue(rendered[0], 'From')).assertEqual('Chair <chair@example.edu>');
+      expect(rendered[0].summary).assertEqual('Please check the latest review note.');
+      expect(store.getSurface().dataModelJson.indexOf('FULL BODY SHOULD NOT LEAK')).assertEqual(-1);
+    });
+
+    it('prefers compact Composio Gmail messages over technical query rows', 0, () => {
+      const composio: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail 结果',
+        status: 'success',
+        summary: 'Composio 已执行 GMAIL_FETCH_EMAILS，返回真实结果。',
+        rows: [{ label: 'query', value: 'ECCV OR paper OR manuscript OR submission OR review' }],
+        rawPreview: '{"messages":[{"threadId":"thread-eccv","messageId":"msg-eccv","sender":"OpenReview <noreply@openreview.net>","subject":"[ECCV 2026] Paper Decision Notification","messageText":"ECCV decision update"}]}'
+      };
+      const store = surfaceFromJsonl(gmailThreadResultsA2ui('gmail_results', 'gmail.mail.search', [composio]));
+      const rendered = genericToolResults(store.getSurface());
+
+      expect(rendered.length).assertEqual(1);
+      expect(rendered[0].title).assertEqual('[ECCV 2026] Paper Decision Notification');
+      expect(rowValue(rendered[0], 'Thread ID')).assertEqual('thread-eccv');
+      expect(rowValue(rendered[0], 'From')).assertEqual('OpenReview <noreply@openreview.net>');
+      expect(rendered[0].summary).assertEqual('ECCV decision update');
+    });
+
+    it('renders failed Composio Gmail reads as old Gmail failure cards', 0, () => {
+      const composio: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail 结果',
+        status: 'error',
+        summary: 'Composio 搜索工具失败：Operation timeout',
+        rows: [{ label: 'Source', value: 'Composio Gmail' }],
+        rawPreview: ''
+      };
+      const store = surfaceFromJsonl(gmailThreadResultsA2ui('gmail_results', 'gmail.mail.search', [composio]));
+      const rendered = genericToolResults(store.getSurface());
+
+      expect(rendered.length).assertEqual(1);
+      expect(rendered[0].sourceTag).assertEqual('Gmail');
+      expect(rendered[0].title).assertEqual('Gmail 调用失败');
+      expect(store.getSurface().dataModelJson.indexOf('Composio Gmail 结果')).assertEqual(-1);
+    });
+
     it('renders drafts and blocked send without claiming send success', 0, () => {
       const draftStore = surfaceFromJsonl(gmailDraftPreviewA2ui('gmail_draft', draftResult()));
       const draft = genericToolResults(draftStore.getSurface())[0];

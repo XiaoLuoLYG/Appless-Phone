@@ -4,6 +4,8 @@ export function officialMediaVideoPlaybackUrl(value: string): string {
   const url = value.trim();
   if (url.startsWith('https://www.youtube.com/watch?') ||
     url.startsWith('https://youtube.com/watch?') ||
+    url.startsWith('https://www.youtube.com/playlist?') ||
+    url.startsWith('https://youtube.com/playlist?') ||
     url.startsWith('https://youtu.be/') ||
     url.startsWith('https://player.bilibili.com/player.html?') ||
     url.startsWith('https://www.bilibili.com/video/') ||
@@ -29,6 +31,7 @@ function rowValue(item: A2uiGenericToolResultData, labels: string[]): string {
 export function isMediaVideoResult(item: A2uiGenericToolResultData): boolean {
   return item.toolName === 'media.video.search' ||
     item.toolName === 'youtube.video.search' ||
+    item.toolName === 'youtube.mine.playlists' ||
     item.sourceTag === 'YouTube Data API' ||
     item.sourceTag === '哔哩哔哩';
 }

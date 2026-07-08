@@ -1231,6 +1231,16 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('6月25日')).assertEqual(-1);
     });
 
+    it('does not mark Google Calendar as synced when Composio auth is missing', 0, () => {
+      const doc = calendarEmptySearchDocumentFixture();
+      doc.subtitle = 'Composio 用户 aiphone-luoyige 没有 ACTIVE connected account';
+      doc.blocks[0].subtitle = doc.subtitle;
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 待授权')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已同步')).assertEqual(-1);
+    });
+
     it('renders Google Calendar create results as a write confirmation', 0, () => {
       const html = renderHtmlHomeDocument(calendarCreateDocumentFixture());
 
@@ -1341,9 +1351,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Bilibili video')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-youtube"')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-bilibili"')).assertLarger(-1);
-      expect(html.indexOf('https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;charset=utf-8,%3Csvg')).assertLarger(-1);
-      expect(html.indexOf('%3Ebilibili%3C/text%3E')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRkYwMDAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDBBMUQ2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
       expect(html.indexOf('data-filter="youtube"')).assertLarger(-1);
       expect(html.indexOf('data-filter="bilibili"')).assertLarger(-1);
       expect(html.indexOf('data-filter="playable"')).assertEqual(-1);

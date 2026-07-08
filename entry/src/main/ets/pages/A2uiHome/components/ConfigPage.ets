@@ -50,7 +50,6 @@ const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
   { slug: 'instagram', name: 'Instagram' },
   { slug: 'youtube', name: 'YouTube' },
   { slug: 'x', name: 'X' },
-  { slug: 'twitter', name: 'Twitter' },
   { slug: 'spotify', name: 'Spotify' },
   { slug: 'tiktok', name: 'TikTok' },
   { slug: 'ticketmaster', name: 'Ticketmaster' },
@@ -190,19 +189,36 @@ export struct ConfigPage {
   }
 
   private authItemForToolkit(slug: string): ComposioAuthConfigItem | null {
-    const normalized = slug.trim().toLowerCase();
+    const normalized = this.normalizedToolkitSlug(slug);
     for (let index = 0; index < this.composioAuthItems.length; index++) {
-      if (this.composioAuthItems[index].toolkitSlug.trim().toLowerCase() === normalized) {
+      if (this.normalizedToolkitSlug(this.composioAuthItems[index].toolkitSlug) === normalized) {
         return this.composioAuthItems[index];
       }
     }
     return null;
   }
 
-  private hasToolkit(previews: ComposioToolkitSummary[], slug: string): boolean {
+  private normalizedToolkitSlug(slug: string): string {
     const normalized = slug.trim().toLowerCase();
+    if (normalized === 'twitter') {
+      return 'x';
+    }
+    if (normalized === 'calendar') {
+      return 'googlecalendar';
+    }
+    if (normalized === 'microsoftoutlook') {
+      return 'outlook';
+    }
+    if (normalized === 'youtubev3' || normalized === 'youtubedata') {
+      return 'youtube';
+    }
+    return normalized;
+  }
+
+  private hasToolkit(previews: ComposioToolkitSummary[], slug: string): boolean {
+    const normalized = this.normalizedToolkitSlug(slug);
     for (let index = 0; index < previews.length; index++) {
-      if (previews[index].slug === normalized) {
+      if (this.normalizedToolkitSlug(previews[index].slug) === normalized) {
         return true;
       }
     }
@@ -213,7 +229,7 @@ export struct ConfigPage {
     const previews: ComposioToolkitSummary[] = COMPOSIO_SUPPORTED_TOOLKITS.slice();
     for (let index = 0; index < this.composioAuthItems.length; index++) {
       const item = this.composioAuthItems[index];
-      const slug = item.toolkitSlug.trim().toLowerCase();
+      const slug = this.normalizedToolkitSlug(item.toolkitSlug);
       if (slug.length > 0 && !this.hasToolkit(previews, slug)) {
         previews.push({
           slug: slug,
@@ -247,20 +263,29 @@ export struct ConfigPage {
     return count;
   }
 
+  private composioToolkitNameFontSize(summary: ComposioToolkitSummary): number {
+    return summary.name.length > 12 ? 9 : 11;
+  }
+
   @Builder
   ComposioToolkitTile(summary: ComposioToolkitSummary) {
     Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
-        Image(composioToolkitLogoResource(summary.slug))
-          .width(30)
-          .height(30)
-          .objectFit(ImageFit.Contain)
-          .borderRadius(8)
+        if (composioToolkitLogoResource(summary.slug) !== null) {
+          Image(composioToolkitLogoResource(summary.slug) as Resource)
+            .width(30)
+            .height(30)
+            .objectFit(ImageFit.Contain)
+        } else {
+          Blank()
+            .width(30)
+            .height(30)
+        }
         Text(summary.name)
-          .fontSize(11)
+          .fontSize(this.composioToolkitNameFontSize(summary))
           .fontWeight(FontWeight.Medium)
           .fontColor(COLOR_INK)
-          .maxLines(1)
+          .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 7 })
         Text(this.composioStatusLabel(summary.slug))

@@ -50,6 +50,7 @@ export default function socialHubViewDataTest() {
         normalizeSocialHubItem({ id: 'slack-2', platform: 'slack', kind: 'message', text: 'b', timestamp: '2026-07-08T09:00:00.000Z' }),
         normalizeSocialHubItem({ id: 'slack-3', platform: 'slack', kind: 'message', text: 'c', timestamp: '2026-07-08T08:00:00.000Z' }),
         normalizeSocialHubItem({ id: 'x-old', platform: 'x', kind: 'message', text: 'old', timestamp: '2026-05-01T00:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'x-mention', platform: 'x', kind: 'mention', text: 'public mention', timestamp: '2026-07-08T00:30:00.000Z' }),
         normalizeSocialHubItem({ id: 'x-post', platform: 'x', kind: 'post', text: 'public', timestamp: '2026-07-08T00:00:00.000Z' })
       ];
       const groups = socialHubRecentMessageGroups(items, '2026-07-08T12:00:00.000Z', 2);

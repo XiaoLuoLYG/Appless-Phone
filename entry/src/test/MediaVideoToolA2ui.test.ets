@@ -35,12 +35,13 @@ export default function mediaVideoToolA2uiTest() {
       const errorRow = result('哔哩哔哩', 'media.video.search', 'error', 'https://www.bilibili.com/video/BV1h57y6pE5o');
       const missingUrl = result('哔哩哔哩', 'media.video.search', 'success', '');
       const nonUrl = result('哔哩哔哩', 'media.video.search', 'success', 'not-a-url');
-      const playlist = result('YouTube Data API', 'youtube.mine.playlists', 'success', 'https://www.youtube.com/playlist?list=PL123');
+      const playlist = result('Composio YouTube', 'youtube.mine.playlists', 'success', 'https://www.youtube.com/playlist?list=PL123');
 
       expect(mediaVideoPlaybackAction(errorRow)).assertEqual(null);
       expect(mediaVideoPlaybackAction(missingUrl)).assertEqual(null);
       expect(mediaVideoPlaybackAction(nonUrl)).assertEqual(null);
-      expect(mediaVideoPlaybackAction(playlist)).assertEqual(null);
+      expect(isMediaVideoResult(playlist)).assertTrue();
+      expect(mediaVideoPlaybackAction(playlist)?.prompt).assertEqual('https://www.youtube.com/playlist?list=PL123');
     });
   });
 }

@@ -7,7 +7,7 @@ const LOG_DOMAIN: number = 0x1200;
 const LOG_TAG: string = 'LoopComposio';
 const CONNECT_TIMEOUT_MS: number = 15000;
 const READ_TIMEOUT_MS: number = 30000;
-const MAX_OBSERVATION_CHARS: number = 16000;
+const MAX_OBSERVATION_CHARS: number = 200000;
 const MAX_ACCOUNT_PAGES: number = 10;
 const MAX_SEARCH_DESCRIPTION_CHARS: number = 600;
 const MAX_SEARCH_SCHEMA_CHARS: number = 3000;
@@ -222,12 +222,15 @@ export class ComposioSessionClient {
       return;
     }
     try {
+      this.discoveryError = '';
+      this.toolkitAccounts.clear();
       await this.discoverConnectedAccounts();
       if (this.toolkitAccounts.size === 0) {
         this.discoveryError = `Composio 用户 ${this.config.userId} 没有 ACTIVE connected account`;
       }
     } catch (error) {
       this.discoveryError = this.safeFailure('发现授权 Toolkit', error);
+      this.initialized = false;
     }
   }
 

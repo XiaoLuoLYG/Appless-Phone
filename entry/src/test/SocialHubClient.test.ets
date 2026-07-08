@@ -31,8 +31,8 @@ export default function socialHubClientTest() {
       expect(filtered.connections[0].platform).assertEqual('x');
     });
 
-    it('keeps only private-message-like rows for SocialHub feed', 0, () => {
-      const parsed = parseSocialHubFeedPayload('{"items":[{"id":"x-post","platform":"x","kind":"post","text":"public post"},{"id":"x-dm","platform":"x","kind":"message","text":"private dm"},{"id":"slack-1","platform":"slack","kind":"message","text":"private slack"},{"id":"ig-post","platform":"instagram","kind":"post","text":"public media"}],"connections":[]}');
+    it('keeps only received private message rows for SocialHub feed', 0, () => {
+      const parsed = parseSocialHubFeedPayload('{"items":[{"id":"x-post","platform":"x","kind":"post","text":"public post"},{"id":"x-mention","platform":"x","kind":"mention","text":"public mention"},{"id":"x-dm","platform":"x","kind":"message","text":"private dm"},{"id":"slack-1","platform":"slack","kind":"message","text":"private slack"},{"id":"slack-conn","platform":"slack","kind":"connection","text":"connection state"},{"id":"ig-post","platform":"instagram","kind":"post","text":"public media"}],"connections":[]}');
       const filtered = socialHubPrivateItems(parsed.items);
 
       expect(filtered.length).assertEqual(2);

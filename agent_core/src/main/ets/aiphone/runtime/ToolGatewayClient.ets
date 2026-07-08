@@ -6782,7 +6782,12 @@ function firstUrlInText(value: string): string {
 
 function isComposioSystemLabel(label: string): boolean {
   return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
-    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段';
+    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段' || label === 'Tool ID';
+}
+
+function isSlackDirectMessageRow(row: A2uiLabelValueData): boolean {
+  const text = (row.label + ' ' + row.value).toLowerCase();
+  return text.indexOf('/archives/d') >= 0;
 }
 
 function socialConnectionStatus(status: string): string {
@@ -6808,10 +6813,13 @@ function composioSocialFeedResult(platform: SocialHubPlatform, displayName: stri
     if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
       return;
     }
+    if (platform === 'slack' && !isSlackDirectMessageRow(row)) {
+      return;
+    }
     items.push({
       id: 'composio-' + platform + '-' + index.toString(),
       platform: platform,
-      kind: platform === 'linkedin' || platform === 'instagram' ? 'post' : 'message',
+      kind: 'message',
       author: row.label,
       handle: displayName,
       text: row.value,
@@ -6887,7 +6895,7 @@ function socialHubPlatformFromText(value: string): SocialHubPlatform {
 }
 
 function isSocialHubToolId(toolId: string): boolean {
-  return toolId === 'social.feed.search' || toolId === 'social.reply.draft' || toolId === 'x.post.search';
+  return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
 }
 
 function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProviderConfig {
@@ -6901,17 +6909,7 @@ function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProvid
 }
 
 function shouldUseComposioSocialAggregate(prompt: string): boolean {
-  const lower = prompt.toLowerCase();
-  return prompt.indexOf('社交') >= 0 ||
-    prompt.indexOf('消息聚合') >= 0 ||
-    prompt.indexOf('多平台') >= 0 ||
-    lower.indexOf('discord') >= 0 ||
-    lower.indexOf('linkedin') >= 0 ||
-    prompt.indexOf('领英') >= 0 ||
-    lower.indexOf('whatsapp') >= 0 ||
-    lower.indexOf('whats app') >= 0 ||
-    lower.indexOf('instagram') >= 0 ||
-    lower.indexOf('instgram') >= 0;
+  return prompt.trim().length > 0;
 }
 
 async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
@@ -6919,13 +6917,17 @@ async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedRes
   const items: SocialHubItemData[] = [];
   const connections: SocialHubConnectionData[] = [];
   const results: SocialHubFeedResult[] = await Promise.all([
+    composioAppResult('Twitter', query, '最近 30 天私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('x', 'X', result)),
+    composioAppResult('Slack', query, '最近 30 天 DM 私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('slack', 'Slack', result)),
     composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('discord', 'Discord', result)),
-    composioAppResult('LinkedIn', query, '相关动态').then((result: DynamicGenericToolResult) =>
+    composioAppResult('LinkedIn', query, '私信消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('linkedin', 'LinkedIn', result)),
     composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
-    composioAppResult('Instagram', query, '相关评论').then((result: DynamicGenericToolResult) =>
+    composioAppResult('Instagram', query, '私信消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('instagram', 'Instagram', result))
   ]);
   results.forEach((result: SocialHubFeedResult) => {
@@ -6953,18 +6955,17 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
-  if (toolId === 'x.post.search') {
-    return genericToolResultsA2ui(surfaceId, toolId, [
-      await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
-    ]);
-  }
-  const result = await socialHubClient.feed(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig(await safeXAccessTokenForDm()));
   if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
-    const composio = await composioSocialAggregate(prompt);
-    composio.items.forEach((item: SocialHubItemData) => result.items.push(item));
-    composio.connections.forEach((connection: SocialHubConnectionData) => result.connections.push(connection));
+    const result = await composioSocialAggregate(prompt);
+    return socialHubFeedA2ui(surfaceId, result.items, result.connections);
   }
-  return socialHubFeedA2ui(surfaceId, result.items, result.connections);
+  return socialHubFeedA2ui(surfaceId, [], []);
+}
+
+async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
+  ]);
 }
 
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -8058,6 +8059,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isSocialHubToolId(toolId)) {
     return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+  }
+  if (toolId === 'x.post.search') {
+    return callLocalXTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'payment.account.setup') {
     return callLocalStripeReceivingTool(prompt, surfaceId, actionId, args);

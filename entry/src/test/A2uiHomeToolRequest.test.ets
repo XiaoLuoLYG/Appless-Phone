@@ -255,7 +255,7 @@ export default function a2uiHomeToolRequestTest() {
       const surface = surfaceWithSocialHubComponent();
 
       expect(surfaceHasSatisfiedToolResult(surface, 'social.feed.search')).assertTrue();
-      expect(surfaceHasSatisfiedToolResult(surface, 'x.post.search')).assertTrue();
+      expect(surfaceHasSatisfiedToolResult(surface, 'x.post.search')).assertFalse();
     });
 
     it('detects visible tool results before intent fallback reruns another tool', 0, () => {
@@ -502,6 +502,17 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.toolId).assertEqual('youtube.video.search');
       expect(argText(resolved.args, 'query')).assertEqual('帮我在 YouTube 搜索 qwen max 官方介绍视频');
       expect(argSources(resolved.args).length).assertEqual(0);
+    });
+
+    it('routes YouTube account playlist prompts to the fixed playlist tool', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '帮我查看我的 YouTube 播放列表',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('youtube.mine.playlists');
     });
 
     it('adds YouTube hotness fallback args for five hottest videos', 0, () => {

@@ -109,6 +109,16 @@ export struct SocialHubView {
     };
   }
 
+  private hasReadableSource(): boolean {
+    const connections = socialHubConnections(this.surface);
+    for (let index = 0; index < connections.length; index++) {
+      if (connections[index].status === 'connected' || connections[index].status === 'limited') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private draftAction(item: SocialHubItemData): A2uiAction {
     return {
       id: 'social_hub_draft_reply',
@@ -583,11 +593,11 @@ export struct SocialHubView {
 
       if (socialHubVisibleMessageCount(groups) === 0) {
         Column() {
-          Text('还没有真实消息')
+          Text(this.hasReadableSource() ? '近 30 天私信列表为空' : '来源未连通')
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_INK)
-          Text('真实数据接入前，这里只显示连接状态。')
+          Text(this.hasReadableSource() ? '已连接来源当前没有收到私信。' : '请先点击应用授权后再查看私信。')
             .fontSize(12)
             .fontColor(COLOR_MUTED)
             .margin({ top: 6 })

@@ -67,7 +67,7 @@ export function socialHubRecentMessageGroups(items: SocialHubItemData[], nowIso:
   const byPlatform = new Map<string, SocialHubItemData[]>();
   items.forEach((item: SocialHubItemData) => {
     const time = socialHubTimestampMs(item.timestamp);
-    if (!(item.kind === 'message' || item.kind === 'mention') || (oldest > 0 && time > 0 && time < oldest)) {
+    if (item.kind !== 'message' || (oldest > 0 && time > 0 && time < oldest)) {
       return;
     }
     const key = item.platform;
