@@ -116,15 +116,15 @@ The app surface is designed around real providers and recognizable app entry poi
 
 ## 🎬 Demo gallery
 
-Videos are embedded as muted autoplay loops with controls. The Chinese text is the exact query used in the demo, followed by a short English translation.
+Click any preview to open the compressed MP4. The Chinese text is the exact query used in the demo, followed by a short English translation.
 
 ### Travel and local life
 
 <table>
   <tr>
-    <td align="center" width="33%"><video src="docs/assets/demos/latest/travel-beijing-shanghai.mp4" poster="docs/assets/demos/posters/travel-beijing-shanghai.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Travel demo"></video><br><sub><code>我明天要从北京去上海，帮我搜索合适的出行方式</code><br>Find suitable travel options from Beijing to Shanghai tomorrow</sub></td>
-    <td align="center" width="33%"><video src="docs/assets/demos/latest/food-coffee-huawei.mp4" poster="docs/assets/demos/posters/food-coffee-huawei.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Coffee search demo"></video><br><sub><code>帮我查深圳坂田华为基地附近的咖啡店</code><br>Find coffee near Huawei Base in Bantian, Shenzhen</sub></td>
-    <td align="center" width="33%"><video src="docs/assets/demos/latest/google-maps-kings-cross.mp4" poster="docs/assets/demos/posters/google-maps-kings-cross.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Google Maps demo"></video><br><sub><code>帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐</code><br>Search Google Maps for Chinese food near King's Cross</sub></td>
+    <td align="center" width="33%"><a href="docs/assets/demos/latest/travel-beijing-shanghai.mp4"><img src="docs/assets/demos/posters/travel-beijing-shanghai.jpg" alt="Travel demo" /></a><br><sub><code>我明天要从北京去上海，帮我搜索合适的出行方式</code><br>Find suitable travel options from Beijing to Shanghai tomorrow</sub></td>
+    <td align="center" width="33%"><a href="docs/assets/demos/latest/food-coffee-huawei.mp4"><img src="docs/assets/demos/posters/food-coffee-huawei.jpg" alt="Coffee search demo" /></a><br><sub><code>帮我查深圳坂田华为基地附近的咖啡店</code><br>Find coffee near Huawei Base in Bantian, Shenzhen</sub></td>
+    <td align="center" width="33%"><a href="docs/assets/demos/latest/google-maps-kings-cross.mp4"><img src="docs/assets/demos/posters/google-maps-kings-cross.jpg" alt="Google Maps demo" /></a><br><sub><code>帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐</code><br>Search Google Maps for Chinese food near King's Cross</sub></td>
   </tr>
 </table>
 
@@ -132,13 +132,13 @@ Videos are embedded as muted autoplay loops with controls. The Chinese text is t
 
 <table>
   <tr>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/mail-important-aggregate.mp4" poster="docs/assets/demos/posters/mail-important-aggregate.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Mail aggregation demo"></video><br><sub><code>帮我查看邮箱里最新的重要邮件</code><br>Show the latest important emails across my inboxes</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/gmail-eccv-paper.mp4" poster="docs/assets/demos/posters/gmail-eccv-paper.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Gmail ECCV demo"></video><br><sub><code>帮我查看我Gmail里和我eccv论文相关的邮件</code><br>Find Gmail messages related to my ECCV paper</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/gmail-web.mp4" poster="docs/assets/demos/posters/gmail-web.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Gmail web demo"></video><br><sub><code>帮我打开 Gmail 网页版</code><br>Open Gmail on the web</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/calendar-month.mp4" poster="docs/assets/demos/posters/calendar-month.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Calendar month demo"></video><br><sub><code>帮我查看我本月的calendar日程</code><br>Show this month's Google Calendar events</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/mail-important-aggregate.mp4"><img src="docs/assets/demos/posters/mail-important-aggregate.jpg" alt="Mail aggregation demo" /></a><br><sub><code>帮我查看邮箱里最新的重要邮件</code><br>Show the latest important emails across my inboxes</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/gmail-eccv-paper.mp4"><img src="docs/assets/demos/posters/gmail-eccv-paper.jpg" alt="Gmail ECCV demo" /></a><br><sub><code>帮我查看我Gmail里和我eccv论文相关的邮件</code><br>Find Gmail messages related to my ECCV paper</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/gmail-web.mp4"><img src="docs/assets/demos/posters/gmail-web.jpg" alt="Gmail web demo" /></a><br><sub><code>帮我打开 Gmail 网页版</code><br>Open Gmail on the web</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/calendar-month.mp4"><img src="docs/assets/demos/posters/calendar-month.jpg" alt="Calendar month demo" /></a><br><sub><code>帮我查看我本月的calendar日程</code><br>Show this month's Google Calendar events</sub></td>
   </tr>
   <tr>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/calendar-create-aiphonedemo.mp4" poster="docs/assets/demos/posters/calendar-create-aiphonedemo.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Calendar create demo"></video><br><sub><code>帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程</code><br>Create a 30-minute AIPhoneDemo event on July 30, 2026 at 3 PM</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/calendar-create-aiphonedemo.mp4"><img src="docs/assets/demos/posters/calendar-create-aiphonedemo.jpg" alt="Calendar create demo" /></a><br><sub><code>帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程</code><br>Create a 30-minute AIPhoneDemo event on July 30, 2026 at 3 PM</sub></td>
   </tr>
 </table>
 
@@ -146,14 +146,14 @@ Videos are embedded as muted autoplay loops with controls. The Chinese text is t
 
 <table>
   <tr>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/media-qwen-official.mp4" poster="docs/assets/demos/posters/media-qwen-official.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Qwen media search demo"></video><br><sub><code>帮我在b站和youtube里搜索qwen的官方视频</code><br>Search Bilibili and YouTube for official Qwen videos</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/youtube-world-cup.mp4" poster="docs/assets/demos/posters/youtube-world-cup.jpg" autoplay muted loop playsinline controls width="100%" aria-label="YouTube World Cup demo"></video><br><sub><code>帮我在 YouTube 里搜索世界杯相关视频</code><br>Search YouTube for World Cup videos</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/memory-luckin.mp4" poster="docs/assets/demos/posters/memory-luckin.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Memory update demo"></video><br><sub><code>我只喝瑞幸咖啡</code><br>Remember that I only drink Luckin Coffee</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/payment-paypal-send.mp4" poster="docs/assets/demos/posters/payment-paypal-send.jpg" autoplay muted loop playsinline controls width="100%" aria-label="PayPal payment demo"></video><br><sub><code>用 PayPal 给罗一格转 1 美元</code><br>Send Luo Yige 1 USD with PayPal</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/media-qwen-official.mp4"><img src="docs/assets/demos/posters/media-qwen-official.jpg" alt="Qwen media search demo" /></a><br><sub><code>帮我在b站和youtube里搜索qwen的官方视频</code><br>Search Bilibili and YouTube for official Qwen videos</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/youtube-world-cup.mp4"><img src="docs/assets/demos/posters/youtube-world-cup.jpg" alt="YouTube World Cup demo" /></a><br><sub><code>帮我在 YouTube 里搜索世界杯相关视频</code><br>Search YouTube for World Cup videos</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/memory-luckin.mp4"><img src="docs/assets/demos/posters/memory-luckin.jpg" alt="Memory update demo" /></a><br><sub><code>我只喝瑞幸咖啡</code><br>Remember that I only drink Luckin Coffee</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/payment-paypal-send.mp4"><img src="docs/assets/demos/posters/payment-paypal-send.jpg" alt="PayPal payment demo" /></a><br><sub><code>用 PayPal 给罗一格转 1 美元</code><br>Send Luo Yige 1 USD with PayPal</sub></td>
   </tr>
   <tr>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/stripe-receiving-account.mp4" poster="docs/assets/demos/posters/stripe-receiving-account.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Stripe receiving account demo"></video><br><sub><code>帮我创建我的stripe收款账户</code><br>Create my Stripe receiving account</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/payment-google-pay-send.mp4" poster="docs/assets/demos/posters/payment-google-pay-send.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Google Pay payment demo"></video><br><sub><code>用 Google Pay 给罗一格转账 5 美元</code><br>Send Luo Yige 5 USD with Google Pay</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/stripe-receiving-account.mp4"><img src="docs/assets/demos/posters/stripe-receiving-account.jpg" alt="Stripe receiving account demo" /></a><br><sub><code>帮我创建我的stripe收款账户</code><br>Create my Stripe receiving account</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/payment-google-pay-send.mp4"><img src="docs/assets/demos/posters/payment-google-pay-send.jpg" alt="Google Pay payment demo" /></a><br><sub><code>用 Google Pay 给罗一格转账 5 美元</code><br>Send Luo Yige 5 USD with Google Pay</sub></td>
   </tr>
 </table>
 
@@ -161,10 +161,10 @@ Videos are embedded as muted autoplay loops with controls. The Chinese text is t
 
 <table>
   <tr>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/composio-github-prs.mp4" poster="docs/assets/demos/posters/composio-github-prs.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Composio GitHub demo"></video><br><sub><code>帮我在 GitHub 里找 Appless-Phone 最近的 pr</code><br>Find recent Appless-Phone pull requests in GitHub</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/composio-google-docs.mp4" poster="docs/assets/demos/posters/composio-google-docs.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Composio Google Docs demo"></video><br><sub><code>帮我在 Google Docs 里找 AIPhoneDemo 设计文档</code><br>Find the AIPhoneDemo design doc in Google Docs</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/composio-google-drive.mp4" poster="docs/assets/demos/posters/composio-google-drive.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Composio Google Drive demo"></video><br><sub><code>帮我在 Google Drive 里找专利申请交底书</code><br>Find a patent disclosure file in Google Drive</sub></td>
-    <td align="center" width="25%"><video src="docs/assets/demos/latest/composio-connections.mp4" poster="docs/assets/demos/posters/composio-connections.jpg" autoplay muted loop playsinline controls width="100%" aria-label="Composio connection management demo"></video><br><sub><code>打开 Composio 授权配置</code><br>Review Composio app connections and OAuth status</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/composio-github-prs.mp4"><img src="docs/assets/demos/posters/composio-github-prs.jpg" alt="Composio GitHub demo" /></a><br><sub><code>帮我在 GitHub 里找 Appless-Phone 最近的 pr</code><br>Find recent Appless-Phone pull requests in GitHub</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/composio-google-docs.mp4"><img src="docs/assets/demos/posters/composio-google-docs.jpg" alt="Composio Google Docs demo" /></a><br><sub><code>帮我在 Google Docs 里找 AIPhoneDemo 设计文档</code><br>Find the AIPhoneDemo design doc in Google Docs</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/composio-google-drive.mp4"><img src="docs/assets/demos/posters/composio-google-drive.jpg" alt="Composio Google Drive demo" /></a><br><sub><code>帮我在 Google Drive 里找专利申请交底书</code><br>Find a patent disclosure file in Google Drive</sub></td>
+    <td align="center" width="25%"><a href="docs/assets/demos/latest/composio-connections.mp4"><img src="docs/assets/demos/posters/composio-connections.jpg" alt="Composio connection management demo" /></a><br><sub><code>打开 Composio 授权配置</code><br>Review Composio app connections and OAuth status</sub></td>
   </tr>
 </table>
 
