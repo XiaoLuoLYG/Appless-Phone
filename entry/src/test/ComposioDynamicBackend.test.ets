@@ -21,6 +21,11 @@ export default function composioDynamicBackendTest() {
       expect(isComposioDynamicPrompt('帮我查 Linear 里分配给我的高优先级 bug')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio Gmail 查最近重要邮件')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio Google Calendar 查本月日程')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio YouTube 查我的播放列表')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio X 查 openai 最近公开 post')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Composio Twitter 查我的私信')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 Discord 查最近提到 AIPhoneDemo 的消息')).assertTrue();
       expect(isComposioDynamicPrompt('帮我在 LinkedIn 查 AIPhoneDemo 相关动态')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 WhatsApp 查最近提到 AIPhoneDemo 的消息')).assertTrue();

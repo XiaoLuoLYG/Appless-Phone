@@ -3,10 +3,7 @@ import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2u
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
-import { MemoryCredentialStore } from '@loop/agent-core';
-import { saveGmailOAuthTokenSet } from '@loop/agent-core';
-import { DynamicGenericToolResult, DynamicToolRegistration } from '@loop/agent-core';
-import { GenericMcpClient } from '@loop/agent-core';
+import { DynamicGenericToolResult } from '@loop/agent-core';
 import { MailDraftArgs, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
@@ -14,8 +11,6 @@ import {
   callToolGateway,
   configureComposioConfigFromRawJson,
   configureLocalPaymentAccountBookJson,
-  configureGmailCredentialStoreForTests,
-  configureGmailMcpClientForTests,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
   foodA2uiRenderState,
@@ -42,53 +37,6 @@ import {
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '@loop/agent-core';
-
-class FixtureGmailMcpClient extends GenericMcpClient {
-  lastToolName: string = '';
-  lastCredential: string = '';
-  lastArgs: string = '';
-
-  async callTool(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<DynamicGenericToolResult> {
-    this.lastToolName = registration.mcpToolName;
-    this.lastCredential = credentialValue;
-    this.lastArgs = JSON.stringify(args);
-    return {
-      sourceTag: 'Gmail',
-      toolName: registration.mcpToolName,
-      title: 'Important launch thread',
-      status: 'success',
-      summary: 'MCP returned one real Gmail thread.',
-      rows: [{ label: 'Thread', value: 'thread-123' }],
-      rawPreview: '{"threadId":"thread-123"}'
-    };
-  }
-}
-
-class FailingGmailMcpClient extends GenericMcpClient {
-  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
-    throw new Error('Operation timeout');
-  }
-}
-
-class ErrorResultGmailMcpClient extends GenericMcpClient {
-  async callTool(registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
-    return {
-      sourceTag: 'Gmail',
-      toolName: registration.mcpToolName,
-      title: 'Gmail API 调用失败',
-      status: 'error',
-      summary: 'Missing recipient email address.',
-      rows: [{ label: 'Error', value: 'Missing recipient email address.' }],
-      rawPreview: 'error=Missing recipient email address.'
-    };
-  }
-}
-
-interface GmailToolArgsFixture {
-  query: string;
-  pageSize: number;
-  intentSummary: string;
-}
 
 interface YouTubeSearchArgsFixture {
   query: string;
@@ -344,9 +292,9 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('continues aggregate mail after Gmail auth is missing', 0, async () => {
+    it('continues aggregate mail when Gmail is routed through Composio auth state', 0, async () => {
       try {
-        configureGmailCredentialStoreForTests(new MemoryCredentialStore());
+        configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
         const args: MailSearchArgs = {
@@ -367,15 +315,17 @@ export default function toolGatewayClientTest() {
         );
 
         const rendered = genericToolResults(result.surface);
-        expect(rendered.length).assertEqual(2);
+        expect(rendered.length).assertEqual(3);
         expect(rendered[0].sourceTag).assertEqual('Gmail');
         expect(rendered[0].toolName).assertEqual('mail.provider.status');
-        expect(rendered[0].status).assertEqual('error');
-        expect(rendered[0].summary.indexOf('Google Workspace MCP OAuth')).assertLarger(-1);
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(rendered[0].summary.indexOf('Composio 未配置')).assertLarger(-1);
         expect(rendered[1].sourceTag).assertEqual('QQ Mail');
         expect(rendered[1].toolName).assertEqual('mail.provider.status');
+        expect(rendered[2].sourceTag).assertEqual('Composio Gmail');
+        expect(rendered[2].toolName).assertEqual('gmail.mail.search');
       } finally {
-        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
       }
     });
@@ -500,8 +450,9 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('renders Calendar auth errors without fake events', 0, async () => {
+    it('uses Composio auth state for Calendar fixed tools without fake events', 0, async () => {
       try {
+        configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
         const result = await callToolGateway(
@@ -513,57 +464,19 @@ export default function toolGatewayClientTest() {
           noop
         );
         expect(result.ok).assertTrue();
-        expect(dynamicToolConnect(result.surface).toolId).assertEqual('calendar.events.search');
-        expect(dynamicToolConnect(result.surface).credentialName).assertEqual('Google OAuth');
-        expect(dynamicToolConnect(result.surface).actions[0].id).assertEqual('calendar.authorize');
-        expect(result.raw.indexOf('Google Calendar OAuth')).assertLarger(-1);
+        expect(genericToolResults(result.surface)[0].toolName).assertEqual('calendar.events.search');
+        expect(genericToolResults(result.surface)[0].sourceTag).assertEqual('Composio Google Calendar');
+        expect(genericToolResults(result.surface)[0].status).assertEqual('needs_auth');
+        expect(result.raw.indexOf('Composio 未配置')).assertLarger(-1);
         expect(result.raw.indexOf('AIPhoneDemo smoke')).assertEqual(-1);
       } finally {
+        configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
       }
     });
 
-    it('builds a direct Google consent URL for Calendar auth when client config is present', 0, async () => {
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google',
-          GMAIL_MCP_USER_PROJECT: 'gen-lang-client-0449715219'
-        }));
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const authResult = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'calendar.events.search',
-          '帮我看今天的 Google Calendar 日程',
-          'surface_calendar_auth_with_client',
-          'client_intent_fallback',
-          noop
-        );
-
-        const authAction = dynamicToolConnect(authResult.surface).actions[0];
-        expect(authResult.ok).assertTrue();
-        expect(authAction.id).assertEqual('calendar.authorize');
-        expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
-        expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('calendar.events')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('console.cloud.google.com')).assertEqual(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('returns Gmail auth-required, blocked, and open-web A2UI from the local gateway', 0, async () => {
+    it('keeps Gmail blocked-send and open-web A2UI on the local gateway', 0, async () => {
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const authResult: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.mail.search',
-        '帮我看下 Gmail 最近的重要邮件',
-        'surface_gmail_auth',
-        'client_intent_fallback',
-        noop
-      );
       const blockedResult: A2uiCallResult = await callToolGateway(
         defaultToolGatewayUrl(),
         'gmail.message.send',
@@ -581,14 +494,6 @@ export default function toolGatewayClientTest() {
         noop
       );
 
-      expect(authResult.ok).assertTrue();
-      expect(dynamicToolConnect(authResult.surface).toolId).assertEqual('gmail.mail.search');
-      expect(dynamicToolConnect(authResult.surface).credentialName).assertEqual('Google Workspace MCP OAuth');
-      expect(dynamicToolConnect(authResult.surface).sourceUrl).assertEqual('https://gmailmcp.googleapis.com/mcp/v1');
-      expect(dynamicToolConnect(authResult.surface).actions[0].id).assertEqual('gmail.authorize');
-      expect(dynamicToolConnect(authResult.surface).actions[1].id).assertEqual('gmail.open.web');
-      expect(authResult.raw.indexOf('不会模拟 Gmail 邮件')).assertLarger(-1);
-
       expect(blockedResult.ok).assertTrue();
       expect(genericToolResults(blockedResult.surface)[0].status).assertEqual('blocked');
       expect(genericToolResults(blockedResult.surface)[0].summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
@@ -597,6 +502,52 @@ export default function toolGatewayClientTest() {
       expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
       expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
       expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+    });
+
+    it('uses Composio auth state for Gmail fixed tools when no Composio config exists', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '帮我看 Gmail 重要邮件',
+          'surface_gmail_composio_missing',
+          'model_tool_request',
+          noop
+        );
+
+        expect(result.ok).assertTrue();
+        expect(result.raw.indexOf('Composio 未配置')).assertLarger(-1);
+        expect(result.raw.indexOf('gmail.mail.search')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('uses Composio auth state for X public post search when no Composio config exists', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'x.post.search',
+          '帮我查看 X 上 openai 最近的公开 post',
+          'surface_x_composio_missing',
+          'model_tool_request',
+          noop
+        );
+
+        expect(result.ok).assertTrue();
+        expect(result.raw.indexOf('Composio 未配置')).assertLarger(-1);
+        expect(result.raw.indexOf('SocialHub')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('renders YouTube API key errors without fake videos', 0, async () => {
@@ -658,263 +609,27 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('renders YouTube account tools as auth-required without fake playlists', 0, async () => {
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const result: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'youtube.mine.playlists',
-        '帮我看我的 YouTube 播放列表',
-        'surface_youtube_auth',
-        'model_tool_request',
-        noop
-      );
-
-      expect(result.ok).assertTrue();
-      expect(genericToolResults(result.surface)[0].status).assertEqual('auth_required');
-      expect(result.raw.indexOf('不会模拟播放列表')).assertLarger(-1);
-      expect(result.raw.indexOf('fake')).assertEqual(-1);
-    });
-
-    it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
+    it('uses Composio auth state for YouTube account tools without fake playlists', 0, async () => {
       try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const authResult: A2uiCallResult = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.mail.search',
-          '帮我看下 Gmail 最近的重要邮件',
-          'surface_gmail_auth_with_client',
-          'client_intent_fallback',
-          noop
-        );
-
-        const authAction = dynamicToolConnect(authResult.surface).actions[0];
-        expect(authResult.ok).assertTrue();
-        expect(authAction.id).assertEqual('gmail.authorize');
-        expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
-        expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('calendar.events')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
-        expect(authAction.prompt.indexOf('code_challenge_method=S256')).assertLarger(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('uses stored Gmail OAuth tokens to call Gmail MCP without asking auth again', 0, async () => {
-      const store = new MemoryCredentialStore();
-      await saveGmailOAuthTokenSet(store, {
-        access_token: 'stored-access-token',
-        refresh_token: 'stored-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
-      });
-      const mcp = new FixtureGmailMcpClient();
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-        configureGmailCredentialStoreForTests(store);
-        configureGmailMcpClientForTests(mcp);
-
+        configureComposioConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
         const result: A2uiCallResult = await callToolGateway(
           defaultToolGatewayUrl(),
-          'gmail.mail.search',
-          '帮我看 Gmail 里最新的重要邮件',
-          'surface_gmail_mcp',
-          'client_intent_fallback',
-          noop
-        );
-
-        expect(result.ok).assertTrue();
-        expect(result.surface.status).assertEqual('ready');
-        expect(genericToolResults(result.surface)[0].title).assertEqual('Important launch thread');
-        expect(mcp.lastToolName).assertEqual('search_threads');
-        expect(mcp.lastCredential).assertEqual('stored-access-token');
-        expect(mcp.lastArgs.indexOf('newer_than:30d')).assertLarger(-1);
-        expect(mcp.lastArgs.indexOf('-in:draft')).assertLarger(-1);
-        expect(mcp.lastArgs.indexOf('is:important')).assertEqual(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('passes structured Gmail args to stored-token Gmail MCP calls', 0, async () => {
-      const store = new MemoryCredentialStore();
-      await saveGmailOAuthTokenSet(store, {
-        access_token: 'stored-access-token',
-        refresh_token: 'stored-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
-      });
-      const mcp = new FixtureGmailMcpClient();
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-        configureGmailCredentialStoreForTests(store);
-        configureGmailMcpClientForTests(mcp);
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const args: GmailToolArgsFixture = {
-          query: 'from:committee@example.edu subject:"decision"',
-          pageSize: 4,
-          intentSummary: '模型结构化查询'
-        };
-        const result: A2uiCallResult = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.mail.search',
-          '原始 prompt 不应决定 Gmail 搜索语义',
-          'surface_gmail_mcp_args',
+          'youtube.mine.playlists',
+          '帮我看我的 YouTube 播放列表',
+          'surface_youtube_auth',
           'model_tool_request',
-          noop,
-          null,
-          args
-        );
-
-        expect(result.ok).assertTrue();
-        expect(mcp.lastToolName).assertEqual('search_threads');
-        expect(mcp.lastArgs.indexOf('committee@example.edu')).assertLarger(-1);
-        expect(mcp.lastArgs.indexOf('-in:draft')).assertLarger(-1);
-        expect(mcp.lastArgs.indexOf('is:important')).assertEqual(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('renders a Gmail error result when stored Gmail token cannot reach MCP', 0, async () => {
-      const store = new MemoryCredentialStore();
-      await saveGmailOAuthTokenSet(store, {
-        access_token: 'stored-access-token',
-        refresh_token: 'stored-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
-      });
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-        configureGmailCredentialStoreForTests(store);
-        configureGmailMcpClientForTests(new FailingGmailMcpClient());
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const result: A2uiCallResult = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.mail.search',
-          '帮我看 Gmail 里最新的重要邮件',
-          'surface_gmail_mcp_timeout',
-          'client_intent_fallback',
           noop
         );
 
         expect(result.ok).assertTrue();
-        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
-        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail MCP 调用失败');
-        expect(genericToolResults(result.surface)[0].summary.indexOf('Operation timeout')).assertLarger(-1);
-        expect(result.raw.indexOf('Gmail MCP 调用失败')).assertLarger(-1);
-        expect(result.raw.indexOf('打开 Gmail Web')).assertEqual(-1);
+        expect(genericToolResults(result.surface)[0].toolName).assertEqual('youtube.mine.playlists');
+        expect(genericToolResults(result.surface)[0].sourceTag).assertEqual('Composio YouTube');
+        expect(genericToolResults(result.surface)[0].status).assertEqual('needs_auth');
+        expect(result.raw.indexOf('Composio 未配置')).assertLarger(-1);
+        expect(result.raw.indexOf('fake')).assertEqual(-1);
       } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('renders Gmail returned error results instead of relabeling them as auth', 0, async () => {
-      const store = new MemoryCredentialStore();
-      await saveGmailOAuthTokenSet(store, {
-        access_token: 'stored-access-token',
-        refresh_token: 'stored-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
-      });
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-        configureGmailCredentialStoreForTests(store);
-        configureGmailMcpClientForTests(new ErrorResultGmailMcpClient());
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const result: A2uiCallResult = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.draft.create',
-          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
-          'surface_gmail_error_result',
-          'client_intent_fallback',
-          noop
-        );
-
-        expect(result.ok).assertTrue();
-        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
-        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail API 调用失败');
-        expect(genericToolResults(result.surface)[0].summary.indexOf('Missing recipient email address')).assertLarger(-1);
-        expect(result.raw.indexOf('Gmail API 调用失败')).assertLarger(-1);
-        expect(result.raw.indexOf('打开 Gmail Web')).assertEqual(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
-      }
-    });
-
-    it('does not fall back to Gmail MCP when the local Gmail API adapter returns an error', 0, async () => {
-      const store = new MemoryCredentialStore();
-      await saveGmailOAuthTokenSet(store, {
-        access_token: 'stored-access-token',
-        refresh_token: 'stored-refresh-token',
-        expires_in: 3600,
-        token_type: 'Bearer',
-        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
-      });
-      try {
-        configureLocalProviderConfigFromRawJson(JSON.stringify({
-          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-        }));
-        configureGmailCredentialStoreForTests(store);
-
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const result = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.draft.create',
-          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
-          'surface_gmail_api_error_no_mcp',
-          'client_intent_fallback',
-          noop
-        );
-
-        expect(result.ok).assertTrue();
-        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
-        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail API 调用失败');
-        expect(genericToolResults(result.surface)[0].summary.indexOf('Missing recipient email address')).assertLarger(-1);
-        expect(result.raw.indexOf('Gmail MCP 调用失败')).assertEqual(-1);
-      } finally {
-        configureGmailCredentialStoreForTests(null);
-        configureGmailMcpClientForTests(null);
-        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
       }
     });
 

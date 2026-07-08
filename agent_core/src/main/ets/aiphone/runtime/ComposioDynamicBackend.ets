@@ -99,6 +99,18 @@ function containsAny(value: string, needles: string[]): boolean {
 
 function composioToolkitFromPrompt(prompt: string): string {
   const lower = prompt.toLowerCase();
+  if (lower.indexOf('gmail') >= 0 || prompt.indexOf('谷歌邮箱') >= 0 || prompt.indexOf('谷歌邮件') >= 0) {
+    return 'gmail';
+  }
+  if (lower.indexOf('google calendar') >= 0 || lower.indexOf('calendar') >= 0 || prompt.indexOf('谷歌日历') >= 0) {
+    return 'googlecalendar';
+  }
+  if (lower.indexOf('youtube') >= 0 || prompt.indexOf('油管') >= 0) {
+    return 'youtube';
+  }
+  if (lower.indexOf('twitter') >= 0 || lower.indexOf(' x ') >= 0 || lower.indexOf('x/twitter') >= 0) {
+    return 'twitter';
+  }
   if (lower.indexOf('google drive') >= 0) {
     return 'googledrive';
   }
@@ -203,6 +215,18 @@ function ownerNameFromPrompt(prompt: string): string {
 function normalizedComposioUseCase(prompt: string): string {
   const keyword = promptSearchKeyword(prompt);
   const toolkit = composioToolkitFromPrompt(prompt);
+  if (toolkit === 'gmail') {
+    return 'Search Gmail messages for ' + keyword;
+  }
+  if (toolkit === 'googlecalendar') {
+    return 'Search Google Calendar events for ' + keyword;
+  }
+  if (toolkit === 'youtube') {
+    return 'List YouTube account data or search YouTube for ' + keyword;
+  }
+  if (toolkit === 'twitter') {
+    return 'Search X Twitter posts or direct messages for ' + keyword;
+  }
   if (toolkit === 'outlook') {
     return 'Search Outlook mail messages for ' + keyword;
   }
@@ -264,6 +288,13 @@ function preferredToolScore(prompt: string, tool: ComposioSearchTool): number {
   const toolkit = composioToolkitFromPrompt(prompt);
   if (toolkit.length > 0 && slug.indexOf(toolkit) >= 0) {
     score += 160;
+  }
+  if ((toolkit === 'gmail' || toolkit === 'googlecalendar' || toolkit === 'youtube' || toolkit === 'twitter') &&
+    (slug.indexOf('search') >= 0 || slug.indexOf('list') >= 0 || slug.indexOf('get') >= 0 || slug.indexOf('message') >= 0)) {
+    score += 90;
+  }
+  if (slug.indexOf('send') >= 0 || slug.indexOf('delete') >= 0 || slug.indexOf('publish') >= 0 || slug.indexOf('post_tweet') >= 0) {
+    score -= 300;
   }
   if (toolkit === 'outlook' && (slug.indexOf('mail') >= 0 || slug.indexOf('message') >= 0 || description.indexOf('mail') >= 0)) {
     score += 90;
@@ -700,6 +731,18 @@ function rowsForExecute(payload: Object, prompt: string, toolSlug: string): A2ui
 
 function resultTitleForTool(toolSlug: string): string {
   const lower = toolSlug.toLowerCase();
+  if (lower.indexOf('gmail') >= 0) {
+    return 'Composio Gmail 结果';
+  }
+  if (lower.indexOf('googlecalendar') >= 0) {
+    return 'Composio Google Calendar 结果';
+  }
+  if (lower.indexOf('youtube') >= 0) {
+    return 'Composio YouTube 结果';
+  }
+  if (lower.indexOf('twitter') >= 0) {
+    return 'Composio Twitter 结果';
+  }
   if (lower.indexOf('github') >= 0) {
     return 'Composio GitHub 结果';
   }
@@ -793,6 +836,13 @@ export function isComposioConfigured(): boolean {
 export function isComposioDynamicPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return lower.indexOf('notion') >= 0 ||
+    lower.indexOf('gmail') >= 0 ||
+    lower.indexOf('google calendar') >= 0 ||
+    lower.indexOf('calendar') >= 0 ||
+    lower.indexOf('youtube') >= 0 ||
+    lower.indexOf('twitter') >= 0 ||
+    lower.indexOf(' x ') >= 0 ||
+    lower.indexOf('x/twitter') >= 0 ||
     lower.indexOf('google drive') >= 0 ||
     lower.indexOf('google docs') >= 0 ||
     lower.indexOf('google doc') >= 0 ||
@@ -815,6 +865,10 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('tik tok') >= 0 ||
     lower.indexOf('ticketmaster') >= 0 ||
     lower.indexOf('ticket master') >= 0 ||
+    prompt.indexOf('谷歌邮箱') >= 0 ||
+    prompt.indexOf('谷歌邮件') >= 0 ||
+    prompt.indexOf('谷歌日历') >= 0 ||
+    prompt.indexOf('油管') >= 0 ||
     lower.indexOf('composio') >= 0;
 }
 
