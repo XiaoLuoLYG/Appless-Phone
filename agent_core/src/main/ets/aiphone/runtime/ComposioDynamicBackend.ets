@@ -402,8 +402,23 @@ function shouldPreserveMissingFixedWriteArg(toolId: string, targetName: string):
 
 function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): string[] {
   const record = argumentRecord(fixedArgs);
-  if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
-    return hasMeaningfulValue(record.body) ? [] : ['body'];
+  if (fixedToolId === 'gmail.draft.create') {
+    const missing: string[] = [];
+    ['to', 'body'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
+  }
+  if (fixedToolId === 'gmail.draft.apply') {
+    const missing: string[] = [];
+    ['threadId', 'to', 'subject', 'replyMode', 'body'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
   }
   if (fixedToolId === 'calendar.event.create') {
     const missing: string[] = [];

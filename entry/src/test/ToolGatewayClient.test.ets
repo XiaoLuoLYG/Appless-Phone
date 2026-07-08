@@ -650,6 +650,37 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('blocks Gmail draft-create when fixed to args are missing even if body is present', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
+          'surface_gmail_draft_create_missing_to',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            body: 'Got it.'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.create');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('to')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('Composio 未配置')).assertEqual(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('gmail.draft.create')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('blocks Gmail draft-apply when fixed body args are missing', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
@@ -672,6 +703,40 @@ export default function toolGatewayClientTest() {
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('error');
         expect(rendered[0].summary.indexOf('body')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks Gmail draft-apply when reply context is missing even if body is present', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.apply',
+          '确认应用刚才的 Gmail 草稿',
+          'surface_gmail_draft_apply_missing_reply_context',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            threadId: 'thread-345',
+            to: ['alice@example.com'],
+            subject: 'AIPhoneDemo',
+            body: 'Please send later.'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('replyMode')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('Composio 未配置')).assertEqual(-1);
         expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {

@@ -171,18 +171,37 @@ export default function composioDynamicBackendTest() {
     it('returns fixed-tool missing-args errors before Composio auth/config checks', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
+        const createResult = await callComposioDynamic(
+          '帮我给 Alice 写 Gmail 草稿说我收到了',
+          {
+            fixedToolId: 'gmail.draft.create',
+            fixedArgs: {
+              body: 'Got it.'
+            }
+          } as Object
+        ) as DynamicGenericToolResult;
+        expect(createResult.toolName).assertEqual('gmail.draft.create');
+        expect(createResult.status).assertEqual('error');
+        expect(createResult.summary.indexOf('to')).assertLarger(-1);
+        expect(createResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
+        expect(JSON.stringify(createResult.rows).indexOf('gmail.draft.create')).assertLarger(-1);
+
         const draftResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
           {
             fixedToolId: 'gmail.draft.apply',
             fixedArgs: {
-              subject: 'Re: Demo'
+              threadId: 'thread-123',
+              to: ['alice@example.com'],
+              subject: 'Re: Demo',
+              body: 'Got it.'
             }
           } as Object
         ) as DynamicGenericToolResult;
         expect(draftResult.toolName).assertEqual('gmail.draft.apply');
         expect(draftResult.status).assertEqual('error');
-        expect(draftResult.summary.indexOf('body')).assertLarger(-1);
+        expect(draftResult.summary.indexOf('replyMode')).assertLarger(-1);
+        expect(draftResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
         expect(JSON.stringify(draftResult.rows).indexOf('Missing')).assertLarger(-1);
 
         const calendarResult = await callComposioDynamic(
