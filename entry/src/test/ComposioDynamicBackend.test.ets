@@ -186,6 +186,41 @@ export default function composioDynamicBackendTest() {
         expect(createResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
         expect(JSON.stringify(createResult.rows).indexOf('gmail.draft.create')).assertLarger(-1);
 
+        const emptyRecipientResult = await callComposioDynamic(
+          '帮我给 Alice 写 Gmail 草稿说我收到了',
+          {
+            fixedToolId: 'gmail.draft.create',
+            fixedArgs: {
+              to: [''],
+              body: 'Got it.'
+            }
+          } as Object
+        ) as DynamicGenericToolResult;
+        expect(emptyRecipientResult.toolName).assertEqual('gmail.draft.create');
+        expect(emptyRecipientResult.status).assertEqual('error');
+        expect(emptyRecipientResult.summary.indexOf('to')).assertLarger(-1);
+        expect(emptyRecipientResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
+        expect(JSON.stringify(emptyRecipientResult.rows).indexOf('gmail.draft.create')).assertLarger(-1);
+
+        const blankRecipientResult = await callComposioDynamic(
+          '确认应用刚才的 Gmail 草稿',
+          {
+            fixedToolId: 'gmail.draft.apply',
+            fixedArgs: {
+              threadId: 'thread-123',
+              to: ['   '],
+              subject: 'Re: Demo',
+              replyMode: 'reply',
+              body: 'Got it.'
+            }
+          } as Object
+        ) as DynamicGenericToolResult;
+        expect(blankRecipientResult.toolName).assertEqual('gmail.draft.apply');
+        expect(blankRecipientResult.status).assertEqual('error');
+        expect(blankRecipientResult.summary.indexOf('to')).assertLarger(-1);
+        expect(blankRecipientResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
+        expect(JSON.stringify(blankRecipientResult.rows).indexOf('gmail.draft.apply')).assertLarger(-1);
+
         const draftResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
           {

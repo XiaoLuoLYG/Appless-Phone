@@ -80,7 +80,12 @@ function hasMeaningfulValue(value: Object | string | number | boolean | null | u
     return value.trim().length > 0;
   }
   if (Array.isArray(value)) {
-    return value.length > 0;
+    for (let index = 0; index < value.length; index++) {
+      if (hasMeaningfulValue(value[index] as Object | string | number | boolean | null | undefined)) {
+        return true;
+      }
+    }
+    return false;
   }
   return true;
 }

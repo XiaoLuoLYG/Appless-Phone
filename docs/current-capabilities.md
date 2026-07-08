@@ -20,8 +20,8 @@
 | 邮箱 | `mail.draft.create` | `帮我给 QQ 邮箱里最近一封邮件起草回复` | 基于真实线程创建草稿，不发送 | `draft` | 需要真实邮件上下文；QQ IMAP/Gmail OAuth | 按邮件 provider | 否 | 规则/动作链路 |
 | Gmail | `gmail.mail.search` | `帮我查看我Gmail里和我eccv论文相关的邮件` | Gmail 搜索结果、可展开详情、可生成回复草稿；无 Composio 授权则显示真实授权/失败 | `read` | Composio Gmail connected account | 通常需要外网/VPN | 是 | 默认 smoke + Gmail cases |
 | Gmail | `gmail.thread.read` | `打开第一封 Gmail 详情` | 读取指定 Gmail thread；无 Composio 授权则显示真实授权/失败 | `read` | Composio Gmail connected account + threadId | 通常需要外网/VPN | 是 | 单元/动作链路 |
-| Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送；缺少结构化正文时直接报错，不会从 prompt 补正文 | `draft` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | Gmail cases |
-| Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿；缺少结构化正文时直接报错 | `confirm_required` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | 单元/动作链路 |
+| Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送；缺少结构化 `to`/`body` 时直接报错，不会从 prompt 补正文 | `draft` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | Gmail cases |
+| Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿；缺少结构化 `threadId`/`to`/`subject`/`replyMode`/`body` 时直接报错 | `confirm_required` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | 单元/动作链路 |
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
 | Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
