@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  callComposioDynamic,
   composioDynamicMissingConfigResult,
   composioArgumentsForTool,
   composioDynamicResultFromObservation,
@@ -130,6 +131,74 @@ export default function composioDynamicBackendTest() {
       expect(updateArgs.summary).assertEqual('AIPhoneDemo sync');
       expect(updateArgs.start).assertEqual('2026-07-30T16:00:00+08:00');
       expect(updateArgs.end).assertEqual('2026-07-30T16:30:00+08:00');
+    });
+
+    it('does not synthesize missing fixed write args from prompt text', 0, () => {
+      const draftTool = {
+        toolSlug: 'GMAIL_CREATE_DRAFT',
+        inputSchema: '{"type":"object","required":["body"],"properties":{"body":{"type":"string"},"subject":{"type":"string"},"thread_id":{"type":"string"}}}'
+      } as Object;
+      const draftArgs = composioArgumentsForTool(
+        draftTool,
+        '帮我给 Alice 写 Gmail 草稿说我收到了',
+        'gmail.draft.create',
+        {
+          subject: 'Re: Demo'
+        } as Object
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(draftArgs.body === undefined).assertTrue();
+      expect(draftArgs.subject).assertEqual('Re: Demo');
+      expect(draftArgs.thread_id === undefined).assertTrue();
+
+      const updateTool = {
+        toolSlug: 'GOOGLECALENDAR_UPDATE_EVENT',
+        inputSchema: '{"type":"object","required":["event_id","summary"],"properties":{"event_id":{"type":"string"},"summary":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"}}}'
+      } as Object;
+      const updateArgs = composioArgumentsForTool(
+        updateTool,
+        '把刚才的日程改到下午四点',
+        'calendar.event.update',
+        {
+          start: '2026-07-30T16:00:00+08:00'
+        } as Object
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(updateArgs.event_id === undefined).assertTrue();
+      expect(updateArgs.summary === undefined).assertTrue();
+      expect(updateArgs.start).assertEqual('2026-07-30T16:00:00+08:00');
+      expect(updateArgs.end === undefined).assertTrue();
+    });
+
+    it('returns fixed-tool missing-args errors before Composio auth/config checks', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const draftResult = await callComposioDynamic(
+          '帮我给 Alice 写 Gmail 草稿说我收到了',
+          {
+            fixedToolId: 'gmail.draft.apply',
+            fixedArgs: {
+              subject: 'Re: Demo'
+            }
+          } as Object
+        ) as DynamicGenericToolResult;
+        expect(draftResult.toolName).assertEqual('gmail.draft.apply');
+        expect(draftResult.status).assertEqual('error');
+        expect(draftResult.summary.indexOf('body')).assertLarger(-1);
+        expect(JSON.stringify(draftResult.rows).indexOf('Missing')).assertLarger(-1);
+
+        const calendarResult = await callComposioDynamic(
+          '把刚才的日程改到下午四点',
+          {
+            fixedToolId: 'calendar.event.update',
+            fixedArgs: {} as Object
+          } as Object
+        ) as DynamicGenericToolResult;
+        expect(calendarResult.toolName).assertEqual('calendar.event.update');
+        expect(calendarResult.status).assertEqual('error');
+        expect(calendarResult.summary.indexOf('eventId')).assertLarger(-1);
+        expect(calendarResult.summary.indexOf('title/start/end')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
     });
 
     it('keeps read/search fixed tools below side-effect Composio matches', 0, () => {

@@ -619,6 +619,67 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('blocks Gmail draft-create when fixed body args are missing', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
+          'surface_gmail_draft_create_missing_body',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            to: ['alice@example.com'],
+            subject: 'AIPhoneDemo'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.create');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('body')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('alice@example.com')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks Gmail draft-apply when fixed body args are missing', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.apply',
+          '确认应用刚才的 Gmail 草稿',
+          'surface_gmail_draft_apply_missing_body',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            threadId: 'thread-345'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('body')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('uses Composio auth state for X public post search when no Composio config exists', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
@@ -701,6 +762,68 @@ export default function toolGatewayClientTest() {
         expect(rendered[0].status).assertEqual('needs_auth');
         expect(JSON.stringify(rendered[0].rows).indexOf('evt-456')).assertLarger(-1);
         expect(JSON.stringify(rendered[0].rows).indexOf('AIPhoneDemo moved')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks Calendar create when required fixed args are missing', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.create',
+          '帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程',
+          'surface_calendar_create_missing_required',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            end: '2026-07-30T15:30:00+08:00'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('calendar.event.create');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('title')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('start')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('2026-07-30T15:30:00+08:00')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks Calendar update when fixed eventId or update payload is missing', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.update',
+          '把刚才的日程改到下午4点',
+          'surface_calendar_update_missing_required',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            timezone: 'Asia/Shanghai'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('calendar.event.update');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('eventId')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('title/start/end')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('Asia/Shanghai')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');

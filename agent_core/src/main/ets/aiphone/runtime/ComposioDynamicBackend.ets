@@ -372,6 +372,79 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
   return [];
 }
 
+function fixedWritePreservedArgs(toolId: string): string[] {
+  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+    return ['to', 'subject', 'body', 'threadId', 'replyMode'];
+  }
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    return ['eventId', 'title', 'start', 'end', 'timezone', 'calendarId'];
+  }
+  return [];
+}
+
+function shouldPreserveMissingFixedWriteArg(toolId: string, targetName: string): boolean {
+  const preserved = fixedWritePreservedArgs(toolId);
+  if (preserved.length === 0) {
+    return false;
+  }
+  const aliases = fixedArgumentAliases(toolId);
+  for (let index = 0; index < aliases.length; index++) {
+    const alias = aliases[index];
+    if (preserved.indexOf(alias.source) < 0) {
+      continue;
+    }
+    if (alias.source === targetName || alias.targets.indexOf(targetName) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): string[] {
+  const record = argumentRecord(fixedArgs);
+  if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
+    return hasMeaningfulValue(record.body) ? [] : ['body'];
+  }
+  if (fixedToolId === 'calendar.event.create') {
+    const missing: string[] = [];
+    ['title', 'start', 'end'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
+  }
+  if (fixedToolId === 'calendar.event.update') {
+    const missing: string[] = [];
+    if (!hasMeaningfulValue(record.eventId)) {
+      missing.push('eventId');
+    }
+    if (!hasMeaningfulValue(record.title) && !hasMeaningfulValue(record.start) && !hasMeaningfulValue(record.end)) {
+      missing.push('title/start/end');
+    }
+    return missing;
+  }
+  return [];
+}
+
+function missingFixedWriteArgsResult(
+  prompt: string,
+  fixedToolId: string,
+  missing: string[]
+): DynamicGenericToolResult {
+  const rows: A2uiLabelValueData[] = [{ label: 'Tool ID', value: fixedToolId }];
+  missing.forEach((name: string) => rows.push({ label: 'Missing', value: name }));
+  return {
+    sourceTag: 'Composio',
+    toolName: fixedToolId,
+    title: resultTitleForPrompt(prompt) + ' 参数不完整',
+    status: 'error',
+    summary: '缺少字段：' + missing.join(', ') + '。固定写工具不会从 prompt 补全这些参数。',
+    rows: rows,
+    rawPreview: prompt.substring(0, 16000)
+  };
+}
+
 function mergeFixedArguments(
   target: Record<string, Object | string | number | boolean>,
   schema: ComposioInputSchema,
@@ -697,6 +770,9 @@ export function composioArgumentsForTool(
   });
   const required = schema.required ?? [];
   required.forEach((name: string) => {
+    if (args[name] === undefined && shouldPreserveMissingFixedWriteArg(fixedToolId, name)) {
+      return;
+    }
     if (args[name] === undefined && properties[name] !== undefined) {
       args[name] = fallbackValueForProperty(name, properties[name], prompt);
     }
@@ -1182,6 +1258,11 @@ async function clientForPrompt(prompt: string): Promise<ComposioSessionClient> {
 
 export async function callComposioDynamic(prompt: string, args: Object | null): Promise<DynamicGenericToolResult | null> {
   const parsed = parsedExecuteArgs(args);
+  const fixedToolId = textOf(parsed.fixedToolId).trim();
+  const missingFixedArgs = missingFixedWriteArgs(fixedToolId, parsed.fixedArgs ?? null);
+  if (missingFixedArgs.length > 0) {
+    return missingFixedWriteArgsResult(prompt, fixedToolId, missingFixedArgs);
+  }
   const operation = textOf(parsed.operation).trim();
   if (!shouldAttemptComposioDynamic(prompt, operation, composioConfig.isConfigured())) {
     return null;

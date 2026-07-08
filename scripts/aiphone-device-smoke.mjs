@@ -266,7 +266,7 @@ const visibleDomainMarkers = [
   'gmail.draft.create',
   'gmail.open.web',
   'gmail.message.send',
-  'Google Workspace MCP OAuth',
+  'Composio Gmail',
   '授权 Gmail',
   'UnsafeActionBlocked',
   '不会模拟 Gmail 邮件',
@@ -1343,7 +1343,7 @@ function layoutExpectationsForQuery(query) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
-    return ['gmail.draft.create', 'Google Workspace MCP OAuth', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
+    return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
   }
   if (isGmailEccvQuery(query)) {
     return ['Composio', 'Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
