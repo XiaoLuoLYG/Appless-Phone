@@ -623,6 +623,16 @@ function mergeFeedResults(results: SocialHubFeedResult[]): SocialHubFeedResult {
   };
 }
 
+export function socialHubPrivateItems(items: SocialHubItemData[]): SocialHubItemData[] {
+  const result: SocialHubItemData[] = [];
+  items.forEach((item: SocialHubItemData) => {
+    if (item.kind === 'message' || item.kind === 'mention' || item.kind === 'connection') {
+      result.push(item);
+    }
+  });
+  return result;
+}
+
 export function socialHubBridgeHeaders(gatewayApiKey: string): Record<string, string> {
   const headers: Record<string, string> = {
     'Accept': 'application/json'
@@ -736,7 +746,7 @@ export class SocialHubClient {
   async feed(query: string, _gatewayApiKey: string = '', providerConfig: SocialHubProviderConfig = emptySocialHubProviderConfig()): Promise<SocialHubFeedResult> {
     const results: SocialHubFeedResult[] = [];
     try {
-      results.push(await fetchXRecentSearch(query, providerConfig));
+      results.push(await fetchXDirectMessages(query, providerConfig));
     } catch (error) {
       results.push({ items: [], connections: [connectionError('x', describeThrown(error))] });
     }

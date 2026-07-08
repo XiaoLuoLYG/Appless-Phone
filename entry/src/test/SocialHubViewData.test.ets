@@ -4,7 +4,8 @@ import {
   socialHubComposioToolkitCandidates,
   socialHubKindLabel,
   socialHubPlatformLabel,
-  socialHubPrimaryText
+  socialHubPrimaryText,
+  socialHubRecentMessageGroups
 } from '../main/ets/pages/A2uiHome/components/SocialHubViewData';
 import { normalizeSocialHubItem } from '@loop/agent-core';
 
@@ -40,6 +41,22 @@ export default function socialHubViewDataTest() {
 
       expect(socialHubPrimaryText(item)).assertEqual('真实内容');
       expect(socialHubPrimaryText(emptyItem)).assertEqual('没有正文');
+    });
+
+    it('groups recent SocialHub messages by app and collapses overflow', 0, () => {
+      const items = [
+        normalizeSocialHubItem({ id: 'slack-1', platform: 'slack', kind: 'message', text: 'a', timestamp: '2026-07-08T10:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'slack-2', platform: 'slack', kind: 'message', text: 'b', timestamp: '2026-07-08T09:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'slack-3', platform: 'slack', kind: 'message', text: 'c', timestamp: '2026-07-08T08:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'x-old', platform: 'x', kind: 'message', text: 'old', timestamp: '2026-05-01T00:00:00.000Z' }),
+        normalizeSocialHubItem({ id: 'x-post', platform: 'x', kind: 'post', text: 'public', timestamp: '2026-07-08T00:00:00.000Z' })
+      ];
+      const groups = socialHubRecentMessageGroups(items, '2026-07-08T12:00:00.000Z', 2);
+
+      expect(groups.length).assertEqual(1);
+      expect(groups[0].platform).assertEqual('slack');
+      expect(groups[0].visibleItems.length).assertEqual(2);
+      expect(groups[0].hiddenCount).assertEqual(1);
     });
 
     it('maps SocialHub platforms to Composio toolkit candidates', 0, () => {

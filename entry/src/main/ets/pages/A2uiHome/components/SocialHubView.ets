@@ -42,8 +42,10 @@ import {
   socialHubDraftDisplayText,
   socialHubItemMetaText,
   socialHubKindLabel,
+  SocialHubMessageGroup,
   socialHubPlatformLabel,
-  socialHubPrimaryText
+  socialHubPrimaryText,
+  socialHubRecentMessageGroups
 } from './SocialHubViewData';
 
 const SOCIAL_HUB_CONNECTION_HEIGHT: number = 82;
@@ -593,9 +595,22 @@ export struct SocialHubView {
       } else {
         Scroll() {
           Column() {
-            ForEach(this.items(), (item: SocialHubItemData) => {
-              this.MessageRow(item)
-            }, (item: SocialHubItemData) => item.id)
+            ForEach(socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5), (group: SocialHubMessageGroup) => {
+              Text(socialHubPlatformLabel(group.platform))
+                .fontSize(13)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_MUTED)
+                .margin({ top: 12 })
+              ForEach(group.visibleItems, (item: SocialHubItemData) => {
+                this.MessageRow(item)
+              }, (item: SocialHubItemData) => item.id)
+              if (group.hiddenCount > 0) {
+                Text('已折叠 ' + group.hiddenCount.toString() + ' 条更早消息')
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 8 })
+              }
+            }, (group: SocialHubMessageGroup) => group.platform)
           }
           .width('100%')
         }

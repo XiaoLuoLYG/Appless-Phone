@@ -13,6 +13,7 @@ import {
   SocialHubDraftData,
   SocialHubItemData
 } from './SocialHubTypes';
+import { socialHubPrivateItems } from './SocialHubClient';
 
 function jsonLine(envelope: A2uiEnvelope): string {
   return JSON.stringify(envelope);
@@ -69,9 +70,10 @@ function dataLine(surfaceId: string, path: string, value: A2uiDataValue): string
 }
 
 export function socialHubFeedA2ui(surfaceId: string, items: SocialHubItemData[], connections: SocialHubConnectionData[]): string {
-  const selected = items.length > 0 ? items[0] : emptySocialHubItem();
+  const privateItems = socialHubPrivateItems(items);
+  const selected = privateItems.length > 0 ? privateItems[0] : emptySocialHubItem();
   return surfaceLines(surfaceId).concat([
-    dataLine(surfaceId, '/socialHub/items', items),
+    dataLine(surfaceId, '/socialHub/items', privateItems),
     dataLine(surfaceId, '/socialHub/selected', selected),
     dataLine(surfaceId, '/socialHub/draft', emptySocialHubDraft()),
     dataLine(surfaceId, '/socialHub/connections', connections)
