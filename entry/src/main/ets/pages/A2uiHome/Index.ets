@@ -463,6 +463,14 @@ struct Index {
     return null;
   }
 
+  private showComposioAuthList(message: string = ''): void {
+    this.showConfigPage = false;
+    this.showComposioAuthPage = true;
+    if (message.length > 0) {
+      this.composioAuthMessage = message;
+    }
+  }
+
   private async openSocialHubComposioAuth(platform: string): Promise<void> {
     if (this.composioAuthItems.length === 0) {
       await this.refreshComposioAuth();
@@ -471,12 +479,12 @@ struct Index {
     for (let index = 0; index < candidates.length; index++) {
       const item = this.composioAuthItemForToolkit(candidates[index]);
       if (item !== null) {
+        this.showComposioAuthList('正在打开 ' + platform + ' 授权页。');
         await this.openComposioAuthLink(item);
         return;
       }
     }
-    this.applySocialHubData('/socialHub/draft',
-      this.socialHubDraftError('', 'Composio 没有返回 ' + platform + ' 的授权配置。'));
+    this.showComposioAuthList('Composio 没有返回 ' + platform + ' 的授权配置。');
   }
 
   private loadPaymentAccounts(): void {
