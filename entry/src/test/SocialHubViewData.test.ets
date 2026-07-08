@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  socialHubCanAuthorize,
+  socialHubComposioToolkitCandidates,
   socialHubKindLabel,
   socialHubPlatformLabel,
   socialHubPrimaryText
@@ -38,6 +40,24 @@ export default function socialHubViewDataTest() {
 
       expect(socialHubPrimaryText(item)).assertEqual('真实内容');
       expect(socialHubPrimaryText(emptyItem)).assertEqual('没有正文');
+    });
+
+    it('maps SocialHub platforms to Composio toolkit candidates', 0, () => {
+      expect(socialHubComposioToolkitCandidates('x').join(',')).assertEqual('x,twitter');
+      expect(socialHubComposioToolkitCandidates('slack').join(',')).assertEqual('slack');
+      expect(socialHubComposioToolkitCandidates('discord').join(',')).assertEqual('discord');
+      expect(socialHubComposioToolkitCandidates('linkedin').join(',')).assertEqual('linkedin');
+      expect(socialHubComposioToolkitCandidates('whatsapp').join(',')).assertEqual('whatsapp');
+      expect(socialHubComposioToolkitCandidates('instagram').join(',')).assertEqual('instagram');
+      expect(socialHubComposioToolkitCandidates('wecom').length).assertEqual(0);
+    });
+
+    it('allows authorization for every unavailable Composio-backed SocialHub app', 0, () => {
+      expect(socialHubCanAuthorize('needs_auth')).assertTrue();
+      expect(socialHubCanAuthorize('limited')).assertTrue();
+      expect(socialHubCanAuthorize('disabled')).assertTrue();
+      expect(socialHubCanAuthorize('connected')).assertFalse();
+      expect(socialHubCanAuthorize('error')).assertFalse();
     });
   });
 }

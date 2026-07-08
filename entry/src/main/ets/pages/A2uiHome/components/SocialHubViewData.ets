@@ -110,6 +110,21 @@ export function socialHubBadgeStatus(status: SocialHubConnectionStatus | string)
   return 'idle';
 }
 
+export function socialHubComposioToolkitCandidates(platform: SocialHubPlatform | string): string[] {
+  if (platform === 'x') {
+    return ['x', 'twitter'];
+  }
+  if (platform === 'slack' || platform === 'discord' || platform === 'linkedin' ||
+    platform === 'whatsapp' || platform === 'instagram') {
+    return [platform];
+  }
+  return [];
+}
+
+export function socialHubCanAuthorize(status: SocialHubConnectionStatus | string): boolean {
+  return status === 'needs_auth' || status === 'limited' || status === 'disabled';
+}
+
 export function socialHubConnectionMessage(connection: SocialHubConnectionData): string {
   if (connection.message.length > 0) {
     return connection.message;

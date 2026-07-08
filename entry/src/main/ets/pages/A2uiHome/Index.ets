@@ -75,6 +75,7 @@ import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
+import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
@@ -450,6 +451,32 @@ struct Index {
     } finally {
       this.composioAuthBusy = false;
     }
+  }
+
+  private composioAuthItemForToolkit(slug: string): ComposioAuthConfigItem | null {
+    const normalized = slug.trim().toLowerCase();
+    for (let index = 0; index < this.composioAuthItems.length; index++) {
+      if (this.composioAuthItems[index].toolkitSlug.trim().toLowerCase() === normalized) {
+        return this.composioAuthItems[index];
+      }
+    }
+    return null;
+  }
+
+  private async openSocialHubComposioAuth(platform: string): Promise<void> {
+    if (this.composioAuthItems.length === 0) {
+      await this.refreshComposioAuth();
+    }
+    const candidates = socialHubComposioToolkitCandidates(platform);
+    for (let index = 0; index < candidates.length; index++) {
+      const item = this.composioAuthItemForToolkit(candidates[index]);
+      if (item !== null) {
+        await this.openComposioAuthLink(item);
+        return;
+      }
+    }
+    this.applySocialHubData('/socialHub/draft',
+      this.socialHubDraftError('', 'Composio 没有返回 ' + platform + ' 的授权配置。'));
   }
 
   private loadPaymentAccounts(): void {
@@ -1175,7 +1202,8 @@ struct Index {
         action.id === 'social_hub_draft_reply' ||
         action.id === 'social_hub_send_reply' ||
         action.id === 'social_hub_open_source' ||
-        action.id === 'x.authorize');
+        action.id === 'x.authorize' ||
+        action.id === 'social_hub_authorize');
   }
 
   private isSocialHubClientAction(action: A2uiAction): boolean {
@@ -1967,6 +1995,10 @@ struct Index {
     }
     if (action.id === 'social_hub_send_reply') {
       await this.sendSocialHubReply(action);
+      return;
+    }
+    if (action.id === 'social_hub_authorize') {
+      await this.openSocialHubComposioAuth(action.prompt);
       return;
     }
     if (action.id === 'social_hub_open_source') {

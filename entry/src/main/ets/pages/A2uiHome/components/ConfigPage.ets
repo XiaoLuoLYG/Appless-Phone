@@ -33,7 +33,9 @@ interface ComposioToolkitSummary {
 }
 
 const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
+  { slug: 'gmail', name: 'Gmail' },
   { slug: 'github', name: 'GitHub' },
+  { slug: 'googlecalendar', name: 'Google Calendar' },
   { slug: 'googledrive', name: 'Google Drive' },
   { slug: 'googledocs', name: 'Google Docs' },
   { slug: 'slack', name: 'Slack' },
@@ -46,6 +48,9 @@ const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
   { slug: 'linkedin', name: 'LinkedIn' },
   { slug: 'whatsapp', name: 'WhatsApp' },
   { slug: 'instagram', name: 'Instagram' },
+  { slug: 'youtube', name: 'YouTube' },
+  { slug: 'x', name: 'X' },
+  { slug: 'twitter', name: 'Twitter' },
   { slug: 'spotify', name: 'Spotify' },
   { slug: 'tiktok', name: 'TikTok' },
   { slug: 'ticketmaster', name: 'Ticketmaster' },

@@ -37,6 +37,8 @@ import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import {
   socialHubAuthorText,
+  socialHubCanAuthorize,
+  socialHubComposioToolkitCandidates,
   socialHubDraftDisplayText,
   socialHubItemMetaText,
   socialHubKindLabel,
@@ -136,7 +138,7 @@ export struct SocialHubView {
 
   private authorizeAction(platform: SocialHubPlatform): A2uiAction {
     return {
-      id: platform === 'x' ? 'x.authorize' : 'social_hub_authorize',
+      id: 'social_hub_authorize',
       label: '授权',
       prompt: platform,
       variant: 'primary',
@@ -145,8 +147,8 @@ export struct SocialHubView {
   }
 
   private canAuthorize(connection: SocialHubConnectionData): boolean {
-    return connection.platform === 'x' &&
-      (connection.status === 'needs_auth' || connection.status === 'limited' || connection.status === 'disabled');
+    return socialHubComposioToolkitCandidates(connection.platform).length > 0 &&
+      socialHubCanAuthorize(connection.status);
   }
 
   private openInlineReply(item: SocialHubItemData): void {
