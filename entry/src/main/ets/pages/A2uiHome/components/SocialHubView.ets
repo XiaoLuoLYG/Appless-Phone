@@ -564,9 +564,7 @@ export struct SocialHubView {
   }
 
   @Builder
-  private MessageList() {
-    const groups = this.messageGroups();
-    const visibleCount = socialHubVisibleMessageCount(groups);
+  private MessageList(groups: SocialHubMessageGroup[]) {
     Column() {
       Row() {
         Text('消息')
@@ -574,7 +572,7 @@ export struct SocialHubView {
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
           .layoutWeight(1)
-        Text(visibleCount.toString())
+        Text(socialHubVisibleMessageCount(groups).toString())
           .fontSize(12)
           .fontColor(COLOR_MUTED)
       }
@@ -583,7 +581,7 @@ export struct SocialHubView {
       .alignItems(VerticalAlign.Center)
       .padding({ left: 12, right: 12 })
 
-      if (visibleCount === 0) {
+      if (socialHubVisibleMessageCount(groups) === 0) {
         Column() {
           Text('还没有真实消息')
             .fontSize(15)
@@ -666,7 +664,7 @@ export struct SocialHubView {
         .margin({ top: 8 })
 
         Column() {
-          this.MessageList()
+          this.MessageList(this.messageGroups())
         }
         .width('100%')
         .margin({ top: 12 })

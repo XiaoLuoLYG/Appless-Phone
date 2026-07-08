@@ -162,6 +162,11 @@ interface HttpTextResponse {
   headers: string;
 }
 
+interface ComposioFixedRequestPayload {
+  fixedToolId: string;
+  fixedArgs?: Object;
+}
+
 interface HttpRequestHeaders {
   'User-Agent'?: string;
   'Accept'?: string;
@@ -6681,7 +6686,7 @@ async function composioAppResult(appName: string, query: string, kind: string): 
 }
 
 function composioFixedRequestArgs(toolId: string, args: Object | null = null): Object {
-  const payload: Record<string, Object | string | number | boolean> = {
+  const payload: ComposioFixedRequestPayload = {
     fixedToolId: toolId
   };
   if (args !== null) {
