@@ -144,6 +144,21 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
     });
 
+    it('prefers safe Gmail draft slugs over send or delete draft slugs', 0, () => {
+      const createDraft = { toolSlug: 'GMAIL_CREATE_DRAFT', description: 'Create Gmail draft' } as Object;
+      const sendDraft = { toolSlug: 'GMAIL_SEND_DRAFT', description: 'Send Gmail draft' } as Object;
+      const deleteDraft = { toolSlug: 'GMAIL_DELETE_DRAFT', description: 'Delete Gmail draft' } as Object;
+
+      expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
+        .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', sendDraft, 'gmail.draft.create'));
+      expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
+        .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', deleteDraft, 'gmail.draft.create'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
+    });
+
     it('keeps configured app user id for Composio dynamic calls', 0, () => {
       configureComposioUserId('aiphone-user-device-1');
       expect(currentComposioUserId()).assertEqual('aiphone-user-device-1');

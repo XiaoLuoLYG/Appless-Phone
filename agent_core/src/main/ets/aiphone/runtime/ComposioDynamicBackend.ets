@@ -101,6 +101,12 @@ function slugContainsAny(slug: string, parts: string[]): boolean {
   return false;
 }
 
+function isSafeGmailDraftSlug(slug: string): boolean {
+  return slugContainsAny(slug, ['draft']) &&
+    slugContainsAny(slug, ['create', 'upsert', 'save', 'update', 'edit', 'apply']) &&
+    !slugContainsAny(slug, ['send', 'delete', 'publish', 'remove']);
+}
+
 function rowsForSearch(payload: ComposioSearchObservation): A2uiLabelValueData[] {
   const rows: A2uiLabelValueData[] = [];
   const toolkits = Array.isArray(payload.authorizedToolkits) ? payload.authorizedToolkits.join(', ') : '';
@@ -307,7 +313,7 @@ function normalizedComposioUseCase(prompt: string): string {
 
 function fixedToolAllowsSideEffectSlug(fixedToolId: string, slug: string): boolean {
   if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
-    return slugContainsAny(slug, ['draft']);
+    return isSafeGmailDraftSlug(slug);
   }
   if (fixedToolId === 'calendar.event.create') {
     return slugContainsAny(slug, ['create', 'insert', 'add']);
@@ -422,7 +428,7 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
     (slugContainsAny(slug, ['get', 'read', 'fetch']) && slugContainsAny(slug, ['gmail', 'thread', 'message']))) {
     score += 400;
   }
-  if ((fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') && slugContainsAny(slug, ['draft'])) {
+  if ((fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') && isSafeGmailDraftSlug(slug)) {
     score += 700;
   }
   if (fixedToolId === 'calendar.events.search' &&
