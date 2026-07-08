@@ -11,7 +11,7 @@ interface ComposioExecuteArgs {
   fixedArgs?: Object;
 }
 
-interface ComposioSearchTool {
+export interface ComposioSearchTool {
   toolSlug?: string;
   description?: string;
   inputSchema?: string;

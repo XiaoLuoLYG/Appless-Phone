@@ -11,10 +11,19 @@ import {
   configureComposioUserId,
   currentComposioConfig,
   currentComposioUserId,
+  ComposioSearchTool,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute
 } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
+
+function looseObject(raw: string): Object {
+  return JSON.parse(raw) as Object;
+}
+
+function composioTool(raw: string): ComposioSearchTool {
+  return JSON.parse(raw) as ComposioSearchTool;
+}
 
 export default function composioDynamicBackendTest() {
   describe('composioDynamicBackend', () => {
@@ -56,21 +65,12 @@ export default function composioDynamicBackendTest() {
     });
 
     it('maps Gmail fixed-tool args into the matched Composio schema', 0, () => {
-      const draftTool = {
-        toolSlug: 'GMAIL_CREATE_DRAFT',
-        inputSchema: '{"type":"object","properties":{"to":{"type":"array"},"subject":{"type":"string"},"body":{"type":"string"},"thread_id":{"type":"string"},"reply_mode":{"type":"string"}}}'
-      } as Object;
+      const draftTool = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"to\\":{\\"type\\":\\"array\\"},\\"subject\\":{\\"type\\":\\"string\\"},\\"body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"},\\"reply_mode\\":{\\"type\\":\\"string\\"}}}"}');
       const draftArgs = composioArgumentsForTool(
         draftTool,
         '创建 Gmail 回复草稿',
         'gmail.draft.apply',
-        {
-          to: ['alice@example.com'],
-          subject: 'Re: Demo',
-          body: 'Got it.',
-          threadId: 'thread-123',
-          replyMode: 'reply'
-        } as Object
+        looseObject('{"to":["alice@example.com"],"subject":"Re: Demo","body":"Got it.","threadId":"thread-123","replyMode":"reply"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(JSON.stringify(draftArgs.to)).assertEqual('["alice@example.com"]');
       expect(draftArgs.subject).assertEqual('Re: Demo');
@@ -78,54 +78,35 @@ export default function composioDynamicBackendTest() {
       expect(draftArgs.thread_id).assertEqual('thread-123');
       expect(draftArgs.reply_mode).assertEqual('reply');
 
-      const threadTool = {
-        toolSlug: 'GMAIL_GET_THREAD',
-        inputSchema: '{"type":"object","properties":{"threadId":{"type":"string"}}}'
-      } as Object;
+      const threadTool = composioTool('{"toolSlug":"GMAIL_GET_THREAD","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"threadId\\":{\\"type\\":\\"string\\"}}}"}');
       const threadArgs = composioArgumentsForTool(
         threadTool,
         '读取 Gmail 线程',
         'gmail.thread.read',
-        { threadId: 'thread-999' } as Object
+        looseObject('{"threadId":"thread-999"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(threadArgs.threadId).assertEqual('thread-999');
     });
 
     it('maps Calendar fixed-tool args into create and update schemas', 0, () => {
-      const createTool = {
-        toolSlug: 'GOOGLECALENDAR_CREATE_EVENT',
-        inputSchema: '{"type":"object","properties":{"summary":{"type":"string"},"startDateTime":{"type":"string"},"endDateTime":{"type":"string"},"timeZone":{"type":"string"}}}'
-      } as Object;
+      const createTool = composioTool('{"toolSlug":"GOOGLECALENDAR_CREATE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"summary\\":{\\"type\\":\\"string\\"},\\"startDateTime\\":{\\"type\\":\\"string\\"},\\"endDateTime\\":{\\"type\\":\\"string\\"},\\"timeZone\\":{\\"type\\":\\"string\\"}}}"}');
       const createArgs = composioArgumentsForTool(
         createTool,
         '创建日程',
         'calendar.event.create',
-        {
-          title: 'AIPhoneDemo',
-          start: '2026-07-30T15:00:00+08:00',
-          end: '2026-07-30T15:30:00+08:00',
-          timezone: 'Asia/Shanghai'
-        } as Object
+        looseObject('{"title":"AIPhoneDemo","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(createArgs.summary).assertEqual('AIPhoneDemo');
       expect(createArgs.startDateTime).assertEqual('2026-07-30T15:00:00+08:00');
       expect(createArgs.endDateTime).assertEqual('2026-07-30T15:30:00+08:00');
       expect(createArgs.timeZone).assertEqual('Asia/Shanghai');
 
-      const updateTool = {
-        toolSlug: 'GOOGLECALENDAR_UPDATE_EVENT',
-        inputSchema: '{"type":"object","properties":{"event_id":{"type":"string"},"summary":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"}}}'
-      } as Object;
+      const updateTool = composioTool('{"toolSlug":"GOOGLECALENDAR_UPDATE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"event_id\\":{\\"type\\":\\"string\\"},\\"summary\\":{\\"type\\":\\"string\\"},\\"start\\":{\\"type\\":\\"string\\"},\\"end\\":{\\"type\\":\\"string\\"}}}"}');
       const updateArgs = composioArgumentsForTool(
         updateTool,
         '更新日程',
         'calendar.event.update',
-        {
-          eventId: 'evt-1',
-          title: 'AIPhoneDemo sync',
-          start: '2026-07-30T16:00:00+08:00',
-          end: '2026-07-30T16:30:00+08:00'
-        } as Object
+        looseObject('{"eventId":"evt-1","title":"AIPhoneDemo sync","start":"2026-07-30T16:00:00+08:00","end":"2026-07-30T16:30:00+08:00"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(updateArgs.event_id).assertEqual('evt-1');
       expect(updateArgs.summary).assertEqual('AIPhoneDemo sync');
@@ -134,33 +115,23 @@ export default function composioDynamicBackendTest() {
     });
 
     it('does not synthesize missing fixed write args from prompt text', 0, () => {
-      const draftTool = {
-        toolSlug: 'GMAIL_CREATE_DRAFT',
-        inputSchema: '{"type":"object","required":["body"],"properties":{"body":{"type":"string"},"subject":{"type":"string"},"thread_id":{"type":"string"}}}'
-      } as Object;
+      const draftTool = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"body\\"],\\"properties\\":{\\"body\\":{\\"type\\":\\"string\\"},\\"subject\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"}}}"}');
       const draftArgs = composioArgumentsForTool(
         draftTool,
         '帮我给 Alice 写 Gmail 草稿说我收到了',
         'gmail.draft.create',
-        {
-          subject: 'Re: Demo'
-        } as Object
+        looseObject('{"subject":"Re: Demo"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(draftArgs.body === undefined).assertTrue();
       expect(draftArgs.subject).assertEqual('Re: Demo');
       expect(draftArgs.thread_id === undefined).assertTrue();
 
-      const updateTool = {
-        toolSlug: 'GOOGLECALENDAR_UPDATE_EVENT',
-        inputSchema: '{"type":"object","required":["event_id","summary"],"properties":{"event_id":{"type":"string"},"summary":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"}}}'
-      } as Object;
+      const updateTool = composioTool('{"toolSlug":"GOOGLECALENDAR_UPDATE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"event_id\\",\\"summary\\"],\\"properties\\":{\\"event_id\\":{\\"type\\":\\"string\\"},\\"summary\\":{\\"type\\":\\"string\\"},\\"start\\":{\\"type\\":\\"string\\"},\\"end\\":{\\"type\\":\\"string\\"}}}"}');
       const updateArgs = composioArgumentsForTool(
         updateTool,
         '把刚才的日程改到下午四点',
         'calendar.event.update',
-        {
-          start: '2026-07-30T16:00:00+08:00'
-        } as Object
+        looseObject('{"start":"2026-07-30T16:00:00+08:00"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(updateArgs.event_id === undefined).assertTrue();
       expect(updateArgs.summary === undefined).assertTrue();
@@ -173,12 +144,7 @@ export default function composioDynamicBackendTest() {
         configureComposioConfigFromRawJson('{}');
         const createResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
-          {
-            fixedToolId: 'gmail.draft.create',
-            fixedArgs: {
-              body: 'Got it.'
-            }
-          } as Object
+          looseObject('{"fixedToolId":"gmail.draft.create","fixedArgs":{"body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(createResult.toolName).assertEqual('gmail.draft.create');
         expect(createResult.status).assertEqual('error');
@@ -188,13 +154,7 @@ export default function composioDynamicBackendTest() {
 
         const emptyRecipientResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
-          {
-            fixedToolId: 'gmail.draft.create',
-            fixedArgs: {
-              to: [''],
-              body: 'Got it.'
-            }
-          } as Object
+          looseObject('{"fixedToolId":"gmail.draft.create","fixedArgs":{"to":[""],"body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(emptyRecipientResult.toolName).assertEqual('gmail.draft.create');
         expect(emptyRecipientResult.status).assertEqual('error');
@@ -204,16 +164,7 @@ export default function composioDynamicBackendTest() {
 
         const blankRecipientResult = await callComposioDynamic(
           '确认应用刚才的 Gmail 草稿',
-          {
-            fixedToolId: 'gmail.draft.apply',
-            fixedArgs: {
-              threadId: 'thread-123',
-              to: ['   '],
-              subject: 'Re: Demo',
-              replyMode: 'reply',
-              body: 'Got it.'
-            }
-          } as Object
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["   "],"subject":"Re: Demo","replyMode":"reply","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(blankRecipientResult.toolName).assertEqual('gmail.draft.apply');
         expect(blankRecipientResult.status).assertEqual('error');
@@ -223,15 +174,7 @@ export default function composioDynamicBackendTest() {
 
         const draftResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
-          {
-            fixedToolId: 'gmail.draft.apply',
-            fixedArgs: {
-              threadId: 'thread-123',
-              to: ['alice@example.com'],
-              subject: 'Re: Demo',
-              body: 'Got it.'
-            }
-          } as Object
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["alice@example.com"],"subject":"Re: Demo","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(draftResult.toolName).assertEqual('gmail.draft.apply');
         expect(draftResult.status).assertEqual('error');
@@ -241,10 +184,7 @@ export default function composioDynamicBackendTest() {
 
         const calendarResult = await callComposioDynamic(
           '把刚才的日程改到下午四点',
-          {
-            fixedToolId: 'calendar.event.update',
-            fixedArgs: {} as Object
-          } as Object
+          looseObject('{"fixedToolId":"calendar.event.update","fixedArgs":{}}')
         ) as DynamicGenericToolResult;
         expect(calendarResult.toolName).assertEqual('calendar.event.update');
         expect(calendarResult.status).assertEqual('error');
@@ -256,21 +196,21 @@ export default function composioDynamicBackendTest() {
     });
 
     it('keeps read/search fixed tools below side-effect Composio matches', 0, () => {
-      const calendarRead = { toolSlug: 'GOOGLECALENDAR_LIST_EVENTS', description: 'List events' } as Object;
-      const calendarCreate = { toolSlug: 'GOOGLECALENDAR_CREATE_EVENT', description: 'Create event' } as Object;
+      const calendarRead = composioTool('{"toolSlug":"GOOGLECALENDAR_LIST_EVENTS","description":"List events"}');
+      const calendarCreate = composioTool('{"toolSlug":"GOOGLECALENDAR_CREATE_EVENT","description":"Create event"}');
       expect(composioPreferredToolScore('帮我看今天的 Google Calendar 日程', calendarRead, 'calendar.events.search'))
         .assertLarger(composioPreferredToolScore('帮我看今天的 Google Calendar 日程', calendarCreate, 'calendar.events.search'));
 
-      const gmailRead = { toolSlug: 'GMAIL_GET_THREAD', description: 'Read Gmail thread' } as Object;
-      const gmailDraft = { toolSlug: 'GMAIL_CREATE_DRAFT', description: 'Create Gmail draft' } as Object;
+      const gmailRead = composioTool('{"toolSlug":"GMAIL_GET_THREAD","description":"Read Gmail thread"}');
+      const gmailDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
       expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailRead, 'gmail.thread.read'))
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
     });
 
     it('prefers safe Gmail draft slugs over send or delete draft slugs', 0, () => {
-      const createDraft = { toolSlug: 'GMAIL_CREATE_DRAFT', description: 'Create Gmail draft' } as Object;
-      const sendDraft = { toolSlug: 'GMAIL_SEND_DRAFT', description: 'Send Gmail draft' } as Object;
-      const deleteDraft = { toolSlug: 'GMAIL_DELETE_DRAFT', description: 'Delete Gmail draft' } as Object;
+      const createDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
+      const sendDraft = composioTool('{"toolSlug":"GMAIL_SEND_DRAFT","description":"Send Gmail draft"}');
+      const deleteDraft = composioTool('{"toolSlug":"GMAIL_DELETE_DRAFT","description":"Delete Gmail draft"}');
 
       expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', sendDraft, 'gmail.draft.create'));

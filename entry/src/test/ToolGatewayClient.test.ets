@@ -54,6 +54,10 @@ interface PaymentTestArgs {
   originalQuery?: string;
 }
 
+function looseObject(raw: string): Object {
+  return JSON.parse(raw) as Object;
+}
+
 interface McDonaldsStoreFixture {
   storeName: string;
   address: string;
@@ -540,7 +544,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          { threadId: 'thread-123' } as Object
+          looseObject('{"threadId":"thread-123"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -566,13 +570,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            to: ['alice@example.com'],
-            subject: 'AIPhoneDemo',
-            body: 'Got it.',
-            threadId: 'thread-234',
-            replyMode: 'reply'
-          } as Object
+          looseObject('{"to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Got it.","threadId":"thread-234","replyMode":"reply"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -599,13 +597,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            to: ['alice@example.com'],
-            subject: 'AIPhoneDemo',
-            body: 'Please send later.',
-            threadId: 'thread-345',
-            replyMode: 'reply'
-          } as Object
+          looseObject('{"to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later.","threadId":"thread-345","replyMode":"reply"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -632,10 +624,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            to: ['alice@example.com'],
-            subject: 'AIPhoneDemo'
-          } as Object
+          looseObject('{"to":["alice@example.com"],"subject":"AIPhoneDemo"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -663,9 +652,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            body: 'Got it.'
-          } as Object
+          looseObject('{"body":"Got it."}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -694,9 +681,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            threadId: 'thread-345'
-          } as Object
+          looseObject('{"threadId":"thread-345"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -724,12 +709,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            threadId: 'thread-345',
-            to: ['alice@example.com'],
-            subject: 'AIPhoneDemo',
-            body: 'Please send later.'
-          } as Object
+          looseObject('{"threadId":"thread-345","to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later."}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -781,12 +761,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            title: 'AIPhoneDemo sync',
-            start: '2026-07-30T15:00:00+08:00',
-            end: '2026-07-30T15:30:00+08:00',
-            timezone: 'Asia/Shanghai'
-          } as Object
+          looseObject('{"title":"AIPhoneDemo sync","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -813,13 +788,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            eventId: 'evt-456',
-            title: 'AIPhoneDemo moved',
-            start: '2026-07-30T16:00:00+08:00',
-            end: '2026-07-30T16:30:00+08:00',
-            timezone: 'Asia/Shanghai'
-          } as Object
+          looseObject('{"eventId":"evt-456","title":"AIPhoneDemo moved","start":"2026-07-30T16:00:00+08:00","end":"2026-07-30T16:30:00+08:00","timezone":"Asia/Shanghai"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -846,9 +815,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            end: '2026-07-30T15:30:00+08:00'
-          } as Object
+          looseObject('{"end":"2026-07-30T15:30:00+08:00"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -877,9 +844,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            timezone: 'Asia/Shanghai'
-          } as Object
+          looseObject('{"timezone":"Asia/Shanghai"}')
         );
 
         const rendered = genericToolResults(result.surface);
