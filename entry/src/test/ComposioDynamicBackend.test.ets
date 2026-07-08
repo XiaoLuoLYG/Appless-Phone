@@ -209,6 +209,9 @@ export default function composioDynamicBackendTest() {
 
     it('prefers safe Gmail draft slugs over send or delete draft slugs', 0, () => {
       const createDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
+      const updateDraft = composioTool('{"toolSlug":"GMAIL_UPDATE_DRAFT","description":"Update Gmail draft"}');
+      const editDraft = composioTool('{"toolSlug":"GMAIL_EDIT_DRAFT","description":"Edit Gmail draft"}');
+      const applyDraft = composioTool('{"toolSlug":"GMAIL_APPLY_DRAFT","description":"Apply Gmail draft"}');
       const sendDraft = composioTool('{"toolSlug":"GMAIL_SEND_DRAFT","description":"Send Gmail draft"}');
       const deleteDraft = composioTool('{"toolSlug":"GMAIL_DELETE_DRAFT","description":"Delete Gmail draft"}');
 
@@ -216,9 +219,19 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', sendDraft, 'gmail.draft.create'));
       expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', deleteDraft, 'gmail.draft.create'));
+      expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
+        .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', updateDraft, 'gmail.draft.create'));
+      expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
+        .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', editDraft, 'gmail.draft.create'));
+      expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
+        .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', applyDraft, 'gmail.draft.create'));
       expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
         .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
       expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', editDraft, 'gmail.draft.apply'))
         .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
     });
 
