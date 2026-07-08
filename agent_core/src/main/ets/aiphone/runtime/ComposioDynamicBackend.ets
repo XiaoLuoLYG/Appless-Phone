@@ -7,6 +7,8 @@ interface ComposioExecuteArgs {
   operation?: string;
   toolSlug?: string;
   arguments?: Object;
+  fixedToolId?: string;
+  fixedArgs?: Object;
 }
 
 interface ComposioSearchTool {
@@ -40,6 +42,11 @@ interface ComposioArrayHit {
   items: Object[];
 }
 
+interface FixedArgumentAlias {
+  source: string;
+  targets: string[];
+}
+
 let composioConfig: ComposioConfig = new ComposioConfig('', 'https://backend.composio.dev/api/v3.1', '', '', '');
 let composioClient: ComposioSessionClient | null = null;
 let scopedComposioClients: Map<string, ComposioSessionClient> = new Map();
@@ -58,11 +65,40 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
   return JSON.stringify(value);
 }
 
+function argumentRecord(value: Object | null | undefined): Record<string, Object | string | number | boolean | null | undefined> {
+  if (value === undefined || value === null || Array.isArray(value) || typeof value !== 'object') {
+    return {};
+  }
+  return value as Record<string, Object | string | number | boolean | null | undefined>;
+}
+
+function hasMeaningfulValue(value: Object | string | number | boolean | null | undefined): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return true;
+}
+
 function parsedExecuteArgs(args: Object | null): ComposioExecuteArgs {
   if (args === null) {
     return {};
   }
   return args as ComposioExecuteArgs;
+}
+
+function slugContainsAny(slug: string, parts: string[]): boolean {
+  for (let index = 0; index < parts.length; index++) {
+    if (slug.indexOf(parts[index]) >= 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function rowsForSearch(payload: ComposioSearchObservation): A2uiLabelValueData[] {
@@ -269,13 +305,95 @@ function normalizedComposioUseCase(prompt: string): string {
   return prompt;
 }
 
-function preferredToolScore(prompt: string, tool: ComposioSearchTool): number {
+function fixedToolAllowsSideEffectSlug(fixedToolId: string, slug: string): boolean {
+  if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
+    return slugContainsAny(slug, ['draft']);
+  }
+  if (fixedToolId === 'calendar.event.create') {
+    return slugContainsAny(slug, ['create', 'insert', 'add']);
+  }
+  if (fixedToolId === 'calendar.event.update') {
+    return slugContainsAny(slug, ['update', 'patch', 'edit']);
+  }
+  return false;
+}
+
+function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
+  if (toolId === 'gmail.mail.search') {
+    return [
+      { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
+      { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults'] }
+    ];
+  }
+  if (toolId === 'gmail.thread.read') {
+    return [{ source: 'threadId', targets: ['threadId', 'thread_id', 'id'] }];
+  }
+  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+    return [
+      { source: 'to', targets: ['to', 'to_addresses', 'recipients', 'emails'] },
+      { source: 'subject', targets: ['subject', 'title'] },
+      { source: 'body', targets: ['body', 'message', 'content', 'text'] },
+      { source: 'threadId', targets: ['threadId', 'thread_id'] },
+      { source: 'replyMode', targets: ['replyMode', 'reply_mode', 'mode'] }
+    ];
+  }
+  if (toolId === 'calendar.events.search') {
+    return [
+      { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
+      { source: 'timeRange', targets: ['timeRange', 'time_range'] },
+      { source: 'timeMin', targets: ['timeMin', 'time_min', 'start', 'startDateTime', 'start_time'] },
+      { source: 'timeMax', targets: ['timeMax', 'time_max', 'end', 'endDateTime', 'end_time'] },
+      { source: 'timezone', targets: ['timezone', 'timeZone'] },
+      { source: 'calendarId', targets: ['calendarId', 'calendar_id'] }
+    ];
+  }
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    return [
+      { source: 'eventId', targets: ['eventId', 'event_id', 'id'] },
+      { source: 'title', targets: ['title', 'summary', 'name'] },
+      { source: 'start', targets: ['start', 'startDateTime', 'start_time', 'startTime'] },
+      { source: 'end', targets: ['end', 'endDateTime', 'end_time', 'endTime'] },
+      { source: 'timezone', targets: ['timezone', 'timeZone'] },
+      { source: 'calendarId', targets: ['calendarId', 'calendar_id'] }
+    ];
+  }
+  if (toolId === 'x.post.search') {
+    return [
+      { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
+      { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults'] }
+    ];
+  }
+  return [];
+}
+
+function mergeFixedArguments(
+  target: Record<string, Object | string | number | boolean>,
+  schema: ComposioInputSchema,
+  fixedToolId: string,
+  fixedArgs: Object | null
+): void {
+  if (fixedToolId.length === 0 || fixedArgs === null) {
+    return;
+  }
+  const record = argumentRecord(fixedArgs);
+  fixedArgumentAliases(fixedToolId).forEach((alias: FixedArgumentAlias) => {
+    const value = record[alias.source];
+    if (!hasMeaningfulValue(value)) {
+      return;
+    }
+    alias.targets.forEach((targetName: string) => setIfSupported(target, schema, targetName, value as Object | string | number | boolean));
+    setIfSupported(target, schema, alias.source, value as Object | string | number | boolean);
+  });
+}
+
+export function composioPreferredToolScore(prompt: string, tool: ComposioSearchTool, fixedToolId: string = ''): number {
   const slug = textOf(tool.toolSlug).toLowerCase();
   const description = textOf(tool.description).toLowerCase();
   if (slug.length === 0 || isUnsafeComposioExecute(slug, '{}')) {
     return -10000;
   }
   let score = 0;
+  const sideEffectSlug = slugContainsAny(slug, ['send', 'delete', 'publish', 'post_tweet', 'create', 'update', 'insert', 'draft', 'patch', 'edit']);
   if (slug.indexOf('search') >= 0 || slug.indexOf('find') >= 0) {
     score += 24;
   }
@@ -293,8 +411,43 @@ function preferredToolScore(prompt: string, tool: ComposioSearchTool): number {
     (slug.indexOf('search') >= 0 || slug.indexOf('list') >= 0 || slug.indexOf('get') >= 0 || slug.indexOf('message') >= 0)) {
     score += 90;
   }
-  if (slug.indexOf('send') >= 0 || slug.indexOf('delete') >= 0 || slug.indexOf('publish') >= 0 || slug.indexOf('post_tweet') >= 0) {
-    score -= 300;
+  if (sideEffectSlug && !fixedToolAllowsSideEffectSlug(fixedToolId, slug)) {
+    score -= 700;
+  }
+  if (fixedToolId === 'gmail.mail.search' &&
+    (slugContainsAny(slug, ['search', 'find', 'list']) && slugContainsAny(slug, ['gmail', 'mail', 'message', 'thread']))) {
+    score += 260;
+  }
+  if (fixedToolId === 'gmail.thread.read' &&
+    (slugContainsAny(slug, ['get', 'read', 'fetch']) && slugContainsAny(slug, ['gmail', 'thread', 'message']))) {
+    score += 400;
+  }
+  if ((fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') && slugContainsAny(slug, ['draft'])) {
+    score += 700;
+  }
+  if (fixedToolId === 'calendar.events.search' &&
+    (slugContainsAny(slug, ['search', 'find', 'list', 'get']) && slugContainsAny(slug, ['calendar', 'event']))) {
+    score += 400;
+  }
+  if (fixedToolId === 'calendar.event.create' &&
+    (slugContainsAny(slug, ['create', 'insert', 'add']) && slugContainsAny(slug, ['calendar', 'event']))) {
+    score += 700;
+  }
+  if (fixedToolId === 'calendar.event.update' &&
+    (slugContainsAny(slug, ['update', 'patch', 'edit']) && slugContainsAny(slug, ['calendar', 'event']))) {
+    score += 700;
+  }
+  if (fixedToolId === 'youtube.mine.playlists' &&
+    (slugContainsAny(slug, ['playlist']) && slugContainsAny(slug, ['list', 'get', 'search']))) {
+    score += 400;
+  }
+  if (fixedToolId === 'youtube.mine.subscriptions' &&
+    (slugContainsAny(slug, ['subscription']) && slugContainsAny(slug, ['list', 'get', 'search']))) {
+    score += 400;
+  }
+  if (fixedToolId === 'x.post.search' &&
+    (slugContainsAny(slug, ['search', 'find', 'list']) && slugContainsAny(slug, ['twitter', 'tweet', 'post', 'x_']))) {
+    score += 400;
   }
   if (toolkit === 'outlook' && (slug.indexOf('mail') >= 0 || slug.indexOf('message') >= 0 || description.indexOf('mail') >= 0)) {
     score += 90;
@@ -344,7 +497,7 @@ function preferredToolScore(prompt: string, tool: ComposioSearchTool): number {
   return score;
 }
 
-function bestToolForPrompt(payload: ComposioSearchObservation, prompt: string): ComposioSearchTool | null {
+function bestToolForPrompt(payload: ComposioSearchObservation, prompt: string, fixedToolId: string = ''): ComposioSearchTool | null {
   if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
     return null;
   }
@@ -352,7 +505,7 @@ function bestToolForPrompt(payload: ComposioSearchObservation, prompt: string): 
   let bestScore = -10000;
   payload.tools.forEach((item: Object) => {
     const tool = item as ComposioSearchTool;
-    const score = preferredToolScore(prompt, tool);
+    const score = composioPreferredToolScore(prompt, tool, fixedToolId);
     if (score > bestScore) {
       bestScore = score;
       best = tool;
@@ -509,10 +662,16 @@ function fallbackValueForProperty(name: string, property: ComposioInputSchemaPro
   return keyword.length > 0 ? keyword : prompt;
 }
 
-function argumentsForTool(tool: ComposioSearchTool, prompt: string): Object {
+export function composioArgumentsForTool(
+  tool: ComposioSearchTool,
+  prompt: string,
+  fixedToolId: string = '',
+  fixedArgs: Object | null = null
+): Object {
   const schema = parsedInputSchema(textOf(tool.inputSchema));
   const slug = textOf(tool.toolSlug).trim();
   const args = specialArgumentsForTool(slug, prompt, schema);
+  mergeFixedArguments(args, schema, fixedToolId, fixedArgs);
   const properties = schema.properties ?? {};
   const names = propertyNames(schema);
   names.forEach((name: string) => {
@@ -971,7 +1130,11 @@ export function composioDynamicResultFromObservation(
   }
 }
 
-async function callComposioSearchAndExecute(current: ComposioSessionClient, prompt: string): Promise<DynamicGenericToolResult> {
+async function callComposioSearchAndExecute(
+  current: ComposioSessionClient,
+  prompt: string,
+  parsed: ComposioExecuteArgs
+): Promise<DynamicGenericToolResult> {
   const searchObservation = await current.search(normalizedComposioUseCase(prompt));
   let payload: ComposioSearchObservation;
   try {
@@ -979,12 +1142,13 @@ async function callComposioSearchAndExecute(current: ComposioSessionClient, prom
   } catch (_error) {
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
-  const tool = bestToolForPrompt(payload, prompt);
+  const fixedToolId = textOf(parsed.fixedToolId).trim();
+  const tool = bestToolForPrompt(payload, prompt, fixedToolId);
   if (tool === null) {
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   const slug = textOf(tool.toolSlug).trim();
-  const args = argumentsForTool(tool, prompt);
+  const args = composioArgumentsForTool(tool, prompt, fixedToolId, parsed.fixedArgs ?? null);
   return composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
 }
 
@@ -1024,5 +1188,5 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
     const slug = textOf(parsed.toolSlug).trim();
     return composioDynamicResultFromObservation('execute', await current.execute(slug, parsed.arguments ?? new Object()), slug, prompt);
   }
-  return callComposioSearchAndExecute(current, prompt);
+  return callComposioSearchAndExecute(current, prompt, parsed);
 }

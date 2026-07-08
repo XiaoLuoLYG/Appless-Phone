@@ -527,6 +527,98 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('keeps Gmail thread-read args visible on the fixed Composio path', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.thread.read',
+          '打开这封 Gmail 线程',
+          'surface_gmail_thread_read_missing',
+          'model_tool_request',
+          noop,
+          null,
+          { threadId: 'thread-123' } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.thread.read');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(JSON.stringify(rendered[0].rows).indexOf('thread-123')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps Gmail draft-create args visible on the fixed Composio path', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我写 Gmail 草稿',
+          'surface_gmail_draft_create_missing',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            to: ['alice@example.com'],
+            subject: 'AIPhoneDemo',
+            body: 'Got it.',
+            threadId: 'thread-234',
+            replyMode: 'reply'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.create');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(JSON.stringify(rendered[0].rows).indexOf('alice@example.com')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('thread-234')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps Gmail draft-apply args visible on the fixed Composio path', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.apply',
+          '确认应用刚才的 Gmail 草稿',
+          'surface_gmail_draft_apply_missing',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            to: ['alice@example.com'],
+            subject: 'AIPhoneDemo',
+            body: 'Please send later.',
+            threadId: 'thread-345',
+            replyMode: 'reply'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('Please send later.')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('uses Composio auth state for X public post search when no Composio config exists', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
@@ -544,6 +636,71 @@ export default function toolGatewayClientTest() {
         expect(result.ok).assertTrue();
         expect(result.raw.indexOf('Composio 未配置')).assertLarger(-1);
         expect(result.raw.indexOf('SocialHub')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps Calendar create args visible on the fixed Composio path', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.create',
+          '帮我创建一个日程',
+          'surface_calendar_create_missing',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            title: 'AIPhoneDemo sync',
+            start: '2026-07-30T15:00:00+08:00',
+            end: '2026-07-30T15:30:00+08:00',
+            timezone: 'Asia/Shanghai'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('calendar.event.create');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(JSON.stringify(rendered[0].rows).indexOf('AIPhoneDemo sync')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('2026-07-30T15:00:00+08:00')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps Calendar update args visible on the fixed Composio path', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.update',
+          '帮我更新这个日程',
+          'surface_calendar_update_missing',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            eventId: 'evt-456',
+            title: 'AIPhoneDemo moved',
+            start: '2026-07-30T16:00:00+08:00',
+            end: '2026-07-30T16:30:00+08:00',
+            timezone: 'Asia/Shanghai'
+          } as Object
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].toolName).assertEqual('calendar.event.update');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(JSON.stringify(rendered[0].rows).indexOf('evt-456')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('AIPhoneDemo moved')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
