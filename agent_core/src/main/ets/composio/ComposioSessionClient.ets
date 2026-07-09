@@ -221,6 +221,9 @@ export class ComposioSessionClient {
       this.discoveryError = `Composio 未配置：${this.config.missingConfiguration()}`;
       return;
     }
+    if (this.canUseAuthlessSession()) {
+      return;
+    }
     try {
       this.discoveryError = '';
       this.toolkitAccounts.clear();
@@ -236,6 +239,10 @@ export class ComposioSessionClient {
 
   private allowsToolkit(toolkit: string): boolean {
     return this.toolkitAllowlist.length === 0 || this.toolkitAllowlist.indexOf(toolkit) >= 0;
+  }
+
+  private canUseAuthlessSession(): boolean {
+    return this.toolkitAllowlist.length === 1 && this.toolkitAllowlist[0] === 'hackernews';
   }
 
   toolDescription(): string {
@@ -386,7 +393,7 @@ export class ComposioSessionClient {
     if (this.sessionId.length > 0) {
       return this.sessionId;
     }
-    if (this.toolkitAccounts.size === 0) {
+    if (this.toolkitAccounts.size === 0 && !this.canUseAuthlessSession()) {
       throw new Error(this.discoveryError.length > 0 ? this.discoveryError : 'Composio 没有已授权 Toolkit');
     }
     if (this.sessionPromise === null) {
@@ -497,6 +504,9 @@ export class ComposioSessionClient {
     this.toolkitAccounts.forEach((_accountId: string, toolkit: string) => {
       result.push(toolkit);
     });
+    if (result.length === 0 && this.canUseAuthlessSession()) {
+      return ['hackernews'];
+    }
     result.sort();
     return result;
   }

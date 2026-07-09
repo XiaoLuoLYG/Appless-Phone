@@ -1,5 +1,6 @@
 import {
   A2UI_COMPONENT_ACTION_BAR,
+  A2UI_COMPONENT_AGGREGATE_SEARCH,
   A2UI_COMPONENT_COLUMN,
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_FLIGHT_BOARD,
@@ -28,6 +29,10 @@ import {
   A2uiSurfaceState,
   A2uiTrainData,
   A2uiTravelOptionData,
+  AggregateSearchPost,
+  AggregateSearchResult,
+  AggregateSearchSourceStatus,
+  AggregateSearchVideo,
   StripeReceivingAccountCardData
 } from '@loop/agent-core';
 import {
@@ -138,12 +143,19 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
   const surface = params.surface;
   const kind = kindOf(surface);
   const root = findA2uiComponent(surface, surface.rootId.length > 0 ? surface.rootId : 'root');
+  const aggregate = kind === 'aggregate-search' ? aggregateSearchData(surface) : null;
+  const aggregateComponent = kind === 'aggregate-search' ? firstComponentByName(surface, A2UI_COMPONENT_AGGREGATE_SEARCH) : null;
+  const aggregateTitle = aggregateComponent === null ? '' : componentTitleOf(aggregateComponent);
+  const aggregateBaseTitle = firstText(surface.title, surface.surfaceId, 'A2UI');
+  const aggregateSubtitle = aggregate === null
+    ? firstText(surface.error, prompt)
+    : firstText(aggregate.query, aggregate.summary, firstText(surface.error, prompt));
   const baseDocument: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
     source: sourceOf(kind, surface, params.isBusy),
     kind: kind,
-    title: firstText(surface.title, surface.surfaceId, 'A2UI'),
-    subtitle: firstText(surface.error, prompt),
+    title: kind === 'aggregate-search' ? firstText(aggregateTitle, aggregateBaseTitle) : aggregateBaseTitle,
+    subtitle: kind === 'aggregate-search' ? aggregateSubtitle : firstText(surface.error, prompt),
     chips: [],
     metrics: [],
     timeline: [],
@@ -161,6 +173,9 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     appendComponentActions(document.actions, component);
     appendBlocksForComponent(document, surface, component);
   });
+  if (kind === 'aggregate-search' && aggregateComponent === null && aggregate !== null && hasAggregateData(aggregate)) {
+    appendAggregateSearchBlocks(document, surface, aggregateSearchFallbackComponent(surface));
+  }
 
   dropCompletedThinkingBlocks(document, params.isBusy);
   return document;
@@ -217,6 +232,10 @@ function pendingDocument(params: CreateHtmlHomeDocumentParams, prompt: string): 
 }
 
 function appendBlocksForComponent(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  if (component.component === A2UI_COMPONENT_AGGREGATE_SEARCH) {
+    appendAggregateSearchBlocks(document, surface, component);
+    return;
+  }
   if (component.component === A2UI_COMPONENT_TRAVEL_OPTIONS) {
     appendTravelBlocks(document, surface, component);
     return;
@@ -450,6 +469,58 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     if (mediaPlayback !== null) {
       block.actions = block.actions.concat(htmlActions([mediaPlayback], component.id));
     }
+    document.blocks.push(block);
+  });
+}
+
+function appendAggregateSearchBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  const aggregate = aggregateSearchData(surface);
+  const hasAggregateComponent = component.component === A2UI_COMPONENT_AGGREGATE_SEARCH;
+  if (!hasAggregateData(aggregate) && !hasAggregateComponent && document.kind !== 'aggregate-search') {
+    appendGenericComponentBlock(document, surface, component);
+    return;
+  }
+  aggregate.videos.forEach((item: AggregateSearchVideo, index: number) => {
+    const block = newBlock(component.id + '-video-' + index.toString(), 'aggregate-video', firstText(item.title, item.provider, item.id));
+    block.subtitle = '';
+    block.status = item.status;
+    block.source = item.source;
+    const mediaEmbed = mediaEmbedForResult(aggregateVideoResult(item));
+    if (mediaEmbed !== null) {
+      block.mediaEmbed = mediaEmbed;
+    }
+    document.blocks.push(block);
+  });
+  aggregate.posts.forEach((item: AggregateSearchPost, index: number) => {
+    const block = newBlock(component.id + '-post-' + index.toString(), 'aggregate-post', firstText(item.title, item.provider, item.id));
+    block.subtitle = firstText(item.text, item.author, item.handle);
+    block.status = item.status;
+    block.source = item.source;
+    appendMetric(block.metrics, 'author', item.author);
+    appendMetric(block.metrics, 'handle', item.handle);
+    appendMetric(block.metrics, 'publishedAt', item.publishedAt);
+    appendMetric(block.metrics, 'score', item.score);
+    appendMetric(block.metrics, 'commentCount', item.commentCount);
+    appendMetric(block.rows, 'url', item.url);
+    item.rows.forEach((row) => {
+      const label = row.label.toLowerCase();
+      if (label === 'mediaurl' || label === 'image' || label === 'images' || label === 'thumbnail' ||
+        label === 'cover' || label === 'pic' || label === 'picture' || label === 'url') {
+        appendMetric(block.rows, row.label, row.value);
+      }
+    });
+    document.blocks.push(block);
+  });
+  aggregate.sourceStatuses.forEach((item: AggregateSearchSourceStatus, index: number) => {
+    if (item.message.length === 0 && item.count <= 0) {
+      return;
+    }
+    const block = newBlock(component.id + '-status-' + index.toString(), 'aggregate-source-status', firstText(item.label, item.source));
+    block.subtitle = item.message;
+    block.status = item.status;
+    block.source = item.source;
+    appendMetric(block.metrics, 'source', item.source);
+    appendMetric(block.metrics, 'count', item.count);
     document.blocks.push(block);
   });
 }
@@ -860,6 +931,9 @@ function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
   if (hasComponent(surface, A2UI_COMPONENT_SOCIAL_HUB) || surface.intent === 'social') {
     return 'social';
   }
+  if (hasAggregateSearchSurface(surface)) {
+    return 'aggregate-search';
+  }
   if (hasGmailData(surface)) {
     return 'gmail';
   }
@@ -896,7 +970,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment') {
+  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search') {
     return 'tool';
   }
   return 'model';
@@ -911,9 +985,54 @@ function hasComponent(surface: A2uiSurfaceState, componentName: string): boolean
   return false;
 }
 
+function firstComponentByName(surface: A2uiSurfaceState, componentName: string): A2uiComponent | null {
+  for (let index = 0; index < surface.components.length; index++) {
+    if (surface.components[index].component === componentName) {
+      return surface.components[index];
+    }
+  }
+  return null;
+}
+
+function aggregateSearchFallbackComponent(surface: A2uiSurfaceState): A2uiComponent {
+  return {
+    id: firstText(surface.rootId, 'aggregate_search'),
+    component: A2UI_COMPONENT_AGGREGATE_SEARCH,
+    title: firstText(surface.title, '聚合搜索'),
+    status: surface.status,
+    dataPath: '/aggregateSearch'
+  };
+}
+
 function hasDynamicData(surface: A2uiSurfaceState): boolean {
   const connect = dynamicToolConnect(surface);
   return hasConnectData(connect) || genericToolResults(surface).length > 0;
+}
+
+function aggregateSearchData(surface: A2uiSurfaceState): AggregateSearchResult {
+  const result = resolveData(surface, '/aggregateSearch') as AggregateSearchResult;
+  if (result === undefined || result === null) {
+    return {
+      query: '',
+      videos: [],
+      posts: [],
+      sourceStatuses: [],
+      summary: ''
+    };
+  }
+  return result;
+}
+
+function hasAggregateSearchSurface(surface: A2uiSurfaceState): boolean {
+  if (surface.intent === 'aggregate_search' || hasComponent(surface, A2UI_COMPONENT_AGGREGATE_SEARCH)) {
+    return true;
+  }
+  return hasAggregateData(aggregateSearchData(surface));
+}
+
+function hasAggregateData(result: AggregateSearchResult): boolean {
+  return result.query.length > 0 || result.summary.length > 0 || result.videos.length > 0 ||
+    result.posts.length > 0 || result.sourceStatuses.length > 0;
 }
 
 function hasMediaVideoData(surface: A2uiSurfaceState): boolean {
@@ -1155,4 +1274,24 @@ function firstDateText(...values: HtmlHomeTextValue[]): string {
 function summaryText(surface: A2uiSurfaceState): string {
   const summary = resolveData(surface, '/summary') as A2uiSummaryData;
   return summary === undefined || summary === null ? '' : textOf(summary.text);
+}
+
+function aggregateVideoResult(item: AggregateSearchVideo): A2uiGenericToolResultData {
+  const rows: A2uiLabelValueData[] = [{
+    label: 'Video URL',
+    value: item.url
+  }, {
+    label: 'Thumbnail',
+    value: item.thumbnail
+  }];
+  item.rows.forEach((row: A2uiLabelValueData) => rows.push(row));
+  return {
+    toolName: 'media.video.search',
+    title: item.title,
+    summary: item.summary,
+    status: item.status,
+    sourceTag: item.provider,
+    rows: rows,
+    rawPreview: ''
+  };
 }

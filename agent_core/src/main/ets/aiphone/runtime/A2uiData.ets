@@ -27,6 +27,7 @@ import {
   SocialHubDraftData,
   SocialHubItemData
 } from './SocialHubTypes';
+import { AggregateSearchResult, emptyAggregateSearchResult } from './AggregateSearchTypes';
 
 export type A2uiLabelValue = A2uiLabelValueData;
 export type A2uiTrainOption = A2uiTrainData;
@@ -90,6 +91,7 @@ function emptyModel(): A2uiRuntimeDataModel {
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
     genericToolResults: [],
+    aggregateSearch: emptyAggregateSearchResult(),
     socialHub: emptySocialHub(),
     persona: emptyPersona(),
     personaMemory: emptyPersonaMemory(),
@@ -333,6 +335,7 @@ function parseModel(surface: A2uiSurfaceState): A2uiRuntimeDataModel {
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
+      aggregateSearch: parsed.aggregateSearch === undefined || parsed.aggregateSearch === null ? fallback.aggregateSearch : parsed.aggregateSearch,
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
@@ -482,6 +485,9 @@ export function resolveData(surface: A2uiSurfaceState, path: string | undefined)
   }
   if (path === '/genericToolResults') {
     return model.genericToolResults;
+  }
+  if (path === '/aggregateSearch') {
+    return model.aggregateSearch === undefined ? emptyAggregateSearchResult() : model.aggregateSearch;
   }
   if (path === '/stripeReceivingAccount') {
     return model.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : model.stripeReceivingAccount;

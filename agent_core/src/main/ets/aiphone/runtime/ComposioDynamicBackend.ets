@@ -219,6 +219,12 @@ function composioToolkitFromPrompt(prompt: string): string {
   if (lower.indexOf('ticketmaster') >= 0 || lower.indexOf('ticket master') >= 0) {
     return 'ticketmaster';
   }
+  if (lower.indexOf('hacker news') >= 0 || lower.indexOf('hackernews') >= 0 || prompt.indexOf('黑客新闻') >= 0) {
+    return 'hackernews';
+  }
+  if (lower.indexOf('reddit') >= 0 || prompt.indexOf('红迪') >= 0) {
+    return 'reddit';
+  }
   if (lower.indexOf('github') >= 0) {
     return 'github';
   }
@@ -349,6 +355,12 @@ function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): st
   }
   if (toolkit === 'ticketmaster') {
     return 'Search Ticketmaster events for ' + keyword;
+  }
+  if (toolkit === 'hackernews') {
+    return 'Search Hacker News posts for ' + keyword;
+  }
+  if (toolkit === 'reddit') {
+    return 'Search Reddit posts for ' + keyword;
   }
   if (containsAny(prompt, ['slack']) && containsAny(prompt, ['最近30', '最近 30', '近30', '近 30', '私信', 'dm', 'direct message'])) {
     return 'List recent Slack direct messages and channel messages from the last 30 days';
@@ -642,6 +654,31 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
   if (toolkit === 'ticketmaster' && (slug.indexOf('event') >= 0 || description.indexOf('event') >= 0)) {
     score += 80;
   }
+  if (toolkit === 'hackernews') {
+    if (slug === 'hackernews_search_posts') {
+      score += 220;
+    }
+    if (slug.indexOf('search') >= 0 && (slug.indexOf('post') >= 0 || description.indexOf('post') >= 0)) {
+      score += 80;
+    }
+  }
+  if (toolkit === 'reddit') {
+    if (slug === 'reddit_search_across_subreddits') {
+      score += 260;
+    }
+    if (slug === 'reddit_search_posts') {
+      score += 240;
+    }
+    if (slug.indexOf('post') >= 0 || description.indexOf('post') >= 0) {
+      score += 120;
+    }
+    if (slug === 'reddit_get_r_top' || slug === 'reddit_retrieve_reddit_post') {
+      score -= 260;
+    }
+    if (slug.indexOf('subreddit') >= 0 && slug !== 'reddit_search_across_subreddits' && slug.indexOf('post') < 0) {
+      score -= 180;
+    }
+  }
   if (containsAny(prompt, ['github']) && containsAny(prompt, ['pr', 'pull request', 'pull requests'])) {
     if (slug === 'github_find_pull_requests') {
       score += 200;
@@ -785,9 +822,23 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
     setIfSupported(args, schema, 'count', 5);
     return args;
   }
+  if (lower === 'hackernews_search_posts') {
+    setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'size', 5);
+    setIfSupported(args, schema, 'page', 0);
+    return args;
+  }
+  if (lower === 'reddit_search_across_subreddits') {
+    setIfSupported(args, schema, 'search_query', keyword);
+    setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'limit', 5);
+    setIfSupported(args, schema, 'count', 5);
+    return args;
+  }
   const toolkit = composioToolkitFromPrompt(prompt);
   if (toolkit === 'outlook' || toolkit === 'discord' || toolkit === 'linkedin' || toolkit === 'whatsapp' ||
-    toolkit === 'instagram' || toolkit === 'spotify' || toolkit === 'tiktok' || toolkit === 'ticketmaster') {
+    toolkit === 'instagram' || toolkit === 'spotify' || toolkit === 'tiktok' || toolkit === 'ticketmaster' ||
+    toolkit === 'reddit') {
     setIfSupported(args, schema, 'query', keyword);
     setIfSupported(args, schema, 'q', keyword);
     setIfSupported(args, schema, 'search', keyword);
@@ -966,6 +1017,10 @@ function itemDetail(item: Object): string {
   if (url.length > 0) {
     parts.push(url);
   }
+  const image = stringField(record, ['thumbnail_pic', 'bmiddle_pic', 'original_pic', 'image', 'image_url', 'imageUrl', 'cover', 'thumbnail', 'pic', 'pics', 'images']);
+  if (image.length > 0) {
+    parts.push(image);
+  }
   const snippet = stringField(record, ['snippet', 'text', 'message', 'body', 'content', 'description']);
   if (snippet.length > 0 && parts.join(' ').indexOf(snippet.substring(0, 40)) < 0) {
     parts.push(snippet.substring(0, 180));
@@ -1001,7 +1056,8 @@ function firstArrayHit(value: Object | string | number | boolean | null | undefi
     return { found: false, label: '', items: [] };
   }
   const record = value as Record<string, Object | string | number | boolean | null | undefined>;
-  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents', 'messages', 'emails', 'mails', 'posts', 'comments', 'tracks', 'playlists', 'videos', 'events'];
+  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents', 'messages', 'emails', 'mails',
+    'posts', 'comments', 'answers', 'articles', 'questions', 'statuses', 'feeds', 'tracks', 'playlists', 'videos', 'events'];
   for (let index = 0; index < preferred.length; index++) {
     const hit = arrayHit(preferred[index], record[preferred[index]]);
     if (hit.found) {
@@ -1260,6 +1316,12 @@ function resultTitleForTool(toolSlug: string): string {
   if (lower.indexOf('ticketmaster') >= 0) {
     return 'Composio Ticketmaster 结果';
   }
+  if (lower.indexOf('hackernews') >= 0 || lower.indexOf('hacker_news') >= 0) {
+    return 'Composio Hacker News 结果';
+  }
+  if (lower.indexOf('reddit') >= 0) {
+    return 'Composio Reddit 结果';
+  }
   return 'Composio 工具结果';
 }
 
@@ -1316,6 +1378,10 @@ export function isComposioConfigured(): boolean {
 
 export function isComposioDynamicPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
+  if (lower.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0 ||
+    lower.indexOf('zhihu') >= 0 || prompt.indexOf('知乎') >= 0) {
+    return false;
+  }
   return lower.indexOf('notion') >= 0 ||
     lower.indexOf('gmail') >= 0 ||
     lower.indexOf('google calendar') >= 0 ||
@@ -1346,6 +1412,11 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('tik tok') >= 0 ||
     lower.indexOf('ticketmaster') >= 0 ||
     lower.indexOf('ticket master') >= 0 ||
+    lower.indexOf('hacker news') >= 0 ||
+    lower.indexOf('hackernews') >= 0 ||
+    lower.indexOf('reddit') >= 0 ||
+    prompt.indexOf('黑客新闻') >= 0 ||
+    prompt.indexOf('红迪') >= 0 ||
     prompt.indexOf('谷歌邮箱') >= 0 ||
     prompt.indexOf('谷歌邮件') >= 0 ||
     prompt.indexOf('谷歌日历') >= 0 ||

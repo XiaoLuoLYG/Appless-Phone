@@ -68,6 +68,8 @@ interface XSearchPayload {
   includes?: XIncludesPayload;
 }
 
+const X_PUBLIC_SEARCH_MARKER: string = 'X 公开 post 搜索关键词:';
+
 interface XDmEventPayload {
   id?: string;
   event_type?: string;
@@ -324,7 +326,14 @@ function xHandleFromPrompt(prompt: string): string {
   return '';
 }
 
-function xSearchQuery(prompt: string, xUsername: string): string {
+export function xSearchQuery(prompt: string, xUsername: string): string {
+  const markerIndex = prompt.indexOf(X_PUBLIC_SEARCH_MARKER);
+  if (markerIndex >= 0) {
+    const keyword = prompt.substring(markerIndex + X_PUBLIC_SEARCH_MARKER.length).trim();
+    if (keyword.length > 0) {
+      return keyword;
+    }
+  }
   if (/\b(?:from|to|@)[A-Za-z0-9_]/.test(prompt)) {
     return prompt.trim();
   }

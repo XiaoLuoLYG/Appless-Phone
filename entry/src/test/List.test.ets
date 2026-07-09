@@ -38,6 +38,8 @@ import youtubeApiClientTest from './YouTubeApiClient.test';
 import mediaVideoToolA2uiTest from './MediaVideoToolA2ui.test';
 import bilibiliApiClientTest from './BilibiliApiClient.test';
 import mediaVideoClientTest from './MediaVideoClient.test';
+import aggregateSearchA2uiTest from './AggregateSearchA2ui.test';
+import aggregateSearchClientTest from './AggregateSearchClient.test';
 import paymentCoreTest from './PaymentCore.test';
 import paymentA2uiTest from './PaymentA2ui.test';
 import payPalPaymentClientTest from './PayPalPaymentClient.test';
@@ -103,6 +105,8 @@ export default function testsuite() {
   mediaVideoToolA2uiTest();
   bilibiliApiClientTest();
   mediaVideoClientTest();
+  aggregateSearchA2uiTest();
+  aggregateSearchClientTest();
   paymentCoreTest();
   paymentA2uiTest();
   payPalPaymentClientTest();

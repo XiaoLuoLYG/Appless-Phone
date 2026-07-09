@@ -4,6 +4,7 @@ import {
   SocialHubDraftData,
   SocialHubItemData
 } from './SocialHubTypes';
+import { AggregateSearchResult } from './AggregateSearchTypes';
 
 export const A2UI_VERSION: string = 'v0.9.1';
 export const A2UI_MIME: string = 'application/a2ui+json';
@@ -26,6 +27,7 @@ export const A2UI_COMPONENT_TOOL_CONNECT_CARD: string = 'ToolConnectCard';
 export const A2UI_COMPONENT_GENERIC_TOOL_RESULTS: string = 'GenericToolResults';
 export const A2UI_COMPONENT_SOCIAL_HUB: string = 'SocialHub';
 export const A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD: string = 'StripeReceivingAccountCard';
+export const A2UI_COMPONENT_AGGREGATE_SEARCH: string = 'AggregateSearch';
 
 export interface A2uiAction {
   id: string;
@@ -201,6 +203,7 @@ export interface A2uiRuntimeDataModel {
   toolRequest: A2uiToolRequestData;
   dynamicToolConnect: A2uiDynamicToolConnectData;
   genericToolResults: A2uiGenericToolResultData[];
+  aggregateSearch?: AggregateSearchResult;
   socialHub: SocialHubData;
   persona: A2uiPersonaData;
   personaMemory: A2uiPersonaMemoryData;
@@ -223,6 +226,7 @@ export type A2uiDataValue =
   A2uiToolRequestData |
   A2uiDynamicToolConnectData |
   A2uiGenericToolResultData[] |
+  AggregateSearchResult |
   A2uiPersonaData |
   A2uiPersonaMemoryData |
   StripeReceivingAccountCardData |
@@ -370,7 +374,8 @@ export function defaultA2uiCapabilities(): A2uiClientCapabilities {
       A2UI_COMPONENT_TOOL_CONNECT_CARD,
       A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
       A2UI_COMPONENT_SOCIAL_HUB,
-      A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD
+      A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
+      A2UI_COMPONENT_AGGREGATE_SEARCH
     ],
     transport: ['jsonl', 'openai-compatible-sse']
   };

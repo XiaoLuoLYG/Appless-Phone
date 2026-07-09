@@ -1,10 +1,10 @@
 # 当前工具能力总表
 
-更新时间：2026-07-07
+更新时间：2026-07-09
 
-来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
+来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：27 个静态工具 + `memory.update` + `dynamic.search` = 29 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`，少量 Outlook/SocialHub 结果会作为 extra 追加；表里把 `--composio-tools` 的 query 逐条展开，方便复制。
+当前 agent 工具箱：28 个静态工具 + `memory.update` + `dynamic.search` = 30 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；`media.aggregate.search` 内部会调用 Composio Hacker News，少量 Outlook/SocialHub 结果会作为 extra 追加；表里把 `--composio-tools` 的 query 逐条展开，方便复制。
 
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -25,6 +25,7 @@
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
 | Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
+| 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`X_BEARER_TOKEN`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID`；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
 | YouTube | `youtube.video.search` | `帮我在 YouTube 搜索 世界杯相关视频` | YouTube-only 公开视频搜索；可用 API 热门排序 | `read` | `YOUTUBE_API_KEY` | 通常需要 VPN | 否 | `--google-apps` |
 | YouTube | `youtube.mine.playlists` | `帮我查看我的 YouTube 播放列表` | 用户播放列表或真实 Composio 授权/失败卡 | `read` | Composio YouTube connected account | 通常需要外网/VPN | 是 | `--google-apps` |
 | YouTube | `youtube.mine.subscriptions` | `帮我查看我的 YouTube 订阅` | 用户订阅或真实 Composio 授权/失败卡 | `read` | Composio YouTube connected account | 通常需要外网/VPN | 是 | 注册/单元测试 |
@@ -58,4 +59,4 @@
 
 ## 更新规则
 
-改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 agent-only 工具看 `LoopBackend.ets`; 新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。
+改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 agent-only 工具看 `LoopBackend.ets`; 新增聚合搜索来源看 `AggregateSearchClient.ets`；新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。

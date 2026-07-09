@@ -456,6 +456,65 @@ export default function a2uiHomeToolRequestTest() {
       expect(argText(resolved.args, 'query')).assertEqual('');
     });
 
+    it('falls back mixed news and discussion prompts to aggregate media search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '我想看看有关 openai codex 的相关新闻和讨论',
+        ''
+      );
+      const sources = argSources(resolved.args);
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+      expect(sources.indexOf('youtube')).assertLarger(-1);
+      expect(sources.indexOf('bilibili')).assertLarger(-1);
+      expect(sources.indexOf('x')).assertLarger(-1);
+      expect(sources.indexOf('hackernews')).assertLarger(-1);
+      expect(sources.indexOf('reddit')).assertLarger(-1);
+      expect(argText(resolved.args, 'query')).assertEqual('openai codex');
+    });
+
+    it('accepts compact aggregate news discussion prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        'openai codex 新闻讨论',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(argText(resolved.args, 'query')).assertEqual('openai codex');
+    });
+
+    it('reroutes mistaken X-only tool choice for mixed aggregate prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('x.post.search', '我想看看有关 openai codex 的相关新闻和讨论', 'model_tool_request', null),
+        '我想看看有关 openai codex 的相关新闻和讨论',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(resolved.actionId).assertEqual('client_aggregate_search_reroute');
+    });
+
+    it('does not steal single-source YouTube or X public post prompts', 0, () => {
+      const youtube = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '帮我整理 YouTube 上 openai codex 的新闻视频',
+        ''
+      );
+      const xPost = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '帮我整理 X 上 openai 最近的公开 post',
+        ''
+      );
+
+      expect(youtube.toolId).assertEqual('youtube.video.search');
+      expect(xPost.toolId).assertEqual('x.post.search');
+    });
+
     it('reroutes mistaken dynamic media prompts to aggregate video search', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('dynamic.search', '帮我在b站和youtube里搜索qwen max 的官方视频', 'model_tool_request', null),
@@ -601,6 +660,26 @@ export default function a2uiHomeToolRequestTest() {
         '帮我查看 Slack 最近的消息',
         ''
       );
+      const composioWeibo = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Composio Weibo 查 openai codex 讨论',
+        ''
+      );
+      const aggregateWithZhihu = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我想看看有关 openai codex 的相关新闻和讨论，知乎也看',
+        ''
+      );
+      const reddit = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Reddit 查 openai codex 讨论',
+        ''
+      );
+      const aggregateWithReddit = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我想看看有关 openai codex 的相关新闻和讨论，Reddit也看',
+        ''
+      );
 
       expect(googleDocs.toolId).assertEqual('dynamic.search');
       expect(googleDocs.actionId).assertEqual('client_intent_fallback');
@@ -609,6 +688,10 @@ export default function a2uiHomeToolRequestTest() {
       expect(outlook.toolId).assertEqual('dynamic.search');
       expect(discord.toolId).assertEqual('dynamic.search');
       expect(plainSlack.toolId).assertEqual('social.feed.search');
+      expect(composioWeibo.toolId).assertEqual('');
+      expect(aggregateWithZhihu.toolId).assertEqual('media.aggregate.search');
+      expect(reddit.toolId).assertEqual('dynamic.search');
+      expect(aggregateWithReddit.toolId).assertEqual('media.aggregate.search');
     });
 
     it('does not infer X post search from Xcode or generic post text', 0, () => {

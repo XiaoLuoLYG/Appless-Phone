@@ -1,4 +1,5 @@
 import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
+import { APP_LOGO_GOOGLE_PAY, APP_LOGO_PAYPAL, APP_LOGO_STRIPE } from './AppLogoDataUri';
 
 interface HtmlPaymentHomeDocumentWithBusy extends HtmlHomeDocument {
   isBusy?: boolean;
@@ -352,6 +353,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   height: 42px;
   width: 100%;
   border: 0;
@@ -361,6 +363,11 @@ h1 {
   font-size: 14px;
   font-weight: 760;
   font: inherit;
+}
+.google-pay-placeholder img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
 }
 .google-pay-placeholder:disabled {
   opacity: .62;
@@ -486,9 +493,10 @@ const PAYMENT_HOME_JS: string = `
   var data = JSON.parse(document.getElementById('payment-data').textContent || '{}');
   var isBusy = data.isBusy === true;
   var PROVIDER_ICONS = {
-    paypal: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#ffffff"/><rect x="3" y="3" width="42" height="42" rx="10" fill="#003087"/><text x="24" y="27" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9.5" font-weight="800" fill="#ffffff">PayPal</text><rect x="12" y="31" width="24" height="3" rx="1.5" fill="#009cde"/></svg>',
-    stripe: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48"><rect width="48" height="48" rx="12" fill="#635bff"/><text x="24" y="29" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#ffffff">stripe</text></svg>'
+    paypal: '${APP_LOGO_PAYPAL}',
+    stripe: '${APP_LOGO_STRIPE}'
   };
+  var GOOGLE_PAY_ICON = '${APP_LOGO_GOOGLE_PAY}';
   function text(value) {
     if (value === undefined || value === null) { return ''; }
     return String(value);
@@ -528,7 +536,7 @@ const PAYMENT_HOME_JS: string = `
     mark.setAttribute('aria-label', key === 'generic' ? '支付方式' : label);
     if (PROVIDER_ICONS[key]) {
       var img = add(mark, 'img');
-      img.src = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(PROVIDER_ICONS[key]);
+      img.src = PROVIDER_ICONS[key];
       img.alt = '';
       img.setAttribute('aria-hidden', 'true');
       img.onerror = function () { mark.setAttribute('data-broken', 'true'); };
@@ -866,9 +874,14 @@ const PAYMENT_HOME_JS: string = `
     if (config === null) { return; }
     var wrap = add(parent, 'div', 'google-pay-action');
     var slot = add(wrap, 'div', 'google-pay-button-slot');
-    var fallback = add(slot, 'button', 'google-pay-placeholder', 'Pay with G Pay');
+    var fallback = add(slot, 'button', 'google-pay-placeholder');
     fallback.type = 'button';
     fallback.disabled = isBusy;
+    var fallbackIcon = add(fallback, 'img');
+    fallbackIcon.src = GOOGLE_PAY_ICON;
+    fallbackIcon.alt = '';
+    fallbackIcon.setAttribute('aria-hidden', 'true');
+    add(fallback, 'span', '', 'Pay with G Pay');
     var status = add(wrap, 'p', 'google-pay-status', isBusy ? '正在处理上一笔支付。' : '');
     if (!isBusy) { status.style.display = 'none'; }
     if (isBusy) { return; }

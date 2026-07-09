@@ -68,6 +68,8 @@ export default function toolDefinitionRegistryTest() {
       expect(isYouTubeToolId('media.video.search')).assertFalse();
       expect(isMediaToolId('media.video.search')).assertTrue();
       expect(isMediaToolId('youtube.video.search')).assertFalse();
+      expect(isKnownDomainToolId('media.aggregate.search')).assertTrue();
+      expect(isMediaToolId('media.aggregate.search')).assertTrue();
     });
 
     it('registers SocialHub read and draft tools without send', 0, () => {
@@ -164,6 +166,7 @@ export default function toolDefinitionRegistryTest() {
 
     it('registers media video aggregation as a read-only local adapter', 0, () => {
       const media = toolDefinitionForToolId('media.video.search') as ToolDefinition;
+      const aggregate = toolDefinitionForToolId('media.aggregate.search') as ToolDefinition;
 
       expect(media.domain).assertEqual('media');
       expect(media.riskLevel).assertEqual('read');
@@ -173,6 +176,16 @@ export default function toolDefinitionRegistryTest() {
       expect(media.outputSchema).assertEqual('mediaVideos');
       expect(media.a2uiComponent).assertEqual('GenericToolResults');
       expect(media.actions[0]).assertEqual('media.open.web');
+      expect(aggregate.domain).assertEqual('media');
+      expect(aggregate.riskLevel).assertEqual('read');
+      expect(aggregate.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(aggregate.authModes.join(',')).assertEqual('provider_key,oauth,mcp_auth');
+      expect(aggregate.inputSchema).assertEqual('aggregateMediaSearchQuery');
+      expect(aggregate.outputSchema).assertEqual('aggregateSearch');
+      expect(aggregate.a2uiComponent).assertEqual('AggregateSearch');
+      expect(aggregate.actions[0]).assertEqual('media.open.web');
+      expect(isKnownDomainToolId('media.aggregate.search')).assertTrue();
+      expect(isMediaToolId('media.aggregate.search')).assertTrue();
     });
 
     it('registers payment send as a confirm-required local adapter', 0, () => {

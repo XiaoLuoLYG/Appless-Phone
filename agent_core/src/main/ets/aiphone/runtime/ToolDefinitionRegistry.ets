@@ -224,6 +224,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['media.open.web']
   },
   {
+    toolId: 'media.aggregate.search',
+    domain: 'media',
+    intent: 'media.aggregate.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'oauth', 'mcp_auth'],
+    inputSchema: 'aggregateMediaSearchQuery',
+    outputSchema: 'aggregateSearch',
+    a2uiComponent: 'AggregateSearch',
+    actions: ['media.open.web']
+  },
+  {
+    toolId: 'worldcup.open',
+    domain: 'media',
+    intent: 'worldcup.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['system'],
+    inputSchema: 'worldCupExperienceRequest',
+    outputSchema: 'worldCupExperience',
+    a2uiComponent: 'AnythingDemo',
+    actions: []
+  },
+  {
     toolId: 'youtube.mine.playlists',
     domain: 'youtube',
     intent: 'youtube.mine.playlists',

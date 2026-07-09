@@ -310,10 +310,10 @@ img { display: block; max-width: 100%; }
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 12px 14px 13px;
-  border-bottom: 1px solid rgba(25,20,15,.06);
+  padding: 12px 14px 17px;
   background: rgba(247,240,229,.92);
   backdrop-filter: blur(18px);
+  box-shadow: 0 10px 22px rgba(48,33,18,.05);
   scrollbar-width: none;
 }
 .source-rail::-webkit-scrollbar { display: none; }
@@ -569,32 +569,210 @@ img { display: block; max-width: 100%; }
 .fixture-strip {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(180px, 72%);
-  gap: 10px;
+  grid-auto-columns: minmax(296px, calc(100% - 28px));
+  gap: 16px;
   overflow-x: auto;
-  padding: 0 14px 14px;
+  padding: 12px 14px 16px;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 14px;
+  scroll-behavior: smooth;
   scrollbar-width: none;
+  overscroll-behavior-x: contain;
 }
 .fixture-strip::-webkit-scrollbar { display: none; }
 .fixture {
+  position: relative;
+  overflow: hidden;
   border: 1px solid rgba(25,20,15,.1);
   border-radius: 20px;
   padding: 13px;
-  background: rgba(255,250,242,.74);
+  background:
+    radial-gradient(circle at 86% 0%, rgba(214,166,72,.18), transparent 32%),
+    linear-gradient(135deg, rgba(31,107,75,.18), rgba(255,250,242,.88) 62%),
+    rgba(255,250,242,.9);
   box-shadow: 0 10px 24px rgba(48,33,18,.08);
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
 }
-.fixture span {
+.fixture.expanded {
+  border-color: rgba(31,107,75,.32);
+  box-shadow: 0 16px 34px rgba(31,107,75,.16);
+}
+.fixture-main {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.fixture-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fixture-time {
   color: var(--muted);
   font-size: 11px;
   font-weight: 820;
   line-height: 1;
 }
-.fixture b {
-  display: block;
-  margin-top: 8px;
+.fixture-phase {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(31,107,75,.12);
+  color: var(--pitch-2);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+.fixture-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 13px;
+}
+.fixture-team {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  min-width: 0;
+}
+.fixture-flag {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 6px 10px rgba(25,20,15,.14));
+}
+.fixture-flag.flag-england,
+.fixture-h2h-flag.flag-england {
+  display: inline-block;
+  width: 31px;
+  height: 21px;
+  border-radius: 3px;
+  background:
+    linear-gradient(90deg, transparent 0 41%, #c8102e 41% 59%, transparent 59%),
+    linear-gradient(0deg, #fff 0 38%, #c8102e 38% 62%, #fff 62%);
+  box-shadow: 0 6px 10px rgba(25,20,15,.14), inset 0 0 0 1px rgba(25,20,15,.12);
+}
+.fixture-team b {
   color: var(--ink);
-  font-size: 14px;
-  line-height: 1.2;
+  font-size: 13px;
+  line-height: 1.15;
+  text-align: center;
+}
+.fixture-vs {
+  border-radius: 999px;
+  padding: 7px 8px;
+  background: rgba(25,20,15,.08);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+.fixture-venue {
+  display: block;
+  margin-top: 12px;
+  color: #5a5047;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.25;
+  text-align: center;
+}
+.fixture-detail {
+  display: grid;
+  gap: 12px;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(25,20,15,.1);
+}
+.fixture-detail[hidden] { display: none; }
+.fixture-detail-grid,
+.fixture-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.fixture-h2h {
+  display: grid;
+  gap: 8px;
+  border-radius: 18px;
+  padding: 10px;
+  background: rgba(255,250,242,.72);
+  box-shadow: inset 0 0 0 1px rgba(25,20,15,.08);
+}
+.fixture-h2h-head,
+.fixture-h2h-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.fixture-h2h-team {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  min-width: 0;
+}
+.fixture-h2h-team span {
+  font-size: 22px;
+  line-height: 1;
+}
+.fixture-h2h-flag.flag-england {
+  width: 26px;
+  height: 18px;
+}
+.fixture-h2h-team b {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.1;
+  text-align: center;
+}
+.fixture-h2h-vs,
+.fixture-h2h-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: center;
+}
+.fixture-h2h-cell {
+  min-width: 0;
+  border-radius: 12px;
+  padding: 8px;
+  background: rgba(31,107,75,.08);
+  color: var(--pitch-2);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-align: center;
+}
+.fixture-mini,
+.fixture-compare-row {
+  min-width: 0;
+  border: 1px solid rgba(25,20,15,.08);
+  border-radius: 14px;
+  padding: 9px;
+  background: rgba(255,250,242,.62);
+}
+.fixture-mini b,
+.fixture-compare-row b {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.15;
+}
+.fixture-mini span,
+.fixture-compare-row span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.fixture-detail .card-actions {
+  margin-top: 0;
 }
 .section-title {
   padding: 12px 16px 9px;
@@ -608,6 +786,14 @@ img { display: block; max-width: 100%; }
   gap: 14px;
   padding: 0 14px 22px;
 }
+.feed-section-title {
+  margin: 4px 2px -4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+.feed-section-title[hidden] { display: none; }
 .content-card {
   --kind-accent: var(--pitch);
   position: relative;
@@ -723,6 +909,7 @@ img { display: block; max-width: 100%; }
 .short-card {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(118px, .72fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 10px 16px;
   border: 0;
   border-radius: 28px;
@@ -780,8 +967,10 @@ img { display: block; max-width: 100%; }
 }
 .short-card .feed-player {
   grid-column: 1;
-  grid-row: 1 / span 7;
-  aspect-ratio: 9 / 16;
+  grid-row: 1 / -1;
+  align-self: stretch;
+  aspect-ratio: auto;
+  height: 100%;
   min-height: 336px;
   margin-top: 0;
   border: 0;
@@ -838,6 +1027,19 @@ img { display: block; max-width: 100%; }
   color: #332a22;
   font-size: 15px;
   line-height: 1.58;
+}
+.news-card .card-actions {
+  flex-wrap: nowrap;
+}
+.news-detail {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.news-detail[hidden] { display: none; }
+.news-toggle {
+  background: rgba(185,93,55,.1);
+  color: #7d3d24;
 }
 .card-actions {
   display: flex;
@@ -937,6 +1139,7 @@ img { display: block; max-width: 100%; }
   margin-top: 14px;
 }
 .player-card {
+  --flag-bg: linear-gradient(135deg, rgba(31,107,75,.2), rgba(214,166,72,.18));
   position: relative;
   min-height: 168px;
   overflow: hidden;
@@ -947,6 +1150,21 @@ img { display: block; max-width: 100%; }
     radial-gradient(circle at 90% 10%, rgba(214,166,72,.22), transparent 34%),
     linear-gradient(135deg, rgba(31,107,75,.14), rgba(247,240,229,.92));
   box-shadow: 0 12px 26px rgba(48,33,18,.08);
+}
+.player-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .16;
+  background: var(--flag-bg);
+}
+.player-card > * {
+  position: relative;
+  z-index: 1;
+}
+.player-card.expanded {
+  border-color: rgba(31,107,75,.28);
+  box-shadow: 0 16px 34px rgba(31,107,75,.14);
 }
 .player-head {
   display: grid;
@@ -1024,6 +1242,21 @@ img { display: block; max-width: 100%; }
   font-weight: 650;
   line-height: 1.45;
 }
+.player-detail {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+.player-detail[hidden] { display: none; }
+.player-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.player-toggle {
+  background: rgba(31,107,75,.1);
+  color: var(--pitch-2);
+}
 .empty {
   margin: 0 14px 22px;
   border: 1px dashed rgba(25,20,15,.18);
@@ -1044,6 +1277,11 @@ img { display: block; max-width: 100%; }
   .short-card .card-copy,
   .short-card .card-actions,
   .short-card .feed-player { grid-column: 1; }
+  .short-card .feed-player {
+    grid-row: auto;
+    aspect-ratio: 9 / 16;
+    height: auto;
+  }
 }
 @media (min-width: 720px) {
   .hero { min-height: 470px; padding-left: 24px; padding-right: 24px; }
@@ -1106,6 +1344,16 @@ function anythingJs(): string {
     };
     return labels[key] || key;
   }
+  function sectionLabel(value) {
+    var key = text(value);
+    var labels = {
+      feature: '精选视频',
+      preview: '赛前前瞻',
+      highlights: '过往集锦',
+      stars: '球星数据'
+    };
+    return labels[key] || key;
+  }
   function sourceUrlForCard(card) {
     var direct = text(card && card.sourceUrl);
     if (direct.length > 0) { return direct; }
@@ -1157,14 +1405,16 @@ function anythingJs(): string {
   }
   function appendVideoPlayer(player, video, src) {
     var media = document.createElement('video');
-    media.src = src;
     media.poster = text(video.thumbnail);
     media.controls = true;
     media.preload = 'metadata';
     media.playsInline = true;
-    media.crossOrigin = 'anonymous';
     media.setAttribute('playsinline', '');
     media.setAttribute('webkit-playsinline', '');
+    var source = document.createElement('source');
+    source.src = src;
+    if (mediaKind(video).toLowerCase() === 'mp4') { source.type = 'video/mp4'; }
+    media.appendChild(source);
     media.addEventListener('error', function () {
       showPlayerFallback(player, video, '当前网络未能载入这条 ' + mediaKind(video) + ' 视频流。');
     });
@@ -1233,15 +1483,143 @@ function anythingJs(): string {
       button.classList.toggle('active', button.getAttribute('data-video-id') === state.videoId);
     });
   }
+  function addTeamFlag(parent, team, flag, className) {
+    var node = add(parent, 'span', className || 'fixture-flag', '');
+    if (text(team).toLowerCase() === 'england') {
+      node.className += ' flag-england';
+      node.setAttribute('aria-label', 'England');
+      return node;
+    }
+    node.textContent = text(flag);
+    return node;
+  }
   function renderFixtures(parent) {
     var fixtures = list(data.fixtures);
     if (fixtures.length === 0) { return; }
     var strip = add(parent, 'section', 'fixture-strip');
-    fixtures.forEach(function (fixture) {
-      var item = add(strip, 'div', 'fixture');
-      add(item, 'span', '', text(fixture.timeET || fixture.timeLocal || fixture.time) + ' · ' + text(fixture.status));
-      add(item, 'b', '', text(fixture.match));
-      add(item, 'span', '', text(fixture.venue) + ' / ' + text(fixture.city));
+    strip.setAttribute('data-kind', 'schedule');
+    var fixturesExpanded = false;
+    function syncFixtureExpanded() {
+      Array.prototype.slice.call(strip.querySelectorAll('.fixture')).forEach(function (card) {
+        card.classList.toggle('expanded', fixturesExpanded);
+      });
+      Array.prototype.slice.call(strip.querySelectorAll('.fixture-detail')).forEach(function (detail) {
+        detail.hidden = !fixturesExpanded;
+      });
+    }
+    var loopFixtures = fixtures.length > 1 ? [fixtures[fixtures.length - 1]].concat(fixtures).concat([fixtures[0]]) : fixtures;
+    loopFixtures.forEach(function (fixture, index) {
+      var item = add(strip, 'article', 'fixture');
+      item.setAttribute('data-kind', 'schedule');
+      item.setAttribute('data-loop-index', String(index));
+      if (fixtures.length > 1 && (index === 0 || index === loopFixtures.length - 1)) {
+        item.setAttribute('data-loop-clone', 'true');
+      }
+      var main = add(item, 'button', 'fixture-main');
+      main.type = 'button';
+      var top = add(main, 'div', 'fixture-top');
+      add(top, 'span', 'fixture-time', text(fixture.timeChina || fixture.timeET || fixture.timeLocal || fixture.time));
+      add(top, 'span', 'fixture-phase', text(fixture.phase || fixture.status));
+      var teams = add(main, 'div', 'fixture-teams');
+      var home = add(teams, 'div', 'fixture-team');
+      addTeamFlag(home, fixture.home, fixture.homeFlag, 'fixture-flag');
+      add(home, 'b', '', text(fixture.home) || text(fixture.match).split(' vs ')[0]);
+      add(teams, 'span', 'fixture-vs', 'VS');
+      var away = add(teams, 'div', 'fixture-team');
+      addTeamFlag(away, fixture.away, fixture.awayFlag, 'fixture-flag');
+      add(away, 'b', '', text(fixture.away) || text(fixture.match).split(' vs ')[1]);
+      add(main, 'span', 'fixture-venue', text(fixture.venue) + ' / ' + text(fixture.city));
+      var detail = add(item, 'div', 'fixture-detail');
+      detail.hidden = true;
+      var h2h = add(detail, 'div', 'fixture-h2h');
+      var h2hHead = add(h2h, 'div', 'fixture-h2h-head');
+      var homeHead = add(h2hHead, 'div', 'fixture-h2h-team');
+      addTeamFlag(homeHead, fixture.home, fixture.homeFlag, 'fixture-h2h-flag');
+      add(homeHead, 'b', '', text(fixture.home));
+      add(h2hHead, 'span', 'fixture-h2h-vs', 'HEAD TO HEAD');
+      var awayHead = add(h2hHead, 'div', 'fixture-h2h-team');
+      addTeamFlag(awayHead, fixture.away, fixture.awayFlag, 'fixture-h2h-flag');
+      add(awayHead, 'b', '', text(fixture.away));
+      list(fixture.comparison).forEach(function (metric) {
+        var row = add(h2h, 'div', 'fixture-h2h-row');
+        add(row, 'div', 'fixture-h2h-cell', text(metric.home));
+        add(row, 'div', 'fixture-h2h-label', text(metric.label));
+        add(row, 'div', 'fixture-h2h-cell', text(metric.away));
+      });
+      var stars = add(detail, 'div', 'fixture-detail-grid');
+      var homeStars = add(stars, 'div', 'fixture-mini');
+      add(homeStars, 'b', '', text(fixture.home) + ' 关键点');
+      add(homeStars, 'span', '', list(fixture.homeStars).join(' / '));
+      var awayStars = add(stars, 'div', 'fixture-mini');
+      add(awayStars, 'b', '', text(fixture.away) + ' 关键点');
+      add(awayStars, 'span', '', list(fixture.awayStars).join(' / '));
+      var lineups = add(detail, 'div', 'fixture-detail-grid');
+      var homeLineup = add(lineups, 'div', 'fixture-mini');
+      add(homeLineup, 'b', '', text(fixture.home) + ' 核心阵容');
+      add(homeLineup, 'span', '', list(fixture.homeLineup).join(' / '));
+      var awayLineup = add(lineups, 'div', 'fixture-mini');
+      add(awayLineup, 'b', '', text(fixture.away) + ' 核心阵容');
+      add(awayLineup, 'span', '', list(fixture.awayLineup).join(' / '));
+      var url = text(fixture.sourceUrl);
+      if (url.length > 0) {
+        var actions = add(detail, 'div', 'card-actions');
+        var open = add(actions, 'button', 'card-action', '赛程来源');
+        open.type = 'button';
+        open.addEventListener('click', function (event) {
+          event.stopPropagation();
+          postAction({ url: url });
+        });
+      }
+      main.addEventListener('click', function () {
+        fixturesExpanded = !fixturesExpanded;
+        syncFixtureExpanded();
+      });
+    });
+    if (fixtures.length < 2) { return; }
+    var loopTimer = 0;
+    var isLoopJumping = false;
+    function fixtureCards() {
+      return Array.prototype.slice.call(strip.querySelectorAll('.fixture'));
+    }
+    function scrollToLoopIndex(index) {
+      var cards = fixtureCards();
+      var card = cards[index];
+      if (!card) { return; }
+      var left = card.offsetLeft - ((strip.clientWidth - card.offsetWidth) / 2);
+      isLoopJumping = true;
+      strip.style.scrollBehavior = 'auto';
+      strip.scrollLeft = left;
+      window.setTimeout(function () {
+        strip.style.scrollBehavior = '';
+        isLoopJumping = false;
+      }, 50);
+    }
+    function closestLoopIndex() {
+      var cards = fixtureCards();
+      var center = strip.scrollLeft + (strip.clientWidth / 2);
+      var bestIndex = 0;
+      var bestDistance = Infinity;
+      cards.forEach(function (card, index) {
+        var distance = Math.abs(center - (card.offsetLeft + (card.offsetWidth / 2)));
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+      return bestIndex;
+    }
+    window.setTimeout(function () { scrollToLoopIndex(1); }, 0);
+    strip.addEventListener('scroll', function () {
+      if (isLoopJumping) { return; }
+      window.clearTimeout(loopTimer);
+      loopTimer = window.setTimeout(function () {
+        var index = closestLoopIndex();
+        if (index === 0) {
+          scrollToLoopIndex(fixtures.length);
+        } else if (index === fixtures.length + 1) {
+          scrollToLoopIndex(1);
+        }
+      }, 70);
     });
   }
   function metricGrid(parent, metrics) {
@@ -1346,6 +1724,9 @@ function anythingJs(): string {
     players.forEach(function (player) {
       var card = add(board, 'article', 'player-card');
       card.setAttribute('data-kind', 'data');
+      card.setAttribute('data-section', 'stars');
+      var flagBackground = text(player.flagBackground);
+      if (flagBackground.length > 0) { card.style.setProperty('--flag-bg', flagBackground); }
       var head = add(card, 'div', 'player-head');
       var photo = add(head, 'div', 'player-photo');
       var image = document.createElement('img');
@@ -1354,7 +1735,7 @@ function anythingJs(): string {
       photo.appendChild(image);
       var identity = add(head, 'div', '');
       add(identity, 'div', 'player-name', text(player.name));
-      add(identity, 'div', 'player-role', text(player.team) + ' / ' + text(player.role));
+      add(identity, 'div', 'player-role', text(player.flag) + ' ' + text(player.team) + ' / ' + text(player.role));
       add(identity, 'div', 'player-match', text(player.match));
       var stats = add(card, 'div', 'player-stats');
       list(player.stats).forEach(function (stat) {
@@ -1363,10 +1744,27 @@ function anythingJs(): string {
         add(cell, 'span', '', text(stat.label));
       });
       add(card, 'p', 'player-note', text(player.note));
+      var detail = add(card, 'div', 'player-detail');
+      detail.hidden = true;
+      var detailGrid = add(detail, 'div', 'player-detail-grid');
+      list(player.detailStats).forEach(function (stat) {
+        var cell = add(detailGrid, 'div', 'player-stat');
+        add(cell, 'b', '', text(stat.value));
+        add(cell, 'span', '', text(stat.label));
+      });
+      renderParagraphs(detail, player.detailBody);
+      var controls = add(card, 'div', 'card-actions');
+      var toggle = add(controls, 'button', 'card-action player-toggle', '展开数据');
+      toggle.type = 'button';
+      toggle.addEventListener('click', function () {
+        var expanded = !card.classList.contains('expanded');
+        card.classList.toggle('expanded', expanded);
+        detail.hidden = !expanded;
+        toggle.textContent = expanded ? '收起数据' : '展开数据';
+      });
       var url = text(player.sourceUrl);
       if (url.length > 0) {
-        var actions = add(card, 'div', 'card-actions');
-        var open = add(actions, 'button', 'card-action', '数据来源');
+        var open = add(controls, 'button', 'card-action', '数据来源');
         open.type = 'button';
         open.addEventListener('click', function () { postAction({ url: url }); });
       }
@@ -1375,7 +1773,14 @@ function anythingJs(): string {
   function renderCards(parent) {
     add(parent, 'h2', 'section-title', '今日聚合流');
     var grid = add(parent, 'section', 'content-grid');
+    var lastSection = '';
     list(data.cards).forEach(function (card) {
+      var section = text(card.section);
+      if (section.length > 0 && section !== lastSection) {
+        var header = add(grid, 'h3', 'feed-section-title', sectionLabel(section));
+        header.setAttribute('data-section', section);
+        lastSection = section;
+      }
       if (text(card.kind) === 'data') {
         renderPlayerBoard(grid);
         return;
@@ -1384,27 +1789,60 @@ function anythingJs(): string {
       if (text(card.kind) === 'clip') { article.className += ' short-card'; }
       if (text(card.kind) === 'news') { article.className += ' news-card'; }
       article.setAttribute('data-kind', text(card.kind));
+      article.setAttribute('data-section', section);
       var top = add(article, 'div', 'card-topline');
       add(top, 'span', '', kindLabel(card.kind));
       add(top, 'span', '', text(card.source));
       add(article, 'h3', '', text(card.title));
       add(article, 'p', '', text(card.subtitle));
-      renderParagraphs(article, card.body);
+      if (text(card.kind) === 'news') {
+        add(article, 'p', 'card-copy', text(card.summary) || text(list(card.body)[0]));
+        var detail = add(article, 'div', 'news-detail');
+        detail.hidden = true;
+        renderParagraphs(detail, card.body);
+        var newsActions = add(article, 'div', 'card-actions');
+        var toggle = add(newsActions, 'button', 'card-action news-toggle', '查看详情');
+        toggle.type = 'button';
+        toggle.addEventListener('click', function () {
+          var expanded = !article.classList.contains('expanded');
+          article.classList.toggle('expanded', expanded);
+          detail.hidden = !expanded;
+          toggle.textContent = expanded ? '收起详情' : '查看详情';
+        });
+        var newsUrl = sourceUrlForCard(card);
+        if (newsUrl.length > 0) {
+          var newsOpen = add(newsActions, 'button', 'card-action', '打开来源');
+          newsOpen.type = 'button';
+          newsOpen.addEventListener('click', function () { postAction({ url: newsUrl }); });
+        }
+      } else {
+        renderParagraphs(article, card.body);
+      }
       var linked = cardVideo(card);
       renderInlineVideo(article, linked);
       renderBullets(article, card.bullets);
       if (text(card.kind) !== 'news' && text(linked && linked.id).length === 0) { metricGrid(article, card.metrics); }
       if (text(card.kind) === 'schedule') { renderFixtureBoard(article); }
-      renderCardActions(article, card, linked);
+      if (text(card.kind) !== 'news') { renderCardActions(article, card, linked); }
     });
   }
   function applyFilter(kind) {
     state.filter = kind;
     var visibleCount = 0;
+    Array.prototype.slice.call(document.querySelectorAll('.fixture-strip[data-kind]')).forEach(function (strip) {
+      var keepStrip = kind === 'all' || strip.getAttribute('data-kind') === kind;
+      strip.hidden = !keepStrip;
+      if (keepStrip) { visibleCount += strip.querySelectorAll('.fixture[data-kind]').length; }
+    });
     Array.prototype.slice.call(document.querySelectorAll('.content-card, .player-card[data-kind]')).forEach(function (card) {
       var keep = kind === 'all' || card.getAttribute('data-kind') === kind;
       card.hidden = !keep;
       if (keep) { visibleCount += 1; }
+    });
+    Array.prototype.slice.call(document.querySelectorAll('.feed-section-title')).forEach(function (title) {
+      var section = title.getAttribute('data-section') || '';
+      var hasVisible = !!document.querySelector('.content-card[data-section="' + section + '"]:not([hidden]), .player-card[data-section="' + section + '"]:not([hidden])');
+      title.hidden = !hasVisible;
     });
     Array.prototype.slice.call(document.querySelectorAll('.source-tab')).forEach(function (button) {
       button.classList.toggle('active', button.getAttribute('data-kind') === kind);
@@ -1431,13 +1869,13 @@ function anythingJs(): string {
   add(heroNode, 'h1', '', text(hero.title) || '世界杯 Anything OS');
   add(heroNode, 'p', '', text(hero.subtitle) || text(data.sourceNote));
   renderSourceRail(shell);
+  renderFixtures(shell);
   var stageWrap = add(shell, 'section', 'stage-wrap');
   var stageRoot = add(stageWrap, 'div', '');
   stageRoot.id = 'stage-root';
   renderStage(stageRoot);
   renderVideoRail(stageWrap);
   syncVideoRail();
-  renderFixtures(shell);
   renderCards(shell);
   var empty = add(shell, 'div', 'empty', '这个筛选暂无卡片。');
   empty.id = 'empty-state';

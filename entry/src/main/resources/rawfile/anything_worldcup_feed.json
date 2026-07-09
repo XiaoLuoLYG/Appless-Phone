@@ -1,14 +1,14 @@
 {
   "topic": "World Cup 2026",
-  "date": "2026-07-02",
-  "updatedAt": "2026-07-02 16:15 Asia/Shanghai",
-  "sourceNote": "横版集锦和竖屏短视频使用 FOX Sports 页面暴露的 MP4 直链；比分、赛程、战报和球员信息按 2026-07-02 可核验公开来源整理。",
+  "date": "2026-07-09",
+  "updatedAt": "2026-07-09 19:05 Asia/Shanghai",
+  "sourceNote": "横版集锦和短视频槽位使用 FOX Sports 页面暴露的 MP4 直链；赛程、前瞻和球员信息按 2026-07-09 可核验公开来源整理。",
   "officialScheduleUrl": "https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/scores-fixtures",
   "hero": {
-    "kicker": "Today / Round of 32",
+    "kicker": "Today / Quarterfinals",
     "title": "世界杯 Anything OS",
     "subtitle": "同一个兴趣主题里刷集锦、战报、赛程、球员数据和长内容线索。",
-    "background": "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=1400&q=82"
+    "background": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=1400&q=82"
   },
   "sources": [
     { "id": "all", "label": "全部", "kind": "all" },
@@ -23,307 +23,422 @@
       "id": "usa-bosnia",
       "kind": "video",
       "provider": "FOX Sports",
-      "title": "United States vs Bosnia and Herzegovina Highlights",
-      "match": "United States 2-0 Bosnia and Herzegovina",
-      "score": "2-0",
-      "status": "Final",
-      "duration": "4:43",
-      "published": "6 HOURS AGO",
+      "title": "France vs Morocco Preview",
+      "match": "France vs Morocco",
+      "score": "Quarterfinal preview",
+      "status": "Upcoming",
+      "duration": "33:10",
+      "published": "Today",
       "streamType": "MP4",
-      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-2qwc6yy1zekzejvv/USavsBIH_lowres.mp4",
-      "sourceUrl": "https://www.foxsports.com/watch/fmc-2qwc6yy1zekzejvv",
-      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16523782/1280/720/pqfvhwb8ymv0qct3.jpg?ve=1&tl=1",
-      "summary": "美国队在 Round of 32 中 2-0 晋级，Balogun 先打开局面，Tillman 用任意球扩大优势。"
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-vyvtsojgrg1nao55/FTF_7-8_OTAB_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-vyvtsojgrg1nao55",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/7625f604-e8eb-4717-8147-6153732c91f3/1280/720/exu45ez1ytsmgl43.jpg",
+      "summary": "FOX Sports 赛前节目讨论法国是否会在八强对摩洛哥时遇到冷门风险。"
     },
     {
       "id": "belgium-senegal",
       "kind": "video",
       "provider": "FOX Sports",
-      "title": "Belgium vs Senegal Highlights",
-      "match": "Belgium 3-2 Senegal",
-      "score": "3-2",
-      "status": "Final",
-      "duration": "4:52",
-      "published": "9 HOURS AGO",
+      "title": "Every Goal From the Round of 16",
+      "match": "Round of 16 goal reel",
+      "score": "All goals",
+      "status": "Highlights",
+      "duration": "7:31",
+      "published": "Today",
       "streamType": "MP4",
-      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-ujm5rsfrv6i6z90l/4MIN_BEL_SEN_HL_0701_lowres.mp4",
-      "sourceUrl": "https://www.foxsports.com/watch/fmc-ujm5rsfrv6i6z90l",
-      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16523036/1280/720/rj2i2qtxmsc9sit4.jpg?ve=1&tl=1",
-      "summary": "比利时从 0-2 追到 3-2，Tielemans 在加时最后阶段罚入制胜点球。"
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-yuayv1pkb8n7cc4p/R16GOALS_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-yuayv1pkb8n7cc4p",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16552604/1280/720/l37lh41zlb9lrf9l.png",
+      "summary": "八强开打前回看 16 强全部进球，覆盖 Messi、Mbappe、Bellingham、Haaland 等淘汰赛片段。"
     },
     {
       "id": "england-dr-congo",
       "kind": "video",
       "provider": "FOX Sports",
-      "title": "England vs DR Congo Highlights",
-      "match": "England 2-1 DR Congo",
-      "score": "2-1",
+      "title": "Switzerland vs Colombia Extended Highlights",
+      "match": "Switzerland vs Colombia",
+      "score": "Round of 16",
       "status": "Final",
-      "duration": "4:34",
-      "published": "14 HOURS AGO",
+      "duration": "20:26",
+      "published": "Yesterday",
       "streamType": "MP4",
-      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-ct3q1x3m4x5j8w35/ENGvsCOD_lowres.mp4",
-      "sourceUrl": "https://www.foxsports.com/watch/fmc-ct3q1x3m4x5j8w35",
-      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16521433/1280/720/5zcrwg1736os1if3.jpg?ve=1&tl=1",
-      "summary": "英格兰开局落后，Harry Kane 在最后 15 分钟梅开二度，完成 2-1 逆转。"
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-10vej9ay8izpkc3b/SUI_COL_HL_0707_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-10vej9ay8izpkc3b",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16552330/1280/720/y68yxxxwuh1xug6b.jpg",
+      "summary": "瑞士晋级八强后的长集锦，用来衔接 Argentina vs Switzerland 的赛前内容。"
     },
     {
       "id": "tielemans-goal",
       "kind": "clip",
       "provider": "FOX Sports",
-      "title": "Tielemans Vertical Penalty Short",
-      "match": "Belgium 3-2 Senegal",
-      "score": "Goal",
-      "status": "Short",
-      "duration": "0:33",
-      "published": "Today",
+      "title": "USA vs Belgium Highlights",
+      "match": "USA vs Belgium",
+      "score": "Round of 16",
+      "status": "Final",
+      "duration": "Highlights",
+      "published": "This week",
       "streamType": "MP4",
-      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-4k4xtgem88th16ix/bel_goal_3_pk_lowres.mp4",
-      "sourceUrl": "https://www.foxsports.com/watch-vertical/fmc-4k4xtgem88th16ix",
-      "thumbnail": "https://static-media.fox.com/fmc/prod/sports/VX-16523037/hmko6casq6f4cggj.png",
-      "summary": "0:33 竖屏短片，Tielemans 加时点球破门。"
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-3rzla56rqwsdwwu2/USA_BEL_HL_0706_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-3rzla56rqwsdwwu2",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16545609/1280/720/k5dd6yyxde0ioald.jpg",
+      "summary": "比利时进入八强前的真实集锦源，配合 Spain vs Belgium 前瞻查看。"
     },
     {
       "id": "kane-goal",
       "kind": "clip",
       "provider": "FOX Sports",
-      "title": "Harry Kane Late Equalizer",
-      "match": "England 2-1 DR Congo",
-      "score": "Goal",
-      "status": "Clip",
-      "duration": "1:31",
-      "published": "14 HOURS AGO",
+      "title": "Mexico vs England Extended Highlights",
+      "match": "Mexico vs England",
+      "score": "Round of 16",
+      "status": "Final",
+      "duration": "18:13",
+      "published": "3 days ago",
       "streamType": "MP4",
-      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-dnof9dhbsvttl0wn/ENG_KANE_GOAL_75_COD_0701_lowres.mp4",
-      "sourceUrl": "https://www.foxsports.com/watch/fmc-dnof9dhbsvttl0wn",
-      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/0d5f8769-f593-42f4-828b-5b2910d29b2a/1280/720/r80obcejcvkp48ey.png?ve=1&tl=1",
-      "summary": "Kane 在 75' 打进扳平球。"
+      "streamUrl": "https://statics.foxsports.com/mediacloud/fmc-4yx6f1qrcupt0j29/MEX_ENG_HL_0705_lowres.mp4",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-4yx6f1qrcupt0j29",
+      "thumbnail": "https://a57.foxsports.com/static-media.fox.com/fmc/prod/sports/VX-16540911/1280/720/u7nauh1mermjpbzs.jpg",
+      "summary": "英格兰晋级八强前的真实长集锦，配合 Norway vs England 赛程查看。"
     }
   ],
   "fixtures": [
     {
       "id": "spain-austria",
-      "match": "Spain vs Austria",
+      "match": "France vs Morocco",
+      "home": "France",
+      "away": "Morocco",
+      "homeFlag": "🇫🇷",
+      "awayFlag": "🇲🇦",
+      "phase": "Quarterfinal",
       "status": "Upcoming",
-      "timeLocal": "Jul 2, 12:00 PM PT",
-      "timeET": "3:00 PM ET",
-      "timeChina": "北京时间 7/3 03:00",
-      "venue": "SoFi Stadium",
-      "city": "Los Angeles",
-      "source": "CBS Sports / FIFA",
-      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
-      "angle": "Spain 对 Austria，今日第一场淘汰赛。"
+      "timeLocal": "Jul 9, 4:00 PM ET",
+      "timeET": "4:00 PM ET",
+      "timeChina": "北京时间 7/10 04:00",
+      "venue": "Boston Stadium",
+      "city": "Boston",
+      "source": "FIFA / Al Jazeera",
+      "sourceUrl": "https://www.fifa.com/en/match-centre/match/17/285023/289289/400021536",
+      "angle": "八强第一场。法国前场速度和个人能力更强，摩洛哥依靠防守纪律、边路推进和转换质量寻找机会。",
+      "homeLineup": ["Kylian Mbappe", "Michael Olise", "Ousmane Dembele", "Aurelien Tchouameni"],
+      "awayLineup": ["Achraf Hakimi", "Yassine Bounou", "Sofyan Amrabat", "Youssef En-Nesyri"],
+      "homeStars": ["Mbappe: 5 场 7 球 2 助", "Olise: 法国前场创造点"],
+      "awayStars": ["Hakimi: 90 次传入进攻三区", "Bounou: 摩洛哥门线核心"],
+      "comparison": [
+        { "label": "头号威胁", "home": "Mbappe 7 球", "away": "Hakimi 90 次进攻三区传球" },
+        { "label": "进攻方式", "home": "速度和 1v1", "away": "边路推进和转换" },
+        { "label": "防守支点", "home": "Tchouameni 覆盖", "away": "Bounou 门线" }
+      ]
     },
     {
       "id": "portugal-croatia",
-      "match": "Portugal vs Croatia",
+      "match": "Spain vs Belgium",
+      "home": "Spain",
+      "away": "Belgium",
+      "homeFlag": "🇪🇸",
+      "awayFlag": "🇧🇪",
+      "phase": "Quarterfinal",
       "status": "Upcoming",
-      "timeLocal": "Jul 2, 7:00 PM ET",
-      "timeET": "7:00 PM ET",
-      "timeChina": "北京时间 7/3 07:00",
-      "venue": "BMO Field",
-      "city": "Toronto",
-      "source": "CBS Sports / FIFA",
-      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
-      "angle": "Ronaldo 与 Modric 再碰面，晚间焦点战。"
+      "timeLocal": "Jul 10, 12:00 PM PT",
+      "timeET": "3:00 PM ET",
+      "timeChina": "北京时间 7/11 03:00",
+      "venue": "Los Angeles Stadium",
+      "city": "Los Angeles",
+      "source": "Al Jazeera / AP",
+      "sourceUrl": "https://www.aljazeera.com/sports/2026/7/8/fifa-world-cup-2026-quarterfinal-fixtures-match-previews-schedule",
+      "angle": "西班牙的控球和防守稳定性，对上比利时的经验、门将质量和前场个人能力。",
+      "homeLineup": ["Lamine Yamal", "Rodri", "Pedri", "Mikel Oyarzabal"],
+      "awayLineup": ["Kevin De Bruyne", "Thibaut Courtois", "Youri Tielemans", "Jeremy Doku"],
+      "homeStars": ["Rodri: AP 列为西班牙核心", "Pedri: 138 次传入进攻三区"],
+      "awayStars": ["De Bruyne: 比利时进攻组织核心", "Courtois: 比利时门将核心"],
+      "comparison": [
+        { "label": "控球倾向", "home": "Spain 65.7%", "away": "经验和反击" },
+        { "label": "防守状态", "home": "5 场未失球", "away": "Courtois 门线" },
+        { "label": "创造点", "home": "Pedri 138 次进攻三区传球", "away": "De Bruyne 组织" }
+      ]
     },
     {
       "id": "switzerland-algeria",
-      "match": "Switzerland vs Algeria",
+      "match": "Norway vs England",
+      "home": "Norway",
+      "away": "England",
+      "homeFlag": "🇳🇴",
+      "awayFlag": "🏴",
+      "phase": "Quarterfinal",
       "status": "Upcoming",
-      "timeLocal": "Jul 2, 8:00 PM PT",
-      "timeET": "11:00 PM ET",
-      "timeChina": "北京时间 7/3 11:00",
-      "venue": "BC Place",
-      "city": "Vancouver",
-      "source": "CBS Sports / FIFA",
-      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
-      "angle": "Switzerland 对 Algeria，温哥华夜场。"
+      "timeLocal": "Jul 11, 5:00 PM ET",
+      "timeET": "5:00 PM ET",
+      "timeChina": "北京时间 7/12 05:00",
+      "venue": "Miami Stadium",
+      "city": "Miami",
+      "source": "Al Jazeera / AP",
+      "sourceUrl": "https://www.aljazeera.com/news/2026/7/8/world-cup-2026-quarterfinals-full-schedule-and-egypt-fifa-dispute",
+      "angle": "Haaland、Odegaard 领衔的挪威，面对 Kane、Bellingham 所在的英格兰，核心看点是禁区效率。",
+      "homeLineup": ["Erling Haaland", "Martin Odegaard", "Alexander Sorloth", "Oscar Bobb"],
+      "awayLineup": ["Harry Kane", "Jude Bellingham", "Bukayo Saka", "Phil Foden"],
+      "homeStars": ["Haaland: 4 场 7 球", "Odegaard: 挪威最后一传核心"],
+      "awayStars": ["Kane: 5 场 6 球 1 助", "Bellingham: 5 场 4 球 1 助"],
+      "comparison": [
+        { "label": "进球效率", "home": "Haaland 1.75 球/场", "away": "Kane 1.20 球/场" },
+        { "label": "核心连接", "home": "Odegaard 找 Haaland", "away": "Kane 支点和 Bellingham 前插" },
+        { "label": "射正", "home": "Haaland 12", "away": "Kane 11" }
+      ]
+    },
+    {
+      "id": "argentina-switzerland",
+      "match": "Argentina vs Switzerland",
+      "home": "Argentina",
+      "away": "Switzerland",
+      "homeFlag": "🇦🇷",
+      "awayFlag": "🇨🇭",
+      "phase": "Quarterfinal",
+      "status": "Upcoming",
+      "timeLocal": "Jul 12, 3:00 PM ET",
+      "timeET": "3:00 PM ET",
+      "timeChina": "北京时间 7/13 03:00",
+      "venue": "New Jersey Stadium",
+      "city": "East Rutherford",
+      "source": "Al Jazeera / AP",
+      "sourceUrl": "https://www.aljazeera.com/sports/2026/7/8/fifa-world-cup-2026-quarterfinal-fixtures-match-previews-schedule",
+      "angle": "阿根廷继续围绕 Messi 的创造力推进，瑞士则依靠 Xhaka 的中场组织和淘汰赛防守韧性。",
+      "homeLineup": ["Lionel Messi", "Lautaro Martinez", "Enzo Fernandez", "Julian Alvarez"],
+      "awayLineup": ["Granit Xhaka", "Johan Manzambi", "Manuel Akanji", "Yann Sommer"],
+      "homeStars": ["Messi: 5 场 8 球 1 助", "Enzo: 中场推进和覆盖"],
+      "awayStars": ["Xhaka: 106 次传入进攻三区", "Manzambi: AP 列为瑞士核心"],
+      "comparison": [
+        { "label": "进攻核心", "home": "Messi 8 球", "away": "Xhaka 组织" },
+        { "label": "晋级背景", "home": "卫冕冠军", "away": "72 年来首次八强" },
+        { "label": "中场推进", "home": "Enzo 覆盖", "away": "Xhaka 106 次进攻三区传球" }
+      ]
     }
   ],
   "players": [
     {
       "id": "harry-kane",
-      "name": "Harry Kane",
-      "team": "England",
-      "role": "Captain / Striker",
-      "image": "https://b.fssta.com/uploads/application/soccer/headshots/453.vresize.350.350.medium.2.png",
-      "match": "England 2-1 DR Congo",
-      "source": "FOX Sports Boxscore",
-      "sourceUrl": "https://www.foxsports.com/soccer/fifa-world-cup-men-england-vs-dr-congo-jul-01-2026-game-boxscore-607912",
+      "name": "Kylian Mbappe",
+      "team": "France",
+      "role": "Forward",
+      "flag": "🇫🇷",
+      "flagBackground": "linear-gradient(90deg,#1d4ed8 0 33%,#f8fafc 33% 66%,#ef4444 66% 100%)",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/40670.vresize.350.350.medium.3.png",
+      "match": "France vs Morocco",
+      "source": "FOX Sports stats",
+      "sourceUrl": "https://www.foxsports.com/soccer/fifa-world-cup/stats?category=standard&season=2026&sort=sog&sortOrder=desc",
       "stats": [
-        { "label": "Goals", "value": "2" },
-        { "label": "SOG", "value": "3" },
-        { "label": "Passes", "value": "9" },
-        { "label": "Goal times", "value": "75' / 86'" }
+        { "label": "Goals", "value": "7" },
+        { "label": "Goals / match", "value": "1.40" },
+        { "label": "Assists", "value": "2" },
+        { "label": "SOG", "value": "17" }
       ],
-      "note": "75'、86' 连进两球。"
+      "detailStats": [
+        { "label": "Matches", "value": "5" },
+        { "label": "Shots", "value": "26" },
+        { "label": "Rating", "value": "8.0" },
+        { "label": "POTM", "value": "3" }
+      ],
+      "note": "法国前场最直接的纵深威胁。",
+      "detailBody": [
+        "5 场 7 球 2 助，17 次射正。",
+        "对 Morocco 看左侧 1v1 和禁区前沿提速。"
+      ]
     },
     {
       "id": "youri-tielemans",
-      "name": "Youri Tielemans",
-      "team": "Belgium",
-      "role": "Midfielder",
-      "image": "https://b.fssta.com/uploads/application/soccer/headshots/3543.vresize.350.350.medium.2.png",
-      "match": "Belgium 3-2 Senegal",
-      "source": "The Guardian",
-      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/belgium-senegal-2026-world-cup-last-32-match-report",
+      "name": "Achraf Hakimi",
+      "team": "Morocco",
+      "role": "Right back",
+      "flag": "🇲🇦",
+      "flagBackground": "linear-gradient(135deg,#b91c1c 0%,#ef4444 58%,#065f46 100%)",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/44920.vresize.350.350.medium.2.png",
+      "match": "France vs Morocco",
+      "source": "LiveScore creator stats",
+      "sourceUrl": "https://www.livescore.com/en/news/football/world-cup/world-cup-2026-creator-stats-most-assists-chances-created-big-chances-created-xa-passes-into-the-final-third/",
       "stats": [
-        { "label": "Winner", "value": "124:44" },
-        { "label": "Type", "value": "Penalty" },
-        { "label": "Score swing", "value": "0-2 to 3-2" },
-        { "label": "Next", "value": "USA" }
+        { "label": "Final third passes", "value": "90" },
+        { "label": "Stage", "value": "QF" },
+        { "label": "Match", "value": "France" },
+        { "label": "Role", "value": "wide" }
       ],
-      "note": "124:44 罚进制胜点球。"
+      "detailStats": [
+        { "label": "Team", "value": "Morocco" },
+        { "label": "Position", "value": "RB" },
+        { "label": "Main lane", "value": "right" },
+        { "label": "Focus", "value": "transition" }
+      ],
+      "note": "摩洛哥右路推进和反击起速的关键点。",
+      "detailBody": [
+        "90 次传入进攻三区。",
+        "对 France 要兼顾边路限制和反击推进。"
+      ]
     },
     {
       "id": "folarin-balogun",
-      "name": "Folarin Balogun",
-      "team": "United States",
+      "name": "Erling Haaland",
+      "team": "Norway",
       "role": "Forward",
-      "image": "https://b.fssta.com/uploads/application/soccer/headshots/74048.vresize.350.350.medium.2.png",
-      "match": "United States 2-0 Bosnia and Herzegovina",
-      "source": "The Guardian / People",
-      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/folarin-balogun-red-card-world-cup-appeal-usmnt",
+      "flag": "🇳🇴",
+      "flagBackground": "linear-gradient(90deg,#ba0c2f 0 28%,#fff 28% 36%,#00205b 36% 44%,#fff 44% 52%,#ba0c2f 52% 100%)",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/66617.vresize.350.350.medium.2.png",
+      "match": "Norway vs England",
+      "source": "FOX Sports stats",
+      "sourceUrl": "https://www.foxsports.com/soccer/fifa-world-cup/stats?category=standard&season=2026&sort=sog&sortOrder=desc",
       "stats": [
-        { "label": "Goal", "value": "Opener" },
-        { "label": "Red card", "value": "64'" },
-        { "label": "Next match", "value": "Suspended" },
-        { "label": "Result", "value": "2-0" }
+        { "label": "Goals", "value": "7" },
+        { "label": "Goals / match", "value": "1.75" },
+        { "label": "Assists", "value": "0" },
+        { "label": "SOG", "value": "12" }
       ],
-      "note": "先进球，64' 吃到红牌。"
+      "detailStats": [
+        { "label": "Matches", "value": "4" },
+        { "label": "Shots", "value": "18" },
+        { "label": "Rating", "value": "7.8" },
+        { "label": "Headed goals", "value": "1" }
+      ],
+      "note": "挪威最明确的禁区终结点，和 Odegaard 的连接是对英格兰的主线。",
+      "detailBody": [
+        "4 场 7 球，12 次射正。",
+        "对 England 看少量触球里的高质量射门。"
+      ]
     },
     {
       "id": "malik-tillman",
-      "name": "Malik Tillman",
-      "team": "United States",
-      "role": "Midfielder",
-      "image": "https://b.fssta.com/uploads/application/soccer/headshots/80522.vresize.350.350.medium.2.png",
-      "match": "United States 2-0 Bosnia and Herzegovina",
-      "source": "FOX Sports / People",
-      "sourceUrl": "https://www.foxsports.com/watch/fmc-xkrf6vsftbz6vhzf",
+      "name": "Lionel Messi",
+      "team": "Argentina",
+      "role": "Forward",
+      "flag": "🇦🇷",
+      "flagBackground": "linear-gradient(180deg,#75aadb 0 33%,#fff 33% 66%,#75aadb 66% 100%)",
+      "image": "https://b.fssta.com/uploads/application/soccer/headshots/711.vresize.350.350.medium.5.png",
+      "match": "Argentina vs Switzerland",
+      "source": "FOX Sports stats",
+      "sourceUrl": "https://www.foxsports.com/soccer/fifa-world-cup/stats?category=standard&season=2026&sort=sog&sortOrder=desc",
       "stats": [
-        { "label": "Goal", "value": "Free kick" },
-        { "label": "Minute", "value": "82'" },
-        { "label": "Lead", "value": "2-0" },
-        { "label": "Stage", "value": "R32" }
+        { "label": "Goals", "value": "8" },
+        { "label": "Goals / match", "value": "1.60" },
+        { "label": "Assists", "value": "1" },
+        { "label": "SOG", "value": "15" }
       ],
-      "note": "82' 任意球锁定 2-0。"
+      "detailStats": [
+        { "label": "Matches", "value": "5" },
+        { "label": "Shots", "value": "28" },
+        { "label": "Rating", "value": "8.4" },
+        { "label": "POTM", "value": "4" }
+      ],
+      "note": "阿根廷仍依靠 Messi 在中前场的小范围处理球和最后一传打开局面。",
+      "detailBody": [
+        "5 场 8 球 1 助，15 次射正。",
+        "对 Switzerland 看禁区前处理球和定位球威胁。"
+      ]
     }
   ],
   "cards": [
     {
       "id": "lead-video",
       "kind": "video",
-      "title": "USA 2-0 Bosnia",
-      "subtitle": "Balogun 破门，Tillman 任意球锁定胜局。",
+      "section": "feature",
+      "title": "16 强全部进球回看",
+      "subtitle": "和主舞台赛前视频不同的另一条 FOX Sports 真实 MP4 源。",
       "source": "FOX Sports",
-      "videoId": "usa-bosnia",
+      "videoId": "belgium-senegal",
       "body": [
-        "美国队 2-0 晋级。Balogun 先得分，64' 被红牌罚下，Tillman 在 82' 任意球破门。"
+        "八强开打前先回看 16 强全部进球，方便衔接接下来的四场赛程。"
       ],
       "metrics": [
-        { "label": "Score", "value": "2-0" },
-        { "label": "Stage", "value": "R32" },
-        { "label": "Clip", "value": "4:43" },
+        { "label": "Stage", "value": "R16" },
+        { "label": "Video", "value": "7:31" },
+        { "label": "Type", "value": "Goals" },
         { "label": "Source", "value": "MP4" }
       ]
     },
     {
       "id": "belgium-report",
       "kind": "news",
-      "title": "Belgium 3-2 Senegal: 五球逆转战报",
-      "subtitle": "The Guardian 文字战报。",
-      "source": "The Guardian",
-      "sourceUrl": "https://www.theguardian.com/football/2026/jul/01/belgium-senegal-2026-world-cup-last-32-match-report",
+      "section": "preview",
+      "title": "Spain vs Belgium 前瞻",
+      "subtitle": "Al Jazeera / AP 赛程与八强背景。",
+      "source": "Al Jazeera / AP",
+      "sourceUrl": "https://www.aljazeera.com/sports/2026/7/8/fifa-world-cup-2026-quarterfinal-fixtures-match-previews-schedule",
+      "summary": "西班牙以控球和防守稳定性进入八强，比利时则依靠 De Bruyne、Courtois 的经验和关键球能力。",
       "body": [
-        "Senegal 一度 2-0 领先。比利时在比赛尾段追平，把比赛拖进加时。",
-        "124:44，Tielemans 罚进点球。这个进球把比分定格为 3-2，比利时进入下一轮。",
-        "比利时下一轮将面对 United States。"
+        "Spain vs Belgium 将在 Los Angeles Stadium 进行，北京时间 7/11 03:00 开球。",
+        "西班牙的控球和防守稳定性，对上比利时的经验、门将质量和前场个人能力。",
+        "比利时已经进入八强，De Bruyne、Courtois 等核心仍是他们的主要看点。"
       ]
     },
     {
       "id": "england-news",
       "kind": "news",
-      "title": "Kane 把英格兰拉回来",
-      "subtitle": "Sky Sports 赛后文字报道。",
-      "source": "Sky Sports",
-      "sourceUrl": "https://www.skysports.com/football/england-vs-dr-congo/report/549847",
+      "section": "preview",
+      "title": "Norway vs England 前瞻",
+      "subtitle": "Haaland、Odegaard 对上 Kane、Bellingham。",
+      "source": "Al Jazeera / AP",
+      "sourceUrl": "https://www.aljazeera.com/news/2026/7/8/world-cup-2026-quarterfinals-full-schedule-and-egypt-fifa-dispute",
+      "summary": "Norway vs England 的主线是禁区效率：Haaland 的终结和 Kane、Bellingham 的连接。",
       "body": [
-        "DR Congo 第 7 分钟先得分，英格兰大半场都没找到节奏。",
-        "Kane 在 75' 扳平，又在 86' 打进制胜球。英格兰 2-1 晋级，将面对 Mexico。",
-        "Sky Sports 赛后报道把焦点放在 Kane 的终结能力和英格兰的慢热问题上。"
+        "Norway vs England 将在 Miami Stadium 进行，北京时间 7/12 05:00 开球。",
+        "挪威的主线是 Haaland 的禁区压迫和 Odegaard 的最后一传。",
+        "英格兰需要 Kane 的支点和 Bellingham 的前插把机会转成进球。"
       ]
     },
     {
       "id": "tielemans-clip",
       "kind": "clip",
-      "title": "Tielemans 制胜点球",
-      "subtitle": "0:33 竖屏短视频。",
+      "section": "highlights",
+      "title": "USA vs Belgium 集锦",
+      "subtitle": "比利时晋级八强前的真实 MP4 源。",
       "source": "FOX Sports",
       "videoId": "tielemans-goal",
       "body": [
-        "加时最后阶段，Tielemans 主罚命中。"
+        "这条集锦用于配合 Spain vs Belgium 前瞻查看。"
       ],
       "metrics": [
-        { "label": "Type", "value": "Goal" },
-        { "label": "Match", "value": "BEL 3-2 SEN" },
-        { "label": "Clip", "value": "0:33" },
+        { "label": "Type", "value": "HL" },
+        { "label": "Match", "value": "USA-BEL" },
+        { "label": "Clip", "value": "MP4" },
         { "label": "Source", "value": "FOX" }
       ]
     },
     {
       "id": "england-card",
       "kind": "video",
-      "title": "England 2-1 DR Congo",
-      "subtitle": "Kane 最后 15 分钟连进两球。",
-      "source": "FOX Sports / Sky Sports",
+      "section": "highlights",
+      "title": "Switzerland vs Colombia",
+      "subtitle": "瑞士晋级八强前的长集锦。",
+      "source": "FOX Sports",
       "videoId": "england-dr-congo",
-      "sourceUrl": "https://www.skysports.com/football/england-vs-dr-congo/549847",
+      "sourceUrl": "https://www.foxsports.com/watch/fmc-10vej9ay8izpkc3b",
       "body": [
-        "DR Congo 第 7 分钟领先。Kane 在 75' 扳平，86' 打进制胜球。"
+        "瑞士进入八强后将面对 Argentina，这条长集锦可作为赛前背景。"
       ],
       "metrics": [
-        { "label": "Score", "value": "2-1" },
-        { "label": "Kane", "value": "2 goals" },
-        { "label": "Clip", "value": "4:34" },
+        { "label": "Stage", "value": "R16" },
+        { "label": "Video", "value": "20:26" },
+        { "label": "Source", "value": "MP4" },
         { "label": "Status", "value": "Final" }
       ]
     },
     {
       "id": "kane-clip",
       "kind": "clip",
-      "title": "Kane 扳平球",
-      "subtitle": "1 分 31 秒短视频。",
+      "section": "highlights",
+      "title": "Mexico vs England 集锦",
+      "subtitle": "18 分 13 秒长集锦。",
       "source": "FOX Sports",
       "videoId": "kane-goal",
       "body": [
-        "Kane 门前抢点，英格兰把比赛拉回同一起跑线。"
+        "英格兰晋级八强前的真实长集锦，配合 Norway vs England 查看。"
       ],
       "metrics": [
-        { "label": "Type", "value": "Goal" },
-        { "label": "Match", "value": "ENG 2-1 COD" },
-        { "label": "Clip", "value": "1:31" },
-        { "label": "Player", "value": "Kane" }
-      ]
-    },
-    {
-      "id": "fixtures-card",
-      "kind": "schedule",
-      "title": "接下来该看什么",
-      "subtitle": "7 月 2 日还有三场淘汰赛。",
-      "source": "CBS Sports / FIFA",
-      "sourceUrl": "https://www.cbssports.com/soccer/news/world-cup-2026-schedule-times-dates/",
-      "body": [
-        "Spain vs Austria、Portugal vs Croatia、Switzerland vs Algeria。时间和球场在下面。"
+        { "label": "Type", "value": "HL" },
+        { "label": "Match", "value": "MEX-ENG" },
+        { "label": "Clip", "value": "18:13" },
+        { "label": "Source", "value": "FOX" }
       ]
     },
     {
       "id": "stats-card",
       "kind": "data",
+      "section": "stars",
       "title": "今日球员",
-      "subtitle": "Kane、Tielemans、Balogun、Tillman。",
-      "source": "FOX / Guardian / People / Sky",
+      "subtitle": "Mbappe、Hakimi、Haaland、Messi。",
+      "source": "AP / FOX Sports",
       "body": []
     }
   ]

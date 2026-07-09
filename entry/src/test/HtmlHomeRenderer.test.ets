@@ -65,6 +65,64 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function aggregateSearchDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'aggregate-search';
+  doc.title = '聚合搜索';
+  doc.subtitle = 'openai codex';
+  doc.blocks = [{
+    id: 'video-1',
+    kind: 'aggregate-video',
+    title: 'Codex demo',
+    subtitle: 'Video row',
+    status: 'success',
+    source: 'youtube',
+    metrics: [{ label: 'provider', value: 'YouTube' }],
+    rows: [{ label: 'url', value: 'https://www.youtube.com/watch?v=abc123' }],
+    actions: [],
+    mediaEmbed: {
+      provider: 'YouTube',
+      title: 'Codex demo',
+      embedUrl: 'https://www.youtube.com/embed/abc123',
+      pageUrl: 'https://www.youtube.com/watch?v=abc123',
+      thumbnail: ''
+    }
+  }, {
+    id: 'post-1',
+    kind: 'aggregate-post',
+    title: 'OpenAI Codex discussion',
+    subtitle: 'Discussion row',
+    status: 'success',
+    source: 'hackernews',
+    metrics: [{ label: 'provider', value: 'Hacker News' }],
+    rows: [{ label: 'url', value: 'https://news.ycombinator.com/item?id=123' }],
+    actions: []
+  }, {
+    id: 'status-youtube',
+    kind: 'aggregate-source-status',
+    title: 'YouTube',
+    subtitle: 'YouTube returned 1 row.',
+    status: 'success',
+    source: 'youtube',
+    metrics: [{ label: 'count', value: '1' }],
+    rows: [],
+    actions: []
+  }, {
+    id: 'status-zhihu',
+    kind: 'aggregate-source-status',
+    title: '知乎',
+    subtitle: '未配置 ZHIHU_API_KEY（知乎 Access Secret）。',
+    status: 'needs_auth',
+    source: 'zhihu',
+    metrics: [],
+    rows: [],
+    actions: []
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'travel';
@@ -925,6 +983,22 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('https://aiphone.local')).assertEqual(-1);
     });
 
+    it('renders aggregate search videos separately from posts and source issues', 0, () => {
+      const html = renderHtmlHomeDocument(aggregateSearchDocumentFixture(), false);
+
+      expect(html.indexOf('aggregate-shell')).assertLarger(-1);
+      expect(html.indexOf('视频')).assertLarger(-1);
+      expect(html.indexOf('讨论')).assertLarger(-1);
+      expect(html.indexOf('Codex demo')).assertLarger(-1);
+      expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
+      expect(html.indexOf('data-filter="reddit"')).assertLarger(-1);
+      expect(html.indexOf('可用来源')).assertLarger(-1);
+      expect(html.indexOf('YouTube returned 1 row')).assertLarger(-1);
+      expect(html.indexOf('需要关注')).assertLarger(-1);
+      expect(html.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
+      expect(html.indexOf('异常或提示')).assertEqual(-1);
+    });
+
     it('keeps travel and food card details collapsed behind source aware expansion hooks', 0, () => {
       const doc = travelFoodCardsDocumentFixture();
       doc.persona = {
@@ -961,6 +1035,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('client_filter_available')).assertLarger(-1);
       expect(html.indexOf('client_show_more')).assertLarger(-1);
       expect(html.indexOf("state.trainShowMore = !state.trainShowMore")).assertLarger(-1);
+      expect(html.indexOf('function displayTime(value)')).assertLarger(-1);
+      expect(html.indexOf("displayTime(metric(block, ['depart', 'depTime']))")).assertLarger(-1);
+      expect(html.indexOf('white-space: nowrap')).assertLarger(-1);
       expect(html.indexOf('data-source="train"')).assertLarger(-1);
       expect(html.indexOf('data-source="food"')).assertLarger(-1);
       expect(html.indexOf('data-duration')).assertLarger(-1);
@@ -1002,7 +1079,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AVATAR_MEITUAN')).assertLarger(-1);
       expect(html.indexOf('AVATAR_LUCKIN')).assertLarger(-1);
       expect(html.indexOf('AVATAR_GOOGLE_MAPS')).assertLarger(-1);
-      expect(html.indexOf('AVATAR_LOCAL')).assertLarger(-1);
+      expect(html.indexOf("var AVATAR_LOCAL = '';")).assertLarger(-1);
       expect(html.indexOf('function addAvatar(parent, block)')).assertLarger(-1);
       expect(html.indexOf('addAvatar(head, block)')).assertLarger(-1);
       expect(html.indexOf('border-radius: 999px')).assertLarger(-1);
@@ -1032,7 +1109,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("if (id === 'food_filter_1km') { state.filter = 'within_1km'; applyFilter(); return true; }")).assertLarger(-1);
       expect(html.indexOf("if (feature) { feature.style.display = matchesFilter(feature) ? '' : 'none'; }")).assertLarger(-1);
       expect(html.indexOf("feature.setAttribute('data-search'")).assertLarger(-1);
-      expect(html.indexOf('food_show_more')).assertLarger(-1);
+      expect(html.indexOf("['food_show_more', '展示更多'")).assertEqual(-1);
+      expect(html.indexOf("id === 'food_show_more'")).assertEqual(-1);
+      expect(html.indexOf('state.showMore')).assertEqual(-1);
+      expect(html.indexOf('visible >= 6')).assertEqual(-1);
       expect(html.indexOf('function sourceParts(block)')).assertLarger(-1);
       expect(html.indexOf("card.setAttribute('data-source-key', sourceKey(block))")).assertLarger(-1);
       expect(html.indexOf("raw.indexOf('美团')")).assertLarger(-1);
@@ -1057,7 +1137,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('payee-card')).assertLarger(-1);
       expect(html.indexOf('provider-logo')).assertLarger(-1);
       expect(html.indexOf('addProviderMark')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertLarger(-1);
+      expect(html.indexOf('GOOGLE_PAY_ICON')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertEqual(-1);
       expect(html.indexOf('form-actions')).assertLarger(-1);
       expect(html.indexOf("add(shell, 'details', 'payee-card')")).assertLarger(-1);
       expect(html.indexOf('form.open = !block')).assertLarger(-1);
@@ -1351,13 +1433,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Bilibili video')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-youtube"')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-bilibili"')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRkYwMDAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDBBMUQ2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
+      expect(html.indexOf("if (key === 'media-youtube') { return 'data:image/svg+xml;base64")).assertLarger(-1);
+      expect(html.indexOf("if (key === 'media-bilibili') { return 'data:image/svg+xml;base64")).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64')).assertLarger(-1);
+      expect(html.indexOf('https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png')).assertEqual(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=utf-8,%3Csvg')).assertEqual(-1);
+      expect(html.indexOf('%3Ebilibili%3C/text%3E')).assertEqual(-1);
       expect(html.indexOf('data-filter="youtube"')).assertLarger(-1);
       expect(html.indexOf('data-filter="bilibili"')).assertLarger(-1);
       expect(html.indexOf('data-filter="playable"')).assertEqual(-1);
       expect(html.indexOf('data-mode')).assertEqual(-1);
-      expect(html.indexOf('data-filter="error"')).assertLarger(-1);
+      expect(html.indexOf('data-filter="error"')).assertEqual(-1);
+      expect(html.indexOf("['error', '错误']")).assertEqual(-1);
       expect(html.indexOf('B 站')).assertLarger(-1);
       expect(html.indexOf('media.open.web')).assertLarger(-1);
       expect(html.indexOf("var play = add(actions")).assertEqual(-1);

@@ -19,6 +19,16 @@ interface TestStructuredContent {
   weather: string;
 }
 
+interface TestStatusItem {
+  text: string;
+  url: string;
+  thumbnail_pic: string;
+}
+
+interface TestStructuredArrayContent {
+  statuses: TestStatusItem[];
+}
+
 export default function genericMcpClientTest() {
   describe('genericMcpClient', () => {
     it('builds initialize and tool requests', 0, () => {
@@ -87,6 +97,28 @@ export default function genericMcpClientTest() {
       expect(summary.rows.length).assertLarger(0);
       expect(summary.rawPreview.indexOf('深圳')).assertLarger(-1);
       expect(summary.status).assertEqual('success');
+    });
+
+    it('expands structured content arrays into display rows', 0, () => {
+      const statuses: TestStatusItem[] = [{
+        text: 'OpenAI Codex 新讨论',
+        url: 'https://example.com/1',
+        thumbnail_pic: 'https://img.example.com/codex.jpg'
+      }];
+      const structured: TestStructuredArrayContent = {
+        statuses: statuses
+      };
+      const payload: McpToolResultPayload = {
+        content: [{ type: 'text', text: '返回 1 条内容' }],
+        structuredContent: structured,
+        isError: false
+      };
+      const summary = summarizeMcpToolResult(payload);
+
+      expect(summary.rows.length).assertEqual(1);
+      expect(summary.rows[0].label).assertEqual('statuses 1');
+      expect(summary.rows[0].value.indexOf('OpenAI Codex 新讨论')).assertLarger(-1);
+      expect(summary.rows[0].value.indexOf('codex.jpg')).assertLarger(-1);
     });
   });
 }

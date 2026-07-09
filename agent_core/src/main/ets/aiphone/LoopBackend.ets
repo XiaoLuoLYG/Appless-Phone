@@ -37,6 +37,9 @@ class AiphoneTool implements AgentTool {
     if (this.toolId === 'memory.update') {
       return this.runMemoryUpdate(input);
     }
+    if (this.toolId === 'worldcup.open') {
+      return 'Client intent accepted: worldcup.open. The app will open the World Cup experience.';
+    }
     const parsedArgs = this.parseInputArgs(input);
     const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
     const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
@@ -241,7 +244,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use dynamic.search for payment, ordinary SocialHub DM inbox, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -286,6 +289,10 @@ export class LoopBackend {
       description += '. Blocked safety fallback. Do not use for ordinary writing, composing, replying, or "send an email saying..." requests; use gmail.draft.create. Use only if the user explicitly asks to bypass review or confirmation and send immediately, and expect the client to block it.';
     } else if (definition.toolId === 'media.video.search') {
       description += '. Use for Bilibili/B站/哔哩哔哩 video search or multi-source video search. If the same request mentions YouTube and Bilibili, choose media.video.search with sources ["youtube","bilibili"].';
+    } else if (definition.toolId === 'media.aggregate.search') {
+      description += '. Use only for mixed-content topic research where the user asks for videos plus news, discussions, posts, or public reactions around one topic; use media.video.search for video-only requests. It aggregates YouTube, Bilibili, X public posts, Hacker News and Reddit via Composio, and Zhihu via its official REST API. Never fabricate media or posts.';
+    } else if (definition.toolId === 'worldcup.open') {
+      description += '. Use when the user wants to open the World Cup experience, view World Cup schedules, next match time, previews, highlights, teams, players, or matchup cards. Use media tools instead for explicit YouTube-only, Bilibili-only, or mixed-content search requests.';
     } else if (definition.toolId === 'youtube.video.search') {
       description += '. Use only for explicit YouTube-only public video search; use media.video.search for Bilibili or multi-source video requests.';
     } else if (definition.toolId === 'calendar.events.search') {

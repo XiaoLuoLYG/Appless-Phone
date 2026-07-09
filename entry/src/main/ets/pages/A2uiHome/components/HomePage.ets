@@ -67,7 +67,6 @@ export struct HomePage {
   onToggleHistory: () => void = () => {};
   onOpenConfig: () => void = () => {};
   onOpenSocialHub: () => void = () => {};
-  onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
@@ -322,19 +321,6 @@ export struct HomePage {
           })
             .onClick(() => {
               this.onOpenConfig();
-            })
-            .margin({ left: A2UI_HEADER_BUTTON_GAP })
-
-          A2uiButtonView({
-            icon: $r('app.media.icon_lab'),
-            hasIcon: true,
-            shape: 'circle',
-            circleSize: A2UI_HEADER_BUTTON_SIZE,
-            iconSize: A2UI_HEADER_BUTTON_ICON_SIZE,
-            tone: 'secondary'
-          })
-            .onClick(() => {
-              this.onOpenStyleLab();
             })
             .margin({ left: A2UI_HEADER_BUTTON_GAP })
         }

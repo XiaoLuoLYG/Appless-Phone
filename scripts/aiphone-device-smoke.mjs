@@ -15,6 +15,7 @@ const defaultCases = [
   { query: '帮我查看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search' },
   { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
   { query: '帮我在b站和youtube里搜索qwen的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
+  { query: '我想看看有关 openai codex 的相关新闻和讨论', expectsTool: true, expectedToolId: 'media.aggregate.search' },
   { query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search' },
   { query: '帮我查看 X 上 openai 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
   { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
@@ -355,6 +356,19 @@ const socialHubTruthfulBlockingMarkers = [
   'Bad Request'
 ];
 
+const aggregateMediaTruthfulBlockingMarkers = [
+  '工具供应商调用异常',
+  '需要供应商配置',
+  '需要配置：',
+  '查询失败',
+  'Operation timeout',
+  '2300028',
+  'MCP 工具调用失败',
+  'Internal error',
+  '2300999',
+  'Bad Request'
+];
+
 const argv = process.argv.slice(2);
 const cleanData = process.env.AIPHONE_SMOKE_CLEAN_DATA === '1' || argv.includes('--clean-data');
 const runDynamicCases = argv.includes('--dynamic-tools');
@@ -422,6 +436,12 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'payment.send'
+    };
+  }
+  if (isAggregateMediaSearchQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'media.aggregate.search'
     };
   }
   if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
@@ -500,6 +520,12 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'media.video.search'
+    };
+  }
+  if (/世界杯|world\s*cup|worldcup/i.test(query) && /想看|打开|进入|页面|界面|赛程|下一场|下场|什么时候|几点|开始|开赛|前瞻|集锦|球星|数据|对阵|比赛|schedule|fixture|preview|next match/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'worldcup.open'
     };
   }
   if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
@@ -1141,16 +1167,18 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
     gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
+    worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
   const modelFallbackOnlyAfterSameToolSelection = result.modelFailed && result.directIntent && result.modelSelectedExpectedToolId;
   const modelPassed = modelFallbackOnlyAfterSameToolSelection || (result.model200 && result.modelOk && !result.modelFailed);
   const htmlDocumentPassed = result.htmlHomeDocument.ok ||
-    (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0);
+    (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0) ||
+    (expectedToolId === 'worldcup.open' && result.worldCupOpened);
   const baseWithoutTransport = !result.htmlLoadError &&
     result.htmlHomeSurfaceLoad.ok &&
     !result.syntheticFallback &&
-    (!result.directIntent || modelFallbackOnlyAfterSameToolSelection) &&
+    (!result.directIntent || modelFallbackOnlyAfterSameToolSelection || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
     htmlDocumentPassed;
   result.modelPassed = modelPassed;
   result.transportPassed = !result.failedConnect && !result.providerFailed;
@@ -1164,7 +1192,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
       /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
       /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text);
   } else if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
+    result.ok = basePassed && modelPassed && result.toolRequested &&
+      (result.localToolRequest || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
+      result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
     result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
   } else {
@@ -1204,6 +1234,29 @@ function isMailAggregationQuery(query) {
 
 function isYouTubeBilibiliQuery(query) {
   return /YouTube|油管/i.test(query) && /B站|B 站|Bilibili|哔哩哔哩/i.test(query);
+}
+
+function isAggregateMediaSearchQuery(query) {
+  if (isSocialFeedQuery(query)) {
+    return false;
+  }
+  const wantsTopic = /有关|关于|看看|搜索|搜|聚合|整理|汇总|追踪|了解/.test(query);
+  const wantsDiscussion = /新闻|讨论|热议|舆论|观点|帖子|po文|post|posts|reaction|reactions|public/i.test(query);
+  if (!wantsTopic || !wantsDiscussion) {
+    return false;
+  }
+  const mentionsVideoSource = /YouTube|油管|B站|B 站|Bilibili|哔哩哔哩/i.test(query);
+  const mentionsTextSource = /Twitter|推文|x\.com|知乎|Hacker\s*News|HackNews|HackerNews|\bHN\b|Reddit|红迪/i.test(query) ||
+    (hasStandaloneXMarker(query) && /上|平台|推文|公开\s*posts?\b|public\s+posts?\b/i.test(query));
+  const asksMixedView = /聚合|多来源|多平台|汇总|新闻.*讨论|讨论.*新闻/.test(query) ||
+    (/视频.*讨论|讨论.*视频/.test(query) && (!mentionsVideoSource || mentionsTextSource));
+  if (mentionsVideoSource && !mentionsTextSource && !asksMixedView) {
+    return false;
+  }
+  if (isXPostSearchQuery(query) && !mentionsVideoSource && !asksMixedView) {
+    return false;
+  }
+  return asksMixedView || mentionsVideoSource && mentionsTextSource || !mentionsVideoSource && !mentionsTextSource;
 }
 
 function isSocialFeedQuery(query) {
@@ -1249,6 +1302,16 @@ function hasVisibleSocialHubOutput(text, expectedToolId) {
         /回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
   }
   return false;
+}
+
+function hasVisibleAggregateMediaOutput(text) {
+  return /聚合搜索/.test(text) &&
+    /视频/.test(text) &&
+    /讨论/.test(text) &&
+    /YouTube/.test(text) &&
+    /B 站/.test(text) &&
+    /\bX\b/.test(text) &&
+    /\bHN\b/.test(text);
 }
 
 function isCalendarQuery(query) {
@@ -1363,6 +1426,9 @@ function layoutExpectationsForQuery(query) {
   if (isYouTubeBilibiliQuery(query)) {
     return ['YouTube', 'YouTube Data API', '哔哩哔哩', 'Bilibili'];
   }
+  if (isAggregateMediaSearchQuery(query)) {
+    return ['聚合搜索', '视频', '讨论', 'YouTube', 'B 站', 'X', 'HN', 'Reddit'];
+  }
   if (/YouTube|油管/i.test(query)) {
     return ['YouTube', 'youtube.video.search', 'YouTube Data API', 'YOUTUBE_API_KEY'];
   }
@@ -1410,6 +1476,9 @@ function requiredScrolledMarkersForQuery(query, expectedToolId) {
   }
   if (expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query)) {
     return ['ECCV'];
+  }
+  if (expectedToolId === 'media.aggregate.search') {
+    return ['聚合搜索', '视频', '讨论', 'YouTube', 'B 站', 'X', 'HN', 'Reddit'];
   }
   return [];
 }
@@ -1701,6 +1770,8 @@ async function runQuery(query, index, expectedTool) {
   const isSocialHubCase = isSocialHubExpectedToolId(expectedToolId);
   const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
   const allowsSocialHubTruthfulState = socialHubVisibleOutput && hasTruthfulSocialHubState(evidenceText);
+  const aggregateMediaVisibleOutput = expectedToolId === 'media.aggregate.search' && hasVisibleAggregateMediaOutput(evidenceText);
+  const worldCupVisibleOutput = expectedToolId === 'worldcup.open' && evidenceText.includes('世界杯 Anything OS');
   const allowsExternalGmailWeb = isGmailWebQuery(query) && summary.gmailWebOpened === true;
   const allowsAggregateMailProviderFailure = expectedToolId === 'mail.search' &&
     !isQqMailQuery(query) &&
@@ -1718,6 +1789,9 @@ async function runQuery(query, index, expectedTool) {
     if (allowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
       return false;
     }
+    if (aggregateMediaVisibleOutput && aggregateMediaTruthfulBlockingMarkers.includes(marker)) {
+      return false;
+    }
     if (allowsAggregateMailProviderFailure && (/^(Gmail|QQ)/.test(marker) || marker === 'Operation timeout' || marker === '2300028')) {
       return false;
     }
@@ -1731,7 +1805,7 @@ async function runQuery(query, index, expectedTool) {
     }
   }
   const providerLayoutFailed = retryableProviderLayoutMarkers.some((marker) => evidenceText.includes(marker));
-  summary.providerFailed = summary.providerFailed || (providerLayoutFailed && !allowsSocialHubTruthfulState && !allowsAggregateMailProviderFailure);
+  summary.providerFailed = summary.providerFailed || (providerLayoutFailed && !allowsSocialHubTruthfulState && !aggregateMediaVisibleOutput && !allowsAggregateMailProviderFailure);
   summary.layoutPath = join(outDir, `query-${index + 1}-final-layout.json`);
   summary.layoutTextPath = layoutTextPath;
   summary.layoutScrolledTextPath = scrollEvidence.combinedTextPath;
@@ -1746,11 +1820,13 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutForbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyHits;
   summary.layoutBlockingHits = layoutBlockingHits;
   summary.gmailEccvKeywordVisible = !isGmailEccvQuery(query) || /eccv/i.test(evidenceText);
+  const aggregateMediaMarkersOk = expectedToolId !== 'media.aggregate.search' || expectedMisses.length === 0;
   summary.layoutTextExposed = isSocialHubCase ?
     socialHubVisibleOutput :
-    (expectedMarkers.length === 0 || expectedHits.length > 0) &&
+    (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
     calendarMarkersOk &&
     composioCardMarkersOk &&
+    aggregateMediaMarkersOk &&
     summary.gmailEccvKeywordVisible;
   if (expectedPersonaMemory === 'luckin_only') {
     summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
@@ -1792,7 +1868,8 @@ async function runQuery(query, index, expectedTool) {
   } else {
     summary.layoutTextExposed = summary.layoutTextExposed && summary.mailAggregateVisible;
   }
-  const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' && summary.htmlHomeDocument.ok;
+  const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' &&
+    expectedToolId !== 'media.aggregate.search' && summary.htmlHomeDocument.ok;
   summary.layoutOk = layoutBlockingHits.length === 0 &&
     forbiddenSocialHubLegacyHits.length === 0 &&
     (isSocialHubCase ? socialHubVisibleOutput : (allowsExternalGmailWeb || summary.layoutTextExposed || allowsHtmlDocumentOnly));
@@ -1820,6 +1897,15 @@ async function runQuery(query, index, expectedTool) {
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
       (summary.transportPassed === true || allowsSocialHubTruthfulState) &&
+      summary.layoutOk;
+  } else if (expectedToolId === 'worldcup.open') {
+    summary.ok = summary.basePassedWithoutTransport === true &&
+      summary.modelPassed === true &&
+      summary.toolRequested &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.worldCupOpened === true &&
+      worldCupVisibleOutput &&
       summary.layoutOk;
   } else if (layoutEvidenceRecovered) {
     summary.basePassedWithoutTransport = true;
@@ -2006,6 +2092,10 @@ const finalAllowsAggregateMailProviderFailure =
   finalSummary !== null &&
   finalSummary.expectedToolId === 'mail.search' &&
   finalSummary.mailAggregateVisible === true;
+const finalAggregateMediaVisibleOutput =
+  finalSummary !== null &&
+  finalSummary.expectedToolId === 'media.aggregate.search' &&
+  hasVisibleAggregateMediaOutput(finalLayoutText);
 const finalAllowsSourceFailure =
   finalAllowsPartialTravel &&
   finalSummary !== null &&
@@ -2021,6 +2111,9 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
     return false;
   }
   if (finalAllowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
+    return false;
+  }
+  if (finalAggregateMediaVisibleOutput && aggregateMediaTruthfulBlockingMarkers.includes(marker)) {
     return false;
   }
   if (finalAllowsAggregateMailProviderFailure && /^(Gmail|QQ)/.test(marker)) {

@@ -118,6 +118,7 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -1312,6 +1313,14 @@ struct Index {
     }
   }
 
+  private openAnythingDemo(): void {
+    router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
+      if (error) {
+        aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
+      }
+    });
+  }
+
   private async submitPrompt(prompt: string, visibleText: string, actionId: string = '', actionArgs: Object | null = null): Promise<void> {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || this.isBusy) {
@@ -2332,6 +2341,22 @@ struct Index {
       ' promptChars=' + prompt.length.toString() +
       ' actionId=' + actionId +
       ' gateway=' + TOOL_GATEWAY_URL);
+    if (toolId === 'worldcup.open') {
+      aiLogInfo('[AIPhone][AnythingDemoRouteByTool] actionId=' + actionId +
+        ' promptChars=' + prompt.length.toString());
+      this.markChecking('正在打开世界杯界面...');
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '已打开世界杯界面。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      this.appendMessage('assistant', '已打开世界杯界面。');
+      this.openAnythingDemo();
+      return true;
+    }
     configureLocalToolDebugConfig({
       foodProviderDelayEnabled: this.foodProviderDelayEnabled,
       foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs),
@@ -2552,13 +2577,6 @@ struct Index {
         },
         onResetSession: () => {
           this.resetCurrentSession();
-        },
-        onOpenStyleLab: () => {
-          router.pushUrl({ url: 'pages/A2uiHome/AnythingDemo' }, (error) => {
-            if (error) {
-              aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
-            }
-          });
         },
         onSendPrompt: () => {
           this.sendPrompt();

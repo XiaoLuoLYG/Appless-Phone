@@ -1,4 +1,5 @@
 import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
+import { APP_LOGO_BILIBILI, APP_LOGO_YOUTUBE } from './AppLogoDataUri';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
 type HtmlMediaTextValue = Object | string | number | boolean | null | undefined;
@@ -274,8 +275,7 @@ img { display: block; }
   color: var(--panel-strong);
 }
 .media-filter[data-filter="youtube"],
-.media-filter[data-filter="bilibili"],
-.media-filter[data-filter="error"] {
+.media-filter[data-filter="bilibili"] {
   scroll-margin-left: 12px;
 }
 .media-card-player::after {
@@ -577,8 +577,8 @@ const MEDIA_HOME_JS: string = `
     return '媒体';
   }
   function sourceLogoUrl(key) {
-    if (key === 'media-youtube') { return 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRkYwMDAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+WW91VHViZTwvdGl0bGU+PHBhdGggZD0iTTIzLjQ5OCA2LjE4NmEzLjAxNiAzLjAxNiAwIDAgMC0yLjEyMi0yLjEzNkMxOS41MDUgMy41NDUgMTIgMy41NDUgMTIgMy41NDVzLTcuNTA1IDAtOS4zNzcuNTA1QTMuMDE3IDMuMDE3IDAgMCAwIC41MDIgNi4xODZDMCA4LjA3IDAgMTIgMCAxMnMwIDMuOTMuNTAyIDUuODE0YTMuMDE2IDMuMDE2IDAgMCAwIDIuMTIyIDIuMTM2YzEuODcxLjUwNSA5LjM3Ni41MDUgOS4zNzYuNTA1czcuNTA1IDAgOS4zNzctLjUwNWEzLjAxNSAzLjAxNSAwIDAgMCAyLjEyMi0yLjEzNkMyNCAxNS45MyAyNCAxMiAyNCAxMnMwLTMuOTMtLjUwMi01LjgxNHpNOS41NDUgMTUuNTY4VjguNDMyTDE1LjgxOCAxMmwtNi4yNzMgMy41Njh6Ii8+PC9zdmc+'; }
-    if (key === 'media-bilibili') { return 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDBBMUQ2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+QmlsaWJpbGk8L3RpdGxlPjxwYXRoIGQ9Ik0xNy44MTMgNC42NTNoLjg1NGMxLjUxLjA1NCAyLjc2OS41NzggMy43NzMgMS41NzQgMS4wMDQuOTk1IDEuNTI0IDIuMjQ5IDEuNTYgMy43NnY3LjM2Yy0uMDM2IDEuNTEtLjU1NiAyLjc2OS0xLjU2IDMuNzczcy0yLjI2MiAxLjUyNC0zLjc3MyAxLjU2SDUuMzMzYy0xLjUxLS4wMzYtMi43NjktLjU1Ni0zLjc3My0xLjU2Uy4wMzYgMTguODU4IDAgMTcuMzQ3di03LjM2Yy4wMzYtMS41MTEuNTU2LTIuNzY1IDEuNTYtMy43NiAxLjAwNC0uOTk2IDIuMjYyLTEuNTIgMy43NzMtMS41NzRoLjc3NGwtMS4xNzQtMS4xMmExLjIzNCAxLjIzNCAwIDAgMS0uMzczLS45MDZjMC0uMzU2LjEyNC0uNjU4LjM3My0uOTA3bC4wMjctLjAyN2MuMjY3LS4yNDkuNTczLS4zNzMuOTItLjM3My4zNDcgMCAuNjUzLjEyNC45Mi4zNzNMOS42NTMgNC40NGMuMDcxLjA3MS4xMzQuMTQyLjE4Ny4yMTNoNC4yNjdhLjgzNi44MzYgMCAwIDEgLjE2LS4yMTNsMi44NTMtMi43NDdjLjI2Ny0uMjQ5LjU3My0uMzczLjkyLS4zNzMuMzQ3IDAgLjY2Mi4xNTEuOTI5LjQuMjY3LjI0OS4zOTEuNTUxLjM5MS45MDcgMCAuMzU1LS4xMjQuNjU3LS4zNzMuOTA2ek01LjMzMyA3LjI0Yy0uNzQ2LjAxOC0xLjM3My4yNzYtMS44OC43NzMtLjUwNi40OTgtLjc2OSAxLjEzLS43ODYgMS44OTR2Ny41MmMuMDE3Ljc2NC4yOCAxLjM5NS43ODYgMS44OTMuNTA3LjQ5OCAxLjEzNC43NTYgMS44OC43NzNoMTMuMzM0Yy43NDYtLjAxNyAxLjM3My0uMjc1IDEuODgtLjc3My41MDYtLjQ5OC43NjktMS4xMjkuNzg2LTEuODkzdi03LjUyYy0uMDE3LS43NjUtLjI4LTEuMzk2LS43ODYtMS44OTQtLjUwNy0uNDk3LTEuMTM0LS43NTUtMS44OC0uNzczek04IDExLjEwN2MuMzczIDAgLjY4NC4xMjQuOTMzLjM3My4yNS4yNDkuMzgzLjU2OS40Ljk2djEuMTczYy0uMDE3LjM5MS0uMTUuNzExLS40Ljk2LS4yNDkuMjUtLjU2LjM3NC0uOTMzLjM3NHMtLjY4NC0uMTI1LS45MzMtLjM3NGMtLjI1LS4yNDktLjM4My0uNTY5LS40LS45NlYxMi40NGMwLS4zNzMuMTI5LS42ODkuMzg2LS45NDcuMjU4LS4yNTcuNTc0LS4zODYuOTQ3LS4zODZ6bTggMGMuMzczIDAgLjY4NC4xMjQuOTMzLjM3My4yNS4yNDkuMzgzLjU2OS40Ljk2djEuMTczYy0uMDE3LjM5MS0uMTUuNzExLS40Ljk2LS4yNDkuMjUtLjU2LjM3NC0uOTMzLjM3NHMtLjY4NC0uMTI1LS45MzMtLjM3NGMtLjI1LS4yNDktLjM4My0uNTY5LS40LS45NlYxMi40NGMuMDE3LS4zOTEuMTUtLjcxMS40LS45Ni4yNDktLjI0OS41Ni0uMzczLjkzMy0uMzczWiIvPjwvc3ZnPg=='; }
+    if (key === 'media-youtube') { return '${APP_LOGO_YOUTUBE}'; }
+    if (key === 'media-bilibili') { return '${APP_LOGO_BILIBILI}'; }
     return '';
   }
   function sourceShort(key) {
@@ -678,7 +678,6 @@ const MEDIA_HOME_JS: string = `
     Array.prototype.slice.call(document.querySelectorAll('.media-card')).forEach(function (card) {
       var key = card.getAttribute('data-source-key') || '';
       var keep = state.filter === 'all' ||
-        (state.filter === 'error' && text(card.getAttribute('data-status')).toLowerCase() === 'error') ||
         key.indexOf(state.filter) >= 0;
       card.style.display = keep ? '' : 'none';
       if (keep) { visible += 1; }
@@ -794,8 +793,7 @@ const MEDIA_HOME_JS: string = `
   [
     ['all', '全部'],
     ['youtube', 'YouTube'],
-    ['bilibili', 'B 站'],
-    ['error', '错误']
+    ['bilibili', 'B 站']
   ].forEach(function (item) {
     var button = add(rail, 'button', 'media-filter');
     button.type = 'button';

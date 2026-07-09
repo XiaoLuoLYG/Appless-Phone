@@ -76,6 +76,8 @@ import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import { callComposioDynamic } from './ComposioDynamicBackend';
+import { aggregateSearchA2ui } from './AggregateSearchA2ui';
+import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
@@ -252,6 +254,7 @@ interface LocalProviderConfig {
   gmailOauthRedirectUri: string;
   gmailMcpUserProject: string;
   youtubeApiKey: string;
+  zhihuApiKey: string;
   qqMailAddress: string;
   qqMailAuthCode: string;
   qqMailImapHost: string;
@@ -324,6 +327,7 @@ interface LocalProviderRawConfig {
   GMAIL_MCP_USER_PROJECT?: string;
   GOOGLE_CLOUD_PROJECT?: string;
   YOUTUBE_API_KEY?: string;
+  ZHIHU_API_KEY?: string;
   QQ_MAIL_ADDRESS?: string;
   QQ_MAIL_AUTH_CODE?: string;
   QQ_MAIL_IMAP_HOST?: string;
@@ -380,6 +384,7 @@ interface LocalProviderRawConfig {
   gmailOauthRedirectUri?: string;
   gmailMcpUserProject?: string;
   youtubeApiKey?: string;
+  zhihuApiKey?: string;
   qqMailAddress?: string;
   qqMailAuthCode?: string;
   qqMailImapHost?: string;
@@ -1152,6 +1157,7 @@ let localProviderConfig: LocalProviderConfig = {
   gmailOauthRedirectUri: '',
   gmailMcpUserProject: '',
   youtubeApiKey: '',
+  zhihuApiKey: '',
   qqMailAddress: '',
   qqMailAuthCode: '',
   qqMailImapHost: 'imap.qq.com',
@@ -1379,6 +1385,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     gmailOauthRedirectUri: config.gmailOauthRedirectUri.trim().length > 0 ? config.gmailOauthRedirectUri.trim() : GMAIL_DEFAULT_REDIRECT_URI,
     gmailMcpUserProject: config.gmailMcpUserProject.trim(),
     youtubeApiKey: config.youtubeApiKey.trim(),
+    zhihuApiKey: config.zhihuApiKey.trim(),
     qqMailAddress: config.qqMailAddress.trim(),
     qqMailAuthCode: config.qqMailAuthCode.trim(),
     qqMailImapHost: config.qqMailImapHost.trim().length > 0 ? config.qqMailImapHost.trim() : 'imap.qq.com',
@@ -1425,6 +1432,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
     ' gmailOauthClientSecretChars=' + localProviderConfig.gmailOauthClientSecret.length.toString() +
     ' youtubeApiKeyChars=' + localProviderConfig.youtubeApiKey.length.toString() +
+    ' zhihuApiKeyChars=' + localProviderConfig.zhihuApiKey.length.toString() +
     ' gmailMcpUserProjectPresent=' + (localProviderConfig.gmailMcpUserProject.length > 0 ? 'true' : 'false') +
     ' qqMailAddressPresent=' + (localProviderConfig.qqMailAddress.length > 0 ? 'true' : 'false') +
     ' qqMailAuthCodeChars=' + localProviderConfig.qqMailAuthCode.length.toString() +
@@ -1482,6 +1490,7 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     gmailOauthRedirectUri: firstText([parsed.GMAIL_OAUTH_REDIRECT_URI, parsed.GOOGLE_OAUTH_REDIRECT_URI, parsed.gmailOauthRedirectUri]),
     gmailMcpUserProject: firstText([parsed.GMAIL_MCP_USER_PROJECT, parsed.GOOGLE_CLOUD_PROJECT, parsed.gmailMcpUserProject]),
     youtubeApiKey: firstText([parsed.YOUTUBE_API_KEY, parsed.youtubeApiKey]),
+    zhihuApiKey: firstText([parsed.ZHIHU_API_KEY, parsed.zhihuApiKey]),
     qqMailAddress: firstText([parsed.QQ_MAIL_ADDRESS, parsed.qqMailAddress]),
     qqMailAuthCode: firstText([parsed.QQ_MAIL_AUTH_CODE, parsed.qqMailAuthCode]),
     qqMailImapHost: firstText([parsed.QQ_MAIL_IMAP_HOST, parsed.qqMailImapHost]),
@@ -1531,6 +1540,7 @@ export function localProviderConfigDebugSummary(): string {
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientSecret=' + (localProviderConfig.gmailOauthClientSecret.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientSecret.length.toString() + ')' : 'missing') +
     ', youtubeApiKey=' + (localProviderConfig.youtubeApiKey.length > 0 ? 'present(' + localProviderConfig.youtubeApiKey.length.toString() + ')' : 'missing') +
+    ', zhihuApiKey=' + (localProviderConfig.zhihuApiKey.length > 0 ? 'present(' + localProviderConfig.zhihuApiKey.length.toString() + ')' : 'missing') +
     ', gmailMcpUserProject=' + (localProviderConfig.gmailMcpUserProject.length > 0 ? 'present' : 'missing') +
     ', qqMailAddress=' + (localProviderConfig.qqMailAddress.length > 0 ? 'present' : 'missing') +
     ', qqMailAuthCode=' + (localProviderConfig.qqMailAuthCode.length > 0 ? 'present(' + localProviderConfig.qqMailAuthCode.length.toString() + ')' : 'missing') +
@@ -6993,12 +7003,27 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
       )
     );
   }
+  if (toolId === 'media.aggregate.search') {
+    return aggregateSearchA2ui(
+      surfaceId,
+      await callAggregateSearch(
+        prompt,
+        args,
+        localProviderConfig.youtubeApiKey,
+        socialHubClient,
+        socialHubProviderConfig(),
+        {
+          apiKey: localProviderConfig.zhihuApiKey
+        }
+      )
+    );
+  }
   return genericToolResultsA2ui(surfaceId, toolId, [{
     sourceTag: '媒体聚合',
     toolName: toolId,
     title: '未知媒体工具',
     status: 'error',
-    summary: '当前媒体聚合只支持 media.video.search。',
+    summary: '当前媒体聚合只支持 media.video.search 和 media.aggregate.search。',
     rows: [{ label: 'Tool ID', value: toolId }],
     rawPreview: 'unknown media tool'
   }]);

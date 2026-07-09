@@ -432,6 +432,20 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('loads Zhihu aggregate search key from local provider raw JSON without exposing secrets', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ZHIHU_API_KEY: 'zhihu-api-key'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('zhihuApiKey=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('zhihu-api-key')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('renders Maps missing-key errors without falling back to food search', 0, async () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');
