@@ -21,7 +21,7 @@ export default function socialHubA2uiTest() {
       const items: SocialHubItemData[] = [{
         id: 'x-1',
         platform: 'x',
-        kind: 'post',
+        kind: 'message',
         author: 'OpenAI',
         handle: '@openai',
         text: 'Hello',
@@ -51,6 +51,28 @@ export default function socialHubA2uiTest() {
       expect(parsedItems[0].text).assertEqual('Hello');
       expect(selected.id).assertEqual('x-1');
       expect(parsedConnections[0].message).assertEqual('Slack OAuth required');
+    });
+
+    it('does not write public posts into SocialHub data paths', 0, () => {
+      const items: SocialHubItemData[] = [{
+        id: 'x-post',
+        platform: 'x',
+        kind: 'post',
+        author: 'OpenAI',
+        handle: '@openai',
+        text: 'public',
+        timestamp: '2026-07-01T01:00:00.000Z',
+        url: 'https://x.com/openai/status/1',
+        mediaUrl: '',
+        channel: '',
+        channelId: '',
+        threadId: '',
+        unread: false
+      }];
+      const store = applyJsonl(socialHubFeedA2ui('surface_social_hub', items, []));
+      const parsedItems = resolveData(store.getSurface(), '/socialHub/items') as SocialHubItemData[];
+
+      expect(parsedItems.length).assertEqual(0);
     });
 
     it('renders drafts as local unsent SocialHub state', 0, () => {

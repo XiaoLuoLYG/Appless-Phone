@@ -266,7 +266,7 @@ const visibleDomainMarkers = [
   'gmail.draft.create',
   'gmail.open.web',
   'gmail.message.send',
-  'Google Workspace MCP OAuth',
+  'Composio Gmail',
   '授权 Gmail',
   'UnsafeActionBlocked',
   '不会模拟 Gmail 邮件',
@@ -1211,7 +1211,7 @@ function isSocialFeedQuery(query) {
 }
 
 function isSocialHubExpectedToolId(expectedToolId) {
-  return expectedToolId === 'social.feed.search' || expectedToolId === 'x.post.search';
+  return expectedToolId === 'social.feed.search';
 }
 
 function hasStandaloneXMarker(query) {
@@ -1319,7 +1319,7 @@ function layoutExpectationsForQuery(query) {
     return ['接入工具', 'ppt.generate', 'API_KEY', 'unsupported_transport', '歌者PPT'];
   }
   if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
-    return ['SocialHub', '公开 post', 'x.post.search', 'X'];
+    return ['Composio', 'x.post.search', 'Twitter'];
   }
   if (isSocialFeedQuery(query)) {
     if (/社交聚合|消息聚合|多平台消息/.test(query)) {
@@ -1343,22 +1343,22 @@ function layoutExpectationsForQuery(query) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
-    return ['gmail.draft.create', 'Google Workspace MCP OAuth', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
+    return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
   }
   if (isGmailEccvQuery(query)) {
-    return ['Gmail', 'gmail.mail.search', 'eccv', 'ECCV', '不会模拟 Gmail 邮件'];
+    return ['Composio', 'Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
-    return ['Gmail', 'gmail.mail.search', 'Google Workspace MCP OAuth', '授权 Gmail', '不会模拟 Gmail 邮件', '没有找到匹配邮件'];
+    return ['Composio', 'Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
   }
   if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
     return ['AIPhone Pay', 'PayPal', 'Google Pay', '5 USD', '确认支付'];
   }
   if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
-    return ['YouTube', 'youtube.mine.playlists', 'OAuth', '不会模拟播放列表'];
+    return ['Composio', 'YouTube', 'youtube.mine.playlists', '不会模拟播放列表'];
   }
   if (/YouTube|油管/i.test(query) && /订阅|subscriptions?/i.test(query)) {
-    return ['YouTube', 'youtube.mine.subscriptions', 'OAuth', '不会模拟播放列表'];
+    return ['Composio', 'YouTube', 'youtube.mine.subscriptions', '不会模拟播放列表'];
   }
   if (isYouTubeBilibiliQuery(query)) {
     return ['YouTube', 'YouTube Data API', '哔哩哔哩', 'Bilibili'];
@@ -1371,8 +1371,10 @@ function layoutExpectationsForQuery(query) {
   }
   if (isCalendarQuery(query)) {
     return /创建|新建|添加|安排|预约/.test(query)
-      ? ['Google Calendar API', '天', '周', '月', '日视图', '已写入', 'AIPhoneDemo', '15:00', '15:30']
-      : ['Google Calendar API', '天', '周', '月', '日视图'];
+      ? ['Composio', 'Google Calendar', 'calendar.event.create']
+      : (/改到|改成|更新|挪到|延期/.test(query)
+        ? ['Composio', 'Google Calendar', 'calendar.event.update']
+        : ['Composio', 'Google Calendar', 'calendar.events.search']);
   }
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
     return ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];

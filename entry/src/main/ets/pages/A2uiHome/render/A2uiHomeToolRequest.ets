@@ -427,6 +427,13 @@ function youtubeArgsForPrompt(prompt: string): Object | null {
 }
 
 function inferredYouTubeToolIdForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  if (hasExplicitYouTubeIntent(prompt) && (prompt.indexOf('播放列表') >= 0 || lowerPrompt.indexOf('playlist') >= 0)) {
+    return 'youtube.mine.playlists';
+  }
+  if (hasExplicitYouTubeIntent(prompt) && (prompt.indexOf('订阅') >= 0 || lowerPrompt.indexOf('subscription') >= 0)) {
+    return 'youtube.mine.subscriptions';
+  }
   return youtubeArgsForPrompt(prompt) === null ? '' : 'youtube.video.search';
 }
 
@@ -525,7 +532,7 @@ export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId:
       return true;
     }
   }
-  if (toolId === 'social.feed.search' || toolId === 'x.post.search') {
+  if (toolId === 'social.feed.search') {
     for (let index = 0; index < surface.components.length; index++) {
       if (surface.components[index].component === 'SocialHub') {
         return true;

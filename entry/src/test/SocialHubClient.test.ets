@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubXPostResult } from '@loop/agent-core';
+import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult } from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -29,6 +29,15 @@ export default function socialHubClientTest() {
       expect(filtered.items[0].id).assertEqual('x-1');
       expect(filtered.connections.length).assertEqual(1);
       expect(filtered.connections[0].platform).assertEqual('x');
+    });
+
+    it('keeps only received private message rows for SocialHub feed', 0, () => {
+      const parsed = parseSocialHubFeedPayload('{"items":[{"id":"x-post","platform":"x","kind":"post","text":"public post"},{"id":"x-mention","platform":"x","kind":"mention","text":"public mention"},{"id":"x-dm","platform":"x","kind":"message","text":"private dm"},{"id":"slack-1","platform":"slack","kind":"message","text":"private slack"},{"id":"slack-conn","platform":"slack","kind":"connection","text":"connection state"},{"id":"ig-post","platform":"instagram","kind":"post","text":"public media"}],"connections":[]}');
+      const filtered = socialHubPrivateItems(parsed.items);
+
+      expect(filtered.length).assertEqual(2);
+      expect(filtered[0].id).assertEqual('x-dm');
+      expect(filtered[1].id).assertEqual('slack-1');
     });
 
     it('fails closed when the bridge is missing', 0, () => {

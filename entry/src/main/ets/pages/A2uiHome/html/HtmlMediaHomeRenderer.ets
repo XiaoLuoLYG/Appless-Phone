@@ -577,8 +577,8 @@ const MEDIA_HOME_JS: string = `
     return '媒体';
   }
   function sourceLogoUrl(key) {
-    if (key === 'media-youtube') { return 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png'; }
-    if (key === 'media-bilibili') { return 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23fb7299%22/%3E%3Cpath d=%22M18 22h28a6 6 0 0 1 6 6v16a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6V28a6 6 0 0 1 6-6Z%22 fill=%22none%22 stroke=%22white%22 stroke-width=%224%22/%3E%3Cpath d=%22M24 14l7 8M40 14l-7 8%22 stroke=%22white%22 stroke-width=%224%22 stroke-linecap=%22round%22/%3E%3Ctext x=%2232%22 y=%2241%22 text-anchor=%22middle%22 font-family=%22Arial,sans-serif%22 font-size=%2213%22 font-weight=%22700%22 fill=%22white%22%3Ebilibili%3C/text%3E%3C/svg%3E'; }
+    if (key === 'media-youtube') { return 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRkYwMDAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+WW91VHViZTwvdGl0bGU+PHBhdGggZD0iTTIzLjQ5OCA2LjE4NmEzLjAxNiAzLjAxNiAwIDAgMC0yLjEyMi0yLjEzNkMxOS41MDUgMy41NDUgMTIgMy41NDUgMTIgMy41NDVzLTcuNTA1IDAtOS4zNzcuNTA1QTMuMDE3IDMuMDE3IDAgMCAwIC41MDIgNi4xODZDMCA4LjA3IDAgMTIgMCAxMnMwIDMuOTMuNTAyIDUuODE0YTMuMDE2IDMuMDE2IDAgMCAwIDIuMTIyIDIuMTM2YzEuODcxLjUwNSA5LjM3Ni41MDUgOS4zNzYuNTA1czcuNTA1IDAgOS4zNzctLjUwNWEzLjAxNSAzLjAxNSAwIDAgMCAyLjEyMi0yLjEzNkMyNCAxNS45MyAyNCAxMiAyNCAxMnMwLTMuOTMtLjUwMi01LjgxNHpNOS41NDUgMTUuNTY4VjguNDMyTDE1LjgxOCAxMmwtNi4yNzMgMy41Njh6Ii8+PC9zdmc+'; }
+    if (key === 'media-bilibili') { return 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDBBMUQ2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+QmlsaWJpbGk8L3RpdGxlPjxwYXRoIGQ9Ik0xNy44MTMgNC42NTNoLjg1NGMxLjUxLjA1NCAyLjc2OS41NzggMy43NzMgMS41NzQgMS4wMDQuOTk1IDEuNTI0IDIuMjQ5IDEuNTYgMy43NnY3LjM2Yy0uMDM2IDEuNTEtLjU1NiAyLjc2OS0xLjU2IDMuNzczcy0yLjI2MiAxLjUyNC0zLjc3MyAxLjU2SDUuMzMzYy0xLjUxLS4wMzYtMi43NjktLjU1Ni0zLjc3My0xLjU2Uy4wMzYgMTguODU4IDAgMTcuMzQ3di03LjM2Yy4wMzYtMS41MTEuNTU2LTIuNzY1IDEuNTYtMy43NiAxLjAwNC0uOTk2IDIuMjYyLTEuNTIgMy43NzMtMS41NzRoLjc3NGwtMS4xNzQtMS4xMmExLjIzNCAxLjIzNCAwIDAgMS0uMzczLS45MDZjMC0uMzU2LjEyNC0uNjU4LjM3My0uOTA3bC4wMjctLjAyN2MuMjY3LS4yNDkuNTczLS4zNzMuOTItLjM3My4zNDcgMCAuNjUzLjEyNC45Mi4zNzNMOS42NTMgNC40NGMuMDcxLjA3MS4xMzQuMTQyLjE4Ny4yMTNoNC4yNjdhLjgzNi44MzYgMCAwIDEgLjE2LS4yMTNsMi44NTMtMi43NDdjLjI2Ny0uMjQ5LjU3My0uMzczLjkyLS4zNzMuMzQ3IDAgLjY2Mi4xNTEuOTI5LjQuMjY3LjI0OS4zOTEuNTUxLjM5MS45MDcgMCAuMzU1LS4xMjQuNjU3LS4zNzMuOTA2ek01LjMzMyA3LjI0Yy0uNzQ2LjAxOC0xLjM3My4yNzYtMS44OC43NzMtLjUwNi40OTgtLjc2OSAxLjEzLS43ODYgMS44OTR2Ny41MmMuMDE3Ljc2NC4yOCAxLjM5NS43ODYgMS44OTMuNTA3LjQ5OCAxLjEzNC43NTYgMS44OC43NzNoMTMuMzM0Yy43NDYtLjAxNyAxLjM3My0uMjc1IDEuODgtLjc3My41MDYtLjQ5OC43NjktMS4xMjkuNzg2LTEuODkzdi03LjUyYy0uMDE3LS43NjUtLjI4LTEuMzk2LS43ODYtMS44OTQtLjUwNy0uNDk3LTEuMTM0LS43NTUtMS44OC0uNzczek04IDExLjEwN2MuMzczIDAgLjY4NC4xMjQuOTMzLjM3My4yNS4yNDkuMzgzLjU2OS40Ljk2djEuMTczYy0uMDE3LjM5MS0uMTUuNzExLS40Ljk2LS4yNDkuMjUtLjU2LjM3NC0uOTMzLjM3NHMtLjY4NC0uMTI1LS45MzMtLjM3NGMtLjI1LS4yNDktLjM4My0uNTY5LS40LS45NlYxMi40NGMwLS4zNzMuMTI5LS42ODkuMzg2LS45NDcuMjU4LS4yNTcuNTc0LS4zODYuOTQ3LS4zODZ6bTggMGMuMzczIDAgLjY4NC4xMjQuOTMzLjM3My4yNS4yNDkuMzgzLjU2OS40Ljk2djEuMTczYy0uMDE3LjM5MS0uMTUuNzExLS40Ljk2LS4yNDkuMjUtLjU2LjM3NC0uOTMzLjM3NHMtLjY4NC0uMTI1LS45MzMtLjM3NGMtLjI1LS4yNDktLjM4My0uNTY5LS40LS45NlYxMi40NGMuMDE3LS4zOTEuMTUtLjcxMS40LS45Ni4yNDktLjI0OS41Ni0uMzczLjkzMy0uMzczWiIvPjwvc3ZnPg=='; }
     return '';
   }
   function sourceShort(key) {
@@ -935,7 +935,8 @@ function isMediaHomeBlock(block: HtmlHomeBlock): boolean {
   if (block.kind !== 'generic-tool-result') {
     return false;
   }
-  return mediaMetric(block, ['toolName']) === 'media.video.search';
+  const toolName = mediaMetric(block, ['toolName']);
+  return toolName === 'media.video.search' || toolName === 'youtube.video.search' || toolName === 'youtube.mine.playlists';
 }
 
 function mediaMetric(block: HtmlHomeBlock, labels: string[]): string {

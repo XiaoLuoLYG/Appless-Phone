@@ -809,10 +809,25 @@ function confirmation(event: CalendarHomeEvent | null): string {
     '</aside>';
 }
 
+function hasAuthFailure(document: HtmlHomeDocument): boolean {
+  const text = (document.subtitle + ' ' + document.blocks.map((block) => block.title + ' ' + block.subtitle).join(' ')).toLowerCase();
+  return text.indexOf('没有 active connected account') >= 0 ||
+    text.indexOf('needs_auth') >= 0 ||
+    text.indexOf('待授权') >= 0;
+}
+
+function hasSyncFailure(document: HtmlHomeDocument): boolean {
+  const text = (document.subtitle + ' ' + document.blocks.map((block) => block.title + ' ' + block.subtitle).join(' ')).toLowerCase();
+  return text.indexOf('搜索工具失败') >= 0 ||
+    text.indexOf('operation timeout') >= 0 ||
+    text.indexOf('调用失败') >= 0 ||
+    text.indexOf('查询失败') >= 0;
+}
+
 function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate: boolean, isBusy: boolean): string {
   const first = primaryEvent(events);
   const target = targetDate(events, document.generatedAt);
-  const state = isBusy ? '同步中' : (isCreate ? '已写入' : '已同步');
+  const state = isBusy ? '同步中' : (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步')));
   return '<header class="calendar-hero">' +
     '<section class="calendar-hero-copy">' +
     '<span class="calendar-kicker">Google Calendar API · ' + escapeHtmlText(state) + '</span>' +

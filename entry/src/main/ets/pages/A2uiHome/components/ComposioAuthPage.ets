@@ -27,6 +27,10 @@ export struct ComposioAuthPage {
   }
 
   private displayToolkitName(item: ComposioAuthConfigItem): string {
+    const slug = item.toolkitSlug.trim().toLowerCase().split(' ').join('').split('-').join('').split('_').join('');
+    if (slug === 'googlecalendar' || slug === 'calendar') {
+      return 'Google Cal';
+    }
     return item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug;
   }
 
@@ -42,11 +46,16 @@ export struct ComposioAuthPage {
 
   @Builder
   ToolkitBadge(item: ComposioAuthConfigItem) {
-    Image(composioToolkitLogoResource(item.toolkitSlug))
-      .width(36)
-      .height(36)
-      .objectFit(ImageFit.Contain)
-      .borderRadius(10)
+    if (composioToolkitLogoResource(item.toolkitSlug) !== null) {
+      Image(composioToolkitLogoResource(item.toolkitSlug) as Resource)
+        .width(36)
+        .height(36)
+        .objectFit(ImageFit.Contain)
+    } else {
+      Blank()
+        .width(36)
+        .height(36)
+    }
   }
 
   @Builder

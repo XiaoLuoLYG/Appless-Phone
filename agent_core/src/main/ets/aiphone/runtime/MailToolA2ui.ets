@@ -9,6 +9,7 @@ import {
   A2uiSummaryData
 } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
+import { gmailComposioThreadResults } from './GmailToolA2ui';
 import { MailProviderStatus, MailThreadResult } from './MailToolTypes';
 
 const GENERIC_RESULTS_PATH: string = '/genericToolResults';
@@ -146,10 +147,14 @@ function threadResult(thread: MailThreadResult): A2uiGenericToolResultData {
 }
 
 function statusResult(status: MailProviderStatus): A2uiGenericToolResultData {
+  let title = status.title;
+  if (status.status !== 'success' && status.provider === 'gmail' && title.indexOf('Composio') >= 0) {
+    title = 'Gmail 调用失败';
+  }
   return {
     sourceTag: providerLabel(status.provider),
     toolName: 'mail.provider.status',
-    title: status.title,
+    title: title,
     status: status.status,
     summary: status.message,
     rows: [
@@ -173,6 +178,14 @@ function dynamicResult(result: DynamicGenericToolResult): A2uiGenericToolResultD
   };
 }
 
+function dynamicResults(result: DynamicGenericToolResult): A2uiGenericToolResultData[] {
+  const gmailRows = gmailComposioThreadResults(result);
+  if (gmailRows.length > 0) {
+    return gmailRows;
+  }
+  return [dynamicResult(result)];
+}
+
 function isTechnicalGmailSearchSummary(result: A2uiGenericToolResultData): boolean {
   const source = result.sourceTag.toLowerCase();
   if (source.indexOf('gmail') < 0 || result.toolName === 'mail.thread') {
@@ -191,9 +204,15 @@ export function mailResultsA2ui(
 ): string {
   const sorted = threads.slice().sort((left: MailThreadResult, right: MailThreadResult) => dateMs(right.receivedAt) - dateMs(left.receivedAt));
   const results: A2uiGenericToolResultData[] = [];
-  statuses.forEach((status: MailProviderStatus) => results.push(statusResult(status)));
+  statuses.forEach((status: MailProviderStatus) => {
+    if (status.status !== 'success') {
+      results.push(statusResult(status));
+    }
+  });
   sorted.forEach((thread: MailThreadResult) => results.push(threadResult(thread)));
-  extras.forEach((result: DynamicGenericToolResult) => results.push(dynamicResult(result)));
+  extras.forEach((result: DynamicGenericToolResult) => {
+    dynamicResults(result).forEach((item: A2uiGenericToolResultData) => results.push(item));
+  });
   const visibleResults = results.filter((result: A2uiGenericToolResultData) => !isTechnicalGmailSearchSummary(result));
   const count = visibleResults.length;
   const title = '邮箱';
@@ -217,15 +236,7 @@ export function mailResultsFromDynamicA2ui(
 ): string {
   const mapped: A2uiGenericToolResultData[] = [];
   results.forEach((result: DynamicGenericToolResult) => {
-    mapped.push({
-      sourceTag: result.sourceTag,
-      toolName: result.toolName,
-      title: result.title,
-      status: result.status,
-      summary: result.summary,
-      rows: result.rows,
-      rawPreview: ''
-    });
+    dynamicResults(result).forEach((item: A2uiGenericToolResultData) => mapped.push(item));
   });
   const summary: A2uiSummaryData = {
     text: mapped.length.toString() + ' mail results returned for review.',

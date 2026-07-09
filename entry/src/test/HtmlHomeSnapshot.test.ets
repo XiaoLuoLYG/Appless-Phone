@@ -433,6 +433,34 @@ export default function htmlHomeSnapshotTest() {
         isAwaitingFirstSurface: false
       });
       expect(youtubeDoc.blocks[0].mediaEmbed?.embedUrl).assertEqual('https://www.youtube.com/embed/abc123?playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local');
+
+      const playlistDoc = createHtmlHomeDocument({
+        surface: surface('media', 'ready', [root('media_results'), results],
+          '{"genericToolResults":[{"sourceTag":"Composio YouTube","toolName":"youtube.mine.playlists","title":"Demo playlist","status":"success","summary":"playlist result","rows":[{"label":"AIPhoneDemo playlist","value":"#PL123 | https://www.youtube.com/playlist?list=PL123"}],"rawPreview":""}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      expect(playlistDoc.kind).assertEqual('media');
+      expect(playlistDoc.blocks[0].mediaEmbed?.embedUrl).assertEqual('https://www.youtube.com/embed/videoseries?list=PL123&playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local');
+
+      const rawPlaylistDoc = createHtmlHomeDocument({
+        surface: surface('media', 'ready', [root('media_results'), results],
+          '{"genericToolResults":[{"sourceTag":"Composio YouTube","toolName":"youtube.mine.playlists","title":"Demo playlist","status":"success","summary":"playlist result","rows":[{"label":"结果数量","value":"1"}],"rawPreview":"{\\"data\\":{\\"items\\":[{\\"id\\":\\"PLRAW123456\\",\\"title\\":\\"AIPhoneDemo playlist\\"}]}}"}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      expect(rawPlaylistDoc.blocks[0].mediaEmbed?.embedUrl).assertEqual('https://www.youtube.com/embed/videoseries?list=PLRAW123456&playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local');
+
+      const thumbnailPlaylistDoc = createHtmlHomeDocument({
+        surface: surface('media', 'ready', [root('media_results'), results],
+          '{"genericToolResults":[{"sourceTag":"Composio YouTube","toolName":"youtube.mine.playlists","title":"Demo playlist","status":"success","summary":"playlist result","rows":[{"label":"Playlist ID","value":"PLRAW123456"},{"label":"Thumbnail","value":"https://i.ytimg.com/vi/vHeDD9IluHc/hqdefault.jpg"}],"rawPreview":""}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      expect(thumbnailPlaylistDoc.blocks[0].mediaEmbed?.embedUrl).assertEqual('https://www.youtube.com/embed/vHeDD9IluHc?playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local');
     });
 
     it('keeps non-media generic tool results as dynamic tools', 0, () => {
