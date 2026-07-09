@@ -1,31 +1,58 @@
-import { LocalModelSettings, defaultLocalModelSettings } from '../../model/LocalModelSettings';
+import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
 import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
-import { notificationExtensionSubscription } from '@kit.NotificationKit';
+import util from '@ohos.util';
 import {
-  A2UI_COMPONENT_SOCIAL_INBOX,
+  A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiAction,
   A2uiCallResult,
   A2uiComponent,
+  A2uiDataValue,
   A2uiDynamicToolConnectData,
   A2uiFlightData,
   A2uiFoodData,
   A2uiMessage,
   A2uiRuntimeDataModel,
-  A2uiSocialMessageData,
-  A2uiSocialReplyData,
   A2uiSurfaceState,
   A2uiTrainData,
   A2uiTravelOptionData
-} from '../../model/A2uiTypes';
+} from '@loop/agent-core';
+import { stripeReceivingAccount } from '@loop/agent-core';
 import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
-import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL } from '../../model/GmailToolA2ui';
-import { A2uiSurfaceStore, createSeedA2uiSurface } from '../../model/A2uiSurfaceStore';
-import { aiLogError, aiLogInfo } from '../../model/AiphoneLogger';
-import { callToolGateway, configureLocalToolDebugConfig, defaultToolGatewayUrl, isRegisteredToolId, prepareGmailOAuthAuthorizationUrl } from '../../model/ToolGatewayClient';
+import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
+import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
+import {
+  emptySocialHubDraft,
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData
+} from '@loop/agent-core';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
+import {
+  callToolGateway,
+  COMPOSIO_USER_ID_PREFIX,
+  ComposioAuthConfigItem,
+  ComposioAuthProxyClient,
+  configureComposioUserId,
+  configureLocalPaymentAccountBookJson,
+  configureLocalStripeReceivingAgentJson,
+  configureLocalToolDebugConfig,
+  currentComposioConfig,
+  currentComposioUserId,
+  defaultToolGatewayUrl,
+  isRegisteredToolId,
+  normalizeComposioUserId,
+  prepareGmailOAuthAuthorizationUrl,
+  prepareGoogleOAuthAuthorizationUrl,
+  prepareXOAuthAuthorizationUrl,
+  sendLocalSocialHubReply,
+  shortComposioUserId
+} from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   NavigationCardSnapshotBuildResult,
@@ -35,19 +62,23 @@ import {
   navigationCardSnapshotFromFoodOption,
   navigationCardSnapshotFromTrainOption,
   navigationCardSnapshotFromTravelOption
-} from '../../model/NavigationCardSnapshot';
-import {
-  AccessibilityIngestProvider,
-  NotificationIngestProvider,
-  SocialMessageStore,
-  WechatReplyAutomation,
-  buildSocialDiagnosticsRows,
-  probeSocialCapabilities
-} from '../../model/SocialBridge';
-import { detectSocialAccessibilitySync, detectWechatBundleSync } from '../../model/SocialCapabilityProbe';
-import { readNotificationCaptureArchive, SocialNotificationArchiveRead } from '../../model/SocialNotificationArchive';
+} from '@loop/agent-core';
+import { AssetCredentialStore } from '@loop/agent-core';
+import { buildSystemFoodNavigationUri } from '@loop/agent-core';
+import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
+import { copyPersonaData } from '../../model/PersonaA2ui';
+import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
+import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
+import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
+import { PersonaPack } from '../../model/PersonaTypes';
+import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
+import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
+import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
+import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
+import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
+import { HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
   A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
   normalizeFoodPartialThrottleMs,
@@ -58,10 +89,18 @@ import {
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
   shouldApplySurfaceUpdate,
+  shouldShowQueryPendingSurface,
   shouldShowWelcome,
-  updateConnectionPanelState
+  updateConnectionPanelState,
+  voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
-import { A2uiHomeResolvedToolRequest, resolveA2uiHomeToolRequest } from './render/A2uiHomeToolRequest';
+import {
+  A2uiHomeResolvedToolRequest,
+  directPaymentToolIdForActionId,
+  resolveA2uiHomeToolRequest,
+  surfaceHasSatisfiedToolResult,
+  surfaceHasVisibleToolResult
+} from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
 const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
@@ -70,10 +109,94 @@ const initialSurface: A2uiSurfaceState = createSeedA2uiSurface();
 const LOG_SNIPPET_LIMIT: number = 1200;
 const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 Appless Phone 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
-const SOCIAL_REPLY_UNAVAILABLE: string = '真实微信发送器未接入或当前设备未开放自动发送能力';
-const SOCIAL_NOTIFICATION_UNSUPPORTED_HINT: string = '当前 PC 系统未向三方应用开放通知内容订阅；系统开放后会显示真实微信新消息';
-const SOCIAL_MESSAGE_STORE: SocialMessageStore = new SocialMessageStore();
 const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
+const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
+const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
+const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
+const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
+const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+
+type HtmlActionValue = Object | string | number | boolean | null | undefined;
+
+interface HtmlDynamicCredentialPayload {
+  credentialRef?: HtmlActionValue;
+  credentialValue?: HtmlActionValue;
+  toolId?: HtmlActionValue;
+  prompt?: HtmlActionValue;
+}
+
+interface HtmlPinPayload {
+  index?: HtmlActionValue;
+  id?: HtmlActionValue;
+  source?: HtmlActionValue;
+  trainCode?: HtmlActionValue;
+  flightNo?: HtmlActionValue;
+  name?: HtmlActionValue;
+  address?: HtmlActionValue;
+  location?: HtmlActionValue;
+  distance?: HtmlActionValue;
+  depart?: HtmlActionValue;
+  depTime?: HtmlActionValue;
+  from?: HtmlActionValue;
+  to?: HtmlActionValue;
+  dep?: HtmlActionValue;
+  arr?: HtmlActionValue;
+}
+
+interface SocialHubReplyPayload {
+  text?: HtmlActionValue;
+}
+
+interface PaymentCheckoutActionPayload {
+  provider?: HtmlActionValue;
+  recipient?: HtmlActionValue;
+  amountText?: HtmlActionValue;
+  currency?: HtmlActionValue;
+  note?: HtmlActionValue;
+  checkoutUrl?: HtmlActionValue;
+  providerSessionId?: HtmlActionValue;
+}
+
+interface StripeOnboardingActionPayload {
+  onboardingUrl?: HtmlActionValue;
+}
+
+interface StripeReceivingSavedProfile {
+  agentId: string;
+  deviceId: string;
+  displayName: string;
+  email: string;
+  country: string;
+  businessType: string;
+  stripeAccountId: string;
+  status: string;
+}
+
+interface HtmlPaymentAccountPayload {
+  displayName?: HtmlActionValue;
+  aliases?: HtmlActionValue;
+  paypalEmail?: HtmlActionValue;
+  paypalMerchantId?: HtmlActionValue;
+  stripeAccountId?: HtmlActionValue;
+  stripePaymentLinkUrl?: HtmlActionValue;
+}
+
+interface PaymentCaptureArgs {
+  provider: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  phase: string;
+  providerSessionId: string;
+}
+
+interface PaymentSavedPreviewArgs {
+  accountId: string;
+  recipient: string;
+  provider: string;
+  originalQuery: string;
+}
 
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
@@ -82,14 +205,23 @@ function logSnippet(text: string): string {
   return text.substring(0, LOG_SNIPPET_LIMIT) + '...<truncated>';
 }
 
+function modelPromptWithActionContext(prompt: string, actionId: string, args: Object | null): string {
+  if (actionId.length === 0 && args === null) {
+    return prompt;
+  }
+  return prompt + '\n\nAction ID: ' + actionId + '\nStructured action args JSON: ' +
+    (args === null ? '{}' : JSON.stringify(args));
+}
+
 @Entry
 @Component
 struct Index {
   @State showConfigPage: boolean = false;
+  @State showComposioAuthPage: boolean = false;
   @State showAdvancedSettings: boolean = false;
   @State showHistory: boolean = false;
   @State baseUrl: string = defaultLocalModelSettings().baseUrl;
-  @State apiKey: string = '';
+  @State apiKey: string = defaultLocalModelSettings().apiKey;
   @State selectedModel: string = defaultLocalModelSettings().model;
   @State customParametersJson: string = defaultLocalModelSettings().customParametersJson;
   @State foodProviderDelayEnabled: boolean = false;
@@ -106,20 +238,482 @@ struct Index {
   @State surfaceRenderTick: number = 0;
   @State isAwaitingFirstSurface: boolean = false;
   @State inputText: string = '';
+  @State isVoiceListening: boolean = false;
+  @State voiceInputMessage: string = '';
+  @State showPaymentCheckout: boolean = false;
+  @State paymentCheckoutUrl: string = '';
+  @State paymentCheckoutProvider: string = '';
+  @State paymentCheckoutProviderSessionId: string = '';
+  @State paymentCheckoutRecipient: string = '';
+  @State paymentCheckoutAmountText: string = '';
+  @State paymentCheckoutCurrency: string = '';
+  @State paymentCheckoutNote: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
-  @State selectedSocialMessageId: string = '';
-  @State selectedSocialConversationTitle: string = '';
-  @State socialLastCapture: string = '无真实消息';
-  @State socialLastSend: string = '未发送';
-  @State hasSocialReturnSurface: boolean = false;
-  @State socialReturnSurface: A2uiSurfaceState = initialSurface;
-  @State socialReturnInputText: string = '';
-  @State socialReturnInputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
+  @State personaPacks: PersonaPack[] = allPersonaPacks();
+  @State selectedPersonaId: string = 'food_companion';
+  @State personaSoulDraft: string = personaPackForId('food_companion').soul;
+  @State personaMemoryDraft: string = personaPackForId('food_companion').memory;
+  @State personaSaveMessage: string = '';
+  @State composioUserId: string = '';
+  @State composioAuthItems: ComposioAuthConfigItem[] = [];
+  @State composioAuthMessage: string = '';
+  @State composioAuthBusy: boolean = false;
+  private htmlHomeCacheKey: string = '';
+  private htmlHomeCacheHtml: string = '';
+  private voiceSession: VoiceInputSession | null = null;
+  private voiceSessionSeq: number = 0;
+  private voiceBaseInputText: string = '';
+  private voiceStopRequested: boolean = false;
+  private voiceCompletionHandled: boolean = false;
+
+  aboutToAppear(): void {
+    this.configureComposioRuntimeForCurrentUser();
+    this.loadPersonaOverrides();
+    this.loadPaymentAccounts();
+    this.loadStripeReceivingProfile();
+  }
+
+  private personaPackStore(): PreferencesPersonaPackStore | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    return context === null ? null : new PreferencesPersonaPackStore(context);
+  }
+
+  private refreshPersonaEditor(personaId: string = this.selectedPersonaId): void {
+    this.personaPacks = allPersonaPacks();
+    const pack = personaPackForId(personaId);
+    this.selectedPersonaId = pack.manifest.id;
+    this.personaSoulDraft = pack.soul;
+    this.personaMemoryDraft = pack.memory;
+  }
+
+  private loadPersonaOverrides(): void {
+    const store = this.personaPackStore();
+    if (store !== null) {
+      store.loadSync();
+    }
+    this.refreshPersonaEditor(this.selectedPersonaId);
+  }
+
+  private paymentAccountPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return preferences.getPreferencesSync(context, { name: PAYMENT_ACCOUNT_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private composioAuthPreferences(): preferences.Preferences | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    try {
+      return preferences.getPreferencesSync(context, { name: COMPOSIO_AUTH_STORE_NAME });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private preferenceText(value: preferences.ValueType | string | number | boolean | null | undefined): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return value.toString();
+    }
+    return '';
+  }
+
+  private savedPaymentAccountsJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(PAYMENT_ACCOUNT_BOOK_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private savedPaymentAccounts(): PaymentAccount[] {
+    const raw = this.savedPaymentAccountsJson().trim();
+    if (raw.length === 0) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw) as PaymentAccount[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  private savedComposioUserId(): string {
+    const store = this.composioAuthPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      const saved = this.preferenceText(store.getSync(COMPOSIO_USER_ID_KEY, '')).trim();
+      return saved.length > 0 ? normalizeComposioUserId(saved) : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private async persistComposioUserId(userId: string): Promise<void> {
+    const store = this.composioAuthPreferences();
+    if (store === null) {
+      return;
+    }
+    store.putSync(COMPOSIO_USER_ID_KEY, userId);
+    await store.flush();
+  }
+
+  private createComposioUserId(): string {
+    return normalizeComposioUserId(COMPOSIO_USER_ID_PREFIX + util.generateRandomUUID(false));
+  }
+
+  private ensureComposioUserId(): string {
+    if (this.composioUserId.length > 0) {
+      return this.composioUserId;
+    }
+    const configuredRaw = currentComposioUserId().trim();
+    if (configuredRaw.length > 0) {
+      const configured = normalizeComposioUserId(configuredRaw);
+      this.composioUserId = configured;
+      configureComposioUserId(configured);
+      return configured;
+    }
+    const saved = this.savedComposioUserId();
+    if (saved.length > 0) {
+      this.composioUserId = saved;
+      configureComposioUserId(saved);
+      return saved;
+    }
+    const generated = this.createComposioUserId();
+    this.composioUserId = generated;
+    configureComposioUserId(generated);
+    this.persistComposioUserId(generated).catch((_error: Error | Object | string | number | boolean | null | undefined) => {});
+    return generated;
+  }
+
+  private composioAuthClient(): ComposioAuthProxyClient {
+    const config = currentComposioConfig();
+    if (config.proxyBaseUrl.length > 0) {
+      return new ComposioAuthProxyClient(config.proxyBaseUrl, config.proxyApiKey);
+    }
+    return new ComposioAuthProxyClient(config.baseUrl, config.apiKey, true);
+  }
+
+  private configureComposioRuntimeForCurrentUser(): string {
+    const userId = this.ensureComposioUserId();
+    configureComposioUserId(userId);
+    return userId;
+  }
+
+  private async refreshComposioAuth(): Promise<void> {
+    this.composioAuthBusy = true;
+    try {
+      const userId = this.configureComposioRuntimeForCurrentUser();
+      const result = await this.composioAuthClient().listAuthConfigs(userId);
+      this.composioAuthItems = result.items;
+      this.composioAuthMessage = result.ok ? '已刷新 Composio 授权状态。' : (result.error.length > 0 ? result.error : 'Composio 授权状态刷新失败。');
+    } catch (error) {
+      this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
+    } finally {
+      this.composioAuthBusy = false;
+    }
+  }
+
+  private async openComposioAuthLink(item: ComposioAuthConfigItem): Promise<void> {
+    this.composioAuthBusy = true;
+    try {
+      const link = await this.composioAuthClient().createLink(this.configureComposioRuntimeForCurrentUser(), item.authConfigId, item.toolkitSlug);
+      if (!link.ok) {
+        this.composioAuthMessage = link.error.length > 0 ? link.error : 'Composio 授权链接创建失败。';
+        return;
+      }
+      this.composioAuthMessage = '正在打开授权页。';
+      await this.openExternalUrl(link.redirectUrl);
+    } catch (error) {
+      this.composioAuthMessage = error instanceof Error ? error.message : JSON.stringify(error);
+    } finally {
+      this.composioAuthBusy = false;
+    }
+  }
+
+  private loadPaymentAccounts(): void {
+    const raw = this.savedPaymentAccountsJson();
+    if (raw.trim().length > 0) {
+      configureLocalPaymentAccountBookJson(raw);
+    }
+  }
+
+  private savedStripeReceivingProfileJson(): string {
+    const store = this.paymentAccountPreferences();
+    if (store === null) {
+      return '';
+    }
+    try {
+      return this.preferenceText(store.getSync(STRIPE_RECEIVING_PROFILE_KEY, ''));
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private loadStripeReceivingProfile(): void {
+    const raw = this.savedStripeReceivingProfileJson();
+    if (raw.trim().length > 0) {
+      configureLocalStripeReceivingAgentJson(raw);
+    }
+  }
+
+  private splitPaymentAliases(rawAliases: string): string[] {
+    const normalized = rawAliases.split('，').join(',');
+    const parts = normalized.split(',');
+    const aliases: string[] = [];
+    for (let index = 0; index < parts.length; index++) {
+      const alias = parts[index].trim();
+      if (alias.length > 0) {
+        aliases.push(alias);
+      }
+    }
+    return aliases;
+  }
+
+  private paymentAccountId(displayName: string): string {
+    const value = displayName.trim().toLowerCase();
+    let result = '';
+    let previousSeparator = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value.charAt(index);
+      const code = value.charCodeAt(index);
+      const isAsciiLetter = (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+      if (isAsciiLetter) {
+        result += char;
+        previousSeparator = false;
+      } else if (code > 127) {
+        result += char;
+        previousSeparator = false;
+      } else if (!previousSeparator && result.length > 0) {
+        result += '_';
+        previousSeparator = true;
+      }
+    }
+    while (result.endsWith('_')) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result.length > 0 ? result : 'local_payee';
+  }
+
+  private paymentAccountFromAction(action: A2uiAction): PaymentAccount | null {
+    let payload: HtmlPaymentAccountPayload;
+    try {
+      payload = JSON.parse(action.prompt) as HtmlPaymentAccountPayload;
+    } catch (_error) {
+      return null;
+    }
+    const displayName = this.actionText(payload.displayName).trim();
+    const paypalEmail = this.actionText(payload.paypalEmail).trim();
+    const paypalMerchantId = this.actionText(payload.paypalMerchantId).trim();
+    const stripeAccountId = this.actionText(payload.stripeAccountId).trim();
+    const stripePaymentLinkUrl = this.actionText(payload.stripePaymentLinkUrl).trim();
+    if (displayName.length === 0 ||
+      (paypalEmail.length === 0 && paypalMerchantId.length === 0 && stripeAccountId.length === 0 && stripePaymentLinkUrl.length === 0)) {
+      return null;
+    }
+    return {
+      id: this.paymentAccountId(displayName),
+      displayName: displayName,
+      aliases: this.splitPaymentAliases(this.actionText(payload.aliases)),
+      email: '',
+      paypalEmail: paypalEmail,
+      paypalMerchantId: paypalMerchantId,
+      stripeAccountId: stripeAccountId,
+      stripePaymentLinkUrl: stripePaymentLinkUrl,
+      enabled: true
+    };
+  }
+
+  private upsertSavedPaymentAccount(accounts: PaymentAccount[], account: PaymentAccount): PaymentAccount[] {
+    const next: PaymentAccount[] = [];
+    let replaced = false;
+    for (let index = 0; index < accounts.length; index++) {
+      if (accounts[index].id === account.id) {
+        next.push(account);
+        replaced = true;
+      } else {
+        next.push(accounts[index]);
+      }
+    }
+    if (!replaced) {
+      next.push(account);
+    }
+    return next;
+  }
+
+  private paymentPreferredProvider(account: PaymentAccount): string {
+    const hasPayPal = account.paypalEmail.length > 0 || account.paypalMerchantId.length > 0;
+    const hasStripe = account.stripeAccountId.length > 0 || account.stripePaymentLinkUrl.length > 0;
+    if (hasPayPal && !hasStripe) {
+      return 'paypal';
+    }
+    if (hasStripe && !hasPayPal) {
+      return 'stripe';
+    }
+    return '';
+  }
+
+  private async savePaymentAccount(action: A2uiAction): Promise<void> {
+    const account = this.paymentAccountFromAction(action);
+    const store = this.paymentAccountPreferences();
+    if (account === null || store === null) {
+      this.logHtmlHomeActionError(action, 'invalid_payment_account_payload');
+      return;
+    }
+    try {
+      const accounts = this.upsertSavedPaymentAccount(this.savedPaymentAccounts(), account);
+      const raw = JSON.stringify(accounts);
+      store.putSync(PAYMENT_ACCOUNT_BOOK_KEY, raw);
+      await store.flush();
+      configureLocalPaymentAccountBookJson(raw);
+      aiLogInfo('[AIPhone][PaymentAccountSave] ok=true displayName=' + account.displayName);
+      const previewArgs: PaymentSavedPreviewArgs = {
+        accountId: account.id,
+        recipient: account.displayName,
+        provider: this.paymentPreferredProvider(account),
+        originalQuery: '给 ' + account.displayName + ' 转账'
+      };
+      await this.callToolById('payment.send', '给 ' + account.displayName + ' 转账', 'payment.account.saved', previewArgs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '付款对象保存失败',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][PaymentAccountSave] ok=false reason=' + message);
+    }
+  }
+
+  private hasStripeReceivingAccountComponent(surface: A2uiSurfaceState): boolean {
+    for (let index = 0; index < surface.components.length; index++) {
+      if (surface.components[index].component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private stripeReceivingProfileFromSurface(surface: A2uiSurfaceState): StripeReceivingSavedProfile | null {
+    if (!this.hasStripeReceivingAccountComponent(surface)) {
+      return null;
+    }
+    const account: StripeReceivingAccountCardData = stripeReceivingAccount(surface);
+    if (account.stripeAccountId.trim().length === 0) {
+      return null;
+    }
+    return {
+      agentId: account.agentId,
+      deviceId: account.deviceId,
+      displayName: account.displayName,
+      email: account.email,
+      country: account.country,
+      businessType: account.businessType,
+      stripeAccountId: account.stripeAccountId,
+      status: account.status
+    };
+  }
+
+  private async saveStripeReceivingProfile(surface: A2uiSurfaceState): Promise<void> {
+    const profile = this.stripeReceivingProfileFromSurface(surface);
+    const store = this.paymentAccountPreferences();
+    if (profile === null || store === null) {
+      return;
+    }
+    try {
+      const raw = JSON.stringify(profile);
+      store.putSync(STRIPE_RECEIVING_PROFILE_KEY, raw);
+      await store.flush();
+      configureLocalStripeReceivingAgentJson(raw);
+      aiLogInfo('[AIPhone][StripeReceivingProfileSave] ok=true accountIdPresent=true status=' + profile.status);
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfileSave] ok=false reason=' + (error instanceof Error ? error.message : JSON.stringify(error)));
+    }
+  }
+
+  private savePersonaOverrides(): void {
+    const store = this.personaPackStore();
+    if (store !== null) {
+      store.saveSync();
+    }
+  }
+
+  private selectPersonaForEdit(personaId: string): void {
+    this.refreshPersonaEditor(personaId);
+    this.personaSaveMessage = '';
+  }
+
+  private savePersonaDraft(): void {
+    updatePersonaPackText(this.selectedPersonaId, this.personaSoulDraft, this.personaMemoryDraft);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor(this.selectedPersonaId);
+    this.personaSaveMessage = '已保存';
+  }
+
+  private resetPersonaDraft(): void {
+    resetPersonaPackText(this.selectedPersonaId);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor(this.selectedPersonaId);
+    this.personaSaveMessage = '已恢复默认';
+  }
+
+  private applyPersonaMemoryUpdate(update: PersonaMemoryUpdateRequest): void {
+    const pack = personaPackForId(update.personaId);
+    if (pack.manifest.id !== update.personaId) {
+      aiLogError('[AIPhone][PersonaMemoryUpdate] ok=false reason=unknown_persona personaId=' + update.personaId);
+      return;
+    }
+    updatePersonaPackText(update.personaId, pack.soul, update.memoryText);
+    this.savePersonaOverrides();
+    this.refreshPersonaEditor(update.personaId);
+    this.personaSaveMessage = '已保存：' + update.summary;
+    aiLogInfo('[AIPhone][PersonaMemoryUpdate] ok=true personaId=' + update.personaId + ' summary=' + update.summary);
+  }
+
+  private isPersonaEditorAction(action: A2uiAction): boolean {
+    return action.id === 'persona_memory_edit' || action.id === 'persona_soul_edit';
+  }
+
+  private isStripeReceivingActionId(action: A2uiAction): boolean {
+    return action.kind === 'client' &&
+      (action.id === 'stripe.account.create' ||
+        action.id === 'stripe.account.onboard' ||
+        action.id === 'stripe.account.refresh');
+  }
+
+  private openPersonaEditor(personaId: string, target: string): void {
+    this.selectPersonaForEdit(personaId);
+    this.showConfigPage = true;
+    this.personaSaveMessage = target === 'soul' ? '正在编辑 soul.md' : '正在编辑 memory.md';
+  }
 
   private getSettings(): LocalModelSettings {
     return {
-      provider: 'Huawei Local API',
+      provider: defaultLocalModelSettings().provider,
       baseUrl: this.baseUrl,
       model: this.selectedModel,
       apiKey: this.apiKey,
@@ -201,53 +795,53 @@ struct Index {
     }
   }
 
-  private emptySocialModel(): A2uiRuntimeDataModel {
-    return {
-      rows: [],
-      trains: [],
-      flights: [],
-      travelOptions: [],
-      foods: [],
-      social: {
-        messages: [],
-        replies: [],
-        diagnostics: []
-      },
-      thoughts: [],
-      summary: {
-        text: '',
-        toolName: '',
-        dataLabel: '',
-        count: 0
-      },
-      trip: {
-        rows: []
-      },
-      rowGroups: {
-        train: [],
-        flight: [],
-        food: []
-      },
-      toolRequest: {
-        toolId: '',
-        prompt: '',
-        actionId: ''
-      },
-      dynamicToolConnect: {
-        toolId: '',
-        prompt: '',
-        manifestId: '',
-        displayName: '',
-        sourceUrl: '',
-        status: '',
-        message: '',
-        credentialName: '',
-        credentialRef: '',
-        registrationUrl: '',
-        actions: []
-      },
-      genericToolResults: []
-    };
+  private currentHtmlHomeDocument(): HtmlHomeDocument {
+    if (shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface) ||
+      shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface)) {
+      return createHtmlHomeDocument({
+        messages: this.messages,
+        isBusy: this.isBusy,
+        isAwaitingFirstSurface: this.isAwaitingFirstSurface,
+        inputText: this.inputText
+      });
+    }
+    return createHtmlHomeDocument({
+      surface: this.currentSurface,
+      messages: this.messages,
+      isBusy: this.isBusy,
+      isAwaitingFirstSurface: this.isAwaitingFirstSurface
+    });
+  }
+
+  private currentHtmlHomeCacheKey(): string {
+    const needsInputText = shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface);
+    const sequenceKey = this.isBusy ? 'busy' : this.currentSurface.sequence.toString();
+    return [
+      this.currentSurface.surfaceId,
+      sequenceKey,
+      this.currentSurface.status,
+      this.isBusy ? 'busy' : 'idle',
+      this.isAwaitingFirstSurface ? 'awaiting' : 'ready',
+      this.messages.length.toString(),
+      needsInputText ? this.inputText : ''
+    ].join('|');
+  }
+
+  private currentHtmlHomeHtml(): string {
+    const key = this.currentHtmlHomeCacheKey();
+    if (key === this.htmlHomeCacheKey && this.htmlHomeCacheHtml.length > 0) {
+      return this.htmlHomeCacheHtml;
+    }
+    const document = this.currentHtmlHomeDocument();
+    const html = renderHtmlHomeDocument(document, this.isBusy);
+    this.htmlHomeCacheKey = key;
+    this.htmlHomeCacheHtml = html;
+    aiLogInfo('[AIPhone][HtmlHomeDocument] source=' + document.source +
+      ' kind=' + document.kind +
+      ' chars=' + html.length.toString() +
+      ' blocks=' + document.blocks.length.toString() +
+      ' renderTick=' + this.surfaceRenderTick.toString());
+    return html;
   }
 
   private applySurface(surface: A2uiSurfaceState): void {
@@ -264,6 +858,330 @@ struct Index {
       ' renderTick=' + this.surfaceRenderTick.toString());
   }
 
+  private defaultSocialHubConnections(): SocialHubConnectionData[] {
+    return [
+      {
+        platform: 'x',
+        status: 'needs_auth',
+        displayName: 'X',
+        accountId: '',
+        message: '等待授权接入'
+      },
+      {
+        platform: 'slack',
+        status: 'needs_auth',
+        displayName: 'Slack',
+        accountId: '',
+        message: '等待授权接入'
+      },
+      {
+        platform: 'wecom',
+        status: 'needs_auth',
+        displayName: '企业微信',
+        accountId: '',
+        message: '等待授权接入'
+      },
+      {
+        platform: 'discord',
+        status: 'needs_auth',
+        displayName: 'Discord',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'linkedin',
+        status: 'needs_auth',
+        displayName: 'LinkedIn',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'whatsapp',
+        status: 'needs_auth',
+        displayName: 'WhatsApp',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      },
+      {
+        platform: 'instagram',
+        status: 'needs_auth',
+        displayName: 'Instagram',
+        accountId: '',
+        message: '等待 Composio 授权接入'
+      }
+    ];
+  }
+
+  private createSocialHubSurface(): A2uiSurfaceState {
+    const store = new A2uiSurfaceStore();
+    store.apply({
+      version: 'v0.9.1',
+      createSurface: {
+        surfaceId: 'surface_social_hub',
+        root: 'root',
+        title: 'SocialHub',
+        intent: 'social',
+        status: 'ready',
+        sendDataModel: true
+      }
+    });
+    store.apply({
+      version: 'v0.9.1',
+      updateComponents: {
+        surfaceId: 'surface_social_hub',
+        components: [
+          {
+            id: 'root',
+            component: A2UI_COMPONENT_SURFACE_ROOT,
+            child: 'socialHub',
+            title: 'SocialHub',
+            status: 'ready'
+          },
+          {
+            id: 'socialHub',
+            component: A2UI_COMPONENT_SOCIAL_HUB,
+            title: 'SocialHub',
+            status: 'ready',
+            dataPath: '/socialHub/items'
+          }
+        ]
+      }
+    });
+    store.apply({
+      version: 'v0.9.1',
+      updateDataModel: {
+        surfaceId: 'surface_social_hub',
+        path: '/socialHub/connections',
+        value: this.defaultSocialHubConnections()
+      }
+    });
+    return store.getSurface();
+  }
+
+  private openSocialHub(): void {
+    this.showHistory = false;
+    this.isBusy = false;
+    this.isAwaitingFirstSurface = false;
+    this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    this.applySurface(this.createSocialHubSurface());
+    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+      ok: true,
+      status: 'ready',
+      message: 'SocialHub 已打开；等待真实社交数据接入。',
+      requestDebug: this.lastModelRequest,
+      assistantDebug: this.lastModelOutput,
+      error: ''
+    }));
+  }
+
+  private applySocialHubData(path: string, value: A2uiDataValue): void {
+    const store = new A2uiSurfaceStore();
+    store.seed(this.currentSurface);
+    const result = store.apply({
+      version: 'v0.9.1',
+      updateDataModel: {
+        surfaceId: this.currentSurface.surfaceId,
+        path: path,
+        value: value
+      }
+    });
+    if (!result.ok) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: 'SocialHub 本地状态更新失败。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: result.error
+      }));
+      return;
+    }
+    this.applySurface(store.getSurface());
+  }
+
+  private currentSocialHubItems(): SocialHubItemData[] {
+    const model = this.parsedDataModel();
+    if (model === null || model.socialHub === undefined || model.socialHub === null) {
+      return [];
+    }
+    return Array.isArray(model.socialHub.items) ? model.socialHub.items : [];
+  }
+
+  private currentSocialHubSelected(): SocialHubItemData | null {
+    const model = this.parsedDataModel();
+    if (model === null || model.socialHub === undefined || model.socialHub === null ||
+      model.socialHub.selected === undefined || model.socialHub.selected === null ||
+      model.socialHub.selected.id.length === 0) {
+      return null;
+    }
+    return model.socialHub.selected;
+  }
+
+  private findSocialHubItem(itemId: string): SocialHubItemData | null {
+    const items = this.currentSocialHubItems();
+    for (let index = 0; index < items.length; index++) {
+      if (items[index].id === itemId) {
+        return items[index];
+      }
+    }
+    return null;
+  }
+
+  private findSocialHubItemByUrl(url: string): SocialHubItemData | null {
+    if (url.length === 0) {
+      return null;
+    }
+    const items = this.currentSocialHubItems();
+    for (let index = 0; index < items.length; index++) {
+      if (items[index].url === url) {
+        return items[index];
+      }
+    }
+    return null;
+  }
+
+  private hasSocialHubComponent(): boolean {
+    for (let index = 0; index < this.currentSurface.components.length; index++) {
+      if (this.currentSurface.components[index].component === A2UI_COMPONENT_SOCIAL_HUB) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isCurrentSocialHubSurface(): boolean {
+    const model = this.parsedDataModel();
+    return this.currentSurface.intent === 'social' &&
+      this.hasSocialHubComponent() &&
+      model !== null &&
+      model.socialHub !== undefined &&
+      model.socialHub !== null &&
+      Array.isArray(model.socialHub.items);
+  }
+
+  private socialHubDraftError(itemId: string, message: string): SocialHubDraftData {
+    const selected = this.currentSocialHubSelected();
+    return {
+      itemId: itemId,
+      platform: selected === null ? 'unknown' : selected.platform,
+      text: '',
+      status: 'error',
+      error: message,
+      localOnly: true,
+      sent: false
+    };
+  }
+
+  private socialHubDraftSnippet(text: string): string {
+    const trimmed = text.trim();
+    if (trimmed.length <= 80) {
+      return trimmed;
+    }
+    return trimmed.substring(0, 80) + '...';
+  }
+
+  private selectSocialHubItem(action: A2uiAction): void {
+    const item = this.findSocialHubItem(action.prompt);
+    if (item === null) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(action.prompt, '未找到这条真实消息，无法选择。'));
+      return;
+    }
+    this.applySocialHubData('/socialHub/selected', item);
+  }
+
+  private draftSocialHubReply(action: A2uiAction): void {
+    const selected = this.currentSocialHubSelected();
+    const itemId = action.prompt.length > 0 ? action.prompt : (selected === null ? '' : selected.id);
+    if (itemId.length === 0) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError('', '请先选择一条真实消息，再生成草稿。'));
+      return;
+    }
+    const item = this.findSocialHubItem(itemId);
+    if (item === null) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(itemId, '未找到这条真实消息，不能生成草稿。'));
+      return;
+    }
+    const sourceText = item.text.trim();
+    if (sourceText.length === 0) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(itemId, '选中消息没有正文，不能生成本地草稿预览。'));
+      return;
+    }
+    this.applySocialHubData('/socialHub/selected', item);
+    const draft: SocialHubDraftData = emptySocialHubDraft();
+    draft.itemId = item.id;
+    draft.platform = item.platform;
+    draft.status = 'draft';
+    draft.text = '本地草稿预览（未发送）：\n\n我会基于这条真实消息回复：' + this.socialHubDraftSnippet(sourceText);
+    this.applySocialHubData('/socialHub/draft', draft);
+  }
+
+  private socialHubReplyText(action: A2uiAction): string {
+    if (action.args === undefined || action.args === null) {
+      return '';
+    }
+    const payload = action.args as SocialHubReplyPayload;
+    return this.actionText(payload.text).trim();
+  }
+
+  private async sendSocialHubReply(action: A2uiAction): Promise<void> {
+    const selected = this.currentSocialHubSelected();
+    const itemId = action.prompt.length > 0 ? action.prompt : (selected === null ? '' : selected.id);
+    const item = this.findSocialHubItem(itemId);
+    if (item === null) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(itemId, '未找到这条真实消息，不能发送回复。'));
+      return;
+    }
+    const text = this.socialHubReplyText(action);
+    if (text.length === 0) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(item.id, '请输入要发送的回复内容。'));
+      return;
+    }
+    this.applySocialHubData('/socialHub/selected', item);
+    const pending: SocialHubDraftData = emptySocialHubDraft();
+    pending.itemId = item.id;
+    pending.platform = item.platform;
+    pending.status = 'draft';
+    pending.text = '正在发送到 ' + (item.platform === 'slack' ? 'Slack' : '社交平台') + '...';
+    pending.localOnly = false;
+    this.applySocialHubData('/socialHub/draft', pending);
+    try {
+      this.applySocialHubData('/socialHub/draft', await sendLocalSocialHubReply(item, text));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError(item.id, message));
+    }
+  }
+
+  private async openSocialHubSource(action: A2uiAction): Promise<void> {
+    const item = this.findSocialHubItemByUrl(action.prompt);
+    if (item === null) {
+      this.applySocialHubData('/socialHub/draft',
+        this.socialHubDraftError('', '这条消息没有匹配的来源 URL。'));
+      return;
+    }
+    await this.openExternalUrl(item.url);
+  }
+
+  private isSocialHubActionId(action: A2uiAction): boolean {
+    return action.kind === 'client' &&
+      (action.id === 'social_hub_select_item' ||
+        action.id === 'social_hub_draft_reply' ||
+        action.id === 'social_hub_send_reply' ||
+        action.id === 'social_hub_open_source' ||
+        action.id === 'x.authorize');
+  }
+
+  private isSocialHubClientAction(action: A2uiAction): boolean {
+    return this.isSocialHubActionId(action) && this.isCurrentSocialHubSurface();
+  }
+
   private resetCurrentSession(): void {
     this.showHistory = false;
     this.isBusy = false;
@@ -273,12 +1191,6 @@ struct Index {
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.inputText = '';
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
-    this.selectedSocialMessageId = '';
-    this.selectedSocialConversationTitle = '';
-    this.hasSocialReturnSurface = false;
-    this.socialReturnSurface = this.surfaceSnapshot(createSeedA2uiSurface());
-    this.socialReturnInputText = '';
-    this.socialReturnInputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.resetPanelState();
   }
 
@@ -310,198 +1222,12 @@ struct Index {
     this.messages = next;
   }
 
-  private shouldOpenSocialPrompt(prompt: string): boolean {
-    return prompt.indexOf('社交') >= 0 ||
-      prompt.indexOf('微信消息') >= 0 ||
-      prompt.indexOf('微信收件箱') >= 0 ||
-      prompt.indexOf('打开微信') >= 0;
-  }
-
-  private currentSocialMessages(): A2uiSocialMessageData[] {
-    const model = this.parsedDataModel();
-    if (model === null || model.social === undefined || model.social === null || !Array.isArray(model.social.messages)) {
-      return [];
-    }
-    return model.social.messages;
-  }
-
-  private currentSocialReplies(): A2uiSocialReplyData[] {
-    const model = this.parsedDataModel();
-    if (model === null || model.social === undefined || model.social === null || !Array.isArray(model.social.replies)) {
-      return [];
-    }
-    return model.social.replies;
-  }
-
   private currentDynamicToolConnect(): A2uiDynamicToolConnectData | null {
     const model = this.parsedDataModel();
     if (model === null || model.dynamicToolConnect === undefined || model.dynamicToolConnect === null) {
       return null;
     }
     return model.dynamicToolConnect;
-  }
-
-  private selectedSocialMessage(): A2uiSocialMessageData | null {
-    const messages = this.currentSocialMessages();
-    for (let index = 0; index < messages.length; index++) {
-      if (messages[index].id === this.selectedSocialMessageId) {
-        return messages[index];
-      }
-    }
-    return null;
-  }
-
-  private isSocialReplyMode(): boolean {
-    return this.selectedSocialMessageId.length > 0 && this.currentSurface.intent === 'social';
-  }
-
-  private replaceCurrentSocialData(messages: A2uiSocialMessageData[], replies: A2uiSocialReplyData[]): void {
-    let model = this.parsedDataModel();
-    if (model === null) {
-      model = this.emptySocialModel();
-    }
-    if (model.social === undefined || model.social === null) {
-      model.social = {
-        messages: [],
-        replies: [],
-        diagnostics: []
-      };
-    }
-    model.social.messages = messages;
-    model.social.replies = replies;
-    const nextSurface = this.surfaceSnapshot(this.currentSurface);
-    nextSurface.dataModelJson = JSON.stringify(model);
-    nextSurface.sequence = nextSurface.sequence + 1;
-    this.applySurface(nextSurface);
-  }
-
-  private markSocialMessageStatus(messageId: string, status: string): A2uiSocialMessageData[] {
-    const messages = this.currentSocialMessages();
-    const next: A2uiSocialMessageData[] = [];
-    for (let index = 0; index < messages.length; index++) {
-      const item = messages[index];
-      next.push({
-        id: item.id,
-        platform: item.platform,
-        conversationId: item.conversationId,
-        conversationTitle: item.conversationTitle,
-        senderName: item.senderName,
-        preview: item.preview,
-        receivedAt: item.receivedAt,
-        source: item.source,
-        status: item.id === messageId ? status : item.status
-      });
-    }
-    return next;
-  }
-
-  private selectSocialMessageById(messageId: string): void {
-    const messages = this.currentSocialMessages();
-    for (let index = 0; index < messages.length; index++) {
-      if (messages[index].id === messageId) {
-        const message = messages[index];
-        this.selectedSocialMessageId = message.id;
-        this.selectedSocialConversationTitle = message.conversationTitle;
-        this.inputText = '';
-        this.inputPlaceholder = '回复 微信 · ' + message.conversationTitle;
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok: true,
-          status: 'ready',
-          message: '正在回复 ' + message.conversationTitle,
-          requestDebug: this.lastModelRequest,
-          assistantDebug: this.lastModelOutput,
-          error: ''
-        }));
-        this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, 'selected'), this.currentSocialReplies());
-        return;
-      }
-    }
-    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-      ok: false,
-      status: 'error',
-      message: '没有找到可回复的微信消息。',
-      requestDebug: this.lastModelRequest,
-      assistantDebug: this.lastModelOutput,
-      error: 'social message not found: ' + messageId
-    }));
-  }
-
-  private readSocialNotificationArchive(): SocialNotificationArchiveRead {
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    return readNotificationCaptureArchive(context);
-  }
-
-  private rememberSocialReturnSurface(): void {
-    if (this.currentSurface.intent === 'social') {
-      return;
-    }
-    this.socialReturnSurface = this.surfaceSnapshot(this.currentSurface);
-    this.socialReturnInputText = this.inputText;
-    this.socialReturnInputPlaceholder = this.inputPlaceholder;
-    this.hasSocialReturnSurface = true;
-  }
-
-  private restoreSocialReturnSurface(): void {
-    if (!this.hasSocialReturnSurface) {
-      return;
-    }
-    const surface = this.surfaceSnapshot(this.socialReturnSurface);
-    this.selectedSocialMessageId = '';
-    this.selectedSocialConversationTitle = '';
-    this.inputText = this.socialReturnInputText;
-    this.inputPlaceholder = this.socialReturnInputPlaceholder.length > 0 ? this.socialReturnInputPlaceholder : DEFAULT_INPUT_PLACEHOLDER;
-    this.hasSocialReturnSurface = false;
-    this.applySurface(surface);
-    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-      ok: true,
-      status: 'ready',
-      message: '已返回上一页。',
-      requestDebug: this.lastModelRequest,
-      assistantDebug: this.lastModelOutput,
-      error: ''
-    }));
-  }
-
-  private handleSocialNavigation(): void {
-    if (this.currentSurface.intent === 'social' && this.hasSocialReturnSurface) {
-      this.restoreSocialReturnSurface();
-      return;
-    }
-    this.openSocialInbox();
-  }
-
-  private async openSocialNotificationSubscriptionSettings(): Promise<void> {
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      await notificationExtensionSubscription.openSubscriptionSettings(context);
-      this.socialLastCapture = '已请求系统通知订阅授权';
-      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-        ok: true,
-        status: 'ready',
-        message: '已打开通知订阅授权。',
-        requestDebug: this.lastModelRequest,
-        assistantDebug: this.lastModelOutput,
-        error: ''
-      }));
-      aiLogInfo('[AIPhone][SocialNotificationSettings] opened');
-    } catch (error) {
-      const businessError = error as BusinessError;
-      const code = businessError.code === undefined || businessError.code === null ? 'unknown' : businessError.code.toString();
-      const message = code === '201' ?
-        '通知订阅不可用：权限被拒绝，或当前 PC 系统未向三方应用开放通知内容订阅' :
-        ('通知订阅授权页打开失败：' + businessError.message);
-      this.socialLastCapture = message;
-      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-        ok: false,
-        status: 'error',
-        message: code === '201' ? '当前设备不支持通知订阅桥接。' : '通知授权不可用。',
-        requestDebug: this.lastModelRequest,
-        assistantDebug: this.lastModelOutput,
-        error: message
-      }));
-      aiLogError('[AIPhone][SocialNotificationSettingsError] code=' + code +
-        ' message=' + businessError.message);
-    }
   }
 
   private async openExternalUrl(url: string): Promise<void> {
@@ -530,193 +1256,12 @@ struct Index {
     }
   }
 
-  private openSocialInbox(): void {
-    this.rememberSocialReturnSurface();
-    const archive = this.readSocialNotificationArchive();
-    const wechatProbe = detectWechatBundleSync();
-    const accessibilityProbe = detectSocialAccessibilitySync();
-    aiLogInfo('[AIPhone][SocialWechatProbe] installed=' + wechatProbe.installed.toString() +
-      ' bundle=' + wechatProbe.bundleName +
-      ' detail=' + wechatProbe.detail);
-    aiLogInfo('[AIPhone][SocialAccessibilityProbe] available=' + accessibilityProbe.available.toString() +
-      ' detail=' + accessibilityProbe.detail);
-    const notificationCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'notification') : [];
-    const accessibilityCandidates = archive.ok ? archive.candidates.filter(candidate => candidate.source === 'accessibility') : [];
-    const notificationUnavailable = archive.ok ?
-      SOCIAL_NOTIFICATION_UNSUPPORTED_HINT :
-      ('通知中心缓存读取失败：' + archive.error);
-    const notification = new NotificationIngestProvider(notificationCandidates.length > 0, notificationUnavailable, notificationCandidates).capture();
-    const accessibilityUnavailable = archive.ok ? accessibilityProbe.detail : ('辅助缓存读取失败：' + archive.error);
-    const accessibility = new AccessibilityIngestProvider(accessibilityProbe.available || accessibilityCandidates.length > 0,
-      accessibilityUnavailable, accessibilityCandidates).capture();
-    this.socialLastCapture = notification.ok ? '通知中心返回 ' + notification.messages.length.toString() + ' 条' :
-      (accessibility.ok ? '辅助捕获返回 ' + accessibility.messages.length.toString() + ' 条' : '无真实消息：' + notification.error + '；' + accessibility.error);
-    notification.messages.forEach(candidate => {
-      SOCIAL_MESSAGE_STORE.ingest(candidate);
-    });
-    accessibility.messages.forEach(candidate => {
-      SOCIAL_MESSAGE_STORE.ingest(candidate);
-    });
-    const capabilities = probeSocialCapabilities({
-      notificationBridgeAvailable: notification.ok,
-      notificationBridgeDetail: notification.ok ? '已读取真实通知缓存' : notification.error,
-      accessibilityAvailable: accessibility.ok,
-      accessibilityDetail: accessibility.ok ? accessibilityProbe.detail + '；缓存 ' + accessibility.messages.length.toString() + ' 条' : accessibility.error,
-      wechatInstalled: wechatProbe.installed || notification.messages.length > 0 || accessibility.messages.length > 0,
-      wechatBundleName: wechatProbe.bundleName,
-      wechatDetectionDetail: wechatProbe.detail,
-      lastCapture: this.socialLastCapture,
-      lastSend: this.socialLastSend
-    });
-    const store = new A2uiSurfaceStore();
-    store.apply({
-      version: 'v0.9.1',
-      createSurface: {
-        surfaceId: 'surface_social',
-        root: 'root',
-        title: '社交收件箱',
-        intent: 'social',
-        status: 'ready',
-        sendDataModel: true
-      }
-    });
-    store.apply({
-      version: 'v0.9.1',
-      updateComponents: {
-        surfaceId: 'surface_social',
-        components: [
-          {
-            id: 'root',
-            component: A2UI_COMPONENT_SURFACE_ROOT,
-            child: 'social_inbox',
-            title: '社交收件箱',
-            status: 'ready'
-          },
-          {
-            id: 'social_inbox',
-            component: A2UI_COMPONENT_SOCIAL_INBOX,
-            title: '微信消息',
-            body: '只展示真实捕获的新消息；当前不会生成测试消息。',
-            status: 'ready',
-            dataPath: '/social/messages',
-            actions: []
-          }
-        ]
-      }
-    });
-    store.apply({
-      version: 'v0.9.1',
-      updateDataModel: {
-        surfaceId: 'surface_social',
-        path: '/social/messages',
-        value: SOCIAL_MESSAGE_STORE.messages()
-      }
-    });
-    store.apply({
-      version: 'v0.9.1',
-      updateDataModel: {
-        surfaceId: 'surface_social',
-        path: '/social/replies',
-        value: this.currentSocialReplies()
-      }
-    });
-    store.apply({
-      version: 'v0.9.1',
-      updateDataModel: {
-        surfaceId: 'surface_social',
-        path: '/social/diagnostics',
-        value: buildSocialDiagnosticsRows(capabilities)
-      }
-    });
-    this.selectedSocialMessageId = '';
-    this.selectedSocialConversationTitle = '';
-    this.inputPlaceholder = '选择微信消息后在这里回复';
-    this.inputText = '';
-    this.applySurface(store.getSurface());
-    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-      ok: true,
-      status: 'ready',
-      message: '社交收件箱已打开：当前只显示真实捕获的新消息。',
-      requestDebug: this.lastModelRequest,
-      assistantDebug: this.lastModelOutput,
-      error: ''
-    }));
-    this.appendMessage('assistant', '社交收件箱已打开：当前只显示真实捕获的新消息。');
-  }
-
-  private async sendSelectedSocialReply(): Promise<void> {
-    const text = this.inputText.trim();
-    if (text.length === 0 || this.isBusy) {
-      return;
-    }
-    const message = this.selectedSocialMessage();
-    if (message === null) {
-      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-        ok: false,
-        status: 'error',
-        message: '请先选择一条微信消息。',
-        requestDebug: this.lastModelRequest,
-        assistantDebug: this.lastModelOutput,
-        error: '缺少社交会话'
-      }));
-      return;
-    }
-    this.isBusy = true;
-    this.inputText = inputTextAfterPromptSubmit(this.inputText);
-    this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, 'sending'), this.currentSocialReplies());
-    aiLogInfo('[AIPhone][SocialReplyRequest] messageId=' + message.id +
-      ' platform=' + message.platform +
-      ' target=' + message.conversationTitle +
-      ' textChars=' + text.length.toString());
-    try {
-      const automation = new WechatReplyAutomation(false, SOCIAL_REPLY_UNAVAILABLE);
-      const reply = automation.send({
-        targetMessageId: message.id,
-        platform: message.platform,
-        conversationId: message.conversationId,
-        text
-      });
-      const replies = this.currentSocialReplies();
-      const nextReplies = replies.slice();
-      nextReplies.push(reply);
-      const nextStatus = reply.status === 'sent' ? 'replied' : 'failed';
-      this.replaceCurrentSocialData(this.markSocialMessageStatus(message.id, nextStatus), nextReplies);
-      this.socialLastSend = reply.status === 'sent' ? '已发送 ' + text.length.toString() + ' 字' : '失败：' + reply.error;
-      aiLogInfo('[AIPhone][SocialReplyResult] messageId=' + message.id +
-        ' platform=' + message.platform +
-        ' status=' + reply.status +
-        ' failureStep=' + reply.error);
-      if (reply.status === 'sent') {
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok: true,
-          status: 'ready',
-          message: '微信回复已发送。',
-          requestDebug: this.lastModelRequest,
-          assistantDebug: this.lastModelOutput,
-          error: ''
-        }));
-        this.appendMessage('assistant', '微信回复已发送。');
-      } else {
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok: false,
-          status: 'error',
-          message: '微信回复失败。',
-          requestDebug: this.lastModelRequest,
-          assistantDebug: this.lastModelOutput,
-          error: reply.error
-        }));
-        this.appendMessage('assistant', '微信回复失败：' + reply.error);
-      }
-    } finally {
-      this.isBusy = false;
-    }
-  }
-
-  private async submitPrompt(prompt: string, visibleText: string, actionId: string = ''): Promise<void> {
+  private async submitPrompt(prompt: string, visibleText: string, actionId: string = '', actionArgs: Object | null = null): Promise<void> {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || this.isBusy) {
       return;
     }
+    const modelPrompt = modelPromptWithActionContext(trimmed, actionId, actionArgs);
     if (this.baseUrl.trim().length === 0) {
       aiLogError('[AIPhone][A2uiHomeSubmitBlocked] missingBaseUrl');
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -729,12 +1274,9 @@ struct Index {
       }));
       return;
     }
-
-    this.selectedSocialMessageId = '';
-    this.selectedSocialConversationTitle = '';
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.appendMessage('user', visibleText);
-    aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + trimmed.length.toString() +
+    aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + modelPrompt.length.toString() +
       ' model=' + this.selectedModel +
       ' baseUrl=' + this.baseUrl);
     this.inputText = inputTextAfterPromptSubmit(this.inputText);
@@ -744,7 +1286,7 @@ struct Index {
     try {
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
-        trimmed,
+        modelPrompt,
         this.recentMessages(),
         (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
           this.isAwaitingFirstSurface = false;
@@ -759,7 +1301,11 @@ struct Index {
             error: ''
           }));
         },
-        null
+        null,
+        (update: PersonaMemoryUpdateRequest) => {
+          this.applyPersonaMemoryUpdate(update);
+        },
+        actionArgs
       );
       this.isAwaitingFirstSurface = false;
       this.applySurface(result.surface);
@@ -778,13 +1324,28 @@ struct Index {
       }));
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
-        await this.callModelRequestedTool(result.surface, trimmed, actionId);
+        if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
+          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
+          if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
+          } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_visible source=loopy_adapter toolId=' + fallbackRequest.toolId);
+          } else if (fallbackRequest.hasTool) {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
+              ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
+            await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
+          } else {
+            aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
+          }
+        } else {
+          await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
+        }
       } else {
-        const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, trimmed, actionId);
+        const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
         if (fallbackRequest.hasTool) {
           aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
             ' reason=model_failed promptChars=' + fallbackRequest.prompt.length.toString());
-          await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId);
+          await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
         } else {
           this.appendMessage('assistant', 'A2UI 生成失败：' + result.error);
         }
@@ -808,35 +1369,668 @@ struct Index {
   }
 
   private async sendPrompt(): Promise<void> {
-    if (this.isSocialReplyMode()) {
-      await this.sendSelectedSocialReply();
-      return;
-    }
-    if (this.shouldOpenSocialPrompt(this.inputText)) {
-      this.appendMessage('user', this.inputText);
-      this.openSocialInbox();
-      return;
-    }
     await this.submitPrompt(this.inputText, this.inputText);
+  }
+
+  private currentVoiceSession(seq: number): boolean {
+    return this.isVoiceListening && this.voiceSessionSeq === seq && !this.voiceCompletionHandled;
+  }
+
+  private voiceLiveLabel(text: string): string {
+    const next = text.trim();
+    return next.length > 0 ? next : '语音识别中';
+  }
+
+  private finishVoiceInputWithResult(seq: number, result: VoiceInputResult): void {
+    if (!this.currentVoiceSession(seq)) {
+      return;
+    }
+    this.voiceCompletionHandled = true;
+    const next = voiceInputTextAfterRecognition(this.voiceBaseInputText, result.text);
+    if (next === this.voiceBaseInputText) {
+      this.voiceInputMessage = '没有识别到语音内容';
+    } else {
+      this.inputText = next;
+      this.voiceInputMessage = '已加入输入框';
+    }
+    this.voiceSession = null;
+    this.isVoiceListening = false;
+  }
+
+  private finishVoiceInputWithError(seq: number, error: Error | Object | string | number | boolean | null | undefined): void {
+    if (!this.currentVoiceSession(seq)) {
+      return;
+    }
+    this.voiceCompletionHandled = true;
+    const serialized = error === null || error === undefined ? '' : JSON.stringify(error);
+    const message = error instanceof Error ? error.message : (serialized === undefined ? '' : serialized);
+    this.voiceInputMessage = message.length > 0 ? '语音输入失败：' + message : '语音输入失败';
+    this.voiceSession = null;
+    this.isVoiceListening = false;
+  }
+
+  private async startVoiceInput(): Promise<void> {
+    if (this.isBusy || this.isVoiceListening) {
+      return;
+    }
+    const seq = this.voiceSessionSeq + 1;
+    this.voiceSessionSeq = seq;
+    this.voiceSession = null;
+    this.voiceBaseInputText = this.inputText;
+    this.voiceStopRequested = false;
+    this.voiceCompletionHandled = false;
+    this.isVoiceListening = true;
+    this.voiceInputMessage = '语音识别中';
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const session = await startVoiceInputSession(context, (text: string) => {
+        if (this.currentVoiceSession(seq)) {
+          this.voiceInputMessage = this.voiceLiveLabel(text);
+        }
+      });
+      if (!this.currentVoiceSession(seq)) {
+        session.stop().catch((_error: Error) => {});
+        return;
+      }
+      this.voiceSession = session;
+      session.result
+        .then((result: VoiceInputResult) => {
+          this.finishVoiceInputWithResult(seq, result);
+        })
+        .catch((error: Error) => {
+          this.finishVoiceInputWithError(seq, error);
+        });
+      if (this.voiceStopRequested) {
+        session.stop().catch((_error: Error) => {});
+      }
+    } catch (error) {
+      this.finishVoiceInputWithError(seq, error as Error | Object | string | number | boolean | null | undefined);
+    }
+  }
+
+  private stopVoiceInput(): void {
+    if (!this.isVoiceListening) {
+      return;
+    }
+    this.voiceStopRequested = true;
+    if (this.voiceSession === null) {
+      this.voiceInputMessage = '识别整理中';
+      return;
+    }
+    if (this.voiceInputMessage === '语音识别中') {
+      this.voiceInputMessage = '识别整理中';
+    }
+    this.voiceSession.stop().catch((_error: Error) => {});
+  }
+
+  private htmlPinPayload(action: A2uiAction): HtmlPinPayload {
+    if (action.prompt.trim().charAt(0) !== '{') {
+      return { index: action.prompt };
+    }
+    try {
+      const payload = JSON.parse(action.prompt) as HtmlPinPayload;
+      return payload === null ? { index: action.prompt } : payload;
+    } catch (_error) {
+      return { index: action.prompt };
+    }
+  }
+
+  private htmlActionIndex(action: A2uiAction, payload: HtmlPinPayload): number {
+    const payloadValue = Number.parseInt(this.actionText(payload.index), 10);
+    if (payloadValue === payloadValue && payloadValue >= 0) {
+      return payloadValue;
+    }
+    const value = Number.parseInt(action.prompt, 10);
+    return value === value && value >= 0 ? value : -1;
+  }
+
+  private htmlPinTravelMatches(item: A2uiTravelOptionData, payload: HtmlPinPayload): boolean {
+    if (!this.htmlPinTravelPayloadHasIdentity(payload)) {
+      return false;
+    }
+    const id = this.actionText(payload.id);
+    const source = this.actionText(payload.source);
+    const depart = this.actionText(payload.depart);
+    const from = this.actionText(payload.from);
+    const to = this.actionText(payload.to);
+    return id === this.actionText(item.id) &&
+      source === this.actionText(item.source) &&
+      depart === this.actionText(item.depart) &&
+      from === this.actionText(item.from) &&
+      to === this.actionText(item.to);
+  }
+
+  private htmlPinTrainMatches(item: A2uiTrainData, payload: HtmlPinPayload): boolean {
+    if (!this.htmlPinTrainPayloadHasIdentity(payload)) {
+      return false;
+    }
+    const trainCode = this.actionText(payload.trainCode);
+    const depart = this.actionText(payload.depart);
+    const from = this.actionText(payload.from);
+    const to = this.actionText(payload.to);
+    return trainCode === this.actionText(item.trainCode) &&
+      depart === this.actionText(item.depart) &&
+      from === this.actionText(item.from) &&
+      to === this.actionText(item.to);
+  }
+
+  private htmlPinFlightMatches(item: A2uiFlightData, payload: HtmlPinPayload): boolean {
+    if (!this.htmlPinFlightPayloadHasIdentity(payload)) {
+      return false;
+    }
+    const flightNo = this.actionText(payload.flightNo);
+    const depTime = this.actionText(payload.depTime);
+    const dep = this.actionText(payload.dep);
+    const arr = this.actionText(payload.arr);
+    return flightNo === this.actionText(item.flightNo) &&
+      depTime === this.actionText(item.depTime) &&
+      dep === this.actionText(item.dep) &&
+      arr === this.actionText(item.arr);
+  }
+
+  private htmlPinFoodMatches(item: A2uiFoodData, payload: HtmlPinPayload): boolean {
+    if (!this.htmlPinFoodPayloadHasIdentity(payload)) {
+      return false;
+    }
+    const name = this.actionText(payload.name);
+    const address = this.actionText(payload.address);
+    const location = this.actionText(payload.location);
+    const distance = this.actionText(payload.distance);
+    return name === this.actionText(item.name) &&
+      address === this.actionText(item.address) &&
+      location === this.actionText(item.location) &&
+      distance === this.actionText(item.distance);
+  }
+
+  private htmlPinTravelPayloadHasIdentity(payload: HtmlPinPayload): boolean {
+    return this.actionText(payload.id).length + this.actionText(payload.source).length +
+      this.actionText(payload.depart).length + this.actionText(payload.from).length +
+      this.actionText(payload.to).length > 0;
+  }
+
+  private htmlPinTrainPayloadHasIdentity(payload: HtmlPinPayload): boolean {
+    return this.actionText(payload.trainCode).length + this.actionText(payload.depart).length +
+      this.actionText(payload.from).length + this.actionText(payload.to).length > 0;
+  }
+
+  private htmlPinFlightPayloadHasIdentity(payload: HtmlPinPayload): boolean {
+    return this.actionText(payload.flightNo).length + this.actionText(payload.depTime).length +
+      this.actionText(payload.dep).length + this.actionText(payload.arr).length > 0;
+  }
+
+  private htmlPinFoodPayloadHasIdentity(payload: HtmlPinPayload): boolean {
+    return this.actionText(payload.name).length + this.actionText(payload.address).length +
+      this.actionText(payload.location).length + this.actionText(payload.distance).length > 0;
+  }
+
+  private htmlPinTravelRow(model: A2uiRuntimeDataModel, payload: HtmlPinPayload, index: number): A2uiTravelOptionData | null {
+    if (!Array.isArray(model.travelOptions)) {
+      return null;
+    }
+    for (let rowIndex = 0; rowIndex < model.travelOptions.length; rowIndex++) {
+      if (this.htmlPinTravelMatches(model.travelOptions[rowIndex], payload)) {
+        return model.travelOptions[rowIndex];
+      }
+    }
+    if (this.htmlPinTravelPayloadHasIdentity(payload)) {
+      return null;
+    }
+    return index >= 0 && index < model.travelOptions.length ? model.travelOptions[index] : null;
+  }
+
+  private htmlPinTrainRow(model: A2uiRuntimeDataModel, payload: HtmlPinPayload, index: number): A2uiTrainData | null {
+    if (!Array.isArray(model.trains)) {
+      return null;
+    }
+    for (let rowIndex = 0; rowIndex < model.trains.length; rowIndex++) {
+      if (this.htmlPinTrainMatches(model.trains[rowIndex], payload)) {
+        return model.trains[rowIndex];
+      }
+    }
+    if (this.htmlPinTrainPayloadHasIdentity(payload)) {
+      return null;
+    }
+    return index >= 0 && index < model.trains.length ? model.trains[index] : null;
+  }
+
+  private htmlPinFlightRow(model: A2uiRuntimeDataModel, payload: HtmlPinPayload, index: number): A2uiFlightData | null {
+    if (!Array.isArray(model.flights)) {
+      return null;
+    }
+    for (let rowIndex = 0; rowIndex < model.flights.length; rowIndex++) {
+      if (this.htmlPinFlightMatches(model.flights[rowIndex], payload)) {
+        return model.flights[rowIndex];
+      }
+    }
+    if (this.htmlPinFlightPayloadHasIdentity(payload)) {
+      return null;
+    }
+    return index >= 0 && index < model.flights.length ? model.flights[index] : null;
+  }
+
+  private htmlPinFoodRow(model: A2uiRuntimeDataModel, payload: HtmlPinPayload, index: number): A2uiFoodData | null {
+    if (!Array.isArray(model.foods)) {
+      return null;
+    }
+    for (let rowIndex = 0; rowIndex < model.foods.length; rowIndex++) {
+      if (this.htmlPinFoodMatches(model.foods[rowIndex], payload)) {
+        return model.foods[rowIndex];
+      }
+    }
+    if (this.htmlPinFoodPayloadHasIdentity(payload)) {
+      return null;
+    }
+    return index >= 0 && index < model.foods.length ? model.foods[index] : null;
+  }
+
+  private logHtmlHomeActionError(action: A2uiAction, reason: string): void {
+    aiLogError('[AIPhone][HtmlHomeAction] id=' + action.id +
+      ' ok=false reason=' + reason +
+      ' promptChars=' + action.prompt.length.toString());
+  }
+
+  private async handleHtmlPinAction(action: A2uiAction): Promise<boolean> {
+    if (action.id !== 'html_pin_travel' && action.id !== 'html_pin_train' &&
+      action.id !== 'html_pin_flight' && action.id !== 'html_pin_food') {
+      return false;
+    }
+    const model = this.parsedDataModel();
+    const payload = this.htmlPinPayload(action);
+    const index = this.htmlActionIndex(action, payload);
+    if (model === null) {
+      this.logHtmlHomeActionError(action, 'invalid_model');
+      return true;
+    }
+    if (action.id === 'html_pin_travel') {
+      const row = this.htmlPinTravelRow(model, payload, index);
+      if (row === null) {
+        this.logHtmlHomeActionError(action, 'missing_travel_row');
+        return true;
+      }
+      await this.pinTravelNavigationCard(row);
+      return true;
+    }
+    if (action.id === 'html_pin_train') {
+      const row = this.htmlPinTrainRow(model, payload, index);
+      if (row === null) {
+        this.logHtmlHomeActionError(action, 'missing_train_row');
+        return true;
+      }
+      await this.pinTrainNavigationCard(row);
+      return true;
+    }
+    if (action.id === 'html_pin_flight') {
+      const row = this.htmlPinFlightRow(model, payload, index);
+      if (row === null) {
+        this.logHtmlHomeActionError(action, 'missing_flight_row');
+        return true;
+      }
+      await this.pinFlightNavigationCard(row);
+      return true;
+    }
+    const row = this.htmlPinFoodRow(model, payload, index);
+    if (row === null) {
+      this.logHtmlHomeActionError(action, 'missing_food_row');
+      return true;
+    }
+    await this.pinNavigationCard(row);
+    return true;
+  }
+
+  private async handleHtmlFoodMapAction(action: A2uiAction): Promise<boolean> {
+    if (action.id !== 'html_open_food_map') {
+      return false;
+    }
+    const model = this.parsedDataModel();
+    const payload = this.htmlPinPayload(action);
+    const index = this.htmlActionIndex(action, payload);
+    if (model === null) {
+      this.logHtmlHomeActionError(action, 'invalid_model');
+      return true;
+    }
+    const row = this.htmlPinFoodRow(model, payload, index);
+    if (row === null) {
+      this.logHtmlHomeActionError(action, 'missing_food_row');
+      return true;
+    }
+    const uri = buildSystemFoodNavigationUri(this.actionText(row.location), '', row.name);
+    if (uri.length === 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '缺少真实坐标，不能打开地图。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      this.logHtmlHomeActionError(action, 'missing_food_coordinate');
+      return true;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      try {
+        await context.openLink(uri);
+      } catch (_linkError) {
+        await context.startAbility({
+          action: 'ohos.want.action.viewData',
+          entities: ['entity.system.browsable'],
+          uri: uri
+        });
+      }
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '已打开系统地图：' + row.name,
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      aiLogInfo('[AIPhone][HtmlHomeFoodMap] ok=true uriChars=' + uri.length.toString() + ' name=' + row.name);
+    } catch (error) {
+      const businessError = error as BusinessError;
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '地图打开失败。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: businessError.message
+      }));
+      aiLogError('[AIPhone][HtmlHomeFoodMap] ok=false message=' + businessError.message);
+    }
+    return true;
+  }
+
+  private actionText(value: HtmlActionValue): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return value.toString();
+    }
+    return '';
+  }
+
+  private isPaymentCheckoutUrl(url: string): boolean {
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith('https://checkout.stripe.com/') ||
+      lower.startsWith('https://buy.stripe.com/') ||
+      lower.startsWith('https://www.paypal.com/') ||
+      lower.startsWith('https://www.sandbox.paypal.com/');
+  }
+
+  private isStripeOnboardingUrl(url: string): boolean {
+    return url.trim().toLowerCase().startsWith('https://connect.stripe.com/');
+  }
+
+  private stripeOnboardingUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as StripeOnboardingActionPayload;
+      fromArgs = this.actionText(payload.onboardingUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
+  private paymentCheckoutUrlForAction(action: A2uiAction): string {
+    let fromArgs = '';
+    if (action.args !== undefined) {
+      const payload = action.args as PaymentCheckoutActionPayload;
+      fromArgs = this.actionText(payload.checkoutUrl).trim();
+    }
+    if (fromArgs.length > 0) {
+      return fromArgs;
+    }
+    return action.prompt.trim();
+  }
+
+  private paymentCheckoutPayload(action: A2uiAction): PaymentCheckoutActionPayload {
+    if (action.args === undefined) {
+      return JSON.parse('{}') as PaymentCheckoutActionPayload;
+    }
+    return action.args as PaymentCheckoutActionPayload;
+  }
+
+  private rememberPaymentCheckout(action: A2uiAction, checkoutUrl: string): void {
+    const payload = this.paymentCheckoutPayload(action);
+    this.paymentCheckoutUrl = checkoutUrl;
+    this.paymentCheckoutProvider = this.actionText(payload.provider).trim().toLowerCase();
+    this.paymentCheckoutProviderSessionId = this.actionText(payload.providerSessionId).trim();
+    this.paymentCheckoutRecipient = this.actionText(payload.recipient).trim();
+    this.paymentCheckoutAmountText = this.actionText(payload.amountText).trim();
+    this.paymentCheckoutCurrency = this.actionText(payload.currency).trim();
+    this.paymentCheckoutNote = this.actionText(payload.note).trim();
+  }
+
+  private queryValue(url: string, key: string): string {
+    const marker = key + '=';
+    const queryIndex = url.indexOf('?');
+    if (queryIndex < 0) {
+      return '';
+    }
+    const query = url.substring(queryIndex + 1);
+    const parts = query.split('&');
+    for (let index = 0; index < parts.length; index++) {
+      if (parts[index].startsWith(marker)) {
+        return decodeURIComponent(parts[index].substring(marker.length));
+      }
+    }
+    return '';
+  }
+
+  private async handlePaymentCheckoutReturn(url: string): Promise<void> {
+    this.showPaymentCheckout = false;
+    const lower = url.toLowerCase();
+    if (lower.indexOf('/cancel') >= 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已取消，没有完成扣款。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    if (this.paymentCheckoutProvider !== 'paypal') {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: '支付页面已返回 app，请在供应商页面确认支付状态。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      return;
+    }
+    const orderId = this.paymentCheckoutProviderSessionId.length > 0 ?
+      this.paymentCheckoutProviderSessionId : this.queryValue(url, 'token');
+    if (orderId.length === 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: 'PayPal 已返回 app，但缺少 order id，不能 capture。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: url
+      }));
+      return;
+    }
+    const args: PaymentCaptureArgs = {
+      provider: 'paypal',
+      recipient: this.paymentCheckoutRecipient,
+      amountText: this.paymentCheckoutAmountText,
+      currency: this.paymentCheckoutCurrency,
+      note: this.paymentCheckoutNote,
+      phase: 'capture',
+      providerSessionId: orderId
+    };
+    await this.callToolById('payment.send', 'PayPal payment approved, capture order ' + orderId, 'payment.capture', args);
+  }
+
+  private async saveDynamicCredentialAndTest(action: A2uiAction): Promise<void> {
+    let payload: HtmlDynamicCredentialPayload;
+    try {
+      payload = JSON.parse(action.prompt) as HtmlDynamicCredentialPayload;
+    } catch (_error) {
+      this.logHtmlHomeActionError(action, 'invalid_dynamic_payload');
+      return;
+    }
+    const credentialRef = this.actionText(payload.credentialRef);
+    const credentialValue = this.actionText(payload.credentialValue).trim();
+    const data = this.currentDynamicToolConnect();
+    let toolId = this.actionText(payload.toolId);
+    let testPrompt = this.actionText(payload.prompt);
+    if (toolId.length === 0 && data !== null) {
+      toolId = data.toolId;
+    }
+    if (testPrompt.length === 0 && data !== null) {
+      testPrompt = data.prompt;
+    }
+    if (testPrompt.length === 0) {
+      testPrompt = toolId;
+    }
+    if (data === null || credentialRef !== data.credentialRef || toolId !== data.toolId) {
+      this.logHtmlHomeActionError(action, 'dynamic_credential_not_allowed');
+      return;
+    }
+    if (credentialRef.length === 0 || credentialValue.length === 0 || toolId.length === 0) {
+      this.logHtmlHomeActionError(action, 'missing_dynamic_credential');
+      return;
+    }
+    try {
+      await new AssetCredentialStore().put(credentialRef, credentialValue);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'checking',
+        message: '已保存到本机，正在测试连接。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ''
+      }));
+      await this.callToolById(toolId, testPrompt, 'dynamic_test_connection');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '凭据保存失败，请检查本机安全存储状态。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: message
+      }));
+      aiLogError('[AIPhone][HtmlHomeAction] id=' + action.id + ' ok=false reason=credential_save_failed message=' + message);
+    }
   }
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (this.isPersonaEditorAction(action)) {
+      this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
+      return;
+    }
+    if (action.id === 'stripe.account.open') {
+      const onboardingUrl = this.stripeOnboardingUrlForAction(action);
+      if (!this.isStripeOnboardingUrl(onboardingUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_stripe_onboarding_url');
+        return;
+      }
+      await this.openExternalUrl(onboardingUrl);
+      return;
+    }
+    if (this.isStripeReceivingActionId(action)) {
+      await this.callToolById(
+        'payment.account.setup',
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
+    if (this.isSocialHubActionId(action) && !this.isCurrentSocialHubSurface()) {
+      this.logHtmlHomeActionError(action, 'social_hub_surface_required');
+      return;
+    }
+    if (action.id === 'social_hub_select_item') {
+      this.selectSocialHubItem(action);
+      return;
+    }
+    if (action.id === 'social_hub_draft_reply') {
+      this.draftSocialHubReply(action);
+      return;
+    }
+    if (action.id === 'social_hub_send_reply') {
+      await this.sendSocialHubReply(action);
+      return;
+    }
+    if (action.id === 'social_hub_open_source') {
+      await this.openSocialHubSource(action);
+      return;
+    }
+    if (await this.handleHtmlFoodMapAction(action)) {
+      return;
+    }
+    if (await this.handleHtmlPinAction(action)) {
+      return;
+    }
+    if (action.id === 'html_dynamic_save_and_test') {
+      await this.saveDynamicCredentialAndTest(action);
+      return;
+    }
+    if (action.id === 'payment.account.save') {
+      await this.savePaymentAccount(action);
+      return;
+    }
+    if (action.id === 'payment.checkout.open') {
+      const checkoutUrl = this.paymentCheckoutUrlForAction(action);
+      if (!this.isPaymentCheckoutUrl(checkoutUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_payment_checkout_url');
+        return;
+      }
+      this.rememberPaymentCheckout(action, checkoutUrl);
+      this.showPaymentCheckout = true;
+      aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
+      return;
+    }
     if (action.id === 'gmail.authorize') {
       const authorizeUrl = await prepareGmailOAuthAuthorizationUrl();
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL);
+      return;
+    }
+    if (action.id === 'x.authorize') {
+      await this.openExternalUrl(await prepareXOAuthAuthorizationUrl());
+      return;
+    }
+    if (action.id === 'calendar.authorize') {
+      const authorizeUrl = await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL);
+      await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL);
+      return;
+    }
+    if (action.id === 'calendar.open.web') {
+      await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GOOGLE_CALENDAR_WEB_URL);
       return;
     }
     if (action.id === 'gmail.open.web') {
       await this.openExternalUrl(action.prompt.length > 0 ? action.prompt : GMAIL_WEB_URL);
       return;
     }
-    if (action.id === 'social_select_message') {
-      this.selectSocialMessageById(action.prompt);
+    if (action.id === 'maps.open.web') {
+      await this.openExternalUrl(action.prompt);
       return;
     }
-    if (action.id === 'social_open_notification_settings') {
-      await this.openSocialNotificationSubscriptionSettings();
+    if (action.id === 'media.open.web') {
+      const mediaUrl = officialMediaVideoPlaybackUrl(action.prompt);
+      if (mediaUrl.length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_media_url');
+        return;
+      }
+      await this.openExternalUrl(mediaUrl);
       return;
     }
     if (action.id === 'dynamic_open_registration') {
@@ -992,6 +2186,36 @@ struct Index {
   }
 
   private async sendAction(action: A2uiAction): Promise<void> {
+    if (this.isBusy) {
+      aiLogInfo('[AIPhone][A2uiHomeActionIgnored] id=' + action.id + ' reason=busy');
+      return;
+    }
+    if (this.isSocialHubActionId(action) && !this.isCurrentSocialHubSurface()) {
+      this.logHtmlHomeActionError(action, 'social_hub_surface_required');
+      return;
+    }
+    if (this.isSocialHubClientAction(action)) {
+      await this.handleClientAction(action);
+      return;
+    }
+    if (this.isPersonaEditorAction(action)) {
+      await this.handleClientAction(action);
+      return;
+    }
+    if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
+      this.logHtmlHomeActionError(action, 'not_allowed');
+      return;
+    }
+    const directPaymentToolId = directPaymentToolIdForActionId(action.id);
+    if (directPaymentToolId.length > 0) {
+      await this.callToolById(
+        directPaymentToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);
@@ -1001,7 +2225,7 @@ struct Index {
       this.focusEditQuery(action.id);
       return;
     }
-    await this.submitPrompt(action.prompt, action.label, action.id);
+    await this.submitPrompt(action.prompt, action.label, action.id, action.args === undefined ? null : action.args);
   }
 
   private toolSurfaceId(): string {
@@ -1011,8 +2235,13 @@ struct Index {
     return this.currentSurface.surfaceId;
   }
 
-  private async callModelRequestedTool(surface: A2uiSurfaceState, fallbackPrompt: string, fallbackActionId: string): Promise<void> {
-    const request: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(surface, fallbackPrompt, fallbackActionId);
+  private async callModelRequestedTool(
+    surface: A2uiSurfaceState,
+    fallbackPrompt: string,
+    fallbackActionId: string,
+    fallbackArgs: Object | null = null
+  ): Promise<void> {
+    const request: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(surface, fallbackPrompt, fallbackActionId, fallbackArgs);
     if (!request.hasTool) {
       aiLogInfo('[AIPhone][A2uiHomeToolRequest] none');
       return;
@@ -1021,10 +2250,10 @@ struct Index {
       ' modelPromptChars=' + request.modelPromptChars.toString() +
       ' userPromptChars=' + fallbackPrompt.length.toString() +
       ' sentPromptChars=' + request.prompt.length.toString());
-    await this.callToolById(request.toolId, request.prompt, request.actionId);
+    await this.callToolById(request.toolId, request.prompt, request.actionId, request.args);
   }
 
-  private async callToolById(toolId: string, prompt: string, actionId: string): Promise<boolean> {
+  private async callToolById(toolId: string, prompt: string, actionId: string, args: Object | null = null): Promise<boolean> {
     if (!isRegisteredToolId(toolId)) {
       const message = '模型请求了未注册工具：' + toolId;
       aiLogError('[AIPhone][A2uiHomeToolRequestInvalid] toolId=' + toolId);
@@ -1048,6 +2277,7 @@ struct Index {
       foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs),
       foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
+    const personaSourceSurface = this.currentSurface;
     this.markChecking('正在调用工具：' + toolId);
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
@@ -1056,29 +2286,35 @@ struct Index {
       this.toolSurfaceId(),
       actionId,
       (surface: A2uiSurfaceState, raw: string) => {
-        this.applySurface(surface);
+        const nextSurface = copyPersonaData(personaSourceSurface, surface);
+        this.applySurface(nextSurface);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'checking',
-          message: '工具流式更新：' + surface.title,
+          message: '工具流式更新：' + nextSurface.title,
           requestDebug: this.lastModelRequest,
           assistantDebug: raw,
           error: ''
         }));
       },
-      null
+      null,
+      args
     );
 
     aiLogInfo('[AIPhone][A2uiHomeToolResult] ok=' + (result.ok ? 'true' : 'false') +
       ' errorChars=' + result.error.length.toString() +
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
-    this.applySurface(result.surface);
+    const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    this.applySurface(resultSurface);
+    if (toolId === 'payment.account.setup') {
+      await this.saveStripeReceivingProfile(resultSurface);
+    }
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
       status: result.ok ? 'ready' : 'error',
-      message: result.ok ? result.surface.title + ' 已返回工具结果。' : '工具返回异常，请到配置页查看详情。',
-      requestDebug: this.lastModelRequest,
+      message: result.ok ? resultSurface.title + ' 已返回工具结果。' : '工具返回异常，请到配置页查看详情。',
+      requestDebug: result.requestDebug,
       assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
       error: result.error
     }));
@@ -1086,7 +2322,7 @@ struct Index {
       this.appendMessage('assistant', '工具返回异常：' + result.error);
       return false;
     }
-    this.appendMessage('assistant', result.surface.title + ' 已返回 A2UI 结果。');
+    this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
     if (toolId === 'gmail.open.web') {
       await this.openExternalUrl(GMAIL_WEB_URL);
     }
@@ -1161,7 +2397,23 @@ struct Index {
   }
 
   build() {
-    if (this.showConfigPage) {
+    if (this.showComposioAuthPage) {
+      ComposioAuthPage({
+        userShortId: this.composioUserId,
+        items: this.composioAuthItems,
+        message: this.composioAuthMessage,
+        isBusy: this.composioAuthBusy,
+        onBack: () => {
+          this.showComposioAuthPage = false;
+        },
+        onRefresh: () => {
+          this.refreshComposioAuth();
+        },
+        onAuthorize: (item: ComposioAuthConfigItem) => {
+          this.openComposioAuthLink(item);
+        }
+      })
+    } else if (this.showConfigPage) {
       ConfigPage({
         baseUrl: $baseUrl,
         apiKey: $apiKey,
@@ -1178,11 +2430,37 @@ struct Index {
         lastModelOutput: this.lastModelOutput,
         lastError: this.lastError,
         refreshTick: this.refreshTick,
+        personaPacks: this.personaPacks,
+        selectedPersonaId: $selectedPersonaId,
+        personaSoulDraft: $personaSoulDraft,
+        personaMemoryDraft: $personaMemoryDraft,
+        personaSaveMessage: this.personaSaveMessage,
+        composioUserId: this.composioUserId,
+        composioAuthItems: this.composioAuthItems,
+        composioAuthMessage: this.composioAuthMessage,
+        composioAuthBusy: this.composioAuthBusy,
         onBack: () => {
           this.showConfigPage = false;
         },
         onTestConnection: () => {
           this.testConnection();
+        },
+        onOpenComposioAuth: () => {
+          this.configureComposioRuntimeForCurrentUser();
+          this.showComposioAuthPage = true;
+          this.refreshComposioAuth();
+        },
+        onRefreshComposioAuth: () => {
+          this.refreshComposioAuth();
+        },
+        onSelectPersona: (personaId: string) => {
+          this.selectPersonaForEdit(personaId);
+        },
+        onSavePersona: () => {
+          this.savePersonaDraft();
+        },
+        onResetPersona: () => {
+          this.resetPersonaDraft();
         }
       })
     } else {
@@ -1192,47 +2470,53 @@ struct Index {
         showHistory: this.showHistory,
         messages: this.messages,
         currentSurface: this.currentSurface,
+        htmlHomeHtml: this.currentSurface.intent === 'social' ? '' : this.currentHtmlHomeHtml(),
         surfaceRenderTick: this.surfaceRenderTick,
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,
-        isSocialReturnAvailable: this.hasSocialReturnSurface,
+        isVoiceListening: this.isVoiceListening,
+        voiceInputMessage: this.voiceInputMessage,
         showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
+        showPaymentCheckout: this.showPaymentCheckout,
+        paymentCheckoutUrl: this.paymentCheckoutUrl,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
-        onOpenSocial: () => {
-          this.handleSocialNavigation();
-        },
         onOpenConfig: () => {
+          this.configureComposioRuntimeForCurrentUser();
           this.showConfigPage = true;
+          this.refreshComposioAuth();
+        },
+        onOpenSocialHub: () => {
+          this.openSocialHub();
         },
         onResetSession: () => {
           this.resetCurrentSession();
         },
         onOpenStyleLab: () => {
-          router.pushUrl({ url: 'pages/A2uiHome/StyleLab' }, (error) => {
+          router.pushUrl({ url: 'pages/A2uiHome/AnythingDemo' }, (error) => {
             if (error) {
-              aiLogError('[AIPhone][A2uiStyleLabRouteFailed] ' + JSON.stringify(error));
+              aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
             }
           });
         },
         onSendPrompt: () => {
           this.sendPrompt();
         },
+        onStartVoiceInput: () => {
+          this.startVoiceInput();
+        },
+        onStopVoiceInput: () => {
+          this.stopVoiceInput();
+        },
+        onClosePaymentCheckout: () => {
+          this.showPaymentCheckout = false;
+        },
+        onPaymentCheckoutReturn: (url: string) => {
+          this.handlePaymentCheckoutReturn(url);
+        },
         onAction: (action: A2uiAction) => {
           this.sendAction(action);
-        },
-        onPinNavigationCard: (item: A2uiFoodData) => {
-          this.pinNavigationCard(item);
-        },
-        onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
-          this.pinTravelNavigationCard(item);
-        },
-        onPinTrainNavigationCard: (item: A2uiTrainData) => {
-          this.pinTrainNavigationCard(item);
-        },
-        onPinFlightNavigationCard: (item: A2uiFlightData) => {
-          this.pinFlightNavigationCard(item);
         }
       })
     }

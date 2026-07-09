@@ -1,0 +1,7 @@
+{
+  "activeSkillId": "game-research",
+  "skills": [
+    { "id": "game-research", "path": "skills/game-research/SKILL.md", "status": "active" },
+    { "id": "build-guide", "path": "skills/build-guide/SKILL.md", "status": "placeholder" }
+  ]
+}

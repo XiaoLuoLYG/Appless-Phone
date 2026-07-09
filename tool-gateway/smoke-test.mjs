@@ -89,9 +89,88 @@ const outputDir = path.resolve(process.env.AIPHONE_SMOKE_DIR || path.join(TOOL_G
 const gatewayUrl = (process.env.TOOL_GATEWAY_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const endpoint = gatewayUrl.endsWith('/api/aiphone/tool') ? gatewayUrl : `${gatewayUrl}/api/aiphone/tool`;
 const healthUrl = endpoint.replace(/\/api\/aiphone\/tool$/, '/health');
+const socialBridgeUrl = endpoint.replace(/\/api\/aiphone\/tool$/, '/api/social');
+const gatewayApiKey = (process.env.TOOL_GATEWAY_API_KEY || '').trim();
+const wecomCallbackToken = (process.env.WECOM_CALLBACK_TOKEN || '').trim();
 const hdcTarget = process.env.AIPHONE_HDC_TARGET || process.env.HDC_TARGET || '';
 const gatewayErr = process.env.AIPHONE_GATEWAY_ERR || '/tmp/aiphone-tool-gateway.err';
 const gatewayLog = process.env.AIPHONE_GATEWAY_LOG || '/tmp/aiphone-tool-gateway.log';
+
+const SOCIAL_BRIDGE_CASES = [
+  {
+    name: 'social_feed',
+    url: `${socialBridgeUrl}/feed?q=hello`,
+    expect: ['items', 'connections']
+  },
+  {
+    name: 'social_x_post_search',
+    url: `${socialBridgeUrl}/feed?source=x&q=openai`,
+    expect: ['items', 'connections']
+  },
+  {
+    name: 'social_missing_draft',
+    url: `${socialBridgeUrl}/draft`,
+    method: 'POST',
+    body: { itemId: 'missing-social-smoke', platform: 'x', instruction: '简短回复' },
+    expect: ['draft', '"status":"error"', 'localOnly', '"sent":false']
+  }
+];
+
+const COMPOSIO_AUTH_CASES = [
+  {
+    name: 'composio_auth_configs',
+    path: '/v1/composio/auth-configs?userId=app-user-smoke',
+    method: 'GET',
+    expect: ['"ok":true', '"toolkitSlug":"github"', '"authConfigId":"ac_mock_github"']
+  },
+  {
+    name: 'composio_link',
+    path: '/v1/composio/link',
+    method: 'POST',
+    body: {
+      userId: 'app-user-smoke',
+      authConfigId: 'ac_mock_github',
+      toolkitSlug: 'github'
+    },
+    expect: ['"ok":true', '"redirectUrl":"https://mock.composio.local/connect/github"']
+  },
+  {
+    name: 'composio_proxy_session',
+    path: '/v1/composio/session',
+    method: 'POST',
+    body: {
+      user_id: 'app-user-smoke',
+      toolkits: { enable: ['github'] },
+      connected_accounts: { github: ['ca_mock_github'] },
+      manage_connections: { enable: false },
+      workbench: { enable: false },
+      multi_account: { enable: false },
+      search: { enable: true },
+      execute: { enable_multi_execute: false }
+    },
+    expect: ['"session_id":"mock-session"']
+  },
+  {
+    name: 'composio_proxy_search',
+    path: '/v1/composio/session/mock-session/search',
+    method: 'POST',
+    body: { queries: [{ use_case: 'find recent Appless-Phone pull requests' }] },
+    expect: ['"success":true', '"GITHUB_FIND_PULL_REQUESTS"']
+  },
+  {
+    name: 'composio_proxy_execute',
+    path: '/v1/composio/session/mock-session/execute',
+    method: 'POST',
+    body: { tool_slug: 'GITHUB_FIND_PULL_REQUESTS', arguments: {} },
+    expect: ['"ok":true', '"mock Composio execute"']
+  },
+  {
+    name: 'composio_proxy_delete_session',
+    path: '/v1/composio/session/mock-session',
+    method: 'DELETE',
+    expect: ['"ok":true']
+  }
+];
 
 function textOf(value) {
   if (value === undefined || value === null) {
@@ -151,12 +230,16 @@ function summarize(envelopes) {
 }
 
 async function postFromHost(testCase) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/a2ui+json'
+  };
+  if (gatewayApiKey.length > 0) {
+    headers['X-API-Key'] = gatewayApiKey;
+  }
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/a2ui+json'
-    },
+    headers,
     body: JSON.stringify({
       toolId: testCase.toolId,
       prompt: testCase.prompt,
@@ -170,6 +253,106 @@ async function postFromHost(testCase) {
     httpStatus: response.status,
     text: await response.text()
   };
+}
+
+async function runSocialBridgeCases() {
+  const baseHeaders = gatewayApiKey.length > 0 ? { 'X-API-Key': gatewayApiKey } : {};
+  const callbackHeaders = wecomCallbackToken.length > 0 ? { ...baseHeaders, 'X-WeCom-Token': wecomCallbackToken } : baseHeaders;
+  for (const testCase of SOCIAL_BRIDGE_CASES) {
+    const response = await fetch(testCase.url, {
+      method: testCase.method || 'GET',
+      headers: testCase.method === 'POST' ? { ...baseHeaders, 'Content-Type': 'application/json' } : baseHeaders,
+      body: testCase.body ? JSON.stringify(testCase.body) : undefined,
+      signal: AbortSignal.timeout(5000)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${testCase.name} failed: HTTP ${response.status} ${text}`);
+    }
+    testCase.expect.forEach(marker => {
+      if (!text.includes(marker)) {
+        throw new Error(`${testCase.name} missing marker: ${marker}`);
+      }
+    });
+    console.log(`PASS host/${testCase.name}`);
+  }
+
+  const callbackResponse = await fetch(`${socialBridgeUrl}/wecom/callback`, {
+    method: 'POST',
+    headers: callbackHeaders,
+    body: `smoke callback body ${Date.now()}`,
+    signal: AbortSignal.timeout(5000)
+  });
+  const callbackText = await callbackResponse.text();
+  if (!callbackResponse.ok) {
+    throw new Error(`social_wecom_callback failed: HTTP ${callbackResponse.status} ${callbackText}`);
+  }
+  const callbackPayload = JSON.parse(callbackText);
+  const itemId = textOf(callbackPayload?.item?.id);
+  if (itemId.length === 0 || !callbackText.includes('smoke callback body')) {
+    throw new Error('social_wecom_callback did not return cached callback item');
+  }
+
+  const draftResponse = await fetch(`${socialBridgeUrl}/draft`, {
+    method: 'POST',
+    headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId, platform: 'wecom', instruction: '简短回复' }),
+    signal: AbortSignal.timeout(5000)
+  });
+  const draftText = await draftResponse.text();
+  if (!draftResponse.ok || !draftText.includes('"status":"draft"') || !draftText.includes('"sent":false')) {
+    throw new Error(`social_cached_draft failed: HTTP ${draftResponse.status} ${draftText}`);
+  }
+  console.log('PASS host/social_cached_draft');
+}
+
+async function runComposioAuthCases() {
+  const baseHeaders = {
+    ...(gatewayApiKey.length > 0 ? { 'X-API-Key': gatewayApiKey } : {}),
+    'Content-Type': 'application/json'
+  };
+  for (const testCase of COMPOSIO_AUTH_CASES) {
+    const response = await fetch(`${gatewayUrl}${testCase.path}`, {
+      method: testCase.method,
+      headers: baseHeaders,
+      body: testCase.body ? JSON.stringify(testCase.body) : undefined,
+      signal: AbortSignal.timeout(5000)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${testCase.name} failed: HTTP ${response.status} ${text}`);
+    }
+    testCase.expect.forEach(marker => {
+      if (!text.includes(marker)) {
+        throw new Error(`${testCase.name} missing marker: ${marker}`);
+      }
+    });
+    console.log(`PASS host/${testCase.name}`);
+  }
+}
+
+async function runSocialBridgeAuthNegativeCases() {
+  if (gatewayApiKey.length === 0) {
+    return;
+  }
+  const cases = [
+    ['social_feed_unauth', `${socialBridgeUrl}/feed?q=auth-negative`, { method: 'GET' }],
+    ['social_draft_unauth', `${socialBridgeUrl}/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: 'missing-social-smoke', platform: 'x', instruction: '简短回复' })
+    }]
+  ];
+  for (const [name, url, options] of cases) {
+    const response = await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(5000)
+    });
+    if (response.status !== 401) {
+      throw new Error(`${name} expected HTTP 401, got ${response.status}: ${await response.text()}`);
+    }
+    console.log(`PASS host/${name}`);
+  }
 }
 
 function resolveHdcTarget() {
@@ -200,7 +383,9 @@ function postFromDevice(target, testCase) {
   const remote = '/data/local/tmp/aiphone-tool-body.json';
   const shellCommand =
     `printf %s ${shQuote(Buffer.from(body).toString('base64'))} | base64 -d > ${remote} && ` +
-    `curl -sS --max-time 45 -H 'Content-Type: application/json' -H 'Accept: application/a2ui+json' --data-binary @${remote} http://127.0.0.1:8787/api/aiphone/tool`;
+    `curl -sS --max-time 45 -H 'Content-Type: application/json' -H 'Accept: application/a2ui+json' ` +
+    (gatewayApiKey.length > 0 ? `-H ${shQuote(`X-API-Key: ${gatewayApiKey}`)} ` : '') +
+    `--data-binary @${remote} http://127.0.0.1:8787/api/aiphone/tool`;
   return {
     httpStatus: 200,
     text: runHdc(target, ['shell', shellCommand], { timeout: 60000 })
@@ -413,7 +598,12 @@ async function main() {
   if (!healthResponse.ok) {
     throw new Error(`Gateway health failed: HTTP ${healthResponse.status} ${health}`);
   }
-
+  if (args.has('--composio-auth')) {
+    await runComposioAuthCases();
+    return;
+  }
+  await runSocialBridgeAuthNegativeCases();
+  await runSocialBridgeCases();
   const beforeLogs = useDevice ? captureHilog(target, 'before') : '';
   const suites = [
     ['host', postFromHost]

@@ -1,0 +1,7 @@
+{
+  "activeSkillId": "shopping-research",
+  "skills": [
+    { "id": "shopping-research", "path": "skills/shopping-research/SKILL.md", "status": "active" },
+    { "id": "budget-compare", "path": "skills/budget-compare/SKILL.md", "status": "placeholder" }
+  ]
+}

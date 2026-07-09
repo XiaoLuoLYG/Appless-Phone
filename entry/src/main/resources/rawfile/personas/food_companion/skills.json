@@ -1,0 +1,8 @@
+{
+  "activeSkillId": "food-search",
+  "skills": [
+    { "id": "food-search", "path": "skills/food-search/SKILL.md", "status": "active" },
+    { "id": "coffee-order", "path": "skills/coffee-order/SKILL.md", "status": "placeholder" },
+    { "id": "milk-tea", "path": "skills/milk-tea/SKILL.md", "status": "placeholder" }
+  ]
+}

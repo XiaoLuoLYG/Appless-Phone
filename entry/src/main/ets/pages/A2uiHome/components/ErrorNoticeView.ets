@@ -1,5 +1,5 @@
-import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
-import { actionsOf, labelValues, A2uiLabelValue } from '../../../model/A2uiData';
+import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '@loop/agent-core';
+import { actionsOf, labelValues, A2uiLabelValue } from '@loop/agent-core';
 import {
   COLOR_CARD_GLOW,
   COLOR_ERROR,

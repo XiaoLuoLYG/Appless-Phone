@@ -1,0 +1,8 @@
+{
+  "activeSkillId": "work-assistant",
+  "skills": [
+    { "id": "work-assistant", "path": "skills/work-assistant/SKILL.md", "status": "active" },
+    { "id": "mail-draft", "path": "skills/mail-draft/SKILL.md", "status": "placeholder" },
+    { "id": "calendar-planning", "path": "skills/calendar-planning/SKILL.md", "status": "placeholder" }
+  ]
+}

@@ -1,16 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '../main/ets/model/A2uiTypes';
-import { genericToolResults, dynamicToolConnect } from '../main/ets/model/A2uiData';
-import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '../main/ets/model/A2uiPartialUpdatePlanner';
-import { buildSystemFoodNavigationUri, foodMapsLatLng } from '../main/ets/model/FoodNavigation';
-import { MemoryCredentialStore } from '../main/ets/model/DynamicCredentialStore';
-import { saveGmailOAuthTokenSet } from '../main/ets/model/GmailOAuthClient';
-import { DynamicGenericToolResult, DynamicToolRegistration } from '../main/ets/model/DynamicToolTypes';
-import { GenericMcpClient } from '../main/ets/model/GenericMcpClient';
+import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '@loop/agent-core';
+import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
+import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
+import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
+import { MemoryCredentialStore } from '@loop/agent-core';
+import { saveGmailOAuthTokenSet } from '@loop/agent-core';
+import { DynamicGenericToolResult, DynamicToolRegistration } from '@loop/agent-core';
+import { GenericMcpClient } from '@loop/agent-core';
+import { MailDraftArgs, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  configureComposioConfigFromRawJson,
+  configureLocalPaymentAccountBookJson,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureLocalProviderConfigFromRawJson,
@@ -28,12 +31,17 @@ import {
   isReadonlyBrandMcpTool,
   isLocalToolGatewayUrl,
   isRegisteredToolId,
+  isTransientPayPalRequestErrorForTest,
+  localProviderConfigDebugSummary,
+  mailSearchArgs,
+  payPalApiFallbackUrlForTest,
+  paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
   FoodProviderResult
-} from '../main/ets/model/ToolGatewayClient';
+} from '@loop/agent-core';
 
 class FixtureGmailMcpClient extends GenericMcpClient {
   lastToolName: string = '';
@@ -54,6 +62,48 @@ class FixtureGmailMcpClient extends GenericMcpClient {
       rawPreview: '{"threadId":"thread-123"}'
     };
   }
+}
+
+class FailingGmailMcpClient extends GenericMcpClient {
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    throw new Error('Operation timeout');
+  }
+}
+
+class ErrorResultGmailMcpClient extends GenericMcpClient {
+  async callTool(registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    return {
+      sourceTag: 'Gmail',
+      toolName: registration.mcpToolName,
+      title: 'Gmail API 调用失败',
+      status: 'error',
+      summary: 'Missing recipient email address.',
+      rows: [{ label: 'Error', value: 'Missing recipient email address.' }],
+      rawPreview: 'error=Missing recipient email address.'
+    };
+  }
+}
+
+interface GmailToolArgsFixture {
+  query: string;
+  pageSize: number;
+  intentSummary: string;
+}
+
+interface YouTubeSearchArgsFixture {
+  query: string;
+}
+
+interface MediaVideoSearchArgsFixture {
+  query: string;
+  sources: string[];
+}
+
+interface PaymentTestArgs {
+  provider?: string;
+  recipient?: string;
+  phase?: string;
+  originalQuery?: string;
 }
 
 interface McDonaldsStoreFixture {
@@ -156,7 +206,7 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('train.search')).assertTrue();
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
-      expect(isRegisteredToolId('social.reply.send')).assertTrue();
+      expect(isRegisteredToolId('social.reply.send')).assertFalse();
     });
 
     it('allows only explicit dynamic catalog aliases to enter the local tool host', 0, () => {
@@ -170,6 +220,27 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('ferry.ticket.search')).assertFalse();
     });
 
+    it('uses Composio missing-config result for unsupported app dynamic queries', 0, async () => {
+      configureComposioConfigFromRawJson('{}');
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+
+      const result: A2uiCallResult = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'dynamic.search',
+        '帮我在 Notion 里找一下 7 月旅行计划相关页面',
+        'surface_composio',
+        '',
+        noop
+      );
+
+      const rendered = genericToolResults(result.surface);
+      expect(result.ok).assertTrue();
+      expect(rendered.length).assertLarger(0);
+      expect(rendered[0].sourceTag).assertEqual('Composio');
+      expect(rendered[0].status).assertEqual('needs_auth');
+      expect(rendered[0].rawPreview.indexOf('Notion')).assertLarger(-1);
+    });
+
     it('registers Gmail tools on the same local tool framework without enabling silent send', 0, () => {
       expect(isRegisteredToolId('gmail.mail.search')).assertTrue();
       expect(isRegisteredToolId('gmail.thread.read')).assertTrue();
@@ -178,6 +249,309 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('gmail.open.web')).assertTrue();
       expect(isRegisteredToolId('gmail.message.send')).assertTrue();
       expect(isRegisteredToolId('gmail.unknown')).assertFalse();
+    });
+
+    it('loads QQ Mail config from local provider raw JSON without exposing the auth code', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          QQ_MAIL_ADDRESS: 'me@qq.com',
+          QQ_MAIL_AUTH_CODE: 'sixteencharscode',
+          QQ_MAIL_IMAP_HOST: 'imap.qq.com',
+          QQ_MAIL_IMAP_PORT: '993',
+          QQ_MAIL_DRAFTS_MAILBOX: 'Drafts'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('qqMailAddress=present')).assertLarger(-1);
+        expect(summary.indexOf('qqMailAuthCode=present(16)')).assertLarger(-1);
+        expect(summary.indexOf('sixteencharscode')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('loads payment config from local provider raw JSON without exposing secrets', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          PAYPAL_CLIENT_ID: 'paypal-client',
+          PAYPAL_CLIENT_SECRET: 'paypal-secret',
+          PAYPAL_ENVIRONMENT: 'sandbox',
+          PAYPAL_CHECKOUT_GATEWAY_URL: 'http://127.0.0.1:8787/api/payment/paypal/checkout',
+          STRIPE_SECRET_KEY: 'sk_test_secret',
+          STRIPE_PUBLISHABLE_KEY: 'pk_test_public',
+          STRIPE_CHECKOUT_GATEWAY_URL: 'http://127.0.0.1:8787/api/payment/stripe/checkout',
+          PAYMENT_ACCOUNT_BOOK_JSON: '[{"id":"alex"}]',
+          PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS: 'acct_live_ok',
+          PAYMENT_LIVE_MAX_AMOUNT_MINOR: '100'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('paypalClientId=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('paypalClientSecret=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('paypalCheckoutGatewayUrl=present')).assertLarger(-1);
+        expect(summary.indexOf('stripeSecretKey=present(14)')).assertLarger(-1);
+        expect(summary.indexOf('stripeCheckoutGatewayUrl=present')).assertLarger(-1);
+        expect(summary.indexOf('paymentAccountBookJson=present')).assertLarger(-1);
+        expect(summary.indexOf('paypal-secret')).assertEqual(-1);
+        expect(summary.indexOf('sk_test_secret')).assertEqual(-1);
+        expect(summary.indexOf('127.0.0.1')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('classifies transient PayPal DNS and timeout errors for retry', 0, () => {
+      expect(isTransientPayPalRequestErrorForTest('Failed to resolve the host name')).assertTrue();
+      expect(isTransientPayPalRequestErrorForTest('Operation timeout')).assertTrue();
+      expect(isTransientPayPalRequestErrorForTest('HTTP 422 payer action required')).assertFalse();
+      expect(payPalApiFallbackUrlForTest('https://api-m.paypal.com/v1/oauth2/token')).assertEqual('https://api.paypal.com/v1/oauth2/token');
+      expect(payPalApiFallbackUrlForTest('https://api-m.sandbox.paypal.com/v2/checkout/orders')).assertEqual('https://api.sandbox.paypal.com/v2/checkout/orders');
+      const help = paypalGooglePayNetworkHelpForTest('paypal', 'google_pay', 'Failed to resolve the host name');
+      expect(help.indexOf('先关闭 VPN')).assertLarger(-1);
+      expect(help.indexOf('Pay with G Pay')).assertLarger(-1);
+      expect(paypalGooglePayNetworkHelpForTest('paypal', 'google_pay', 'HTTP 422 payer action required')).assertEqual('HTTP 422 payer action required');
+    });
+
+    it('renders aggregate mail missing QQ config as real provider status', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: MailSearchArgs = {
+          query: 'newer_than:30d',
+          pageSize: 10,
+          providers: ['qq'],
+          intentSummary: ''
+        };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'mail.search',
+          '帮我看邮箱里最新的重要邮件',
+          'surface_mail_missing_qq',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered.length).assertLarger(0);
+        expect(rendered[0].sourceTag).assertEqual('QQ Mail');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('QQ_MAIL_ADDRESS')).assertLarger(-1);
+        expect(result.raw.indexOf('auth code')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('continues aggregate mail after Gmail auth is missing', 0, async () => {
+      try {
+        configureGmailCredentialStoreForTests(new MemoryCredentialStore());
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: MailSearchArgs = {
+          query: 'newer_than:30d',
+          pageSize: 10,
+          providers: ['gmail', 'qq'],
+          intentSummary: ''
+        };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'mail.search',
+          '帮我查看邮箱里的最新的重要邮件',
+          'surface_mail_gmail_auth',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered.length).assertEqual(2);
+        expect(rendered[0].sourceTag).assertEqual('Gmail');
+        expect(rendered[0].toolName).assertEqual('mail.provider.status');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('Google Workspace MCP OAuth')).assertLarger(-1);
+        expect(rendered[1].sourceTag).assertEqual('QQ Mail');
+        expect(rendered[1].toolName).assertEqual('mail.provider.status');
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('extracts aggregate mail keyword when model timeout falls back without args', 0, () => {
+      const parsed = mailSearchArgs('聚合搜索 Gmail 和 QQ 邮箱里关键词 loopy 的邮件', null);
+
+      expect(parsed.query).assertEqual('newer_than:30d loopy');
+      expect(parsed.providers.length).assertEqual(3);
+      expect(parsed.providers[0]).assertEqual('gmail');
+      expect(parsed.providers[1]).assertEqual('qq');
+      expect(parsed.providers[2]).assertEqual('outlook');
+    });
+
+    it('does not treat latest important as aggregate mail keyword text', 0, () => {
+      const args = JSON.parse('{"query":"最新 重要","providers":["gmail","qq","outlook"]}') as Object;
+      const parsed = mailSearchArgs('帮我查看邮箱里最新的重要邮件', args);
+      const englishArgs = JSON.parse('{"query":"latest important","providers":["gmail","qq","outlook"]}') as Object;
+      const englishParsed = mailSearchArgs('帮我查看邮箱里最新的重要邮件', englishArgs);
+
+      expect(parsed.query).assertEqual('newer_than:30d');
+      expect(englishParsed.query).assertEqual('newer_than:30d');
+      expect(parsed.providers.length).assertEqual(3);
+      expect(parsed.providers[1]).assertEqual('qq');
+    });
+
+    it('does not claim QQ draft success when config is missing', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: MailDraftArgs = {
+          provider: 'qq',
+          accountLabel: '',
+          threadId: '',
+          messageId: 'qq-1',
+          to: ['sender@qq.com'],
+          subject: 'Re: QQ latest',
+          body: 'Thanks.',
+          replyMode: 'reply',
+          contextSummary: ''
+        };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'mail.draft.create',
+          'Create QQ reply draft',
+          'surface_mail_draft_missing_qq',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].sourceTag).assertEqual('QQ Mail');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('missing')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('已保存')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('registers YouTube tools on the same local tool framework', 0, () => {
+      expect(isRegisteredToolId('youtube.video.search')).assertTrue();
+      expect(isRegisteredToolId('youtube.mine.playlists')).assertTrue();
+      expect(isRegisteredToolId('youtube.mine.subscriptions')).assertTrue();
+      expect(isRegisteredToolId('media.video.search')).assertTrue();
+      expect(isRegisteredToolId('youtube.unknown')).assertFalse();
+    });
+
+    it('registers Calendar and Maps tools without delete or routes', 0, () => {
+      expect(isRegisteredToolId('calendar.events.search')).assertTrue();
+      expect(isRegisteredToolId('calendar.event.create')).assertTrue();
+      expect(isRegisteredToolId('calendar.event.update')).assertTrue();
+      expect(isRegisteredToolId('maps.place.search')).assertTrue();
+      expect(isRegisteredToolId('maps.place.details')).assertTrue();
+      expect(isRegisteredToolId('calendar.event.delete')).assertFalse();
+      expect(isRegisteredToolId('maps.route.plan')).assertFalse();
+    });
+
+    it('loads Google app API keys and OAuth config from local provider raw JSON', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GOOGLE_MAPS_API_KEY: 'maps-key',
+          YOUTUBE_API_KEY: 'youtube-key',
+          GOOGLE_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GOOGLE_OAUTH_CLIENT_SECRET: 'secret-456',
+          GOOGLE_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google',
+          GOOGLE_CLOUD_PROJECT: 'aiphone-cloud'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('googleMapsApiKey=present(8)')).assertLarger(-1);
+        expect(summary.indexOf('youtubeApiKey=present(11)')).assertLarger(-1);
+        expect(summary.indexOf('googleOauthClientId=present(37)')).assertLarger(-1);
+        expect(summary.indexOf('gmailMcpUserProject=present')).assertLarger(-1);
+        expect(summary.indexOf('youtube-key')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders Maps missing-key errors without falling back to food search', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'maps.place.search',
+          '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店',
+          'surface_maps_missing_key',
+          'model_tool_request',
+          noop
+        );
+        expect(result.ok).assertTrue();
+        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(result.surface)[0].toolName).assertEqual('maps.place.search');
+        expect(genericToolResults(result.surface)[0].sourceTag).assertEqual('Google Places API');
+        expect(result.raw.indexOf('GOOGLE_MAPS_API_KEY')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders Calendar auth errors without fake events', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.events.search',
+          '帮我看今天的 Google Calendar 日程',
+          'surface_calendar_auth',
+          'model_tool_request',
+          noop
+        );
+        expect(result.ok).assertTrue();
+        expect(dynamicToolConnect(result.surface).toolId).assertEqual('calendar.events.search');
+        expect(dynamicToolConnect(result.surface).credentialName).assertEqual('Google OAuth');
+        expect(dynamicToolConnect(result.surface).actions[0].id).assertEqual('calendar.authorize');
+        expect(result.raw.indexOf('Google Calendar OAuth')).assertLarger(-1);
+        expect(result.raw.indexOf('AIPhoneDemo smoke')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('builds a direct Google consent URL for Calendar auth when client config is present', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google',
+          GMAIL_MCP_USER_PROJECT: 'gen-lang-client-0449715219'
+        }));
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const authResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.events.search',
+          '帮我看今天的 Google Calendar 日程',
+          'surface_calendar_auth_with_client',
+          'client_intent_fallback',
+          noop
+        );
+
+        const authAction = dynamicToolConnect(authResult.surface).actions[0];
+        expect(authResult.ok).assertTrue();
+        expect(authAction.id).assertEqual('calendar.authorize');
+        expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
+        expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('calendar.events')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('console.cloud.google.com')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('returns Gmail auth-required, blocked, and open-web A2UI from the local gateway', 0, async () => {
@@ -225,34 +599,115 @@ export default function toolGatewayClientTest() {
       expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
     });
 
-    it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
-      configureLocalProviderConfigFromRawJson(JSON.stringify({
-        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-      }));
+    it('renders YouTube API key errors without fake videos', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: YouTubeSearchArgsFixture = {
+          query: 'qwen max 官方介绍视频'
+        };
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'youtube.video.search',
+          '帮我在 YouTube 搜索 qwen max 官方介绍视频',
+          'surface_youtube_missing_key',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
 
+        expect(result.ok).assertTrue();
+        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
+        expect(result.raw.indexOf('YOUTUBE_API_KEY')).assertLarger(-1);
+        expect(result.raw.indexOf('fake')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('dispatches media video search locally without network when YouTube key is missing', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: MediaVideoSearchArgsFixture = {
+          query: 'qwen max',
+          sources: ['youtube']
+        };
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'media.video.search',
+          '帮我搜 qwen max 视频',
+          'surface_media_youtube_missing_key',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(result.ok).assertTrue();
+        expect(rendered.length).assertLarger(0);
+        expect(rendered[0].toolName).assertEqual('media.video.search');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].sourceTag).assertEqual('YouTube Data API');
+        expect(rendered[0].rows.length).assertLarger(0);
+        expect(rendered[0].summary.indexOf('YOUTUBE_API_KEY')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders YouTube account tools as auth-required without fake playlists', 0, async () => {
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const authResult: A2uiCallResult = await callToolGateway(
+      const result: A2uiCallResult = await callToolGateway(
         defaultToolGatewayUrl(),
-        'gmail.mail.search',
-        '帮我看下 Gmail 最近的重要邮件',
-        'surface_gmail_auth_with_client',
-        'client_intent_fallback',
+        'youtube.mine.playlists',
+        '帮我看我的 YouTube 播放列表',
+        'surface_youtube_auth',
+        'model_tool_request',
         noop
       );
 
-      configureLocalProviderConfigFromRawJson('{}');
+      expect(result.ok).assertTrue();
+      expect(genericToolResults(result.surface)[0].status).assertEqual('auth_required');
+      expect(result.raw.indexOf('不会模拟播放列表')).assertLarger(-1);
+      expect(result.raw.indexOf('fake')).assertEqual(-1);
+    });
 
-      const authAction = dynamicToolConnect(authResult.surface).actions[0];
-      expect(authResult.ok).assertTrue();
-      expect(authAction.id).assertEqual('gmail.authorize');
-      expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
-      expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
-      expect(authAction.prompt.indexOf('code_challenge_method=S256')).assertLarger(-1);
+    it('builds a Google OAuth authorization URL for Gmail MCP when client config is present', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const authResult: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '帮我看下 Gmail 最近的重要邮件',
+          'surface_gmail_auth_with_client',
+          'client_intent_fallback',
+          noop
+        );
+
+        const authAction = dynamicToolConnect(authResult.surface).actions[0];
+        expect(authResult.ok).assertTrue();
+        expect(authAction.id).assertEqual('gmail.authorize');
+        expect(authAction.prompt.indexOf('https://accounts.google.com/o/oauth2/v2/auth?')).assertEqual(0);
+        expect(authAction.prompt.indexOf('client_id=client-123.apps.googleusercontent.com')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('redirect_uri=com.example.aiphonedemo%3A%2Foauth%2Fgoogle')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('gmail.readonly')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('gmail.compose')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('calendar.events')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('code_challenge=')).assertLarger(-1);
+        expect(authAction.prompt.indexOf('code_challenge_method=S256')).assertLarger(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('uses stored Gmail OAuth tokens to call Gmail MCP without asking auth again', 0, async () => {
@@ -265,33 +720,202 @@ export default function toolGatewayClientTest() {
         scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
       });
       const mcp = new FixtureGmailMcpClient();
-      configureLocalProviderConfigFromRawJson(JSON.stringify({
-        GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
-        GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
-      }));
-      configureGmailCredentialStoreForTests(store);
-      configureGmailMcpClientForTests(mcp);
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+        configureGmailCredentialStoreForTests(store);
+        configureGmailMcpClientForTests(mcp);
 
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const result: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.mail.search',
-        '帮我看 Gmail 里最新的重要邮件',
-        'surface_gmail_mcp',
-        'client_intent_fallback',
-        noop
-      );
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '帮我看 Gmail 里最新的重要邮件',
+          'surface_gmail_mcp',
+          'client_intent_fallback',
+          noop
+        );
 
-      configureGmailCredentialStoreForTests(null);
-      configureGmailMcpClientForTests(null);
-      configureLocalProviderConfigFromRawJson('{}');
+        expect(result.ok).assertTrue();
+        expect(result.surface.status).assertEqual('ready');
+        expect(genericToolResults(result.surface)[0].title).assertEqual('Important launch thread');
+        expect(mcp.lastToolName).assertEqual('search_threads');
+        expect(mcp.lastCredential).assertEqual('stored-access-token');
+        expect(mcp.lastArgs.indexOf('newer_than:30d')).assertLarger(-1);
+        expect(mcp.lastArgs.indexOf('-in:draft')).assertLarger(-1);
+        expect(mcp.lastArgs.indexOf('is:important')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
 
-      expect(result.ok).assertTrue();
-      expect(result.surface.status).assertEqual('ready');
-      expect(genericToolResults(result.surface)[0].title).assertEqual('Important launch thread');
-      expect(mcp.lastToolName).assertEqual('search_threads');
-      expect(mcp.lastCredential).assertEqual('stored-access-token');
-      expect(mcp.lastArgs.indexOf('is:important')).assertLarger(-1);
+    it('passes structured Gmail args to stored-token Gmail MCP calls', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      const mcp = new FixtureGmailMcpClient();
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+        configureGmailCredentialStoreForTests(store);
+        configureGmailMcpClientForTests(mcp);
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: GmailToolArgsFixture = {
+          query: 'from:committee@example.edu subject:"decision"',
+          pageSize: 4,
+          intentSummary: '模型结构化查询'
+        };
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '原始 prompt 不应决定 Gmail 搜索语义',
+          'surface_gmail_mcp_args',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+
+        expect(result.ok).assertTrue();
+        expect(mcp.lastToolName).assertEqual('search_threads');
+        expect(mcp.lastArgs.indexOf('committee@example.edu')).assertLarger(-1);
+        expect(mcp.lastArgs.indexOf('-in:draft')).assertLarger(-1);
+        expect(mcp.lastArgs.indexOf('is:important')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders a Gmail error result when stored Gmail token cannot reach MCP', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+        configureGmailCredentialStoreForTests(store);
+        configureGmailMcpClientForTests(new FailingGmailMcpClient());
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '帮我看 Gmail 里最新的重要邮件',
+          'surface_gmail_mcp_timeout',
+          'client_intent_fallback',
+          noop
+        );
+
+        expect(result.ok).assertTrue();
+        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail MCP 调用失败');
+        expect(genericToolResults(result.surface)[0].summary.indexOf('Operation timeout')).assertLarger(-1);
+        expect(result.raw.indexOf('Gmail MCP 调用失败')).assertLarger(-1);
+        expect(result.raw.indexOf('打开 Gmail Web')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders Gmail returned error results instead of relabeling them as auth', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+        configureGmailCredentialStoreForTests(store);
+        configureGmailMcpClientForTests(new ErrorResultGmailMcpClient());
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
+          'surface_gmail_error_result',
+          'client_intent_fallback',
+          noop
+        );
+
+        expect(result.ok).assertTrue();
+        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail API 调用失败');
+        expect(genericToolResults(result.surface)[0].summary.indexOf('Missing recipient email address')).assertLarger(-1);
+        expect(result.raw.indexOf('Gmail API 调用失败')).assertLarger(-1);
+        expect(result.raw.indexOf('打开 Gmail Web')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('does not fall back to Gmail MCP when the local Gmail API adapter returns an error', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await saveGmailOAuthTokenSet(store, {
+        access_token: 'stored-access-token',
+        refresh_token: 'stored-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose'
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          GMAIL_OAUTH_CLIENT_ID: 'client-123.apps.googleusercontent.com',
+          GMAIL_OAUTH_REDIRECT_URI: 'com.example.aiphonedemo:/oauth/google'
+        }));
+        configureGmailCredentialStoreForTests(store);
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了',
+          'surface_gmail_api_error_no_mcp',
+          'client_intent_fallback',
+          noop
+        );
+
+        expect(result.ok).assertTrue();
+        expect(genericToolResults(result.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(result.surface)[0].title).assertEqual('Gmail API 调用失败');
+        expect(genericToolResults(result.surface)[0].summary.indexOf('Missing recipient email address')).assertLarger(-1);
+        expect(result.raw.indexOf('Gmail MCP 调用失败')).assertEqual(-1);
+      } finally {
+        configureGmailCredentialStoreForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('keeps brand MCP adapters query-only', 0, () => {
@@ -598,20 +1222,30 @@ export default function toolGatewayClientTest() {
         distance: '0.1千米',
         sourceTags: ['美团']
       };
+      const google: A2uiFoodData = {
+        name: '喜茶 深圳科技园店',
+        category: 'Google Places',
+        address: '南山科技园',
+        distance: '',
+        location: '113.943,22.541',
+        sourceTags: ['Google Maps']
+      };
 
       const merged = aggregateFoodProviderResults([
         { provider: '高德', foods: [amap], error: '' },
         { provider: '美团', foods: [meituan], error: '' },
         { provider: '腾讯地图', foods: [{ name: '喜茶-深圳科技园店', category: '美食', address: '科技园', distance: '100米', sourceTags: ['腾讯地图'] }], error: '' },
+        { provider: 'Google Maps', foods: [google], error: '' },
         { provider: '淘宝闪购', foods: [], error: '未配置 TAOBAO_APP_KEY' }
       ]);
 
       expect(merged.foods.length).assertEqual(1);
       const tags = merged.foods[0].sourceTags === undefined ? [] : merged.foods[0].sourceTags;
-      expect(tags.length).assertEqual(3);
+      expect(tags.length).assertEqual(4);
       expect(tags[0]).assertEqual('高德');
       expect(tags[1]).assertEqual('美团');
       expect(tags[2]).assertEqual('腾讯地图');
+      expect(tags[3]).assertEqual('Google Maps');
       expect(providerIssueRows(merged.issues)[0].label).assertEqual('淘宝闪购');
     });
 
@@ -801,6 +1435,73 @@ export default function toolGatewayClientTest() {
       expect(merged.foods[2].name).assertEqual('近距离单源店');
     });
 
+    it('prioritizes preferred Luckin food results without fabricating rows', 0, () => {
+      const merged = aggregateFoodProviderResults([
+        {
+          provider: '高德',
+          foods: [{
+            name: '普通咖啡店',
+            category: '咖啡',
+            address: 'A',
+            distance: '100米',
+            sourceTags: ['高德']
+          }],
+          error: ''
+        },
+        {
+          provider: '瑞幸',
+          foods: [{
+            name: '瑞幸咖啡 深圳店',
+            category: '瑞幸门店',
+            address: 'B',
+            distance: '900米',
+            sourceTags: ['瑞幸']
+          }],
+          error: ''
+        }
+      ], {
+        brandPreference: '瑞幸',
+        sweetness: '半糖'
+      });
+
+      expect(merged.foods.length).assertEqual(2);
+      expect(merged.foods[0].name.indexOf('瑞幸')).assertLarger(-1);
+      expect(merged.foods[0].sourceTags === undefined ? '' : merged.foods[0].sourceTags![0]).assertEqual('瑞幸');
+    });
+
+    it('filters to Luckin rows for strict Luckin-only preference', 0, () => {
+      const merged = aggregateFoodProviderResults([
+        {
+          provider: '高德',
+          foods: [{
+            name: '普通咖啡店',
+            category: '咖啡',
+            address: 'A',
+            distance: '100米',
+            sourceTags: ['高德']
+          }],
+          error: ''
+        },
+        {
+          provider: '瑞幸',
+          foods: [{
+            name: '瑞幸咖啡 深圳店',
+            category: '瑞幸门店',
+            address: 'B',
+            distance: '900米',
+            sourceTags: ['瑞幸']
+          }],
+          error: ''
+        }
+      ], {
+        brandPreference: '瑞幸',
+        brandStrict: true
+      });
+
+      expect(merged.foods.length).assertEqual(1);
+      expect(merged.foods[0].name.indexOf('瑞幸')).assertLarger(-1);
+    });
+
     it('keeps later map provider tags visible when Amap fills the limit first', 0, () => {
       const amapFoods: A2uiFoodData[] = [];
       for (let index = 0; index < 8; index++) {
@@ -844,6 +1545,33 @@ export default function toolGatewayClientTest() {
       expect(firstTags.indexOf('高德')).assertLarger(-1);
       expect(firstTags.indexOf('腾讯地图')).assertLarger(-1);
       expect(firstTags.indexOf('百度地图')).assertLarger(-1);
+    });
+
+    it('keeps one Google Maps row visible when earlier providers fill the food limit', 0, () => {
+      const amapFoods: A2uiFoodData[] = [];
+      for (let index = 0; index < 30; index++) {
+        amapFoods.push({
+          name: '高德餐饮 ' + index.toString(),
+          category: '餐饮服务',
+          address: '高德地址 ' + index.toString(),
+          distance: (100 + index).toString() + '米',
+          sourceTags: ['高德']
+        });
+      }
+      const merged = aggregateFoodProviderResults([
+        { provider: '高德', foods: amapFoods, error: '' },
+        { provider: 'Google Maps', foods: [{ name: 'NCafe', category: 'Google Places', address: '坂田', distance: '', location: '114.1,22.6', sourceTags: ['Google Maps'] }], error: '' }
+      ]);
+      let hasGoogle = false;
+      for (let index = 0; index < merged.foods.length; index++) {
+        const tags = merged.foods[index].sourceTags;
+        if (tags !== undefined) {
+          hasGoogle = hasGoogle || tags.indexOf('Google Maps') >= 0;
+        }
+      }
+
+      expect(merged.foods.length).assertEqual(24);
+      expect(hasGoogle).assertTrue();
     });
 
     it('keeps more than the default visible food rows for client show more', 0, () => {
@@ -963,6 +1691,120 @@ export default function toolGatewayClientTest() {
       expect(emittedAt.length).assertEqual(3);
       expect(emittedAt[1] - emittedAt[0]).assertLarger(10);
       expect(emittedAt[2] - emittedAt[1]).assertLarger(10);
+    });
+
+    it('renders payment amount completion before provider checkout', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给罗一格转账' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '用 PayPal 给罗一格转账',
+          'surface_payment_amount',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.toolName).assertEqual('payment.send');
+        expect(rendered.title).assertEqual('补充金额');
+        expect(result.raw.indexOf('payment.amount.select')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('uses locally saved payment accounts in payment.send', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureLocalPaymentAccountBookJson(JSON.stringify([{
+          id: 'dana_saved',
+          displayName: 'Dana Saved',
+          aliases: ['Dana Saved', '小丹'],
+          email: '',
+          paypalEmail: 'dana@example.com',
+          paypalMerchantId: '',
+          stripeAccountId: '',
+          stripePaymentLinkUrl: '',
+          enabled: true
+        }]));
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: '用 PayPal 给 Dana Saved 转账' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '用 PayPal 给 Dana Saved 转账',
+          'surface_payment_saved_account',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('补充金额');
+        expect(rendered.summary.indexOf('Dana Saved')).assertLarger(-1);
+        expect(JSON.stringify(rendered.rows).indexOf('dana@example.com')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.amount.select')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('renders payment confirmation without creating provider session first', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const query = '用 PayPal 给罗一格转 5 美元';
+        const args: PaymentTestArgs = { provider: 'paypal', originalQuery: query };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          query,
+          'surface_payment_confirm',
+          'model_tool_request',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('确认支付');
+        expect(rendered.summary.indexOf('罗一格')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.confirm')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('turns Stripe Payment Link confirmation into app checkout action', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const args: PaymentTestArgs = { provider: 'stripe', recipient: 'External Cafe', phase: 'confirm' };
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'payment.send',
+          '打开 External Cafe 的 Stripe 付款页',
+          'surface_payment_checkout',
+          'payment.confirm',
+          noop,
+          null,
+          args
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(rendered.title).assertEqual('打开支付确认页');
+        expect(JSON.stringify(rendered.rows).indexOf('https://buy.stripe.com/')).assertLarger(-1);
+        expect(result.raw.indexOf('payment.checkout.open')).assertLarger(-1);
+        expect(result.raw.indexOf('client')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
   });
 }

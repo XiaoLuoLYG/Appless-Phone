@@ -6,9 +6,11 @@ import {
   A2uiTrainData,
   A2uiTravelOptionData,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
+} from '@loop/agent-core';
+import { personaMemoryData, personaRuntimeData } from '@loop/agent-core';
 import { rootComponentIdOf } from '../render/A2uiRenderData';
 import { A2uiNodeView } from './A2uiNodeView';
+import { PersonaStatusView } from './PersonaStatusView';
 import { QueryPendingSurfaceView } from './QueryPendingSurfaceView';
 
 @Component
@@ -32,25 +34,32 @@ export struct A2uiSurfaceView {
       if (this.showPendingSurface) {
         QueryPendingSurfaceView()
       } else if (this.hasRenderableSurface()) {
-        A2uiNodeView({
-          surface: this.surface,
-          componentId: rootComponentIdOf(this.surface),
-          renderTick: this.renderTick,
-          isBusy: this.isBusy,
-          onAction: this.onAction,
-          onPinNavigationCard: (item: A2uiFoodData) => {
-            this.onPinNavigationCard(item);
-          },
-          onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
-            this.onPinTravelNavigationCard(item);
-          },
-          onPinTrainNavigationCard: (item: A2uiTrainData) => {
-            this.onPinTrainNavigationCard(item);
-          },
-          onPinFlightNavigationCard: (item: A2uiFlightData) => {
-            this.onPinFlightNavigationCard(item);
-          }
-        })
+        Column() {
+          PersonaStatusView({
+            persona: personaRuntimeData(this.surface),
+            personaMemory: personaMemoryData(this.surface)
+          })
+          A2uiNodeView({
+            surface: this.surface,
+            componentId: rootComponentIdOf(this.surface),
+            renderTick: this.renderTick,
+            isBusy: this.isBusy,
+            onAction: this.onAction,
+            onPinNavigationCard: (item: A2uiFoodData) => {
+              this.onPinNavigationCard(item);
+            },
+            onPinTravelNavigationCard: (item: A2uiTravelOptionData) => {
+              this.onPinTravelNavigationCard(item);
+            },
+            onPinTrainNavigationCard: (item: A2uiTrainData) => {
+              this.onPinTrainNavigationCard(item);
+            },
+            onPinFlightNavigationCard: (item: A2uiFlightData) => {
+              this.onPinFlightNavigationCard(item);
+            }
+          })
+        }
+        .width('100%')
       }
     }
     .width('100%')

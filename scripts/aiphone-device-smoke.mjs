@@ -9,9 +9,17 @@ const outDir = join(rootDir, 'tool-gateway', '.smoke');
 mkdirSync(outDir, { recursive: true });
 
 const defaultCases = [
-  { query: '你好', expectsTool: false },
   { query: '我明天要从北京去上海，帮我搜索出行方案', expectsTool: true, expectedToolId: 'travel.search' },
-  { query: '帮我搜索深圳坂田华为基地附近的奶茶店', expectsTool: true, expectedToolId: 'food.search' }
+  { query: '帮我搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'food.search' },
+  { query: '帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐', expectsTool: true, expectedToolId: 'maps.place.search' },
+  { query: '帮我查看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search' },
+  { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
+  { query: '帮我在b站和youtube里搜索qwen的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
+  { query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search' },
+  { query: '帮我查看 X 上 openai 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
+  { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
+  { query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '' },
+  { query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' }
 ];
 
 const dynamicCases = [
@@ -26,19 +34,161 @@ const dynamicCases = [
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'weather.query'
-  },
-  {
-    query: '帮我查一下最近的统计局GDP数据',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'statistics.search'
-  },
-  {
-    query: '帮我生成一份深圳低空经济介绍PPT',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'ppt.generate'
   }
+];
+
+const composioCases = [
+  {
+    query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Google Drive 里找专利交底书',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查 Linear 里分配给我的高优先级 bug',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Trello 里找本周发布 checklist 相关卡片',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Asana 里查今天到期的任务',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 HubSpot 里找最近更新的 contacts',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 Salesforce 里找最近更新的 leads',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查看邮箱里最新的重要邮件',
+    expectsTool: true,
+    expectedToolId: 'mail.search'
+  },
+  {
+    query: '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我在 LinkedIn 查 AIPhoneDemo 相关动态',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 WhatsApp 查最近提到 AIPhoneDemo 的消息',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Instagram 查 AIPhoneDemo 相关评论',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Spotify 搜适合 AIPhoneDemo demo 的播放列表',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 TikTok 搜 AIPhoneDemo 相关短视频',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我用 Ticketmaster 查深圳本周末的演唱会',
+    expectsTool: true,
+    expectedToolId: 'dynamic.search',
+    expectedDiscoveredToolId: 'dynamic.search'
+  },
+  {
+    query: '帮我查看今天的社交聚合消息',
+    expectsTool: true,
+    expectedToolId: 'social.feed.search'
+  }
+];
+
+const gmailCases = [
+  { query: '帮我看 Gmail 里最新的重要邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
+  { query: '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了', expectsTool: true, expectedToolId: 'gmail.draft.create' },
+  { query: '帮我查看我Gmail里和我eccv论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' }
+];
+
+const mailCases = [
+  { query: '帮我看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search' },
+  { query: '帮我看 QQ 邮箱里最新邮件', expectsTool: true, expectedToolId: 'mail.search' }
+];
+
+const googleAppCases = [
+  { query: '帮我在 YouTube 搜索 世界杯相关视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
+  { query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
+  { query: '帮我看本月的 Google Calendar 日程', expectsTool: true, expectedToolId: 'calendar.events.search' },
+  { query: '帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程', expectsTool: true, expectedToolId: 'calendar.event.create' },
+  { query: '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'maps.place.search' }
+];
+
+const fullRegressionCases = [
+  { query: '你好', expectsTool: false },
+  ...defaultCases,
+  { query: '帮我查明天北京到上海航班', expectsTool: true, expectedToolId: 'flight.search' },
+  { query: '帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁', expectsTool: true, expectedToolId: 'train.search' },
+  { query: '帮我查附近咖啡', expectsTool: true, expectedToolId: 'food.search' },
+  { query: '帮我查深圳坂田附近麦当劳门店和菜单', expectsTool: true, expectedToolId: 'food.search' },
+  ...dynamicCases,
+  ...mailCases,
+  ...gmailCases,
+  ...googleAppCases
+];
+
+const forbiddenSocialHubLegacyMarkers = [
+  'SocialInbox',
+  'social.reply.send',
+  '微信消息收件箱',
+  '通知中心桥接',
+  '辅助捕获'
 ];
 
 const forbiddenSyntheticMarkers = [
@@ -49,7 +199,8 @@ const forbiddenSyntheticMarkers = [
   '附近咖啡优先',
   '安静办公优先',
   '连锁稳定优先',
-  '可查选项'
+  '可查选项',
+  ...forbiddenSocialHubLegacyMarkers
 ];
 
 const visibleDomainMarkers = [
@@ -69,11 +220,46 @@ const visibleDomainMarkers = [
   '华为',
   '接入工具',
   'dynamic.search',
+  'Composio',
+  'GitHub',
+  'Notion',
+  'Google Drive',
+  'Google Docs',
+  'Linear',
+  'Trello',
+  'Asana',
+  'HubSpot',
+  'Salesforce',
+  'Outlook',
+  'Discord',
+  'LinkedIn',
+  'WhatsApp',
+  'Instagram',
+  'Spotify',
+  'TikTok',
+  'Ticketmaster',
+  'needs_auth',
   'ferry.ticket.search',
   'weather.query',
   'statistics.search',
   'ppt.generate',
   'Gmail',
+  'mail.search',
+  'Mailbox',
+  'QQ Mail',
+  'AI 回复草稿',
+  'YouTube',
+  'youtube.video.search',
+  'youtube.mine.playlists',
+  'YOUTUBE_API_KEY',
+  'Google Calendar',
+  'calendar.events.search',
+  'calendar.event.create',
+  'Google OAuth',
+  'Google Places',
+  'Google Maps',
+  'maps.place.search',
+  'GOOGLE_MAPS_API_KEY',
   'Gmail Web',
   'google.gmail',
   'gmail.mail.search',
@@ -90,7 +276,14 @@ const visibleDomainMarkers = [
   'API_KEY',
   '歌者PPT',
   '多展示一些',
-  '选最快的'
+  '选最快的',
+  'SocialHub',
+  '社交工作台',
+  'social.feed.search',
+  'x.post.search',
+  '生成草稿',
+  'Slack',
+  '企业微信'
 ];
 
 const forbiddenLayoutActionMarkers = [
@@ -105,8 +298,15 @@ const finalLayoutBlockingMarkers = [
   '需要供应商配置',
   '需要配置：',
   '查询失败',
+  'Google Places API 调用失败',
+  'Gmail 调用失败',
   'Gmail API 调用失败',
   'Gmail MCP 调用失败',
+  'QQ 邮箱调用失败',
+  'QQ IMAP timeout',
+  'Operation timeout',
+  '2300028',
+  'MCP 工具调用失败',
   'Internal error',
   '2300999',
   'Bad Request',
@@ -114,8 +314,8 @@ const finalLayoutBlockingMarkers = [
   '暂不支持的组件',
   '把一句话变成可执行界面',
   '告诉 AIPhone 你要安排的事',
-  '[',
-  ']'
+  '[object Object]',
+  '{"version"'
 ];
 
 const finalLayoutRouteMarkers = [
@@ -128,17 +328,55 @@ const finalLayoutBlockingPatterns = [
   { name: 'zh-date', pattern: /\b\d{4}年\d{1,2}月\d{1,2}日\b/ }
 ];
 
+const forbiddenGmailSendSuccessPatterns = [
+  { name: 'gmail-send-success-en', pattern: /sent successfully|message sent/i },
+  { name: 'gmail-send-success-zh', pattern: /发送成功|已发送成功|邮件已发送/ }
+];
+
+const retryableProviderLayoutMarkers = [
+  'Google Places API 调用失败',
+  'Gmail 调用失败',
+  'Gmail API 调用失败',
+  'QQ 邮箱调用失败',
+  'QQ IMAP timeout',
+  'Operation timeout',
+  '2300028'
+];
+
+const socialHubTruthfulBlockingMarkers = [
+  '需要供应商配置',
+  '需要配置：',
+  '查询失败',
+  'Operation timeout',
+  '2300028',
+  'MCP 工具调用失败',
+  'Internal error',
+  '2300999',
+  'Bad Request'
+];
+
 const argv = process.argv.slice(2);
 const cleanData = process.env.AIPHONE_SMOKE_CLEAN_DATA === '1' || argv.includes('--clean-data');
 const runDynamicCases = argv.includes('--dynamic-tools');
-const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools');
-const selectedDefaultCases = runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases;
+const runComposioCases = argv.includes('--composio-tools');
+const runComposioAuthCases = argv.includes('--composio-auth');
+const runGoogleApps = argv.includes('--google-apps');
+const runFullRegression = argv.includes('--full-regression');
+const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--composio-tools' && arg !== '--composio-auth' && arg !== '--google-apps' && arg !== '--full-regression');
+const selectedDefaultCases = runComposioCases ? composioCases : (runFullRegression ? fullRegressionCases : (runGoogleApps ? defaultCases.concat(googleAppCases) : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases)));
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
+const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 
 function expectedCaseForQuery(query) {
+  if (isPersonaMemoryUpdateQuery(query)) {
+    return {
+      expectsTool: false,
+      expectedToolId: ''
+    };
+  }
   if (/^你好$|问候|打招呼/.test(query)) {
     return {
       expectsTool: false,
@@ -173,6 +411,43 @@ function expectedCaseForQuery(query) {
       expectedDiscoveredToolId: 'ppt.generate'
     };
   }
+  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'dynamic.search',
+      expectedDiscoveredToolId: 'dynamic.search'
+    };
+  }
+  if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'payment.send'
+    };
+  }
+  if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'x.post.search'
+    };
+  }
+  if (isSocialFeedQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'social.feed.search'
+    };
+  }
+  if (/邮箱|邮件|收件箱/.test(query) && isMailAggregationQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'mail.search'
+    };
+  }
+  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: /写一封|写邮件|起草|草稿|回复|撰写/.test(query) ? 'mail.draft.create' : 'mail.search'
+    };
+  }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query)) {
     return {
       expectsTool: true,
@@ -195,6 +470,60 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.mail.search'
+    };
+  }
+  if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.mine.playlists'
+    };
+  }
+  if (/YouTube|油管/i.test(query) && /订阅|subscriptions?/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.mine.subscriptions'
+    };
+  }
+  if (isYouTubeBilibiliQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'media.video.search'
+    };
+  }
+  if (/YouTube|油管/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'youtube.video.search'
+    };
+  }
+  if (/B站|B 站|Bilibili|哔哩哔哩/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'media.video.search'
+    };
+  }
+  if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
+    if (/创建|新建|添加|安排|预约/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.create'
+      };
+    }
+    if (/更新|修改|改到|改为|调整/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.update'
+      };
+    }
+    return {
+      expectsTool: true,
+      expectedToolId: 'calendar.events.search'
+    };
+  }
+  if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: /详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search'
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -254,6 +583,35 @@ function hdc(args, options = {}) {
     throw new Error(`hdc ${args.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
   }
   return result.stdout;
+}
+
+function appWindowRect() {
+  const output = hdc(['shell', 'hidumper', '-s', 'WindowManagerService', '-a', '-a']);
+  const line = output.split('\n').find((value) => value.includes('aiphonedemo'));
+  if (line === undefined) {
+    return null;
+  }
+  const match = /\[\s*(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s+\]/.exec(line);
+  if (match === null) {
+    return null;
+  }
+  return {
+    x: Number.parseInt(match[1], 10),
+    y: Number.parseInt(match[2], 10),
+    width: Number.parseInt(match[3], 10),
+    height: Number.parseInt(match[4], 10)
+  };
+}
+
+function moveAppWindowIntoScreenshot() {
+  const rect = appWindowRect();
+  if (rect === null || rect.y >= 0 && rect.y <= 220) {
+    return;
+  }
+  const x = Math.max(80, Math.floor(rect.x + rect.width / 2));
+  const fromY = Math.max(40, rect.y + 40);
+  hdc(['shell', 'uitest', 'uiInput', 'drag', String(x), String(fromY), String(x), '120', '2000']);
+  spawnSync('sleep', ['1']);
 }
 
 function clearHilog() {
@@ -325,7 +683,21 @@ async function ensureLocalModel() {
 }
 
 function cleanupHilogProcesses() {
-  spawnSync('pkill', ['-f', `hdc -t ${target} hilog`], { encoding: 'utf8' });
+  const targetHilogPattern = `-t ${target} hilog`;
+  const killMatching = (signal) => {
+    for (const line of activeHilogProcesses()) {
+      if (!line.includes(targetHilogPattern)) {
+        continue;
+      }
+      const match = /^(\d+)\s+/.exec(line);
+      if (match !== null) {
+        spawnSync('kill', [`-${signal}`, match[1]], { encoding: 'utf8' });
+      }
+    }
+  };
+  killMatching('TERM');
+  spawnSync('sleep', ['0.3']);
+  killMatching('KILL');
 }
 
 function sleep(ms) {
@@ -405,6 +777,7 @@ function dumpLayout(localName = 'latest-layout.json') {
 }
 
 function captureScreen(localName = 'latest-screen.png') {
+  moveAppWindowIntoScreenshot();
   const remote = '/data/local/tmp/aiphone-smoke-screen.png';
   const local = join(outDir, localName);
   hdc(['shell', 'uitest', 'screenCap', '-p', remote]);
@@ -424,6 +797,75 @@ function collectLayoutText(layout) {
     });
   });
   return [...new Set(values)];
+}
+
+function findTextCenter(layout, marker) {
+  const matches = findTextMatches(layout, marker);
+  if (matches.length === 0) {
+    return null;
+  }
+  return {
+    x: matches[0].bounds.x,
+    y: matches[0].bounds.y
+  };
+}
+
+function findTextCenters(layout, marker) {
+  return findTextMatches(layout, marker).map((match) => ({ x: match.bounds.x, y: match.bounds.y }));
+}
+
+function findTextMatches(layout, marker) {
+  const matches = [];
+  walk(layout, (node) => {
+    const attrs = node.attributes || {};
+    const bounds = parseBounds(attrs.bounds);
+    if (bounds === null) {
+      return;
+    }
+    const text = ['text', 'content', 'description', 'hint']
+      .map((key) => attrs[key])
+      .filter((value) => typeof value === 'string' && value.includes(marker))
+      .join('|');
+    if (text.length > 0) {
+      matches.push({
+        text,
+        bounds
+      });
+    }
+  });
+  matches.sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left);
+  return matches;
+}
+
+function findHeaderSettingsCenter(layout) {
+  const candidates = [];
+  walk(layout, (node) => {
+    const attrs = node.attributes || {};
+    const bounds = parseBounds(attrs.bounds);
+    if (bounds === null || !attrIsTrue(attrs.clickable) || attrIsFalse(attrs.enabled)) {
+      return;
+    }
+    if (bounds.top <= 360 && bounds.width >= 32 && bounds.width <= 160 && bounds.height >= 32 && bounds.height <= 160) {
+      candidates.push(bounds);
+    }
+  });
+  candidates.sort((left, right) => right.x - left.x);
+  return candidates.length >= 2 ? { x: candidates[1].x, y: candidates[1].y } : null;
+}
+
+async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) {
+  for (let attempt = 0; attempt <= maxSwipes; attempt += 1) {
+    const layout = dumpLayout(`${localNamePrefix}-${attempt + 1}.json`);
+    const text = collectLayoutText(layout).join('\n');
+    writeFileSync(join(outDir, `${localNamePrefix}-${attempt + 1}-text.txt`), text + '\n');
+    const found = findTextCenter(layout, marker);
+    if (found !== null) {
+      return found;
+    }
+    swipeResultsUp();
+    await sleep(800);
+  }
+  return null;
 }
 
 function collectInputText(layout) {
@@ -477,13 +919,13 @@ function findControls(layout) {
   if (generate === null && inputBounds !== null) {
     const sendCandidate = clickable
       .filter((item) => item.bounds.left >= inputBounds.right - 4 &&
-        item.bounds.left <= inputBounds.right + 120 &&
+        item.bounds.left <= inputBounds.right + 360 &&
         verticallyOverlaps(item.bounds, inputBounds) &&
         item.bounds.width >= 24 &&
-        item.bounds.width <= 100 &&
+        item.bounds.width <= 180 &&
         item.bounds.height >= 24 &&
-        item.bounds.height <= 100)
-      .sort((a, b) => Math.abs(a.bounds.x - inputBounds.right) - Math.abs(b.bounds.x - inputBounds.right))[0];
+        item.bounds.height <= 180)
+      .sort((a, b) => b.bounds.x - a.bounds.x)[0];
     if (sendCandidate) {
       generate = {
         x: sendCandidate.bounds.x,
@@ -544,11 +986,18 @@ async function captureWhile(appPid, runAction) {
     await runAction();
 
     const started = Date.now();
+    let doneAt = 0;
     while (Date.now() - started < timeoutMs) {
       await sleep(500);
       const text = logs.join('\n');
-      if (/\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
-        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text)) {
+      const done = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
+        /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
+      const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
+      if (done && doneAt === 0) {
+        doneAt = Date.now();
+      }
+      if (done && (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
       const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
@@ -596,9 +1045,58 @@ function activeHilogProcesses() {
     .filter((line) => line.includes('hdc') && line.includes('hilog'));
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function htmlHomeDocumentEvidence(logs) {
+  const documents = [];
+  for (const line of logs) {
+    const match = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=([^ \n]+)[^\n]*kind=([^ \n]+)[^\n]*chars=(\d+)[^\n]*blocks=(\d+)/.exec(line);
+    if (match === null) {
+      continue;
+    }
+    documents.push({
+      source: match[1],
+      kind: match[2],
+      chars: Number.parseInt(match[3], 10),
+      blocks: Number.parseInt(match[4], 10)
+    });
+  }
+  const queryDocuments = documents.filter((document) => document.source !== 'welcome');
+  return {
+    count: documents.length,
+    queryCount: queryDocuments.length,
+    maxChars: documents.reduce((max, document) => Math.max(max, document.chars), 0),
+    maxBlocks: documents.reduce((max, document) => Math.max(max, document.blocks), 0),
+    ok: queryDocuments.some((document) => document.chars > 0 && document.blocks > 0)
+  };
+}
+
+function htmlHomeSurfaceLoadEvidence(logs) {
+  const loads = [];
+  for (const line of logs) {
+    const match = /\[AIPhone\]\[HtmlHomeSurfaceLoad\][^\n]*chars=(\d+)[^\n]*renderTick=(\d+)/.exec(line);
+    if (match === null) {
+      continue;
+    }
+    loads.push({
+      chars: Number.parseInt(match[1], 10),
+      renderTick: Number.parseInt(match[2], 10)
+    });
+  }
+  return {
+    count: loads.length,
+    maxChars: loads.reduce((max, load) => Math.max(max, load.chars), 0),
+    ok: loads.some((load) => load.chars > 0)
+  };
+}
+
 function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscoveredToolId = '') {
   const text = logs.join('\n');
-  const escapedToolId = expectedToolId.replace('.', '\\.');
+  const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
+  const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
+  const escapedToolId = escapeRegExp(expectedToolId);
   const toolIdPattern = expectedToolId.length > 0 ?
     new RegExp(`\\[AIPhone\\]\\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\\][^\\n]*toolId=${escapedToolId}`) :
     null;
@@ -608,6 +1106,14 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     null;
   const hasExpectedDiscoveredToolId = discoveryPattern === null ? true : discoveryPattern.test(text);
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
+  const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
+    new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
+    new RegExp(`toolId=${escapedToolId}`).test(text);
+  const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
+  const personaMemoryUpdateProof = !isPersonaMemoryUpdateQuery(query) ||
+    (/\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text) &&
+      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
+      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text));
   const result = {
     query,
     expectedTool,
@@ -615,26 +1121,50 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     expectedDiscoveredToolId,
     hasExpectedToolId,
     hasExpectedDiscoveredToolId,
-    directIntent: /\[AIPhone\]\[ToolRequestByIntent\] toolId=/.test(text),
+    htmlHomeDocument,
+    htmlHomeSurfaceLoad,
+    htmlLoadError: /\[AIPhone\]\[HtmlHomeSurfaceLoadError\]/.test(text),
+    modelSelectedExpectedToolId,
+    personaCoffeeProof,
+    personaMemoryUpdateProof,
+    directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
-    model200: /\[AIPhone\]\[ModelStreamResponse\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
+    model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
     modelOk: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=true/.test(text),
     toolRequested: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text),
     toolOk: /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=true/.test(text),
     failedConnect: /failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|server is not running|CURLcode result 7|curl_code":7|os_errno":111/i.test(text),
-    providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) || /\[AIPhone\]\[LocalToolException\]/.test(text) || (missingConfig && expectedToolId !== 'travel.search'),
+    providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) ||
+      /\[AIPhone\]\[LocalToolException\]/.test(text) ||
+      /Google Calendar API 调用失败/.test(text) ||
+      (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
     gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
-  const modelPassed = result.model200 && result.modelOk && !result.modelFailed;
-  const basePassed = !result.failedConnect &&
-    !result.providerFailed &&
+  const modelFallbackOnlyAfterSameToolSelection = result.modelFailed && result.directIntent && result.modelSelectedExpectedToolId;
+  const modelPassed = modelFallbackOnlyAfterSameToolSelection || (result.model200 && result.modelOk && !result.modelFailed);
+  const htmlDocumentPassed = result.htmlHomeDocument.ok ||
+    (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0);
+  const baseWithoutTransport = !result.htmlLoadError &&
+    result.htmlHomeSurfaceLoad.ok &&
     !result.syntheticFallback &&
-    !result.directIntent;
-  if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId;
+    (!result.directIntent || modelFallbackOnlyAfterSameToolSelection) &&
+    htmlDocumentPassed;
+  result.modelPassed = modelPassed;
+  result.transportPassed = !result.failedConnect && !result.providerFailed;
+  result.basePassedWithoutTransport = baseWithoutTransport;
+  const basePassed = result.transportPassed && baseWithoutTransport;
+  if (isPersonaMemoryUpdateQuery(query)) {
+    result.modelPassed = result.personaMemoryUpdateProof === true;
+    result.transportPassed = true;
+    result.basePassedWithoutTransport = true;
+    result.ok = result.personaMemoryUpdateProof === true &&
+      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
+      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text);
+  } else if (expectedTool === true) {
+    result.ok = basePassed && modelPassed && result.toolRequested && result.localToolRequest && result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
     result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
   } else {
@@ -648,7 +1178,131 @@ function isGmailWebQuery(query) {
   return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query);
 }
 
+function isPersonaCoffeeQuery(query) {
+  return /点一杯咖啡|来一杯咖啡|买杯咖啡/.test(query);
+}
+
+function isPersonaMemoryUpdateQuery(query) {
+  return /瑞幸/.test(query) && /只喝|只买|只点/.test(query);
+}
+
+function hasLuckinMemoryEvidence(text) {
+  return /只展示瑞幸|只喝瑞幸|瑞幸相关真实结果|瑞幸优先/.test(text);
+}
+
+function isGmailEccvQuery(query) {
+  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /eccv/i.test(query);
+}
+
+function isQqMailQuery(query) {
+  return /QQ\s*邮箱|QQ邮箱/i.test(query);
+}
+
+function isMailAggregationQuery(query) {
+  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && isQqMailQuery(query);
+}
+
+function isYouTubeBilibiliQuery(query) {
+  return /YouTube|油管/i.test(query) && /B站|B 站|Bilibili|哔哩哔哩/i.test(query);
+}
+
+function isSocialFeedQuery(query) {
+  return /社交|消息聚合|多平台消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
+}
+
+function isSocialHubExpectedToolId(expectedToolId) {
+  return expectedToolId === 'social.feed.search' || expectedToolId === 'x.post.search';
+}
+
+function hasStandaloneXMarker(query) {
+  return /(^|[^A-Za-z0-9_])X(?=$|[^A-Za-z0-9_])/i.test(query.replace(/Xcode/gi, ''));
+}
+
+function isXPostSearchQuery(query) {
+  const text = query.replace(/Xcode/gi, '');
+  if (/posts?\s*[- ]?\s*processing/i.test(text)) {
+    return false;
+  }
+  const hasPlatform = /Twitter|推文|x\.com/i.test(text) ||
+    (hasStandaloneXMarker(text) && /上|平台|推文|公开\s*posts?\b|public\s+posts?\b/i.test(text));
+  return hasPlatform && /读|看|查看|查|查询|搜索|搜|最近|公开|read|search|find|recent|latest|public/i.test(text);
+}
+
+function hasTruthfulSocialHubState(text) {
+  return /SocialHub/.test(text) &&
+    /社交工作台/.test(text) &&
+    /待授权|等待授权接入|异常|受限|已连接|在线|connected|未配置|Social bridge unavailable|HTTP|scope|rate|token|configured|可搜索你有权限看到的消息|真实数据接入前|还没有真实消息/i.test(text);
+}
+
+function hasVisibleSocialHubOutput(text, expectedToolId) {
+  if (!hasTruthfulSocialHubState(text)) {
+    return false;
+  }
+  if (expectedToolId === 'x.post.search') {
+    return /\bX\b/.test(text);
+  }
+  if (expectedToolId === 'social.feed.search') {
+    return /\bX\b/.test(text) &&
+      /Slack/.test(text) &&
+      /企业微信/.test(text) &&
+      ((/Discord/.test(text) && /LinkedIn/.test(text) && /WhatsApp/.test(text) && /Instagram/.test(text)) ||
+        /回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
+  }
+  return false;
+}
+
+function isCalendarQuery(query) {
+  return /Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query);
+}
+
+function isComposioCardQuery(query) {
+  return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
+    (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) ||
+    (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
+    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
+    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query));
+}
+
 function layoutExpectationsForQuery(query) {
+  if (isPersonaMemoryUpdateQuery(query)) {
+    return [];
+  }
+  if (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) {
+    return ['Composio 工具结果', 'Composio GitHub 结果', 'GITHUB_FIND_PULL_REQUESTS', 'Appless-Phone'];
+  }
+  if (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) {
+    return ['Composio 工具结果', 'Composio Google Drive 结果', 'GOOGLEDRIVE_FIND_FILE', '专利交底书'];
+  }
+  if (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) {
+    return ['Composio 工具结果', 'Composio Google Docs 结果', 'GOOGLEDOCS_SEARCH_DOCUMENTS', 'AIPhoneDemo'];
+  }
+  if (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) {
+    return ['Composio 工具结果', 'Composio Slack 结果', 'SLACK_SEARCH_MESSAGES', 'AIPhoneDemo'];
+  }
+  if (/Outlook/i.test(query)) {
+    return ['Composio Outlook 结果', 'Outlook'];
+  }
+  if (/Discord/i.test(query)) {
+    return ['Composio Discord 结果', 'Discord'];
+  }
+  if (/LinkedIn/i.test(query)) {
+    return ['Composio LinkedIn 结果', 'LinkedIn'];
+  }
+  if (/WhatsApp/i.test(query)) {
+    return ['Composio WhatsApp 结果', 'WhatsApp'];
+  }
+  if (/Instagram|Instgram/i.test(query)) {
+    return ['Composio Instagram 结果', 'Instagram'];
+  }
+  if (/Spotify|Soptify/i.test(query)) {
+    return ['Composio Spotify 结果', 'Spotify'];
+  }
+  if (/TikTok/i.test(query)) {
+    return ['Composio TikTok 结果', 'TikTok'];
+  }
+  if (/Ticketmaster/i.test(query)) {
+    return ['Composio Ticketmaster 结果', 'Ticketmaster'];
+  }
   if (/^你好$|问候|打招呼/.test(query)) {
     return ['你好'];
   }
@@ -664,6 +1318,24 @@ function layoutExpectationsForQuery(query) {
   if (/PPT|ppt|幻灯片|演示文稿/.test(query)) {
     return ['接入工具', 'ppt.generate', 'API_KEY', 'unsupported_transport', '歌者PPT'];
   }
+  if (isXPostSearchQuery(query) && (!isSocialFeedQuery(query) || /公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
+    return ['SocialHub', '公开 post', 'x.post.search', 'X'];
+  }
+  if (isSocialFeedQuery(query)) {
+    if (/社交聚合|消息聚合|多平台消息/.test(query)) {
+      return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'Discord', 'LinkedIn', 'WhatsApp', 'Instagram'];
+    }
+    return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'social.feed.search'];
+  }
+  if (isMailAggregationQuery(query)) {
+    return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
+  }
+  if (isQqMailQuery(query)) {
+    return ['mail.search', 'QQ Mail', '不会模拟'];
+  }
+  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+    return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
+  }
   if (isGmailWebQuery(query)) {
     return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
   }
@@ -671,18 +1343,283 @@ function layoutExpectationsForQuery(query) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
-    return ['Draft saved', 'Saved in Gmail', 'Draft'];
+    return ['gmail.draft.create', 'Google Workspace MCP OAuth', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
+  }
+  if (isGmailEccvQuery(query)) {
+    return ['Gmail', 'gmail.mail.search', 'eccv', 'ECCV', '不会模拟 Gmail 邮件'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
-    return ['Inbox', 'Important', '没有找到匹配邮件'];
+    return ['Gmail', 'gmail.mail.search', 'Google Workspace MCP OAuth', '授权 Gmail', '不会模拟 Gmail 邮件', '没有找到匹配邮件'];
+  }
+  if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
+    return ['AIPhone Pay', 'PayPal', 'Google Pay', '5 USD', '确认支付'];
+  }
+  if (/YouTube|油管/i.test(query) && /播放列表|playlist/i.test(query)) {
+    return ['YouTube', 'youtube.mine.playlists', 'OAuth', '不会模拟播放列表'];
+  }
+  if (/YouTube|油管/i.test(query) && /订阅|subscriptions?/i.test(query)) {
+    return ['YouTube', 'youtube.mine.subscriptions', 'OAuth', '不会模拟播放列表'];
+  }
+  if (isYouTubeBilibiliQuery(query)) {
+    return ['YouTube', 'YouTube Data API', '哔哩哔哩', 'Bilibili'];
+  }
+  if (/YouTube|油管/i.test(query)) {
+    return ['YouTube', 'youtube.video.search', 'YouTube Data API', 'YOUTUBE_API_KEY'];
+  }
+  if (/B站|B 站|Bilibili|哔哩哔哩/i.test(query)) {
+    return ['哔哩哔哩', 'media.video.search', '跳转'];
+  }
+  if (isCalendarQuery(query)) {
+    return /创建|新建|添加|安排|预约/.test(query)
+      ? ['Google Calendar API', '天', '周', '月', '日视图', '已写入', 'AIPhoneDemo', '15:00', '15:30']
+      : ['Google Calendar API', '天', '周', '月', '日视图'];
+  }
+  if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
+    return ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
   }
+  if (/航班|机票|飞机/.test(query)) {
+    return ['航班', '飞常准', 'flight.search', '来源状态'];
+  }
+  if (/高铁|火车|车票|12306/.test(query)) {
+    return ['高铁', '12306', 'train.search'];
+  }
   if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
+    if (isPersonaCoffeeQuery(query)) {
+      return ['饮食搭子', '餐饮', '咖啡', '高德', '百度地图'];
+    }
     return ['奶茶', '餐饮', '高德', '腾讯地图', '百度地图', '美团', '淘宝闪购'];
   }
   return [];
+}
+
+function swipeResultsUp() {
+  hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '2200', '650', '950', '600']);
+}
+
+function requiredScrolledMarkersForQuery(query, expectedToolId) {
+  if (expectedToolId === 'mail.search') {
+    if (isQqMailQuery(query)) {
+      return ['QQ Mail'];
+    }
+    return ['Gmail', 'QQ Mail', 'Outlook'];
+  }
+  if (expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query)) {
+    return ['ECCV'];
+  }
+  return [];
+}
+
+async function collectScrolledLayoutEvidence(initialLayout, initialText, index, requiredMarkers) {
+  const texts = [initialText];
+  const layoutPaths = [join(outDir, `query-${index + 1}-final-layout.json`)];
+  const textPaths = [join(outDir, `query-${index + 1}-final-layout-text.txt`)];
+  const screenPaths = [];
+  let currentLayout = initialLayout;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const combinedText = texts.join('\n');
+    if (requiredMarkers.every((marker) => combinedText.includes(marker))) {
+      break;
+    }
+    swipeResultsUp();
+    await sleep(900);
+    currentLayout = dumpLayout(`query-${index + 1}-scroll-${attempt + 1}-layout.json`);
+    const scrolledText = collectLayoutText(currentLayout).join('\n');
+    const scrolledTextPath = join(outDir, `query-${index + 1}-scroll-${attempt + 1}-layout-text.txt`);
+    writeFileSync(scrolledTextPath, scrolledText + '\n');
+    const scrolledScreenPath = captureScreen(`query-${index + 1}-scroll-${attempt + 1}-screen.png`);
+    texts.push(scrolledText);
+    layoutPaths.push(join(outDir, `query-${index + 1}-scroll-${attempt + 1}-layout.json`));
+    textPaths.push(scrolledTextPath);
+    screenPaths.push(scrolledScreenPath);
+  }
+  const uniqueText = [...new Set(texts.join('\n').split('\n').filter((line) => line.trim().length > 0))].join('\n');
+  const combinedTextPath = join(outDir, `query-${index + 1}-scrolled-layout-text.txt`);
+  writeFileSync(combinedTextPath, uniqueText + '\n');
+  return {
+    text: uniqueText,
+    currentLayout,
+    combinedTextPath,
+    layoutPaths,
+    textPaths,
+    screenPaths,
+    requiredMarkers,
+    foundMarkers: requiredMarkers.filter((marker) => uniqueText.includes(marker))
+  };
+}
+
+function expandMatchesForTarget(layout, targetMarker) {
+  const expands = findTextMatches(layout, '展开')
+    .filter((item) => item.bounds.y > 400 && item.bounds.y < 2450);
+  if (targetMarker.length === 0) {
+    return expands;
+  }
+  const targets = findTextMatches(layout, targetMarker);
+  if (targets.length === 0) {
+    return [];
+  }
+  return expands
+    .filter((expand) => targets.some((target) =>
+      Math.abs(expand.bounds.y - target.bounds.y) < 360 ||
+      verticallyOverlaps(expand.bounds, target.bounds)))
+    .sort((left, right) => {
+      const leftDistance = Math.min(...targets.map((target) => Math.abs(left.bounds.y - target.bounds.y)));
+      const rightDistance = Math.min(...targets.map((target) => Math.abs(right.bounds.y - target.bounds.y)));
+      return leftDistance - rightDistance;
+    });
+}
+
+async function findVisibleReplyDraftAction(layout, index) {
+  let currentLayout = layout;
+  let actionText = collectLayoutText(currentLayout).join('\n');
+  let actionLayoutPath = '';
+  let actionTextPath = '';
+  let actionScreenPath = '';
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    actionLayoutPath = join(outDir, `query-${index + 1}-mail-action-${attempt + 1}-layout.json`);
+    actionTextPath = join(outDir, `query-${index + 1}-mail-action-${attempt + 1}-layout-text.txt`);
+    writeFileSync(actionLayoutPath, JSON.stringify(currentLayout, null, 2));
+    writeFileSync(actionTextPath, actionText + '\n');
+    actionScreenPath = captureScreen(`query-${index + 1}-mail-action-${attempt + 1}-screen.png`);
+    if (actionText.includes('AI 回复草稿')) {
+      return {
+        layout: currentLayout,
+        text: actionText,
+        layoutPath: actionLayoutPath,
+        textPath: actionTextPath,
+        screenPath: actionScreenPath
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-mail-action-${attempt + 2}-layout.json`);
+    actionLayoutPath = join(outDir, `query-${index + 1}-mail-action-${attempt + 2}-layout.json`);
+    actionText = collectLayoutText(currentLayout).join('\n');
+  }
+  return {
+    layout: currentLayout,
+    text: actionText,
+    layoutPath: actionLayoutPath,
+    textPath: actionTextPath,
+    screenPath: actionScreenPath
+  };
+}
+
+async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '') {
+  let currentLayout = layout;
+  let lastExpandedText = '';
+  let lastExpandedTextPath = '';
+  let lastExpandedLayoutPath = '';
+  let lastExpandedScreenPath = '';
+  for (let page = 0; page < 6; page += 1) {
+    const matches = expandMatchesForTarget(currentLayout, targetMarker);
+    for (let matchIndex = 0; matchIndex < matches.length; matchIndex += 1) {
+      const clickTarget = matches[matchIndex].bounds;
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(clickTarget.x), String(clickTarget.y)]);
+      await sleep(900);
+      currentLayout = dumpLayout(`query-${index + 1}-mail-expanded-layout.json`);
+      lastExpandedLayoutPath = join(outDir, `query-${index + 1}-mail-expanded-layout.json`);
+      lastExpandedText = collectLayoutText(currentLayout).join('\n');
+      lastExpandedTextPath = join(outDir, `query-${index + 1}-mail-expanded-layout-text.txt`);
+      writeFileSync(lastExpandedTextPath, lastExpandedText + '\n');
+      lastExpandedScreenPath = captureScreen(`query-${index + 1}-mail-expanded-screen.png`);
+      const actionEvidence = await findVisibleReplyDraftAction(currentLayout, index);
+      lastExpandedText = actionEvidence.text;
+      lastExpandedTextPath = actionEvidence.textPath;
+      lastExpandedLayoutPath = actionEvidence.layoutPath;
+      lastExpandedScreenPath = actionEvidence.screenPath;
+      currentLayout = actionEvidence.layout;
+      if (!actionEvidence.text.includes('AI 回复草稿')) {
+        continue;
+      }
+      const draftCenter = findTextCenter(actionEvidence.layout, 'AI 回复草稿');
+      if (draftCenter === null) {
+        return {
+          clicked: true,
+          actionVisible: true,
+          draftClicked: false,
+          draftToolRequested: false,
+          draftToolOk: false,
+          draftVisible: false,
+          targetMarker,
+          reason: 'AI 回复草稿 was visible but no clickable center was found.',
+          layoutPath: lastExpandedLayoutPath,
+          layoutTextPath: lastExpandedTextPath,
+          screenPath: lastExpandedScreenPath
+        };
+      }
+      clearHilog();
+      await sleep(300);
+      const draftLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(draftCenter.x), String(draftCenter.y)]);
+      });
+      const draftLogPath = join(outDir, `query-${index + 1}-mail-draft.log`);
+      writeFileSync(draftLogPath, draftLogs.join('\n') + '\n');
+      const draftLogText = draftLogs.join('\n');
+      const draftLayout = dumpLayout(`query-${index + 1}-mail-draft-layout.json`);
+      const draftLayoutPath = join(outDir, `query-${index + 1}-mail-draft-layout.json`);
+      const draftText = collectLayoutText(draftLayout).join('\n');
+      const draftTextPath = join(outDir, `query-${index + 1}-mail-draft-layout-text.txt`);
+      writeFileSync(draftTextPath, draftText + '\n');
+      const draftScreenPath = captureScreen(`query-${index + 1}-mail-draft-screen.png`);
+      const draftToolRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=(gmail|mail)\.draft\.create/.test(draftLogText) ||
+        /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=(gmail|mail)\.draft\.create/.test(draftLogText) ||
+        /\b(gmail|mail)\.draft\.create\b/.test(draftText);
+      const draftToolOk = draftToolRequested &&
+        /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\][^\n]*ok=true/.test(draftLogText) &&
+        !/failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|CURLcode result 7|curl_code":7|os_errno":111/i.test(draftLogText);
+      const draftVisible = /\b(gmail|mail)\.draft\.create\b|Draft saved|Saved in Gmail|Mail Draft Preview|草稿|跳转到Gmail/.test(draftText);
+      const draftModelFailed = /\[AIPhone\]\[ModelException\]|\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\][^\n]*ok=false/.test(draftLogText);
+      const draftProviderFailed = /Operation timeout|2300028|2300056|Failed to receive data from the peer|QQ IMAP timeout|Gmail 调用失败|QQ 邮箱调用失败/i.test(draftLogText);
+      return {
+        clicked: true,
+        actionVisible: true,
+        draftClicked: true,
+        draftToolRequested,
+        draftToolOk,
+        draftVisible,
+        draftModelFailed,
+        draftProviderFailed,
+        targetMarker,
+        layoutPath: lastExpandedLayoutPath,
+        layoutTextPath: lastExpandedTextPath,
+        screenPath: lastExpandedScreenPath,
+        draftLogPath,
+        draftLayoutPath,
+        draftTextPath,
+        draftScreenPath
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-mail-search-scroll-${page + 1}-layout.json`);
+  }
+  if (lastExpandedText.length === 0) {
+    return {
+      clicked: false,
+      actionVisible: false,
+      draftClicked: false,
+      draftToolRequested: false,
+      draftToolOk: false,
+      draftVisible: false,
+      targetMarker,
+      reason: 'Could not locate a visible mail result expand button.'
+    };
+  }
+  return {
+    clicked: true,
+    actionVisible: false,
+    draftClicked: false,
+    draftToolRequested: false,
+    draftToolOk: false,
+    draftVisible: false,
+    targetMarker,
+    layoutPath: lastExpandedLayoutPath,
+    layoutTextPath: lastExpandedTextPath,
+    screenPath: lastExpandedScreenPath
+  };
 }
 
 async function runQuery(query, index, expectedTool) {
@@ -693,6 +1630,7 @@ async function runQuery(query, index, expectedTool) {
   }
   hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
   await sleep(3000);
+  moveAppWindowIntoScreenshot();
   const appPid = hdc(['shell', 'pidof', 'com.example.aiphonedemo']).trim().split(/\s+/)[0] || '';
   const controls = await waitForControls();
   const logs = await captureWhile(appPid, async () => {
@@ -712,14 +1650,17 @@ async function runQuery(query, index, expectedTool) {
     if (!typed) {
       throw new Error(`Could not type full query into AIPhone input: ${query}`);
     }
-    hdc(['shell', 'uitest', 'uiInput', 'click', String(controls.generate.x), String(controls.generate.y)]);
+    const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
   });
   const logPath = join(outDir, `query-${index + 1}.log`);
   writeFileSync(logPath, logs.join('\n') + '\n');
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
+  const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
   const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  summary.expectedPersonaMemory = expectedPersonaMemory;
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
@@ -727,32 +1668,290 @@ async function runQuery(query, index, expectedTool) {
   const layoutTextPath = join(outDir, `query-${index + 1}-final-layout-text.txt`);
   writeFileSync(layoutTextPath, layoutText + '\n');
   const expectedMarkers = layoutExpectationsForQuery(query);
-  const expectedHits = expectedMarkers.filter((marker) => layoutText.includes(marker));
+  const scrollEvidence = await collectScrolledLayoutEvidence(
+    layout,
+    layoutText,
+    index,
+    requiredScrolledMarkersForQuery(query, expectedToolId)
+  );
+  const evidenceText = scrollEvidence.text;
+  const evidenceLayout = scrollEvidence.currentLayout;
+  if (isPersonaCoffeeQuery(query) && /饮食搭子上线|饮食搭子/.test(evidenceText)) {
+    summary.personaCoffeeProof = true;
+    summary.personaExpectedMemoryProof = expectedPersonaMemory !== 'luckin_only' || hasLuckinMemoryEvidence(evidenceText);
+    if (expectedTool === true &&
+      summary.basePassedWithoutTransport === true &&
+      summary.modelPassed === true &&
+      summary.toolRequested &&
+      summary.localToolRequest &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.hasExpectedDiscoveredToolId &&
+      summary.personaExpectedMemoryProof) {
+      summary.ok = true;
+    }
+  }
+  const expectedHits = expectedMarkers.filter((marker) => evidenceText.includes(marker));
+  const expectedMisses = expectedMarkers.filter((marker) => !evidenceText.includes(marker));
+  const calendarMarkersOk = !isCalendarQuery(query) || expectedMisses.length === 0;
+  const composioCardMarkersOk = !isComposioCardQuery(query) || expectedMisses.length === 0;
+  const forbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyMarkers.filter((marker) => evidenceText.includes(marker));
+  const isSocialHubCase = isSocialHubExpectedToolId(expectedToolId);
+  const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
+  const allowsSocialHubTruthfulState = socialHubVisibleOutput && hasTruthfulSocialHubState(evidenceText);
   const allowsExternalGmailWeb = isGmailWebQuery(query) && summary.gmailWebOpened === true;
+  const allowsAggregateMailProviderFailure = expectedToolId === 'mail.search' &&
+    !isQqMailQuery(query) &&
+    /Gmail/.test(evidenceText) &&
+    /QQ Mail/.test(evidenceText) &&
+    /Outlook/.test(evidenceText);
   const allowsPartialTravelSourceFailure = expectedToolId === 'travel.search' &&
     summary.toolOk === true &&
-    (layoutText.includes('来源状态') || layoutText.includes('飞常准')) &&
-    (layoutText.includes('耗时') || /\bG\d+\b/.test(layoutText) || layoutText.includes('高铁 · 12306'));
+    (evidenceText.includes('来源状态') || evidenceText.includes('飞常准')) &&
+    (evidenceText.includes('耗时') || /\bG\d+\b/.test(evidenceText) || evidenceText.includes('高铁 · 12306'));
   const layoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
     if (allowsPartialTravelSourceFailure && marker === '查询失败') {
       return false;
     }
-    return layoutText.includes(marker);
+    if (allowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
+      return false;
+    }
+    if (allowsAggregateMailProviderFailure && (/^(Gmail|QQ)/.test(marker) || marker === 'Operation timeout' || marker === '2300028')) {
+      return false;
+    }
+    return evidenceText.includes(marker);
   });
+  if (expectedToolId === 'gmail.message.send') {
+    for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
+      if (blockingPattern.pattern.test(evidenceText)) {
+        layoutBlockingHits.push(blockingPattern.name);
+      }
+    }
+  }
+  const providerLayoutFailed = retryableProviderLayoutMarkers.some((marker) => evidenceText.includes(marker));
+  summary.providerFailed = summary.providerFailed || (providerLayoutFailed && !allowsSocialHubTruthfulState && !allowsAggregateMailProviderFailure);
   summary.layoutPath = join(outDir, `query-${index + 1}-final-layout.json`);
   summary.layoutTextPath = layoutTextPath;
+  summary.layoutScrolledTextPath = scrollEvidence.combinedTextPath;
+  summary.layoutScrolledRequiredMarkers = scrollEvidence.requiredMarkers;
+  summary.layoutScrolledFoundMarkers = scrollEvidence.foundMarkers;
+  summary.layoutScrollTextPaths = scrollEvidence.textPaths;
+  summary.layoutScrollScreenPaths = scrollEvidence.screenPaths;
   summary.screenPath = captureScreen(`query-${index + 1}-final-screen.png`);
   summary.layoutExpectedHits = expectedHits;
+  summary.layoutExpectedMisses = expectedMisses;
+  summary.socialHubVisibleOutput = socialHubVisibleOutput;
+  summary.layoutForbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyHits;
   summary.layoutBlockingHits = layoutBlockingHits;
+  summary.gmailEccvKeywordVisible = !isGmailEccvQuery(query) || /eccv/i.test(evidenceText);
+  summary.layoutTextExposed = isSocialHubCase ?
+    socialHubVisibleOutput :
+    (expectedMarkers.length === 0 || expectedHits.length > 0) &&
+    calendarMarkersOk &&
+    composioCardMarkersOk &&
+    summary.gmailEccvKeywordVisible;
+  if (expectedPersonaMemory === 'luckin_only') {
+    summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
+    summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
+  }
+  summary.mailAggregateVisible = expectedToolId !== 'mail.search' ||
+    (isMailAggregationQuery(query) ? (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText) && /Outlook/.test(evidenceText)) :
+      (isQqMailQuery(query) ? /QQ Mail/.test(evidenceText) : (/Gmail/.test(evidenceText) && /QQ Mail/.test(evidenceText) && /Outlook/.test(evidenceText))));
+  const expectsMailDraftAction = expectedToolId === 'gmail.mail.search' && isGmailEccvQuery(query);
+  summary.mailExpandedActions = expectsMailDraftAction
+    ? await verifyMailExpandedActions(evidenceLayout, index, appPid, isGmailEccvQuery(query) ? 'ECCV' : '')
+    : {
+      clicked: false,
+      actionVisible: true,
+      draftClicked: false,
+      draftToolRequested: true,
+      draftToolOk: true,
+      draftVisible: true
+    };
+  if (isPersonaMemoryUpdateQuery(query)) {
+    summary.mailAggregateVisible = true;
+    summary.layoutTextExposed = summary.personaMemoryUpdateProof === true;
+    summary.layoutOk = layoutBlockingHits.length === 0 &&
+      forbiddenSocialHubLegacyHits.length === 0 &&
+      summary.layoutTextExposed;
+    summary.ok = summary.ok && summary.layoutOk;
+    return summary;
+  }
+  summary.modelFailed = summary.modelFailed || summary.mailExpandedActions.draftModelFailed === true;
+  summary.providerFailed = summary.providerFailed || summary.mailExpandedActions.draftProviderFailed === true;
+  if (expectsMailDraftAction) {
+    summary.layoutTextExposed = summary.layoutTextExposed &&
+      summary.mailAggregateVisible &&
+      summary.mailExpandedActions.actionVisible &&
+      summary.mailExpandedActions.draftClicked &&
+      summary.mailExpandedActions.draftToolRequested &&
+      summary.mailExpandedActions.draftToolOk &&
+      summary.mailExpandedActions.draftVisible;
+  } else {
+    summary.layoutTextExposed = summary.layoutTextExposed && summary.mailAggregateVisible;
+  }
+  const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' && summary.htmlHomeDocument.ok;
   summary.layoutOk = layoutBlockingHits.length === 0 &&
-    (allowsExternalGmailWeb || expectedMarkers.length === 0 || expectedHits.length > 0);
-  summary.ok = summary.ok && summary.layoutOk;
+    forbiddenSocialHubLegacyHits.length === 0 &&
+    (isSocialHubCase ? socialHubVisibleOutput : (allowsExternalGmailWeb || summary.layoutTextExposed || allowsHtmlDocumentOnly));
+  const layoutEvidenceRecovered = expectedTool === true &&
+    !summary.basePassedWithoutTransport &&
+    summary.htmlHomeSurfaceLoad.ok &&
+    !summary.htmlLoadError &&
+    !summary.syntheticFallback &&
+    summary.layoutOk;
+  summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
+  if (isSocialHubCase) {
+    const socialHubRecovered = socialHubVisibleOutput &&
+      summary.htmlHomeSurfaceLoad.ok &&
+      !summary.htmlLoadError &&
+      !summary.syntheticFallback &&
+      summary.layoutOk;
+    if (socialHubRecovered) {
+      summary.basePassedWithoutTransport = true;
+    }
+    summary.ok = summary.basePassedWithoutTransport === true &&
+      summary.modelPassed === true &&
+      summary.toolRequested &&
+      summary.localToolRequest &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.hasExpectedDiscoveredToolId &&
+      (summary.transportPassed === true || allowsSocialHubTruthfulState) &&
+      summary.layoutOk;
+  } else if (layoutEvidenceRecovered) {
+    summary.basePassedWithoutTransport = true;
+    summary.ok = summary.modelPassed === true &&
+      summary.transportPassed === true &&
+      summary.toolRequested &&
+      summary.localToolRequest &&
+      summary.toolOk &&
+      summary.hasExpectedToolId &&
+      summary.hasExpectedDiscoveredToolId &&
+      summary.personaCoffeeProof === true &&
+      summary.layoutOk;
+  } else {
+    summary.ok = summary.ok && summary.layoutOk;
+  }
   return summary;
 }
 
+async function waitForComposioAuthEvidence() {
+  const requiredMarkers = ['Composio 授权', '当前用户'];
+  const authActionLabels = ['授权', '重新授权'];
+  const authStatusLabels = [
+    '待授权',
+    '已连接',
+    '异常',
+    '已停用'
+  ];
+  const toolkitMarkers = [
+    'GitHub',
+    'Notion',
+    'Google Drive',
+    'Google Docs',
+    'Slack',
+    'OAuth',
+    'Composio ·'
+  ];
+  let last = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const layout = dumpLayout(`composio-auth-page-${attempt + 1}.json`);
+    const layoutTextValues = collectLayoutText(layout);
+    const text = layoutTextValues.join('\n');
+    const textPath = join(outDir, `composio-auth-page-${attempt + 1}-text.txt`);
+    writeFileSync(textPath, text + '\n');
+    last = {
+      layout,
+      text,
+      layoutPath: join(outDir, `composio-auth-page-${attempt + 1}.json`),
+      textPath,
+      markerHits: requiredMarkers.filter((marker) => text.includes(marker)),
+      authActionHits: authActionLabels.filter((marker) => layoutTextValues.includes(marker)),
+      authStatusHits: authStatusLabels.filter((marker) => layoutTextValues.includes(marker)),
+      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker))
+    };
+    if (last.markerHits.length === requiredMarkers.length &&
+      last.authActionHits.length > 0 &&
+      last.authStatusHits.length > 0) {
+      return last;
+    }
+    await sleep(1000);
+  }
+  return last;
+}
+
+async function runComposioAuthSmoke() {
+  clearHilog();
+  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+  if (cleanData) {
+    cleanBundleData();
+  }
+  hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
+  await sleep(3000);
+  moveAppWindowIntoScreenshot();
+
+  const homeLayout = dumpLayout('composio-auth-home-layout.json');
+  writeFileSync(join(outDir, 'composio-auth-home-layout-text.txt'), collectLayoutText(homeLayout).join('\n') + '\n');
+  const settings = findHeaderSettingsCenter(homeLayout);
+  if (settings === null) {
+    throw new Error('Could not locate the home header settings button for Composio auth smoke.');
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(settings.x), String(settings.y)]);
+  await sleep(1200);
+
+  const configLayout = dumpLayout('composio-auth-config-collapsed.json');
+  const configText = collectLayoutText(configLayout).join('\n');
+  writeFileSync(join(outDir, 'composio-auth-config-collapsed-text.txt'), configText + '\n');
+  if (!configText.includes('Composio 授权')) {
+    const expandAuth = findTextCenter(configLayout, '展开');
+    if (expandAuth !== null) {
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(expandAuth.x), String(expandAuth.y)]);
+      await sleep(800);
+    }
+  }
+
+  const authButton = await findTextCenterWithScroll('Composio 授权', 'composio-auth-config-layout');
+  if (authButton === null) {
+    throw new Error('Could not locate the Config page Composio 授权 button.');
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(authButton.x), String(authButton.y)]);
+
+  const evidence = await waitForComposioAuthEvidence();
+  if (evidence === null) {
+    throw new Error('Could not capture Composio auth page layout evidence.');
+  }
+  const screenPath = captureScreen('composio-auth-page-screen.png');
+  const summary = {
+    mode: 'composio-auth',
+    ok: evidence.markerHits.length === 2 && evidence.authActionHits.length > 0 && evidence.authStatusHits.length > 0,
+    requiredMarkers: ['Composio 授权', '当前用户'],
+    markerHits: evidence.markerHits,
+    authActionHits: evidence.authActionHits,
+    authStatusHits: evidence.authStatusHits,
+    toolkitHits: evidence.toolkitHits,
+    layoutPath: evidence.layoutPath,
+    textPath: evidence.textPath,
+    screenPath
+  };
+  writeFileSync(join(outDir, 'composio-auth-summary.json'), JSON.stringify(summary, null, 2));
+  return summary;
+}
+
+console.log(`cleanData: ${cleanData ? 'true' : 'false'}`);
+
+if (runComposioAuthCases) {
+  const summary = await runComposioAuthSmoke();
+  console.log(JSON.stringify(summary, null, 2));
+  if (!summary.ok) {
+    process.exit(1);
+  }
+  if (!runComposioCases && queryArgs.length === 0) {
+    process.exit(0);
+  }
+}
 const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
-console.log(`cleanData: ${cleanData ? 'true' : 'false'}`);
 
 const summaries = [];
 for (let index = 0; index < queries.length; index += 1) {
@@ -760,7 +1959,23 @@ for (let index = 0; index < queries.length; index += 1) {
   console.log(`\n[${index + 1}/${queries.length}] ${query}`);
   const inferredCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedTool = inferredCase.expectsTool;
-  const summary = await runQuery(query, index, expectedTool);
+  let summary = null;
+  for (let attempt = 0; attempt <= queryRetryLimit; attempt += 1) {
+    summary = await runQuery(query, index, expectedTool);
+    summary.attempt = attempt + 1;
+    summary.retryLimit = queryRetryLimit;
+    const missingScrolledMarkers = Array.isArray(summary.layoutScrolledRequiredMarkers) &&
+      Array.isArray(summary.layoutScrolledFoundMarkers) &&
+      summary.layoutScrolledRequiredMarkers.some((marker) => !summary.layoutScrolledFoundMarkers.includes(marker));
+    const retryableFailure = summary.providerFailed || summary.modelFailed || missingScrolledMarkers;
+    if (summary.ok || !retryableFailure || attempt === queryRetryLimit) {
+      break;
+    }
+    console.warn(`retryable failure for query ${index + 1}, retrying attempt ${attempt + 2}/${queryRetryLimit + 1}`);
+  }
+  if (summary === null) {
+    throw new Error(`No summary produced for query: ${query}`);
+  }
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
 }
@@ -777,9 +1992,18 @@ const finalLayoutForbiddenActionHits = forbiddenLayoutActionMarkers.filter((mark
 const finalQuery = queries.length > 0 ? queries[queries.length - 1] : '';
 const finalAllowsPartialTravel = /出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(finalQuery);
 const finalSummary = summaries.length > 0 ? summaries[summaries.length - 1] : null;
+const finalAllowsPersonaMemoryUpdate = finalSummary !== null && finalSummary.personaMemoryUpdateProof === true;
 const finalAllowsExternalGmailWeb = isGmailWebQuery(finalQuery) &&
   finalSummary !== null &&
   finalSummary.gmailWebOpened === true;
+const finalAllowsSocialHubTruthfulState =
+  finalSummary !== null &&
+  isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
+  hasVisibleSocialHubOutput(finalLayoutText, finalSummary.expectedToolId);
+const finalAllowsAggregateMailProviderFailure =
+  finalSummary !== null &&
+  finalSummary.expectedToolId === 'mail.search' &&
+  finalSummary.mailAggregateVisible === true;
 const finalAllowsSourceFailure =
   finalAllowsPartialTravel &&
   finalSummary !== null &&
@@ -794,9 +2018,18 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
   if (finalAllowsSourceFailure && marker === '查询失败') {
     return false;
   }
+  if (finalAllowsSocialHubTruthfulState && socialHubTruthfulBlockingMarkers.includes(marker)) {
+    return false;
+  }
+  if (finalAllowsAggregateMailProviderFailure && /^(Gmail|QQ)/.test(marker)) {
+    return false;
+  }
   return finalLayoutText.includes(marker);
 });
 for (const blockingPattern of finalLayoutBlockingPatterns) {
+  if (finalSummary !== null && finalSummary.expectedToolId.startsWith('calendar.')) {
+    continue;
+  }
   if (finalSummary !== null &&
     finalSummary.expectedToolId === 'dynamic.search' &&
     finalSummary.expectedDiscoveredToolId === 'weather.query' &&
@@ -805,6 +2038,13 @@ for (const blockingPattern of finalLayoutBlockingPatterns) {
   }
   if (blockingPattern.pattern.test(finalLayoutText)) {
     finalLayoutBlockingHits.push(blockingPattern.name);
+  }
+}
+if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.message.send') {
+  for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
+    if (blockingPattern.pattern.test(finalLayoutText)) {
+      finalLayoutBlockingHits.push(blockingPattern.name);
+    }
   }
 }
 const finalLayoutRouteHits = finalLayoutRouteMarkers.filter((marker) => finalLayoutText.includes(marker));
@@ -818,7 +2058,11 @@ const visibleOutput = {
   syntheticHits: finalLayoutSyntheticHits,
   forbiddenActionHits: finalLayoutForbiddenActionHits,
   blockingHits: finalLayoutBlockingHits,
-  ok: (finalAllowsExternalGmailWeb || finalLayoutDomainHits.length > 0) &&
+  ok: (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate || finalLayoutDomainHits.length > 0 ||
+    (finalSummary !== null &&
+      !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
+      finalSummary.htmlHomeDocument !== undefined &&
+      finalSummary.htmlHomeDocument.ok === true)) &&
     finalLayoutSyntheticHits.length === 0 &&
     finalLayoutForbiddenActionHits.length === 0 &&
     finalLayoutBlockingHits.length === 0

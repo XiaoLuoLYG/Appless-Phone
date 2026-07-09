@@ -6,8 +6,19 @@ import { fileURLToPath } from 'node:url';
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const envPath = join(rootDir, 'tool-gateway', '.env.local');
 const outPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'aiphone_provider_config.json');
+const composioOutPath = join(rootDir, 'entry', 'src', 'main', 'resources', 'rawfile', 'composio_config.json');
+const defaultComposioBaseUrl = 'https://backend.composio.dev/api/v3.1';
 
 const providerKeys = [
+  'TOOL_GATEWAY_API_KEY',
+  'X_BEARER_TOKEN',
+  'X_ACCESS_TOKEN',
+  'X_OAUTH_TOKEN',
+  'X_USERNAME',
+  'X_OAUTH_CLIENT_ID',
+  'X_OAUTH_REDIRECT_URI',
+  'SLACK_USER_TOKEN',
+  'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'X_VARIFLIGHT_KEY',
@@ -33,11 +44,42 @@ const providerKeys = [
   'MCD_MCP_URL',
   'LUCKIN_MCP_TOKEN',
   'LUCKIN_MCP_URL',
+  'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+  'GOOGLE_OAUTH_REDIRECT_URI',
   'GMAIL_AUTH_URL',
   'GMAIL_OAUTH_CLIENT_ID',
   'GMAIL_OAUTH_CLIENT_SECRET',
   'GMAIL_OAUTH_REDIRECT_URI',
+  'YOUTUBE_API_KEY',
   'GMAIL_MCP_USER_PROJECT',
+  'QQ_MAIL_ADDRESS',
+  'QQ_MAIL_AUTH_CODE',
+  'QQ_MAIL_IMAP_HOST',
+  'QQ_MAIL_IMAP_PORT',
+  'QQ_MAIL_DRAFTS_MAILBOX',
+  'PAYPAL_CLIENT_ID',
+  'PAYPAL_CLIENT_SECRET',
+  'PAYPAL_ENVIRONMENT',
+  'PAYPAL_RETURN_URL',
+  'PAYPAL_CANCEL_URL',
+  'PAYPAL_CHECKOUT_GATEWAY_URL',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_TEST_SECRET_KEY',
+  'STRIPE_LIVE_SECRET_KEY',
+  'STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_SUCCESS_URL',
+  'STRIPE_CANCEL_URL',
+  'STRIPE_CHECKOUT_GATEWAY_URL',
+  'STRIPE_CONNECT_RETURN_URL',
+  'STRIPE_CONNECT_REFRESH_URL',
+  'STRIPE_RECEIVING_AGENT_JSON',
+  'PAYMENT_ACCOUNT_BOOK_JSON',
+  'PAYMENT_DEFAULT_CURRENCY',
+  'PAYMENT_MODE',
+  'PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS',
+  'PAYMENT_LIVE_MAX_AMOUNT_MINOR',
   'GOOGLE_CLOUD_PROJECT'
 ];
 
@@ -86,6 +128,9 @@ const env = loadEnv(envPath);
 const config = {};
 for (const key of providerKeys) {
   if (env[key]) {
+    if (key === 'PAYPAL_CHECKOUT_GATEWAY_URL' || key === 'STRIPE_CHECKOUT_GATEWAY_URL') {
+      continue;
+    }
     config[key] = env[key];
   }
 }
@@ -95,6 +140,12 @@ writeFileSync(outPath, JSON.stringify(config, null, 2) + '\n');
 
 console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
+  'TOOL_GATEWAY_API_KEY',
+  'X_BEARER_TOKEN',
+  'X_USERNAME',
+  'X_OAUTH_CLIENT_ID',
+  'SLACK_USER_TOKEN',
+  'DASHSCOPE_API_KEY',
   'FLIGHT_MCP_KEY',
   'VARIFLIGHT_API_KEY',
   'AMAP_KEY',
@@ -106,9 +157,39 @@ console.log(maskedStatus(config, [
   'TAOBAO_FLASH_PID',
   'MCD_MCP_TOKEN',
   'LUCKIN_MCP_TOKEN',
+  'GOOGLE_MAPS_API_KEY',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
   'GMAIL_AUTH_URL',
   'GMAIL_OAUTH_CLIENT_ID',
   'GMAIL_OAUTH_CLIENT_SECRET',
+  'YOUTUBE_API_KEY',
   'GMAIL_MCP_USER_PROJECT',
+  'QQ_MAIL_ADDRESS',
+  'QQ_MAIL_AUTH_CODE',
+  'PAYPAL_CLIENT_ID',
+  'PAYPAL_CLIENT_SECRET',
+  'PAYPAL_CHECKOUT_GATEWAY_URL',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_TEST_SECRET_KEY',
+  'STRIPE_LIVE_SECRET_KEY',
+  'STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_CHECKOUT_GATEWAY_URL',
+  'STRIPE_CONNECT_RETURN_URL',
+  'STRIPE_RECEIVING_AGENT_JSON',
+  'PAYMENT_ACCOUNT_BOOK_JSON',
   'GOOGLE_CLOUD_PROJECT'
+]));
+
+const composioConfig = {
+  apiKey: env.COMPOSIO_API_KEY || '',
+  baseUrl: env.COMPOSIO_BASE_URL || defaultComposioBaseUrl,
+  userId: env.COMPOSIO_USER_ID || ''
+};
+writeFileSync(composioOutPath, JSON.stringify(composioConfig, null, 2) + '\n');
+console.log(`Wrote ${composioOutPath}`);
+console.log(maskedStatus(composioConfig, [
+  'apiKey',
+  'baseUrl',
+  'userId'
 ]));

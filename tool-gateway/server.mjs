@@ -42,6 +42,7 @@ const PORT = Number.parseInt(process.env.TOOL_GATEWAY_PORT || '8787', 10);
 const HOST = process.env.TOOL_GATEWAY_HOST || '127.0.0.1';
 const GATEWAY_API_KEY = (process.env.TOOL_GATEWAY_API_KEY || '').trim();
 const MAX_BODY_BYTES = 1024 * 1024;
+const STRIPE_CHECKOUT_ENDPOINT = 'https://api.stripe.com/v1/checkout/sessions';
 const A2UI_VERSION = 'v0.9.1';
 const A2UI_MIME = 'application/a2ui+json';
 const TRAIN_RESULT_LIMIT = Math.min(Math.max(Number.parseInt(process.env.TRAIN_RESULT_LIMIT || '30', 10) || 30, 6), 50);
@@ -100,14 +101,6 @@ const TOOL_DEFS = {
     requiredArgs: ['location', 'keyword'],
     configItems: ['AMAP_KEY', 'AMAP_DEFAULT_LOCATION=经度,纬度', 'MEITUAN_UNION_APP_KEY/SECRET', 'TAOBAO_APP_KEY/SECRET/TAOBAO_FLASH_PID'],
     actions: ['配置外卖来源 Key', '设置默认坐标', '只查询不下单']
-  },
-  'social.reply.send': {
-    title: '微信回复发送',
-    envPrefix: 'SOCIAL',
-    providerHint: 'AIPhone 设备侧通知/辅助桥接和真实微信发送执行器',
-    requiredArgs: ['target_message_id', 'conversation_id', 'text'],
-    configItems: ['系统/特权通知桥接或用户授权辅助捕获', '真实微信辅助发送执行器'],
-    actions: ['打开社交权限诊断']
   }
 };
 
@@ -167,7 +160,7 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-API-Key'
   });
   res.end(body);
@@ -179,7 +172,7 @@ function writeA2uiHeaders(res, statusCode = 200) {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-API-Key'
   });
 }
@@ -264,6 +257,26 @@ function readJson(req) {
   });
 }
 
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let total = 0;
+    const chunks = [];
+    req.on('data', chunk => {
+      total += chunk.length;
+      if (total > MAX_BODY_BYTES) {
+        reject(new Error('Request body is too large.'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+    req.on('error', reject);
+  });
+}
+
 function textOf(value) {
   if (value === undefined || value === null) {
     return '';
@@ -274,11 +287,803 @@ function textOf(value) {
   return JSON.stringify(value);
 }
 
+const socialCache = {
+  items: []
+};
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function hasEnv(name) {
+  return textOf(process.env[name]).trim().length > 0;
+}
+
+function describeError(error) {
+  return error instanceof Error ? error.message : textOf(error);
+}
+
+function composioBaseUrl() {
+  return textOf(process.env.COMPOSIO_BASE_URL || 'https://backend.composio.dev/api/v3.1').replace(/\/+$/, '');
+}
+
+function composioApiKey() {
+  return textOf(process.env.COMPOSIO_API_KEY).trim();
+}
+
+function composioMockEnabled() {
+  return textOf(process.env.COMPOSIO_AUTH_MOCK).trim() === '1';
+}
+
+function composioHeaders() {
+  const apiKey = composioApiKey();
+  if (apiKey.length === 0) {
+    throw new Error('Configure COMPOSIO_API_KEY in tool-gateway/.env.local.');
+  }
+  return {
+    'x-api-key': apiKey,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+}
+
+function normalizeComposioAuthItem(item, connectedByToolkit) {
+  const toolkit = item.toolkit || {};
+  const toolkitSlug = textOf(toolkit.slug || item.toolkit_slug || item.toolkit).trim().toLowerCase();
+  const connected = connectedByToolkit.get(toolkitSlug) || {};
+  return {
+    authConfigId: textOf(item.id || item.auth_config_id).trim(),
+    toolkitSlug,
+    toolkitName: textOf(toolkit.name || item.name || toolkitSlug).trim(),
+    logoUrl: textOf(toolkit.logo || toolkit.logo_url || item.logo_url).trim(),
+    authScheme: textOf(item.auth_scheme || item.scheme).trim(),
+    management: textOf(item.management || item.type).trim(),
+    status: textOf(connected.id).length > 0 ? 'connected' : 'needs_auth',
+    connectedAccountId: textOf(connected.id).trim(),
+    connectedAccountLabel: textOf(connected.account_id || connected.email || connected.name).trim(),
+    lastConnectedAt: textOf(connected.updated_at || connected.created_at).trim(),
+    canExecute: textOf(connected.id).length > 0
+  };
+}
+
+function mockComposioAuthConfigs(userId) {
+  return {
+    ok: true,
+    userId,
+    items: [
+      {
+        authConfigId: 'ac_mock_github',
+        toolkitSlug: 'github',
+        toolkitName: 'GitHub',
+        logoUrl: '',
+        authScheme: 'OAuth2',
+        management: 'managed',
+        status: 'needs_auth',
+        connectedAccountId: '',
+        connectedAccountLabel: '',
+        lastConnectedAt: '',
+        canExecute: false
+      }
+    ]
+  };
+}
+
+function mockComposioSessionResponse(pathname) {
+  if (pathname === '/tool_router/session') {
+    return { session_id: 'mock-session' };
+  }
+  if (pathname.endsWith('/search')) {
+    return {
+      success: true,
+      results: [{ primary_tool_slugs: ['GITHUB_FIND_PULL_REQUESTS'], related_tool_slugs: [] }],
+      tool_schemas: {
+        GITHUB_FIND_PULL_REQUESTS: {
+          tool_slug: 'GITHUB_FIND_PULL_REQUESTS',
+          description: 'Find GitHub pull requests',
+          input_schema: { type: 'object', properties: {} }
+        }
+      }
+    };
+  }
+  if (pathname.endsWith('/execute')) {
+    return { ok: true, message: 'mock Composio execute' };
+  }
+  return { ok: true };
+}
+
+async function composioFetch(pathname, options = {}) {
+  const response = await fetch(`${composioBaseUrl()}${pathname}`, {
+    ...options,
+    headers: {
+      ...composioHeaders(),
+      ...(options.headers || {})
+    },
+    signal: AbortSignal.timeout(20000)
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Composio HTTP ${response.status}: ${text.slice(0, 500)}`);
+  }
+  return text.length > 0 ? JSON.parse(text) : {};
+}
+
+async function handleComposioAuthConfigs(req, res, url) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const userId = textOf(url.searchParams.get('userId')).trim();
+  if (userId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'userId is required.' });
+    return;
+  }
+  if (composioMockEnabled()) {
+    sendJson(res, 200, mockComposioAuthConfigs(userId));
+    return;
+  }
+  const accounts = await composioFetch(`/connected_accounts?user_ids=${encodeURIComponent(userId)}&statuses=ACTIVE&limit=100`);
+  const connectedByToolkit = new Map();
+  for (const account of accounts.items || []) {
+    const slug = textOf(account.toolkit?.slug || account.toolkit_slug).trim().toLowerCase();
+    if (slug.length > 0 && !connectedByToolkit.has(slug)) {
+      connectedByToolkit.set(slug, account);
+    }
+  }
+  const authConfigs = await composioFetch('/auth_configs?limit=100');
+  const items = (authConfigs.items || [])
+    .filter(item => textOf(item.status || 'enabled').toLowerCase() !== 'disabled')
+    .map(item => normalizeComposioAuthItem(item, connectedByToolkit))
+    .filter(item => item.authConfigId.length > 0 && item.toolkitSlug.length > 0);
+  sendJson(res, 200, { ok: true, userId, items });
+}
+
+async function handleComposioLink(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = await readJson(req);
+  const userId = textOf(body.userId).trim();
+  const authConfigId = textOf(body.authConfigId).trim();
+  const toolkitSlug = textOf(body.toolkitSlug).trim().toLowerCase();
+  if (userId.length === 0 || authConfigId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'userId and authConfigId are required.' });
+    return;
+  }
+  if (composioMockEnabled()) {
+    sendJson(res, 200, { ok: true, redirectUrl: `https://mock.composio.local/connect/${toolkitSlug || 'toolkit'}` });
+    return;
+  }
+  const payload = await composioFetch('/connected_accounts/link', {
+    method: 'POST',
+    body: JSON.stringify({
+      auth_config_id: authConfigId,
+      user_id: userId,
+      callback_url: textOf(process.env.COMPOSIO_CALLBACK_URL || 'aiphone://composio/callback'),
+      alias: toolkitSlug.length > 0 ? `${toolkitSlug}:${userId}` : userId
+    })
+  });
+  const redirectUrl = textOf(payload.redirect_url || payload.link || payload.url).trim();
+  if (!redirectUrl.startsWith('https://')) {
+    sendJson(res, 502, { ok: false, error: 'Composio did not return an HTTPS redirect URL.' });
+    return;
+  }
+  sendJson(res, 200, { ok: true, redirectUrl });
+}
+
+async function handleComposioProxyJson(req, res, composioPath, successStatus = 200) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = req.method === 'DELETE' ? null : await readJson(req);
+  if (composioMockEnabled()) {
+    sendJson(res, successStatus, mockComposioSessionResponse(composioPath));
+    return;
+  }
+  const payload = await composioFetch(composioPath, {
+    method: req.method,
+    body: body === null ? undefined : JSON.stringify(body)
+  });
+  sendJson(res, successStatus, payload);
+}
+
+function stripeCheckoutAllowedAccounts() {
+  return textOf(process.env.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS)
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => value.length > 0);
+}
+
+function stripeLiveMaxAmountMinor() {
+  const value = Number.parseInt(textOf(process.env.PAYMENT_LIVE_MAX_AMOUNT_MINOR || '500'), 10);
+  return Number.isFinite(value) && value > 0 ? value : 500;
+}
+
+function stripeCheckoutError(message, status = 400) {
+  return { status, body: { ok: false, error: message } };
+}
+
+function stripeCheckoutInput(body) {
+  const connectedAccountId = textOf(body.connectedAccountId).trim();
+  const amountMinor = Number.parseInt(textOf(body.amountMinor), 10);
+  const currency = textOf(body.currency || 'USD').trim().toLowerCase();
+  const successUrl = textOf(body.successUrl).trim() || 'aiphone://payment/stripe/success';
+  const cancelUrl = textOf(body.cancelUrl).trim() || 'aiphone://payment/stripe/cancel';
+  const merchantName = textOf(body.merchantName || 'AIPhone payment').trim();
+  const note = textOf(body.note).trim();
+  const idempotencyKey = textOf(body.idempotencyKey).trim();
+
+  if (!connectedAccountId.startsWith('acct_')) {
+    return stripeCheckoutError('Stripe connected account must start with acct_.');
+  }
+  const allowed = stripeCheckoutAllowedAccounts();
+  if (allowed.length > 0 && !allowed.includes(connectedAccountId)) {
+    return stripeCheckoutError('Stripe connected account is not allowed.', 403);
+  }
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    return stripeCheckoutError('Amount must be a positive minor-unit integer.');
+  }
+  if (amountMinor > stripeLiveMaxAmountMinor()) {
+    return stripeCheckoutError('Amount exceeds PAYMENT_LIVE_MAX_AMOUNT_MINOR.', 403);
+  }
+  if (!/^[a-z]{3}$/.test(currency)) {
+    return stripeCheckoutError('Currency must be a 3-letter ISO code.');
+  }
+  if (idempotencyKey.length === 0) {
+    return stripeCheckoutError('idempotencyKey is required.');
+  }
+  return {
+    connectedAccountId,
+    amountMinor,
+    currency,
+    successUrl,
+    cancelUrl,
+    merchantName: merchantName.length > 0 ? merchantName : 'AIPhone payment',
+    note,
+    idempotencyKey
+  };
+}
+
+async function handleStripeCheckout(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const secretKey = textOf(process.env.STRIPE_SECRET_KEY).trim();
+  if (!secretKey.startsWith('sk_live_') && !secretKey.startsWith('rk_live_')) {
+    sendJson(res, 400, { ok: false, error: 'Configure a live Stripe secret or restricted key in tool-gateway/.env.local.' });
+    return;
+  }
+  const input = stripeCheckoutInput(await readJson(req));
+  if (input.body !== undefined) {
+    sendJson(res, input.status, input.body);
+    return;
+  }
+
+  const params = new URLSearchParams();
+  params.set('mode', 'payment');
+  params.set('success_url', input.successUrl);
+  params.set('cancel_url', input.cancelUrl);
+  params.set('line_items[0][price_data][currency]', input.currency);
+  params.set('line_items[0][price_data][product_data][name]', input.merchantName + ' payment');
+  params.set('line_items[0][price_data][unit_amount]', String(input.amountMinor));
+  params.set('line_items[0][quantity]', '1');
+  params.set('payment_intent_data[transfer_data][destination]', input.connectedAccountId);
+  if (input.note.length > 0) {
+    params.set('metadata[note]', input.note);
+    params.set('payment_intent_data[metadata][note]', input.note);
+  }
+
+  const response = await fetch(STRIPE_CHECKOUT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${secretKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Idempotency-Key': input.idempotencyKey
+    },
+    body: params.toString()
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    sendJson(res, response.status, { ok: false, error: `Stripe Checkout failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+    return;
+  }
+  const payload = JSON.parse(text);
+  const checkoutUrl = textOf(payload.url).trim();
+  if (!checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+    sendJson(res, 502, { ok: false, error: 'Stripe response did not include a hosted Checkout URL.' });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    checkoutUrl,
+    providerSessionId: textOf(payload.id).trim()
+  });
+}
+
+function paypalBaseUrl() {
+  return textOf(process.env.PAYPAL_ENVIRONMENT).trim().toLowerCase() === 'live'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+}
+
+function amountMajorFromMinor(amountMinor, currency) {
+  const zeroDecimal = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
+  if (zeroDecimal.includes(textOf(currency).trim().toUpperCase())) {
+    return String(amountMinor);
+  }
+  return (amountMinor / 100).toFixed(2);
+}
+
+async function paypalAccessToken() {
+  const clientId = textOf(process.env.PAYPAL_CLIENT_ID).trim();
+  const clientSecret = textOf(process.env.PAYPAL_CLIENT_SECRET).trim();
+  if (clientId.length === 0 || clientSecret.length === 0) {
+    throw new Error('Configure PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in tool-gateway/.env.local.');
+  }
+  const response = await fetch(`${paypalBaseUrl()}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json'
+    },
+    body: 'grant_type=client_credentials'
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`PayPal token failed with HTTP ${response.status}: ${text.slice(0, 400)}`);
+  }
+  const payload = JSON.parse(text);
+  const token = textOf(payload.access_token).trim();
+  if (token.length === 0) {
+    throw new Error('PayPal token response did not include access_token.');
+  }
+  return token;
+}
+
+function paypalApprovalUrl(orderPayload) {
+  const links = Array.isArray(orderPayload.links) ? orderPayload.links : [];
+  for (const link of links) {
+    if (textOf(link.rel).toLowerCase() === 'approve' && textOf(link.href).startsWith('https://')) {
+      return textOf(link.href);
+    }
+  }
+  return '';
+}
+
+function paypalCheckoutInput(body) {
+  const payeeEmail = textOf(body.payeeEmail).trim();
+  const payeeMerchantId = textOf(body.payeeMerchantId).trim();
+  const amountMinor = Number.parseInt(textOf(body.amountMinor), 10);
+  const currency = textOf(body.currency || 'USD').trim().toUpperCase();
+  if (payeeEmail.length === 0 && payeeMerchantId.length === 0) {
+    return stripeCheckoutError('PayPal payee email or merchant id is required.');
+  }
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    return stripeCheckoutError('Amount must be a positive minor-unit integer.');
+  }
+  if (amountMinor > stripeLiveMaxAmountMinor()) {
+    return stripeCheckoutError('Amount exceeds PAYMENT_LIVE_MAX_AMOUNT_MINOR.', 403);
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return stripeCheckoutError('Currency must be a 3-letter ISO code.');
+  }
+  return {
+    payeeEmail,
+    payeeMerchantId,
+    amountMinor,
+    currency,
+    returnUrl: textOf(body.returnUrl).trim() || 'aiphone://payment/paypal/success',
+    cancelUrl: textOf(body.cancelUrl).trim() || 'aiphone://payment/paypal/cancel',
+    note: textOf(body.note).trim()
+  };
+}
+
+async function handlePayPalCheckout(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const input = paypalCheckoutInput(await readJson(req));
+  if (input.body !== undefined) {
+    sendJson(res, input.status, input.body);
+    return;
+  }
+  try {
+    const token = await paypalAccessToken();
+    const payee = {};
+    if (input.payeeEmail.length > 0) {
+      payee.email_address = input.payeeEmail;
+    }
+    if (input.payeeMerchantId.length > 0) {
+      payee.merchant_id = input.payeeMerchantId;
+    }
+    const purchaseUnit = {
+      amount: {
+        value: amountMajorFromMinor(input.amountMinor, input.currency),
+        currency_code: input.currency
+      },
+      payee
+    };
+    if (input.note.length > 0) {
+      purchaseUnit.description = input.note;
+    }
+    const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [purchaseUnit],
+        application_context: {
+          return_url: input.returnUrl,
+          cancel_url: input.cancelUrl,
+          user_action: 'PAY_NOW'
+        }
+      })
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      sendJson(res, response.status, { ok: false, error: `PayPal order create failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+      return;
+    }
+    const payload = JSON.parse(text);
+    const checkoutUrl = paypalApprovalUrl(payload);
+    if (checkoutUrl.length === 0) {
+      sendJson(res, 502, { ok: false, error: 'PayPal order response did not include an approve URL.' });
+      return;
+    }
+    sendJson(res, 200, {
+      ok: true,
+      checkoutUrl,
+      providerSessionId: textOf(payload.id).trim()
+    });
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: describeError(error) });
+  }
+}
+
+async function handlePayPalCapture(req, res) {
+  if (!isGatewayAuthorized(req)) {
+    rejectUnauthorized(res);
+    return;
+  }
+  const body = await readJson(req);
+  const orderId = textOf(body.providerSessionId || body.orderId).trim();
+  if (orderId.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'PayPal order id is required.' });
+    return;
+  }
+  try {
+    const token = await paypalAccessToken();
+    const response = await fetch(`${paypalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: '{}'
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      sendJson(res, response.status, { ok: false, error: `PayPal capture failed with HTTP ${response.status}: ${text.slice(0, 400)}` });
+      return;
+    }
+    sendJson(res, 200, { ok: true, providerSessionId: orderId });
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: describeError(error) });
+  }
+}
+
+function socialConnection(platform, configured, displayName, accountId, configuredMessage, setupMessage) {
+  return {
+    platform,
+    status: configured ? 'connected' : 'needs_auth',
+    displayName,
+    accountId: configured ? accountId : '',
+    message: configured ? configuredMessage : setupMessage
+  };
+}
+
+function socialConnectionError(platform, message) {
+  return {
+    platform,
+    status: 'error',
+    displayName: platform === 'x' ? 'X' : 'Slack',
+    accountId: '',
+    message
+  };
+}
+
+function socialConnections(source = '') {
+  const xConfigured = hasEnv('X_BEARER_TOKEN') || hasEnv('X_ACCESS_TOKEN') || hasEnv('X_OAUTH_TOKEN');
+  const slackConfigured = hasEnv('SLACK_BOT_TOKEN') || hasEnv('SLACK_USER_TOKEN');
+  const wecomConfigured = ['WECOM_CORP_ID', 'WECOM_AGENT_ID', 'WECOM_SECRET', 'WECOM_CALLBACK_TOKEN', 'WECOM_ENCODING_AES_KEY'].every(hasEnv);
+  const connections = [
+    socialConnection('x', xConfigured, 'X', textOf(process.env.X_ACCOUNT_ID || process.env.X_USER_ID), 'X token configured.', 'Set X_BEARER_TOKEN or an OAuth-backed X access token.'),
+    socialConnection('slack', slackConfigured, 'Slack', textOf(process.env.SLACK_TEAM_ID || process.env.SLACK_ACCOUNT_ID), 'Slack token configured.', 'Set SLACK_USER_TOKEN or SLACK_BOT_TOKEN with read scopes.'),
+    socialConnection('wecom', wecomConfigured, '企业微信', textOf(process.env.WECOM_CORP_ID), 'WeCom app and callback secrets configured.', 'Set WECOM_CORP_ID, WECOM_AGENT_ID, WECOM_SECRET, WECOM_CALLBACK_TOKEN, and WECOM_ENCODING_AES_KEY.')
+  ];
+  return source === 'x' ? connections.filter(connection => connection.platform === 'x') : connections;
+}
+
+function replaceSocialConnection(connections, replacement) {
+  return connections.map(connection => connection.platform === replacement.platform ? replacement : connection);
+}
+
+function socialItemMatchesQuery(item, query) {
+  const needle = textOf(query).trim().toLowerCase();
+  if (needle.length === 0) {
+    return true;
+  }
+  return [item.author, item.handle, item.text, item.channel, item.threadId]
+    .map(textOf)
+    .some(value => value.toLowerCase().includes(needle));
+}
+
+function upsertSocialItems(items) {
+  items.forEach(item => {
+    const id = textOf(item?.id).trim();
+    if (id.length === 0) {
+      return;
+    }
+    const index = socialCache.items.findIndex(cached => cached.id === id);
+    if (index >= 0) {
+      socialCache.items[index] = item;
+      return;
+    }
+    socialCache.items.push(item);
+  });
+}
+
+function uniqueSocialItems(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const id = textOf(item?.id).trim();
+    if (id.length === 0 || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+}
+
+async function fetchXRecentSearch(query) {
+  const token = textOf(process.env.X_BEARER_TOKEN || process.env.X_ACCESS_TOKEN || process.env.X_OAUTH_TOKEN).trim();
+  if (token.length === 0 || textOf(query).trim().length === 0) {
+    return { items: [], connection: null };
+  }
+  const params = new URLSearchParams({
+    query: textOf(query).trim(),
+    max_results: '10',
+    'tweet.fields': 'created_at,author_id,conversation_id',
+    expansions: 'author_id',
+    'user.fields': 'username,name'
+  });
+  const response = await fetch(`https://api.x.com/2/tweets/search/recent?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json'
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`X recent search failed: HTTP ${response.status} ${text.slice(0, 240)}`);
+  }
+  const payload = JSON.parse(text);
+  const users = new Map((Array.isArray(payload.includes?.users) ? payload.includes.users : [])
+    .map(user => [textOf(user.id), user]));
+  const items = (Array.isArray(payload.data) ? payload.data : []).map(tweet => {
+    const user = users.get(textOf(tweet.author_id)) || {};
+    const username = textOf(user.username);
+    return {
+      id: `x-${textOf(tweet.id)}`,
+      platform: 'x',
+      kind: 'post',
+      author: textOf(user.name || username),
+      handle: username.length > 0 ? `@${username}` : '',
+      text: textOf(tweet.text),
+      timestamp: textOf(tweet.created_at),
+      url: username.length > 0 && textOf(tweet.id).length > 0 ? `https://x.com/${username}/status/${tweet.id}` : '',
+      channel: '',
+      threadId: textOf(tweet.conversation_id || tweet.id),
+      unread: false
+    };
+  });
+  return { items, connection: null };
+}
+
+async function fetchSlackSearch(query) {
+  const token = textOf(process.env.SLACK_USER_TOKEN || process.env.SLACK_BOT_TOKEN).trim();
+  const searchQuery = slackSearchQuery(query);
+  if (token.length === 0 || searchQuery.length === 0) {
+    return { items: [], connection: null };
+  }
+  const params = new URLSearchParams({
+    query: searchQuery,
+    count: '10'
+  });
+  const response = await fetch(`https://slack.com/api/search.messages?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json'
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Slack search.messages failed: HTTP ${response.status} ${text.slice(0, 240)}`);
+  }
+  const payload = JSON.parse(text);
+  if (payload.ok === false) {
+    throw new Error(`Slack search.messages failed: ${textOf(payload.error || 'ok:false')}`);
+  }
+  const matches = Array.isArray(payload.messages?.matches) ? payload.messages.matches : [];
+  const items = matches.map(match => {
+    const ts = textOf(match.ts || match.iid);
+    return {
+      id: `slack-${textOf(match.channel?.id || match.channel_name)}-${ts}`.replaceAll(/\s+/g, '_'),
+      platform: 'slack',
+      kind: 'message',
+      author: textOf(match.user_name || match.username || match.user),
+      handle: textOf(match.user_name || match.username || match.user),
+      text: textOf(match.text),
+      timestamp: ts,
+      url: textOf(match.permalink),
+      channel: textOf(match.channel?.name || match.channel_name),
+      threadId: textOf(match.thread_ts || match.previous?.ts || ts),
+      unread: false
+    };
+  });
+  return { items, connection: null };
+}
+
+function slackSearchQuery(query) {
+  const prompt = textOf(query).trim();
+  const operator = /\b(?:from|after|before|in):[^\s,，]+/i.exec(prompt);
+  if (operator !== null) {
+    return operator[0];
+  }
+  const match = /(?:Slack|slack)\s*(?:搜索|查找|查看|search)?\s*[:：]?\s*(.+)$/i.exec(prompt) ||
+    /(?:搜索|查找|查看)\s*(?:Slack|slack)\s*(?:消息)?\s*[:：]?\s*(.+)$/i.exec(prompt);
+  return match === null ? prompt : textOf(match[1]).trim();
+}
+
+async function socialFeedResponse(url) {
+  const source = textOf(url.searchParams.get('source')).trim().toLowerCase();
+  const query = url.searchParams.get('q') || '';
+  let connections = socialConnections(source);
+  const fetchedItems = [];
+  if (query.trim().length > 0) {
+    if (source === '' || source === 'x') {
+      try {
+        const items = (await fetchXRecentSearch(query)).items;
+        upsertSocialItems(items);
+        fetchedItems.push(...items);
+      } catch (error) {
+        connections = replaceSocialConnection(connections, socialConnectionError('x', describeError(error)));
+      }
+    }
+    if (source === '') {
+      try {
+        const items = (await fetchSlackSearch(query)).items;
+        upsertSocialItems(items);
+        fetchedItems.push(...items);
+      } catch (error) {
+        connections = replaceSocialConnection(connections, socialConnectionError('slack', describeError(error)));
+      }
+    }
+  }
+  let items = uniqueSocialItems(socialCache.items.filter(item => socialItemMatchesQuery(item, query)).concat(fetchedItems));
+  if (source === 'x') {
+    items = items.filter(item => item.platform === 'x' && item.kind === 'post');
+  }
+  return {
+    items,
+    connections
+  };
+}
+
+function findSocialItem(itemId) {
+  return socialCache.items.find(item => item.id === itemId) || null;
+}
+
+function normalizeSocialPlatform(value) {
+  const platform = textOf(value).trim().toLowerCase();
+  if (platform === 'x' || platform === 'twitter') {
+    return 'x';
+  }
+  if (platform === 'slack') {
+    return 'slack';
+  }
+  if (platform === 'wecom' || platform === 'wework' || platform === '企业微信') {
+    return 'wecom';
+  }
+  return 'unknown';
+}
+
+function socialDraftResponse(body) {
+  const itemId = textOf(body.itemId).trim();
+  const platform = normalizeSocialPlatform(body.platform);
+  if (itemId.length === 0) {
+    return {
+      draft: {
+        itemId: '',
+        platform,
+        text: '',
+        status: 'error',
+        error: 'itemId is required to create a local SocialHub draft.',
+        localOnly: true,
+        sent: false
+      }
+    };
+  }
+  const item = findSocialItem(itemId);
+  if (!item || (platform !== 'unknown' && item.platform !== platform)) {
+    return {
+      draft: {
+        itemId,
+        platform,
+        text: '',
+        status: 'error',
+        error: `SocialHub item not found for local draft: ${itemId}`,
+        localOnly: true,
+        sent: false
+      }
+    };
+  }
+  return {
+    draft: {
+      itemId,
+      platform: item.platform,
+      text: textOf(body.instruction).trim(),
+      status: 'draft',
+      error: '',
+      localOnly: true,
+      sent: false
+    }
+  };
+}
+
+function isWecomCallbackAuthorized(req, url) {
+  if (!isGatewayAuthorized(req)) {
+    return false;
+  }
+  const callbackToken = textOf(process.env.WECOM_CALLBACK_TOKEN).trim();
+  if (callbackToken.length === 0) {
+    return true;
+  }
+  const suppliedToken = textOf(url.searchParams.get('token') || req.headers['x-wecom-token']).trim();
+  return suppliedToken === callbackToken;
+}
+
+function wecomCallbackItem(raw) {
+  const text = textOf(raw).trim();
+  if (text.length === 0) {
+    return null;
+  }
+  return {
+    id: `wecom-${Date.now()}`,
+    platform: 'wecom',
+    kind: 'message',
+    author: '',
+    handle: '',
+    text,
+    timestamp: nowIso(),
+    url: '',
+    channel: '',
+    threadId: '',
+    unread: true
+  };
+}
+
 function normalizeToolId(name) {
   const value = textOf(name).trim().toLowerCase().replaceAll('_', '.');
-  if (value === 'social.reply.send' || value.includes('social.reply') || value.includes('微信回复') || value.includes('社交回复')) {
-    return 'social.reply.send';
-  }
   if (value === 'travel.search' || value.includes('travel') || value.includes('出行方案') || value.includes('搜索出行') || value.includes('综合出行')) {
     return 'travel.search';
   }
@@ -385,9 +1190,6 @@ function safeId(value) {
 }
 
 function surfaceIdForTool(toolName) {
-  if (toolName === 'social.reply.send') {
-    return 'surface_social';
-  }
   if (toolName === 'travel.search') {
     return 'surface_travel';
   }
@@ -404,9 +1206,6 @@ function surfaceIdForTool(toolName) {
 }
 
 function intentForTool(toolName) {
-  if (toolName === 'social.reply.send') {
-    return 'social';
-  }
   if (toolName === 'food.search') {
     return 'food';
   }
@@ -2210,21 +3009,6 @@ async function callTool(toolName, args) {
   if (toolName === 'travel.search') {
     return callTravelSearch(args);
   }
-  if (toolName === 'social.reply.send') {
-    return generated(
-      '微信回复未发送。',
-      [
-        {
-          type: 'tool_required',
-          title: '微信回复未发送',
-          body: 'social.reply.send 已注册为真实动作，但 HTTP 兼容网关没有设备侧通知/辅助桥接和微信发送执行器；不会假装发送成功。',
-          toolName,
-          items: ['缺少真实微信辅助发送执行器', '请在 AIPhone HAP 内授权并接入设备侧桥接'],
-          actions: ['打开社交权限诊断']
-        }
-      ]
-    );
-  }
   const config = providerConfig(toolName);
   if (config.mcpUrl.length > 0) {
     return callHttpMcp(toolName, args, config);
@@ -2337,6 +3121,79 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/mcp/tools') {
       handleTools(res);
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/social/feed') {
+      if (!isGatewayAuthorized(req)) {
+        rejectUnauthorized(res);
+        return;
+      }
+      sendJson(res, 200, await socialFeedResponse(url));
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/social/draft') {
+      if (!isGatewayAuthorized(req)) {
+        rejectUnauthorized(res);
+        return;
+      }
+      sendJson(res, 200, socialDraftResponse(await readJson(req)));
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/stripe/checkout') {
+      await handleStripeCheckout(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/paypal/checkout') {
+      await handlePayPalCheckout(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/payment/paypal/capture') {
+      await handlePayPalCapture(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/social/wecom/callback') {
+      if (!isWecomCallbackAuthorized(req, url)) {
+        rejectUnauthorized(res);
+        return;
+      }
+      const item = wecomCallbackItem(await readRawBody(req));
+      if (!item) {
+        sendJson(res, 400, {
+          ok: false,
+          error: 'WeCom callback body is empty; no SocialHub item was cached.'
+        });
+        return;
+      }
+      socialCache.items.push(item);
+      sendJson(res, 200, {
+        ok: true,
+        item
+      });
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/v1/composio/auth-configs') {
+      await handleComposioAuthConfigs(req, res, url);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/composio/link') {
+      await handleComposioLink(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/composio/session') {
+      await handleComposioProxyJson(req, res, '/tool_router/session', 200);
+      return;
+    }
+    const composioSessionRoute = url.pathname.match(/^\/v1\/composio\/session\/([^/]+)(\/search|\/execute)?$/);
+    if (composioSessionRoute !== null) {
+      const sessionId = decodeURIComponent(composioSessionRoute[1]);
+      const suffix = composioSessionRoute[2] ?? '';
+      if (req.method === 'DELETE' && suffix.length === 0) {
+        await handleComposioProxyJson(req, res, `/tool_router/session/${encodeURIComponent(sessionId)}`, 200);
+        return;
+      }
+      if (req.method === 'POST' && (suffix === '/search' || suffix === '/execute')) {
+        await handleComposioProxyJson(req, res, `/tool_router/session/${encodeURIComponent(sessionId)}${suffix}`, 200);
+        return;
+      }
     }
     if (req.method === 'POST' && url.pathname === '/mcp/call') {
       if (!isGatewayAuthorized(req)) {

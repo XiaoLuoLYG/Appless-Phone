@@ -1,10 +1,10 @@
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
-import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '../../../model/A2uiTypes';
-import { actionsOf, foodOptions, foodVisualSourceTag, uniqueFoodSourceTags, A2uiFoodOption } from '../../../model/A2uiData';
-import { aiLogError, aiLogInfo } from '../../../model/AiphoneLogger';
-import { buildSystemFoodNavigationUri, describeSystemFoodNavigationUri } from '../../../model/FoodNavigation';
+import { A2uiAction, A2uiComponent, A2uiSurfaceState, emptyA2uiSurface } from '@loop/agent-core';
+import { actionsOf, foodOptions, foodVisualSourceTag, uniqueFoodSourceTags, A2uiFoodOption } from '@loop/agent-core';
+import { aiLogError, aiLogInfo } from '@loop/agent-core';
+import { buildSystemFoodNavigationUri, describeSystemFoodNavigationUri } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
   PreferencesNavigationCardSnapshotStore,
@@ -12,8 +12,8 @@ import {
   canCreateNavigationCardFromFoodOption,
   navigationCardPinActionFromFoodOption,
   navigationCardSnapshotFromFoodOption
-} from '../../../model/NavigationCardSnapshot';
-import { foodDistanceMeters } from '../../../model/ToolGatewayClient';
+} from '@loop/agent-core';
+import { foodDistanceMeters } from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,

@@ -5,8 +5,9 @@ import {
   A2uiSurfaceState,
   A2uiDynamicToolConnectData,
   A2uiGenericToolResultData
-} from '../main/ets/model/A2uiTypes';
-import { dynamicToolConnect, genericToolResults } from '../main/ets/model/A2uiData';
+} from '@loop/agent-core';
+import { dynamicToolConnect, genericToolResults } from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 function baseModel(): A2uiRuntimeDataModel {
   return {
@@ -15,11 +16,11 @@ function baseModel(): A2uiRuntimeDataModel {
     flights: [],
     travelOptions: [],
     foods: [],
-    social: { messages: [], replies: [], diagnostics: [] },
     thoughts: [],
     summary: { text: '', toolName: '', dataLabel: '', count: 0 },
     trip: { rows: [] },
     rowGroups: { train: [], flight: [], food: [] },
+    form: {},
     toolRequest: { toolId: '', prompt: '', actionId: '' },
     dynamicToolConnect: {
       toolId: 'maps.weather',
@@ -44,7 +45,10 @@ function baseModel(): A2uiRuntimeDataModel {
         rows: [{ label: 'Result', value: 'Fixture row' }],
         rawPreview: '{"ok":true}'
       }
-    ]
+    ],
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
 }
 

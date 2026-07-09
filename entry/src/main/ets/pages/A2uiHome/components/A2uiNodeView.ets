@@ -7,7 +7,8 @@ import {
   A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
-  A2UI_COMPONENT_SOCIAL_INBOX,
+  A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_CARD,
@@ -23,8 +24,8 @@ import {
   A2uiTravelOptionData,
   A2uiSurfaceState,
   emptyA2uiSurface
-} from '../../../model/A2uiTypes';
-import { actionsOf } from '../../../model/A2uiData';
+} from '@loop/agent-core';
+import { actionsOf } from '@loop/agent-core';
 import {
   COLOR_ERROR,
   COLOR_ERROR_SOFT,
@@ -46,8 +47,10 @@ import { ErrorNoticeView } from './ErrorNoticeView';
 import { FlightBoardView } from './FlightBoardView';
 import { FoodChoicesView } from './FoodChoicesView';
 import { GenericToolResultsView } from './GenericToolResultsView';
+import { SocialHubView } from './SocialHubView';
 import { InfoRowsView } from './InfoRowsView';
-import { SocialInboxView } from './SocialInboxView';
+import { PersonaMemoryUpdateView } from './PersonaMemoryUpdateView';
+import { StripeReceivingAccountView } from './StripeReceivingAccountView';
 import { ThinkingStreamView } from './ThinkingStreamView';
 import { ToolConnectCardView } from './ToolConnectCardView';
 import { TrainOptionsView } from './TrainOptionsView';
@@ -161,13 +164,23 @@ export struct A2uiNodeView {
           .margin({ bottom: 10 })
           .transition(a2uiEnterTransition())
       } else if (this.component()?.component === A2UI_COMPONENT_INFO_ROWS) {
-        InfoRowsView({
-          surface: this.surface,
-          component: this.component() as A2uiComponent,
-          renderTick: this.renderTick,
-          isBusy: this.isBusy,
-          onAction: this.onAction
-        })
+        if (this.component()?.id === 'memory_update') {
+          PersonaMemoryUpdateView({
+            surface: this.surface,
+            component: this.component() as A2uiComponent,
+            renderTick: this.renderTick,
+            isBusy: this.isBusy,
+            onAction: this.onAction
+          })
+        } else {
+          InfoRowsView({
+            surface: this.surface,
+            component: this.component() as A2uiComponent,
+            renderTick: this.renderTick,
+            isBusy: this.isBusy,
+            onAction: this.onAction
+          })
+        }
       } else if (this.component()?.component === A2UI_COMPONENT_TRAIN_OPTIONS) {
         TrainOptionsView({
           surface: this.surface,
@@ -213,14 +226,6 @@ export struct A2uiNodeView {
             this.onPinNavigationCard(item);
           }
         })
-      } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_INBOX) {
-        SocialInboxView({
-          surface: this.surface,
-          component: this.component() as A2uiComponent,
-          renderTick: this.renderTick,
-          isBusy: this.isBusy,
-          onAction: this.onAction
-        })
       } else if (this.component()?.component === A2UI_COMPONENT_TOOL_CONNECT_CARD) {
         ToolConnectCardView({
           surface: this.surface,
@@ -234,6 +239,20 @@ export struct A2uiNodeView {
           surface: this.surface,
           component: this.component() as A2uiComponent,
           renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_SOCIAL_HUB) {
+        SocialHubView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
+          isBusy: this.isBusy,
+          onAction: this.onAction
+        })
+      } else if (this.component()?.component === A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD) {
+        StripeReceivingAccountView({
+          surface: this.surface,
+          component: this.component() as A2uiComponent,
           isBusy: this.isBusy,
           onAction: this.onAction
         })

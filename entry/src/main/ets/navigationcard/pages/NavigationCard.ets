@@ -1,4 +1,4 @@
-import { resolveNavigationCardMapUri } from '../../model/NavigationCardSnapshot';
+import { resolveNavigationCardMapUri } from '@loop/agent-core';
 
 let storage = LocalStorage.getShared();
 

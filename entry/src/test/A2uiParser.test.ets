@@ -1,26 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '../main/ets/model/A2uiParser';
-import { A2uiSurfaceStore } from '../main/ets/model/A2uiSurfaceStore';
+import { parseA2uiEnvelope, parseA2uiJsonl, parseA2uiJsonlChunk } from '@loop/agent-core';
+import { A2uiSurfaceStore } from '@loop/agent-core';
 import {
   componentById,
   dynamicToolConnect,
   foodOptions,
   genericToolResults,
   labelValues,
-  socialMessages,
-  socialReplies,
+  resolveData,
   toolRequest,
   trainOptions,
   travelOptions
-} from '../main/ets/model/A2uiData';
-import {
-  appendThinkingStream,
-  extractA2uiJsonlFromModelChunk,
-  modelThinkCloseSeen,
-  normalizeAssistantDebugDisplay,
-  parseSseReasoningContent,
-  splitModelThinkFromContent
-} from '../main/ets/model/LocalModelClient';
+} from '@loop/agent-core';
+import { SocialHubItemData } from '@loop/agent-core';
+import { modelThinkCloseSeen } from '../main/ets/model/LocalModelClient';
 
 export default function a2uiParserTest() {
   describe('a2uiParser', () => {
@@ -178,12 +171,20 @@ export default function a2uiParserTest() {
       expect(results[0].rows[0].value).assertEqual('');
     });
 
-    it('accepts SocialInbox messages and reply state without falling back to rows', 0, () => {
+    it('rejects the removed SocialInbox component', 0, () => {
       const stream =
         '{"version":"v0.9.1","createSurface":{"surfaceId":"social","root":"root","title":"社交收件箱","intent":"social","status":"ready"}}\n' +
-        '{"version":"v0.9.1","updateComponents":{"surfaceId":"social","components":[{"id":"root","component":"SurfaceRoot","child":"inbox","title":"社交收件箱","status":"ready"},{"id":"inbox","component":"SocialInbox","title":"微信消息","dataPath":"/social/messages","status":"ready"}]}}\n' +
-        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"social","path":"/social/messages","value":[{"id":"wechat-1","platform":"wechat","conversationId":"wechat-alice","conversationTitle":"Alice","senderName":"Alice","preview":"晚上一起吃饭吗","receivedAt":"2026-06-11T08:30:00.000Z","source":"notification","status":"unread"}]}}\n' +
-        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"social","path":"/social/replies","value":[{"id":"reply-1","targetMessageId":"wechat-1","platform":"wechat","conversationId":"wechat-alice","text":"可以","status":"sent","error":"","sentAt":"2026-06-11T08:31:00.000Z"}]}}\n';
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"social","components":[{"id":"root","component":"SurfaceRoot","child":"inbox","title":"社交收件箱","status":"ready"},{"id":"inbox","component":"SocialInbox","title":"微信消息","dataPath":"/social/messages","status":"ready"}]}}\n';
+      const parsed = parseA2uiJsonl(stream);
+
+      expect(parsed.error.indexOf('SocialInbox')).assertLarger(-1);
+    });
+
+    it('accepts SocialHub components bound to socialHub items', 0, () => {
+      const stream =
+        '{"version":"v0.9.1","createSurface":{"surfaceId":"social-hub","root":"root","title":"Social Hub","intent":"social","status":"ready"}}\n' +
+        '{"version":"v0.9.1","updateComponents":{"surfaceId":"social-hub","components":[{"id":"root","component":"SurfaceRoot","child":"hub","title":"Social Hub","status":"ready"},{"id":"hub","component":"SocialHub","title":"Social Hub","dataPath":"/socialHub/items","status":"ready"}]}}\n' +
+        '{"version":"v0.9.1","updateDataModel":{"surfaceId":"social-hub","path":"/socialHub/items","value":[{"id":"slack-1","platform":"slack","kind":"message","author":"Lin","text":"standup moved","channel":"#core"}]}}\n';
       const parsed = parseA2uiJsonl(stream);
       const store = new A2uiSurfaceStore();
 
@@ -191,98 +192,18 @@ export default function a2uiParserTest() {
         store.apply(envelope);
       });
 
-      const surface = store.getSurface();
-      const inbox = componentById(surface, 'inbox');
+      const hub = componentById(store.getSurface(), 'hub');
+      const items = resolveData(store.getSurface(), '/socialHub/items') as SocialHubItemData[];
       expect(parsed.error).assertEqual('');
-      expect(inbox !== null).assertTrue();
-      if (inbox !== null) {
-        expect(socialMessages(surface, inbox)[0].conversationTitle).assertEqual('Alice');
-        expect(socialMessages(surface, inbox)[0].source).assertEqual('notification');
-        expect(socialReplies(surface)[0].status).assertEqual('sent');
-      }
-    });
-
-    it('extracts model A2UI from think blocks and markdown fences', 0, () => {
-      const content =
-        '<think>private reasoning</think>\n' +
-        '```json\n' +
-        '{"version":"v0.9.1","createSurface":{"surfaceId":"s","root":"root","title":"你好"}}\n' +
-        '```\n' +
-        'done\n';
-      const extracted = extractA2uiJsonlFromModelChunk(content);
-      const parsed = parseA2uiJsonl(extracted.jsonl);
-
-      expect(extracted.jsonl.indexOf('<think>')).assertEqual(-1);
-      expect(parsed.error).assertEqual('');
-      expect(parsed.envelopes.length).assertEqual(1);
-    });
-
-    it('streams model think tags separately from A2UI content', 0, () => {
-      const first = splitModelThinkFromContent('<think>正在分析路', false, '');
-      const second = splitModelThinkFromContent('线</think>\n{"version":"v0.9.1","createSurface":{"surfaceId":"s","root":"root","title":"你好"}}\n', first.inThink, first.tagRemainder);
-      const extracted = extractA2uiJsonlFromModelChunk(first.content + second.content);
-      const parsed = parseA2uiJsonl(extracted.jsonl);
-
-      expect(first.think).assertEqual('正在分析路');
-      expect(second.think).assertEqual('线');
-      expect(second.content.indexOf('<think>')).assertEqual(-1);
-      expect(parsed.error).assertEqual('');
-      expect(parsed.envelopes.length).assertEqual(1);
-    });
-
-    it('extracts think blocks from qwen think tags', 0, () => {
-      const openTag = '<' + 'think' + '>';
-      const closeTag = '</' + 'think' + '>';
-      const split = splitModelThinkFromContent(openTag + '正在确认工具' + closeTag + '\n{"version":"v0.9.1"}');
-
-      expect(split.think).assertEqual('正在确认工具');
-      expect(split.content.indexOf('{"version"')).assertLarger(-1);
-      expect(split.inThink).assertFalse();
+      expect(hub !== null).assertTrue();
+      expect(items.length).assertEqual(1);
+      expect(items[0].platform).assertEqual('slack');
+      expect(items[0].text).assertEqual('standup moved');
     });
 
     it('detects redacted thinking close tag', 0, () => {
       expect(modelThinkCloseSeen('分析完成</think>\n{"version":"v0.9.1"}')).assertTrue();
       expect(modelThinkCloseSeen('还在思考中')).assertFalse();
-    });
-
-    it('appends thinking stream without truncating to summaries', 0, () => {
-      let thoughts = appendThinkingStream([], '正在分析');
-      thoughts = appendThinkingStream(thoughts, '用户请求');
-      thoughts = appendThinkingStream(thoughts, '并准备生成 A2UI');
-
-      expect(thoughts.length).assertEqual(1);
-      expect(thoughts[0]).assertEqual('正在分析用户请求并准备生成 A2UI');
-    });
-
-    it('extracts OpenAI reasoning content from SSE chunks', 0, () => {
-      const chunk = 'data: {"choices":[{"delta":{"reasoning_content":"正在确认查询条件"}}]}\n\n' +
-        'data: {"choices":[{"delta":{"content":"{\\"version\\":\\"v0.9.1\\"}"}}]}\n\n';
-
-      expect(parseSseReasoningContent(chunk)).assertEqual('正在确认查询条件');
-    });
-
-    it('extracts JSON objects even when the model splits them across lines', 0, () => {
-      const content =
-        '{"version":"v0.9.1","createSurface":{\n' +
-        '"surfaceId":"s","root":"root","title":"你好","intent":"general","status":"ready","sendDataModel":true}}\n';
-      const extracted = extractA2uiJsonlFromModelChunk(content);
-      const parsed = parseA2uiJsonl(extracted.jsonl);
-
-      expect(parsed.error).assertEqual('');
-      expect(parsed.envelopes.length).assertEqual(1);
-      expect(parsed.envelopes[0].createSurface?.surfaceId).assertEqual('s');
-    });
-
-    it('recovers later complete envelopes after a malformed model object', 0, () => {
-      const content =
-        '{"version":"v0.9.1","createSurface":{"surfaceId":"s","root":"root","title":"AIPhone","status":"ready","send\n' +
-        '{"version":"v0.9.1","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"SurfaceRoot","child":"hello"},{"id":"hello","component":"Text","text":"你好"}]}}\n';
-      const extracted = extractA2uiJsonlFromModelChunk(content);
-      const parsed = parseA2uiJsonl(extracted.jsonl);
-
-      expect(parsed.error).assertEqual('');
-      expect(parsed.envelopes.length).assertEqual(1);
-      expect(parsed.envelopes[0].updateComponents?.surfaceId).assertEqual('s');
     });
 
     it('rejects unknown components', 0, () => {
@@ -416,12 +337,5 @@ export default function a2uiParserTest() {
       expect(store.getSurface().components.length).assertEqual(2);
     });
 
-    it('normalizes assistant debug when opening think tag is missing', 0, () => {
-      const raw = '正在确认出行日期</think>\n{"version":"v0.9.1"}\n';
-      const normalized = normalizeAssistantDebugDisplay(raw);
-
-      expect(normalized.indexOf('<think>')).assertEqual(0);
-      expect(normalized.indexOf('</think>')).assertLarger(0);
-    });
   });
 }

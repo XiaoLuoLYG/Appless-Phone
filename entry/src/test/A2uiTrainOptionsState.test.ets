@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiAction, A2uiTrainData } from '../main/ets/model/A2uiTypes';
+import { A2uiAction, A2uiTrainData } from '@loop/agent-core';
 import {
   A2UI_TRAIN_ACTION_FILTER_AVAILABLE,
   A2UI_TRAIN_ACTION_SHOW_MORE,

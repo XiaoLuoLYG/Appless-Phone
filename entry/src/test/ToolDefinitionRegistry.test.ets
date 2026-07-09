@@ -3,13 +3,20 @@ import {
   GMAIL_TOOL_IDS,
   allToolDefinitions,
   backendLabel,
+  isCalendarToolId,
   isGmailToolId,
   isKnownDomainToolId,
   isLocalAdapterToolId,
+  isMailToolId,
+  isMapsToolId,
+  isMediaToolId,
+  isPaymentToolId,
+  isRegisteredAiphoneToolId,
+  isYouTubeToolId,
   resolveBackendForTool,
   toolDefinitionForToolId
-} from '../main/ets/model/ToolDefinitionRegistry';
-import { BackendAvailability, BackendResolution, ToolBackendType, ToolDefinition } from '../main/ets/model/ToolDefinitionTypes';
+} from '@loop/agent-core';
+import { BackendAvailability, BackendResolution, ToolBackendType, ToolDefinition } from '@loop/agent-core';
 
 function availability(
   backend: ToolBackendType,
@@ -30,19 +37,76 @@ export default function toolDefinitionRegistryTest() {
     it('recognizes existing local adapters and Gmail tools through one registry', 0, () => {
       expect(isKnownDomainToolId('travel.search')).assertTrue();
       expect(isKnownDomainToolId('food.search')).assertTrue();
-      expect(isKnownDomainToolId('social.reply.send')).assertTrue();
+      expect(isKnownDomainToolId('social.reply.send')).assertFalse();
+      expect(isKnownDomainToolId('social.feed.search')).assertTrue();
+      expect(isKnownDomainToolId('social.reply.draft')).assertTrue();
+      expect(isKnownDomainToolId('x.post.search')).assertTrue();
       expect(isKnownDomainToolId('gmail.mail.search')).assertTrue();
       expect(isKnownDomainToolId('gmail.thread.read')).assertTrue();
       expect(isKnownDomainToolId('gmail.draft.create')).assertTrue();
       expect(isKnownDomainToolId('gmail.draft.apply')).assertTrue();
       expect(isKnownDomainToolId('gmail.open.web')).assertTrue();
       expect(isKnownDomainToolId('gmail.message.send')).assertTrue();
+      expect(isKnownDomainToolId('calendar.events.search')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.create')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.update')).assertTrue();
+      expect(isKnownDomainToolId('maps.place.search')).assertTrue();
+      expect(isKnownDomainToolId('maps.place.details')).assertTrue();
       expect(isKnownDomainToolId('gmail.unknown')).assertFalse();
+      expect(isKnownDomainToolId('youtube.video.search')).assertTrue();
+      expect(isKnownDomainToolId('youtube.mine.playlists')).assertTrue();
+      expect(isKnownDomainToolId('youtube.mine.subscriptions')).assertTrue();
+      expect(isKnownDomainToolId('media.video.search')).assertTrue();
+      expect(isKnownDomainToolId('youtube.unknown')).assertFalse();
 
       expect(isLocalAdapterToolId('travel.search')).assertTrue();
       expect(isLocalAdapterToolId('gmail.mail.search')).assertFalse();
       expect(isGmailToolId('gmail.mail.search')).assertTrue();
       expect(isGmailToolId('food.search')).assertFalse();
+      expect(isYouTubeToolId('youtube.video.search')).assertTrue();
+      expect(isYouTubeToolId('gmail.mail.search')).assertFalse();
+      expect(isYouTubeToolId('media.video.search')).assertFalse();
+      expect(isMediaToolId('media.video.search')).assertTrue();
+      expect(isMediaToolId('youtube.video.search')).assertFalse();
+    });
+
+    it('registers SocialHub read and draft tools without send', 0, () => {
+      const feed = toolDefinitionForToolId('social.feed.search') as ToolDefinition;
+      const draft = toolDefinitionForToolId('social.reply.draft') as ToolDefinition;
+      const xPost = toolDefinitionForToolId('x.post.search') as ToolDefinition;
+
+      expect(feed.domain).assertEqual('social');
+      expect(feed.riskLevel).assertEqual('read');
+      expect(feed.outputSchema).assertEqual('socialHubFeed');
+      expect(feed.a2uiComponent).assertEqual('SocialHub');
+      expect(feed.actions[0]).assertEqual('social.reply.draft');
+      expect(draft.riskLevel).assertEqual('draft');
+      expect(draft.outputSchema).assertEqual('socialHubDraft');
+      expect(draft.actions.length).assertEqual(0);
+      expect(xPost.domain).assertEqual('x');
+      expect(xPost.riskLevel).assertEqual('read');
+      expect(xPost.actions[0]).assertEqual('social.reply.draft');
+      expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
+    });
+
+    it('registers Calendar writes and Maps POI search explicitly', 0, () => {
+      const calendarCreate = toolDefinitionForToolId('calendar.event.create') as ToolDefinition;
+      const calendarUpdate = toolDefinitionForToolId('calendar.event.update') as ToolDefinition;
+      const mapsSearch = toolDefinitionForToolId('maps.place.search') as ToolDefinition;
+
+      expect(calendarCreate.domain).assertEqual('calendar');
+      expect(calendarCreate.riskLevel).assertEqual('confirm_required');
+      expect(calendarCreate.backendPriority.join(',')).assertEqual('oauth_api');
+      expect(calendarCreate.outputSchema).assertEqual('calendarEvent');
+      expect(calendarUpdate.riskLevel).assertEqual('confirm_required');
+      expect(isCalendarToolId('calendar.events.search')).assertTrue();
+      expect(isCalendarToolId('calendar.event.delete')).assertFalse();
+      expect(mapsSearch.domain).assertEqual('maps');
+      expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
+      expect(mapsSearch.outputSchema).assertEqual('places');
+      expect(isMapsToolId('maps.place.details')).assertTrue();
+      expect(toolDefinitionForToolId('maps.route.plan')).assertEqual(null);
+      expect(toolDefinitionForToolId('calendar.event.delete')).assertEqual(null);
     });
 
     it('keeps Gmail definitions declarative and direct send blocked', 0, () => {
@@ -61,6 +125,69 @@ export default function toolDefinitionRegistryTest() {
       expect(messageSend.riskLevel).assertEqual('blocked');
       expect(messageSend.outputSchema).assertEqual('blockedAction');
       expect(GMAIL_TOOL_IDS.indexOf('gmail.message.send') >= 0).assertTrue();
+    });
+
+    it('registers aggregate mail tools without enabling send', 0, () => {
+      expect(isKnownDomainToolId('mail.search')).assertTrue();
+      expect(isKnownDomainToolId('mail.thread.read')).assertTrue();
+      expect(isKnownDomainToolId('mail.draft.create')).assertTrue();
+      expect(isKnownDomainToolId('mail.message.send')).assertFalse();
+      expect(isMailToolId('mail.search')).assertTrue();
+      expect(isMailToolId('gmail.mail.search')).assertFalse();
+
+      const mailSearch = toolDefinitionForToolId('mail.search');
+      expect(mailSearch !== null).assertTrue();
+      if (mailSearch !== null) {
+        expect(mailSearch.domain).assertEqual('mail');
+        expect(mailSearch.riskLevel).assertEqual('read');
+        expect(mailSearch.backendPriority.indexOf('imap') >= 0).assertTrue();
+        expect(mailSearch.authModes.indexOf('imap_auth') >= 0).assertTrue();
+        expect(mailSearch.a2uiComponent).assertEqual('GenericToolResults');
+      }
+    });
+
+    it('keeps YouTube public search separate from OAuth account tools', 0, () => {
+      const search = toolDefinitionForToolId('youtube.video.search') as ToolDefinition;
+      const playlists = toolDefinitionForToolId('youtube.mine.playlists') as ToolDefinition;
+
+      expect(search.domain).assertEqual('youtube');
+      expect(search.riskLevel).assertEqual('read');
+      expect(search.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(search.authModes.join(',')).assertEqual('provider_key');
+      expect(search.outputSchema).assertEqual('youtubeVideos');
+      expect(search.a2uiComponent).assertEqual('GenericToolResults');
+      expect(playlists.backendPriority.join(',')).assertEqual('oauth_api,web_session');
+      expect(playlists.authModes.join(',')).assertEqual('oauth,web_session');
+    });
+
+    it('registers media video aggregation as a read-only local adapter', 0, () => {
+      const media = toolDefinitionForToolId('media.video.search') as ToolDefinition;
+
+      expect(media.domain).assertEqual('media');
+      expect(media.riskLevel).assertEqual('read');
+      expect(media.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(media.authModes.join(',')).assertEqual('provider_key');
+      expect(media.inputSchema).assertEqual('mediaVideoSearchQuery');
+      expect(media.outputSchema).assertEqual('mediaVideos');
+      expect(media.a2uiComponent).assertEqual('GenericToolResults');
+      expect(media.actions[0]).assertEqual('media.open.web');
+    });
+
+    it('registers payment send as a confirm-required local adapter', 0, () => {
+      const payment = toolDefinitionForToolId('payment.send') as ToolDefinition;
+
+      expect(isKnownDomainToolId('payment.send')).assertTrue();
+      expect(isLocalAdapterToolId('payment.send')).assertTrue();
+      expect(isPaymentToolId('payment.send')).assertTrue();
+      expect(isRegisteredAiphoneToolId('payment.send')).assertTrue();
+      expect(payment.domain).assertEqual('payment');
+      expect(payment.riskLevel).assertEqual('confirm_required');
+      expect(payment.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(payment.authModes.join(',')).assertEqual('provider_key,web_session');
+      expect(payment.inputSchema).assertEqual('paymentSendRequest');
+      expect(payment.outputSchema).assertEqual('paymentCheckout');
+      expect(payment.a2uiComponent).assertEqual('GenericToolResults');
+      expect(payment.actions[0]).assertEqual('payment.confirm');
     });
 
     it('resolves available Gmail backends before returning an auth-needed reason', 0, () => {
@@ -95,6 +222,7 @@ export default function toolDefinitionRegistryTest() {
       expect(fresh[0].backendPriority.join(',')).assertEqual('local_adapter');
       expect(backendLabel('local_adapter')).assertEqual('Local adapter');
       expect(backendLabel('oauth_api')).assertEqual('OAuth API');
+      expect(backendLabel('imap')).assertEqual('IMAP');
       expect(backendLabel('workspace_mcp')).assertEqual('Workspace MCP');
       expect(backendLabel('web_session')).assertEqual('Web session');
       expect(backendLabel('system_intent')).assertEqual('System intent');

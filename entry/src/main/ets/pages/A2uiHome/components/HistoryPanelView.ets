@@ -1,4 +1,4 @@
-import { A2uiMessage } from '../../../model/A2uiTypes';
+import { A2uiMessage } from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_SOFT,

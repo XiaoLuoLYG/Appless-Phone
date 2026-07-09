@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { flightOptions, foodOptions, foodVisualSourceTag, trainOptions } from '../main/ets/model/A2uiData';
+import { flightOptions, foodOptions, foodVisualSourceTag, trainOptions } from '@loop/agent-core';
 import {
   A2uiComponent,
   A2uiFlightData,
@@ -7,14 +7,14 @@ import {
   A2uiLabelValueData,
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
-  A2uiSocialData,
   A2uiSummaryData,
   A2uiSurfaceState,
   A2uiToolRequestData,
   A2uiTrainData,
   A2uiTravelOptionData,
   A2uiTripData
-} from '../main/ets/model/A2uiTypes';
+} from '@loop/agent-core';
+import { emptySocialHub } from '@loop/agent-core';
 
 function businessSurface(): A2uiSurfaceState {
   const trains: A2uiTrainData[] = [{
@@ -50,11 +50,6 @@ function businessSurface(): A2uiSurfaceState {
     distance: '300米'
   }];
   const travelOptions: A2uiTravelOptionData[] = [];
-  const social: A2uiSocialData = {
-    messages: [],
-    replies: [],
-    diagnostics: []
-  };
   const rows: A2uiLabelValueData[] = [];
   const thoughts: string[] = [];
   const summary: A2uiSummaryData = {
@@ -86,11 +81,11 @@ function businessSurface(): A2uiSurfaceState {
     flights: flights,
     travelOptions: travelOptions,
     foods: foods,
-    social: social,
     thoughts: thoughts,
     summary: summary,
     trip: trip,
     rowGroups: rowGroups,
+    form: {},
     toolRequest: toolRequest,
     dynamicToolConnect: {
       toolId: '',
@@ -105,7 +100,10 @@ function businessSurface(): A2uiSurfaceState {
       registrationUrl: '',
       actions: []
     },
-    genericToolResults: []
+    genericToolResults: [],
+    socialHub: emptySocialHub(),
+    persona: { id: '', name: '', avatarKey: '', status: '', reason: '' },
+    personaMemory: { summary: '', preferences: [] }
   };
   const components: A2uiComponent[] = [];
   return {
