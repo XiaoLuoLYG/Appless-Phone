@@ -162,6 +162,11 @@ interface HttpTextResponse {
   headers: string;
 }
 
+interface ComposioFixedRequestPayload {
+  fixedToolId: string;
+  fixedArgs?: Object;
+}
+
 interface HttpRequestHeaders {
   'User-Agent'?: string;
   'Accept'?: string;
@@ -6680,6 +6685,82 @@ async function composioAppResult(appName: string, query: string, kind: string): 
   }
 }
 
+function composioFixedRequestArgs(toolId: string, args: Object | null = null): Object {
+  const payload: ComposioFixedRequestPayload = {
+    fixedToolId: toolId
+  };
+  if (args !== null) {
+    payload.fixedArgs = args;
+  }
+  return payload;
+}
+
+function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
+  if (args === null || Array.isArray(args) || typeof args !== 'object') {
+    return [];
+  }
+  const rows: A2uiLabelValueData[] = [];
+  const record = args as Record<string, Object | string | number | boolean | null | undefined>;
+  Object.keys(record).forEach((key: string) => {
+    const value = record[key];
+    const text = textOf(value).trim();
+    if (text.length > 0) {
+      rows.push({ label: key, value: text.substring(0, 360) });
+    }
+  });
+  return rows;
+}
+
+function composioFixedResult(toolId: string, appName: string, result: DynamicGenericToolResult, args: Object | null = null): DynamicGenericToolResult {
+  result.toolName = toolId;
+  result.sourceTag = 'Composio ' + appName;
+  if (result.rows.find((row: A2uiLabelValueData) => row.label === 'Tool ID') === undefined) {
+    result.rows.push({ label: 'Tool ID', value: toolId });
+  }
+  composioPayloadRows(args).forEach((row: A2uiLabelValueData) => {
+    if (result.rows.find((existing: A2uiLabelValueData) => existing.label === row.label) === undefined) {
+      result.rows.push(row);
+    }
+  });
+  return result;
+}
+
+async function composioFixedAppResult(
+  toolId: string,
+  appName: string,
+  query: string,
+  kind: string,
+  args: Object | null = null
+): Promise<DynamicGenericToolResult> {
+  const prompt = composioProviderPrompt(appName, query, kind);
+  try {
+    const result = await callComposioDynamic(prompt, composioFixedRequestArgs(toolId, args));
+    if (result !== null) {
+      result.rows.push({ label: 'provider', value: appName });
+      return composioFixedResult(toolId, appName, result, args);
+    }
+    return composioFixedResult(toolId, appName, {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: 'Composio 没有处理该请求。',
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    }, args);
+  } catch (error) {
+    return composioFixedResult(toolId, appName, {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    }, args);
+  }
+}
+
 function firstUrlInText(value: string): string {
   const parts = value.split('|').join(' ').split(' ');
   for (let index = 0; index < parts.length; index++) {
@@ -6701,7 +6782,12 @@ function firstUrlInText(value: string): string {
 
 function isComposioSystemLabel(label: string): boolean {
   return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
-    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段';
+    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段' || label === 'Tool ID';
+}
+
+function isSlackDirectMessageRow(row: A2uiLabelValueData): boolean {
+  const text = (row.label + ' ' + row.value).toLowerCase();
+  return text.indexOf('/archives/d') >= 0;
 }
 
 function socialConnectionStatus(status: string): string {
@@ -6727,10 +6813,13 @@ function composioSocialFeedResult(platform: SocialHubPlatform, displayName: stri
     if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
       return;
     }
+    if (platform === 'slack' && !isSlackDirectMessageRow(row)) {
+      return;
+    }
     items.push({
       id: 'composio-' + platform + '-' + index.toString(),
       platform: platform,
-      kind: platform === 'linkedin' || platform === 'instagram' ? 'post' : 'message',
+      kind: 'message',
       author: row.label,
       handle: displayName,
       text: row.value,
@@ -6806,7 +6895,7 @@ function socialHubPlatformFromText(value: string): SocialHubPlatform {
 }
 
 function isSocialHubToolId(toolId: string): boolean {
-  return toolId === 'social.feed.search' || toolId === 'social.reply.draft' || toolId === 'x.post.search';
+  return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
 }
 
 function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProviderConfig {
@@ -6820,17 +6909,7 @@ function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProvid
 }
 
 function shouldUseComposioSocialAggregate(prompt: string): boolean {
-  const lower = prompt.toLowerCase();
-  return prompt.indexOf('社交') >= 0 ||
-    prompt.indexOf('消息聚合') >= 0 ||
-    prompt.indexOf('多平台') >= 0 ||
-    lower.indexOf('discord') >= 0 ||
-    lower.indexOf('linkedin') >= 0 ||
-    prompt.indexOf('领英') >= 0 ||
-    lower.indexOf('whatsapp') >= 0 ||
-    lower.indexOf('whats app') >= 0 ||
-    lower.indexOf('instagram') >= 0 ||
-    lower.indexOf('instgram') >= 0;
+  return prompt.trim().length > 0;
 }
 
 async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
@@ -6838,13 +6917,17 @@ async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedRes
   const items: SocialHubItemData[] = [];
   const connections: SocialHubConnectionData[] = [];
   const results: SocialHubFeedResult[] = await Promise.all([
+    composioAppResult('Twitter', query, '最近 30 天私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('x', 'X', result)),
+    composioAppResult('Slack', query, '最近 30 天 DM 私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('slack', 'Slack', result)),
     composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('discord', 'Discord', result)),
-    composioAppResult('LinkedIn', query, '相关动态').then((result: DynamicGenericToolResult) =>
+    composioAppResult('LinkedIn', query, '私信消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('linkedin', 'LinkedIn', result)),
     composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
-    composioAppResult('Instagram', query, '相关评论').then((result: DynamicGenericToolResult) =>
+    composioAppResult('Instagram', query, '私信消息').then((result: DynamicGenericToolResult) =>
       composioSocialFeedResult('instagram', 'Instagram', result))
   ]);
   results.forEach((result: SocialHubFeedResult) => {
@@ -6872,15 +6955,17 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
-  const result = toolId === 'x.post.search' ?
-    await socialHubClient.xPostSearch(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig()) :
-    await socialHubClient.feed(prompt, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig(await safeXAccessTokenForDm()));
   if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
-    const composio = await composioSocialAggregate(prompt);
-    composio.items.forEach((item: SocialHubItemData) => result.items.push(item));
-    composio.connections.forEach((connection: SocialHubConnectionData) => result.connections.push(connection));
+    const result = await composioSocialAggregate(prompt);
+    return socialHubFeedA2ui(surfaceId, result.items, result.connections);
   }
-  return socialHubFeedA2ui(surfaceId, result.items, result.connections);
+  return socialHubFeedA2ui(surfaceId, [], []);
+}
+
+async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
+  ]);
 }
 
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -6891,18 +6976,9 @@ async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: s
       await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
     );
   }
-  return genericToolResultsA2ui(surfaceId, toolId, [{
-    sourceTag: 'YouTube Data API',
-    toolName: toolId,
-    title: 'YouTube OAuth 授权需要登录',
-    status: 'auth_required',
-    summary: '当前设备没有可用的 YouTube OAuth 授权；不会模拟播放列表或订阅内容。',
-    rows: [
-      { label: 'OAuth', value: 'Google YouTube scope required' },
-      { label: 'Client', value: localProviderConfig.googleOauthClientId.length > 0 ? 'configured' : 'missing GOOGLE_OAUTH_CLIENT_ID' }
-    ],
-    rawPreview: 'youtube oauth required'
-  }]);
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'YouTube', prompt, toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表', args)
+  ]);
 }
 
 async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -6935,48 +7011,20 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
   if (toolId === 'gmail.open.web') {
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
-  const mcpToolName = gmailMcpToolNameForToolId(toolId);
-  if (mcpToolName.length === 0) {
-    return gmailAuthRequiredA2ui(surfaceId, toolId, '未知 Gmail 工具：' + toolId, GMAIL_MCP_AUTH_SETUP_URL);
-  }
-
-  let accessToken = '';
   try {
-    accessToken = await gmailAccessTokenForMcp();
-  } catch (error) {
-    return gmailUnavailableA2ui(surfaceId, toolId, prompt, describeThrown(error));
-  }
-  if (accessToken.length === 0) {
-    aiLogInfo('[AIPhone][GmailAccessMissing] toolId=' + toolId);
-    return gmailAuthRequiredA2ui(surfaceId, toolId, gmailAuthUnavailableMessage(toolId, prompt), await prepareGmailOAuthAuthorizationUrl());
-  }
-
-  try {
-    if (gmailMcpClient === genericMcpClient) {
-      aiLogInfo('[AIPhone][GmailApiRequest] toolId=' + toolId);
-      const apiResults = await callGmailApiTool(toolId, prompt, accessToken, args);
-      if (gmailResultsHaveError(apiResults)) {
-        aiLogInfo('[AIPhone][GmailApiErrorResult] toolId=' + toolId +
-          ' reason=' + gmailResultErrorSummary(apiResults).substring(0, 180));
-        if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-          return gmailDraftPreviewA2ui(surfaceId, apiResults[0]);
-        }
-        return gmailThreadResultsA2ui(surfaceId, toolId, apiResults);
-      }
-      if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-        return gmailDraftPreviewA2ui(surfaceId, apiResults[0]);
-      }
-      return gmailThreadResultsA2ui(surfaceId, toolId, apiResults);
-    }
-    aiLogInfo('[AIPhone][GmailMcpRequest] toolId=' + toolId +
-      ' mcpToolName=' + mcpToolName);
-    const result = await gmailMcpClient.callTool(gmailMcpRegistration(toolId, mcpToolName), accessToken, gmailMcpArgsForPrompt(toolId, prompt, args));
+    const result = await composioFixedAppResult(
+      toolId,
+      'Gmail',
+      prompt,
+      toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
+      args
+    );
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
       return gmailDraftPreviewA2ui(surfaceId, result);
     }
     return gmailThreadResultsA2ui(surfaceId, toolId, [result]);
   } catch (error) {
-    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(mcpToolName, describeThrown(error))]);
+    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(toolId, describeThrown(error))]);
   }
 }
 
@@ -6989,42 +7037,14 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
 
     if (parsed.providers.indexOf('gmail') >= 0) {
       try {
-        const accessToken = await gmailAccessTokenForMcp();
-        if (accessToken.length === 0) {
-          aiLogInfo('[AIPhone][GmailAccessMissing] toolId=mail.search provider=gmail');
-          statuses.push(mailProviderError('gmail', gmailAuthUnavailableMessage('gmail.mail.search', prompt)));
-        } else {
-          const gmailRows = await callGmailApiTool('gmail.mail.search', prompt, accessToken, parsed as Object);
-          gmailRows.forEach((row: DynamicGenericToolResult) => {
-            if (row.status === 'success' && row.toolName === 'users.threads.get') {
-              const threadId = dynamicRowValue(row, 'Thread ID');
-              const labels = dynamicRowValue(row, 'Labels');
-              threads.push({
-                provider: 'gmail',
-                accountLabel: 'Gmail',
-                threadId: threadId,
-                messageId: threadId,
-                subject: row.title,
-                from: dynamicRowValue(row, 'From'),
-                to: [],
-                participants: [],
-                snippet: row.summary,
-                receivedAt: dynamicRowValue(row, 'Date'),
-                unread: labels.indexOf('UNREAD') >= 0,
-                important: labels.indexOf('IMPORTANT') >= 0,
-                sourceUrl: '',
-                rawProviderRef: threadId
-              });
-            } else if (!isGmailSearchSummaryRow(row)) {
-              statuses.push({
-                provider: 'gmail',
-                status: row.status,
-                title: row.title,
-                message: row.summary
-              });
-            }
-          });
-        }
+        const gmailResult = await composioFixedAppResult('gmail.mail.search', 'Gmail', parsed.query, '邮件', parsed as Object);
+        statuses.push({
+          provider: 'gmail',
+          status: gmailResult.status,
+          title: gmailResult.title,
+          message: gmailResult.summary
+        });
+        extras.push(gmailResult);
       } catch (error) {
         statuses.push(mailProviderError('gmail', describeThrown(error)));
       }
@@ -7136,16 +7156,9 @@ function calendarAuthUnavailableMessage(toolId: string, prompt: string): string 
 }
 
 async function callLocalCalendarTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  let token = '';
-  try {
-    token = await googleAccessTokenForCalendar();
-  } catch (error) {
-    return calendarAuthRequiredA2ui(surfaceId, toolId, calendarAuthUnavailableMessage(toolId, prompt) + ' 错误：' + describeThrown(error), await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL));
-  }
-  if (token.length === 0) {
-    return calendarAuthRequiredA2ui(surfaceId, toolId, calendarAuthUnavailableMessage(toolId, prompt), await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL));
-  }
-  return genericToolResultsA2ui(surfaceId, toolId, await callCalendarTool(toolId, prompt, token, args));
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更', args)
+  ]);
 }
 
 function mapsArgs(args: Object | null): MapsToolArgs {
@@ -8046,6 +8059,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isSocialHubToolId(toolId)) {
     return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+  }
+  if (toolId === 'x.post.search') {
+    return callLocalXTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'payment.account.setup') {
     return callLocalStripeReceivingTool(prompt, surfaceId, actionId, args);

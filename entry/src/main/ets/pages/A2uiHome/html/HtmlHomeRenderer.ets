@@ -1502,6 +1502,8 @@ const HTML_HOME_JS: string = `
   var COMPOSIO_ICON_HUBSPOT = 'data:image/svg+xml,%3Csvg%20fill%3D%22%23FF7A59%22%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M18.164%207.93V5.084a2.198%202.198%200%20001.267-1.978v-.067A2.2%202.2%200%200017.238.845h-.067a2.2%202.2%200%2000-2.193%202.193v.067a2.196%202.196%200%20001.252%201.973l.013.006v2.852a6.22%206.22%200%2000-2.969%201.31l.012-.01-7.828-6.095A2.497%202.497%200%20104.3%204.656l-.012.006%207.697%205.991a6.176%206.176%200%2000-1.038%203.446c0%201.343.425%202.588%201.147%203.607l-.013-.02-2.342%202.343a1.968%201.968%200%2000-.58-.095h-.002a2.033%202.033%200%20102.033%202.033%201.978%201.978%200%2000-.1-.595l.005.014%202.317-2.317a6.247%206.247%200%20104.782-11.134l-.036-.005zm-.964%209.378a3.206%203.206%200%20113.215-3.207v.002a3.206%203.206%200%2001-3.207%203.207z%22%2F%3E%3C%2Fsvg%3E';
   var COMPOSIO_ICON_SALESFORCE = 'data:image/svg+xml,%3Csvg%20fill%3D%22%2300A1E0%22%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M10.006%205.415a4.195%204.195%200%20013.045-1.306c1.56%200%202.954.9%203.69%202.205.63-.3%201.35-.45%202.1-.45%202.85%200%205.159%202.34%205.159%205.22s-2.31%205.22-5.176%205.22c-.345%200-.69-.044-1.02-.104a3.75%203.75%200%2001-3.3%201.95c-.6%200-1.155-.15-1.65-.375A4.314%204.314%200%20018.88%2020.4a4.302%204.302%200%2001-4.05-2.82c-.27.062-.54.076-.825.076-2.204%200-4.005-1.8-4.005-4.05%200-1.5.811-2.805%202.01-3.51-.255-.57-.39-1.2-.39-1.846%200-2.58%202.1-4.65%204.65-4.65%201.53%200%202.85.705%203.72%201.8%22%2F%3E%3C%2Fsvg%3E';
   var COMPOSIO_ICON_DEFAULT = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221024%22%20height%3D%221024%22%20viewBox%3D%220%200%201024%201024%22%3E%20%3Cg%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%20%3Cpath%20d%3D%22M246%20792L512%20224L730%20792%22%20stroke%3D%22%237D4B3B%22%20stroke-width%3D%22118%22%20opacity%3D%220.36%22%2F%3E%20%3Cpath%20d%3D%22M246%20792L512%20224L730%20792%22%20stroke%3D%22%23995F4C%22%20stroke-width%3D%2292%22%2F%3E%20%3Cpath%20d%3D%22M332%20632H650%22%20stroke%3D%22%237D4B3B%22%20stroke-width%3D%22118%22%20opacity%3D%220.36%22%2F%3E%20%3Cpath%20d%3D%22M332%20632H650%22%20stroke%3D%22%23995F4C%22%20stroke-width%3D%2292%22%2F%3E%20%3Cpath%20d%3D%22M246%20792H360%22%20stroke%3D%22%23995F4C%22%20stroke-width%3D%2292%22%2F%3E%20%3Cpath%20d%3D%22M650%20792H770%22%20stroke%3D%22%23995F4C%22%20stroke-width%3D%2292%22%2F%3E%20%3C%2Fg%3E%20%3Cg%20fill%3D%22%23995F4C%22%3E%20%3Crect%20x%3D%22612%22%20y%3D%22208%22%20width%3D%2274%22%20height%3D%2274%22%20rx%3D%2216%22%20transform%3D%22rotate(18%20649%20245)%22%20opacity%3D%220.96%22%2F%3E%20%3Crect%20x%3D%22704%22%20y%3D%22216%22%20width%3D%2248%22%20height%3D%2248%22%20rx%3D%2211%22%20transform%3D%22rotate(-26%20728%20240)%22%20opacity%3D%220.82%22%2F%3E%20%3Crect%20x%3D%22790%22%20y%3D%22274%22%20width%3D%2234%22%20height%3D%2234%22%20rx%3D%228%22%20transform%3D%22rotate(17%20807%20291)%22%20opacity%3D%220.72%22%2F%3E%20%3Crect%20x%3D%22648%22%20y%3D%22352%22%20width%3D%2258%22%20height%3D%2258%22%20rx%3D%2213%22%20transform%3D%22rotate(-18%20677%20381)%22%20opacity%3D%220.86%22%2F%3E%20%3Crect%20x%3D%22758%22%20y%3D%22410%22%20width%3D%2245%22%20height%3D%2245%22%20rx%3D%2210%22%20transform%3D%22rotate(26%20780.5%20432.5)%22%20opacity%3D%220.74%22%2F%3E%20%3Crect%20x%3D%22844%22%20y%3D%22510%22%20width%3D%2228%22%20height%3D%2228%22%20rx%3D%227%22%20transform%3D%22rotate(-18%20858%20524)%22%20opacity%3D%220.58%22%2F%3E%20%3Crect%20x%3D%22706%22%20y%3D%22556%22%20width%3D%2236%22%20height%3D%2236%22%20rx%3D%228%22%20transform%3D%22rotate(20%20724%20574)%22%20opacity%3D%220.68%22%2F%3E%20%3Crect%20x%3D%22805%22%20y%3D%22682%22%20width%3D%2228%22%20height%3D%2228%22%20rx%3D%227%22%20transform%3D%22rotate(-25%20819%20696)%22%20opacity%3D%220.52%22%2F%3E%20%3C%2Fg%3E%20%3C%2Fsvg%3E';
+  var COMPOSIO_ICON_X = 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/Pgo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiB2aWV3Qm94PSIwIDAgMzIgMzIiPgogIDxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjciIGZpbGw9IiMwMDAwMDAiLz4KICA8cGF0aCBkPSJNMTguMyAxNC4xTDI2IDVIMjQuMkwxNy41IDEyLjhMMTIuMiA1SDZMMTQuMSAxNi45TDYgMjYuNUg3LjhMMTQuOSAxOC4yTDIwLjYgMjYuNUgyNi44TDE4LjMgMTQuMVpNMTUuOCAxN0wxNSAxNS45TDguNSA2LjRIMTEuM0wxNi42IDE0LjJMMTcuNCAxNS4zTDI0LjIgMjUuMkgyMS40TDE1LjggMTdaIiBmaWxsPSIjRkZGRkZGIi8+Cjwvc3ZnPgo=';
+  var COMPOSIO_ICON_WECOM = 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/Pgo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiB2aWV3Qm94PSIwIDAgMzIgMzIiPgogIDxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjciIGZpbGw9IiNGRkZGRkYiLz4KICA8cGF0aCBkPSJNMTQuMiA3LjFDOC44IDcuMSA0LjUgMTAuNiA0LjUgMTVDNC41IDE3LjUgNS45IDE5LjcgOC4xIDIxLjJMNy4zIDI0LjJDNy4yIDI0LjggNy44IDI1LjIgOC4zIDI0LjlMMTEuOCAyMy4xQzEyLjYgMjMuMyAxMy40IDIzLjQgMTQuMiAyMy40QzE5LjYgMjMuNCAyMy45IDE5LjggMjMuOSAxNS40QzIzLjkgMTAuOSAxOS42IDcuMSAxNC4yIDcuMVoiIGZpbGw9IiMxQUFEMTkiLz4KICA8cGF0aCBkPSJNMTguNyAxMS4zQzIzLjUgMTEuMyAyNy40IDE0LjUgMjcuNCAxOC40QzI3LjQgMjAuNyAyNi4xIDIyLjcgMjQuMSAyNEwyNC44IDI2LjdDMjQuOSAyNy4yIDI0LjQgMjcuNiAyMy45IDI3LjNMMjAuOCAyNS44QzIwLjEgMjYgMTkuNCAyNi4xIDE4LjcgMjYuMUMxMy45IDI2LjEgMTAgMjIuOSAxMCAxOUMxMCAxNSAxMy45IDExLjMgMTguNyAxMS4zWiIgZmlsbD0iIzJGOEZFRSIvPgogIDxjaXJjbGUgY3g9IjEwLjMiIGN5PSIxNC4yIiByPSIxLjEiIGZpbGw9IiNGRkZGRiIvPgogIDxjaXJjbGUgY3g9IjE0LjQiIGN5PSIxNC4yIiByPSIxLjEiIGZpbGw9IiNGRkZGRiIvPgogIDxjaXJjbGUgY3g9IjE3LjEiIGN5PSIxOC43IiByPSIxIiBmaWxsPSIjRkZGRkYiLz4KICA8Y2lyY2xlIGN4PSIyMC43IiBjeT0iMTguNyIgcj0iMSIgZmlsbD0iI0ZGRkZGRiIvPgo8L3N2Zz4K';
   function kindLabel(value) {
     var kind = text(value);
     if (kind === 'welcome') { return '欢迎'; }
@@ -1553,6 +1555,8 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-ticketmaster') { return 'Ticketmaster'; }
     if (key === 'composio-hubspot') { return 'HubSpot'; }
     if (key === 'composio-salesforce') { return 'Salesforce'; }
+    if (key === 'composio-x' || key === 'social-x') { return 'X'; }
+    if (key === 'social-wecom') { return '企业微信'; }
     if (key === 'composio') { return 'Composio'; }
     if (text(block && block.kind) === 'food-result' && text(block && block.source).length > 0) {
       return text(block && block.source);
@@ -1585,7 +1589,11 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-ticketmaster') { return COMPOSIO_ICON_TICKETMASTER; }
     if (key === 'composio-hubspot') { return COMPOSIO_ICON_HUBSPOT; }
     if (key === 'composio-salesforce') { return COMPOSIO_ICON_SALESFORCE; }
-    if (key === 'composio') { return COMPOSIO_ICON_DEFAULT; }
+    if (key === 'composio-x') { return COMPOSIO_ICON_X; }
+    if (key === 'composio') { return ''; }
+    if (key === 'social-slack') { return COMPOSIO_ICON_SLACK; }
+    if (key === 'social-x') { return COMPOSIO_ICON_X; }
+    if (key === 'social-wecom') { return COMPOSIO_ICON_WECOM; }
     if (key === 'social-discord') { return COMPOSIO_ICON_DISCORD; }
     if (key === 'social-linkedin') { return COMPOSIO_ICON_LINKEDIN; }
     if (key === 'social-whatsapp') { return COMPOSIO_ICON_WHATSAPP; }
@@ -1636,6 +1644,7 @@ const HTML_HOME_JS: string = `
       raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0 ||
       raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0 ||
       raw.indexOf('github') >= 0 || raw.indexOf('slack') >= 0 ||
+      raw.indexOf('twitter') >= 0 || raw.indexOf('x.post.search') >= 0 ||
       raw.indexOf('notion') >= 0 || raw.indexOf('linear') >= 0 ||
       raw.indexOf('asana') >= 0 || raw.indexOf('trello') >= 0 ||
       raw.indexOf('outlook') >= 0 || raw.indexOf('discord') >= 0 ||
@@ -1646,6 +1655,7 @@ const HTML_HOME_JS: string = `
       raw.indexOf('ticketmaster') >= 0 || raw.indexOf('ticket master') >= 0 ||
       raw.indexOf('hubspot') >= 0 || raw.indexOf('salesforce') >= 0)) {
       if (raw.indexOf('github') >= 0) { return 'composio-github'; }
+      if (raw.indexOf('twitter') >= 0 || raw.indexOf('x.post.search') >= 0) { return 'composio-x'; }
       if (raw.indexOf('googledrive') >= 0 || raw.indexOf('google drive') >= 0) { return 'composio-drive'; }
       if (raw.indexOf('googledocs') >= 0 || raw.indexOf('google docs') >= 0) { return 'composio-docs'; }
       if (raw.indexOf('slack') >= 0) { return 'composio-slack'; }
@@ -2219,6 +2229,7 @@ const HTML_HOME_JS: string = `
     if (key === 'composio-ticketmaster') { return 'Ticketmaster'; }
     if (key === 'composio-hubspot') { return 'HubSpot'; }
     if (key === 'composio-salesforce') { return 'Salesforce'; }
+    if (key === 'composio-x') { return 'X'; }
     return 'Composio';
   }
   function isComposioSystemRow(row) {
@@ -2257,12 +2268,15 @@ const HTML_HOME_JS: string = `
     if (!isComposioSourceKey(key)) { return; }
     var wrap = add(parent, 'div', 'composio-preview');
     var head = add(wrap, 'div', 'composio-preview-head');
-    var icon = document.createElement('img');
-    icon.className = 'composio-app-logo';
-    icon.src = mailIconData(key);
-    icon.alt = '';
-    icon.setAttribute('aria-hidden', 'true');
-    head.appendChild(icon);
+    var iconData = mailIconData(key);
+    if (iconData.length > 0) {
+      var icon = document.createElement('img');
+      icon.className = 'composio-app-logo';
+      icon.src = iconData;
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+      head.appendChild(icon);
+    }
     var copy = add(head, 'div', 'composio-app-copy');
     add(copy, 'div', 'composio-app-name', composioAppName(key));
     var count = rowValue(block, '结果数量');

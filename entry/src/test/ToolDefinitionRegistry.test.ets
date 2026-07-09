@@ -85,7 +85,9 @@ export default function toolDefinitionRegistryTest() {
       expect(draft.actions.length).assertEqual(0);
       expect(xPost.domain).assertEqual('x');
       expect(xPost.riskLevel).assertEqual('read');
-      expect(xPost.actions[0]).assertEqual('social.reply.draft');
+      expect(xPost.outputSchema).assertEqual('genericToolResults');
+      expect(xPost.a2uiComponent).assertEqual('GenericToolResults');
+      expect(xPost.actions.length).assertEqual(0);
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
     });
 

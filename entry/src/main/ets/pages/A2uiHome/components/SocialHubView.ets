@@ -37,11 +37,16 @@ import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import {
   socialHubAuthorText,
+  socialHubCanAuthorize,
+  socialHubComposioToolkitCandidates,
   socialHubDraftDisplayText,
   socialHubItemMetaText,
   socialHubKindLabel,
+  SocialHubMessageGroup,
   socialHubPlatformLabel,
-  socialHubPrimaryText
+  socialHubPrimaryText,
+  socialHubVisibleMessageCount,
+  socialHubRecentMessageGroups
 } from './SocialHubViewData';
 
 const SOCIAL_HUB_CONNECTION_HEIGHT: number = 82;
@@ -72,6 +77,10 @@ export struct SocialHubView {
     return socialHubSelected(this.surface);
   }
 
+  private messageGroups(): SocialHubMessageGroup[] {
+    return socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5);
+  }
+
   private isSelected(item: SocialHubItemData): boolean {
     return item.id.length > 0 && item.id === this.selected().id;
   }
@@ -98,6 +107,16 @@ export struct SocialHubView {
       accountId: '',
       message: '未配置'
     };
+  }
+
+  private hasReadableSource(): boolean {
+    const connections = socialHubConnections(this.surface);
+    for (let index = 0; index < connections.length; index++) {
+      if (connections[index].status === 'connected' || connections[index].status === 'limited') {
+        return true;
+      }
+    }
+    return false;
   }
 
   private draftAction(item: SocialHubItemData): A2uiAction {
@@ -136,7 +155,7 @@ export struct SocialHubView {
 
   private authorizeAction(platform: SocialHubPlatform): A2uiAction {
     return {
-      id: platform === 'x' ? 'x.authorize' : 'social_hub_authorize',
+      id: 'social_hub_authorize',
       label: '授权',
       prompt: platform,
       variant: 'primary',
@@ -145,8 +164,8 @@ export struct SocialHubView {
   }
 
   private canAuthorize(connection: SocialHubConnectionData): boolean {
-    return connection.platform === 'x' &&
-      (connection.status === 'needs_auth' || connection.status === 'limited' || connection.status === 'disabled');
+    return socialHubComposioToolkitCandidates(connection.platform).length > 0 &&
+      socialHubCanAuthorize(connection.status);
   }
 
   private openInlineReply(item: SocialHubItemData): void {
@@ -555,7 +574,7 @@ export struct SocialHubView {
   }
 
   @Builder
-  private MessageList() {
+  private MessageList(groups: SocialHubMessageGroup[]) {
     Column() {
       Row() {
         Text('消息')
@@ -563,7 +582,7 @@ export struct SocialHubView {
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
           .layoutWeight(1)
-        Text(this.items().length.toString())
+        Text(socialHubVisibleMessageCount(groups).toString())
           .fontSize(12)
           .fontColor(COLOR_MUTED)
       }
@@ -572,13 +591,13 @@ export struct SocialHubView {
       .alignItems(VerticalAlign.Center)
       .padding({ left: 12, right: 12 })
 
-      if (this.items().length === 0) {
+      if (socialHubVisibleMessageCount(groups) === 0) {
         Column() {
-          Text('还没有真实消息')
+          Text(this.hasReadableSource() ? '近 30 天私信列表为空' : '来源未连通')
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_INK)
-          Text('真实数据接入前，这里只显示连接状态。')
+          Text(this.hasReadableSource() ? '已连接来源当前没有收到私信。' : '请先点击应用授权后再查看私信。')
             .fontSize(12)
             .fontColor(COLOR_MUTED)
             .margin({ top: 6 })
@@ -591,9 +610,22 @@ export struct SocialHubView {
       } else {
         Scroll() {
           Column() {
-            ForEach(this.items(), (item: SocialHubItemData) => {
-              this.MessageRow(item)
-            }, (item: SocialHubItemData) => item.id)
+            ForEach(groups, (group: SocialHubMessageGroup) => {
+              Text(socialHubPlatformLabel(group.platform))
+                .fontSize(13)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_MUTED)
+                .margin({ top: 12 })
+              ForEach(group.visibleItems, (item: SocialHubItemData) => {
+                this.MessageRow(item)
+              }, (item: SocialHubItemData) => item.id)
+              if (group.hiddenCount > 0) {
+                Text('已折叠 ' + group.hiddenCount.toString() + ' 条更早消息')
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 8 })
+              }
+            }, (group: SocialHubMessageGroup) => group.platform)
           }
           .width('100%')
         }
@@ -642,7 +674,7 @@ export struct SocialHubView {
         .margin({ top: 8 })
 
         Column() {
-          this.MessageList()
+          this.MessageList(this.messageGroups())
         }
         .width('100%')
         .margin({ top: 12 })

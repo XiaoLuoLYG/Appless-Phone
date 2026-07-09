@@ -45,9 +45,54 @@ export function socialHubKindLabel(kind: SocialHubItemKind | string): string {
   return '私信';
 }
 
+export interface SocialHubMessageGroup {
+  platform: SocialHubPlatform;
+  visibleItems: SocialHubItemData[];
+  hiddenCount: number;
+}
+
 export function socialHubPrimaryText(item: SocialHubItemData): string {
   const text = item.text.trim();
   return text.length > 0 ? text : '没有正文';
+}
+
+function socialHubTimestampMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function socialHubRecentMessageGroups(items: SocialHubItemData[], nowIso: string, perGroupVisible: number): SocialHubMessageGroup[] {
+  const now = socialHubTimestampMs(nowIso);
+  const oldest = now > 0 ? now - 30 * 24 * 60 * 60 * 1000 : 0;
+  const byPlatform = new Map<string, SocialHubItemData[]>();
+  items.forEach((item: SocialHubItemData) => {
+    const time = socialHubTimestampMs(item.timestamp);
+    if (item.kind !== 'message' || (oldest > 0 && time > 0 && time < oldest)) {
+      return;
+    }
+    const key = item.platform;
+    const list = byPlatform.get(key) ?? [];
+    list.push(item);
+    byPlatform.set(key, list);
+  });
+  const result: SocialHubMessageGroup[] = [];
+  byPlatform.forEach((list: SocialHubItemData[], platform: string) => {
+    list.sort((left: SocialHubItemData, right: SocialHubItemData) => socialHubTimestampMs(right.timestamp) - socialHubTimestampMs(left.timestamp));
+    result.push({
+      platform: platform as SocialHubPlatform,
+      visibleItems: list.slice(0, perGroupVisible),
+      hiddenCount: Math.max(0, list.length - perGroupVisible)
+    });
+  });
+  return result;
+}
+
+export function socialHubVisibleMessageCount(groups: SocialHubMessageGroup[]): number {
+  let count = 0;
+  groups.forEach((group: SocialHubMessageGroup) => {
+    count += group.visibleItems.length;
+  });
+  return count;
 }
 
 export function socialHubAuthorText(item: SocialHubItemData): string {
@@ -108,6 +153,21 @@ export function socialHubBadgeStatus(status: SocialHubConnectionStatus | string)
     return 'checking';
   }
   return 'idle';
+}
+
+export function socialHubComposioToolkitCandidates(platform: SocialHubPlatform | string): string[] {
+  if (platform === 'x') {
+    return ['x', 'twitter'];
+  }
+  if (platform === 'slack' || platform === 'discord' || platform === 'linkedin' ||
+    platform === 'whatsapp' || platform === 'instagram') {
+    return [platform];
+  }
+  return [];
+}
+
+export function socialHubCanAuthorize(status: SocialHubConnectionStatus | string): boolean {
+  return status === 'needs_auth' || status === 'limited' || status === 'disabled';
 }
 
 export function socialHubConnectionMessage(connection: SocialHubConnectionData): string {

@@ -56,7 +56,7 @@ import {
 } from '../render/A2uiRenderData';
 import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
 import { mailReplyDraftAction } from '@loop/agent-core';
-import { isMediaVideoResult, mediaVideoPlaybackAction } from '@loop/agent-core';
+import { isMediaVideoResult, mediaVideoPlaybackAction, officialMediaVideoPlaybackUrl } from '@loop/agent-core';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
 import {
   HtmlHomeAction,
@@ -515,12 +515,21 @@ function mediaEmbedForResult(result: A2uiGenericToolResultData): HtmlHomeMediaEm
   if (result.status !== 'success') {
     return null;
   }
-  const pageUrl = firstText(firstText(
+  let pageUrl = firstText(firstText(
     genericResultRowValue(result, 'Watch URL'),
     genericResultRowValue(result, 'Playback URL'),
     genericResultRowValue(result, 'Share URL')),
     genericResultRowValue(result, 'Video URL')
   );
+  if (pageUrl.length === 0 && isMediaVideoResult(result)) {
+    pageUrl = firstOfficialMediaUrl(result);
+  }
+  if (pageUrl.length === 0 && result.toolName === 'youtube.mine.playlists') {
+    const playlistId = firstYoutubePlaylistId(result);
+    if (playlistId.length > 0) {
+      pageUrl = 'https://www.youtube.com/playlist?list=' + playlistId;
+    }
+  }
   const embedUrl = mediaEmbedUrl(pageUrl, result);
   if (embedUrl.length === 0) {
     return null;
@@ -540,6 +549,16 @@ function mediaEmbedUrl(pageUrl: string, result: A2uiGenericToolResultData): stri
     return 'https://www.youtube.com/embed/' + encodeURIComponent(youtubeId) +
       '?playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local';
   }
+  const playlistId = youtubePlaylistId(pageUrl, genericResultRowValue(result, 'Playlist ID'));
+  if (playlistId.length > 0) {
+    const thumbnailVideoId = firstYoutubeThumbnailVideoId(result);
+    if (thumbnailVideoId.length > 0) {
+      return 'https://www.youtube.com/embed/' + encodeURIComponent(thumbnailVideoId) +
+        '?playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local';
+    }
+    return 'https://www.youtube.com/embed/videoseries?list=' + encodeURIComponent(playlistId) +
+      '&playsinline=1&rel=0&enablejsapi=1&origin=https%3A%2F%2Faiphone.local';
+  }
   const bvid = bilibiliBvid(pageUrl, genericResultRowValue(result, 'BVID'));
   if (bvid.length > 0) {
     const cid = genericResultRowValue(result, 'CID');
@@ -548,6 +567,94 @@ function mediaEmbedUrl(pageUrl: string, result: A2uiGenericToolResultData): stri
       '&p=1&autoplay=0&poster=true&danmaku=0&isOutside=true';
   }
   return '';
+}
+
+function firstOfficialMediaUrl(result: A2uiGenericToolResultData): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    const parts = result.rows[index].value.split('|').join(' ').split(' ');
+    for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+      const url = officialMediaVideoPlaybackUrl(cleanUrlToken(parts[partIndex]));
+      if (url.length > 0) {
+        return url;
+      }
+    }
+  }
+  return '';
+}
+
+function firstYoutubePlaylistId(result: A2uiGenericToolResultData): string {
+  const direct = genericResultRowValue(result, 'Playlist ID').trim();
+  if (direct.length > 0) {
+    return direct;
+  }
+  const chunks: string[] = [result.title, result.summary, result.rawPreview];
+  result.rows.forEach((row: A2uiLabelValueData) => chunks.push(row.label + ' ' + row.value));
+  for (let index = 0; index < chunks.length; index++) {
+    const fromUrl = youtubePlaylistId(chunks[index], '');
+    if (fromUrl.length > 0) {
+      return fromUrl;
+    }
+    const fromKey = firstJsonishValue(chunks[index], ['playlistId', 'playlist_id', 'id']);
+    if (looksLikeYoutubePlaylistId(fromKey)) {
+      return fromKey;
+    }
+  }
+  return '';
+}
+
+function firstYoutubeThumbnailVideoId(result: A2uiGenericToolResultData): string {
+  const chunks: string[] = [genericResultRowValue(result, 'Thumbnail'), result.rawPreview, result.summary];
+  result.rows.forEach((row: A2uiLabelValueData) => chunks.push(row.value));
+  for (let index = 0; index < chunks.length; index++) {
+    const marker = 'i.ytimg.com/vi/';
+    const hit = chunks[index].indexOf(marker);
+    if (hit >= 0) {
+      return tokenUntil(chunks[index].substring(hit + marker.length), ['/', '?', '&', '#', '"', '\\']);
+    }
+  }
+  return '';
+}
+
+function firstJsonishValue(text: string, keys: string[]): string {
+  for (let index = 0; index < keys.length; index++) {
+    const marker = '"' + keys[index] + '"';
+    const markerIndex = text.indexOf(marker);
+    if (markerIndex < 0) {
+      continue;
+    }
+    const colonIndex = text.indexOf(':', markerIndex + marker.length);
+    if (colonIndex < 0) {
+      continue;
+    }
+    const after = text.substring(colonIndex + 1).trim();
+    if (after.startsWith('"')) {
+      return tokenUntil(after.substring(1), ['"', '&', '#', '?', '/', ',', '}']);
+    }
+    return tokenUntil(after, ['"', '&', '#', '?', '/', ',', '}']);
+  }
+  return '';
+}
+
+function looksLikeYoutubePlaylistId(value: string): boolean {
+  const id = value.trim();
+  if (id.length < 8 || id.length > 80) {
+    return false;
+  }
+  return id.startsWith('PL') || id.startsWith('UU') || id.startsWith('OLAK') ||
+    id.startsWith('FL') || id.startsWith('LL') || id.startsWith('RD');
+}
+
+function cleanUrlToken(value: string): string {
+  let token = value.trim();
+  while (token.length > 0) {
+    const last = token.charAt(token.length - 1);
+    if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
+      token = token.substring(0, token.length - 1);
+    } else {
+      break;
+    }
+  }
+  return token;
 }
 
 function youtubeVideoId(pageUrl: string, rowValue: string): string {
@@ -564,6 +671,19 @@ function youtubeVideoId(pageUrl: string, rowValue: string): string {
   const shortIndex = pageUrl.indexOf(shortMarker);
   if (shortIndex >= 0) {
     return tokenUntil(pageUrl.substring(shortIndex + shortMarker.length), ['&', '#', '?', '/']);
+  }
+  return '';
+}
+
+function youtubePlaylistId(pageUrl: string, rowValue: string): string {
+  const direct = rowValue.trim();
+  if (direct.length > 0) {
+    return direct;
+  }
+  const listMarker = 'list=';
+  const listIndex = pageUrl.indexOf(listMarker);
+  if (listIndex >= 0 && (pageUrl.indexOf('youtube.com/playlist?') >= 0 || pageUrl.indexOf('youtube.com/watch?') >= 0)) {
+    return tokenUntil(pageUrl.substring(listIndex + listMarker.length), ['&', '#', '?', '/']);
   }
   return '';
 }

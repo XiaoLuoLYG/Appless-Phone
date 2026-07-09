@@ -70,6 +70,39 @@ export default function mailToolA2uiTest() {
       expect(rows[1].toolName).assertEqual('mail.thread');
     });
 
+    it('hides successful provider status cards from aggregate mail results', 0, () => {
+      const status: MailProviderStatus = {
+        provider: 'gmail',
+        status: 'success',
+        title: 'Composio Gmail 结果',
+        message: 'Composio 已执行 GMAIL_LIST_THREADS。'
+      };
+      const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [
+        thread('qq', '2026-06-30T09:00:00+08:00', 'QQ thread')
+      ], [status]));
+      const rows = genericToolResults(store.getSurface());
+
+      expect(rows.length).assertEqual(1);
+      expect(rows[0].sourceTag).assertEqual('QQ Mail');
+      expect(store.getSurface().dataModelJson.indexOf('Composio Gmail 结果')).assertEqual(-1);
+    });
+
+    it('keeps failed Composio Gmail provider status in the old mail wording', 0, () => {
+      const status: MailProviderStatus = {
+        provider: 'gmail',
+        status: 'error',
+        title: 'Composio Gmail 结果',
+        message: 'Composio 搜索工具失败：Operation timeout'
+      };
+      const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [], [status]));
+      const rows = genericToolResults(store.getSurface());
+
+      expect(rows.length).assertEqual(1);
+      expect(rows[0].sourceTag).assertEqual('Gmail');
+      expect(rows[0].title).assertEqual('Gmail 调用失败');
+      expect(store.getSurface().dataModelJson.indexOf('Composio Gmail 结果')).assertEqual(-1);
+    });
+
     it('keeps Outlook Composio extras in aggregate mail results', 0, () => {
       const outlook: DynamicGenericToolResult = {
         sourceTag: 'Composio',
@@ -91,6 +124,29 @@ export default function mailToolA2uiTest() {
       expect(rows.length).assertEqual(2);
       expect(rows[1].title).assertEqual('Composio Outlook 结果');
       expect(rows[1].toolName).assertEqual('OUTLOOK_SEARCH_MESSAGES');
+    });
+
+    it('adapts Composio Gmail extras into normal aggregate mail cards', 0, () => {
+      const gmail: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail 结果',
+        status: 'success',
+        summary: 'Composio 已执行 GMAIL_LIST_THREADS，返回 1 条可展示结果。',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"data":{"threads":[{"id":"thread-composio-1","subject":"Important Gmail thread","from":"Alice <alice@example.com>","date":"Wed, 8 Jul 2026 09:00:00 +0800","snippet":"Short Gmail snippet."}]}}'
+      };
+      const store = surfaceFromJsonl(mailResultsA2ui('mail_surface', 'mail.search', [
+        thread('qq', '2026-06-30T09:00:00+08:00', 'QQ thread')
+      ], [], [gmail]));
+      const rows = genericToolResults(store.getSurface());
+
+      expect(rows.length).assertEqual(2);
+      expect(rows[0].sourceTag).assertEqual('QQ Mail');
+      expect(rows[1].sourceTag).assertEqual('Gmail API');
+      expect(rows[1].toolName).assertEqual('users.threads.get');
+      expect(rows[1].title).assertEqual('Important Gmail thread');
+      expect(rows[1].summary).assertEqual('Short Gmail snippet.');
     });
 
     it('hides Gmail search summary cards from aggregate mail results', 0, () => {
