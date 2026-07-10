@@ -21,6 +21,8 @@ class HtmlHomeActionBridge {
 @Component
 export struct HtmlHomeSurfaceView {
   @Prop @Watch('onRenderStateChange') html: string = '';
+  @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
+  @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
   @Prop @Watch('onRenderStateChange') isBusy: boolean = false;
   @Prop renderTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
@@ -30,6 +32,8 @@ export struct HtmlHomeSurfaceView {
   private loadedKey: string = '';
   private webReady: boolean = false;
   private busyFrameLoaded: boolean = false;
+  private lastMailDetailEventJson: string = '';
+  private lastMailReplyEventJson: string = '';
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
 
@@ -52,6 +56,8 @@ export struct HtmlHomeSurfaceView {
     try {
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
+      this.lastMailDetailEventJson = '';
+      this.lastMailReplyEventJson = '';
       if (this.isBusy) {
         this.busyFrameLoaded = true;
       }
@@ -67,6 +73,46 @@ export struct HtmlHomeSurfaceView {
       this.busyFrameLoaded = false;
     }
     this.loadHtmlIfNeeded();
+  }
+
+  private pushMailDetailEventIfNeeded(): void {
+    if (!this.webReady || this.mailDetailEventJson.length === 0 ||
+      this.mailDetailEventJson === this.lastMailDetailEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailDetailEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailDetail) { window.__aiphoneApplyMailDetail(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailDetailEventJson = this.mailDetailEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailDetailPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailDetailEventChange(): void {
+    this.pushMailDetailEventIfNeeded();
+  }
+
+  private pushMailReplyEventIfNeeded(): void {
+    if (!this.webReady || this.mailReplyEventJson.length === 0 ||
+      this.mailReplyEventJson === this.lastMailReplyEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailReplyEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailReply) { window.__aiphoneApplyMailReply(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailReplyEventJson = this.mailReplyEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailReplyPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailReplyEventChange(): void {
+    this.pushMailReplyEventIfNeeded();
   }
 
   build() {
@@ -89,6 +135,8 @@ export struct HtmlHomeSurfaceView {
         .onPageEnd(() => {
           this.webReady = true;
           this.loadHtmlIfNeeded();
+          this.pushMailDetailEventIfNeeded();
+          this.pushMailReplyEventIfNeeded();
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           this.popupTitle = popupTitleFromUrl(event.targetUrl);

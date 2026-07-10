@@ -29,6 +29,16 @@ interface HtmlPaymentCapturePayload {
   providerSessionId?: HtmlHomePolicyValue;
 }
 
+interface HtmlMailReplyPayload {
+  requestKey?: HtmlHomePolicyValue;
+  provider?: HtmlHomePolicyValue;
+  threadId?: HtmlHomePolicyValue;
+  messageId?: HtmlHomePolicyValue;
+  to?: HtmlHomePolicyValue;
+  subject?: HtmlHomePolicyValue;
+  body?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -55,6 +65,13 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     if (action.id === 'payment.capture' && paymentCaptureAllowed(block, action)) {
       return true;
     }
+    if ((action.id === 'html_mail_reply_save' || action.id === 'html_mail_reply_send') &&
+      mailReplySubmissionAllowed(block, action)) {
+      return true;
+    }
+    if (action.id === 'html_mail_reply_ai_generate' && mailReplyAiGenerateAllowed(block, action)) {
+      return true;
+    }
     for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
       if (sameAction(block.actions[actionIndex], action)) {
         return true;
@@ -62,6 +79,85 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     }
   }
   return false;
+}
+
+function policyStringList(value: HtmlHomePolicyValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  value.forEach((item: Object | string | number | boolean | null | undefined) => {
+    const text = policyText(item).trim();
+    if (text.length > 0) {
+      result.push(text);
+    }
+  });
+  return result;
+}
+
+function mailReplySubmissionAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailReplyPayload;
+  const recipients = policyStringList(actual.to);
+  if (policyText(actual.body).trim().length === 0 || recipients.length === 0) {
+    return false;
+  }
+  let detailKey = '';
+  let expected: HtmlMailReplyPayload | null = null;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+    }
+    if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
+      candidate.args !== undefined) {
+      expected = candidate.args as HtmlMailReplyPayload;
+    }
+  }
+  if (expected === null || detailKey.length === 0 || action.prompt !== detailKey ||
+    policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, expected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, expected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, expected.messageId);
+}
+
+function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailReplyPayload;
+  let detailKey = '';
+  let detailExpected: HtmlMailReplyPayload | null = null;
+  let hasReplyTemplate = false;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+      if (candidate.args !== undefined) {
+        detailExpected = candidate.args as HtmlMailReplyPayload;
+      }
+    }
+    if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
+      candidate.args !== undefined) {
+      hasReplyTemplate = true;
+    }
+  }
+  if (!hasReplyTemplate || detailExpected === null || detailKey.length === 0 ||
+    action.prompt !== detailKey || policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, detailExpected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, detailExpected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, detailExpected.messageId);
+}
+
+function matchesOptionalMailIdentity(actual: HtmlHomePolicyValue, expected: HtmlHomePolicyValue): boolean {
+  const expectedText = policyText(expected).trim();
+  return expectedText.length === 0 || policyText(actual).trim() === expectedText;
 }
 
 function sameAction(expected: HtmlHomeAction, actual: A2uiAction): boolean {

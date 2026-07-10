@@ -88,6 +88,17 @@ export default function composioDynamicBackendTest() {
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(threadArgs.threadId).assertEqual('thread-999');
 
+      const replyTool = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"recipient_email\\":{\\"type\\":\\"string\\"},\\"message_body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"}}}"}');
+      const replyArgs = composioArgumentsForTool(
+        replyTool,
+        '回复 Gmail 线程',
+        'gmail.reply.send',
+        looseObject('{"recipientEmail":"alice@example.com","body":"Confirmed.","threadId":"thread-999"}')
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(replyArgs.recipient_email).assertEqual('alice@example.com');
+      expect(replyArgs.message_body).assertEqual('Confirmed.');
+      expect(replyArgs.thread_id).assertEqual('thread-999');
+
       const searchTool = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},\\"max_results\\":{\\"type\\":\\"number\\"},\\"include_payload\\":{\\"type\\":\\"boolean\\"},\\"verbose\\":{\\"type\\":\\"boolean\\"}}}"}');
       const searchArgs = composioArgumentsForTool(
         searchTool,
@@ -253,12 +264,18 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('帮我看今天的 Google Calendar 日程', calendarCreate, 'calendar.events.search'));
 
       const gmailRead = composioTool('{"toolSlug":"GMAIL_GET_THREAD","description":"Read Gmail thread"}');
+      const gmailThreadRead = composioTool('{"toolSlug":"GMAIL_FETCH_MESSAGE_BY_THREAD_ID","description":"Fetch Message by Thread ID"}');
+      const gmailReply = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","description":"Reply to Gmail thread"}');
       const gmailDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
       const gmailEmails = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","description":"Fetch Gmail emails"}');
       const gmailThreads = composioTool('{"toolSlug":"GMAIL_LIST_THREADS","description":"List Gmail threads"}');
       const gmailPeople = composioTool('{"toolSlug":"GMAIL_SEARCH_PEOPLE","description":"Search Gmail people and contacts"}');
       expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailRead, 'gmail.thread.read'))
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailThreadRead, 'gmail.thread.read'))
+        .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailEmails, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('回复这封 Gmail 邮件', gmailReply, 'gmail.reply.send'))
+        .assertLarger(composioPreferredToolScore('回复这封 Gmail 邮件', gmailDraft, 'gmail.reply.send'));
       expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
         .assertLarger(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailThreads, 'gmail.mail.search'));
       expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))

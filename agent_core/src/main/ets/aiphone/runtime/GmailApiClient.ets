@@ -10,6 +10,7 @@ import {
 } from './GmailOAuthClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
 import { utf8Bytes } from './Utf8Bytes';
+import { MailDetail, MailDetailRequest } from './MailToolTypes';
 
 const GMAIL_API_BASE_URL: string = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -41,6 +42,14 @@ interface GmailHeader {
 
 interface GmailMessagePayload {
   headers?: GmailHeader[];
+  mimeType?: string;
+  body?: GmailMessageBody;
+  parts?: GmailMessagePayload[];
+}
+
+interface GmailMessageBody {
+  data?: string;
+  size?: number;
 }
 
 interface GmailMessage {
@@ -72,6 +81,8 @@ interface GmailDraftCreateRequest {
   message: GmailDraftCreateMessage;
 }
 
+type GmailJsonValue = Object | string | number | boolean | null | undefined;
+
 function textOf(value: Object | string | number | boolean | null | undefined): string {
   if (value === undefined || value === null) {
     return '';
@@ -93,6 +104,88 @@ function decodeGmailText(value: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'");
+}
+
+function decodeBase64UrlText(value: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let source = value.replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+  while (source.length % 4 !== 0) {
+    source += '=';
+  }
+  const bytes = new Uint8Array(Math.ceil(source.length / 4) * 3);
+  let byteIndex = 0;
+  for (let index = 0; index < source.length; index += 4) {
+    const a = alphabet.indexOf(source.charAt(index));
+    const b = alphabet.indexOf(source.charAt(index + 1));
+    const c = source.charAt(index + 2) === '=' ? -1 : alphabet.indexOf(source.charAt(index + 2));
+    const d = source.charAt(index + 3) === '=' ? -1 : alphabet.indexOf(source.charAt(index + 3));
+    if (a < 0 || b < 0) {
+      continue;
+    }
+    const triple = (a << 18) | (b << 12) | ((c < 0 ? 0 : c) << 6) | (d < 0 ? 0 : d);
+    bytes[byteIndex] = (triple >> 16) & 0xff;
+    byteIndex++;
+    if (c >= 0) {
+      bytes[byteIndex] = (triple >> 8) & 0xff;
+      byteIndex++;
+    }
+    if (d >= 0) {
+      bytes[byteIndex] = triple & 0xff;
+      byteIndex++;
+    }
+  }
+  return util.TextDecoder.create('utf-8').decodeToString(bytes.slice(0, byteIndex));
+}
+
+function gmailHeader(message: GmailMessage, name: string): string {
+  return decodeGmailText(firstHeader(message, name));
+}
+
+function gmailAddresses(value: string): string[] {
+  return value.split(',').map((item: string) => item.trim()).filter((item: string) => item.length > 0);
+}
+
+interface GmailBodyParts {
+  plain: string;
+  html: string;
+}
+
+function collectGmailBody(payload: GmailMessagePayload | undefined, result: GmailBodyParts): void {
+  if (payload === undefined) {
+    return;
+  }
+  const mimeType = textOf(payload.mimeType).toLowerCase();
+  const data = payload.body === undefined ? '' : textOf(payload.body.data);
+  if (data.length > 0) {
+    const decoded = decodeBase64UrlText(data).trim();
+    if (mimeType === 'text/plain' && result.plain.length === 0) {
+      result.plain = decoded;
+    } else if (mimeType === 'text/html' && result.html.length === 0) {
+      result.html = decoded;
+    }
+  }
+  if (Array.isArray(payload.parts)) {
+    for (let index = 0; index < payload.parts.length; index++) {
+      collectGmailBody(payload.parts[index], result);
+    }
+  }
+}
+
+function gmailTextFromHtml(value: string): string {
+  return value
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
 }
 
 function responseText(result: Object | string | number | boolean | ArrayBuffer): string {
@@ -381,6 +474,153 @@ async function getThread(accessToken: string, threadId: string): Promise<GmailTh
     ['metadataHeaders', 'Date']
   ]);
   return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;
+}
+
+function gmailJsonRecord(value: GmailJsonValue): Record<string, GmailJsonValue> | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, GmailJsonValue>;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.charAt(0) === '{') {
+      try {
+        const parsed = JSON.parse(trimmed) as Object;
+        if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, GmailJsonValue>;
+        }
+      } catch (_error) {
+      }
+    }
+  }
+  return null;
+}
+
+function gmailThreadCandidate(record: Record<string, GmailJsonValue>, args: MailDetailRequest): GmailThread | null {
+  if (Array.isArray(record.messages)) {
+    const threadId = textOf(record.id).length > 0 ? textOf(record.id) : textOf(record.threadId);
+    if (args.threadId.length === 0 || threadId.length === 0 || threadId === args.threadId) {
+      return record as GmailThread;
+    }
+  }
+  const payload = gmailJsonRecord(record.payload);
+  if (payload !== null) {
+    const messageId = textOf(record.id).length > 0 ? textOf(record.id) : textOf(record.messageId);
+    const threadId = textOf(record.threadId).length > 0 ? textOf(record.threadId) : args.threadId;
+    if ((args.messageId.length === 0 || messageId.length === 0 || messageId === args.messageId) &&
+      (args.threadId.length === 0 || threadId.length === 0 || threadId === args.threadId)) {
+      const message = record as GmailMessage;
+      const thread: GmailThread = {
+        id: threadId,
+        messages: [message]
+      };
+      return thread;
+    }
+  }
+  return null;
+}
+
+function findGmailThread(value: GmailJsonValue, args: MailDetailRequest, depth: number = 0): GmailThread | null {
+  if (depth > 10 || value === undefined || value === null) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (let index = value.length - 1; index >= 0; index--) {
+      const found = findGmailThread(value[index] as GmailJsonValue, args, depth + 1);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  }
+  const record = gmailJsonRecord(value);
+  if (record === null) {
+    return null;
+  }
+  const candidate = gmailThreadCandidate(record, args);
+  if (candidate !== null) {
+    return candidate;
+  }
+  const preferred = ['data', 'result', 'response', 'thread', 'message', 'message_data', 'messages'];
+  for (let index = 0; index < preferred.length; index++) {
+    const found = findGmailThread(record[preferred[index]], args, depth + 1);
+    if (found !== null) {
+      return found;
+    }
+  }
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    if (preferred.indexOf(keys[index]) >= 0) {
+      continue;
+    }
+    const child = record[keys[index]];
+    if (child !== undefined && child !== null && (typeof child === 'object' || typeof child === 'string')) {
+      const found = findGmailThread(child, args, depth + 1);
+      if (found !== null) {
+        return found;
+      }
+    }
+  }
+  return null;
+}
+
+function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): MailDetail {
+  const newest = lastMessage(thread);
+  const first = firstMessage(thread);
+  const body: GmailBodyParts = { plain: '', html: '' };
+  collectGmailBody(newest.payload, body);
+  const bodyText = (body.plain.length > 0 ? body.plain : gmailTextFromHtml(body.html)).substring(0, 30000);
+  const subject = gmailHeader(first, 'Subject').length > 0 ? gmailHeader(first, 'Subject') : args.subject;
+  const detail: MailDetail = {
+    requestKey: args.requestKey,
+    provider: 'gmail',
+    threadId: textOf(thread.id).length > 0 ? textOf(thread.id) : args.threadId,
+    messageId: textOf(newest.id).length > 0 ? textOf(newest.id) : args.messageId,
+    internetMessageId: gmailHeader(newest, 'Message-ID'),
+    subject: subject,
+    from: gmailHeader(newest, 'From'),
+    replyTo: gmailHeader(newest, 'Reply-To'),
+    to: gmailAddresses(gmailHeader(newest, 'To')),
+    cc: gmailAddresses(gmailHeader(newest, 'Cc')),
+    bodyText: bodyText,
+    bodyHtml: body.html.substring(0, 30000)
+  };
+  return detail;
+}
+
+export function gmailMailDetailFromPayload(payload: Object, args: MailDetailRequest): MailDetail {
+  const thread = findGmailThread(payload, args);
+  if (thread === null) {
+    throw new Error('Composio Gmail response did not contain a readable thread payload.');
+  }
+  const detail = gmailDetailFromThread(thread, args);
+  if (detail.bodyText.length === 0 && detail.bodyHtml.length === 0) {
+    throw new Error('Composio Gmail response did not include the message body.');
+  }
+  return detail;
+}
+
+async function getThreadFull(accessToken: string, threadId: string): Promise<GmailThread> {
+  const url = urlWithParams(GMAIL_API_BASE_URL + '/threads/' + encodeParam(threadId), [
+    ['format', 'full']
+  ]);
+  return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;
+}
+
+export async function readGmailMailDetail(
+  accessToken: string,
+  args: MailDetailRequest
+): Promise<MailDetail> {
+  if (accessToken.trim().length === 0) {
+    throw new Error('Gmail detail requires an OAuth access token.');
+  }
+  if (args.threadId.trim().length === 0) {
+    throw new Error('Gmail detail requires a thread ID.');
+  }
+  const thread = await getThreadFull(accessToken, args.threadId.trim());
+  return gmailDetailFromThread(thread, args);
 }
 
 async function getThreadOrNull(accessToken: string, threadId: string): Promise<GmailThread | null> {

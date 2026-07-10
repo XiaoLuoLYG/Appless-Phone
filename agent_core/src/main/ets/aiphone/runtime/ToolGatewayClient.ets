@@ -35,7 +35,16 @@ import {
   gmailThreadResultsA2ui
 } from './GmailToolA2ui';
 import { mailDraftPreviewA2ui, mailResultsA2ui, mailResultsFromDynamicA2ui } from './MailToolA2ui';
-import { MailDraftArgs, MailProviderStatus, MailSearchArgs, MailThreadResult } from './MailToolTypes';
+import {
+  MailDetail,
+  MailDetailRequest,
+  MailDraftArgs,
+  MailProviderStatus,
+  MailReplyCommand,
+  MailReplyOperationResult,
+  MailSearchArgs,
+  MailThreadResult
+} from './MailToolTypes';
 import {
   GMAIL_ACCESS_TOKEN_REF,
   GMAIL_DEFAULT_REDIRECT_URI,
@@ -66,7 +75,7 @@ import {
   saveXOAuthTokenSet
 } from './XOAuthClient';
 import { GenericMcpClient } from './GenericMcpClient';
-import { callGmailApiTool } from './GmailApiClient';
+import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { callCalendarTool } from './CalendarApiClient';
@@ -75,7 +84,7 @@ import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
-import { callComposioDynamic } from './ComposioDynamicBackend';
+import { callComposioDynamic, callComposioFixedRaw, ComposioRawExecution } from './ComposioDynamicBackend';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
@@ -6601,11 +6610,12 @@ export function mailSearchArgs(prompt: string, args: Object | null): MailSearchA
   const record = mailArgs(args);
   const providers: string[] = [];
   stringListArg(record.providers).forEach((provider: string) => providers.push(provider.toLowerCase()));
+  const hasExplicitQuery = record.query !== undefined;
   const explicitQuery = textOf(record.query).trim();
-  const query = stripGenericMailQueryTerms(explicitQuery.length > 0 ? explicitQuery : fallbackMailSearchQuery(prompt));
+  const query = stripGenericMailQueryTerms(hasExplicitQuery ? explicitQuery : fallbackMailSearchQuery(prompt));
   const normalizedQuery = defaultMailSearchWindow(query);
   return {
-    query: normalizedQuery.length > 0 ? normalizedQuery : 'newer_than:30d',
+    query: normalizedQuery.length > 0 || hasExplicitQuery ? normalizedQuery : 'newer_than:30d',
     pageSize: typeof record.pageSize === 'number' && record.pageSize > 0 ? Math.min(record.pageSize, 10) : 10,
     providers: providers.length > 0 ? providers : ['gmail', 'qq', 'outlook'],
     intentSummary: textOf(record.intentSummary)
@@ -6619,12 +6629,122 @@ function mailDraftArgs(args: Object | null): MailDraftArgs {
     accountLabel: textOf(record.accountLabel),
     threadId: textOf(record.threadId),
     messageId: textOf(record.messageId),
+    internetMessageId: textOf(record.internetMessageId),
     to: stringListArg(record.to),
     subject: textOf(record.subject),
     body: textOf(record.body),
     replyMode: textOf(record.replyMode),
     contextSummary: textOf(record.contextSummary)
   };
+}
+
+interface GmailDraftComposioArgs {
+  to: string[];
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  threadId: string;
+  replyMode: string;
+}
+
+interface GmailReplyComposioArgs {
+  recipientEmail: string;
+  body: string;
+  threadId: string;
+}
+
+function firstMailRecipient(value: string[]): string {
+  if (value.length === 0) {
+    return '';
+  }
+  const trimmed = value[0].trim();
+  const left = trimmed.lastIndexOf('<');
+  const right = trimmed.lastIndexOf('>');
+  return left >= 0 && right > left ? trimmed.substring(left + 1, right).trim() : trimmed;
+}
+
+function mailReplyOperationResult(
+  command: MailReplyCommand,
+  operation: string,
+  message: string
+): MailReplyOperationResult {
+  const result: MailReplyOperationResult = {
+    requestKey: command.requestKey,
+    operation: operation,
+    provider: command.provider,
+    status: 'success',
+    message: message
+  };
+  return result;
+}
+
+export async function saveConfiguredMailDraft(command: MailReplyCommand): Promise<MailReplyOperationResult> {
+  if (command.body.trim().length === 0 || command.to.length === 0) {
+    throw new Error('Mail draft requires a recipient and body.');
+  }
+  const provider = command.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    const result = await new QqMailImapClient(qqMailConfig()).createDraft(command);
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'draft', '已保存到 QQ 邮箱草稿箱。');
+  }
+  if (provider === 'gmail') {
+    const args: GmailDraftComposioArgs = {
+      to: command.to,
+      recipientEmail: firstMailRecipient(command.to),
+      subject: command.subject,
+      body: command.body,
+      threadId: command.threadId,
+      replyMode: command.replyMode
+    };
+    const result = await composioFixedAppResult(
+      'gmail.draft.create',
+      'Gmail',
+      '保存 Gmail 回复草稿',
+      '草稿',
+      args as Object
+    );
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'draft', '已保存到 Gmail 草稿箱。');
+  }
+  throw new Error('Mail draft provider is not supported: ' + provider);
+}
+
+export async function sendConfiguredMailReply(command: MailReplyCommand): Promise<MailReplyOperationResult> {
+  if (command.body.trim().length === 0 || command.to.length === 0) {
+    throw new Error('Mail reply requires a recipient and body.');
+  }
+  const provider = command.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    const result = await new QqMailImapClient(qqMailConfig()).sendReply(command);
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'send', 'QQ 邮箱回复已发送。');
+  }
+  if (provider === 'gmail') {
+    const args: GmailReplyComposioArgs = {
+      recipientEmail: firstMailRecipient(command.to),
+      body: command.body,
+      threadId: command.threadId
+    };
+    const result = await composioFixedAppResult(
+      'gmail.reply.send',
+      'Gmail',
+      '回复 Gmail 线程',
+      '邮件回复',
+      args as Object
+    );
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'send', 'Gmail 回复已发送。');
+  }
+  throw new Error('Mail reply provider is not supported: ' + provider);
 }
 
 function qqMailConfig(): QqMailConfig {
@@ -6635,6 +6755,53 @@ function qqMailConfig(): QqMailConfig {
     imapPort: Number.parseInt(localProviderConfig.qqMailImapPort, 10) || 993,
     draftsMailbox: localProviderConfig.qqMailDraftsMailbox
   };
+}
+
+async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailDetail> {
+  try {
+    const execution: ComposioRawExecution = await callComposioFixedRaw(
+      'Gmail read full thread ' + args.threadId,
+      'gmail.thread.read',
+      args as Object
+    );
+    aiLogInfo('[AIPhone][GmailDetailComposio] tool=' + execution.toolSlug +
+      ' responseChars=' + execution.observation.length.toString());
+    const payload = JSON.parse(execution.observation) as Object;
+    const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
+      Object.keys(payload).slice(0, 12).join(',') : '';
+    aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
+    return gmailMailDetailFromPayload(payload, args);
+  } catch (composioError) {
+    const message = describeThrown(composioError);
+    aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
+    const accessToken = await gmailAccessTokenForMcp();
+    if (accessToken.length === 0) {
+      throw new Error(message);
+    }
+    aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
+    return readGmailMailDetail(accessToken, args);
+  }
+}
+
+export async function readConfiguredMailDetail(args: MailDetailRequest): Promise<MailDetail> {
+  const provider = args.provider.trim().toLowerCase();
+  aiLogInfo('[AIPhone][MailDetailReadStart] provider=' + provider +
+    ' requestKeyChars=' + args.requestKey.length.toString() +
+    ' threadIdChars=' + args.threadId.length.toString() +
+    ' messageIdChars=' + args.messageId.length.toString());
+  let detail: MailDetail;
+  if (provider === 'qq') {
+    detail = await new QqMailImapClient(qqMailConfig()).readDetail(args);
+  } else if (provider === 'gmail') {
+    detail = await readConfiguredGmailDetail(args);
+  } else {
+    throw new Error('Mail detail provider is not supported: ' + provider);
+  }
+  aiLogInfo('[AIPhone][MailDetailReadDone] provider=' + provider +
+    ' bodyChars=' + detail.bodyText.length.toString() +
+    ' to=' + detail.to.length.toString() +
+    ' cc=' + detail.cc.length.toString());
+  return detail;
 }
 
 function mailProviderError(provider: string, message: string): MailProviderStatus {

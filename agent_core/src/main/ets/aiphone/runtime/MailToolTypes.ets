@@ -31,16 +31,52 @@ export interface MailSearchArgs {
   intentSummary: string;
 }
 
+export interface MailDetailRequest {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  subject: string;
+}
+
+export interface MailDetail {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  internetMessageId?: string;
+  subject: string;
+  from: string;
+  replyTo: string;
+  to: string[];
+  cc: string[];
+  bodyText: string;
+  bodyHtml: string;
+}
+
 export interface MailDraftArgs {
   provider: string;
   accountLabel: string;
   threadId: string;
   messageId: string;
+  internetMessageId?: string;
   to: string[];
   subject: string;
   body: string;
   replyMode: string;
   contextSummary: string;
+}
+
+export interface MailReplyCommand extends MailDraftArgs {
+  requestKey: string;
+}
+
+export interface MailReplyOperationResult {
+  requestKey: string;
+  operation: string;
+  provider: string;
+  status: string;
+  message: string;
 }
 
 export interface MailProvider {

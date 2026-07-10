@@ -68,6 +68,15 @@ import {
 import { AssetCredentialStore } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri } from '@loop/agent-core';
 import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
+import {
+  MailDetail,
+  MailDetailRequest,
+  MailReplyCommand,
+  MailReplyOperationResult,
+  readConfiguredMailDetail,
+  saveConfiguredMailDraft,
+  sendConfiguredMailReply
+} from '@loop/agent-core';
 import { copyPersonaData } from '../../model/PersonaA2ui';
 import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
@@ -126,6 +135,35 @@ interface HtmlDynamicCredentialPayload {
   credentialValue?: HtmlActionValue;
   toolId?: HtmlActionValue;
   prompt?: HtmlActionValue;
+}
+
+interface MailDetailUiEvent {
+  sequence: number;
+  requestKey: string;
+  status: string;
+  detail?: MailDetail;
+  error: string;
+}
+
+interface MailReplyUiEvent {
+  sequence: number;
+  requestKey: string;
+  operation: string;
+  status: string;
+  message: string;
+  error: string;
+}
+
+interface MailReplyAiArgs {
+  requestKey?: HtmlActionValue;
+  provider?: HtmlActionValue;
+  accountLabel?: HtmlActionValue;
+  threadId?: HtmlActionValue;
+  messageId?: HtmlActionValue;
+  to?: HtmlActionValue;
+  subject?: HtmlActionValue;
+  replyMode?: HtmlActionValue;
+  contextSummary?: HtmlActionValue;
 }
 
 interface HtmlPinPayload {
@@ -216,6 +254,37 @@ function modelPromptWithActionContext(prompt: string, actionId: string, args: Ob
     (args === null ? '{}' : JSON.stringify(args));
 }
 
+function stripMailReplyAiText(text: string): string {
+  let value = text.trim();
+  const finalAnswerIndex = value.lastIndexOf('final_answer:');
+  if (finalAnswerIndex >= 0) {
+    value = value.substring(finalAnswerIndex + 'final_answer:'.length).trim();
+  }
+  const finalIndex = value.lastIndexOf('Final:');
+  if (finalIndex >= 0) {
+    value = value.substring(finalIndex + 'Final:'.length).trim();
+  }
+  const modelIndex = value.lastIndexOf('MODEL:');
+  if (modelIndex >= 0) {
+    value = value.substring(modelIndex + 'MODEL:'.length).trim();
+  }
+  const errorIndex = value.indexOf('\nERROR:');
+  if (errorIndex >= 0) {
+    value = value.substring(0, errorIndex).trim();
+  }
+  if (value.startsWith('```')) {
+    const firstBreak = value.indexOf('\n');
+    const lastFence = value.lastIndexOf('```');
+    if (firstBreak >= 0 && lastFence > firstBreak) {
+      value = value.substring(firstBreak + 1, lastFence).trim();
+    }
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('“') && value.endsWith('”'))) {
+    value = value.substring(1, value.length - 1).trim();
+  }
+  return value;
+}
+
 @Entry
 @Component
 struct Index {
@@ -262,6 +331,8 @@ struct Index {
   @State composioAuthItems: ComposioAuthConfigItem[] = [];
   @State composioAuthMessage: string = '';
   @State composioAuthBusy: boolean = false;
+  @State mailDetailEventJson: string = '';
+  @State mailReplyEventJson: string = '';
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
@@ -1680,9 +1751,22 @@ struct Index {
   }
 
   private logHtmlHomeActionError(action: A2uiAction, reason: string): void {
+    const argsChars = action.args === undefined ? 0 : JSON.stringify(action.args).length;
     aiLogError('[AIPhone][HtmlHomeAction] id=' + action.id +
       ' ok=false reason=' + reason +
-      ' promptChars=' + action.prompt.length.toString());
+      ' kind=' + action.kind +
+      ' promptChars=' + action.prompt.length.toString() +
+      ' argsChars=' + argsChars.toString());
+    if (action.id === 'html_mail_reply_ai_generate' && action.args !== undefined) {
+      const args = action.args as MailReplyAiArgs;
+      aiLogError('[AIPhone][HtmlHomeMailReplyAiBlocked] prompt=' + action.prompt +
+        ' requestKey=' + this.actionText(args.requestKey) +
+        ' provider=' + this.actionText(args.provider) +
+        ' threadId=' + this.actionText(args.threadId) +
+        ' messageId=' + this.actionText(args.messageId) +
+        ' subjectChars=' + this.actionText(args.subject).length.toString() +
+        ' contextChars=' + this.actionText(args.contextSummary).length.toString());
+    }
   }
 
   private async handleHtmlPinAction(action: A2uiAction): Promise<boolean> {
@@ -1808,6 +1892,87 @@ struct Index {
       return value.toString();
     }
     return '';
+  }
+
+  private mailReplyAiPrompt(args: MailReplyAiArgs): string {
+    const recipients = args.to === undefined ? '' : JSON.stringify(args.to);
+    return '请为下面这封邮件生成一段简短、礼貌、工作风格的回复正文。' +
+      '不要调用工具，不要保存草稿，不要发送邮件。最后必须只用一行输出，格式为 Final: <回复正文>。' +
+      '不要输出 JSON，不要输出 Action。' +
+      '\n收件人: ' + recipients +
+      '\n主题: ' + this.actionText(args.subject) +
+      '\n邮件上下文:\n' + this.actionText(args.contextSummary);
+  }
+
+  private mailReplyAiEvent(requestKey: string, status: string, message: string, error: string): void {
+    const event: MailReplyUiEvent = {
+      sequence: Date.now(),
+      requestKey: requestKey,
+      operation: 'ai',
+      status: status,
+      message: message,
+      error: error
+    };
+    this.mailReplyEventJson = JSON.stringify(event);
+  }
+
+  private async generateMailReplyDraft(action: A2uiAction): Promise<void> {
+    if (action.args === undefined) {
+      this.logHtmlHomeActionError(action, 'missing_mail_reply_ai_args');
+      return;
+    }
+    const requestKey = action.prompt.trim();
+    if (requestKey.length === 0) {
+      this.logHtmlHomeActionError(action, 'invalid_mail_reply_ai_request_key');
+      return;
+    }
+    if (this.baseUrl.trim().length === 0) {
+      this.mailReplyAiEvent(requestKey, 'error', '', '请先填写 Base URL。');
+      return;
+    }
+    const args = action.args as MailReplyAiArgs;
+    const prompt = this.mailReplyAiPrompt(args);
+    aiLogInfo('[AIPhone][MailReplyAiDraftRequest] requestKey=' + requestKey +
+      ' provider=' + this.actionText(args.provider) +
+      ' threadId=' + this.actionText(args.threadId) +
+      ' messageId=' + this.actionText(args.messageId) +
+      ' toCount=' + (Array.isArray(args.to) ? args.to.length : 0).toString() +
+      ' subjectChars=' + this.actionText(args.subject).length.toString() +
+      ' contextChars=' + this.actionText(args.contextSummary).length.toString() +
+      ' promptChars=' + prompt.length.toString());
+    try {
+      const result: A2uiCallResult = await callLocalModel(
+        this.getSettings(),
+        prompt,
+        this.recentMessages(),
+        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
+        null,
+        null,
+        action.args
+      );
+      aiLogInfo('[AIPhone][MailReplyAiDraft] ok=' + (result.ok ? 'true' : 'false') +
+        ' errorChars=' + result.error.length.toString() +
+        ' rawChars=' + result.raw.length.toString() +
+        ' assistantChars=' + result.assistantDebug.length.toString());
+      aiLogInfo('[AIPhone][MailReplyAiDraftRaw] ' + logSnippet(result.raw));
+      if (result.error.length > 0) {
+        aiLogError('[AIPhone][MailReplyAiDraftError] ' + logSnippet(result.error));
+      }
+      if (result.assistantDebug.length > 0) {
+        aiLogInfo('[AIPhone][MailReplyAiDraftAssistant] ' + logSnippet(result.assistantDebug));
+      }
+      const text = stripMailReplyAiText(result.assistantDebug.length > 0 ? result.assistantDebug : result.raw);
+      if (!result.ok || text.length === 0) {
+        const message = result.error.length > 0 ? result.error : 'AI 回复生成失败。';
+        this.mailReplyAiEvent(requestKey, 'error', '', message);
+        return;
+      }
+      this.mailReplyAiEvent(requestKey, 'success', text, '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailReplyAiDraftFailed] error=' + message.substring(0, 240));
+      this.mailReplyAiEvent(requestKey, 'error', '', message);
+    }
   }
 
   private isPaymentCheckoutUrl(url: string): boolean {
@@ -1987,6 +2152,90 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'html_mail_detail_read') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_detail_args');
+        return;
+      }
+      const request = action.args as MailDetailRequest;
+      const requestKey = this.actionText(request.requestKey).trim();
+      if (requestKey.length === 0 || this.actionText(request.provider).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_detail_args');
+        return;
+      }
+      try {
+        const detail = await readConfiguredMailDetail(request);
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'success',
+          detail: detail,
+          error: ''
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'error',
+          error: message
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailDetailReadFailed] provider=' + this.actionText(request.provider) +
+          ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_reply_save' || action.id === 'html_mail_reply_send') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_reply_args');
+        return;
+      }
+      const command = action.args as MailReplyCommand;
+      const requestKey = this.actionText(command.requestKey).trim();
+      const operation = action.id === 'html_mail_reply_save' ? 'draft' : 'send';
+      if (requestKey.length === 0 || this.actionText(command.provider).trim().length === 0 ||
+        this.actionText(command.body).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_reply_args');
+        return;
+      }
+      try {
+        let result: MailReplyOperationResult;
+        if (operation === 'draft') {
+          result = await saveConfiguredMailDraft(command);
+        } else {
+          result = await sendConfiguredMailReply(command);
+        }
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: result.status,
+          message: result.message,
+          error: ''
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: 'error',
+          message: '',
+          error: message
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailReplyOperationFailed] provider=' + this.actionText(command.provider) +
+          ' operation=' + operation + ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_reply_ai_generate') {
+      await this.generateMailReplyDraft(action);
+      return;
+    }
     if (this.isPersonaEditorAction(action)) {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
       return;
@@ -2531,6 +2780,8 @@ struct Index {
         messages: this.messages,
         currentSurface: this.currentSurface,
         htmlHomeHtml: this.currentSurface.intent === 'social' ? '' : this.currentHtmlHomeHtml(),
+        mailDetailEventJson: this.mailDetailEventJson,
+        mailReplyEventJson: this.mailReplyEventJson,
         surfaceRenderTick: this.surfaceRenderTick,
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,

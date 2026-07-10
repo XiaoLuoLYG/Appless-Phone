@@ -33,6 +33,7 @@ import gmailToolA2uiTest from './GmailToolA2ui.test';
 import mailToolA2uiTest from './MailToolA2ui.test';
 import qqMailImapClientTest from './QqMailImapClient.test';
 import gmailOAuthClientTest from './GmailOAuthClient.test';
+import gmailApiClientTest from './GmailApiClient.test';
 import googleOAuthClientTest from './GoogleOAuthClient.test';
 import youtubeApiClientTest from './YouTubeApiClient.test';
 import mediaVideoToolA2uiTest from './MediaVideoToolA2ui.test';
@@ -98,6 +99,7 @@ export default function testsuite() {
   mailToolA2uiTest();
   qqMailImapClientTest();
   gmailOAuthClientTest();
+  gmailApiClientTest();
   googleOAuthClientTest();
   youtubeApiClientTest();
   mediaVideoToolA2uiTest();

@@ -3,7 +3,7 @@ import util from '@ohos.util';
 import { aiLogInfo } from './AiphoneLogger';
 import { A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
-import { MailDraftArgs, MailSearchArgs, MailThreadResult } from './MailToolTypes';
+import { MailDetail, MailDetailRequest, MailDraftArgs, MailSearchArgs, MailThreadResult } from './MailToolTypes';
 import { utf8Bytes } from './Utf8Bytes';
 
 export interface QqMailConfig {
@@ -37,7 +37,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return result;
 }
 
-function decodeBase64(value: string): string {
+function decodeBase64Bytes(value: string): Uint8Array {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const bytes = new Uint8Array(Math.ceil(value.length / 4) * 3);
   let byteIndex = 0;
@@ -61,7 +61,7 @@ function decodeBase64(value: string): string {
       byteIndex++;
     }
   }
-  return decodeUtf8Bytes(bytes, byteIndex);
+  return bytes.slice(0, byteIndex);
 }
 
 function decodeUtf8Bytes(bytes: Uint8Array, length: number): string {
@@ -107,6 +107,256 @@ export function decodeMimeWords(value: string): string {
     start = result.toUpperCase().indexOf(marker, start + decoded.length);
   }
   return result;
+}
+
+export interface SmtpTransport {
+  connect(host: string, port: number): Promise<void>;
+  send(value: string): Promise<void>;
+  readResponse(): Promise<string[]>;
+  close(): Promise<void>;
+}
+
+function decodeQuotedPrintableBytes(value: string): Uint8Array {
+  const source = value.replace(/=\r\n/g, '').replace(/=\n/g, '');
+  const bytes = new Uint8Array(source.length * 2);
+  let byteIndex = 0;
+  for (let index = 0; index < source.length; index++) {
+    if (source.charAt(index) === '=' && index + 2 < source.length) {
+      const hex = source.substring(index + 1, index + 3);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes[byteIndex] = Number.parseInt(hex, 16);
+        byteIndex++;
+        index += 2;
+        continue;
+      }
+    }
+    const code = source.charCodeAt(index);
+    if (code <= 0xff) {
+      bytes[byteIndex] = code;
+      byteIndex++;
+    } else {
+      const encoded = utf8Bytes(source.charAt(index));
+      for (let offset = 0; offset < encoded.length; offset++) {
+        bytes[byteIndex] = encoded[offset];
+        byteIndex++;
+      }
+    }
+  }
+  return bytes.slice(0, byteIndex);
+}
+
+function decodeBase64(value: string): string {
+  const bytes = decodeBase64Bytes(value);
+  return decodeUtf8Bytes(bytes, bytes.length);
+}
+
+function unfoldedHeaders(value: string): string[] {
+  const lines = value.split('\r\n');
+  const result: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if ((lines[index].startsWith(' ') || lines[index].startsWith('\t')) && result.length > 0) {
+      result[result.length - 1] += ' ' + lines[index].trim();
+    } else {
+      result.push(lines[index]);
+    }
+  }
+  return result;
+}
+
+function mimeHeader(headers: string, name: string): string {
+  const target = name.toLowerCase() + ':';
+  const lines = unfoldedHeaders(headers);
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index].toLowerCase().startsWith(target)) {
+      return decodeMimeWords(lines[index].substring(target.length).trim());
+    }
+  }
+  return '';
+}
+
+function addressList(value: string): string[] {
+  return value.split(',').map((item: string) => item.trim()).filter((item: string) => item.length > 0);
+}
+
+function mimeParameter(contentType: string, name: string): string {
+  const parts = contentType.split(';');
+  const target = name.toLowerCase();
+  for (let index = 1; index < parts.length; index++) {
+    const pair = parts[index].split('=');
+    if (pair.length >= 2 && pair[0].trim().toLowerCase() === target) {
+      let value = pair.slice(1).join('=').trim();
+      if (value.length >= 2 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+        value = value.substring(1, value.length - 1);
+      }
+      return value;
+    }
+  }
+  return '';
+}
+
+function normalizedMimeCharset(value: string): string {
+  const charset = value.trim().toLowerCase();
+  if (charset.length === 0 || charset === 'us-ascii') {
+    return 'utf-8';
+  }
+  if (charset === 'gb2312' || charset === 'x-gbk') {
+    return 'gbk';
+  }
+  return charset;
+}
+
+function decodeMimeBytes(bytes: Uint8Array, charset: string): string {
+  const normalized = normalizedMimeCharset(charset);
+  try {
+    return util.TextDecoder.create(normalized).decodeToString(bytes);
+  } catch (_error) {
+    aiLogInfo('[AIPhone][QqMailCharsetFallback] charset=' + normalized +
+      ' bytes=' + bytes.length.toString());
+    return decodeUtf8Bytes(bytes, bytes.length);
+  }
+}
+
+function decodeTransferBody(body: string, encoding: string, charset: string): string {
+  const normalized = encoding.trim().toLowerCase();
+  if (normalized === 'base64') {
+    return decodeMimeBytes(decodeBase64Bytes(body.replace(/\s/g, '')), charset);
+  }
+  if (normalized === 'quoted-printable') {
+    return decodeMimeBytes(decodeQuotedPrintableBytes(body), charset);
+  }
+  return body;
+}
+
+interface MimeTextParts {
+  plain: string;
+  html: string;
+}
+
+function parseMimeText(raw: string, depth: number = 0): MimeTextParts {
+  const split = raw.indexOf('\r\n\r\n');
+  if (split < 0) {
+    return { plain: raw.trim(), html: '' };
+  }
+  const headers = raw.substring(0, split);
+  const body = raw.substring(split + 4);
+  const contentType = mimeHeader(headers, 'Content-Type');
+  const mediaType = contentType.split(';')[0].trim().toLowerCase();
+  const charset = mimeParameter(contentType, 'charset');
+  const transferEncoding = mimeHeader(headers, 'Content-Transfer-Encoding').trim().toLowerCase();
+  const boundary = mimeParameter(contentType, 'boundary');
+  aiLogInfo('[AIPhone][QqMailMimePart] depth=' + depth.toString() +
+    ' type=' + (mediaType.length > 0 ? mediaType : 'text/plain') +
+    ' charset=' + (charset.length > 0 ? charset : 'default') +
+    ' encoding=' + (transferEncoding.length > 0 ? transferEncoding : 'identity') +
+    ' bodyChars=' + body.length.toString());
+  if (mediaType.indexOf('multipart/') === 0 && boundary.length > 0) {
+    const result: MimeTextParts = { plain: '', html: '' };
+    const sections = body.split('--' + boundary);
+    aiLogInfo('[AIPhone][QqMailMimeMultipart] depth=' + depth.toString() +
+      ' sections=' + Math.max(0, sections.length - 1).toString());
+    // sections[0] is the optional multipart preamble, not a MIME body part.
+    for (let index = 1; index < sections.length; index++) {
+      let section = sections[index];
+      if (section.trim().length === 0 || section.trim() === '--') {
+        continue;
+      }
+      if (section.startsWith('\r\n')) {
+        section = section.substring(2);
+      }
+      if (section.endsWith('\r\n')) {
+        section = section.substring(0, section.length - 2);
+      }
+      const parsed = parseMimeText(section, depth + 1);
+      if (result.plain.length === 0 && parsed.plain.length > 0) {
+        result.plain = parsed.plain;
+      }
+      if (result.html.length === 0 && parsed.html.length > 0) {
+        result.html = parsed.html;
+      }
+    }
+    return result;
+  }
+  if (mediaType !== 'text/html' && mediaType !== 'text/plain' && mediaType.length > 0) {
+    return { plain: '', html: '' };
+  }
+  const decoded = decodeTransferBody(body, transferEncoding, charset).trim();
+  if (mediaType === 'text/html') {
+    return { plain: '', html: decoded };
+  }
+  if (mediaType === 'text/plain' || mediaType.length === 0) {
+    return { plain: decoded, html: '' };
+  }
+  return { plain: '', html: '' };
+}
+
+function htmlCodePoint(value: string, radix: number): string {
+  const code = Number.parseInt(value, radix);
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) {
+    return '';
+  }
+  if (code <= 0xffff) {
+    return String.fromCharCode(code);
+  }
+  const normalized = code - 0x10000;
+  return String.fromCharCode(0xd800 + (normalized >> 10)) +
+    String.fromCharCode(0xdc00 + (normalized & 0x3ff));
+}
+
+function decodeDecimalHtmlEntity(_match: string, value: string): string {
+  return htmlCodePoint(value, 10);
+}
+
+function decodeHexHtmlEntity(_match: string, value: string): string {
+  return htmlCodePoint(value, 16);
+}
+
+function decodeHtmlTextEntities(value: string): string {
+  return value
+    .replace(/&zwnj;|&zwj;|&lrm;|&rlm;|&#8204;|&#8205;/gi, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&ndash;/gi, '\u2013')
+    .replace(/&mdash;/gi, '\u2014')
+    .replace(/&hellip;/gi, '\u2026')
+    .replace(/&rsquo;/gi, '\u2019')
+    .replace(/&lsquo;/gi, '\u2018')
+    .replace(/&rdquo;/gi, '\u201d')
+    .replace(/&ldquo;/gi, '\u201c')
+    .replace(/&#([0-9]+);/g, decodeDecimalHtmlEntity)
+    .replace(/&#x([0-9a-f]+);/gi, decodeHexHtmlEntity);
+}
+
+function textFromHtml(value: string): string {
+  const withoutTags = value
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+  return decodeHtmlTextEntities(withoutTags)
+    .replace(/[\u200b-\u200f\u2060\ufeff]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function rawMessageFromFetch(lines: string[]): string {
+  const response = lines.join('\r\n');
+  const literal = /\{[0-9]+\}\r\n/.exec(response);
+  if (literal === null) {
+    return '';
+  }
+  const start = literal.index + literal[0].length;
+  let end = response.lastIndexOf('\r\n)');
+  if (end < start) {
+    end = response.length;
+  }
+  return response.substring(start, end);
 }
 
 function formatAddress(name: string, mailbox: string, host: string): string {
@@ -224,7 +474,7 @@ export function parseImapEnvelopeList(lines: string[], accountLabel: string): Ma
       from: formatAddress(fromName, fromMailbox, fromHost),
       to: [],
       participants: [],
-      snippet: subject,
+      snippet: '',
       receivedAt: isoDate(date),
       unread: line.indexOf('\\\\Seen') < 0,
       important: line.indexOf('\\\\Flagged') >= 0,
@@ -269,11 +519,80 @@ export function buildQqDraftMime(args: MailDraftArgs, fromAddress: string): stri
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8'
   ];
-  if (args.messageId.trim().length > 0) {
-    headers.push('In-Reply-To: ' + args.messageId.trim());
-    headers.push('References: ' + args.messageId.trim());
+  const referenceId = mailReferenceId(args);
+  if (referenceId.length > 0) {
+    headers.push('In-Reply-To: ' + referenceId);
+    headers.push('References: ' + referenceId);
   }
   return headers.join('\r\n') + '\r\n\r\n' + args.body + '\r\n';
+}
+
+function mailReferenceId(args: MailDraftArgs): string {
+  const explicit = args.internetMessageId === undefined ? '' : args.internetMessageId.trim();
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  const fallback = args.messageId.trim();
+  return fallback.indexOf('@') >= 0 || fallback.startsWith('<') ? fallback : '';
+}
+
+function wrappedBase64(value: string): string {
+  const encoded = bytesToBase64(utf8Bytes(value));
+  const lines: string[] = [];
+  for (let index = 0; index < encoded.length; index += 76) {
+    lines.push(encoded.substring(index, Math.min(encoded.length, index + 76)));
+  }
+  return lines.join('\r\n');
+}
+
+export function buildQqReplyMime(args: MailDraftArgs, fromAddress: string): string {
+  const headers: string[] = [
+    'From: ' + fromAddress,
+    'To: ' + args.to.join(', '),
+    'Subject: ' + encodeHeader(args.subject),
+    'Date: ' + new Date().toUTCString(),
+    'Message-ID: <appless-' + Date.now().toString() + '@qq.com>',
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64'
+  ];
+  const referenceId = mailReferenceId(args);
+  if (referenceId.length > 0) {
+    headers.push('In-Reply-To: ' + referenceId);
+    headers.push('References: ' + referenceId);
+  }
+  return headers.join('\r\n') + '\r\n\r\n' + wrappedBase64(args.body) + '\r\n';
+}
+
+function smtpAddress(value: string): string {
+  const trimmed = value.trim();
+  const left = trimmed.lastIndexOf('<');
+  const right = trimmed.lastIndexOf('>');
+  if (left >= 0 && right > left) {
+    return trimmed.substring(left + 1, right).trim();
+  }
+  return trimmed;
+}
+
+function smtpResponseCode(lines: string[]): string {
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim();
+    if (/^[0-9]{3} /.test(line)) {
+      return line.substring(0, 3);
+    }
+  }
+  return '';
+}
+
+function requireSmtpCode(lines: string[], allowed: string[], stage: string): void {
+  const code = smtpResponseCode(lines);
+  if (allowed.indexOf(code) < 0) {
+    throw new Error('QQ SMTP ' + stage + ' rejected with code ' + (code.length > 0 ? code : 'unknown') + '.');
+  }
+}
+
+function smtpDotStuffed(value: string): string {
+  return value.split('\r\n').map((line: string) => line.startsWith('.') ? '.' + line : line).join('\r\n');
 }
 
 function redactedAccountLabel(address: string): string {
@@ -441,7 +760,9 @@ export class TlsImapTransport implements ImapTransport {
     }
     const text = this.buffer;
     this.buffer = '';
-    const lines = text.split('\r\n').filter((line: string) => line.length > 0);
+    // MIME uses empty lines to separate each part's headers from its body.
+    // Keep them intact; search/envelope parsers already ignore unrelated lines.
+    const lines = text.split('\r\n');
     aiLogInfo('[AIPhone][QqMailImapReadDone] tag=' + tag +
       ' lines=' + lines.length.toString() +
       ' chars=' + text.length.toString());
@@ -460,13 +781,84 @@ export class TlsImapTransport implements ImapTransport {
   }
 }
 
+const SMTP_READ_TIMEOUT_MS = 20000;
+
+export class TlsSmtpTransport implements SmtpTransport {
+  private tcpSocket: socket.TCPSocket | null = null;
+  private tlsSocket: socket.TLSSocket | null = null;
+  private buffer: string = '';
+  private decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+
+  async connect(host: string, port: number): Promise<void> {
+    aiLogInfo('[AIPhone][QqMailSmtpConnectStart] host=' + host + ' port=' + port.toString());
+    this.tcpSocket = socket.constructTCPSocketInstance();
+    await this.tcpSocket.bind({ address: '0.0.0.0', port: 0 });
+    await this.tcpSocket.connect({
+      address: { address: host, port: port },
+      timeout: 15000
+    });
+    this.tlsSocket = socket.constructTLSSocketInstance(this.tcpSocket);
+    this.tlsSocket.on('message', (value: socket.SocketMessageInfo) => {
+      this.buffer += this.decoder.decodeToString(new Uint8Array(value.message), { stream: true });
+    });
+    await this.tlsSocket.connect({
+      address: { address: host, port: port },
+      secureOptions: { ca: [DIGICERT_GLOBAL_ROOT_G2_CA] },
+      timeout: 15000
+    });
+    aiLogInfo('[AIPhone][QqMailSmtpConnectOk] host=' + host + ' port=' + port.toString());
+  }
+
+  async send(value: string): Promise<void> {
+    if (this.tlsSocket === null) {
+      throw new Error('SMTP socket is not connected.');
+    }
+    aiLogInfo('[AIPhone][QqMailSmtpSend] chars=' + value.length.toString());
+    const payload = utf8Bytes(value + '\r\n');
+    await this.tlsSocket.send(payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength));
+  }
+
+  async readResponse(): Promise<string[]> {
+    const started = Date.now();
+    while (!/(^|\r\n)[0-9]{3} [^\r\n]*\r\n/.test(this.buffer)) {
+      if (Date.now() - started > SMTP_READ_TIMEOUT_MS) {
+        throw new Error('QQ SMTP timeout waiting for response.');
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    const text = this.buffer;
+    this.buffer = '';
+    const lines = text.split('\r\n').filter((line: string) => line.length > 0);
+    aiLogInfo('[AIPhone][QqMailSmtpRead] code=' + smtpResponseCode(lines) +
+      ' lines=' + lines.length.toString());
+    return lines;
+  }
+
+  async close(): Promise<void> {
+    if (this.tlsSocket !== null) {
+      await this.tlsSocket.close();
+      this.tlsSocket = null;
+      this.tcpSocket = null;
+    } else if (this.tcpSocket !== null) {
+      await this.tcpSocket.close();
+      this.tcpSocket = null;
+    }
+  }
+}
+
 export class QqMailImapClient {
   private config: QqMailConfig;
   private transportFactory: () => ImapTransport;
+  private smtpTransportFactory: () => SmtpTransport;
 
-  constructor(config: QqMailConfig, transportFactory: (() => ImapTransport) | null = null) {
+  constructor(
+    config: QqMailConfig,
+    transportFactory: (() => ImapTransport) | null = null,
+    smtpTransportFactory: (() => SmtpTransport) | null = null
+  ) {
     this.config = config;
     this.transportFactory = transportFactory === null ? (() => new TlsImapTransport()) : transportFactory;
+    this.smtpTransportFactory = smtpTransportFactory === null ? (() => new TlsSmtpTransport()) : smtpTransportFactory;
   }
 
   private async withTransport<T>(operation: (transport: ImapTransport) => Promise<T>): Promise<T> {
@@ -503,6 +895,49 @@ export class QqMailImapClient {
       const terms = imapKeywordTerms(args.query);
       return parseImapEnvelopeList(fetchLines, redactedAccountLabel(this.config.address))
         .filter((thread: MailThreadResult) => visibleMatchesTerms(thread, terms));
+    });
+  }
+
+  async readDetail(args: MailDetailRequest): Promise<MailDetail> {
+    if (this.config.address.length === 0 || this.config.authCode.length === 0) {
+      throw new Error('QQ Mail local config is missing QQ_MAIL_ADDRESS or QQ_MAIL_AUTH_CODE.');
+    }
+    if (!/^[0-9]+$/.test(args.messageId.trim())) {
+      throw new Error('QQ Mail detail requires a numeric IMAP UID.');
+    }
+    return this.withTransport(async (transport: ImapTransport) => {
+      await transport.send('a1 LOGIN "' + this.config.address + '" "' + this.config.authCode + '"');
+      const login = await transport.readUntil('a1');
+      if (login.join('\n').indexOf('a1 OK') < 0) {
+        throw new Error('QQ IMAP login rejected.');
+      }
+      await transport.send('a2 SELECT INBOX');
+      await transport.readUntil('a2');
+      await transport.send('a3 UID FETCH ' + args.messageId.trim() + ' (BODY.PEEK[])');
+      const fetchLines = await transport.readUntil('a3');
+      const raw = rawMessageFromFetch(fetchLines);
+      if (raw.length === 0) {
+        throw new Error('QQ IMAP returned no message body.');
+      }
+      const headerEnd = raw.indexOf('\r\n\r\n');
+      const headers = headerEnd >= 0 ? raw.substring(0, headerEnd) : raw;
+      const mime = parseMimeText(raw);
+      const bodyText = (mime.plain.length > 0 ? mime.plain : textFromHtml(mime.html)).substring(0, 30000);
+      const detail: MailDetail = {
+        requestKey: args.requestKey,
+        provider: 'qq',
+        threadId: args.threadId,
+        messageId: args.messageId,
+        internetMessageId: mimeHeader(headers, 'Message-ID'),
+        subject: mimeHeader(headers, 'Subject').length > 0 ? mimeHeader(headers, 'Subject') : args.subject,
+        from: mimeHeader(headers, 'From'),
+        replyTo: mimeHeader(headers, 'Reply-To'),
+        to: addressList(mimeHeader(headers, 'To')),
+        cc: addressList(mimeHeader(headers, 'Cc')),
+        bodyText: bodyText,
+        bodyHtml: mime.html.substring(0, 30000)
+      };
+      return detail;
     });
   }
 
@@ -553,5 +988,59 @@ export class QqMailImapClient {
       };
       return result;
     });
+  }
+
+  async sendReply(args: MailDraftArgs): Promise<DynamicGenericToolResult> {
+    if (this.config.address.length === 0 || this.config.authCode.length === 0) {
+      throw new Error('QQ Mail local config is missing QQ_MAIL_ADDRESS or QQ_MAIL_AUTH_CODE.');
+    }
+    if (args.to.length === 0 || args.body.trim().length === 0) {
+      throw new Error('QQ Mail reply requires a recipient and body.');
+    }
+    const transport = this.smtpTransportFactory();
+    try {
+      await transport.connect('smtp.qq.com', 465);
+      requireSmtpCode(await transport.readResponse(), ['220'], 'greeting');
+      await transport.send('EHLO appless-phone.local');
+      requireSmtpCode(await transport.readResponse(), ['250'], 'EHLO');
+      await transport.send('AUTH LOGIN');
+      requireSmtpCode(await transport.readResponse(), ['334'], 'AUTH LOGIN');
+      await transport.send(bytesToBase64(utf8Bytes(this.config.address)));
+      requireSmtpCode(await transport.readResponse(), ['334'], 'username');
+      await transport.send(bytesToBase64(utf8Bytes(this.config.authCode)));
+      requireSmtpCode(await transport.readResponse(), ['235'], 'authentication');
+      await transport.send('MAIL FROM:<' + this.config.address + '>');
+      requireSmtpCode(await transport.readResponse(), ['250'], 'MAIL FROM');
+      for (let index = 0; index < args.to.length; index++) {
+        await transport.send('RCPT TO:<' + smtpAddress(args.to[index]) + '>');
+        requireSmtpCode(await transport.readResponse(), ['250', '251'], 'RCPT TO');
+      }
+      await transport.send('DATA');
+      requireSmtpCode(await transport.readResponse(), ['354'], 'DATA');
+      const mime = buildQqReplyMime(args, this.config.address);
+      await transport.send(smtpDotStuffed(mime) + '\r\n.');
+      requireSmtpCode(await transport.readResponse(), ['250'], 'message body');
+      await transport.send('QUIT');
+      aiLogInfo('[AIPhone][QqMailReplySent] recipients=' + args.to.length.toString() +
+        ' bodyChars=' + args.body.length.toString());
+      const rows: A2uiLabelValueData[] = [
+        { label: 'Source', value: 'QQ Mail SMTP' },
+        { label: 'To', value: args.to.join(', ') },
+        { label: 'Subject', value: args.subject },
+        { label: 'Status', value: 'Sent' }
+      ];
+      const result: DynamicGenericToolResult = {
+        sourceTag: 'QQ Mail',
+        toolName: 'mail.reply.send',
+        title: 'QQ 邮箱回复已发送',
+        status: 'success',
+        summary: '已通过 QQ SMTP 发送回复。',
+        rows: rows,
+        rawPreview: 'qq reply sent recipients=' + args.to.length.toString()
+      };
+      return result;
+    } finally {
+      await transport.close();
+    }
   }
 }
