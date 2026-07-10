@@ -172,6 +172,7 @@ interface MailCalendarSuggestionSchemaText {
   title: string;
   start: string;
   end: string;
+  displayTime: string;
   timezone: string;
   location: string;
   description: string;
@@ -1980,6 +1981,7 @@ struct Index {
       title: '',
       start: '',
       end: '',
+      displayTime: '',
       timezone: 'Asia/Shanghai',
       location: '',
       description: '',
@@ -2000,6 +2002,24 @@ struct Index {
     return this.actionText(payload[key]).trim();
   }
 
+  private cleanMailCalendarDescription(value: string): string {
+    const lines: string[] = value.split('\n');
+    const kept: string[] = [];
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      if (/^(来源|邮件来源|Source|发件人|From)\s*[:：]/i.test(line)) {
+        continue;
+      }
+      kept.push(line);
+    }
+    return kept.join('\n')
+      .replace(/[；;，,。\s]*(来源|邮件来源|Source|发件人|From)\s*[:：][^\n]*$/i, '')
+      .trim();
+  }
+
   private mailCalendarSuggestionPrompt(detail: MailDetail): string {
     const schema: MailCalendarSuggestionSchemaText = {
       isWorkRelated: 'boolean，邮件是否与工作/学习/会议协作相关',
@@ -2007,9 +2027,10 @@ struct Index {
       title: 'string，适合放入日历的短标题',
       start: 'string，ISO 8601 日期时间，必须含时区，例如 2026-07-10T15:00:00+08:00；无法确定则空字符串',
       end: 'string，ISO 8601 日期时间，必须含时区；无法确定结束时间则按开始后30分钟估计',
+      displayTime: 'string，面向界面展示的中文时间，例如 7月10日 15:00-15:30；无法确定则空字符串',
       timezone: 'string，默认 Asia/Shanghai',
       location: 'string，会议地点、线上会议链接或空字符串',
-      description: 'string，100字以内会议内容摘要，包含来源为邮件',
+      description: 'string，100字以内会议内容摘要，只写会议/活动本身；不得包含来源、邮件来源、发件人、邮箱等信息',
       confidence: 'string，只能是 high/medium/low',
       reason: 'string，简短说明判断依据'
     };
@@ -2020,7 +2041,9 @@ struct Index {
       '\n1. 只有明确有会议、面试、评审、同步会、deadline 日程等时间安排时 hasMeeting=true。' +
       '\n2. 时间必须基于邮件标题和正文，不要编造日期；只有相对日期但无法确定基准日期时 start 置空。' +
       '\n3. 如果有开始时间但没有结束时间，end 使用开始时间后 30 分钟。' +
-      '\n4. 如果不是工作相关或没有明确时间，仍输出完整 JSON，但按钮字段应为 false/空字符串。' +
+      '\n4. displayTime 是 start/end 的中文可读表达，不要输出 ISO 原文。' +
+      '\n5. description 不要写“来源：...”“邮件来源：...”“From：...”或发件人邮箱，来源由界面单独展示。' +
+      '\n6. 如果不是工作相关或没有明确时间，仍输出完整 JSON，但按钮字段应为 false/空字符串。' +
       '\n当前设备时间: ' + new Date().toISOString() +
       '\n邮件主题: ' + detail.subject +
       '\nFrom: ' + detail.from +
@@ -2046,9 +2069,10 @@ struct Index {
         title: this.payloadText(payload, 'title'),
         start: start,
         end: end,
+        displayTime: this.payloadText(payload, 'displayTime'),
         timezone: this.payloadText(payload, 'timezone').length > 0 ? this.payloadText(payload, 'timezone') : 'Asia/Shanghai',
         location: this.payloadText(payload, 'location'),
-        description: this.payloadText(payload, 'description'),
+        description: this.cleanMailCalendarDescription(this.payloadText(payload, 'description')),
         confidence: this.payloadText(payload, 'confidence').length > 0 ? this.payloadText(payload, 'confidence') : 'low',
         reason: this.payloadText(payload, 'reason')
       };

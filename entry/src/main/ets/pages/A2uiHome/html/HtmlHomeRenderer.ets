@@ -1264,9 +1264,10 @@ body[data-scene="gmail"] .section {
   margin-top: 18px;
 }
 body[data-scene="gmail"] .block {
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 22px rgba(194, 70, 54, 0.08);
+  border-color: rgba(33, 27, 23, 0.08);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(42, 34, 27, 0.06);
 }
 body[data-scene="gmail"] .block-top {
   align-items: center;
@@ -1302,28 +1303,31 @@ body[data-scene] .block {
   padding: 14px;
 }
 body[data-scene] .block::before {
-  width: 5px;
-  background: linear-gradient(180deg, var(--kind-accent), transparent);
+  width: 0;
+  background: transparent;
 }
 body[data-scene="gmail"] .block {
-  border-color: rgba(194, 70, 54, 0.2);
+  border-color: rgba(33, 27, 23, 0.08);
+  padding: 0;
+  overflow: hidden;
 }
 body[data-scene="gmail"] .details {
-  border-top-color: rgba(194, 70, 54, 0.14);
+  border-top-color: rgba(33, 27, 23, 0.06);
 }
 body[data-scene="gmail"] .mail-tech-details {
-  margin-top: 10px;
-  border: 1px solid rgba(194, 70, 54, 0.12);
-  border-radius: 16px;
+  margin-top: 0;
+  border: 0;
+  border-top: 1px solid rgba(33, 27, 23, 0.06);
+  border-radius: 0;
   padding: 0;
-  background: rgba(255, 250, 244, 0.62);
+  background: #ffffff;
 }
 body[data-scene="gmail"] .mail-tech-details > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  color: #9b3f34;
+  padding: 13px 20px;
+  color: #9ca3af;
   font-size: 12px;
   font-weight: 760;
   list-style: none;
@@ -1333,7 +1337,7 @@ body[data-scene="gmail"] .mail-tech-details > summary::-webkit-details-marker {
 }
 body[data-scene="gmail"] .mail-tech-details > summary::after {
   content: "+";
-  color: rgba(155, 63, 52, 0.72);
+  color: #d1d5db;
   font-size: 16px;
   line-height: 1;
 }
@@ -1341,13 +1345,48 @@ body[data-scene="gmail"] .mail-tech-details[open] > summary::after {
   content: "-";
 }
 body[data-scene="gmail"] .mail-tech-body {
-  border-top: 1px solid rgba(194, 70, 54, 0.1);
-  padding: 0 12px 12px;
+  border-top: 1px solid rgba(33, 27, 23, 0.06);
+  padding: 0 20px 14px;
+}
+body[data-scene="gmail"] .block-top {
+  padding: 18px 20px 18px;
+}
+body[data-scene="gmail"] .block-title {
+  gap: 9px;
+}
+body[data-scene="gmail"] .block-title h3 {
+  margin-top: 2px;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1.26;
+}
+body[data-scene="gmail"] .block-title .subtitle {
+  display: none;
+}
+body[data-scene="gmail"] .kind-tag {
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--kind-accent) 20%, transparent);
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--kind-accent) 9%, white);
+  color: var(--kind-accent);
+  font-size: 12px;
+  font-weight: 680;
+}
+body[data-scene="gmail"] .expand-button {
+  color: #8c7a6b;
+  font-size: 14px;
+  font-weight: 680;
+  background: transparent;
+}
+body[data-scene="gmail"] .details {
+  padding: 0 20px 0;
 }
 .mail-detail-host {
   display: grid;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 .mail-detail-skeleton {
   display: grid;
@@ -1365,28 +1404,40 @@ body[data-scene="gmail"] .mail-tech-body {
 .mail-detail-meta {
   display: grid;
   gap: 5px;
-  border-bottom: 1px solid rgba(194, 70, 54, 0.1);
-  padding-bottom: 10px;
-  color: var(--muted);
+  border-bottom: 0;
+  padding: 6px 0 14px;
+  color: #9ca3af;
   font-size: 12px;
   line-height: 1.45;
 }
+.mail-detail-from {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 760;
+}
+.mail-detail-route {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .mail-detail-body {
   margin: 0;
-  color: var(--text);
+  color: #374151;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  padding-bottom: 18px;
 }
 .mail-calendar-card {
   display: grid;
-  gap: 8px;
-  border: 1px solid rgba(57, 122, 85, 0.24);
-  border-radius: 8px;
-  padding: 11px 12px;
-  background: rgba(57, 122, 85, 0.08);
+  gap: 12px;
+  margin: 0 0 18px;
+  border: 1px solid #ebe5d9;
+  border-radius: 12px;
+  padding: 14px;
+  background: #f8f6f1;
 }
 .mail-calendar-head {
   display: flex;
@@ -1396,23 +1447,41 @@ body[data-scene="gmail"] .mail-tech-body {
 }
 .mail-calendar-title {
   min-width: 0;
-  color: var(--ink);
+  color: #4a4036;
   font-size: 14px;
   font-weight: 760;
   line-height: 1.3;
 }
 .mail-calendar-confidence {
   flex: 0 0 auto;
-  color: #397a55;
-  font-size: 11px;
-  font-weight: 720;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: #ffedd5;
+  color: #c2410c;
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 1.4;
+  text-transform: uppercase;
 }
 .mail-calendar-lines {
   display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
+  gap: 8px;
+  color: #5c544d;
+  font-size: 13px;
   line-height: 1.45;
+}
+.mail-calendar-line {
+  display: flex;
+  gap: 12px;
+}
+.mail-calendar-label {
+  flex: 0 0 32px;
+  color: #8c7a6b;
+}
+.mail-calendar-value {
+  min-width: 0;
+  color: #4a4036;
 }
 .mail-calendar-footer {
   display: flex;
@@ -1420,11 +1489,14 @@ body[data-scene="gmail"] .mail-tech-body {
   justify-content: space-between;
   gap: 10px;
   margin-top: 2px;
+  border-top: 1px solid #ebe5d9;
+  padding-top: 12px;
 }
 .mail-calendar-status {
   min-width: 0;
-  color: var(--muted);
+  color: #8c7a6b;
   font-size: 12px;
+  font-weight: 680;
   line-height: 1.4;
 }
 .mail-calendar-status.error { color: #a13f35; }
@@ -1432,6 +1504,17 @@ body[data-scene="gmail"] .mail-tech-body {
 .mail-calendar-add {
   flex: 0 0 auto;
   min-width: 104px;
+  border-radius: 8px;
+  background: #8c7a6b;
+  color: #ffffff;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(75, 66, 59, 0.1);
+}
+.mail-calendar-add:disabled {
+  border: 1px solid #d5cec4;
+  background: transparent;
+  color: #a89f91;
+  box-shadow: none;
 }
 .mail-detail-error {
   color: #a13f35;
@@ -1441,10 +1524,15 @@ body[data-scene="gmail"] .mail-tech-body {
 .mail-reply-launch {
   display: flex;
   justify-content: center;
-  padding: 8px 0 2px;
+  padding: 0 0 18px;
 }
 .mail-reply-launch .action {
+  width: 100%;
   min-width: 132px;
+  border-radius: 12px;
+  background: #262626;
+  color: #ffffff;
+  justify-content: center;
 }
 .mail-reply-overlay {
   position: fixed;
@@ -1453,76 +1541,84 @@ body[data-scene="gmail"] .mail-tech-body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  background: rgba(25, 20, 17, 0.46);
+  padding: 16px;
+  background: transparent;
+  pointer-events: none;
 }
 .mail-reply-dialog {
-  width: min(520px, 100%);
-  max-height: min(620px, calc(100vh - 40px));
+  width: min(432px, 100%);
+  max-height: min(560px, calc(100vh - 32px));
   overflow: auto;
-  border: 1px solid rgba(75, 66, 59, 0.2);
-  border-radius: 8px;
-  background: #fffdf9;
-  box-shadow: 0 24px 60px rgba(31, 24, 20, 0.24);
+  pointer-events: auto;
+  border: 1px solid rgba(229, 231, 235, 0.88);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 26px 70px rgba(17, 24, 39, 0.24);
 }
 .mail-reply-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 16px 12px 18px;
-  border-bottom: 1px solid rgba(75, 66, 59, 0.12);
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.84);
 }
 .mail-reply-title {
   flex: 1;
   margin: 0;
-  color: var(--ink);
+  color: #111827;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 720;
+  letter-spacing: 0;
 }
 .mail-reply-ai {
-  min-width: 64px;
+  min-width: 74px;
   height: 32px;
-  border-radius: 6px;
+  border: 1px solid #ebe5d9;
+  border-radius: 8px;
   padding: 0 12px;
+  background: #f8f6f1;
+  color: #7a6a5c;
   font-size: 12px;
+  font-weight: 760;
   line-height: 1;
+  box-shadow: 0 1px 5px rgba(75, 66, 59, 0.06);
 }
 .mail-reply-close {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
-  font-size: 25px;
+  color: #9ca3af;
+  font-size: 22px;
   line-height: 1;
   cursor: pointer;
 }
-.mail-reply-close:hover { background: rgba(75, 66, 59, 0.08); }
+.mail-reply-close:hover { background: #f9fafb; color: #4b5563; }
 .mail-reply-editor {
   display: block;
-  width: calc(100% - 36px);
-  min-height: 220px;
-  margin: 18px;
+  width: calc(100% - 40px);
+  min-height: 180px;
+  margin: 20px;
   resize: vertical;
-  border: 1px solid rgba(75, 66, 59, 0.24);
-  border-radius: 6px;
-  padding: 13px 14px;
-  background: #ffffff;
-  color: var(--text);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fafafa;
+  color: #1f2937;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   outline: none;
 }
 .mail-reply-editor:focus {
-  border-color: rgba(194, 70, 54, 0.7);
-  box-shadow: 0 0 0 3px rgba(194, 70, 54, 0.1);
+  border-color: #8c7a6b;
+  box-shadow: 0 0 0 1px #8c7a6b;
 }
 .mail-reply-status {
   min-height: 20px;
-  padding: 0 18px 10px;
-  color: var(--muted);
+  padding: 0 20px 10px;
+  color: #6b7280;
   font-size: 12px;
 }
 .mail-reply-status.error { color: #a13f35; }
@@ -1530,14 +1626,27 @@ body[data-scene="gmail"] .mail-tech-body {
 .mail-reply-footer {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 0 18px 18px;
+  gap: 12px;
+  padding: 0 20px 20px;
 }
 .mail-reply-footer .action {
   width: 100%;
   justify-content: center;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.06);
 }
-body.mail-reply-open { overflow: hidden; }
+.mail-reply-footer .action.secondary {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #4b5563;
+}
+.mail-reply-footer .action.primary {
+  background: #262626;
+  color: #ffffff;
+}
 .aiphone-toast {
   position: fixed;
   top: max(12px, env(safe-area-inset-top, 0px));
@@ -1561,7 +1670,7 @@ body.mail-reply-open { overflow: hidden; }
   opacity: 1;
 }
 @media (max-width: 560px) {
-  .mail-reply-overlay { align-items: flex-end; padding: 12px; }
+  .mail-reply-overlay { padding: 12px; }
   .mail-reply-dialog { max-height: calc(100vh - 24px); }
   .mail-reply-editor { min-height: 190px; }
 }
@@ -1601,6 +1710,59 @@ body[data-scene] .action.secondary {
   border-color: rgba(33, 27, 23, 0.1);
   background: rgba(255, 255, 255, 0.78);
   color: var(--scene-accent);
+}
+body[data-scene="gmail"] .mail-calendar-add.action.primary {
+  border: 0;
+  border-radius: 8px;
+  min-height: 30px;
+  padding: 7px 14px;
+  background: #8c7a6b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(75, 66, 59, 0.1);
+}
+body[data-scene="gmail"] .mail-calendar-add.action.primary:disabled {
+  border: 1px solid #d5cec4;
+  background: transparent;
+  color: #a89f91;
+  box-shadow: none;
+}
+body[data-scene="gmail"] .mail-reply-launch .action.primary {
+  border: 0;
+  min-height: 42px;
+  border-radius: 12px;
+  background: #262626;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
+}
+body[data-scene="gmail"] .mail-reply-ai.action.secondary {
+  min-width: 74px;
+  height: 32px;
+  border: 1px solid #ebe5d9;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #f8f6f1;
+  color: #7a6a5c;
+  font-size: 12px;
+  font-weight: 760;
+  box-shadow: 0 1px 5px rgba(75, 66, 59, 0.06);
+}
+body[data-scene="gmail"] .mail-reply-footer .action.secondary {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.04);
+}
+body[data-scene="gmail"] .mail-reply-footer .action.primary {
+  border: 0;
+  background: #262626;
+  color: #ffffff;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
 }
 body[data-scene] .credential {
   border: 1px solid rgba(46, 111, 143, 0.22);
@@ -2257,9 +2419,34 @@ const HTML_HOME_JS: string = `
     add(skeleton, 'div', 'mail-skeleton-line');
     skeleton.setAttribute('aria-label', '正在加载邮件正文');
   }
-  function appendMailMeta(parent, label, value) {
-    var clean = Array.isArray(value) ? value.filter(Boolean).join(', ') : text(value);
-    if (clean.length > 0) { add(parent, 'div', '', label + '：' + clean); }
+  function displayNameFromAddress(value) {
+    var raw = text(value).trim();
+    var left = raw.indexOf('<');
+    if (left > 0) {
+      var name = raw.substring(0, left).replace(/^["“]+|["”]+$/g, '').trim();
+      if (name.length > 0) { return name; }
+    }
+    var at = raw.indexOf('@');
+    if (at > 0) { return raw.substring(0, at); }
+    return raw;
+  }
+  function emailFromAddress(value) {
+    var raw = text(value).trim();
+    var match = raw.match(/<([^>]+)>/);
+    if (match && match[1]) { return match[1].trim(); }
+    var bare = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);
+    return bare && bare[0] ? bare[0].trim() : '';
+  }
+  function mailRouteText(detail) {
+    var fromEmail = emailFromAddress(detail.from);
+    var to = list(detail.to);
+    var firstToName = to.length > 0 ? displayNameFromAddress(to[0]) : '';
+    var route = fromEmail.length > 0 ? fromEmail : text(detail.from);
+    if (route.length === 0) { route = '发件人'; }
+    if (firstToName.length > 0) {
+      route += ' 发给 ' + firstToName + ' (我)';
+    }
+    return route;
   }
   function copiedMailReplyArgs(action, detail, requestKey) {
     var source = action && action.args && typeof action.args === 'object' ? action.args : {};
@@ -2285,7 +2472,6 @@ const HTML_HOME_JS: string = `
       activeMailReply.overlay.parentNode.removeChild(activeMailReply.overlay);
     }
     activeMailReply = null;
-    if (document.body) { document.body.classList.remove('mail-reply-open'); }
   }
   function submitMailReply(operation) {
     if (!activeMailReply || activeMailReply.busy) { return; }
@@ -2343,7 +2529,7 @@ const HTML_HOME_JS: string = `
     var overlay = add(document.body, 'div', 'mail-reply-overlay');
     var dialog = add(overlay, 'section', 'mail-reply-dialog');
     dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-modal', 'false');
     var header = add(dialog, 'header', 'mail-reply-header');
     add(header, 'h2', 'mail-reply-title', '编辑回复');
     var aiButton = add(header, 'button', 'action secondary mail-reply-ai', 'AI回复');
@@ -2374,13 +2560,9 @@ const HTML_HOME_JS: string = `
     };
     editor.addEventListener('input', function () { mailReplyDrafts[requestKey] = editor.value; });
     closeButton.addEventListener('click', closeMailReply);
-    overlay.addEventListener('click', function (event) {
-      if (event.target === overlay) { closeMailReply(); }
-    });
     aiButton.addEventListener('click', function () { requestMailReplyAiDraft(); });
     saveButton.addEventListener('click', function () { submitMailReply('draft'); });
     sendButton.addEventListener('click', function () { submitMailReply('send'); });
-    if (document.body) { document.body.classList.add('mail-reply-open'); }
     editor.focus();
   }
   function renderMailReplyLaunch(entry, detail) {
@@ -2415,9 +2597,57 @@ const HTML_HOME_JS: string = `
       text(suggestion.start).length > 0 &&
       text(suggestion.title).length > 0;
   }
-  function formatCalendarLine(label, value) {
+  function addCalendarLine(parent, label, value) {
     var clean = text(value);
-    return clean.length > 0 ? label + '：' + clean : '';
+    if (clean.length === 0) { return; }
+    var row = add(parent, 'div', 'mail-calendar-line');
+    add(row, 'span', 'mail-calendar-label', label);
+    add(row, 'span', 'mail-calendar-value', clean);
+  }
+  function padTimePart(value) {
+    return value < 10 ? '0' + value : String(value);
+  }
+  function parseCalendarDate(value) {
+    var clean = text(value);
+    if (clean.length === 0) { return null; }
+    var date = new Date(clean);
+    return isNaN(date.getTime()) ? null : date;
+  }
+  function formatCalendarDate(date) {
+    return (date.getMonth() + 1) + '月' + date.getDate() + '日';
+  }
+  function formatCalendarClock(date) {
+    return padTimePart(date.getHours()) + ':' + padTimePart(date.getMinutes());
+  }
+  function formatCalendarDateTime(date) {
+    return formatCalendarDate(date) + ' ' + formatCalendarClock(date);
+  }
+  function formatCalendarTimeRange(suggestion) {
+    var modelTime = text(suggestion && suggestion.displayTime);
+    if (modelTime.length > 0) { return modelTime; }
+    var start = parseCalendarDate(suggestion && suggestion.start);
+    var end = parseCalendarDate(suggestion && suggestion.end);
+    if (!start) { return text(suggestion && suggestion.start); }
+    if (!end) { return formatCalendarDateTime(start); }
+    if (start.getFullYear() === end.getFullYear() &&
+      start.getMonth() === end.getMonth() &&
+      start.getDate() === end.getDate()) {
+      return formatCalendarDate(start) + ' ' + formatCalendarClock(start) + '-' + formatCalendarClock(end);
+    }
+    return formatCalendarDateTime(start) + ' - ' + formatCalendarDateTime(end);
+  }
+  function cleanCalendarDescription(value) {
+    var lines = text(value).split('\\n');
+    var kept = [];
+    lines.forEach(function (line) {
+      var clean = text(line).trim();
+      if (clean.length === 0) { return; }
+      if (/^(来源|邮件来源|Source|发件人|From)\\s*[:：]/i.test(clean)) { return; }
+      kept.push(clean);
+    });
+    return kept.join('\\n')
+      .replace(/[；;，,。\\s]*(来源|邮件来源|Source|发件人|From)\\s*[:：][^\\n]*$/i, '')
+      .trim();
   }
   function renderMailCalendarSuggestion(entry, detail, suggestion) {
     entry.calendarHost.textContent = '';
@@ -2427,14 +2657,10 @@ const HTML_HOME_JS: string = `
     add(head, 'div', 'mail-calendar-title', text(suggestion.title));
     add(head, 'div', 'mail-calendar-confidence', text(suggestion.confidence) || 'medium');
     var lines = add(card, 'div', 'mail-calendar-lines');
-    [
-      formatCalendarLine('开始', suggestion.start),
-      formatCalendarLine('结束', suggestion.end),
-      formatCalendarLine('地点', suggestion.location),
-      formatCalendarLine('内容', suggestion.description)
-    ].forEach(function (line) {
-      if (line.length > 0) { add(lines, 'div', '', line); }
-    });
+    addCalendarLine(lines, '时间', formatCalendarTimeRange(suggestion));
+    addCalendarLine(lines, '地点', suggestion.location);
+    addCalendarLine(lines, '内容', cleanCalendarDescription(suggestion.description));
+    addCalendarLine(lines, '来源', displayNameFromAddress(detail.from) + ' 邮件');
     var footer = add(card, 'div', 'mail-calendar-footer');
     var status = add(footer, 'div', 'mail-calendar-status', '已识别为会议日程');
     var button = add(footer, 'button', 'action primary mail-calendar-add', '添加日程');
@@ -2467,9 +2693,8 @@ const HTML_HOME_JS: string = `
     entry.replyHost.textContent = '';
     entry.calendarHost.textContent = '';
     var meta = add(entry.host, 'div', 'mail-detail-meta');
-    appendMailMeta(meta, 'From', detail.from);
-    appendMailMeta(meta, 'To', detail.to);
-    appendMailMeta(meta, 'Cc', detail.cc);
+    add(meta, 'div', 'mail-detail-from', displayNameFromAddress(detail.from) || '邮件发件人');
+    add(meta, 'div', 'mail-detail-route', mailRouteText(detail));
     add(entry.host, 'pre', 'mail-detail-body', text(detail.bodyText) || '邮件正文为空。');
     renderMailCalendarSuggestion(entry, detail, mailCalendarSuggestions[text(detail.requestKey)]);
     renderMailReplyLaunch(entry, detail);

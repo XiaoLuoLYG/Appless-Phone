@@ -64,6 +64,7 @@ export interface MailCalendarSuggestion {
   title: string;
   start: string;
   end: string;
+  displayTime: string;
   timezone: string;
   location: string;
   description: string;
