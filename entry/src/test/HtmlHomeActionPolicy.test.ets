@@ -32,6 +32,13 @@ interface MailReplyArgsFixture {
   body: string;
 }
 
+interface MailCalendarArgsFixture {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -204,6 +211,51 @@ export default function htmlHomeActionPolicyTest() {
         action('html_mail_reply_send', 'gmail:thread-123', 'client', blocked))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', blocked))).assertFalse();
+    });
+
+    it('allows mail calendar add only for the matching visible mail card', 0, () => {
+      const doc = documentFixture();
+      const detailArgs: MailCalendarArgsFixture = {
+        requestKey: '',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123'
+      };
+      doc.blocks.push({
+        id: 'gmail-meeting-123',
+        kind: 'generic-tool-result',
+        title: 'Meeting invite',
+        subtitle: '',
+        status: 'success',
+        source: 'Gmail',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'html_mail_detail_read',
+          label: '加载正文',
+          prompt: 'gmail:thread-123',
+          variant: 'secondary',
+          kind: 'client',
+          args: detailArgs
+        }]
+      });
+      const allowed: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123'
+      };
+      const blocked: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-other',
+        messageId: 'message-123'
+      };
+
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_calendar_add', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_calendar_add', 'gmail:thread-123', 'client', blocked))).assertFalse();
     });
 
     it('allows only matching payment actions from the current HTML document', 0, () => {

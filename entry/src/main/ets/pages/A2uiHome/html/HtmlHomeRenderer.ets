@@ -1380,6 +1380,59 @@ body[data-scene="gmail"] .mail-tech-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.mail-calendar-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(57, 122, 85, 0.24);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: rgba(57, 122, 85, 0.08);
+}
+.mail-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mail-calendar-title {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.3;
+}
+.mail-calendar-confidence {
+  flex: 0 0 auto;
+  color: #397a55;
+  font-size: 11px;
+  font-weight: 720;
+}
+.mail-calendar-lines {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mail-calendar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+.mail-calendar-status {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mail-calendar-status.error { color: #a13f35; }
+.mail-calendar-status.success { color: #2d6a4f; }
+.mail-calendar-add {
+  flex: 0 0 auto;
+  min-width: 104px;
+}
 .mail-detail-error {
   color: #a13f35;
   font-size: 13px;
@@ -1485,6 +1538,28 @@ body[data-scene="gmail"] .mail-tech-body {
   justify-content: center;
 }
 body.mail-reply-open { overflow: hidden; }
+.aiphone-toast {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: 50%;
+  z-index: 180;
+  transform: translate(-50%, -18px);
+  opacity: 0;
+  pointer-events: none;
+  border: 1px solid rgba(47, 119, 84, 0.22);
+  border-radius: 999px;
+  padding: 10px 15px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #2d6a4f;
+  font-size: 13px;
+  font-weight: 720;
+  box-shadow: 0 14px 34px rgba(36, 31, 27, 0.14);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.aiphone-toast.visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
 @media (max-width: 560px) {
   .mail-reply-overlay { align-items: flex-end; padding: 12px; }
   .mail-reply-dialog { max-height: calc(100vh - 24px); }
@@ -1618,8 +1693,10 @@ const HTML_HOME_JS: string = `
   if (!app) { return; }
   var localState = { travel: 'all', food: 'all', mail: 'all', trainFastest: false, trainAvailable: false, trainShowMore: false, expandedKey: '' };
   var mailDetailEntries = {};
+  var mailCalendarSuggestions = {};
   var mailReplyDrafts = {};
   var activeMailReply = null;
+  var toastTimer = null;
   function text(value) {
     return value === undefined || value === null ? '' : String(value);
   }
@@ -2317,18 +2394,89 @@ const HTML_HOME_JS: string = `
       openMailReply(entry, detail);
     });
   }
+  function showToast(message) {
+    var toast = document.querySelector('.aiphone-toast');
+    if (!toast) {
+      toast = add(document.body, 'div', 'aiphone-toast');
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
+    }
+    toast.textContent = text(message) || '已完成';
+    toast.classList.add('visible');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () {
+      toast.classList.remove('visible');
+    }, 2600);
+  }
+  function calendarSuggestionReady(suggestion) {
+    return !!suggestion &&
+      !!suggestion.isWorkRelated &&
+      !!suggestion.hasMeeting &&
+      text(suggestion.start).length > 0 &&
+      text(suggestion.title).length > 0;
+  }
+  function formatCalendarLine(label, value) {
+    var clean = text(value);
+    return clean.length > 0 ? label + '：' + clean : '';
+  }
+  function renderMailCalendarSuggestion(entry, detail, suggestion) {
+    entry.calendarHost.textContent = '';
+    if (!calendarSuggestionReady(suggestion)) { return; }
+    var card = add(entry.calendarHost, 'section', 'mail-calendar-card');
+    var head = add(card, 'div', 'mail-calendar-head');
+    add(head, 'div', 'mail-calendar-title', text(suggestion.title));
+    add(head, 'div', 'mail-calendar-confidence', text(suggestion.confidence) || 'medium');
+    var lines = add(card, 'div', 'mail-calendar-lines');
+    [
+      formatCalendarLine('开始', suggestion.start),
+      formatCalendarLine('结束', suggestion.end),
+      formatCalendarLine('地点', suggestion.location),
+      formatCalendarLine('内容', suggestion.description)
+    ].forEach(function (line) {
+      if (line.length > 0) { add(lines, 'div', '', line); }
+    });
+    var footer = add(card, 'div', 'mail-calendar-footer');
+    var status = add(footer, 'div', 'mail-calendar-status', '已识别为会议日程');
+    var button = add(footer, 'button', 'action primary mail-calendar-add', '添加日程');
+    button.type = 'button';
+    entry.calendarStatus = status;
+    entry.calendarButton = button;
+    button.addEventListener('click', function (event) {
+      event.stopPropagation();
+      if (button.disabled) { return; }
+      button.disabled = true;
+      status.className = 'mail-calendar-status';
+      status.textContent = '正在添加到手机日历…';
+      postAction({
+        id: 'html_mail_calendar_add',
+        label: '添加日程',
+        prompt: text(detail.requestKey),
+        variant: 'primary',
+        kind: 'client',
+        args: {
+          requestKey: text(detail.requestKey),
+          provider: text(detail.provider),
+          threadId: text(detail.threadId),
+          messageId: text(detail.messageId)
+        }
+      });
+    });
+  }
   function renderMailDetail(entry, detail) {
     entry.host.textContent = '';
     entry.replyHost.textContent = '';
+    entry.calendarHost.textContent = '';
     var meta = add(entry.host, 'div', 'mail-detail-meta');
     appendMailMeta(meta, 'From', detail.from);
     appendMailMeta(meta, 'To', detail.to);
     appendMailMeta(meta, 'Cc', detail.cc);
     add(entry.host, 'pre', 'mail-detail-body', text(detail.bodyText) || '邮件正文为空。');
+    renderMailCalendarSuggestion(entry, detail, mailCalendarSuggestions[text(detail.requestKey)]);
     renderMailReplyLaunch(entry, detail);
   }
   function renderMailDetailError(entry, message) {
     entry.host.textContent = '';
+    entry.calendarHost.textContent = '';
     add(entry.host, 'div', 'mail-detail-error', text(message) || '邮件正文加载失败。');
     var retry = add(entry.host, 'button', 'action secondary', '重试');
     retry.type = 'button';
@@ -2352,11 +2500,35 @@ const HTML_HOME_JS: string = `
     if (!entry) { return; }
     if (text(event && event.status) === 'success' && event.detail) {
       entry.status = 'success';
+      if (event.calendarSuggestion) {
+        mailCalendarSuggestions[key] = event.calendarSuggestion;
+      }
       renderMailDetail(entry, event.detail);
       return;
     }
     entry.status = 'error';
     renderMailDetailError(entry, event && event.error);
+  };
+  window.__aiphoneApplyMailCalendar = function (event) {
+    var key = text(event && event.requestKey);
+    var entry = mailDetailEntries[key];
+    if (!entry) { return; }
+    if (entry.calendarButton) {
+      entry.calendarButton.disabled = false;
+    }
+    if (!entry.calendarStatus) { return; }
+    if (text(event && event.status) === 'success') {
+      entry.calendarStatus.className = 'mail-calendar-status success';
+      entry.calendarStatus.textContent = text(event && event.message) || '已添加日程';
+      if (entry.calendarButton) {
+        entry.calendarButton.disabled = true;
+        entry.calendarButton.textContent = '已添加';
+      }
+      showToast(text(event && event.message) || '已添加日程');
+      return;
+    }
+    entry.calendarStatus.className = 'mail-calendar-status error';
+    entry.calendarStatus.textContent = text(event && event.error) || '添加日程失败';
   };
   window.__aiphoneApplyMailReply = function (event) {
     if (!activeMailReply || text(event && event.requestKey) !== activeMailReply.requestKey) { return; }
@@ -2797,14 +2969,17 @@ const HTML_HOME_JS: string = `
     if (detailAction) {
       var requestKey = text(detailAction.prompt);
       var detailHost = add(parent, 'div', 'mail-detail-host');
+      var calendarHost = add(parent, 'div', 'mail-calendar-host');
       var replyHost = add(parent, 'div', 'mail-reply-actions');
       detailHost.addEventListener('click', function (event) { event.stopPropagation(); });
+      calendarHost.addEventListener('click', function (event) { event.stopPropagation(); });
       replyHost.addEventListener('click', function (event) { event.stopPropagation(); });
       if (card && requestKey.length > 0) {
         card.setAttribute('data-mail-detail-key', requestKey);
         mailDetailEntries[requestKey] = {
           card: card,
           host: detailHost,
+          calendarHost: calendarHost,
           replyHost: replyHost,
           detailAction: detailAction,
           replyAction: mailReplyActions(block).length > 0 ? mailReplyActions(block)[0] : null,

@@ -54,6 +54,30 @@ export interface MailDetail {
   bodyHtml: string;
 }
 
+export interface MailCalendarSuggestion {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  isWorkRelated: boolean;
+  hasMeeting: boolean;
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  location: string;
+  description: string;
+  confidence: string;
+  reason: string;
+}
+
+export interface HuaweiCalendarAddResult {
+  requestKey: string;
+  eventId: string;
+  status: string;
+  message: string;
+}
+
 export interface MailDraftArgs {
   provider: string;
   accountLabel: string;

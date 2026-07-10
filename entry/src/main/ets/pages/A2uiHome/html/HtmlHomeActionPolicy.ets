@@ -39,6 +39,13 @@ interface HtmlMailReplyPayload {
   body?: HtmlHomePolicyValue;
 }
 
+interface HtmlMailCalendarPayload {
+  requestKey?: HtmlHomePolicyValue;
+  provider?: HtmlHomePolicyValue;
+  threadId?: HtmlHomePolicyValue;
+  messageId?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -72,6 +79,9 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     if (action.id === 'html_mail_reply_ai_generate' && mailReplyAiGenerateAllowed(block, action)) {
       return true;
     }
+    if (action.id === 'html_mail_calendar_add' && mailCalendarAddAllowed(block, action)) {
+      return true;
+    }
     for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
       if (sameAction(block.actions[actionIndex], action)) {
         return true;
@@ -79,6 +89,31 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     }
   }
   return false;
+}
+
+function mailCalendarAddAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailCalendarPayload;
+  let detailKey = '';
+  let detailExpected: HtmlMailCalendarPayload | null = null;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+      if (candidate.args !== undefined) {
+        detailExpected = candidate.args as HtmlMailCalendarPayload;
+      }
+    }
+  }
+  if (detailExpected === null || detailKey.length === 0 ||
+    action.prompt !== detailKey || policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, detailExpected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, detailExpected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, detailExpected.messageId);
 }
 
 function policyStringList(value: HtmlHomePolicyValue): string[] {

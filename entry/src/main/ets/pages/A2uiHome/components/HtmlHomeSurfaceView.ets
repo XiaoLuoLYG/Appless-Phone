@@ -23,6 +23,7 @@ export struct HtmlHomeSurfaceView {
   @Prop @Watch('onRenderStateChange') html: string = '';
   @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
   @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
+  @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
   @Prop @Watch('onRenderStateChange') isBusy: boolean = false;
   @Prop renderTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
@@ -34,6 +35,7 @@ export struct HtmlHomeSurfaceView {
   private busyFrameLoaded: boolean = false;
   private lastMailDetailEventJson: string = '';
   private lastMailReplyEventJson: string = '';
+  private lastMailCalendarEventJson: string = '';
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
 
@@ -58,6 +60,7 @@ export struct HtmlHomeSurfaceView {
       this.loadedKey = this.html;
       this.lastMailDetailEventJson = '';
       this.lastMailReplyEventJson = '';
+      this.lastMailCalendarEventJson = '';
       if (this.isBusy) {
         this.busyFrameLoaded = true;
       }
@@ -115,6 +118,26 @@ export struct HtmlHomeSurfaceView {
     this.pushMailReplyEventIfNeeded();
   }
 
+  private pushMailCalendarEventIfNeeded(): void {
+    if (!this.webReady || this.mailCalendarEventJson.length === 0 ||
+      this.mailCalendarEventJson === this.lastMailCalendarEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailCalendarEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailCalendar) { window.__aiphoneApplyMailCalendar(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailCalendarEventJson = this.mailCalendarEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailCalendarPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailCalendarEventChange(): void {
+    this.pushMailCalendarEventIfNeeded();
+  }
+
   build() {
     Stack({ alignContent: Alignment.Top }) {
       Web({ src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23F5F2EE"></body>', controller: this.controller })
@@ -137,6 +160,7 @@ export struct HtmlHomeSurfaceView {
           this.loadHtmlIfNeeded();
           this.pushMailDetailEventIfNeeded();
           this.pushMailReplyEventIfNeeded();
+          this.pushMailCalendarEventIfNeeded();
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           this.popupTitle = popupTitleFromUrl(event.targetUrl);

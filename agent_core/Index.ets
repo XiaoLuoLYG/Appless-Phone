@@ -56,6 +56,7 @@ export * from './src/main/ets/aiphone/runtime/GmailToolA2ui';
 export * from './src/main/ets/aiphone/runtime/GmailToolNormalizer';
 export * from './src/main/ets/aiphone/runtime/GmailToolTypes';
 export * from './src/main/ets/aiphone/runtime/GoogleOAuthClient';
+export * from './src/main/ets/aiphone/runtime/HuaweiCalendarClient';
 export * from './src/main/ets/aiphone/runtime/LocalModelSettings';
 export * from './src/main/ets/aiphone/runtime/MailToolA2ui';
 export * from './src/main/ets/aiphone/runtime/MailToolTypes';
