@@ -735,7 +735,48 @@ function paymentDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
-function googlePayCheckoutDocumentFixture(): HtmlHomeDocument {
+function luckinPaymentDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'luckin';
+  doc.title = '瑞幸订单';
+  doc.subtitle = '';
+  doc.chips = [];
+  doc.metrics = [];
+  doc.timeline = [];
+  doc.blocks = [{
+    id: 'luckin-payment-1',
+    kind: 'generic-tool-result',
+    title: '瑞幸订单已创建',
+    subtitle: '',
+    status: 'success',
+    source: '瑞幸',
+    metrics: [
+      { label: 'source', value: '瑞幸' },
+      { label: 'toolName', value: 'luckin.order.create' }
+    ],
+    rows: [
+      { label: '订单号', value: 'LK20260711001' },
+      { label: '门店', value: '瑞幸咖啡 深圳科技园店' },
+      { label: '商品', value: '生椰拿铁 x1' },
+      { label: '商品图', value: 'resource://rawfile/luckin_coconut.jpeg' },
+      { label: '选项·糖度', value: '半糖:1|全糖:0' },
+      { label: '选项·温度', value: '少冰:1|正常冰:0' },
+      { label: '原价', value: '¥24' },
+      { label: '优惠', value: '¥6' },
+      { label: '应付', value: '¥18' }
+    ],
+    actions: [
+      { id: 'luckin.pay.open', label: '打开微信支付', prompt: 'weixin://wxpay/bizpayurl?pr=abc', variant: 'primary', kind: 'client' },
+      { id: 'luckin.demo.alipay.open', label: '支付宝支付（Demo）', prompt: 'alipays://', variant: 'secondary', kind: 'client' },
+      { id: 'luckin.demo.googlepay.open', label: 'Google Pay 转 5 美金（Demo）', prompt: 'google pay', variant: 'secondary', kind: 'client' },
+      { id: 'luckin.order.status', label: '刷新订单状态', prompt: '查询瑞幸订单状态', variant: 'secondary', kind: 'prompt' }
+    ]
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
   const doc = paymentDocumentFixture();
   doc.title = '打开支付确认页';
   doc.blocks[0].title = '打开支付确认页';
@@ -1529,6 +1570,31 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('social-whatsapp')).assertLarger(-1);
       expect(html.indexOf('social-instagram')).assertLarger(-1);
       expect(html.indexOf('social_select_message')).assertEqual(-1);
+    });
+
+    it('renders Luckin payment checkout with countdown and method grid', 0, () => {
+      const html = renderHtmlHomeDocument(luckinPaymentDocumentFixture());
+
+      expect(html.indexOf('blocks-luckin-payment')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-card')).assertLarger(-1);
+      expect(html.indexOf('订单支付')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-countdown')).assertLarger(-1);
+      expect(html.indexOf('生椰拿铁')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-option-summary')).assertLarger(-1);
+      expect(html.indexOf('选项·糖度')).assertLarger(-1);
+      expect(html.indexOf('半糖:1')).assertLarger(-1);
+      expect(html.indexOf('应付金额')).assertLarger(-1);
+      expect(html.indexOf('¥ 18')).assertLarger(-1);
+      expect(html.indexOf('已优惠 ¥6')).assertLarger(-1);
+      expect(html.indexOf('选择支付方式')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-methods-grid')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-method-text')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-option-chip')).assertLarger(-1);
+      expect(html.indexOf('确认支付')).assertLarger(-1);
+      expect(html.indexOf('瑞幸咖啡·深圳科技园店')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
     });
 
     it('does not auto-render welcome scene and source chips', 0, () => {

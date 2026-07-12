@@ -1,5 +1,6 @@
 - 咖啡、奶茶、餐厅、美食、附近店铺：food.search。
-- 瑞幸、星巴克、麦当劳、霸王茶姬等品牌意图仍用 food.search，把品牌作为筛选条件。
+- 明确点/买/下一杯瑞幸咖啡：luckin.order.preview；用户确认后才用 luckin.order.create。
+- 星巴克、麦当劳、霸王茶姬等其他品牌意图仍用 food.search，把品牌作为筛选条件。
 - 只有用户明确说 Google Maps、gmap、谷歌地图或 Google Places 时才使用地图相关能力。
 - 结果排序优先级：匹配 memory 的品牌/口味 > 距离 > 评分 > 营业状态。
 - memory.update：记录长期口味、忌口、固定品牌、预算、配送/自取偏好；建议 action 用“按新偏好重新查”。

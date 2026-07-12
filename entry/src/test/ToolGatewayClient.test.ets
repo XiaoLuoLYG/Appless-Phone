@@ -126,6 +126,7 @@ interface LuckinProductFixture {
   productName: string;
   price: number;
   skuCode: string;
+  pictureUrl: string;
   productAttrs: LuckinProductAttributeFixture[];
   tags: string[];
 }
@@ -957,14 +958,15 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps brand MCP adapters query-only', 0, () => {
+    it('keeps brand MCP adapters allowlisted', 0, () => {
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-nearby-stores')).assertTrue();
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-meals')).assertTrue();
       expect(isReadonlyBrandMcpTool('麦当劳', 'create-order')).assertFalse();
       expect(isReadonlyBrandMcpTool('麦当劳', 'auto-bind-coupons')).assertFalse();
       expect(isReadonlyBrandMcpTool('瑞幸', 'queryShopList')).assertTrue();
       expect(isReadonlyBrandMcpTool('瑞幸', 'searchProductForMcp')).assertTrue();
-      expect(isReadonlyBrandMcpTool('瑞幸', 'createOrder')).assertFalse();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'previewOrder')).assertTrue();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'createOrder')).assertTrue();
       expect(isReadonlyBrandMcpTool('瑞幸', 'cancelOrder')).assertFalse();
     });
 
@@ -1030,8 +1032,9 @@ export default function toolGatewayClientTest() {
             productName: '生椰拿铁',
             price: 19,
             skuCode: 'SKU001',
+            pictureUrl: 'https://img.luckincoffeecdn.com/example/latte.png',
             productAttrs: [
-              { attributeName: '温度', productSubAttrs: [{ attributeName: '冰', selected: true }] }
+              { attributeName: '温度', productSubAttrs: [{ attributeName: '冰', selected: true }, { attributeName: '热', selected: false }] }
             ],
             tags: ['人气']
           }

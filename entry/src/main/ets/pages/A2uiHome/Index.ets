@@ -4,6 +4,7 @@ import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
+import { geoLocationManager } from '@kit.LocationKit';
 import util from '@ohos.util';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
@@ -92,7 +93,7 @@ import { socialHubComposioToolkitCandidates } from './components/SocialHubViewDa
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
-import { HtmlHomeDocument } from './html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
   A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
   normalizeFoodPartialThrottleMs,
@@ -132,6 +133,8 @@ const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
 const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
+const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
+const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -275,6 +278,25 @@ interface PaymentSavedPreviewArgs {
   originalQuery: string;
 }
 
+interface PaymentFallbackArgs {
+  provider: string;
+  fundingSource: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  originalQuery: string;
+}
+
+interface LuckinOrderStatusArgs {
+  orderId: string;
+}
+
+interface LocationPermissionResult {
+  permissions: string[];
+  authResults: number[];
+}
+
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
     return text;
@@ -412,17 +434,102 @@ struct Index {
   private mailCalendarSuggestions: Record<string, MailCalendarSuggestion> = {};
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
+  @State htmlHomeStableHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
   private voiceSessionSeq: number = 0;
   private voiceBaseInputText: string = '';
   private voiceStopRequested: boolean = false;
   private voiceCompletionHandled: boolean = false;
+  private luckinReturnSurface: A2uiSurfaceState | null = null;
+  @State luckinInlinePatchJson: string = '';
+  @State luckinInlinePatchTick: number = 0;
+  private luckinOptionSwitchInFlight: boolean = false;
+
+  private isLuckinOptionSwitchArgs(args: Object | null): boolean {
+    if (args === null) {
+      return false;
+    }
+    const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+    return this.actionText(raw.attrGroup).length > 0 && this.actionText(raw.attrChoice).length > 0;
+  }
+
+  private luckinConfirmBlockJson(document: HtmlHomeDocument): string {
+    for (let index = 0; index < document.blocks.length; index++) {
+      if (document.blocks[index].title.indexOf('确认瑞幸订单') >= 0) {
+        return JSON.stringify(document.blocks[index]);
+      }
+    }
+    return '';
+  }
+
+  private applyLuckinInlineConfirmPatch(surface: A2uiSurfaceState): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    const patchJson = this.luckinConfirmBlockJson(document);
+    if (patchJson.length === 0) {
+      return false;
+    }
+    this.storeSurfaceSilently(surface);
+    this.htmlHomeCacheKey = this.currentHtmlHomeCacheKey();
+    this.htmlHomeCacheHtml = renderHtmlHomeDocument(document, false);
+    this.luckinInlinePatchJson = patchJson;
+    this.luckinInlinePatchTick = this.luckinInlinePatchTick + 1;
+    return true;
+  }
+
+  private finishLuckinOptionSwitch(inFlight: boolean = false): void {
+    this.luckinOptionSwitchInFlight = inFlight;
+  }
+
+  private storeSurfaceSilently(surface: A2uiSurfaceState): void {
+    this.currentSurface = this.surfaceSnapshot(surface);
+    aiLogInfo('[AIPhone][A2uiHomeSurfaceSilentUpdate] surfaceId=' + surface.surfaceId +
+      ' sequence=' + surface.sequence.toString());
+  }
+
+  private syncHtmlHomeStableHtml(): void {
+    this.htmlHomeStableHtml = this.currentHtmlHomeHtml();
+  }
+
+  private hasLuckinConfirmBlockInSurface(surface: A2uiSurfaceState = this.currentSurface): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    return this.luckinConfirmBlockJson(document).length > 0;
+  }
+
+  private shouldKeepLuckinConfirmWebHtmlStable(): boolean {
+    return this.hasLuckinConfirmBlockInSurface();
+  }
+
+  private htmlHomeHtmlForView(): string {
+    if (this.currentSurface.intent === 'social') {
+      return '';
+    }
+    if (this.shouldKeepLuckinConfirmWebHtmlStable()) {
+      return this.htmlHomeStableHtml.length > 0 ? this.htmlHomeStableHtml : this.currentHtmlHomeHtml();
+    }
+    return this.currentHtmlHomeHtml();
+  }
+
+  private clearLuckinInlinePatchState(): void {
+    this.luckinInlinePatchJson = '';
+    this.finishLuckinOptionSwitch(false);
+  }
 
   aboutToAppear(): void {
     this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
+    void this.requestLocationPermissionOnLaunch();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -1052,12 +1159,60 @@ struct Index {
     }
     this.currentSurface = this.surfaceSnapshot(surface);
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
+  }
+
+  private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
+    this.currentSurface = this.surfaceSnapshot(surface);
+    this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+    aiLogInfo('[AIPhone][A2uiHomeSurfaceForceUpdate] reason=' + reason +
+      ' surfaceId=' + surface.surfaceId +
+      ' status=' + surface.status +
+      ' components=' + surface.components.length.toString() +
+      ' dataChars=' + surface.dataModelJson.length.toString() +
+      ' sequence=' + surface.sequence.toString() +
+      ' renderTick=' + this.surfaceRenderTick.toString());
+  }
+
+  private rememberLuckinReturnSurface(reason: string): void {
+    if (this.currentSurface.intent !== 'luckin') {
+      return;
+    }
+    this.luckinReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    aiLogInfo('[AIPhone][LuckinReturnSurfaceRemember] reason=' + reason +
+      ' title=' + this.currentSurface.title +
+      ' dataChars=' + this.currentSurface.dataModelJson.length.toString());
+  }
+
+  private restoreLuckinReturnSurface(reason: string): void {
+    if (this.luckinReturnSurface === null) {
+      aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=false');
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.luckinReturnSurface);
+    this.luckinReturnSurface = null;
+    this.showPaymentCheckout = false;
+    this.forceApplySurface(surface, reason);
+    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+      ok: true,
+      status: 'ready',
+      message: '已返回瑞幸下单页面。',
+      requestDebug: this.lastModelRequest,
+      assistantDebug: this.lastModelOutput,
+      error: ''
+    }));
+    aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=true');
   }
 
   private socialHubComposioAuthItem(platform: SocialHubPlatform): ComposioAuthConfigItem | null {
@@ -1393,6 +1548,8 @@ struct Index {
     this.messages = [];
     this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
     this.inputText = '';
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.resetPanelState();
@@ -1468,6 +1625,40 @@ struct Index {
     });
   }
 
+  private looksLikeLuckinOrderPrompt(text: string): boolean {
+    const normalized = text.trim();
+    if (normalized.length === 0) {
+      return false;
+    }
+    const lower = normalized.toLowerCase();
+    return normalized.indexOf('瑞幸') >= 0 || lower.indexOf('luckin') >= 0 || normalized.indexOf('生椰') >= 0;
+  }
+
+  private shouldPrefetchLuckinLocation(prompt: string, actionId: string, args: Object | null): boolean {
+    if (actionId !== 'luckin.order.preview' && !this.looksLikeLuckinOrderPrompt(prompt)) {
+      return false;
+    }
+    if (args !== null) {
+      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+      if (this.actionText(raw.deptId).length > 0) {
+        return false;
+      }
+      if (this.actionText(raw.location).length > 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async actionArgsWithLuckinLocationIfNeeded(prompt: string, actionId: string, args: Object | null): Promise<Object | null> {
+    if (!this.shouldPrefetchLuckinLocation(prompt, actionId, args)) {
+      return args;
+    }
+    const location = await this.currentDeviceLocation();
+    aiLogInfo('[AIPhone][LuckinPrefetchLocation] source=device chars=' + location.length.toString());
+    return this.mergeLuckinLocationArgs(args, location);
+  }
+
   private async submitPrompt(prompt: string, visibleText: string, actionId: string = '', actionArgs: Object | null = null): Promise<void> {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || this.isBusy) {
@@ -1495,7 +1686,30 @@ struct Index {
     this.isBusy = true;
     this.isAwaitingFirstSurface = true;
     this.markChecking('正在生成 A2UI...');
+    let modelActionArgs = actionArgs;
     try {
+      if (this.shouldPrefetchLuckinLocation(trimmed, actionId, actionArgs)) {
+        this.markChecking('正在获取当前位置...');
+        try {
+          modelActionArgs = await this.actionArgsWithLuckinLocationIfNeeded(trimmed, actionId, actionArgs);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : JSON.stringify(error);
+          aiLogError('[AIPhone][LuckinPrefetchLocation] ok=false reason=' + message);
+          this.isAwaitingFirstSurface = false;
+          this.isBusy = false;
+          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+            ok: false,
+            status: 'error',
+            message: '瑞幸点单需要定位权限。',
+            requestDebug: this.lastModelRequest,
+            assistantDebug: this.lastModelOutput,
+            error: message
+          }));
+          this.appendMessage('assistant', '瑞幸点单需要定位权限，请允许后再试。');
+          return;
+        }
+      }
+      this.markChecking('正在生成 A2UI...');
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
         modelPrompt,
@@ -1517,7 +1731,7 @@ struct Index {
         (update: PersonaMemoryUpdateRequest) => {
           this.applyPersonaMemoryUpdate(update);
         },
-        actionArgs
+        modelActionArgs
       );
       this.isAwaitingFirstSurface = false;
       this.applySurface(result.surface);
@@ -2267,6 +2481,89 @@ struct Index {
     }
   }
 
+  private locationPermissionGranted(result: LocationPermissionResult): boolean {
+    for (let index = 0; index < result.permissions.length; index++) {
+      const permission = result.permissions[index];
+      const granted = result.authResults.length > index && result.authResults[index] === 0;
+      if ((permission === PRECISE_LOCATION_PERMISSION || permission === APPROX_LOCATION_PERMISSION) && granted) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async ensureLocationPermission(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const permission = await abilityAccessCtrl.createAtManager()
+      .requestPermissionsFromUser(context, [APPROX_LOCATION_PERMISSION, PRECISE_LOCATION_PERMISSION]);
+    if (!this.locationPermissionGranted({
+      permissions: permission.permissions,
+      authResults: permission.authResults
+    })) {
+      throw new Error('定位权限未授权');
+    }
+  }
+
+  private async requestLocationPermissionOnLaunch(): Promise<void> {
+    try {
+      await this.ensureLocationPermission();
+      aiLogInfo('[AIPhone][LocationPermissionLaunch] ok=true');
+    } catch (error) {
+      aiLogError('[AIPhone][LocationPermissionLaunch] ok=false reason=' +
+        (error instanceof Error ? error.message : JSON.stringify(error)));
+    }
+  }
+
+  private async currentDeviceLocation(): Promise<string> {
+    await this.ensureLocationPermission();
+    const current = await geoLocationManager.getCurrentLocation();
+    const longitude = current.longitude;
+    const latitude = current.latitude;
+    if (longitude === undefined || latitude === undefined) {
+      throw new Error('系统未返回当前位置');
+    }
+    return longitude.toString() + ',' + latitude.toString();
+  }
+
+  private mergeLuckinLocationArgs(args: Object | null, location: string): Object {
+    const merged: Record<string, Object | string | number | boolean | null | undefined> = {};
+    if (args !== null) {
+      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+      Object.keys(raw).forEach((key: string) => {
+        merged[key] = raw[key];
+      });
+    }
+    merged.location = location;
+    merged.locationSource = 'device_current';
+    return merged;
+  }
+
+  private async argsWithCurrentLocationForTool(toolId: string, args: Object | null): Promise<Object | null> {
+    if (toolId !== 'luckin.order.preview') {
+      return args;
+    }
+    if (args !== null) {
+      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+      const selectedDeptId = raw.deptId;
+      if (this.actionText(selectedDeptId).length > 0) {
+        return args;
+      }
+      const forceRefresh = this.actionText(raw.locationSource) === 'refresh';
+      const existingLocation = this.actionText(raw.location);
+      if (existingLocation.length > 0 && !forceRefresh) {
+        return args;
+      }
+    }
+    try {
+      const location = await this.currentDeviceLocation();
+      aiLogInfo('[AIPhone][LuckinCurrentLocation] source=device chars=' + location.length.toString());
+      return this.mergeLuckinLocationArgs(args, location);
+    } catch (error) {
+      aiLogError('[AIPhone][LuckinCurrentLocation] ok=false reason=' + (error instanceof Error ? error.message : JSON.stringify(error)));
+      return args;
+    }
+  }
+
   private isPaymentCheckoutUrl(url: string): boolean {
     const lower = url.trim().toLowerCase();
     return lower.startsWith('https://checkout.stripe.com/') ||
@@ -2301,6 +2598,152 @@ struct Index {
       return fromArgs;
     }
     return action.prompt.trim();
+  }
+
+  private luckinPayUrlForAction(action: A2uiAction): string {
+    if (action.args !== undefined) {
+      const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const payOrderUrl = payload.payOrderUrl;
+      const qrCodeUrl = payload.payOrderQrCodeUrl;
+      if (typeof payOrderUrl === 'string' && payOrderUrl.trim().length > 0) {
+        return payOrderUrl.trim();
+      }
+      if (typeof qrCodeUrl === 'string' && qrCodeUrl.trim().length > 0) {
+        return qrCodeUrl.trim();
+      }
+    }
+    return action.prompt.trim();
+  }
+
+  private isLuckinPayUrl(url: string): boolean {
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith('https://') ||
+      lower.startsWith('http://') ||
+      lower.startsWith('weixin://') ||
+      lower.startsWith('weixin');
+  }
+
+  private isLuckinPaymentActionId(actionId: string): boolean {
+    return actionId === 'luckin.pay.open' ||
+      actionId === 'luckin.demo.alipay.open' ||
+      actionId === 'luckin.demo.googlepay.open' ||
+      actionId === 'luckin.order.status';
+  }
+
+  private luckinPaymentOrderIdFromAction(action: A2uiAction): string {
+    if (action.args === undefined) {
+      return '';
+    }
+    const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+    return this.actionText(payload.orderId).trim();
+  }
+
+  private luckinPayUrlFromDocument(document: HtmlHomeDocument): string {
+    const pools: A2uiAction[] = [];
+    document.actions.forEach((action: HtmlHomeAction) => {
+      pools.push(action as A2uiAction);
+    });
+    document.blocks.forEach((block: HtmlHomeBlock) => {
+      block.actions.forEach((action: HtmlHomeAction) => {
+        pools.push(action as A2uiAction);
+      });
+    });
+    for (let index = 0; index < pools.length; index += 1) {
+      const action = pools[index];
+      if (action.id === 'luckin.pay.open') {
+        const payUrl = this.luckinPayUrlForAction(action);
+        if (this.isLuckinPayUrl(payUrl)) {
+          return payUrl;
+        }
+      }
+    }
+    for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex += 1) {
+      const block = document.blocks[blockIndex];
+      for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex += 1) {
+        const row = block.rows[rowIndex];
+        if ((row.label === '支付链接' || row.label === '支付二维码') && this.isLuckinPayUrl(row.value)) {
+          return row.value.trim();
+        }
+      }
+    }
+    return '';
+  }
+
+  private luckinCreateArgsFromAction(action: A2uiAction): Object | null {
+    if (action.args === undefined) {
+      return null;
+    }
+    const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+    const deptId = this.actionText(payload.deptId).trim();
+    const productId = this.actionText(payload.productId).trim();
+    const skuCode = this.actionText(payload.skuCode).trim();
+    if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
+      return null;
+    }
+    return action.args;
+  }
+
+  private async resolveLuckinPayUrlForAction(action: A2uiAction): Promise<string> {
+    let payUrl = this.luckinPayUrlForAction(action);
+    if (this.isLuckinPayUrl(payUrl)) {
+      return payUrl;
+    }
+    const orderId = this.luckinPaymentOrderIdFromAction(action);
+    if (orderId.length > 0) {
+      this.logLuckinPaymentAction(action, 'refresh_pay_url_start');
+      payUrl = await this.refreshLuckinPayUrlForAction(action);
+      if (this.isLuckinPayUrl(payUrl)) {
+        return payUrl;
+      }
+    }
+    const createArgs = this.luckinCreateArgsFromAction(action);
+    if (createArgs !== null) {
+      this.logLuckinPaymentAction(action, 'retry_create_start');
+      const ok = await this.callToolById('luckin.order.create', '确认创建瑞幸订单', 'luckin.pay.open', createArgs);
+      if (ok) {
+        payUrl = this.luckinPayUrlFromDocument(this.currentHtmlHomeDocument());
+        if (this.isLuckinPayUrl(payUrl)) {
+          return payUrl;
+        }
+      }
+    }
+    return '';
+  }
+
+  private async refreshLuckinPayUrlForAction(action: A2uiAction): Promise<string> {
+    const orderId = this.luckinPaymentOrderIdFromAction(action);
+    if (orderId.length === 0) {
+      return '';
+    }
+    let args: Object;
+    if (action.args === undefined) {
+      const statusArgs: LuckinOrderStatusArgs = {
+        orderId: orderId
+      };
+      args = statusArgs as Object;
+    } else {
+      args = action.args;
+    }
+    const ok = await this.callToolById('luckin.order.status', '查询瑞幸订单状态', 'luckin.pay.open', args);
+    if (!ok) {
+      return '';
+    }
+    return this.luckinPayUrlFromDocument(this.currentHtmlHomeDocument());
+  }
+
+  private logLuckinPaymentAction(action: A2uiAction, stage: string, extra: string = ''): void {
+    const document = this.currentHtmlHomeDocument();
+    const allowed = isHtmlHomeActionAllowed(document, action);
+    const suffix = extra.length > 0 ? ' ' + extra : '';
+    aiLogInfo('[AIPhone][LuckinPaymentAction] stage=' + stage +
+      ' id=' + action.id +
+      ' kind=' + action.kind +
+      ' busy=' + (this.isBusy ? 'true' : 'false') +
+      ' allowed=' + (allowed ? 'true' : 'false') +
+      ' surfaceKind=' + document.kind +
+      ' orderId=' + this.luckinPaymentOrderIdFromAction(action) +
+      ' promptChars=' + action.prompt.length.toString() +
+      ' payUrlChars=' + this.luckinPayUrlForAction(action).length.toString() + suffix);
   }
 
   private paymentCheckoutPayload(action: A2uiAction): PaymentCheckoutActionPayload {
@@ -2548,6 +2991,10 @@ struct Index {
       await this.openExternalUrl(onboardingUrl);
       return;
     }
+    if (action.id === 'luckin.demo.googlepay.return') {
+      this.restoreLuckinReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
+      return;
+    }
     if (this.isStripeReceivingActionId(action)) {
       await this.callToolById(
         'payment.account.setup',
@@ -2604,6 +3051,44 @@ struct Index {
       this.rememberPaymentCheckout(action, checkoutUrl);
       this.showPaymentCheckout = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
+      return;
+    }
+    if (action.id === 'luckin.pay.open') {
+      const payUrl = await this.resolveLuckinPayUrlForAction(action);
+      if (!this.isLuckinPayUrl(payUrl)) {
+        this.logLuckinPaymentAction(action, 'invalid_pay_url');
+        this.logHtmlHomeActionError(action, 'invalid_luckin_pay_url');
+        return;
+      }
+      aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl);
+      await this.openExternalUrl(payUrl);
+      return;
+    }
+    if (action.id === 'luckin.demo.alipay.open') {
+      const url = action.prompt.trim().length > 0 ? action.prompt.trim() : 'alipays://';
+      aiLogInfo('[AIPhone][LuckinDemoAlipayOpen] chars=' + url.length.toString());
+      await this.openExternalUrl(url);
+      return;
+    }
+    if (action.id === 'luckin.demo.googlepay.open') {
+      this.rememberLuckinReturnSurface(action.id);
+      const args: PaymentFallbackArgs = {
+        provider: 'paypal',
+        fundingSource: 'google_pay',
+        recipient: '罗一格',
+        amountText: '5',
+        currency: 'USD',
+        note: 'Luckin Google Pay demo only; does not pay the Luckin order.',
+        originalQuery: '用 Google Pay 给罗一格转 5 美金'
+      };
+      aiLogInfo('[AIPhone][LuckinDemoGooglePayPayment] recipient=' + args.recipient +
+        ' amount=' + args.amountText + ' currency=' + args.currency);
+      await this.callToolById(
+        'payment.send',
+        '用 Google Pay 给罗一格转 5 美金',
+        action.id,
+        args
+      );
       return;
     }
     if (action.id === 'gmail.authorize') {
@@ -2794,7 +3279,13 @@ struct Index {
   }
 
   private async sendAction(action: A2uiAction): Promise<void> {
+    if (this.isLuckinPaymentActionId(action.id)) {
+      this.logLuckinPaymentAction(action, 'received');
+    }
     if (this.isBusy) {
+      if (this.isLuckinPaymentActionId(action.id)) {
+        this.logLuckinPaymentAction(action, 'ignored_busy');
+      }
       aiLogInfo('[AIPhone][A2uiHomeActionIgnored] id=' + action.id + ' reason=busy');
       return;
     }
@@ -2811,13 +3302,28 @@ struct Index {
       return;
     }
     if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
+      if (this.isLuckinPaymentActionId(action.id)) {
+        this.logLuckinPaymentAction(action, 'blocked_not_allowed');
+      }
       this.logHtmlHomeActionError(action, 'not_allowed');
       return;
+    }
+    if (this.isLuckinPaymentActionId(action.id)) {
+      this.logLuckinPaymentAction(action, 'dispatch');
     }
     const directPaymentToolId = directPaymentToolIdForActionId(action.id);
     if (directPaymentToolId.length > 0) {
       await this.callToolById(
         directPaymentToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
+    if (action.id === 'luckin.order.preview' || action.id === 'luckin.order.create' || action.id === 'luckin.order.status') {
+      await this.callToolById(
+        action.id,
         action.prompt.length > 0 ? action.prompt : action.label,
         action.id,
         action.args === undefined ? null : action.args
@@ -2902,7 +3408,18 @@ struct Index {
       foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
     const personaSourceSurface = this.currentSurface;
-    this.markChecking('正在调用工具：' + toolId);
+    const inlineLuckinSwitch = toolId === 'luckin.order.preview' && this.isLuckinOptionSwitchArgs(args);
+    if (inlineLuckinSwitch) {
+      if (this.luckinOptionSwitchInFlight) {
+        aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchIgnored] reason=in_flight');
+        return false;
+      }
+      this.finishLuckinOptionSwitch(true);
+    }
+    if (!inlineLuckinSwitch) {
+      this.markChecking('正在调用工具：' + toolId);
+    }
+    const callArgs = await this.argsWithCurrentLocationForTool(toolId, args);
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
       toolId,
@@ -2910,6 +3427,9 @@ struct Index {
       this.toolSurfaceId(),
       actionId,
       (surface: A2uiSurfaceState, raw: string) => {
+        if (inlineLuckinSwitch) {
+          return;
+        }
         const nextSurface = copyPersonaData(personaSourceSurface, surface);
         this.applySurface(nextSurface);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -2922,7 +3442,7 @@ struct Index {
         }));
       },
       null,
-      args
+      callArgs
     );
 
     aiLogInfo('[AIPhone][A2uiHomeToolResult] ok=' + (result.ok ? 'true' : 'false') +
@@ -2930,6 +3450,22 @@ struct Index {
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
     const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    if (inlineLuckinSwitch) {
+      if (result.ok && this.applyLuckinInlineConfirmPatch(resultSurface)) {
+        this.finishLuckinOptionSwitch(false);
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: true,
+          status: 'ready',
+          message: '规格已更新。',
+          requestDebug: result.requestDebug,
+          assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
+          error: ''
+        }));
+        return true;
+      }
+      this.finishLuckinOptionSwitch(false);
+      aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchFallback] ok=' + (result.ok ? 'true' : 'false'));
+    }
     this.applySurface(resultSurface);
     if (toolId === 'payment.account.setup') {
       await this.saveStripeReceivingProfile(resultSurface);
@@ -2946,7 +3482,9 @@ struct Index {
       this.appendMessage('assistant', '工具返回异常：' + result.error);
       return false;
     }
-    this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
+    if (!inlineLuckinSwitch) {
+      this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
+    }
     if (toolId === 'gmail.open.web') {
       await this.openExternalUrl(GMAIL_WEB_URL);
     }
@@ -3094,11 +3632,13 @@ struct Index {
         showHistory: this.showHistory,
         messages: this.messages,
         currentSurface: this.currentSurface,
-        htmlHomeHtml: this.currentSurface.intent === 'social' ? '' : this.currentHtmlHomeHtml(),
+        htmlHomeHtml: this.htmlHomeHtmlForView(),
         mailDetailEventJson: this.mailDetailEventJson,
         mailReplyEventJson: this.mailReplyEventJson,
         mailCalendarEventJson: this.mailCalendarEventJson,
         surfaceRenderTick: this.surfaceRenderTick,
+        luckinInlinePatchJson: this.luckinInlinePatchJson,
+        luckinInlinePatchTick: this.luckinInlinePatchTick,
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,
         isVoiceListening: this.isVoiceListening,

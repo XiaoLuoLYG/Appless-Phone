@@ -260,7 +260,13 @@ export class LoopBackend {
     } else if (definition.toolId === 'flight.search') {
       description += '. Use for flight, airline, airport, or flight-board requests.';
     } else if (definition.toolId === 'food.search') {
-      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
+      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, menus, coupons, delivery, and food or beverage places near a location. Do not use for Luckin order placement; use luckin.order.preview for ordering Luckin coffee.';
+    } else if (definition.toolId === 'luckin.order.preview') {
+      description += '. Use when the user wants to order, buy, get, or preview Luckin/Ruixing coffee, including requests like "点一杯瑞幸咖啡", "来一杯瑞幸", "买瑞幸生椰拿铁", or choosing a Luckin store. This is the first step for Luckin ordering: it queries nearby stores, product SKU/options, and previewOrder pricing. Input must be JSON; at minimum pass {"prompt":"<original user request>"} or {"query":"<original user request>"}. Do not answer with note or food.search for Luckin ordering.';
+    } else if (definition.toolId === 'luckin.order.create') {
+      description += '. Use only after a Luckin order preview card returned real deptId, productId, and skuCode, and the user confirms creating the order. Do not use directly from an initial "order coffee" request.';
+    } else if (definition.toolId === 'luckin.order.status') {
+      description += '. Use when the user asks to check, refresh, or view a Luckin order status, pickup code, or existing orderId.';
     } else if (definition.toolId === 'social.feed.search') {
       description += '. Use for ordinary SocialHub X/Twitter DM, Slack DM, WeCom DM, private-message inbox, or connection-state requests. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. If the user explicitly says Composio Slack, Discord, LinkedIn, WhatsApp, Instagram, TikTok, or another unsupported social toolkit, use dynamic.search instead. Never fabricate social messages.';
     } else if (definition.toolId === 'social.reply.draft') {

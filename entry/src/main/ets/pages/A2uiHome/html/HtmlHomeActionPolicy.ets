@@ -46,6 +46,26 @@ interface HtmlMailCalendarPayload {
   messageId?: HtmlHomePolicyValue;
 }
 
+interface LuckinPreviewArgs {
+  deptId?: HtmlHomePolicyValue;
+  attrGroup?: HtmlHomePolicyValue;
+  attrChoice?: HtmlHomePolicyValue;
+  locationSource?: HtmlHomePolicyValue;
+}
+
+interface LuckinCreateArgs {
+  deptId?: HtmlHomePolicyValue;
+  productId?: HtmlHomePolicyValue;
+  skuCode?: HtmlHomePolicyValue;
+  location?: HtmlHomePolicyValue;
+}
+
+interface LuckinPaymentArgs {
+  orderId?: HtmlHomePolicyValue;
+  payOrderUrl?: HtmlHomePolicyValue;
+  payOrderQrCodeUrl?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -87,6 +107,15 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
         return true;
       }
     }
+  }
+  if (luckinPreviewAllowed(document, action)) {
+    return true;
+  }
+  if (luckinCreateAllowed(document, action)) {
+    return true;
+  }
+  if (luckinPaymentPageAllowed(document, action)) {
+    return true;
   }
   return false;
 }
@@ -318,6 +347,110 @@ function blockHasMetric(block: HtmlHomeBlock, label: string, value: string): boo
     if (policyText(rows[index].label).trim().toLowerCase() === label.toLowerCase() &&
       policyText(rows[index].value).trim() === value) {
       return true;
+    }
+  }
+  return false;
+}
+
+function hasLuckinConfirmOrderBlock(document: HtmlHomeDocument): boolean {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const title = policyText(document.blocks[index].title).trim();
+    if (title.indexOf('确认瑞幸订单') >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasLuckinPaymentOrderBlock(document: HtmlHomeDocument): boolean {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const title = policyText(document.blocks[index].title).trim();
+    if (title.indexOf('瑞幸订单已创建') >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function luckinPaymentOrderId(action: A2uiAction): string {
+  if (action.args === undefined) {
+    return '';
+  }
+  const args = action.args as LuckinPaymentArgs;
+  return policyText(args.orderId).trim();
+}
+
+function luckinPaymentPageAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || !hasLuckinPaymentOrderBlock(document)) {
+    return false;
+  }
+  if (action.id === 'luckin.pay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.demo.alipay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.demo.googlepay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.order.status' && action.kind === 'prompt') {
+    return action.prompt.indexOf('查询瑞幸订单状态') >= 0 || luckinPaymentOrderId(action).length > 0;
+  }
+  return false;
+}
+
+function luckinPreviewAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || action.id !== 'luckin.order.preview') {
+    return false;
+  }
+  if (action.args === undefined) {
+    return false;
+  }
+  const args = action.args as LuckinPreviewArgs;
+  const deptId = policyText(args.deptId).trim();
+  const attrGroup = policyText(args.attrGroup).trim();
+  const attrChoice = policyText(args.attrChoice).trim();
+  if (deptId.length > 0) {
+    if (attrGroup.length > 0 && attrChoice.length > 0) {
+      return hasLuckinConfirmOrderBlock(document);
+    }
+    return true;
+  }
+  return policyText(args.locationSource).trim() === 'refresh';
+}
+
+function luckinCreateAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || action.id !== 'luckin.order.create') {
+    return false;
+  }
+  if (!hasLuckinConfirmOrderBlock(document)) {
+    return false;
+  }
+  if (action.args === undefined) {
+    return false;
+  }
+  const args = action.args as LuckinCreateArgs;
+  const deptId = policyText(args.deptId).trim();
+  const productId = policyText(args.productId).trim();
+  const skuCode = policyText(args.skuCode).trim();
+  if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
+    return false;
+  }
+  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
+    const block = document.blocks[blockIndex];
+    if (policyText(block.title).indexOf('确认瑞幸订单') < 0) {
+      continue;
+    }
+    for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
+      const expected = block.actions[actionIndex];
+      if (expected.id !== 'luckin.order.create' || expected.args === undefined) {
+        continue;
+      }
+      const expectedArgs = expected.args as LuckinCreateArgs;
+      if (policyText(expectedArgs.deptId).trim() === deptId &&
+        policyText(expectedArgs.productId).trim() === productId) {
+        return true;
+      }
     }
   }
   return false;

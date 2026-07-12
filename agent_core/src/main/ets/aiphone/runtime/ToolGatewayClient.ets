@@ -8,6 +8,7 @@ import {
   A2uiEnvelope,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
   A2uiLabelValueData,
   A2uiSummaryData,
   A2uiSurfaceState,
@@ -90,7 +91,7 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
 import {
   PaymentAccount,
   PaymentMode,
@@ -840,6 +841,44 @@ interface LuckinProductSearchArgs {
   query: string;
 }
 
+interface LuckinProductDetailArgs {
+  deptId: number;
+  productId: number;
+}
+
+interface LuckinSwitchProductArgs {
+  deptId: number;
+  productId: number;
+  skuCode: string;
+  attrOperationParam: LuckinAttrOperationParam;
+  amount: number;
+}
+
+interface LuckinAttrOperationParam {
+  attributeId: number;
+  subAttr: LuckinSubAttrOperation;
+}
+
+interface LuckinSubAttrOperation {
+  attributeId: number;
+  operation: number;
+}
+
+interface LuckinOrderProductArgs {
+  productId: number;
+  skuCode: string;
+  amount: number;
+}
+
+interface LuckinOrderRequestArgs {
+  deptId: number;
+  productList: LuckinOrderProductArgs[];
+  longitude: number;
+  latitude: number;
+  couponCodeList?: string[];
+  remark?: string;
+}
+
 type McDonaldsMcpData =
   McDonaldsStoreRecord[] |
   McDonaldsStoreContainer |
@@ -966,14 +1005,24 @@ interface LuckinPayload {
 interface LuckinShopRecord {
   deptId?: string | number;
   deptName?: string;
+  shopName?: string;
+  storeName?: string;
   name?: string;
+  title?: string;
   address?: string;
+  deptAddress?: string;
+  shopAddress?: string;
   deptTags?: string[];
   tags?: string[];
   longitude?: string | number;
   latitude?: string | number;
+  lng?: string | number;
+  lat?: string | number;
+  distanceDesc?: string | number;
   workTimeStart?: string;
   workTimeEnd?: string;
+  workTime?: string;
+  businessTime?: string;
   distance?: string | number;
   number?: string;
 }
@@ -992,6 +1041,7 @@ interface LuckinProductRecord {
   productName?: string;
   name?: string;
   skuCode?: string;
+  pictureUrl?: string;
   price?: string | number;
   discountPrice?: string | number;
   initPrice?: string | number;
@@ -1009,22 +1059,63 @@ interface LuckinProductContainer {
 }
 
 interface LuckinProductAttr {
+  attributeId?: number;
   attributeName?: string;
   productSubAttrs?: LuckinProductSubAttr[];
 }
 
 interface LuckinProductSubAttr {
+  attributeId?: number;
   attributeName?: string;
   selected?: boolean | null;
+  canSelected?: number | null;
+  price?: number | null;
 }
 
 interface LuckinOrderRecord {
   orderId?: string | number;
+  orderIdStr?: string;
   orderStatusName?: string;
   orderStatus?: string | number;
+  aboutTime?: string | number;
+  takeMealTime?: string;
   shopInfo?: LuckinShopRecord;
   productInfoList?: LuckinProductRecord[];
+  productList?: LuckinProductRecord[];
+  orderCommodityList?: LuckinProductRecord[];
   orderPayAmount?: string | number;
+  totalInitialPrice?: string | number;
+  privilegeMoney?: string | number;
+  discountPrice?: string | number;
+  couponCodeList?: string[];
+  payOrderUrl?: string;
+  payOrderQrCodeUrl?: string;
+  needPay?: boolean | string;
+  tradeNo?: string | number;
+}
+
+interface LuckinOrderRecordAliases extends LuckinOrderRecord {
+  order_id?: string | number;
+  order_id_str?: string;
+  order_no?: string | number;
+  orderNo?: string | number;
+  pay_order_url?: string;
+  payUrl?: string;
+  pay_url?: string;
+  wechatPayUrl?: string;
+  wechat_pay_url?: string;
+  pay_order_qr_code_url?: string;
+  qrCodeUrl?: string;
+  qr_code_url?: string;
+  trade_no?: string | number;
+}
+
+interface LuckinPayloadBag extends LuckinPayload {
+  orderInfo?: LuckinOrderRecord;
+  order?: LuckinOrderRecord;
+  orderDetail?: LuckinOrderRecord;
+  orderData?: LuckinOrderRecord;
+  content?: LuckinOrderRecord;
 }
 
 interface FoodParamPair {
@@ -2329,6 +2420,9 @@ export function isReadonlyBrandMcpTool(provider: string, toolName: string): bool
       'queryShopList',
       'searchProductForMcp',
       'queryProductDetailInfo',
+      'switchProduct',
+      'previewOrder',
+      'createOrder',
       'queryOrderDetailInfo'
     ].indexOf(toolName) >= 0;
   }
@@ -4461,6 +4555,545 @@ function selectedLuckinAttrs(attrs: LuckinProductAttr[] | undefined): string {
   return parts.join(' · ');
 }
 
+function luckinAttrSelectionsMapFromProduct(product: LuckinProductRecord): Record<string, string> {
+  const result: Record<string, string> = {};
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    const groupName = textOf(attr.attributeName).trim();
+    if (groupName.length === 0) {
+      continue;
+    }
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        const choiceName = textOf(child.attributeName).trim();
+        if (choiceName.length > 0) {
+          result[groupName] = choiceName;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function luckinAttrOptionRowsFromSelections(selections: string[][]): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [];
+  for (let index = 0; index < selections.length; index += 1) {
+    const groupName = selections[index][0];
+    const choiceName = selections[index][1];
+    if (groupName.length > 0 && choiceName.length > 0) {
+      rows.push({ label: '选项·' + groupName, value: choiceName + ':1' });
+    }
+  }
+  return rows;
+}
+
+function luckinAttrOptionRows(product: LuckinProductRecord): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [];
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index++) {
+    const attr = attrs[index];
+    const groupName = textOf(attr.attributeName);
+    if (groupName.length === 0) {
+      continue;
+    }
+    const parts: string[] = [];
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      const choiceName = textOf(child.attributeName);
+      if (choiceName.length === 0) {
+        continue;
+      }
+      const canSelected = child.canSelected;
+      if (canSelected !== undefined && canSelected !== null && Number(canSelected) === 0) {
+        continue;
+      }
+      parts.push(choiceName + ':' + (child.selected === true ? '1' : '0'));
+    }
+    if (parts.length > 0) {
+      rows.push({ label: '选项·' + groupName, value: parts.join('|') });
+    }
+  }
+  return rows;
+}
+
+function luckinApplySelectedChoices(
+  detailAttrs: LuckinProductAttr[] | undefined,
+  searchAttrs: LuckinProductAttr[] | undefined
+): LuckinProductAttr[] | undefined {
+  if (detailAttrs === undefined || detailAttrs.length === 0) {
+    return searchAttrs;
+  }
+  const selectedByGroup: string[] = [];
+  if (searchAttrs !== undefined) {
+    for (let searchIndex = 0; searchIndex < searchAttrs.length; searchIndex++) {
+      const searchAttr = searchAttrs[searchIndex];
+      const groupName = textOf(searchAttr.attributeName);
+      const children = searchAttr.productSubAttrs === undefined ? [] : searchAttr.productSubAttrs;
+      for (let childIndex = 0; childIndex < children.length; childIndex++) {
+        const child = children[childIndex];
+        if (child.selected === true) {
+          selectedByGroup.push(groupName + '|' + textOf(child.attributeName));
+        }
+      }
+    }
+  }
+  const merged: LuckinProductAttr[] = [];
+  for (let detailIndex = 0; detailIndex < detailAttrs.length; detailIndex++) {
+    const detailAttr = detailAttrs[detailIndex];
+    const groupName = textOf(detailAttr.attributeName);
+    const children = detailAttr.productSubAttrs === undefined ? [] : detailAttr.productSubAttrs;
+    let selectedChoice = '';
+    for (let mapIndex = 0; mapIndex < selectedByGroup.length; mapIndex++) {
+      const parts = selectedByGroup[mapIndex].split('|');
+      if (parts.length === 2 && parts[0] === groupName) {
+        selectedChoice = parts[1];
+      }
+    }
+    const mergedChildren: LuckinProductSubAttr[] = [];
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      const choiceName = textOf(child.attributeName);
+      const selected = selectedChoice.length > 0 ?
+        choiceName === selectedChoice :
+        child.selected === true;
+      mergedChildren.push({
+        attributeName: child.attributeName,
+        selected: selected,
+        canSelected: child.canSelected
+      });
+    }
+    merged.push({
+      attributeName: detailAttr.attributeName,
+      productSubAttrs: mergedChildren
+    });
+  }
+  return merged;
+}
+
+function luckinProductForPreview(searchProduct: LuckinProductRecord, detailProduct: LuckinProductRecord | null): LuckinProductRecord {
+  if (detailProduct === null) {
+    return searchProduct;
+  }
+  return {
+    productId: firstText([searchProduct.productId, detailProduct.productId]),
+    productName: firstText([searchProduct.productName, detailProduct.productName]),
+    name: firstText([searchProduct.name, detailProduct.name]),
+    skuCode: firstText([searchProduct.skuCode, detailProduct.skuCode]),
+    pictureUrl: firstText([searchProduct.pictureUrl, detailProduct.pictureUrl]),
+    price: firstText([detailProduct.price, searchProduct.price]),
+    discountPrice: firstText([detailProduct.discountPrice, searchProduct.discountPrice]),
+    initPrice: firstText([detailProduct.initPrice, searchProduct.initPrice]),
+    productAttrs: luckinApplySelectedChoices(detailProduct.productAttrs, searchProduct.productAttrs),
+    tags: detailProduct.tags !== undefined ? detailProduct.tags : searchProduct.tags
+  };
+}
+
+function luckinProductSearchQuery(prompt: string, request: LuckinOrderActionArgs): string {
+  const previewPrompt = textOf(request.previewPrompt).trim();
+  if (previewPrompt.length > 0) {
+    return previewPrompt;
+  }
+  return luckinPromptKeyword(prompt);
+}
+
+function luckinApplyAttrChoice(
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string
+): LuckinProductRecord {
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  const merged: LuckinProductAttr[] = [];
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    const name = textOf(attr.attributeName);
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    const mergedChildren: LuckinProductSubAttr[] = [];
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      const childName = textOf(child.attributeName);
+      const selected = name === groupName ? childName === choiceName : child.selected === true;
+      mergedChildren.push({
+        attributeId: child.attributeId,
+        attributeName: child.attributeName,
+        selected: selected,
+        canSelected: child.canSelected,
+        price: child.price
+      });
+    }
+    merged.push({
+      attributeId: attr.attributeId,
+      attributeName: attr.attributeName,
+      productSubAttrs: mergedChildren
+    });
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: product.skuCode,
+    pictureUrl: product.pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: merged,
+    tags: product.tags
+  };
+}
+
+function luckinAttrSelectionsFromRequest(request: LuckinOrderActionArgs): string[][] {
+  const raw = request.attrSelections;
+  if (raw === undefined || raw === null || typeof raw !== 'object') {
+    return [];
+  }
+  const pairs: string[][] = [];
+  const keys = Object.keys(raw as Record<string, Object | string | number | boolean | null | undefined>);
+  for (let index = 0; index < keys.length; index += 1) {
+    const groupName = textOf(keys[index]).trim();
+    const choiceName = textOf((raw as Record<string, Object | string | number | boolean | null | undefined>)[keys[index]]).trim();
+    if (groupName.length > 0 && choiceName.length > 0) {
+      pairs.push([groupName, choiceName]);
+    }
+  }
+  return pairs;
+}
+
+function luckinApplyAttrSelections(
+  product: LuckinProductRecord,
+  selections: string[][],
+  skipGroup: string = ''
+): LuckinProductRecord {
+  let result = product;
+  for (let index = 0; index < selections.length; index += 1) {
+    const groupName = selections[index][0];
+    const choiceName = selections[index][1];
+    if (groupName === skipGroup) {
+      continue;
+    }
+    result = luckinApplyAttrChoice(result, groupName, choiceName);
+  }
+  return result;
+}
+
+function luckinPinnedProductPicture(
+  request: LuckinOrderActionArgs,
+  product: LuckinProductRecord,
+  detailProduct?: LuckinProductRecord
+): string {
+  const fromRequest = textOf(request.pictureUrl);
+  if (fromRequest.length > 0) {
+    return fromRequest;
+  }
+  const fromDetail = detailProduct !== undefined ? luckinProductPictureUrl(detailProduct) : '';
+  if (fromDetail.length > 0) {
+    return fromDetail;
+  }
+  return luckinProductPictureUrl(product);
+}
+
+function luckinProductWithPicture(product: LuckinProductRecord, pictureUrl: string): LuckinProductRecord {
+  if (pictureUrl.length === 0) {
+    return product;
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: product.skuCode,
+    pictureUrl: pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: product.productAttrs,
+    tags: product.tags
+  };
+}
+
+function luckinProductWithSku(product: LuckinProductRecord, skuCode: string): LuckinProductRecord {
+  if (skuCode.length === 0) {
+    return product;
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: skuCode,
+    pictureUrl: product.pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: product.productAttrs,
+    tags: product.tags
+  };
+}
+
+function luckinRestoreProductSelectionsFast(
+  request: LuckinOrderActionArgs,
+  detailProduct: LuckinProductRecord
+): LuckinProductRecord {
+  const selections = luckinAttrSelectionsFromRequest(request);
+  const skipGroup = textOf(request.attrGroup);
+  let product = luckinApplyAttrSelections(detailProduct, selections, skipGroup);
+  return luckinProductWithSku(product, textOf(request.skuCode));
+}
+
+function luckinFinalizeSwitchedProduct(
+  detailProduct: LuckinProductRecord,
+  switched: LuckinProductRecord,
+  selections: string[][],
+  groupName: string,
+  choiceName: string
+): LuckinProductRecord {
+  const attrSource = switched.productAttrs !== undefined && switched.productAttrs.length > 0 ?
+    switched.productAttrs :
+    detailProduct.productAttrs;
+  let product: LuckinProductRecord = {
+    productId: firstText([switched.productId, detailProduct.productId]),
+    productName: firstText([switched.productName, detailProduct.productName]),
+    name: firstText([switched.name, detailProduct.name]),
+    skuCode: firstText([switched.skuCode, detailProduct.skuCode]),
+    pictureUrl: firstText([detailProduct.pictureUrl, switched.pictureUrl]),
+    price: firstText([switched.price, detailProduct.price]),
+    discountPrice: firstText([switched.discountPrice, detailProduct.discountPrice]),
+    initPrice: firstText([switched.initPrice, detailProduct.initPrice]),
+    productAttrs: attrSource,
+    tags: switched.tags !== undefined ? switched.tags : detailProduct.tags
+  };
+  product = luckinApplyAttrSelections(product, selections, '');
+  if (groupName.length > 0 && choiceName.length > 0) {
+    product = luckinApplyAttrChoice(product, groupName, choiceName);
+    product = luckinProductWithSku(product, firstText([switched.skuCode, product.skuCode]));
+  }
+  return product;
+}
+
+const luckinProductDetailCache: Map<string, LuckinProductRecord> = new Map();
+
+function luckinDetailCacheKey(deptId: string, productId: number): string {
+  return deptId + '|' + productId.toString();
+}
+
+async function luckinLoadProductDetailCached(
+  shop: LuckinShopRecord,
+  productId: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const deptId = textOf(shop.deptId);
+  const cacheKey = luckinDetailCacheKey(deptId, productId);
+  const cached = luckinProductDetailCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const detailProduct = await luckinLoadProductDetail(shop, productId, token);
+  if (detailProduct !== null) {
+    luckinProductDetailCache.set(cacheKey, detailProduct);
+  }
+  return detailProduct;
+}
+
+function luckinFindAttrIds(
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string
+): LuckinAttrOperationParam | null {
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    if (textOf(attr.attributeName) !== groupName) {
+      continue;
+    }
+    const groupAttrId = Number(attr.attributeId);
+    if (groupAttrId <= 0) {
+      continue;
+    }
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      if (textOf(child.attributeName) !== choiceName) {
+        continue;
+      }
+      const choiceAttrId = Number(child.attributeId);
+      if (choiceAttrId <= 0) {
+        continue;
+      }
+      return {
+        attributeId: groupAttrId,
+        subAttr: {
+          attributeId: choiceAttrId,
+          operation: 3
+        }
+      };
+    }
+  }
+  return null;
+}
+
+async function luckinTrySwitchProduct(
+  shop: LuckinShopRecord,
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string,
+  quantity: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const attrOperationParam = luckinFindAttrIds(product, groupName, choiceName);
+  if (attrOperationParam === null) {
+    return null;
+  }
+  const deptId = Number(textOf(shop.deptId));
+  const productId = Number(textOf(product.productId));
+  const skuCode = luckinProductSku(product);
+  if (deptId <= 0 || productId <= 0 || skuCode.length === 0) {
+    return null;
+  }
+  try {
+    const switchArgs: LuckinSwitchProductArgs = {
+      deptId: deptId,
+      productId: productId,
+      skuCode: skuCode,
+      attrOperationParam: attrOperationParam,
+      amount: quantity
+    };
+    const switchPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'switchProduct',
+      switchArgs
+    );
+    const switchedProducts = luckinProductsFromPayload(switchPayload);
+    if (switchedProducts.length === 0) {
+      return null;
+    }
+    return switchedProducts[0];
+  } catch (error) {
+    aiLogInfo('[AIPhone][LuckinSwitchProduct] fallback=' + describeThrown(error));
+    return null;
+  }
+}
+
+async function luckinLoadProductDetail(
+  shop: LuckinShopRecord,
+  productId: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const deptId = Number(textOf(shop.deptId));
+  if (deptId <= 0 || productId <= 0) {
+    return null;
+  }
+  try {
+    const detailArgs: LuckinProductDetailArgs = {
+      deptId: deptId,
+      productId: productId
+    };
+    const detailPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'queryProductDetailInfo',
+      detailArgs
+    );
+    const detailProducts = luckinProductsFromPayload(detailPayload);
+    return detailProducts.length > 0 ? detailProducts[0] : null;
+  } catch (error) {
+    aiLogInfo('[AIPhone][LuckinProductDetail] fallback=' + describeThrown(error));
+    return null;
+  }
+}
+
+async function luckinLoadProductForOptionSwitch(
+  shop: LuckinShopRecord,
+  request: LuckinOrderActionArgs,
+  prompt: string,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const productId = Number(textOf(request.productId));
+  const quantity = luckinQuantityFromPrompt(prompt);
+  const groupName = textOf(request.attrGroup);
+  const choiceName = textOf(request.attrChoice);
+  const selections = luckinAttrSelectionsFromRequest(request);
+  const detailProduct = await luckinLoadProductDetailCached(shop, productId, token);
+  if (detailProduct === null) {
+    return null;
+  }
+  let product = luckinRestoreProductSelectionsFast(request, detailProduct);
+  if (groupName.length > 0 && choiceName.length > 0) {
+    const switched = await luckinTrySwitchProduct(shop, product, groupName, choiceName, quantity, token);
+    if (switched !== null) {
+      product = luckinFinalizeSwitchedProduct(detailProduct, switched, selections, groupName, choiceName);
+    } else {
+      product = luckinApplyAttrSelections(product, selections, '');
+    }
+  }
+  const pinnedPicture = luckinPinnedProductPicture(request, product, detailProduct);
+  return luckinProductWithPicture(product, pinnedPicture);
+}
+
+async function luckinLoadProductForPreview(
+  shop: LuckinShopRecord,
+  searchProduct: LuckinProductRecord,
+  token: string
+): Promise<LuckinProductRecord> {
+  const deptId = Number(textOf(shop.deptId));
+  const productId = Number(textOf(searchProduct.productId));
+  if (deptId <= 0 || productId <= 0) {
+    return searchProduct;
+  }
+  try {
+    const detailArgs: LuckinProductDetailArgs = {
+      deptId: deptId,
+      productId: productId
+    };
+    const detailPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'queryProductDetailInfo',
+      detailArgs
+    );
+    const detailProducts = luckinProductsFromPayload(detailPayload);
+    const detailProduct = detailProducts.length > 0 ? detailProducts[0] : null;
+    return luckinProductForPreview(searchProduct, detailProduct);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    aiLogInfo('[AIPhone][LuckinProductDetail] fallback=search reason=' + message);
+    return searchProduct;
+  }
+}
+
+function luckinPreviewPromptFromProduct(prompt: string, product: LuckinProductRecord, quantity: number): string {
+  const parts: string[] = [];
+  const productName = luckinProductName(product);
+  if (productName.length > 0) {
+    parts.push(productName + (quantity > 1 ? ' x' + quantity.toString() : ''));
+  }
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index++) {
+    const attr = attrs[index];
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        const choiceName = textOf(child.attributeName);
+        if (choiceName.length > 0) {
+          parts.push(choiceName);
+        }
+      }
+    }
+  }
+  const remark = luckinRemarkFromPrompt(prompt);
+  if (remark.length > 0) {
+    parts.push(remark);
+  }
+  if (parts.length > 0) {
+    return parts.join('，');
+  }
+  return prompt;
+}
+
 function luckinProductToFood(item: LuckinProductRecord): A2uiFoodData {
   return {
     name: '瑞幸 · ' + firstText([item.productName, item.name]),
@@ -4532,6 +5165,788 @@ export function foodRecordsFromLuckinMcpTool(toolName: string, value: Object): A
     return luckinOrderToFood(data as LuckinOrderRecord);
   }
   return [];
+}
+
+interface LuckinOrderActionArgs {
+  deptId?: string | number;
+  deptName?: string;
+  address?: string;
+  distance?: string;
+  location?: string;
+  status?: string;
+  productId?: string | number;
+  productName?: string;
+  skuCode?: string;
+  pictureUrl?: string;
+  previewPrompt?: string;
+  attrGroup?: string;
+  attrChoice?: string;
+  attrSelections?: Record<string, string | number | boolean | Object>;
+  quantity?: string | number;
+  price?: string | number;
+  couponCodeList?: string[];
+  remark?: string;
+  orderId?: string | number;
+  payOrderUrl?: string;
+  payOrderQrCodeUrl?: string;
+}
+
+function luckinActionArgs(args: Object | null): LuckinOrderActionArgs {
+  return args === null ? {} : args as LuckinOrderActionArgs;
+}
+
+function luckinMoney(value: Object | string | number | boolean | null | undefined): string {
+  const raw = textOf(value).trim();
+  if (raw.length === 0) {
+    return '';
+  }
+  return raw.charAt(0) === '¥' ? raw : '¥' + raw;
+}
+
+function luckinPromptKeyword(prompt: string): string {
+  const preset = /(生椰拿铁|冰美式|拿铁|美式|葡萄冰萃|澳瑞白|厚乳拿铁|橙C美式|椰云拿铁|丝绒拿铁)/u.exec(prompt);
+  if (preset !== null) {
+    return preset[0];
+  }
+  const cleaned = prompt
+    .replace(/瑞幸|luckin|ruixing/ig, '')
+    .replace(/帮我|请|来|点|下一杯|下单|咖啡|饮品|一杯|两杯|2杯|杯|自取|外送|配送|附近|门店|使用优惠券|用优惠券/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : '生椰拿铁';
+}
+
+function luckinQuantityFromPrompt(prompt: string): number {
+  if (/两杯|2杯|两份|2份/.test(prompt)) {
+    return 2;
+  }
+  const match = /(\d+)\s*(杯|份)/.exec(prompt);
+  if (match !== null) {
+    const count = Number(match[1]);
+    return count > 0 && count < 10 ? count : 1;
+  }
+  return 1;
+}
+
+function luckinRemarkFromPrompt(prompt: string): string {
+  const remarks: string[] = [];
+  ['无糖', '少少甜', '少甜', '半糖', '标准甜', '热饮', '热', '少冰', '去冰', '正常冰', '多冰', '少奶', '加奶'].forEach((word: string) => {
+    if (prompt.indexOf(word) >= 0 && remarks.indexOf(word) < 0) {
+      remarks.push(word);
+    }
+  });
+  return remarks.join('，');
+}
+
+function luckinProductName(item: LuckinProductRecord): string {
+  return firstText([item.productName, item.name]);
+}
+
+function luckinProductSku(item: LuckinProductRecord): string {
+  return firstText([item.skuCode]);
+}
+
+function luckinProductPictureUrl(item: LuckinProductRecord): string {
+  return firstText([item.pictureUrl]);
+}
+
+function luckinProductsFromPayload(payload: Object): LuckinProductRecord[] {
+  const data = mcpPayloadData(payload as LuckinPayload);
+  if (data === undefined) {
+    return [];
+  }
+  const products = luckinProductsFromData(data as LuckinProductRecord[] | LuckinProductContainer | undefined);
+  if (products.length > 0) {
+    return products;
+  }
+  const item = data as LuckinProductRecord;
+  return luckinProductName(item).length > 0 ? [item] : [];
+}
+
+function luckinOrderRecordFromPayload(payload: Object): LuckinOrderRecord {
+  const candidates = luckinOrderPayloadCandidates(payload);
+  const merged: LuckinOrderRecord = {};
+  let orderId = '';
+  let payOrderUrl = '';
+  let payOrderQrCodeUrl = '';
+  for (let index = 0; index < candidates.length; index += 1) {
+    const record = luckinOrderFieldsFromRecord(candidates[index]);
+    orderId = firstText([record.orderIdStr, record.orderId, orderId]);
+    payOrderUrl = firstText([record.payOrderUrl, payOrderUrl]);
+    payOrderQrCodeUrl = firstText([record.payOrderQrCodeUrl, payOrderQrCodeUrl]);
+    if (record.discountPrice !== undefined) {
+      merged.discountPrice = record.discountPrice;
+    }
+    if (record.totalInitialPrice !== undefined) {
+      merged.totalInitialPrice = record.totalInitialPrice;
+    }
+    if (record.privilegeMoney !== undefined) {
+      merged.privilegeMoney = record.privilegeMoney;
+    }
+    if (record.couponCodeList !== undefined) {
+      merged.couponCodeList = record.couponCodeList;
+    }
+    if (record.orderStatusName !== undefined) {
+      merged.orderStatusName = record.orderStatusName;
+    }
+    if (record.orderStatus !== undefined) {
+      merged.orderStatus = record.orderStatus;
+    }
+    if (record.takeMealTime !== undefined) {
+      merged.takeMealTime = record.takeMealTime;
+    }
+    if (record.aboutTime !== undefined) {
+      merged.aboutTime = record.aboutTime;
+    }
+  }
+  const deep = luckinDeepScanPayFields(payload);
+  orderId = firstText([orderId, deep.orderId]);
+  payOrderUrl = firstText([payOrderUrl, deep.payOrderUrl]);
+  payOrderQrCodeUrl = firstText([payOrderQrCodeUrl, deep.payOrderQrCodeUrl]);
+  if (orderId.length > 0) {
+    merged.orderIdStr = orderId;
+  }
+  if (payOrderUrl.length > 0) {
+    merged.payOrderUrl = payOrderUrl;
+  }
+  if (payOrderQrCodeUrl.length > 0) {
+    merged.payOrderQrCodeUrl = payOrderQrCodeUrl;
+  }
+  return merged;
+}
+
+function luckinOrderFieldsFromRecord(record: LuckinOrderRecord): LuckinOrderRecord {
+  const bag = record as LuckinOrderRecordAliases;
+  const normalized: LuckinOrderRecord = {
+    orderIdStr: firstText([record.orderIdStr, bag.order_id_str]),
+    orderId: firstText([record.orderId, bag.order_id, bag.order_no, bag.orderNo, record.tradeNo, bag.trade_no]),
+    payOrderUrl: firstText([record.payOrderUrl, bag.pay_order_url, bag.payUrl, bag.pay_url, bag.wechatPayUrl, bag.wechat_pay_url]),
+    payOrderQrCodeUrl: firstText([record.payOrderQrCodeUrl, bag.pay_order_qr_code_url, bag.qrCodeUrl, bag.qr_code_url]),
+    discountPrice: record.discountPrice,
+    totalInitialPrice: record.totalInitialPrice,
+    privilegeMoney: record.privilegeMoney,
+    couponCodeList: record.couponCodeList,
+    orderStatusName: record.orderStatusName,
+    orderStatus: record.orderStatus,
+    takeMealTime: record.takeMealTime,
+    aboutTime: record.aboutTime
+  };
+  return normalized;
+}
+
+function luckinDeepScanPayFields(root: Object): LuckinOrderActionArgs {
+  const found: LuckinOrderActionArgs = {};
+  const absorb = (record: LuckinOrderRecord | undefined): void => {
+    if (record === undefined) {
+      return;
+    }
+    const normalized = luckinOrderFieldsFromRecord(record);
+    if (textOf(found.orderId).length === 0) {
+      found.orderId = firstText([normalized.orderIdStr, normalized.orderId]);
+    }
+    if (textOf(found.payOrderUrl).length === 0) {
+      found.payOrderUrl = textOf(normalized.payOrderUrl);
+    }
+    if (textOf(found.payOrderQrCodeUrl).length === 0) {
+      found.payOrderQrCodeUrl = textOf(normalized.payOrderQrCodeUrl);
+    }
+  };
+  const bag = root as LuckinPayloadBag;
+  absorb(bag as LuckinOrderRecord);
+  absorb(bag.orderInfo);
+  absorb(bag.order);
+  absorb(bag.orderDetail);
+  absorb(bag.orderData);
+  absorb(bag.content);
+  const data = mcpPayloadData(bag);
+  if (data !== undefined && !Array.isArray(data)) {
+    absorb(data as LuckinOrderRecord);
+  }
+  if (textOf(found.payOrderUrl).length === 0) {
+    const preview = JSON.stringify(root);
+    const weixinMatch = /weixin:\/\/[^\s"']+/i.exec(preview);
+    if (weixinMatch !== null) {
+      found.payOrderUrl = weixinMatch[0];
+    }
+  }
+  return found;
+}
+
+function luckinPayloadErrorMessage(payload: Object): string {
+  const wrapped = payload as LuckinPayload;
+  const code = textOf(wrapped.code).trim();
+  if (code.length > 0 && code !== '0' && code !== '200' && code !== '0000') {
+    return firstText([wrapped.message, wrapped.msg, '瑞幸返回错误码 ' + code]);
+  }
+  if (wrapped.success === false || wrapped.success === 'false') {
+    return firstText([wrapped.message, wrapped.msg, '瑞幸创建订单失败']);
+  }
+  return '';
+}
+
+function luckinOrderPayloadCandidates(payload: Object): LuckinOrderRecord[] {
+  const wrapped = payload as LuckinPayloadBag;
+  const candidates: LuckinOrderRecord[] = [];
+  const push = (value: Object | undefined | null): void => {
+    if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+    candidates.push(value as LuckinOrderRecord);
+  };
+  const data = mcpPayloadData(wrapped);
+  push(data as Object);
+  push(payload);
+  push(wrapped.orderInfo as Object);
+  push(wrapped.order as Object);
+  push(wrapped.orderDetail as Object);
+  push(wrapped.orderData as Object);
+  push(wrapped.content as Object);
+  return candidates;
+}
+
+function luckinPayDiagnosticsLog(tag: string, orderId: string, payOrderUrl: string, payOrderQrCodeUrl: string, actionCount: number): void {
+  const hasPayOrderUrl = payOrderUrl.length > 0;
+  const hasPayOrderQrCodeUrl = payOrderQrCodeUrl.length > 0;
+  const hasPay = hasPayOrderUrl || hasPayOrderQrCodeUrl;
+  aiLogInfo('[AIPhone][' + tag + '] orderId=' + orderId +
+    ' hasPayOrderUrl=' + (hasPayOrderUrl ? 'true' : 'false') +
+    ' payOrderUrlChars=' + payOrderUrl.length.toString() +
+    ' hasPayOrderQrCodeUrl=' + (hasPayOrderQrCodeUrl ? 'true' : 'false') +
+    ' payOrderQrCodeUrlChars=' + payOrderQrCodeUrl.length.toString() +
+    ' hasPay=' + (hasPay ? 'true' : 'false') +
+    ' actionCount=' + actionCount.toString());
+}
+
+function luckinMcpPayFieldKeys(payload: Object): string {
+  const wrapped = payload as LuckinPayloadBag;
+  const data = mcpPayloadData(wrapped);
+  if (data !== undefined && !Array.isArray(data) && typeof data === 'object') {
+    const record = data as LuckinOrderRecord;
+    const keys: string[] = [];
+    if (record.orderId !== undefined) { keys.push('orderId'); }
+    if (record.orderIdStr !== undefined) { keys.push('orderIdStr'); }
+    if (record.payOrderUrl !== undefined) { keys.push('payOrderUrl'); }
+    if (record.payOrderQrCodeUrl !== undefined) { keys.push('payOrderQrCodeUrl'); }
+    if (record.discountPrice !== undefined) { keys.push('discountPrice'); }
+    if (record.orderStatusName !== undefined) { keys.push('orderStatusName'); }
+    return keys.join(',');
+  }
+  const keys: string[] = [];
+  if (wrapped.data !== undefined) { keys.push('data'); }
+  if (wrapped.result !== undefined) { keys.push('result'); }
+  if (wrapped.orderInfo !== undefined) { keys.push('orderInfo'); }
+  if (wrapped.order !== undefined) { keys.push('order'); }
+  if (wrapped.orderDetail !== undefined) { keys.push('orderDetail'); }
+  if (wrapped.orderData !== undefined) { keys.push('orderData'); }
+  if (wrapped.content !== undefined) { keys.push('content'); }
+  if (wrapped.code !== undefined) { keys.push('code'); }
+  if (wrapped.message !== undefined) { keys.push('message'); }
+  if (wrapped.msg !== undefined) { keys.push('msg'); }
+  if (wrapped.success !== undefined) { keys.push('success'); }
+  return keys.join(',');
+}
+
+function luckinShopName(shop: LuckinShopRecord): string {
+  return firstText([shop.deptName, shop.shopName, shop.storeName, shop.name, shop.title, shop.number]);
+}
+
+function luckinShopAddress(shop: LuckinShopRecord): string {
+  return firstText([shop.address, shop.deptAddress, shop.shopAddress]);
+}
+
+function luckinShopLocation(shop: LuckinShopRecord, fallback: string): string {
+  const longitude = firstText([shop.longitude, shop.lng]);
+  const latitude = firstText([shop.latitude, shop.lat]);
+  return longitude.length > 0 && latitude.length > 0 ? longitude + ',' + latitude : fallback;
+}
+
+function luckinShopStatus(shop: LuckinShopRecord): string {
+  const tags = shop.deptTags !== undefined ? shop.deptTags : (shop.tags !== undefined ? shop.tags : []);
+  for (let index = 0; index < tags.length; index++) {
+    const tag = textOf(tags[index]);
+    if (tag.indexOf('营业') >= 0 || tag.indexOf('自提') >= 0 || tag.indexOf('外送') >= 0) {
+      return tag;
+    }
+  }
+  if (textOf(shop.workTimeStart).length > 0 && textOf(shop.workTimeEnd).length > 0) {
+    return '营业中';
+  }
+  return '营业中';
+}
+
+function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): string {
+  const fromArgs = parseCoordinatePair(textOf(request.location));
+  if (fromArgs.length > 0) {
+    return fromArgs;
+  }
+  const fromPrompt = parseCoordinatePair(prompt);
+  if (fromPrompt.length > 0) {
+    return fromPrompt;
+  }
+  return '';
+}
+
+function luckinShopSelectActions(shops: LuckinShopRecord[], location: string, prompt: string): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  const count = shops.length > 5 ? 5 : shops.length;
+  for (let index = 0; index < count; index++) {
+    const shop = shops[index];
+    const shopArgs: LuckinOrderActionArgs = {
+      deptId: textOf(shop.deptId),
+      deptName: luckinShopName(shop),
+      address: luckinShopAddress(shop),
+      distance: kmNumberDistanceText(firstText([shop.distanceDesc, shop.distance])),
+      location: luckinShopLocation(shop, location),
+      status: luckinShopStatus(shop)
+    };
+    actions.push({
+      id: 'luckin.order.preview',
+      label: '选择：' + luckinShopName(shop),
+      prompt: prompt,
+      variant: 'secondary',
+      kind: 'prompt',
+      args: shopArgs
+    });
+  }
+  return actions;
+}
+
+function luckinSelectedShop(shops: LuckinShopRecord[], deptId: string): LuckinShopRecord | null {
+  for (let index = 0; index < shops.length; index++) {
+    if (textOf(shops[index].deptId) === deptId) {
+      return shops[index];
+    }
+  }
+  return shops.length > 0 ? shops[0] : null;
+}
+
+function luckinFirstShop(payload: Object): LuckinShopRecord | null {
+  const data = mcpPayloadData(payload as LuckinPayload);
+  const shops = luckinShopsFromData(data as LuckinShopRecord[] | LuckinShopContainer | undefined);
+  return shops.length > 0 ? shops[0] : null;
+}
+
+function luckinOrderProduct(item: LuckinProductRecord, quantity: number): LuckinOrderProductArgs {
+  return {
+    productId: Number(textOf(item.productId)),
+    skuCode: luckinProductSku(item),
+    amount: quantity
+  };
+}
+
+function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: string, summary: string, rows: A2uiLabelValueData[], rawPreview: string, actions: A2uiAction[]): string {
+  const results: A2uiGenericToolResultData[] = [{
+    sourceTag: '瑞幸',
+    toolName: toolId,
+    title: title,
+    status: 'success',
+    summary: summary,
+    rows: rows,
+    rawPreview: rawPreview
+  }];
+  const components: A2uiComponent[] = [
+    {
+      id: 'root',
+      component: 'SurfaceRoot',
+      child: 'results',
+      title: title,
+      status: 'ready'
+    },
+    {
+      id: 'results',
+      component: 'GenericToolResults',
+      title: title,
+      body: '以下展示瑞幸 MCP 的真实返回字段。',
+      status: 'ready',
+      dataPath: '/genericToolResults',
+      actions: actions
+    }
+  ];
+  const summaryData: A2uiSummaryData = {
+    text: summary,
+    toolName: toolId,
+    dataLabel: 'genericToolResults',
+    count: 1
+  };
+  const envelopes: A2uiEnvelope[] = [
+    {
+      createSurface: {
+        surfaceId: surfaceId,
+        root: 'root',
+        title: title,
+        intent: 'luckin',
+        status: 'ready',
+        sendDataModel: true
+      }
+    },
+    {
+      updateComponents: {
+        surfaceId: surfaceId,
+        components: components
+      }
+    },
+    {
+      updateDataModel: {
+        surfaceId: surfaceId,
+        path: '/genericToolResults',
+        value: results
+      }
+    },
+    {
+      updateDataModel: {
+        surfaceId: surfaceId,
+        path: '/summary',
+        value: summaryData
+      }
+    }
+  ];
+  return a2uiJsonl(envelopes);
+}
+
+function luckinErrorA2ui(surfaceId: string, toolId: string, title: string, message: string): string {
+  return luckinGenericResultA2ui(surfaceId, toolId, title, message, [{ label: '错误', value: message }], '', []);
+}
+
+async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  if (token.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '瑞幸点单需要登录', '未配置 LUCKIN_MCP_TOKEN。请在瑞幸 AI 开放平台登录复制 Token 后同步到 HAP rawfile。');
+  }
+  const location = resolveLuckinLocation(request, prompt);
+  if (location.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '瑞幸点单缺少位置', '瑞幸下单需要当前经纬度。请允许定位权限后重试。');
+  }
+  const shopArgs: LuckinShopListArgs = {
+    deptName: '',
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location))
+  };
+  const shopPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryShopList', shopArgs);
+  const shops = luckinShopsFromData(mcpPayloadData(shopPayload as LuckinPayload) as LuckinShopRecord[] | LuckinShopContainer | undefined);
+  if (shops.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单门店', '瑞幸 MCP 没有返回可用门店。请换一个地点或门店名称。');
+  }
+  if (textOf(request.deptId).length === 0) {
+    const shopRows: A2uiLabelValueData[] = [];
+    const previewCount = shops.length > 5 ? 5 : shops.length;
+    for (let index = 0; index < previewCount; index++) {
+      const candidate = shops[index];
+      shopRows.push({
+        label: luckinShopName(candidate),
+        value: luckinShopAddress(candidate)
+      });
+    }
+    return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '选择瑞幸门店', '请选择要在哪家门店自取，选定后会继续查询商品并核价。', shopRows, '', luckinShopSelectActions(shops, location, prompt));
+  }
+  const shop = luckinSelectedShop(shops, textOf(request.deptId));
+  if (shop === null || textOf(shop.deptId).length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单门店', '瑞幸 MCP 没有返回可用门店。请换一个地点或门店名称。');
+  }
+  const quantity = luckinQuantityFromPrompt(prompt);
+  const groupName = textOf(request.attrGroup);
+  const choiceName = textOf(request.attrChoice);
+  const isOptionSwitch = groupName.length > 0 && choiceName.length > 0 && textOf(request.productId).length > 0;
+  let product: LuckinProductRecord;
+  if (isOptionSwitch) {
+    const switchedProduct = await luckinLoadProductForOptionSwitch(shop, request, prompt, token);
+    if (switchedProduct === null) {
+      return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '规格切换失败', '暂时无法切换「' + groupName + '」到「' + choiceName + '」。请稍后重试。');
+    }
+    product = switchedProduct;
+  } else {
+    const keyword = luckinProductSearchQuery(prompt, request);
+    const productSearchArgs: LuckinProductSearchArgs = {
+      deptId: Number(textOf(shop.deptId)),
+      query: keyword
+    };
+    const productPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'searchProductForMcp', productSearchArgs);
+    const products = luckinProductsFromPayload(productPayload);
+    if (products.length === 0 || textOf(products[0].productId).length === 0 || luckinProductSku(products[0]).length === 0) {
+      return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单商品', '瑞幸 MCP 没有返回可创建订单的商品或 skuCode。关键词：' + keyword);
+    }
+    const searchProduct = products[0];
+    product = await luckinLoadProductForPreview(shop, searchProduct, token);
+  }
+  const previewArgs: LuckinOrderRequestArgs = {
+    deptId: Number(textOf(shop.deptId)),
+    productList: [luckinOrderProduct(product, quantity)],
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location)),
+    remark: luckinRemarkFromPrompt(prompt)
+  };
+  const previewPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'previewOrder', previewArgs);
+  const preview = luckinOrderRecordFromPayload(previewPayload);
+  const productPictureUrl = isOptionSwitch ?
+    luckinPinnedProductPicture(request, product) :
+    luckinProductPictureUrl(product);
+  const createArgs: LuckinOrderActionArgs = {
+    deptId: textOf(shop.deptId),
+    deptName: luckinShopName(shop),
+    address: luckinShopAddress(shop),
+    distance: kmNumberDistanceText(firstText([shop.distanceDesc, shop.distance])),
+    location: location,
+    productId: textOf(product.productId),
+    productName: luckinProductName(product),
+    skuCode: luckinProductSku(product),
+    pictureUrl: productPictureUrl,
+    previewPrompt: luckinPreviewPromptFromProduct(prompt, product, quantity),
+    quantity: quantity,
+    price: firstText([preview.discountPrice, product.discountPrice, product.price, product.initPrice]),
+    couponCodeList: preview.couponCodeList === undefined ? [] : preview.couponCodeList,
+    remark: previewArgs.remark,
+    attrSelections: luckinAttrSelectionsMapFromProduct(product)
+  };
+  const rows: A2uiLabelValueData[] = [
+    { label: '门店', value: luckinShopName(shop) },
+    { label: '地址', value: luckinShopAddress(shop) },
+    { label: '商品', value: luckinProductName(product) + ' x' + quantity.toString() },
+    { label: 'SKU', value: luckinProductSku(product) },
+    { label: '商品图', value: productPictureUrl }
+  ];
+  luckinAttrOptionRows(product).forEach((row: A2uiLabelValueData) => {
+    rows.push(row);
+  });
+  rows.push({ label: '原价', value: luckinMoney(preview.totalInitialPrice) });
+  rows.push({ label: '优惠', value: luckinMoney(preview.privilegeMoney) });
+  rows.push({ label: '应付', value: luckinMoney(firstText([preview.discountPrice, createArgs.price])) });
+  rows.push({ label: '备注', value: textOf(createArgs.remark) });
+  const action: A2uiAction = {
+    id: 'luckin.order.create',
+    label: '确认下单',
+    prompt: '确认创建瑞幸订单',
+    variant: 'primary',
+    kind: 'prompt',
+    args: createArgs as Object
+  };
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '确认瑞幸订单', '请确认后再创建真实瑞幸订单。', rows, JSON.stringify(previewPayload).substring(0, 1200), [action]);
+}
+
+function luckinPaymentContextArgs(request: LuckinOrderActionArgs, orderId: string, payOrderUrl: string, payOrderQrCodeUrl: string): LuckinOrderActionArgs {
+  return {
+    deptId: request.deptId,
+    deptName: request.deptName,
+    address: request.address,
+    distance: request.distance,
+    location: request.location,
+    productId: request.productId,
+    productName: request.productName,
+    skuCode: request.skuCode,
+    pictureUrl: request.pictureUrl,
+    previewPrompt: request.previewPrompt,
+    attrSelections: request.attrSelections,
+    quantity: request.quantity,
+    price: request.price,
+    couponCodeList: request.couponCodeList,
+    remark: request.remark,
+    orderId: orderId,
+    payOrderUrl: payOrderUrl,
+    payOrderQrCodeUrl: payOrderQrCodeUrl
+  };
+}
+
+function luckinDemoAlipayAction(orderId: string): A2uiAction {
+  const args: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  return {
+    id: 'luckin.demo.alipay.open',
+    label: '支付宝支付（Demo）',
+    prompt: 'alipays://',
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+}
+
+function luckinDemoGooglePayAction(orderId: string): A2uiAction {
+  const args: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  return {
+    id: 'luckin.demo.googlepay.open',
+    label: 'Google Pay 转 5 美金（Demo）',
+    prompt: '用 Google Pay 给罗一格转 5 美金',
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+}
+
+async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  const location = resolveLuckinLocation(request, '');
+  if (token.length === 0 || textOf(request.deptId).length === 0 || textOf(request.productId).length === 0 || textOf(request.skuCode).length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.create', '瑞幸订单参数不足', '创建订单需要登录 Token、门店、商品和 skuCode。请先重新预览订单。');
+  }
+  const createArgs: LuckinOrderRequestArgs = {
+    deptId: Number(textOf(request.deptId)),
+    productList: [{
+      productId: Number(textOf(request.productId)),
+      skuCode: textOf(request.skuCode),
+      amount: Number(textOf(request.quantity).length > 0 ? textOf(request.quantity) : '1')
+    }],
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location)),
+    remark: textOf(request.remark)
+  };
+  const coupons = request.couponCodeList === undefined ? [] : request.couponCodeList;
+  if (coupons.length > 0) {
+    createArgs.couponCodeList = coupons;
+  }
+  const createPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'createOrder', createArgs);
+  const createError = luckinPayloadErrorMessage(createPayload);
+  let created = luckinOrderRecordFromPayload(createPayload);
+  let orderId = firstText([created.orderIdStr, created.orderId, request.orderId]);
+  let payOrderUrl = textOf(created.payOrderUrl);
+  let payOrderQrCodeUrl = textOf(created.payOrderQrCodeUrl);
+  if (orderId.length === 0 && createError.length > 0) {
+    aiLogInfo('[AIPhone][LuckinOrderCreateDeferred] error=' + createError);
+  }
+  if (orderId.length > 0 && payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    try {
+      const detailArgs: LuckinOrderActionArgs = {
+        orderId: orderId
+      };
+      const detailPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs as Object);
+      const detail = luckinOrderRecordFromPayload(detailPayload);
+      orderId = firstText([detail.orderIdStr, detail.orderId, orderId]);
+      payOrderUrl = firstText([detail.payOrderUrl, payOrderUrl]);
+      payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, payOrderQrCodeUrl]);
+      created = {
+        discountPrice: firstText([detail.discountPrice, created.discountPrice]),
+        totalInitialPrice: firstText([detail.totalInitialPrice, created.totalInitialPrice]),
+        privilegeMoney: firstText([detail.privilegeMoney, created.privilegeMoney]),
+        orderIdStr: orderId,
+        payOrderUrl: payOrderUrl,
+        payOrderQrCodeUrl: payOrderQrCodeUrl
+      };
+      aiLogInfo('[AIPhone][LuckinOrderCreateDetailFallback] orderId=' + orderId +
+        ' payOrderUrlChars=' + payOrderUrl.length.toString() +
+        ' payOrderQrCodeUrlChars=' + payOrderQrCodeUrl.length.toString());
+    } catch (error) {
+      aiLogInfo('[AIPhone][LuckinOrderCreateDetailFallbackError] ' + textOf(error));
+    }
+  }
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: orderId },
+    { label: '门店', value: textOf(request.deptName) },
+    { label: '商品', value: textOf(request.productName) + ' x' + textOf(request.quantity) },
+    { label: '商品图', value: textOf(request.pictureUrl) },
+    { label: '原价', value: luckinMoney(firstText([created.totalInitialPrice])) },
+    { label: '优惠', value: luckinMoney(firstText([created.privilegeMoney])) },
+    { label: '应付', value: luckinMoney(firstText([created.discountPrice, request.price])) }
+  ];
+  luckinAttrOptionRowsFromSelections(luckinAttrSelectionsFromRequest(request)).forEach((row: A2uiLabelValueData) => {
+    rows.push(row);
+  });
+  if (payOrderUrl.length > 0) {
+    rows.push({ label: '支付链接', value: payOrderUrl });
+  }
+  if (payOrderQrCodeUrl.length > 0) {
+    rows.push({ label: '支付二维码', value: payOrderQrCodeUrl });
+  }
+  const paymentContextArgs = luckinPaymentContextArgs(request, orderId, payOrderUrl, payOrderQrCodeUrl);
+  const statusAction: A2uiAction = {
+    id: 'luckin.order.status',
+    label: '刷新订单状态',
+    prompt: '查询瑞幸订单状态',
+    variant: 'secondary',
+    kind: 'prompt',
+    args: paymentContextArgs as Object
+  };
+  const payAction: A2uiAction = {
+    id: 'luckin.pay.open',
+    label: payOrderUrl.length > 0 ? '打开微信支付' : '打开微信支付',
+    prompt: payOrderUrl.length > 0 ? payOrderUrl : payOrderQrCodeUrl,
+    variant: 'primary',
+    kind: 'client',
+    args: paymentContextArgs as Object
+  };
+  const createActions: A2uiAction[] = [payAction, luckinDemoAlipayAction(orderId), luckinDemoGooglePayAction(orderId), statusAction];
+  luckinPayDiagnosticsLog('LuckinOrderCreate', orderId, payOrderUrl, payOrderQrCodeUrl, createActions.length);
+  if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    aiLogInfo('[AIPhone][LuckinOrderCreateMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(createPayload) +
+      ' payloadPreview=' + JSON.stringify(createPayload).substring(0, 400));
+  }
+  const summary = createError.length > 0 ? createError : '';
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.create', '瑞幸订单已创建', summary, rows, JSON.stringify(createPayload).substring(0, 1200), createActions);
+}
+
+async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  const orderId = textOf(request.orderId);
+  if (token.length === 0 || orderId.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.status', '无法查询瑞幸订单', token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。');
+  }
+  const detailArgs: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  const payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  const detail = luckinOrderRecordFromPayload(payload);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: firstText([detail.orderIdStr, detail.orderId, orderId]) },
+    { label: '订单状态', value: firstText([detail.orderStatusName, detail.orderStatus]) },
+    { label: '取餐时间', value: firstText([detail.takeMealTime, detail.aboutTime]) },
+    { label: '订单金额', value: luckinMoney(firstText([detail.discountPrice, detail.orderPayAmount])) },
+    { label: '支付链接', value: firstText([detail.payOrderUrl, request.payOrderUrl]) },
+    { label: '支付二维码', value: firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]) }
+  ];
+  const payOrderUrl = firstText([detail.payOrderUrl, request.payOrderUrl]);
+  const payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]);
+  const statusArgs: LuckinOrderActionArgs = {
+    orderId: firstText([detail.orderIdStr, detail.orderId, orderId]),
+    payOrderUrl: payOrderUrl,
+    payOrderQrCodeUrl: payOrderQrCodeUrl
+  };
+  const statusAction: A2uiAction = {
+    id: 'luckin.order.status',
+    label: '刷新订单状态',
+    prompt: '查询瑞幸订单状态',
+    variant: 'secondary',
+    kind: 'prompt',
+    args: statusArgs
+  };
+  const payAction: A2uiAction = {
+    id: 'luckin.pay.open',
+    label: payOrderUrl.length > 0 ? '打开微信支付' : '打开支付二维码',
+    prompt: payOrderUrl.length > 0 ? payOrderUrl : payOrderQrCodeUrl,
+    variant: 'primary',
+    kind: 'client',
+    args: statusArgs
+  };
+  const resolvedOrderId = firstText([detail.orderIdStr, detail.orderId, orderId]);
+  const statusActions: A2uiAction[] = [];
+  if (payOrderUrl.length > 0 || payOrderQrCodeUrl.length > 0) {
+    statusActions.push(payAction);
+  } else if (resolvedOrderId.length > 0) {
+    statusActions.push({
+      id: 'luckin.pay.open',
+      label: '打开微信支付',
+      prompt: '',
+      variant: 'primary',
+      kind: 'client',
+      args: statusArgs
+    });
+  }
+  statusActions.push(luckinDemoAlipayAction(resolvedOrderId), luckinDemoGooglePayAction(resolvedOrderId), statusAction);
+  luckinPayDiagnosticsLog('LuckinOrderStatus', resolvedOrderId, payOrderUrl, payOrderQrCodeUrl, statusActions.length);
+  if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    aiLogInfo('[AIPhone][LuckinOrderStatusMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(payload));
+  }
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.status', '瑞幸订单状态', firstText([detail.orderStatusName, detail.orderStatus, '已返回订单状态']), rows, JSON.stringify(payload).substring(0, 1200), statusActions);
+}
+
+async function callLocalLuckinTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'luckin.order.create') {
+    return callLocalLuckinCreate(surfaceId, args);
+  }
+  if (toolId === 'luckin.order.status') {
+    return callLocalLuckinStatus(surfaceId, args);
+  }
+  return callLocalLuckinPreview(prompt, surfaceId, args);
 }
 
 function normalizeFoodName(value: string): string {
@@ -8260,6 +9675,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isPaymentToolId(toolId)) {
     return callLocalPaymentTool(toolId, prompt, surfaceId, args);
+  }
+  if (isLuckinToolId(toolId)) {
+    return callLocalLuckinTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);

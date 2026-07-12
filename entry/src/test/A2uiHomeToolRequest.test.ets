@@ -400,6 +400,43 @@ export default function a2uiHomeToolRequestTest() {
       expect(argText(resolved.args, 'sweetness')).assertEqual('半糖');
     });
 
+    it('routes explicit Luckin ordering prompts to Luckin preview', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我点一杯瑞幸生椰拿铁，半糖少冰',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('reroutes model-selected food search to Luckin preview for ordering', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', '点一杯瑞幸冰美式', 'model_tool_request'),
+        '点一杯瑞幸冰美式',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_luckin_order_reroute');
+    });
+
+    it('maps Luckin confirmation actions directly to order create', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '确认创建瑞幸订单',
+        'luckin.order.create',
+        { deptId: '101', productId: '1', skuCode: 'sku-1' }
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.create');
+      expect(argText(resolved.args, 'deptId')).assertEqual('101');
+    });
+
     it('keeps explicit gmap requests on Google Maps search', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),

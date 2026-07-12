@@ -13,19 +13,31 @@ class HtmlHomeActionBridge {
   postAction(raw: string): void {
     const action = parseHtmlHomeAction(raw);
     if (action !== null) {
+      if (action.id === 'luckin.pay.open' ||
+        action.id === 'luckin.demo.alipay.open' ||
+        action.id === 'luckin.demo.googlepay.open' ||
+        action.id === 'luckin.order.status') {
+        aiLogInfo('[AIPhone][HtmlHomePostAction] id=' + action.id +
+          ' kind=' + action.kind +
+          ' promptChars=' + action.prompt.length.toString());
+      }
       this.onAction(action);
+      return;
     }
+    aiLogError('[AIPhone][HtmlHomePostActionParseError] rawChars=' + raw.length.toString());
   }
 }
 
 @Component
 export struct HtmlHomeSurfaceView {
-  @Prop @Watch('onRenderStateChange') html: string = '';
+  @Prop @Watch('onHtmlOrBusyChange') html: string = '';
   @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
   @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
   @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
-  @Prop @Watch('onRenderStateChange') isBusy: boolean = false;
+  @Prop @Watch('onHtmlOrBusyChange') isBusy: boolean = false;
   @Prop renderTick: number = 0;
+  @Prop luckinInlinePatchJson: string = '';
+  @Prop @Watch('onLuckinPatchTickChange') luckinInlinePatchTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   private popupController: webview.WebviewController = new webview.WebviewController();
@@ -36,6 +48,7 @@ export struct HtmlHomeSurfaceView {
   private lastMailDetailEventJson: string = '';
   private lastMailReplyEventJson: string = '';
   private lastMailCalendarEventJson: string = '';
+  private appliedLuckinPatchTick: number = -1;
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
 
@@ -47,6 +60,11 @@ export struct HtmlHomeSurfaceView {
 
   private loadHtmlIfNeeded(): void {
     if (!this.webReady) {
+      return;
+    }
+    const patchPending = this.luckinInlinePatchTick > this.appliedLuckinPatchTick &&
+      this.luckinInlinePatchJson.length > 0;
+    if (patchPending && this.html === this.loadedKey) {
       return;
     }
     if (this.html.length === 0 || this.html === this.loadedKey) {
@@ -61,6 +79,7 @@ export struct HtmlHomeSurfaceView {
       this.lastMailDetailEventJson = '';
       this.lastMailReplyEventJson = '';
       this.lastMailCalendarEventJson = '';
+      this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
       if (this.isBusy) {
         this.busyFrameLoaded = true;
       }
@@ -71,7 +90,7 @@ export struct HtmlHomeSurfaceView {
     }
   }
 
-  onRenderStateChange(): void {
+  onHtmlOrBusyChange(): void {
     if (!this.isBusy) {
       this.busyFrameLoaded = false;
     }
@@ -136,6 +155,37 @@ export struct HtmlHomeSurfaceView {
 
   onMailCalendarEventChange(): void {
     this.pushMailCalendarEventIfNeeded();
+  }
+
+  onLuckinPatchTickChange(): void {
+    this.tryApplyLuckinInlinePatch();
+  }
+
+  private tryApplyLuckinInlinePatch(): boolean {
+    if (!this.webReady || this.luckinInlinePatchTick <= this.appliedLuckinPatchTick ||
+      this.luckinInlinePatchJson.length === 0) {
+      return false;
+    }
+    this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
+    const script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinConfirm){AIPhoneHome.patchLuckinConfirm(' +
+      JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+    try {
+      this.controller.runJavaScript(script);
+      aiLogInfo('[AIPhone][HtmlHomeLuckinPatch] tick=' + this.luckinInlinePatchTick.toString());
+      return true;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeLuckinPatchError] ' + JSON.stringify(error));
+      this.clearLuckinOptionUpdating();
+      return false;
+    }
+  }
+
+  private clearLuckinOptionUpdating(): void {
+    try {
+      this.controller.runJavaScript('try{if(window.AIPhoneHome&&AIPhoneHome.clearLuckinOptionUpdating){AIPhoneHome.clearLuckinOptionUpdating();}}catch(e){}');
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeLuckinUpdatingClearError] ' + JSON.stringify(error));
+    }
   }
 
   build() {

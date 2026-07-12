@@ -358,6 +358,130 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('payment.capture', 'capture', 'prompt', wrongOrder))).assertFalse();
     });
 
+    it('allows luckin confirm option preview actions with switched attrs', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      doc.blocks = [{
+        id: 'luckin-confirm',
+        kind: 'generic-tool-result',
+        title: '确认瑞幸订单',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'luckin.order.create',
+          label: '确认下单',
+          prompt: '确认创建瑞幸订单',
+          variant: 'primary',
+          kind: 'prompt',
+          args: {
+            deptId: '1001',
+            location: '114.0,22.5',
+            productId: '2002',
+            skuCode: 'SKU001',
+            quantity: 1
+          }
+        }]
+      }];
+      const optionPreview = action('luckin.order.preview', '生椰拿铁，少甜，冰', 'prompt', {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1,
+        previewPrompt: '生椰拿铁，少甜，冰',
+        attrGroup: '糖度',
+        attrChoice: '少甜'
+      });
+
+      expect(isHtmlHomeActionAllowed(doc, optionPreview)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', {
+        deptId: '1001',
+        attrGroup: '糖度',
+        attrChoice: '少甜'
+      }))).assertFalse();
+    });
+
+    it('allows luckin create after option switch when sku changes', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      doc.blocks = [{
+        id: 'luckin-confirm',
+        kind: 'generic-tool-result',
+        title: '确认瑞幸订单',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'luckin.order.create',
+          label: '确认下单',
+          prompt: '确认创建瑞幸订单',
+          variant: 'primary',
+          kind: 'prompt',
+          args: {
+            deptId: '1001',
+            location: '114.0,22.5',
+            productId: '2002',
+            skuCode: 'SKU001',
+            quantity: 1
+          }
+        }]
+      }];
+      const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU002',
+        previewPrompt: '生椰拿铁，少甜，冰',
+        quantity: 1
+      });
+
+      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertTrue();
+    });
+
+    it('allows luckin relocate refresh preview on luckin pages', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', '生椰拿铁', 'prompt', {
+        locationSource: 'refresh'
+      }))).assertTrue();
+    });
+
+    it('allows luckin payment page actions without exact snapshot match', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      doc.blocks = [{
+        id: 'luckin-payment',
+        kind: 'generic-tool-result',
+        title: '瑞幸订单已创建',
+        subtitle: '',
+        status: 'success',
+        source: '瑞幸',
+        metrics: [{ label: 'toolName', value: 'luckin.order.create' }],
+        rows: [{ label: '订单号', value: 'LK001' }],
+        actions: []
+      }];
+      doc.actions = [];
+
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', 'weixin://wxpay/bizpayurl?pr=abc', 'client', {
+        orderId: 'LK001'
+      }))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.alipay.open', 'alipays://', 'client', {
+        orderId: 'LK001'
+      }))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.googlepay.open', 'google pay', 'client', {
+        orderId: 'LK001'
+      }))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.status', '查询瑞幸订单状态', 'prompt', {
+        orderId: 'LK001'
+      }))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', '', 'client'))).assertTrue();
+    });
+
     it('allows only the current Stripe onboarding URL to open from HTML', 0, () => {
       const doc = documentFixture();
       doc.blocks.push({

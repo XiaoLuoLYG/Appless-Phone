@@ -56,6 +56,42 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'luckin.order.preview',
+    domain: 'luckin',
+    intent: 'luckin.order.preview',
+    riskLevel: 'draft',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderPreviewRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.create']
+  },
+  {
+    toolId: 'luckin.order.create',
+    domain: 'luckin',
+    intent: 'luckin.order.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.status']
+  },
+  {
+    toolId: 'luckin.order.status',
+    domain: 'luckin',
+    intent: 'luckin.order.status',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderStatusQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'social.feed.search',
     domain: 'social',
     intent: 'social.feed.search',
@@ -425,6 +461,11 @@ export function isMapsToolId(toolId: string): boolean {
 export function isPaymentToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'payment';
+}
+
+export function isLuckinToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'luckin';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

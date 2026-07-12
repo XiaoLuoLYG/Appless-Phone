@@ -457,6 +457,9 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
       block.mediaEmbed = mediaEmbed;
     }
     block.actions = htmlActions(actionsOf(component), component.id);
+    if (block.actions.length === 0 && document.actions.length > 0) {
+      block.actions = document.actions.slice();
+    }
     const mailAction = mailReplyDraftAction(item);
     if (mailAction !== null) {
       block.actions = block.actions.concat(htmlActions([mailAction], component.id));
@@ -997,6 +1000,9 @@ function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
   if (surface.intent === 'payment' || surface.intent === 'payment.account.setup' || hasPaymentData(surface)) {
     return 'payment';
   }
+  if (surface.intent === 'luckin') {
+    return 'luckin';
+  }
   if (hasComponent(surface, A2UI_COMPONENT_TOOL_CONNECT_CARD) ||
     hasComponent(surface, A2UI_COMPONENT_GENERIC_TOOL_RESULTS) ||
     surface.intent === 'dynamic_tool' ||
@@ -1015,7 +1021,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search') {
+  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin') {
     return 'tool';
   }
   return 'model';
