@@ -1366,6 +1366,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf(".block[data-source-key=\"composio-outlook\"]")).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(194, 70, 54, 0.45)')).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
+      expect(html.indexOf('mail-reply-overlay')).assertLarger(-1);
+      expect(html.indexOf("'编辑回复'")).assertLarger(-1);
+      expect(html.indexOf("'AI回复'")).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_ai_generate')).assertLarger(-1);
+      expect(html.indexOf("activeMailReply.aiButton.textContent = '...'")).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_save')).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_send')).assertLarger(-1);
+      expect(html.indexOf('window.scrollBy(0, afterTop - beforeTop)')).assertLarger(-1);
     });
 
     it('filters Gmail hero preview counts to mail blocks', 0, () => {

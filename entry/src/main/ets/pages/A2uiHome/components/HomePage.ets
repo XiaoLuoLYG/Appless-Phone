@@ -52,6 +52,9 @@ export struct HomePage {
   @Prop messages: A2uiMessage[] = [];
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop htmlHomeHtml: string = '';
+  @Prop mailDetailEventJson: string = '';
+  @Prop mailReplyEventJson: string = '';
+  @Prop mailCalendarEventJson: string = '';
   @Prop surfaceRenderTick: number = 0;
   @Prop isAwaitingFirstSurface: boolean = false;
   @Prop inputPlaceholder: string = '告诉 Appless Phone 你想完成什么';
@@ -368,6 +371,9 @@ export struct HomePage {
       } else {
         HtmlHomeSurfaceView({
           html: this.htmlHomeHtml,
+          mailDetailEventJson: this.mailDetailEventJson,
+          mailReplyEventJson: this.mailReplyEventJson,
+          mailCalendarEventJson: this.mailCalendarEventJson,
           isBusy: this.isBusy,
           renderTick: this.surfaceRenderTick,
           onAction: this.onAction

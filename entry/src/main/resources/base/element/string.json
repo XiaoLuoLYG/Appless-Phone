@@ -35,6 +35,10 @@
     {
       "name": "microphone_permission_reason",
       "value": "用于把语音输入转成发送栏文字"
+    },
+    {
+      "name": "calendar_permission_reason",
+      "value": "用于把确认后的会议邮件添加到系统日历"
     }
   ]
 }

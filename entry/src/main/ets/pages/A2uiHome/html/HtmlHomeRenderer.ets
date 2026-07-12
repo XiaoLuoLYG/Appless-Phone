@@ -1266,9 +1266,10 @@ body[data-scene="gmail"] .section {
   margin-top: 18px;
 }
 body[data-scene="gmail"] .block {
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 22px rgba(194, 70, 54, 0.08);
+  border-color: rgba(33, 27, 23, 0.08);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(42, 34, 27, 0.06);
 }
 body[data-scene="gmail"] .block-top {
   align-items: center;
@@ -1304,28 +1305,31 @@ body[data-scene] .block {
   padding: 14px;
 }
 body[data-scene] .block::before {
-  width: 5px;
-  background: linear-gradient(180deg, var(--kind-accent), transparent);
+  width: 0;
+  background: transparent;
 }
 body[data-scene="gmail"] .block {
-  border-color: rgba(194, 70, 54, 0.2);
+  border-color: rgba(33, 27, 23, 0.08);
+  padding: 0;
+  overflow: hidden;
 }
 body[data-scene="gmail"] .details {
-  border-top-color: rgba(194, 70, 54, 0.14);
+  border-top-color: rgba(33, 27, 23, 0.06);
 }
 body[data-scene="gmail"] .mail-tech-details {
-  margin-top: 10px;
-  border: 1px solid rgba(194, 70, 54, 0.12);
-  border-radius: 16px;
+  margin-top: 0;
+  border: 0;
+  border-top: 1px solid rgba(33, 27, 23, 0.06);
+  border-radius: 0;
   padding: 0;
-  background: rgba(255, 250, 244, 0.62);
+  background: #ffffff;
 }
 body[data-scene="gmail"] .mail-tech-details > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  color: #9b3f34;
+  padding: 13px 20px;
+  color: #9ca3af;
   font-size: 12px;
   font-weight: 760;
   list-style: none;
@@ -1335,7 +1339,7 @@ body[data-scene="gmail"] .mail-tech-details > summary::-webkit-details-marker {
 }
 body[data-scene="gmail"] .mail-tech-details > summary::after {
   content: "+";
-  color: rgba(155, 63, 52, 0.72);
+  color: #d1d5db;
   font-size: 16px;
   line-height: 1;
 }
@@ -1343,8 +1347,341 @@ body[data-scene="gmail"] .mail-tech-details[open] > summary::after {
   content: "-";
 }
 body[data-scene="gmail"] .mail-tech-body {
-  border-top: 1px solid rgba(194, 70, 54, 0.1);
-  padding: 0 12px 12px;
+  border-top: 1px solid rgba(33, 27, 23, 0.06);
+  padding: 0 20px 14px;
+}
+body[data-scene="gmail"] .block-top {
+  padding: 18px 20px 18px;
+}
+body[data-scene="gmail"] .block-title {
+  gap: 9px;
+}
+body[data-scene="gmail"] .block-title h3 {
+  margin-top: 2px;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1.26;
+}
+body[data-scene="gmail"] .block-title .subtitle {
+  display: none;
+}
+body[data-scene="gmail"] .kind-tag {
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--kind-accent) 20%, transparent);
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--kind-accent) 9%, white);
+  color: var(--kind-accent);
+  font-size: 12px;
+  font-weight: 680;
+}
+body[data-scene="gmail"] .expand-button {
+  color: #8c7a6b;
+  font-size: 14px;
+  font-weight: 680;
+  background: transparent;
+}
+body[data-scene="gmail"] .details {
+  padding: 0 20px 0;
+}
+.mail-detail-host {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 0;
+}
+.mail-detail-skeleton {
+  display: grid;
+  gap: 9px;
+  padding: 4px 0 8px;
+}
+.mail-skeleton-line {
+  height: 12px;
+  border-radius: 4px;
+  background: rgba(75, 66, 59, 0.13);
+  animation: mail-skeleton-pulse 1.15s ease-in-out infinite alternate;
+}
+.mail-skeleton-line.short { width: 42%; }
+.mail-skeleton-line.medium { width: 68%; }
+.mail-detail-meta {
+  display: grid;
+  gap: 5px;
+  border-bottom: 0;
+  padding: 6px 0 14px;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mail-detail-from {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 760;
+}
+.mail-detail-route {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mail-detail-body {
+  margin: 0;
+  color: #374151;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-bottom: 18px;
+}
+.mail-calendar-card {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+  border: 1px solid #ebe5d9;
+  border-radius: 12px;
+  padding: 14px;
+  background: #f8f6f1;
+}
+.mail-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mail-calendar-title {
+  min-width: 0;
+  color: #4a4036;
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.3;
+}
+.mail-calendar-confidence {
+  flex: 0 0 auto;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: #ffedd5;
+  color: #c2410c;
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+.mail-calendar-lines {
+  display: grid;
+  gap: 8px;
+  color: #5c544d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.mail-calendar-line {
+  display: flex;
+  gap: 12px;
+}
+.mail-calendar-label {
+  flex: 0 0 32px;
+  color: #8c7a6b;
+}
+.mail-calendar-value {
+  min-width: 0;
+  color: #4a4036;
+}
+.mail-calendar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+  border-top: 1px solid #ebe5d9;
+  padding-top: 12px;
+}
+.mail-calendar-status {
+  min-width: 0;
+  color: #8c7a6b;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.4;
+}
+.mail-calendar-status.error { color: #a13f35; }
+.mail-calendar-status.success { color: #2d6a4f; }
+.mail-calendar-add {
+  flex: 0 0 auto;
+  min-width: 104px;
+  border-radius: 8px;
+  background: #8c7a6b;
+  color: #ffffff;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(75, 66, 59, 0.1);
+}
+.mail-calendar-add:disabled {
+  border: 1px solid #d5cec4;
+  background: transparent;
+  color: #a89f91;
+  box-shadow: none;
+}
+.mail-detail-error {
+  color: #a13f35;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mail-reply-launch {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 18px;
+}
+.mail-reply-launch .action {
+  width: 100%;
+  min-width: 132px;
+  border-radius: 12px;
+  background: #262626;
+  color: #ffffff;
+  justify-content: center;
+}
+.mail-reply-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: transparent;
+  pointer-events: none;
+}
+.mail-reply-dialog {
+  width: min(432px, 100%);
+  max-height: min(560px, calc(100vh - 32px));
+  overflow: auto;
+  pointer-events: auto;
+  border: 1px solid rgba(229, 231, 235, 0.88);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 26px 70px rgba(17, 24, 39, 0.24);
+}
+.mail-reply-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.84);
+}
+.mail-reply-title {
+  flex: 1;
+  margin: 0;
+  color: #111827;
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: 0;
+}
+.mail-reply-ai {
+  min-width: 74px;
+  height: 32px;
+  border: 1px solid #ebe5d9;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #f8f6f1;
+  color: #7a6a5c;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+  box-shadow: 0 1px 5px rgba(75, 66, 59, 0.06);
+}
+.mail-reply-close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mail-reply-close:hover { background: #f9fafb; color: #4b5563; }
+.mail-reply-editor {
+  display: block;
+  width: calc(100% - 40px);
+  min-height: 180px;
+  margin: 20px;
+  resize: vertical;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fafafa;
+  color: #1f2937;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+  outline: none;
+}
+.mail-reply-editor:focus {
+  border-color: #8c7a6b;
+  box-shadow: 0 0 0 1px #8c7a6b;
+}
+.mail-reply-status {
+  min-height: 20px;
+  padding: 0 20px 10px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.mail-reply-status.error { color: #a13f35; }
+.mail-reply-status.success { color: #2d6a4f; }
+.mail-reply-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 20px 20px;
+}
+.mail-reply-footer .action {
+  width: 100%;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.06);
+}
+.mail-reply-footer .action.secondary {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #4b5563;
+}
+.mail-reply-footer .action.primary {
+  background: #262626;
+  color: #ffffff;
+}
+.aiphone-toast {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: 50%;
+  z-index: 180;
+  transform: translate(-50%, -18px);
+  opacity: 0;
+  pointer-events: none;
+  border: 1px solid rgba(47, 119, 84, 0.22);
+  border-radius: 999px;
+  padding: 10px 15px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #2d6a4f;
+  font-size: 13px;
+  font-weight: 720;
+  box-shadow: 0 14px 34px rgba(36, 31, 27, 0.14);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.aiphone-toast.visible {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+@media (max-width: 560px) {
+  .mail-reply-overlay { padding: 12px; }
+  .mail-reply-dialog { max-height: calc(100vh - 24px); }
+  .mail-reply-editor { min-height: 190px; }
+}
+@keyframes mail-skeleton-pulse {
+  from { opacity: 0.42; }
+  to { opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mail-skeleton-line { animation: none; opacity: 0.64; }
 }
 body[data-scene] .kind-tag {
   border-radius: 999px;
@@ -1375,6 +1712,59 @@ body[data-scene] .action.secondary {
   border-color: rgba(33, 27, 23, 0.1);
   background: rgba(255, 255, 255, 0.78);
   color: var(--scene-accent);
+}
+body[data-scene="gmail"] .mail-calendar-add.action.primary {
+  border: 0;
+  border-radius: 8px;
+  min-height: 30px;
+  padding: 7px 14px;
+  background: #8c7a6b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(75, 66, 59, 0.1);
+}
+body[data-scene="gmail"] .mail-calendar-add.action.primary:disabled {
+  border: 1px solid #d5cec4;
+  background: transparent;
+  color: #a89f91;
+  box-shadow: none;
+}
+body[data-scene="gmail"] .mail-reply-launch .action.primary {
+  border: 0;
+  min-height: 42px;
+  border-radius: 12px;
+  background: #262626;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
+}
+body[data-scene="gmail"] .mail-reply-ai.action.secondary {
+  min-width: 74px;
+  height: 32px;
+  border: 1px solid #ebe5d9;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #f8f6f1;
+  color: #7a6a5c;
+  font-size: 12px;
+  font-weight: 760;
+  box-shadow: 0 1px 5px rgba(75, 66, 59, 0.06);
+}
+body[data-scene="gmail"] .mail-reply-footer .action.secondary {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.04);
+}
+body[data-scene="gmail"] .mail-reply-footer .action.primary {
+  border: 0;
+  background: #262626;
+  color: #ffffff;
+  font-weight: 680;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
 }
 body[data-scene] .credential {
   border: 1px solid rgba(46, 111, 143, 0.22);
@@ -1466,6 +1856,11 @@ const HTML_HOME_JS: string = `
   var app = document.getElementById('app');
   if (!app) { return; }
   var localState = { travel: 'all', food: 'all', mail: 'all', trainFastest: false, trainAvailable: false, trainShowMore: false, expandedKey: '' };
+  var mailDetailEntries = {};
+  var mailCalendarSuggestions = {};
+  var mailReplyDrafts = {};
+  var activeMailReply = null;
+  var toastTimer = null;
   function text(value) {
     return value === undefined || value === null ? '' : String(value);
   }
@@ -1772,8 +2167,15 @@ const HTML_HOME_JS: string = `
   }
   function setExpandedCard(card) {
     var key = card.getAttribute('data-card-key') || '';
-    localState.expandedKey = localState.expandedKey === key ? '' : key;
+    var expanding = localState.expandedKey !== key;
+    var beforeTop = card.getBoundingClientRect().top;
+    localState.expandedKey = expanding ? key : '';
     applyExpandedState();
+    if (expanding) {
+      var afterTop = card.getBoundingClientRect().top;
+      window.scrollBy(0, afterTop - beforeTop);
+    }
+    if (expanding) { requestMailDetail(card); }
   }
   function expandCard(card) {
     localState.expandedKey = card.getAttribute('data-card-key') || '';
@@ -2009,6 +2411,403 @@ const HTML_HOME_JS: string = `
     } catch (error) {
     }
   }
+  function mailReplyActions(block) {
+    return list(block && block.actions).filter(function (action) {
+      var id = text(action && action.id);
+      return id === 'mail.ai.reply.draft' || id === 'gmail.ai.reply.draft';
+    });
+  }
+  function visibleMailActions(block) {
+    return list(block && block.actions).filter(function (action) {
+      var id = text(action && action.id);
+      return id !== 'html_mail_detail_read' && id !== 'mail.ai.reply.draft' && id !== 'gmail.ai.reply.draft';
+    });
+  }
+  function mailDetailAction(block) {
+    var actions = list(block && block.actions);
+    for (var index = 0; index < actions.length; index += 1) {
+      if (text(actions[index] && actions[index].id) === 'html_mail_detail_read') {
+        return actions[index];
+      }
+    }
+    return null;
+  }
+  function mailSkeleton(host) {
+    host.textContent = '';
+    var skeleton = add(host, 'div', 'mail-detail-skeleton');
+    add(skeleton, 'div', 'mail-skeleton-line short');
+    add(skeleton, 'div', 'mail-skeleton-line medium');
+    add(skeleton, 'div', 'mail-skeleton-line');
+    add(skeleton, 'div', 'mail-skeleton-line');
+    skeleton.setAttribute('aria-label', '正在加载邮件正文');
+  }
+  function displayNameFromAddress(value) {
+    var raw = text(value).trim();
+    var left = raw.indexOf('<');
+    if (left > 0) {
+      var name = raw.substring(0, left).replace(/^["“]+|["”]+$/g, '').trim();
+      if (name.length > 0) { return name; }
+    }
+    var at = raw.indexOf('@');
+    if (at > 0) { return raw.substring(0, at); }
+    return raw;
+  }
+  function emailFromAddress(value) {
+    var raw = text(value).trim();
+    var match = raw.match(/<([^>]+)>/);
+    if (match && match[1]) { return match[1].trim(); }
+    var bare = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);
+    return bare && bare[0] ? bare[0].trim() : '';
+  }
+  function mailRouteText(detail) {
+    var fromEmail = emailFromAddress(detail.from);
+    var to = list(detail.to);
+    var firstToName = to.length > 0 ? displayNameFromAddress(to[0]) : '';
+    var route = fromEmail.length > 0 ? fromEmail : text(detail.from);
+    if (route.length === 0) { route = '发件人'; }
+    if (firstToName.length > 0) {
+      route += ' 发给 ' + firstToName + ' (我)';
+    }
+    return route;
+  }
+  function copiedMailReplyArgs(action, detail, requestKey) {
+    var source = action && action.args && typeof action.args === 'object' ? action.args : {};
+    var args = {};
+    Object.keys(source).forEach(function (key) { args[key] = source[key]; });
+    var recipient = text(detail.replyTo) || text(detail.from);
+    args.requestKey = requestKey;
+    args.provider = text(detail.provider) || text(args.provider);
+    args.threadId = text(detail.threadId) || text(args.threadId);
+    args.messageId = text(detail.messageId) || text(args.messageId);
+    args.internetMessageId = text(detail.internetMessageId);
+    args.to = recipient.length > 0 ? [recipient] : list(args.to);
+    args.subject = text(detail.subject).indexOf('Re:') === 0 ? text(detail.subject) : 'Re: ' + text(detail.subject);
+    args.replyMode = 'reply';
+    args.contextSummary = text(detail.subject) + '\\n\\n' + text(detail.bodyText);
+    args.body = '';
+    return args;
+  }
+  function closeMailReply() {
+    if (!activeMailReply) { return; }
+    mailReplyDrafts[activeMailReply.requestKey] = activeMailReply.editor.value;
+    if (activeMailReply.overlay.parentNode) {
+      activeMailReply.overlay.parentNode.removeChild(activeMailReply.overlay);
+    }
+    activeMailReply = null;
+  }
+  function submitMailReply(operation) {
+    if (!activeMailReply || activeMailReply.busy) { return; }
+    var body = activeMailReply.editor.value.trim();
+    mailReplyDrafts[activeMailReply.requestKey] = activeMailReply.editor.value;
+    if (body.length === 0) {
+      activeMailReply.status.className = 'mail-reply-status error';
+      activeMailReply.status.textContent = '请输入回复内容。';
+      return;
+    }
+    if (list(activeMailReply.args.to).length === 0) {
+      activeMailReply.status.className = 'mail-reply-status error';
+      activeMailReply.status.textContent = '这封邮件缺少可回复的发件人地址。';
+      return;
+    }
+    activeMailReply.busy = true;
+    activeMailReply.saveButton.disabled = true;
+    activeMailReply.sendButton.disabled = true;
+    activeMailReply.status.className = 'mail-reply-status';
+    activeMailReply.status.textContent = operation === 'draft' ? '正在保存草稿…' : '正在发送回复…';
+    var args = {};
+    Object.keys(activeMailReply.args).forEach(function (key) { args[key] = activeMailReply.args[key]; });
+    args.body = body;
+    postAction({
+      id: operation === 'draft' ? 'html_mail_reply_save' : 'html_mail_reply_send',
+      label: operation === 'draft' ? '保存草稿' : '发送回复',
+      prompt: activeMailReply.requestKey,
+      variant: operation === 'draft' ? 'secondary' : 'primary',
+      kind: 'client',
+      args: args
+    });
+  }
+  function requestMailReplyAiDraft() {
+    if (!activeMailReply || activeMailReply.busy) { return; }
+    activeMailReply.busy = true;
+    activeMailReply.aiButton.disabled = true;
+    activeMailReply.saveButton.disabled = true;
+    activeMailReply.sendButton.disabled = true;
+    activeMailReply.aiButton.textContent = '...';
+    activeMailReply.status.className = 'mail-reply-status';
+    activeMailReply.status.textContent = '正在生成回复草稿…';
+    postAction({
+      id: 'html_mail_reply_ai_generate',
+      label: 'AI回复',
+      prompt: activeMailReply.requestKey,
+      variant: 'secondary',
+      kind: 'client',
+      args: activeMailReply.args
+    });
+  }
+  function openMailReply(entry, detail) {
+    if (!entry.replyAction) { return; }
+    if (activeMailReply) { closeMailReply(); }
+    var requestKey = text(detail.requestKey) || text(entry.detailAction.prompt);
+    var overlay = add(document.body, 'div', 'mail-reply-overlay');
+    var dialog = add(overlay, 'section', 'mail-reply-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'false');
+    var header = add(dialog, 'header', 'mail-reply-header');
+    add(header, 'h2', 'mail-reply-title', '编辑回复');
+    var aiButton = add(header, 'button', 'action secondary mail-reply-ai', 'AI回复');
+    aiButton.type = 'button';
+    var closeButton = add(header, 'button', 'mail-reply-close', '×');
+    closeButton.type = 'button';
+    closeButton.setAttribute('aria-label', '关闭');
+    var editor = document.createElement('textarea');
+    editor.className = 'mail-reply-editor';
+    editor.value = text(mailReplyDrafts[requestKey]);
+    dialog.appendChild(editor);
+    var status = add(dialog, 'div', 'mail-reply-status', '');
+    var footer = add(dialog, 'footer', 'mail-reply-footer');
+    var saveButton = add(footer, 'button', 'action secondary', '保存草稿');
+    var sendButton = add(footer, 'button', 'action primary', '发送回复');
+    saveButton.type = 'button';
+    sendButton.type = 'button';
+    activeMailReply = {
+      requestKey: requestKey,
+      overlay: overlay,
+      editor: editor,
+      status: status,
+      aiButton: aiButton,
+      saveButton: saveButton,
+      sendButton: sendButton,
+      args: copiedMailReplyArgs(entry.replyAction, detail, requestKey),
+      busy: false
+    };
+    editor.addEventListener('input', function () { mailReplyDrafts[requestKey] = editor.value; });
+    closeButton.addEventListener('click', closeMailReply);
+    aiButton.addEventListener('click', function () { requestMailReplyAiDraft(); });
+    saveButton.addEventListener('click', function () { submitMailReply('draft'); });
+    sendButton.addEventListener('click', function () { submitMailReply('send'); });
+    editor.focus();
+  }
+  function renderMailReplyLaunch(entry, detail) {
+    entry.replyHost.textContent = '';
+    if (!entry.replyAction) { return; }
+    var wrap = add(entry.replyHost, 'div', 'mail-reply-launch');
+    var button = add(wrap, 'button', 'action primary', '回复');
+    button.type = 'button';
+    button.addEventListener('click', function (event) {
+      event.stopPropagation();
+      openMailReply(entry, detail);
+    });
+  }
+  function showToast(message) {
+    var toast = document.querySelector('.aiphone-toast');
+    if (!toast) {
+      toast = add(document.body, 'div', 'aiphone-toast');
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
+    }
+    toast.textContent = text(message) || '已完成';
+    toast.classList.add('visible');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () {
+      toast.classList.remove('visible');
+    }, 2600);
+  }
+  function calendarSuggestionReady(suggestion) {
+    return !!suggestion &&
+      !!suggestion.isWorkRelated &&
+      !!suggestion.hasMeeting &&
+      text(suggestion.start).length > 0 &&
+      text(suggestion.title).length > 0;
+  }
+  function addCalendarLine(parent, label, value) {
+    var clean = text(value);
+    if (clean.length === 0) { return; }
+    var row = add(parent, 'div', 'mail-calendar-line');
+    add(row, 'span', 'mail-calendar-label', label);
+    add(row, 'span', 'mail-calendar-value', clean);
+  }
+  function padTimePart(value) {
+    return value < 10 ? '0' + value : String(value);
+  }
+  function parseCalendarDate(value) {
+    var clean = text(value);
+    if (clean.length === 0) { return null; }
+    var date = new Date(clean);
+    return isNaN(date.getTime()) ? null : date;
+  }
+  function formatCalendarDate(date) {
+    return (date.getMonth() + 1) + '月' + date.getDate() + '日';
+  }
+  function formatCalendarClock(date) {
+    return padTimePart(date.getHours()) + ':' + padTimePart(date.getMinutes());
+  }
+  function formatCalendarDateTime(date) {
+    return formatCalendarDate(date) + ' ' + formatCalendarClock(date);
+  }
+  function formatCalendarTimeRange(suggestion) {
+    var modelTime = text(suggestion && suggestion.displayTime);
+    if (modelTime.length > 0) { return modelTime; }
+    var start = parseCalendarDate(suggestion && suggestion.start);
+    var end = parseCalendarDate(suggestion && suggestion.end);
+    if (!start) { return text(suggestion && suggestion.start); }
+    if (!end) { return formatCalendarDateTime(start); }
+    if (start.getFullYear() === end.getFullYear() &&
+      start.getMonth() === end.getMonth() &&
+      start.getDate() === end.getDate()) {
+      return formatCalendarDate(start) + ' ' + formatCalendarClock(start) + '-' + formatCalendarClock(end);
+    }
+    return formatCalendarDateTime(start) + ' - ' + formatCalendarDateTime(end);
+  }
+  function cleanCalendarDescription(value) {
+    var lines = text(value).split('\\n');
+    var kept = [];
+    lines.forEach(function (line) {
+      var clean = text(line).trim();
+      if (clean.length === 0) { return; }
+      if (/^(来源|邮件来源|Source|发件人|From)\\s*[:：]/i.test(clean)) { return; }
+      kept.push(clean);
+    });
+    return kept.join('\\n')
+      .replace(/[；;，,。\\s]*(来源|邮件来源|Source|发件人|From)\\s*[:：][^\\n]*$/i, '')
+      .trim();
+  }
+  function renderMailCalendarSuggestion(entry, detail, suggestion) {
+    entry.calendarHost.textContent = '';
+    if (!calendarSuggestionReady(suggestion)) { return; }
+    var card = add(entry.calendarHost, 'section', 'mail-calendar-card');
+    var head = add(card, 'div', 'mail-calendar-head');
+    add(head, 'div', 'mail-calendar-title', text(suggestion.title));
+    add(head, 'div', 'mail-calendar-confidence', text(suggestion.confidence) || 'medium');
+    var lines = add(card, 'div', 'mail-calendar-lines');
+    addCalendarLine(lines, '时间', formatCalendarTimeRange(suggestion));
+    addCalendarLine(lines, '地点', suggestion.location);
+    addCalendarLine(lines, '内容', cleanCalendarDescription(suggestion.description));
+    addCalendarLine(lines, '来源', displayNameFromAddress(detail.from) + ' 邮件');
+    var footer = add(card, 'div', 'mail-calendar-footer');
+    var status = add(footer, 'div', 'mail-calendar-status', '已识别为会议日程');
+    var button = add(footer, 'button', 'action primary mail-calendar-add', '添加日程');
+    button.type = 'button';
+    entry.calendarStatus = status;
+    entry.calendarButton = button;
+    button.addEventListener('click', function (event) {
+      event.stopPropagation();
+      if (button.disabled) { return; }
+      button.disabled = true;
+      status.className = 'mail-calendar-status';
+      status.textContent = '正在添加到手机日历…';
+      postAction({
+        id: 'html_mail_calendar_add',
+        label: '添加日程',
+        prompt: text(detail.requestKey),
+        variant: 'primary',
+        kind: 'client',
+        args: {
+          requestKey: text(detail.requestKey),
+          provider: text(detail.provider),
+          threadId: text(detail.threadId),
+          messageId: text(detail.messageId)
+        }
+      });
+    });
+  }
+  function renderMailDetail(entry, detail) {
+    entry.host.textContent = '';
+    entry.replyHost.textContent = '';
+    entry.calendarHost.textContent = '';
+    var meta = add(entry.host, 'div', 'mail-detail-meta');
+    add(meta, 'div', 'mail-detail-from', displayNameFromAddress(detail.from) || '邮件发件人');
+    add(meta, 'div', 'mail-detail-route', mailRouteText(detail));
+    add(entry.host, 'pre', 'mail-detail-body', text(detail.bodyText) || '邮件正文为空。');
+    renderMailCalendarSuggestion(entry, detail, mailCalendarSuggestions[text(detail.requestKey)]);
+    renderMailReplyLaunch(entry, detail);
+  }
+  function renderMailDetailError(entry, message) {
+    entry.host.textContent = '';
+    entry.calendarHost.textContent = '';
+    add(entry.host, 'div', 'mail-detail-error', text(message) || '邮件正文加载失败。');
+    var retry = add(entry.host, 'button', 'action secondary', '重试');
+    retry.type = 'button';
+    retry.addEventListener('click', function (event) {
+      event.stopPropagation();
+      entry.status = '';
+      requestMailDetail(entry.card);
+    });
+  }
+  function requestMailDetail(card) {
+    var key = card.getAttribute('data-mail-detail-key') || '';
+    var entry = mailDetailEntries[key];
+    if (!entry || entry.status === 'loading' || entry.status === 'success') { return; }
+    entry.status = 'loading';
+    mailSkeleton(entry.host);
+    postAction(entry.detailAction);
+  }
+  window.__aiphoneApplyMailDetail = function (event) {
+    var key = text(event && event.requestKey);
+    var entry = mailDetailEntries[key];
+    if (!entry) { return; }
+    if (text(event && event.status) === 'success' && event.detail) {
+      entry.status = 'success';
+      if (event.calendarSuggestion) {
+        mailCalendarSuggestions[key] = event.calendarSuggestion;
+      }
+      renderMailDetail(entry, event.detail);
+      return;
+    }
+    entry.status = 'error';
+    renderMailDetailError(entry, event && event.error);
+  };
+  window.__aiphoneApplyMailCalendar = function (event) {
+    var key = text(event && event.requestKey);
+    var entry = mailDetailEntries[key];
+    if (!entry) { return; }
+    if (entry.calendarButton) {
+      entry.calendarButton.disabled = false;
+    }
+    if (!entry.calendarStatus) { return; }
+    if (text(event && event.status) === 'success') {
+      entry.calendarStatus.className = 'mail-calendar-status success';
+      entry.calendarStatus.textContent = text(event && event.message) || '已添加日程';
+      if (entry.calendarButton) {
+        entry.calendarButton.disabled = true;
+        entry.calendarButton.textContent = '已添加';
+      }
+      showToast(text(event && event.message) || '已添加日程');
+      return;
+    }
+    entry.calendarStatus.className = 'mail-calendar-status error';
+    entry.calendarStatus.textContent = text(event && event.error) || '添加日程失败';
+  };
+  window.__aiphoneApplyMailReply = function (event) {
+    if (!activeMailReply || text(event && event.requestKey) !== activeMailReply.requestKey) { return; }
+    activeMailReply.busy = false;
+    activeMailReply.aiButton.disabled = false;
+    activeMailReply.saveButton.disabled = false;
+    activeMailReply.sendButton.disabled = false;
+    activeMailReply.aiButton.textContent = 'AI回复';
+    if (text(event && event.operation) === 'ai') {
+      if (text(event && event.status) === 'success') {
+        activeMailReply.editor.value = text(event.message);
+        mailReplyDrafts[activeMailReply.requestKey] = activeMailReply.editor.value;
+        activeMailReply.status.className = 'mail-reply-status success';
+        activeMailReply.status.textContent = 'AI 回复已填入，可继续编辑。';
+        activeMailReply.editor.focus();
+        return;
+      }
+      activeMailReply.status.className = 'mail-reply-status error';
+      activeMailReply.status.textContent = text(event && event.error) || 'AI 回复生成失败，请重试。';
+      return;
+    }
+    if (text(event && event.status) === 'success') {
+      delete mailReplyDrafts[activeMailReply.requestKey];
+      activeMailReply.editor.value = '';
+      activeMailReply.status.className = 'mail-reply-status success';
+      activeMailReply.status.textContent = text(event.message) || '操作成功。';
+      setTimeout(closeMailReply, 700);
+      return;
+    }
+    activeMailReply.status.className = 'mail-reply-status error';
+    activeMailReply.status.textContent = text(event && event.error) || '操作失败，请重试。';
+  };
   function metricValue(block, labels) {
     var items = list(block && block.metrics).concat(list(block && block.rows));
     for (var itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
@@ -2412,8 +3211,32 @@ const HTML_HOME_JS: string = `
       add(card, 'div', 'value', item.value);
     });
   }
-  function addMailExpandedDetails(parent, block) {
-    addActions(parent, block.actions);
+  function addMailExpandedDetails(parent, block, card) {
+    var detailAction = mailDetailAction(block);
+    if (detailAction) {
+      var requestKey = text(detailAction.prompt);
+      var detailHost = add(parent, 'div', 'mail-detail-host');
+      var calendarHost = add(parent, 'div', 'mail-calendar-host');
+      var replyHost = add(parent, 'div', 'mail-reply-actions');
+      detailHost.addEventListener('click', function (event) { event.stopPropagation(); });
+      calendarHost.addEventListener('click', function (event) { event.stopPropagation(); });
+      replyHost.addEventListener('click', function (event) { event.stopPropagation(); });
+      if (card && requestKey.length > 0) {
+        card.setAttribute('data-mail-detail-key', requestKey);
+        mailDetailEntries[requestKey] = {
+          card: card,
+          host: detailHost,
+          calendarHost: calendarHost,
+          replyHost: replyHost,
+          detailAction: detailAction,
+          replyAction: mailReplyActions(block).length > 0 ? mailReplyActions(block)[0] : null,
+          status: ''
+        };
+      }
+      addActions(parent, visibleMailActions(block));
+    } else {
+      addActions(parent, block.actions);
+    }
     var hasTechDetails = list(block && block.metrics).length > 0 ||
       list(block && block.rows).length > 0 ||
       text(block && block.rawPreview).length > 0;
@@ -2587,7 +3410,7 @@ const HTML_HOME_JS: string = `
         addMediaEmbed(detailHost, block);
         addStripeReceivingOnboarding(detailHost, block);
         if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
-          addMailExpandedDetails(detailHost, block);
+          addMailExpandedDetails(detailHost, block, card);
         } else {
           addActions(detailHost, block.actions);
           addPairs(detailHost, block.metrics, 'metrics');

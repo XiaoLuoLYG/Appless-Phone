@@ -1,6 +1,6 @@
 import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
@@ -68,6 +68,17 @@ import {
 import { AssetCredentialStore } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri } from '@loop/agent-core';
 import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
+import {
+  MailDetail,
+  MailDetailRequest,
+  MailCalendarSuggestion,
+  MailReplyCommand,
+  MailReplyOperationResult,
+  addHuaweiCalendarEvent,
+  readConfiguredMailDetail,
+  saveConfiguredMailDraft,
+  sendConfiguredMailReply
+} from '@loop/agent-core';
 import { copyPersonaData } from '../../model/PersonaA2ui';
 import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
@@ -119,6 +130,8 @@ const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
+const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
+const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -127,6 +140,66 @@ interface HtmlDynamicCredentialPayload {
   credentialValue?: HtmlActionValue;
   toolId?: HtmlActionValue;
   prompt?: HtmlActionValue;
+}
+
+interface MailDetailUiEvent {
+  sequence: number;
+  requestKey: string;
+  status: string;
+  detail?: MailDetail;
+  calendarSuggestion?: MailCalendarSuggestion;
+  error: string;
+}
+
+interface MailCalendarUiEvent {
+  sequence: number;
+  requestKey: string;
+  status: string;
+  message: string;
+  eventId: string;
+  error: string;
+}
+
+interface MailCalendarActionArgs {
+  requestKey?: HtmlActionValue;
+  provider?: HtmlActionValue;
+  threadId?: HtmlActionValue;
+  messageId?: HtmlActionValue;
+}
+
+interface MailCalendarSuggestionSchemaText {
+  isWorkRelated: string;
+  hasMeeting: string;
+  title: string;
+  start: string;
+  end: string;
+  displayTime: string;
+  timezone: string;
+  location: string;
+  description: string;
+  confidence: string;
+  reason: string;
+}
+
+interface MailReplyUiEvent {
+  sequence: number;
+  requestKey: string;
+  operation: string;
+  status: string;
+  message: string;
+  error: string;
+}
+
+interface MailReplyAiArgs {
+  requestKey?: HtmlActionValue;
+  provider?: HtmlActionValue;
+  accountLabel?: HtmlActionValue;
+  threadId?: HtmlActionValue;
+  messageId?: HtmlActionValue;
+  to?: HtmlActionValue;
+  subject?: HtmlActionValue;
+  replyMode?: HtmlActionValue;
+  contextSummary?: HtmlActionValue;
 }
 
 interface HtmlPinPayload {
@@ -217,6 +290,76 @@ function modelPromptWithActionContext(prompt: string, actionId: string, args: Ob
     (args === null ? '{}' : JSON.stringify(args));
 }
 
+function stripMailReplyAiText(text: string): string {
+  let value = text.trim();
+  const finalAnswerIndex = value.lastIndexOf('final_answer:');
+  if (finalAnswerIndex >= 0) {
+    value = value.substring(finalAnswerIndex + 'final_answer:'.length).trim();
+  }
+  const finalIndex = value.lastIndexOf('Final:');
+  if (finalIndex >= 0) {
+    value = value.substring(finalIndex + 'Final:'.length).trim();
+  }
+  const modelIndex = value.lastIndexOf('MODEL:');
+  if (modelIndex >= 0) {
+    value = value.substring(modelIndex + 'MODEL:'.length).trim();
+  }
+  const errorIndex = value.indexOf('\nERROR:');
+  if (errorIndex >= 0) {
+    value = value.substring(0, errorIndex).trim();
+  }
+  if (value.startsWith('```')) {
+    const firstBreak = value.indexOf('\n');
+    const lastFence = value.lastIndexOf('```');
+    if (firstBreak >= 0 && lastFence > firstBreak) {
+      value = value.substring(firstBreak + 1, lastFence).trim();
+    }
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('“') && value.endsWith('”'))) {
+    value = value.substring(1, value.length - 1).trim();
+  }
+  return value;
+}
+
+function jsonObjectTextFromModel(text: string): string {
+  let value = text.trim();
+  const finalAnswerIndex = value.lastIndexOf('final_answer:');
+  if (finalAnswerIndex >= 0) {
+    value = value.substring(finalAnswerIndex + 'final_answer:'.length).trim();
+  }
+  const finalIndex = value.lastIndexOf('Final:');
+  if (finalIndex >= 0) {
+    value = value.substring(finalIndex + 'Final:'.length).trim();
+  }
+  if (value.startsWith('```')) {
+    const firstBreak = value.indexOf('\n');
+    const lastFence = value.lastIndexOf('```');
+    if (firstBreak >= 0 && lastFence > firstBreak) {
+      value = value.substring(firstBreak + 1, lastFence).trim();
+    }
+  }
+  const left = value.indexOf('{');
+  const right = value.lastIndexOf('}');
+  if (left >= 0 && right > left) {
+    return value.substring(left, right + 1);
+  }
+  return value;
+}
+
+function calendarPermissionGranted(permissions: string[], authResults: number[]): boolean {
+  if (authResults.length === 0) {
+    return false;
+  }
+  const readIndex = permissions.indexOf(READ_CALENDAR_PERMISSION);
+  const writeIndex = permissions.indexOf(WRITE_CALENDAR_PERMISSION);
+  if (permissions.length === 0) {
+    return authResults.length >= 2 && authResults[0] === 0 && authResults[1] === 0;
+  }
+  return readIndex >= 0 && writeIndex >= 0 &&
+    authResults.length > readIndex && authResults.length > writeIndex &&
+    authResults[readIndex] === 0 && authResults[writeIndex] === 0;
+}
+
 @Entry
 @Component
 struct Index {
@@ -263,6 +406,10 @@ struct Index {
   @State composioAuthItems: ComposioAuthConfigItem[] = [];
   @State composioAuthMessage: string = '';
   @State composioAuthBusy: boolean = false;
+  @State mailDetailEventJson: string = '';
+  @State mailReplyEventJson: string = '';
+  @State mailCalendarEventJson: string = '';
+  private mailCalendarSuggestions: Record<string, MailCalendarSuggestion> = {};
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
@@ -1689,9 +1836,22 @@ struct Index {
   }
 
   private logHtmlHomeActionError(action: A2uiAction, reason: string): void {
+    const argsChars = action.args === undefined ? 0 : JSON.stringify(action.args).length;
     aiLogError('[AIPhone][HtmlHomeAction] id=' + action.id +
       ' ok=false reason=' + reason +
-      ' promptChars=' + action.prompt.length.toString());
+      ' kind=' + action.kind +
+      ' promptChars=' + action.prompt.length.toString() +
+      ' argsChars=' + argsChars.toString());
+    if (action.id === 'html_mail_reply_ai_generate' && action.args !== undefined) {
+      const args = action.args as MailReplyAiArgs;
+      aiLogError('[AIPhone][HtmlHomeMailReplyAiBlocked] prompt=' + action.prompt +
+        ' requestKey=' + this.actionText(args.requestKey) +
+        ' provider=' + this.actionText(args.provider) +
+        ' threadId=' + this.actionText(args.threadId) +
+        ' messageId=' + this.actionText(args.messageId) +
+        ' subjectChars=' + this.actionText(args.subject).length.toString() +
+        ' contextChars=' + this.actionText(args.contextSummary).length.toString());
+    }
   }
 
   private async handleHtmlPinAction(action: A2uiAction): Promise<boolean> {
@@ -1817,6 +1977,294 @@ struct Index {
       return value.toString();
     }
     return '';
+  }
+
+  private emptyMailCalendarSuggestion(detail: MailDetail, reason: string): MailCalendarSuggestion {
+    return {
+      requestKey: detail.requestKey,
+      provider: detail.provider,
+      threadId: detail.threadId,
+      messageId: detail.messageId,
+      isWorkRelated: false,
+      hasMeeting: false,
+      title: '',
+      start: '',
+      end: '',
+      displayTime: '',
+      timezone: 'Asia/Shanghai',
+      location: '',
+      description: '',
+      confidence: 'low',
+      reason: reason
+    };
+  }
+
+  private payloadBool(payload: Record<string, HtmlActionValue>, key: string): boolean {
+    const value = payload[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    return this.actionText(value).trim().toLowerCase() === 'true';
+  }
+
+  private payloadText(payload: Record<string, HtmlActionValue>, key: string): string {
+    return this.actionText(payload[key]).trim();
+  }
+
+  private cleanMailCalendarDescription(value: string): string {
+    const lines: string[] = value.split('\n');
+    const kept: string[] = [];
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      if (/^(来源|邮件来源|Source|发件人|From)\s*[:：]/i.test(line)) {
+        continue;
+      }
+      kept.push(line);
+    }
+    return kept.join('\n')
+      .replace(/[；;，,。\s]*(来源|邮件来源|Source|发件人|From)\s*[:：][^\n]*$/i, '')
+      .trim();
+  }
+
+  private mailCalendarSuggestionPrompt(detail: MailDetail): string {
+    const schema: MailCalendarSuggestionSchemaText = {
+      isWorkRelated: 'boolean，邮件是否与工作/学习/会议协作相关',
+      hasMeeting: 'boolean，正文是否明确包含可加入日历的会议/活动/面试/评审等日程',
+      title: 'string，适合放入日历的短标题',
+      start: 'string，ISO 8601 日期时间，必须含时区，例如 2026-07-10T15:00:00+08:00；无法确定则空字符串',
+      end: 'string，ISO 8601 日期时间，必须含时区；无法确定结束时间则按开始后30分钟估计',
+      displayTime: 'string，面向界面展示的中文时间，例如 7月10日 15:00-15:30；无法确定则空字符串',
+      timezone: 'string，默认 Asia/Shanghai',
+      location: 'string，会议地点、线上会议链接或空字符串',
+      description: 'string，100字以内会议内容摘要，只写会议/活动本身；不得包含来源、邮件来源、发件人、邮箱等信息',
+      confidence: 'string，只能是 high/medium/low',
+      reason: 'string，简短说明判断依据'
+    };
+    return '请分析下面邮件是否为工作相关会议，并抽取可写入手机日历的结构化信息。' +
+      '不要调用工具，不要写邮件，不要解释。必须只输出一个 JSON 对象，且完全符合这个 schema：' +
+      JSON.stringify(schema) +
+      '\n规则：' +
+      '\n1. 只有明确有会议、面试、评审、同步会、deadline 日程等时间安排时 hasMeeting=true。' +
+      '\n2. 时间必须基于邮件标题和正文，不要编造日期；只有相对日期但无法确定基准日期时 start 置空。' +
+      '\n3. 如果有开始时间但没有结束时间，end 使用开始时间后 30 分钟。' +
+      '\n4. displayTime 是 start/end 的中文可读表达，不要输出 ISO 原文。' +
+      '\n5. description 不要写“来源：...”“邮件来源：...”“From：...”或发件人邮箱，来源由界面单独展示。' +
+      '\n6. 如果不是工作相关或没有明确时间，仍输出完整 JSON，但按钮字段应为 false/空字符串。' +
+      '\n当前设备时间: ' + new Date().toISOString() +
+      '\n邮件主题: ' + detail.subject +
+      '\nFrom: ' + detail.from +
+      '\nTo: ' + JSON.stringify(detail.to) +
+      '\n正文:\n' + detail.bodyText;
+  }
+
+  private parseMailCalendarSuggestion(detail: MailDetail, raw: string): MailCalendarSuggestion {
+    try {
+      const jsonText = jsonObjectTextFromModel(raw);
+      const payload = JSON.parse(jsonText) as Record<string, HtmlActionValue>;
+      const start = this.payloadText(payload, 'start');
+      const end = this.payloadText(payload, 'end');
+      const isWorkRelated = this.payloadBool(payload, 'isWorkRelated');
+      const hasMeeting = this.payloadBool(payload, 'hasMeeting') && start.length > 0;
+      return {
+        requestKey: detail.requestKey,
+        provider: detail.provider,
+        threadId: detail.threadId,
+        messageId: detail.messageId,
+        isWorkRelated: isWorkRelated,
+        hasMeeting: hasMeeting,
+        title: this.payloadText(payload, 'title'),
+        start: start,
+        end: end,
+        displayTime: this.payloadText(payload, 'displayTime'),
+        timezone: this.payloadText(payload, 'timezone').length > 0 ? this.payloadText(payload, 'timezone') : 'Asia/Shanghai',
+        location: this.payloadText(payload, 'location'),
+        description: this.cleanMailCalendarDescription(this.payloadText(payload, 'description')),
+        confidence: this.payloadText(payload, 'confidence').length > 0 ? this.payloadText(payload, 'confidence') : 'low',
+        reason: this.payloadText(payload, 'reason')
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailCalendarSuggestionParseFailed] ' + message.substring(0, 240));
+      return this.emptyMailCalendarSuggestion(detail, '日程解析失败：' + message.substring(0, 120));
+    }
+  }
+
+  private async extractMailCalendarSuggestion(detail: MailDetail): Promise<MailCalendarSuggestion> {
+    if (this.baseUrl.trim().length === 0 || detail.bodyText.trim().length === 0) {
+      return this.emptyMailCalendarSuggestion(detail, '模型未配置或正文为空。');
+    }
+    const prompt = this.mailCalendarSuggestionPrompt(detail);
+    aiLogInfo('[AIPhone][MailCalendarSuggestionRequest] requestKey=' + detail.requestKey +
+      ' subjectChars=' + detail.subject.length.toString() +
+      ' bodyChars=' + detail.bodyText.length.toString() +
+      ' promptChars=' + prompt.length.toString());
+    try {
+      const result: A2uiCallResult = await callLocalModel(
+        this.getSettings(),
+        prompt,
+        this.recentMessages(),
+        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
+        null,
+        null,
+        null
+      );
+      const raw = result.assistantDebug.length > 0 ? result.assistantDebug : result.raw;
+      if (!result.ok || raw.trim().length === 0) {
+        return this.emptyMailCalendarSuggestion(detail, result.error.length > 0 ? result.error : '模型没有返回日程结构。');
+      }
+      const suggestion = this.parseMailCalendarSuggestion(detail, raw);
+      aiLogInfo('[AIPhone][MailCalendarSuggestionDone] requestKey=' + detail.requestKey +
+        ' work=' + (suggestion.isWorkRelated ? 'true' : 'false') +
+        ' meeting=' + (suggestion.hasMeeting ? 'true' : 'false') +
+        ' start=' + suggestion.start);
+      return suggestion;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailCalendarSuggestionFailed] ' + message.substring(0, 240));
+      return this.emptyMailCalendarSuggestion(detail, message);
+    }
+  }
+
+  private mailReplyAiPrompt(args: MailReplyAiArgs): string {
+    const recipients = args.to === undefined ? '' : JSON.stringify(args.to);
+    return '请为下面这封邮件生成一段简短、礼貌、工作风格的回复正文。' +
+      '不要调用工具，不要保存草稿，不要发送邮件。最后必须只用一行输出，格式为 Final: <回复正文>。' +
+      '不要输出 JSON，不要输出 Action。' +
+      '\n收件人: ' + recipients +
+      '\n主题: ' + this.actionText(args.subject) +
+      '\n邮件上下文:\n' + this.actionText(args.contextSummary);
+  }
+
+  private mailReplyAiEvent(requestKey: string, status: string, message: string, error: string): void {
+    const event: MailReplyUiEvent = {
+      sequence: Date.now(),
+      requestKey: requestKey,
+      operation: 'ai',
+      status: status,
+      message: message,
+      error: error
+    };
+    this.mailReplyEventJson = JSON.stringify(event);
+  }
+
+  private async generateMailReplyDraft(action: A2uiAction): Promise<void> {
+    if (action.args === undefined) {
+      this.logHtmlHomeActionError(action, 'missing_mail_reply_ai_args');
+      return;
+    }
+    const requestKey = action.prompt.trim();
+    if (requestKey.length === 0) {
+      this.logHtmlHomeActionError(action, 'invalid_mail_reply_ai_request_key');
+      return;
+    }
+    if (this.baseUrl.trim().length === 0) {
+      this.mailReplyAiEvent(requestKey, 'error', '', '请先填写 Base URL。');
+      return;
+    }
+    const args = action.args as MailReplyAiArgs;
+    const prompt = this.mailReplyAiPrompt(args);
+    aiLogInfo('[AIPhone][MailReplyAiDraftRequest] requestKey=' + requestKey +
+      ' provider=' + this.actionText(args.provider) +
+      ' threadId=' + this.actionText(args.threadId) +
+      ' messageId=' + this.actionText(args.messageId) +
+      ' toCount=' + (Array.isArray(args.to) ? args.to.length : 0).toString() +
+      ' subjectChars=' + this.actionText(args.subject).length.toString() +
+      ' contextChars=' + this.actionText(args.contextSummary).length.toString() +
+      ' promptChars=' + prompt.length.toString());
+    try {
+      const result: A2uiCallResult = await callLocalModel(
+        this.getSettings(),
+        prompt,
+        this.recentMessages(),
+        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
+        null,
+        null,
+        action.args
+      );
+      aiLogInfo('[AIPhone][MailReplyAiDraft] ok=' + (result.ok ? 'true' : 'false') +
+        ' errorChars=' + result.error.length.toString() +
+        ' rawChars=' + result.raw.length.toString() +
+        ' assistantChars=' + result.assistantDebug.length.toString());
+      aiLogInfo('[AIPhone][MailReplyAiDraftRaw] ' + logSnippet(result.raw));
+      if (result.error.length > 0) {
+        aiLogError('[AIPhone][MailReplyAiDraftError] ' + logSnippet(result.error));
+      }
+      if (result.assistantDebug.length > 0) {
+        aiLogInfo('[AIPhone][MailReplyAiDraftAssistant] ' + logSnippet(result.assistantDebug));
+      }
+      const text = stripMailReplyAiText(result.assistantDebug.length > 0 ? result.assistantDebug : result.raw);
+      if (!result.ok || text.length === 0) {
+        const message = result.error.length > 0 ? result.error : 'AI 回复生成失败。';
+        this.mailReplyAiEvent(requestKey, 'error', '', message);
+        return;
+      }
+      this.mailReplyAiEvent(requestKey, 'success', text, '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailReplyAiDraftFailed] error=' + message.substring(0, 240));
+      this.mailReplyAiEvent(requestKey, 'error', '', message);
+    }
+  }
+
+  private mailCalendarEvent(requestKey: string, status: string, message: string, eventId: string, error: string): void {
+    const event: MailCalendarUiEvent = {
+      sequence: Date.now(),
+      requestKey: requestKey,
+      status: status,
+      message: message,
+      eventId: eventId,
+      error: error
+    };
+    this.mailCalendarEventJson = JSON.stringify(event);
+  }
+
+  private async ensureCalendarPermissions(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const permission = await abilityAccessCtrl.createAtManager()
+      .requestPermissionsFromUser(context, [READ_CALENDAR_PERMISSION, WRITE_CALENDAR_PERMISSION]);
+    if (!calendarPermissionGranted(permission.permissions, permission.authResults)) {
+      throw new Error('日历权限未授权');
+    }
+  }
+
+  private async addSuggestedMailCalendarEvent(action: A2uiAction): Promise<void> {
+    if (action.args === undefined) {
+      this.logHtmlHomeActionError(action, 'missing_mail_calendar_args');
+      return;
+    }
+    const args = action.args as MailCalendarActionArgs;
+    const requestKey = this.actionText(args.requestKey).trim();
+    if (requestKey.length === 0 || action.prompt.trim() !== requestKey) {
+      this.logHtmlHomeActionError(action, 'invalid_mail_calendar_request_key');
+      return;
+    }
+    const suggestion = this.mailCalendarSuggestions[requestKey];
+    if (suggestion === undefined) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '没有找到已解析的日程信息。');
+      return;
+    }
+    if (!suggestion.isWorkRelated || !suggestion.hasMeeting || suggestion.start.trim().length === 0) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '这封邮件没有可添加的会议日程。');
+      return;
+    }
+    if (this.actionText(args.provider).trim() !== suggestion.provider ||
+      this.actionText(args.threadId).trim() !== suggestion.threadId ||
+      this.actionText(args.messageId).trim() !== suggestion.messageId) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '邮件身份校验失败。');
+      return;
+    }
+    try {
+      await this.ensureCalendarPermissions();
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const result = await addHuaweiCalendarEvent(context, suggestion);
+      this.mailCalendarEvent(requestKey, result.status, result.message, result.eventId, '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.mailCalendarEvent(requestKey, 'error', '', '', message);
+    }
   }
 
   private isPaymentCheckoutUrl(url: string): boolean {
@@ -1996,6 +2444,97 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'html_mail_detail_read') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_detail_args');
+        return;
+      }
+      const request = action.args as MailDetailRequest;
+      const requestKey = this.actionText(request.requestKey).trim();
+      if (requestKey.length === 0 || this.actionText(request.provider).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_detail_args');
+        return;
+      }
+      try {
+        const detail = await readConfiguredMailDetail(request);
+        const suggestion = await this.extractMailCalendarSuggestion(detail);
+        this.mailCalendarSuggestions[requestKey] = suggestion;
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'success',
+          detail: detail,
+          calendarSuggestion: suggestion,
+          error: ''
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'error',
+          error: message
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailDetailReadFailed] provider=' + this.actionText(request.provider) +
+          ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_calendar_add') {
+      await this.addSuggestedMailCalendarEvent(action);
+      return;
+    }
+    if (action.id === 'html_mail_reply_save' || action.id === 'html_mail_reply_send') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_reply_args');
+        return;
+      }
+      const command = action.args as MailReplyCommand;
+      const requestKey = this.actionText(command.requestKey).trim();
+      const operation = action.id === 'html_mail_reply_save' ? 'draft' : 'send';
+      if (requestKey.length === 0 || this.actionText(command.provider).trim().length === 0 ||
+        this.actionText(command.body).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_reply_args');
+        return;
+      }
+      try {
+        let result: MailReplyOperationResult;
+        if (operation === 'draft') {
+          result = await saveConfiguredMailDraft(command);
+        } else {
+          result = await sendConfiguredMailReply(command);
+        }
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: result.status,
+          message: result.message,
+          error: ''
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: 'error',
+          message: '',
+          error: message
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailReplyOperationFailed] provider=' + this.actionText(command.provider) +
+          ' operation=' + operation + ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_reply_ai_generate') {
+      await this.generateMailReplyDraft(action);
+      return;
+    }
     if (this.isPersonaEditorAction(action)) {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
       return;
@@ -2556,6 +3095,9 @@ struct Index {
         messages: this.messages,
         currentSurface: this.currentSurface,
         htmlHomeHtml: this.currentSurface.intent === 'social' ? '' : this.currentHtmlHomeHtml(),
+        mailDetailEventJson: this.mailDetailEventJson,
+        mailReplyEventJson: this.mailReplyEventJson,
+        mailCalendarEventJson: this.mailCalendarEventJson,
         surfaceRenderTick: this.surfaceRenderTick,
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,

@@ -90,6 +90,14 @@ interface StripeOnboardingActionArgs {
   onboardingUrl: string;
 }
 
+interface MailDetailActionArgs {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  subject: string;
+}
+
 export interface CreateHtmlHomeDocumentParams {
   surface?: A2uiSurfaceState;
   messages: A2uiMessage[];
@@ -461,6 +469,10 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     if (gmailOpenDraft !== null) {
       block.actions = block.actions.concat(htmlActions([gmailOpenDraft], component.id));
     }
+    const mailDetailRead = mailDetailReadAction(item);
+    if (mailDetailRead !== null) {
+      block.actions = block.actions.concat(htmlActions([mailDetailRead], component.id));
+    }
     const mapsOpenWeb = mapsOpenWebAction(item);
     if (mapsOpenWeb !== null) {
       block.actions = block.actions.concat(htmlActions([mapsOpenWeb], component.id));
@@ -814,6 +826,39 @@ function genericResultRowValue(result: A2uiGenericToolResultData, label: string)
     }
   }
   return '';
+}
+
+function mailDetailReadAction(result: A2uiGenericToolResultData): A2uiAction | null {
+  const source = result.sourceTag.toLowerCase();
+  const rowProvider = genericResultRowValue(result, 'Provider').toLowerCase();
+  const provider = rowProvider === 'qq' || source.indexOf('qq mail') >= 0 ? 'qq' :
+    (rowProvider === 'gmail' || source.indexOf('gmail') >= 0 ? 'gmail' : '');
+  if (provider.length === 0 || result.status !== 'success') {
+    return null;
+  }
+  const threadId = genericResultRowValue(result, 'Thread ID');
+  const messageId = genericResultRowValue(result, 'Message ID');
+  const identity = provider === 'gmail' ? threadId : messageId;
+  if (identity.length === 0) {
+    return null;
+  }
+  const requestKey = provider + ':' + identity;
+  const args: MailDetailActionArgs = {
+    requestKey: requestKey,
+    provider: provider,
+    threadId: threadId,
+    messageId: messageId,
+    subject: result.title
+  };
+  const action: A2uiAction = {
+    id: 'html_mail_detail_read',
+    label: '加载正文',
+    prompt: requestKey,
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+  return action;
 }
 
 function appendGenericComponentBlock(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
