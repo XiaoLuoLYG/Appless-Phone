@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
 interface GooglePayCheckoutArgsFixture {
   provider: string;
@@ -62,6 +63,66 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
     rows: [],
     actions: []
   }];
+  return doc;
+}
+
+function rideDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'dynamic-tools';
+  doc.title = '打车';
+  doc.subtitle = '华为坂田基地 → 秋港花园';
+  doc.blocks = [{
+    id: 'ride-results-ride',
+    kind: 'ride-tool-panel',
+    title: '去秋港花园',
+    subtitle: '华为坂田基地 → 秋港花园',
+    status: 'estimate',
+    source: '滴滴',
+    metrics: [
+      { label: 'stage', value: 'estimate' },
+      { label: 'routeText', value: '华为坂田基地 → 秋港花园' },
+      { label: 'visualLabel', value: '极速叫车' },
+      { label: 'showDriverMarker', value: 'false' }
+    ],
+    rows: [
+      { label: 'estimate|express|快车', value: '15' },
+      { label: 'estimate|1|特惠快车', value: '10' },
+      { label: 'estimate|8|专车', value: '30' },
+      { label: 'estimate|17|豪华车', value: '100' }
+    ],
+    actions: [
+      { id: 'ride.order.confirm', label: '确认叫特惠快车', prompt: '确认下单：特惠快车 10', variant: 'primary', kind: 'prompt' },
+      { id: 'ride.order.confirm', label: '确认叫快车', prompt: '确认下单：快车 15', variant: 'primary', kind: 'prompt' },
+      { id: 'ride.order.confirm', label: '确认叫专车', prompt: '确认下单：专车 30', variant: 'primary', kind: 'prompt' },
+      { id: 'ride.order.confirm', label: '确认叫豪华车', prompt: '确认下单：豪华车 100', variant: 'primary', kind: 'prompt' },
+      { id: 'ride.open.didi', label: '打开滴滴', prompt: 'diditaxi://ride', variant: 'primary', kind: 'client' }
+    ]
+  }];
+  doc.actions = [];
+  return doc;
+}
+
+function rideDriverDocumentFixture(): HtmlHomeDocument {
+  const doc = rideDocumentFixture();
+  doc.blocks[0].status = 'driver_location';
+  doc.blocks[0].metrics = [
+    { label: 'stage', value: 'driver_location' },
+    { label: 'routeText', value: '华为坂田基地 → 秋港花园' },
+    { label: 'pickupLocation', value: '114.066231,22.657805' },
+    { label: 'destinationLocation', value: '114.060432,22.548829' },
+    { label: 'visualLabel', value: '司机正在前往' },
+    { label: 'showDriverMarker', value: 'true' },
+    { label: 'orderId', value: 'order-123' },
+    { label: 'driverLocation', value: '114.060000,22.650000' },
+    { label: 'driverName', value: '李师傅' },
+    { label: 'driverEtaText', value: '预计 6 分钟接驾' },
+    { label: 'selectedVehicleText', value: '专车' }
+  ];
+  doc.blocks[0].rows = [];
+  doc.blocks[0].actions = [
+    { id: 'ride.driver.location.refresh', label: '刷新司机位置', prompt: '刷新滴滴司机位置', variant: 'primary', kind: 'prompt' },
+    { id: 'ride.order.cancel', label: '取消订单', prompt: '取消滴滴打车订单', variant: 'danger', kind: 'prompt' }
+  ];
   return doc;
 }
 
@@ -876,6 +937,155 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(documentFixture());
 
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+    });
+
+    it('renders ride tool panel with no fake map before driver coordinates', 0, () => {
+      const html = renderHtmlHomeDocument(rideDocumentFixture());
+
+      expect(html.indexOf('data-ride-home')).assertLarger(-1);
+      expect(html.indexOf('任务结果')).assertEqual(-1);
+      expect(html.indexOf('上下文')).assertEqual(-1);
+      expect(html.indexOf('打车方案 · 实时叫车')).assertLarger(-1);
+      expect(html.indexOf('去秋港花园')).assertLarger(-1);
+      expect(html.indexOf('华为坂田基地 → 秋港花园')).assertLarger(-1);
+      expect(html.indexOf('极速叫车')).assertLarger(-1);
+      expect(html.indexOf('选择车型，确认叫车')).assertLarger(-1);
+      expect(html.indexOf('未查询到司机坐标前不展示地图或真实路线')).assertEqual(-1);
+      expect(html.indexOf('打开滴滴/高德不会自动下单')).assertEqual(-1);
+      expect(html.indexOf('images.unsplash.com')).assertEqual(-1);
+      expect(html.indexOf('resource://rawfile/ride/ride_cover_taxi_v2.png')).assertLarger(-1);
+      expect(html.indexOf('ride-cover-image')).assertLarger(-1);
+      expect(html.indexOf('ride-cover-title')).assertLarger(-1);
+      expect(html.indexOf('ride-hero-route')).assertEqual(-1);
+      expect(html.indexOf('--ride-cover-image')).assertEqual(-1);
+      expect(html.indexOf('ride_logo_didi.svg')).assertLarger(-1);
+      expect(html.indexOf('ride_logo_amap.jpg')).assertLarger(-1);
+      expect(html.indexOf('ride-cover-media')).assertLarger(-1);
+      expect(html.indexOf('ride-route-map')).assertLarger(-1);
+      expect(html.indexOf('ride-route-cities')).assertLarger(-1);
+      expect(html.indexOf('ride-route-mid')).assertLarger(-1);
+      expect(html.indexOf('ride-route-arrow-flow')).assertEqual(-1);
+      expect(html.indexOf('M5%2016H4.5')).assertLarger(-1);
+      expect(html.indexOf('MTUuODEyNSAxOS4zOTU0')).assertEqual(-1);
+      expect(html.indexOf('travelPulse')).assertLarger(-1);
+      expect(html.indexOf('ride-board')).assertLarger(-1);
+      expect(html.indexOf('ride-panel-card')).assertLarger(-1);
+      expect(html.indexOf('ride-user-prompt')).assertEqual(-1);
+      expect(html.indexOf('ride-glass-extension')).assertEqual(-1);
+      expect(html.indexOf('ride-card-cluster')).assertEqual(-1);
+      expect(html.indexOf('ride-task-card::before')).assertEqual(-1);
+      expect(html.indexOf('rideVehicleImage')).assertLarger(-1);
+      expect(html.indexOf('ride_vehicle_discount.svg')).assertLarger(-1);
+      expect(html.indexOf('ride_vehicle_express.svg')).assertLarger(-1);
+      expect(html.indexOf('ride_vehicle_premium.svg')).assertLarger(-1);
+      expect(html.indexOf('ride_vehicle_luxury.svg')).assertLarger(-1);
+      expect(html.indexOf('ride-estimate-art')).assertLarger(-1);
+      expect(html.indexOf('ride-estimate-price-decimal')).assertLarger(-1);
+      expect(html.indexOf("formatRidePriceParts")).assertLarger(-1);
+      expect(html.indexOf('ride-estimate-enter')).assertLarger(-1);
+      expect(html.indexOf('ride-estimate-action')).assertLarger(-1);
+      expect(html.indexOf('ride-estimate-source')).assertLarger(-1);
+      expect(html.indexOf('ride-action-logo')).assertLarger(-1);
+      expect(html.indexOf('setSelectedEstimate')).assertLarger(-1);
+      expect(html.indexOf('rideActionForEstimate')).assertLarger(-1);
+      expect(html.indexOf('ride-confirm-label')).assertLarger(-1);
+      expect(html.indexOf('data-selected')).assertLarger(-1);
+      expect(html.indexOf('打开滴滴')).assertLarger(-1);
+      expect(html.indexOf('ride-status-strip')).assertLarger(-1);
+      expect(html.indexOf('ride-action-primary')).assertLarger(-1);
+      expect(html.indexOf('ride-action-link')).assertLarger(-1);
+      expect(html.indexOf('rideEstimateBadge')).assertEqual(-1);
+      expect(html.indexOf('ride-estimate-badge')).assertEqual(-1);
+      expect(html.indexOf("item.category || '可选'")).assertEqual(-1);
+    });
+
+    it('renders ride driver map html with Amap script, markers, and fallback eta', 0, () => {
+      const html = renderRideDriverMapHtml({
+        routeText: '华为坂田基地 → 秋港花园',
+        pickupLocation: '114.066231,22.657805',
+        driverLocation: '114.060000,22.650000',
+        driverName: '李师傅',
+        etaText: '预计 6 分钟接驾',
+        amapKey: 'amap-web-key',
+        amapSecurityJsCode: ''
+      });
+
+      expect(html.indexOf('webapi.amap.com/maps')).assertLarger(-1);
+      expect(html.indexOf('amap-web-key')).assertLarger(-1);
+      expect(html.indexOf('114.066231')).assertLarger(-1);
+      expect(html.indexOf('114.060000')).assertLarger(-1);
+      expect(html.indexOf('AMap.Marker')).assertLarger(-1);
+      expect(html.indexOf('AMap.Driving')).assertEqual(-1);
+      expect(html.indexOf('new AMap.Driving({ map: map')).assertEqual(-1);
+      expect(html.indexOf('restapi.amap.com/v5/direction/driving')).assertLarger(-1);
+      expect(html.indexOf('rideMapRouteCallback')).assertLarger(-1);
+      expect(html.indexOf('show_fields=cost,polyline')).assertLarger(-1);
+      expect(html.indexOf('routeCostDuration')).assertLarger(-1);
+      expect(html.indexOf('pathPolyline')).assertLarger(-1);
+      expect(html.indexOf('AMap.Polyline')).assertLarger(-1);
+      expect(html.indexOf('plannedPathFromRoute')).assertLarger(-1);
+      expect(html.indexOf('routePathFromStep')).assertLarger(-1);
+      expect(html.indexOf('emitRouteLog')).assertLarger(-1);
+      expect(html.indexOf('rideMapRouteLog')).assertLarger(-1);
+      expect(html.indexOf('search_start')).assertLarger(-1);
+      expect(html.indexOf('search_complete')).assertLarger(-1);
+      expect(html.indexOf('search_fallback')).assertLarger(-1);
+      expect(html.indexOf('search_error')).assertLarger(-1);
+      expect(html.indexOf('routeTimeSeconds')).assertLarger(-1);
+      expect(html.indexOf('routeDistanceMeters')).assertLarger(-1);
+      expect(html.indexOf('plannedPathPoints')).assertLarger(-1);
+      expect(html.indexOf('function requestExitFullscreen')).assertEqual(-1);
+      expect(html.indexOf('ride-map-exit')).assertEqual(-1);
+      expect(html.indexOf("addEventListener('touchstart', handleExit")).assertEqual(-1);
+      expect(html.indexOf("addEventListener('pointerup', handleExit")).assertEqual(-1);
+      expect(html.indexOf('path: plannedPath')).assertLarger(-1);
+      expect(html.indexOf('path: [driverLngLat, pickupLngLat]')).assertEqual(-1);
+      expect(html.indexOf('rideMapEta')).assertLarger(-1);
+      expect(html.indexOf('class="eta"')).assertEqual(-1);
+      expect(html.indexOf('预计 6 分钟接驾')).assertLarger(-1);
+    });
+
+    it('renders ride driver map with fullscreen control and eta detail row', 0, () => {
+      const html = renderHtmlHomeDocument(rideDriverDocumentFixture());
+
+      expect(html.indexOf('ride-map-panel')).assertLarger(-1);
+      expect(html.indexOf('ride-map-control')).assertLarger(-1);
+      expect(html.indexOf('ride-map-head')).assertLarger(-1);
+      expect(html.indexOf('ride-map-eta')).assertLarger(-1);
+      expect(html.indexOf('data-ride-map-eta-value')).assertLarger(-1);
+      expect(html.indexOf('全屏地图')).assertLarger(-1);
+      expect(html.indexOf('退出全屏')).assertLarger(-1);
+      expect(html.indexOf('ride-map-meta')).assertEqual(-1);
+      expect(html.indexOf('ride-map-summary')).assertEqual(-1);
+      expect(html.indexOf('ride-map-summary-badge')).assertEqual(-1);
+      expect(html.indexOf('body.ride-map-fullscreen .ride-panel-card > :not(.ride-status-strip)')).assertLarger(-1);
+      expect(html.indexOf('body.ride-map-fullscreen .ride-map-panel[data-fullscreen="true"] > .ride-map-head')).assertLarger(-1);
+      expect(html.indexOf('touch-action: manipulation')).assertLarger(-1);
+      expect(html.indexOf('function handleMapControlActivate')).assertLarger(-1);
+      expect(html.indexOf("button.addEventListener('pointerup', handleMapControlActivate")).assertLarger(-1);
+      expect(html.indexOf("button.addEventListener('touchend', handleMapControlActivate")).assertLarger(-1);
+      expect(html.indexOf('lastMapControlActivateAt')).assertLarger(-1);
+      expect(html.indexOf('window.__rideMapSetFullscreen')).assertLarger(-1);
+      expect(html.indexOf("frame.contentWindow.postMessage({ type: 'rideMapFullscreen'")).assertEqual(-1);
+      expect(html.indexOf("frame.setAttribute('sandbox'")).assertEqual(-1);
+      expect(html.indexOf("frame.setAttribute('referrerpolicy', 'origin-when-cross-origin')")).assertLarger(-1);
+      expect(html.indexOf('rideMapFullscreen')).assertEqual(-1);
+      expect(html.indexOf('ride-map-exit')).assertEqual(-1);
+      expect(html.indexOf('司机点位来自 provider 返回坐标')).assertEqual(-1);
+      expect(html.indexOf('预计接驾时间')).assertLarger(-1);
+      expect(html.indexOf('预计 6 分钟接驾')).assertLarger(-1);
+      expect(html.indexOf('>车型</span><b>专车</b>')).assertLarger(-1);
+      expect(html.indexOf('>车型</span><b>待查询</b>')).assertEqual(-1);
+      expect(html.indexOf('data-ride-eta-value')).assertLarger(-1);
+      expect(html.indexOf("updateRideEtaText(etaText)")).assertLarger(-1);
+      expect(html.indexOf('function logRideMapRoute')).assertLarger(-1);
+      expect(html.indexOf('ride.map.route.log')).assertLarger(-1);
+      expect(html.indexOf('[AIPhone][RideMapRoute]')).assertLarger(-1);
+      expect(html.indexOf('正在估算接驾时间')).assertEqual(-1);
+      expect(html.indexOf('setRideMapFullscreen')).assertLarger(-1);
+      expect(html.indexOf('ride-map-fullscreen')).assertLarger(-1);
+      expect(html.indexOf('rideMapEta')).assertLarger(-1);
+      expect(html.indexOf('rideMapRouteLog')).assertLarger(-1);
     });
 
     it('includes dynamic credential save and local action interception', 0, () => {

@@ -11,6 +11,7 @@ import {
   isMapsToolId,
   isMediaToolId,
   isPaymentToolId,
+  isRideToolId,
   isRegisteredAiphoneToolId,
   isYouTubeToolId,
   resolveBackendForTool,
@@ -52,6 +53,11 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('calendar.event.update')).assertTrue();
       expect(isKnownDomainToolId('maps.place.search')).assertTrue();
       expect(isKnownDomainToolId('maps.place.details')).assertTrue();
+      expect(isKnownDomainToolId('ride.estimate')).assertTrue();
+      expect(isKnownDomainToolId('ride.app.link')).assertTrue();
+      expect(isKnownDomainToolId('ride.order.create')).assertTrue();
+      expect(isKnownDomainToolId('ride.order.cancel')).assertTrue();
+      expect(isKnownDomainToolId('ride.driver.location')).assertTrue();
       expect(isKnownDomainToolId('gmail.unknown')).assertFalse();
       expect(isKnownDomainToolId('youtube.video.search')).assertTrue();
       expect(isKnownDomainToolId('youtube.mine.playlists')).assertTrue();
@@ -68,6 +74,11 @@ export default function toolDefinitionRegistryTest() {
       expect(isYouTubeToolId('media.video.search')).assertFalse();
       expect(isMediaToolId('media.video.search')).assertTrue();
       expect(isMediaToolId('youtube.video.search')).assertFalse();
+      expect(isRideToolId('ride.estimate')).assertTrue();
+      expect(isRideToolId('ride.app.link')).assertTrue();
+      expect(isRideToolId('ride.order.create')).assertTrue();
+      expect(isRideToolId('ride.order.cancel')).assertTrue();
+      expect(isRideToolId('ride.driver.location')).assertTrue();
     });
 
     it('registers SocialHub read and draft tools without send', 0, () => {
@@ -190,6 +201,45 @@ export default function toolDefinitionRegistryTest() {
       expect(payment.outputSchema).assertEqual('paymentCheckout');
       expect(payment.a2uiComponent).assertEqual('GenericToolResults');
       expect(payment.actions[0]).assertEqual('payment.confirm');
+    });
+
+    it('registers ride estimate, app link, and confirmed order tools as local adapters', 0, () => {
+      const estimate = toolDefinitionForToolId('ride.estimate') as ToolDefinition;
+      const link = toolDefinitionForToolId('ride.app.link') as ToolDefinition;
+      const createOrder = toolDefinitionForToolId('ride.order.create') as ToolDefinition;
+      const cancelOrder = toolDefinitionForToolId('ride.order.cancel') as ToolDefinition;
+      const driverLocation = toolDefinitionForToolId('ride.driver.location') as ToolDefinition;
+
+      expect(estimate.domain).assertEqual('ride');
+      expect(estimate.riskLevel).assertEqual('read');
+      expect(estimate.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(estimate.authModes.join(',')).assertEqual('provider_key,mcp_auth');
+      expect(estimate.inputSchema).assertEqual('rideRouteQuery');
+      expect(estimate.outputSchema).assertEqual('genericToolResults');
+      expect(estimate.a2uiComponent).assertEqual('GenericToolResults');
+      expect(estimate.actions[0]).assertEqual('ride.order.confirm');
+      expect(estimate.actions[1]).assertEqual('ride.open.didi');
+      expect(estimate.actions[2]).assertEqual('ride.open.amap');
+      expect(link.domain).assertEqual('ride');
+      expect(link.riskLevel).assertEqual('read');
+      expect(createOrder.domain).assertEqual('ride');
+      expect(createOrder.riskLevel).assertEqual('confirm_required');
+      expect(createOrder.actions[0]).assertEqual('ride.driver.location.refresh');
+      expect(createOrder.actions[1]).assertEqual('ride.order.cancel');
+      expect(cancelOrder.domain).assertEqual('ride');
+      expect(cancelOrder.riskLevel).assertEqual('confirm_required');
+      expect(cancelOrder.actions[0]).assertEqual('ride.query.retry');
+      expect(cancelOrder.actions[1]).assertEqual('ride.vehicle.change');
+      expect(driverLocation.domain).assertEqual('ride');
+      expect(driverLocation.riskLevel).assertEqual('read');
+      expect(driverLocation.actions[0]).assertEqual('ride.driver.location.refresh');
+      expect(driverLocation.actions[1]).assertEqual('ride.order.cancel');
+      expect(isLocalAdapterToolId('ride.estimate')).assertTrue();
+      expect(isLocalAdapterToolId('ride.app.link')).assertTrue();
+      expect(isLocalAdapterToolId('ride.order.create')).assertTrue();
+      expect(isLocalAdapterToolId('ride.order.cancel')).assertTrue();
+      expect(isLocalAdapterToolId('ride.driver.location')).assertTrue();
+      expect(isRegisteredAiphoneToolId('ride.estimate')).assertTrue();
     });
 
     it('resolves available Gmail backends before returning an auth-needed reason', 0, () => {

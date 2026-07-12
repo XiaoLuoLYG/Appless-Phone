@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="128" viewBox="0 0 240 128" role="img" aria-label="专车示例">
+  <defs>
+    <linearGradient id="body" x1="29" y1="48" x2="212" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f6f2e9"/>
+      <stop offset=".42" stop-color="#cfc7bd"/>
+      <stop offset="1" stop-color="#8d837a"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="72" y1="30" x2="173" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset=".45" stop-color="#c7d6df"/>
+      <stop offset="1" stop-color="#536674"/>
+    </linearGradient>
+    <radialGradient id="wheel" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#ffffff"/>
+      <stop offset=".34" stop-color="#aaa49d"/>
+      <stop offset=".43" stop-color="#252320"/>
+      <stop offset="1" stop-color="#11100f"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="240" height="128" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="7" flood-color="#4a3b31" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <ellipse cx="120" cy="101" rx="96" ry="10" fill="#2e2924" opacity=".13"/>
+  <g filter="url(#shadow)">
+    <path d="M24 76c9-17 24-27 45-30 13-14 32-21 57-21h22c25 0 47 11 65 31l12 3c8 2 13 8 13 16v11c0 5-3 8-8 8H14c-5 0-8-3-8-8v-3c0-7 5-12 12-14l6-2Z" fill="url(#body)"/>
+    <path d="M76 50c12-13 28-19 50-19h20c19 1 35 9 50 24l-120-5Z" fill="url(#glass)" opacity=".96"/>
+    <path d="M122 31v25M155 35l11 23" stroke="#5f564f" stroke-width="3" opacity=".46"/>
+    <path d="M35 75c48 6 113 5 181-3" stroke="#fffaf3" stroke-width="4" opacity=".62"/>
+    <path d="M189 58h27c5 0 9 3 10 8l-29 2c-5 0-8-4-8-10Z" fill="#fff3df" opacity=".84"/>
+    <path d="M34 66h31" stroke="#8a7c72" stroke-width="5" stroke-linecap="round" opacity=".42"/>
+    <circle cx="62" cy="91" r="18" fill="#171615"/>
+    <circle cx="62" cy="91" r="10" fill="url(#wheel)"/>
+    <circle cx="186" cy="91" r="18" fill="#171615"/>
+    <circle cx="186" cy="91" r="10" fill="url(#wheel)"/>
+  </g>
+</svg>

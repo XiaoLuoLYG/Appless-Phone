@@ -3,6 +3,7 @@ import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
+import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } from './HtmlRideHailingHomeRenderer';
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
 
@@ -86,6 +87,11 @@ const HTML_HOME_CSS: string = `
   --tiktok-soft: rgba(17, 17, 17, 0.1);
   --ticketmaster: #026cdf;
   --ticketmaster-soft: rgba(2, 108, 223, 0.12);
+  --ride: #1f7a61;
+  --ride-dark: #155c49;
+  --ride-soft: rgba(31, 122, 97, 0.12);
+  --ride-blue: #356fa3;
+  --ride-blue-soft: rgba(53, 111, 163, 0.12);
   --mail-inbox-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='22 12 16 12 14 15 10 15 8 12 2 12'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E");
 }
 * { box-sizing: border-box; }
@@ -1529,6 +1535,7 @@ const HTML_HOME_JS: string = `
     if (kind === 'persona-memory-update') { return '记忆更新'; }
     if (kind === 'dynamic-tool-connect') { return '授权'; }
     if (kind === 'generic-tool-result') { return '工具结果'; }
+    if (kind === 'ride-tool-panel') { return '打车'; }
     if (kind === 'StripeReceivingAccountCard') { return 'Stripe 收款'; }
     if (kind === 'social-hub-item') { return '社交'; }
     if (kind === 'social-hub-draft') { return '草稿'; }
@@ -1715,15 +1722,21 @@ const HTML_HOME_JS: string = `
     if (kind === 'food-result') {
       return 'food-local';
     }
+    if (kind === 'ride-tool-panel' || raw.indexOf('ride.') >= 0 || raw.indexOf('滴滴') >= 0 || raw.indexOf('打车') >= 0) {
+      return 'ride';
+    }
     return kind || 'generic';
   }
   function isMailBlock(block) {
     var key = sourceKey(block);
     return key === 'mail-gmail' || key === 'mail-qq' || key === 'composio-outlook';
   }
-	  function isExpandable(block) {
+	function isExpandable(block) {
 	    var kind = text(block && block.kind);
 	    if (kind === 'persona-memory-update') {
+	      return false;
+	    }
+	    if (kind === 'ride-tool-panel') {
 	      return false;
 	    }
 	    if (kind === 'generic-tool-result') {
@@ -2624,6 +2637,9 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
   }
   if (shouldRenderFoodHomeDocument(document)) {
     return renderFoodHomeDocument(document, isBusy);
+  }
+  if (shouldRenderRideHailingHomeDocument(document)) {
+    return renderRideHailingHomeDocument(document, isBusy);
   }
   if (shouldRenderPaymentHomeDocument(document)) {
     return renderPaymentHomeDocument(document, isBusy);

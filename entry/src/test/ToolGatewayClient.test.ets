@@ -10,6 +10,7 @@ import {
   buildToolGatewayUrl,
   callToolGateway,
   configureComposioConfigFromRawJson,
+  configureDidiMcpSandboxForRuntime,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
@@ -32,6 +33,24 @@ import {
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
+  rideAmapGeocodePointForTest,
+  rideAmapGeocodeKeyForTest,
+  rideAmapRequestArgsForTest,
+  rideDidiCityFromAmapGeocodeForTest,
+  rideDidiCancelOrderArgsForTest,
+  rideDidiCreateOrderArgsForTest,
+  rideDidiDriverLocationArgsForTest,
+  rideDidiMcpSandboxEnabledForRuntime,
+  rideDidiOrderMcpUrlForTest,
+  rideDidiQueryMcpUrlForTest,
+  rideOrderCreateDedupBlockedForTest,
+  rideOrderCreateErrorTitleForTest,
+  rideCancelOrderResultForTest,
+  rideDriverLocationResultForTest,
+  rideLinkFromMcpResponseTextForTest,
+  rideOrderConfirmedForTest,
+  rideResultsFromMcpPayloadsForTest,
+  rideShouldSurfaceAppLinkErrorForTest,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
@@ -250,6 +269,405 @@ export default function toolGatewayClientTest() {
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
       }
+    });
+
+    it('loads ride MCP config from local provider raw JSON without exposing secrets', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_URL: 'https://mcp.didichuxing.com/mcp-servers-sandbox',
+          DIDI_MCP_SANDBOX: 'true',
+          AMAP_MCP_KEY: 'amap-mcp-secret',
+          AMAP_MCP_URL: 'https://mcp.amap.com/mcp',
+          RIDE_MOCK_ENABLED: 'true',
+          AMAP_KEY: 'amap-web-key'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('didiMcpKey=present(15)')).assertLarger(-1);
+        expect(summary.indexOf('didiMcpSandbox=true')).assertLarger(-1);
+        expect(summary.indexOf('amapMcpKey=present(15)')).assertLarger(-1);
+        expect(summary.indexOf('rideMockEnabled=true')).assertLarger(-1);
+        expect(summary.indexOf('didi-secret-key')).assertEqual(-1);
+        expect(summary.indexOf('amap-mcp-secret')).assertEqual(-1);
+        expect(summary.indexOf('mcp.didichuxing.com')).assertEqual(-1);
+        expect(summary.indexOf('mcp.amap.com')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          RIDE_MOCK_ENABLED: 'false'
+        }));
+      }
+    });
+
+    it('defaults ride tools to real provider mode unless mock is explicitly enabled', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        let summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('rideMockEnabled=false')).assertLarger(-1);
+
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          RIDE_MOCK_ENABLED: 'true'
+        }));
+        summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('rideMockEnabled=true')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('uses production Didi MCP endpoint for all Didi calls when sandbox is disabled', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_SANDBOX: 'false',
+          RIDE_MOCK_ENABLED: 'false'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('didiMcpSandbox=false')).assertLarger(-1);
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers?key=didi-secret-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('toggles Didi MCP sandbox mode at runtime for all Didi routing', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_SANDBOX: 'true',
+          RIDE_MOCK_ENABLED: 'false'
+        }));
+        expect(rideDidiMcpSandboxEnabledForRuntime()).assertTrue();
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers-sandbox?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers-sandbox?key=didi-secret-key');
+
+        configureDidiMcpSandboxForRuntime(false);
+        expect(rideDidiMcpSandboxEnabledForRuntime()).assertFalse();
+        expect(localProviderConfigDebugSummary().indexOf('didiMcpSandbox=false')).assertLarger(-1);
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers?key=didi-secret-key');
+
+        configureDidiMcpSandboxForRuntime(true);
+        expect(rideDidiMcpSandboxEnabledForRuntime()).assertTrue();
+        expect(localProviderConfigDebugSummary().indexOf('didiMcpSandbox=true')).assertLarger(-1);
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers-sandbox?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('https://mcp.didichuxing.com/mcp-servers-sandbox?key=didi-secret-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('lets disabled Didi sandbox override ride mock config', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_URL: 'http://127.0.0.1:1/mcp',
+          DIDI_MCP_SANDBOX: 'false',
+          RIDE_MOCK_ENABLED: 'true'
+        }));
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'ride.estimate',
+          '帮我看从深圳湾万象城到深圳北站打车多少钱',
+          'surface_ride_mock_override',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            origin: '深圳湾万象城',
+            destination: '深圳北站',
+            city: '深圳'
+          }
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(result.ok).assertTrue();
+        expect(rendered.length).assertLarger(0);
+        expect(rendered[0].sourceTag).assertEqual('滴滴');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('模拟')).assertEqual(-1);
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('registers fixed ride tools while keeping raw MCP order and driver tools hidden', 0, () => {
+      expect(isRegisteredToolId('ride.estimate')).assertTrue();
+      expect(isRegisteredToolId('ride.app.link')).assertTrue();
+      expect(isRegisteredToolId('ride.order.create')).assertTrue();
+      expect(isRegisteredToolId('ride.order.cancel')).assertTrue();
+      expect(isRegisteredToolId('ride.driver.location')).assertTrue();
+      expect(isRegisteredToolId('taxi_create_order')).assertFalse();
+      expect(isRegisteredToolId('taxi_cancel_order')).assertFalse();
+      expect(isRegisteredToolId('taxi_query_order')).assertFalse();
+      expect(isRegisteredToolId('taxi_get_driver_location')).assertFalse();
+    });
+
+    it('renders ride estimate missing Didi config as a real provider error', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'ride.estimate',
+          '帮我看从深圳湾万象城到深圳北站打车多少钱',
+          'surface_ride_missing_didi',
+          'model_tool_request',
+          noop,
+          null,
+          {
+            origin: '深圳湾万象城',
+            destination: '深圳北站',
+            city: '深圳'
+          }
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(result.ok).assertTrue();
+        expect(rendered.length).assertLarger(0);
+        expect(rendered[0].sourceTag).assertEqual('滴滴');
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('DIDI_MCP_KEY')).assertLarger(-1);
+        expect(result.raw.indexOf('taxi_create_order')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('normalizes Didi estimate and ride app links without creating orders', 0, () => {
+      const estimatePayload = JSON.parse('{"structuredContent":{"items":[{"productName":"快车","productCategory":"express","priceText":"约 48 元"},{"productName":"专车","productCategory":"premium","priceText":"约 88 元"}],"traceId":"trace-123"}}') as Object;
+      const didiLinkPayload = JSON.parse('{"structuredContent":{"url":"diditaxi://ride?traceId=trace-123"}}') as Object;
+      const amapLinkPayload = JSON.parse('{"structuredContent":{"url":"amapuri://drive/takeTaxi?sourceApplication=aiphone"}}') as Object;
+
+      const results = rideResultsFromMcpPayloadsForTest(
+        '深圳湾万象城',
+        '深圳北站',
+        estimatePayload,
+        didiLinkPayload,
+        amapLinkPayload
+      );
+
+      expect(results.length).assertEqual(2);
+      expect(results[0].sourceTag).assertEqual('滴滴');
+      expect(results[0].toolName).assertEqual('ride.estimate');
+      expect(results[0].summary.indexOf('快车')).assertLarger(-1);
+      expect(results[0].summary.indexOf('48')).assertLarger(-1);
+      expect(results[0].rawPreview.indexOf('taxi_create_order')).assertEqual(-1);
+      expect(results[0].actions === undefined ? 0 : results[0].actions.length).assertEqual(2);
+      if (results[0].actions !== undefined) {
+        expect(results[0].actions[0].id).assertEqual('ride.order.confirm');
+        expect(results[0].actions[0].label).assertEqual('确认叫快车');
+      }
+      expect(results[1].toolName).assertEqual('ride.app.link');
+      expect(results[1].rows[1].label).assertEqual('滴滴链接');
+      expect(results[1].rows[2].label).assertEqual('高德链接');
+    });
+
+    it('keeps ride estimate usable when optional app link generation is rate limited', 0, () => {
+      expect(rideShouldSurfaceAppLinkErrorForTest('ride.estimate')).assertFalse();
+      expect(rideShouldSurfaceAppLinkErrorForTest('ride.app.link')).assertTrue();
+    });
+
+    it('carries ride route coordinates from estimate action into later order flow', 0, () => {
+      const estimatePayload = JSON.parse('{"structuredContent":{"items":[{"productName":"快车","productCategory":"express","priceText":"约 48 元"}],"traceId":"trace-123"}}') as Object;
+      const emptyLinkPayload = JSON.parse('{}') as Object;
+      const results = rideResultsFromMcpPayloadsForTest(
+        '华为坂田基地',
+        '秋港花园',
+        estimatePayload,
+        emptyLinkPayload,
+        emptyLinkPayload,
+        '114.066231,22.657805',
+        '114.060432,22.548829'
+      );
+
+      const actionArgs = JSON.stringify(results[0].actions === undefined ? {} : results[0].actions[0].args);
+      expect(actionArgs.indexOf('"routeText":"华为坂田基地 → 秋港花园"')).assertLarger(-1);
+      expect(actionArgs.indexOf('"pickupLocation":"114.066231,22.657805"')).assertLarger(-1);
+      expect(actionArgs.indexOf('"destinationLocation":"114.060432,22.548829"')).assertLarger(-1);
+      expect(actionArgs.indexOf('"estimateCacheJson"')).assertLarger(-1);
+      expect(actionArgs.indexOf('约 48 元')).assertLarger(-1);
+    });
+
+    it('normalizes ride order create and cancel args behind explicit confirmation', 0, () => {
+      expect(rideOrderConfirmedForTest({ confirmed: true })).assertTrue();
+      expect(rideOrderConfirmedForTest({ confirmation: '确认下单' })).assertTrue();
+      expect(rideOrderConfirmedForTest({ confirmation: '帮我叫车' })).assertFalse();
+
+      const createArgs = JSON.stringify(rideDidiCreateOrderArgsForTest({
+        productCategory: 'express',
+        estimateTraceId: 'trace-123',
+        confirmed: true
+      }));
+      expect(createArgs.indexOf('"product_category":"express"')).assertLarger(-1);
+      expect(createArgs.indexOf('"estimate_trace_id":"trace-123"')).assertLarger(-1);
+
+      const cancelArgs = JSON.stringify(rideDidiCancelOrderArgsForTest({
+        orderId: 'order-123',
+        reason: '用户取消'
+      }));
+      expect(cancelArgs.indexOf('"order_id":"order-123"')).assertLarger(-1);
+      expect(cancelArgs.indexOf('"reason":"用户取消"')).assertLarger(-1);
+
+      const driverLocationArgs = JSON.stringify(rideDidiDriverLocationArgsForTest({
+        orderId: 'order-123'
+      }));
+      expect(driverLocationArgs.indexOf('"order_id":"order-123"')).assertLarger(-1);
+    });
+
+    it('deduplicates repeated ride order create requests for the same vehicle selection', 0, () => {
+      expect(rideOrderCreateDedupBlockedForTest('express|trace-123', 'express|trace-123', 1000)).assertTrue();
+      expect(rideOrderCreateDedupBlockedForTest('express|trace-123', 'premium|trace-123', 1000)).assertFalse();
+      expect(rideOrderCreateDedupBlockedForTest('express|trace-123', 'express|trace-123', 130000)).assertFalse();
+    });
+
+    it('renders ride order create quota failures as a quota-specific error', 0, () => {
+      expect(rideOrderCreateErrorTitleForTest('rate limit exceeded: user_taxi_create_order quota exceeded')).assertEqual('下单额度已耗尽');
+      expect(rideOrderCreateErrorTitleForTest('network timeout')).assertEqual('滴滴下单失败');
+    });
+
+    it('treats successful driver location response without coordinates as pending data', 0, () => {
+      const result = rideDriverLocationResultForTest({ data: {} }, 'order-123');
+
+      expect(result.toolName).assertEqual('ride.driver.location');
+      expect(result.status).assertEqual('success');
+      expect(result.summary.indexOf('没有可展示的位置')).assertLarger(-1);
+      expect(result.rows[0].label).assertEqual('订单号');
+      expect(result.rows[0].value).assertEqual('order-123');
+      expect(result.rows.length).assertEqual(2);
+    });
+
+    it('extracts Didi sandbox driver coordinates from text payload', 0, () => {
+      const result = rideDriverLocationResultForTest({
+        text: '【司机位置】\n纬度：39.882325\n经度：116.297345\n',
+        eta: 360
+      }, 'order-123', '116.300000,39.880000', '116.310000,39.890000');
+
+      expect(result.status).assertEqual('success');
+      expect(result.summary).assertEqual('已返回司机当前位置。');
+      expect(result.rows[1].label).assertEqual('路线');
+      expect(result.rows[2].label).assertEqual('起点坐标');
+      expect(result.rows[2].value).assertEqual('116.300000,39.880000');
+      expect(result.rows[4].label).assertEqual('司机位置');
+      expect(result.rows[4].value).assertEqual('116.297345,39.882325');
+      expect(result.rows[5].label).assertEqual('预计接驾时间');
+      expect(result.rows[5].value).assertEqual('预计 6 分钟接驾');
+      expect(result.actions[0].label).assertEqual('刷新司机位置');
+      expect(JSON.stringify(result.actions[0].args).indexOf('"pickupLocation":"116.300000,39.880000"')).assertLarger(-1);
+    });
+
+    it('offers retry and vehicle change actions after cancelling ride order', 0, () => {
+      const result = rideCancelOrderResultForTest({ status: 'cancelled' }, 'order-123');
+
+      expect(result.toolName).assertEqual('ride.order.cancel');
+      expect(result.actions.length).assertEqual(2);
+      expect(result.actions[0].label).assertEqual('重新查询');
+      expect(result.actions[0].variant).assertEqual('primary');
+      expect(result.actions[1].label).assertEqual('换车型');
+      expect(result.actions[1].variant).assertEqual('secondary');
+      expect(result.actions[1].kind).assertEqual('client');
+    });
+
+    it('routes ride order create to the configured Didi MCP when sandbox is disabled', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_URL: 'http://127.0.0.1:1/mcp',
+          RIDE_MOCK_ENABLED: 'false',
+          DIDI_MCP_SANDBOX: 'false'
+        }));
+
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('routes ride driver location to the configured Didi MCP when sandbox is disabled', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          DIDI_MCP_KEY: 'didi-secret-key',
+          DIDI_MCP_URL: 'http://127.0.0.1:1/mcp',
+          RIDE_MOCK_ENABLED: 'false',
+          DIDI_MCP_SANDBOX: 'false'
+        }));
+
+        expect(rideDidiQueryMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+        expect(rideDidiOrderMcpUrlForTest()).assertEqual('http://127.0.0.1:1/mcp?key=didi-secret-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('builds Amap taxi MCP args with the tools/list schema fields', 0, () => {
+      const args = rideAmapRequestArgsForTest('114.060000,22.540000', '114.070000,22.550000');
+      const json = JSON.stringify(args);
+
+      expect(json.indexOf('"slon":"114.060000"')).assertLarger(-1);
+      expect(json.indexOf('"slat":"22.540000"')).assertLarger(-1);
+      expect(json.indexOf('"sname":"起点"')).assertLarger(-1);
+      expect(json.indexOf('"dlon":"114.070000"')).assertLarger(-1);
+      expect(json.indexOf('"dlat":"22.550000"')).assertLarger(-1);
+      expect(json.indexOf('"dname":"终点"')).assertLarger(-1);
+      expect(json.indexOf('"slon"')).assertLarger(-1);
+      expect(json.indexOf('"slat"')).assertLarger(-1);
+      expect(json.indexOf('"sname"')).assertLarger(-1);
+      expect(json.indexOf('"dlon"')).assertLarger(-1);
+      expect(json.indexOf('"dlat"')).assertLarger(-1);
+      expect(json.indexOf('"dname"')).assertLarger(-1);
+      expect(json.indexOf('"origin"')).assertEqual(-1);
+      expect(json.indexOf('"destination"')).assertEqual(-1);
+      expect(json.indexOf('"from"')).assertEqual(-1);
+      expect(json.indexOf('"to"')).assertEqual(-1);
+      expect(json.indexOf('"city"')).assertEqual(-1);
+    });
+
+    it('derives ride coordinates and Didi city from Amap geocode payloads', 0, () => {
+      const payload = JSON.parse('{"status":"1","geocodes":[{"formatted_address":"广东省深圳市龙岗区华为坂田基地","province":"广东省","city":"深圳市","district":"龙岗区","location":"114.066231,22.657805","level":"兴趣点"}]}') as Object;
+      const point = JSON.stringify(rideAmapGeocodePointForTest('深圳华为坂田基地', payload));
+
+      expect(point.indexOf('"name":"深圳华为坂田基地"')).assertLarger(-1);
+      expect(point.indexOf('"lng":"114.066231"')).assertLarger(-1);
+      expect(point.indexOf('"lat":"22.657805"')).assertLarger(-1);
+      expect(point.indexOf('"location":"114.066231,22.657805"')).assertLarger(-1);
+      expect(rideDidiCityFromAmapGeocodeForTest(payload)).assertEqual('深圳');
+    });
+
+    it('uses Amap Web key rather than MCP key for ride geocoding', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          AMAP_KEY: 'amap-web-geocode-key',
+          AMAP_MCP_KEY: 'amap-mcp-link-key'
+        }));
+
+        expect(rideAmapGeocodeKeyForTest()).assertEqual('amap-web-geocode-key');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('extracts Amap ride links from plain MCP text content', 0, () => {
+      const response = '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"高德打车唤端链接：https://uri.amap.com/taxi?sourceApplication=aiphone"}]}}';
+
+      expect(rideLinkFromMcpResponseTextForTest(response)).assertEqual('https://uri.amap.com/taxi?sourceApplication=aiphone');
+    });
+
+    it('surfaces MCP tool error text for ride providers', 0, () => {
+      let message = '';
+      try {
+        rideLinkFromMcpResponseTextForTest('{"jsonrpc":"2.0","id":2,"result":{"isError":true,"content":[{"type":"text","text":"参数校验失败：origin 必填"}]}}');
+      } catch (error) {
+        message = error instanceof Error ? error.message : JSON.stringify(error);
+      }
+
+      expect(message.indexOf('origin 必填')).assertLarger(-1);
     });
 
     it('classifies transient PayPal DNS and timeout errors for retry', 0, () => {

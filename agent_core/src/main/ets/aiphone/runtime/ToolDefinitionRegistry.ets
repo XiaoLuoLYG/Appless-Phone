@@ -330,6 +330,66 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'place',
     a2uiComponent: 'GenericToolResults',
     actions: []
+  },
+  {
+    toolId: 'ride.estimate',
+    domain: 'ride',
+    intent: 'ride.estimate',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideRouteQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.order.confirm', 'ride.open.didi', 'ride.open.amap']
+  },
+  {
+    toolId: 'ride.app.link',
+    domain: 'ride',
+    intent: 'ride.app.link',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideRouteQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.open.didi', 'ride.open.amap']
+  },
+  {
+    toolId: 'ride.order.create',
+    domain: 'ride',
+    intent: 'ride.order.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideOrderCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.driver.location.refresh', 'ride.order.cancel']
+  },
+  {
+    toolId: 'ride.order.cancel',
+    domain: 'ride',
+    intent: 'ride.order.cancel',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideOrderCancelRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.query.retry', 'ride.vehicle.change']
+  },
+  {
+    toolId: 'ride.driver.location',
+    domain: 'ride',
+    intent: 'ride.driver.location',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideDriverLocationRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.driver.location.refresh', 'ride.order.cancel']
   }
 ];
 
@@ -401,6 +461,11 @@ export function isMapsToolId(toolId: string): boolean {
 export function isPaymentToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'payment';
+}
+
+export function isRideToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'ride';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

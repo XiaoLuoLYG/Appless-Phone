@@ -194,7 +194,7 @@ function rowsOf(result: DynamicGenericToolResult): A2uiLabelValueData[] {
 }
 
 function resultOf(result: DynamicGenericToolResult): A2uiGenericToolResultData {
-  return {
+  const mapped: A2uiGenericToolResultData = {
     sourceTag: result.sourceTag,
     toolName: result.toolName,
     title: result.title,
@@ -203,6 +203,10 @@ function resultOf(result: DynamicGenericToolResult): A2uiGenericToolResultData {
     rows: rowsOf(result),
     rawPreview: result.rawPreview
   };
+  if (result.actions !== undefined && result.actions.length > 0) {
+    mapped.actions = result.actions.slice();
+  }
+  return mapped;
 }
 
 function genericResultTitle(toolId: string, results: DynamicGenericToolResult[] = []): string {

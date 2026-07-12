@@ -65,7 +65,7 @@ import {
   saveXOAuthPending,
   saveXOAuthTokenSet
 } from './XOAuthClient';
-import { GenericMcpClient } from './GenericMcpClient';
+import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient } from './GenericMcpClient';
 import { callGmailApiTool } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
@@ -79,7 +79,7 @@ import { callComposioDynamic } from './ComposioDynamicBackend';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
 import {
   PaymentAccount,
   PaymentMode,
@@ -126,6 +126,7 @@ import {
 import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
+  DynamicMcpTool,
   DynamicToolManifest,
   DynamicToolRegistration,
   DynamicToolTransport
@@ -242,6 +243,12 @@ interface LocalProviderConfig {
   mcdMcpUrl: string;
   luckinMcpToken: string;
   luckinMcpUrl: string;
+  didiMcpKey: string;
+  didiMcpUrl: string;
+  didiMcpSandbox: string;
+  amapMcpKey: string;
+  amapMcpUrl: string;
+  rideMockEnabled: string;
   googleMapsApiKey: string;
   googleOauthClientId: string;
   googleOauthClientSecret: string;
@@ -313,6 +320,12 @@ interface LocalProviderRawConfig {
   MCD_MCP_URL?: string;
   LUCKIN_MCP_TOKEN?: string;
   LUCKIN_MCP_URL?: string;
+  DIDI_MCP_KEY?: string;
+  DIDI_MCP_URL?: string;
+  DIDI_MCP_SANDBOX?: string;
+  AMAP_MCP_KEY?: string;
+  AMAP_MCP_URL?: string;
+  RIDE_MOCK_ENABLED?: string;
   GOOGLE_MAPS_API_KEY?: string;
   GMAIL_AUTH_URL?: string;
   GMAIL_OAUTH_CLIENT_ID?: string;
@@ -370,6 +383,12 @@ interface LocalProviderRawConfig {
   mcdMcpUrl?: string;
   luckinMcpToken?: string;
   luckinMcpUrl?: string;
+  didiMcpKey?: string;
+  didiMcpUrl?: string;
+  didiMcpSandbox?: string;
+  amapMcpKey?: string;
+  amapMcpUrl?: string;
+  rideMockEnabled?: string;
   googleMapsApiKey?: string;
   googleOauthClientId?: string;
   googleOauthClientSecret?: string;
@@ -520,12 +539,20 @@ interface AmapPoi {
   address?: string;
   distance?: string;
   location?: string;
+  pname?: string;
+  cityname?: string;
+  adname?: string;
 }
 
 interface AmapGeocode {
   location?: string;
   formatted_address?: string;
   level?: string;
+  province?: Object | string;
+  city?: Object | string;
+  district?: Object | string;
+  citycode?: Object | string;
+  adcode?: Object | string;
 }
 
 interface AmapPayload {
@@ -764,41 +791,9 @@ interface McpContentItem {
   data?: Object | string | number | boolean;
 }
 
-class EmptyMcpCapabilities {}
-
-interface McpInitializeClientInfo {
-  name: string;
-  version: string;
-}
-
-interface McpInitializeParams {
-  protocolVersion: string;
-  capabilities: EmptyMcpCapabilities;
-  clientInfo: McpInitializeClientInfo;
-}
-
-interface McpInitializeRequest {
-  jsonrpc: string;
-  id: number;
-  method: string;
-  params: McpInitializeParams;
-}
-
 interface McpInitializedNotification {
   jsonrpc: string;
   method: string;
-}
-
-interface McpToolCallParams {
-  name: string;
-  arguments: Object;
-}
-
-interface McpToolCallRequest {
-  jsonrpc: string;
-  id: number;
-  method: string;
-  params: McpToolCallParams;
 }
 
 interface McDonaldsNearbyStoresArgs {
@@ -1038,6 +1033,7 @@ interface AmapLocationResolution {
   location: string;
   locationSource: string;
   locationLabel: string;
+  city: string;
 }
 
 interface FoodQuery {
@@ -1064,6 +1060,9 @@ const DEFAULT_MEITUAN_UNION_API_URL: string = 'https://media.meituan.com/cps_ope
 const DEFAULT_TAOBAO_API_URL: string = 'https://eco.taobao.com/router/rest';
 const DEFAULT_MCD_MCP_URL: string = 'https://mcp.mcd.cn';
 const DEFAULT_LUCKIN_MCP_URL: string = 'https://gwmcp.lkcoffee.com/order/user/mcp';
+const DEFAULT_DIDI_MCP_URL: string = 'https://mcp.didichuxing.com/mcp-servers';
+const DEFAULT_DIDI_MCP_SANDBOX_URL: string = 'https://mcp.didichuxing.com/mcp-servers-sandbox';
+const DEFAULT_AMAP_MCP_URL: string = 'https://mcp.amap.com/mcp';
 const MCP_PROTOCOL_VERSION: string = '2025-06-18';
 const FOOD_PROVIDER_RESULT_LIMIT: number = 10;
 const FOOD_AGGREGATED_RESULT_LIMIT: number = 24;
@@ -1142,6 +1141,12 @@ let localProviderConfig: LocalProviderConfig = {
   mcdMcpUrl: DEFAULT_MCD_MCP_URL,
   luckinMcpToken: '',
   luckinMcpUrl: DEFAULT_LUCKIN_MCP_URL,
+  didiMcpKey: '',
+  didiMcpUrl: DEFAULT_DIDI_MCP_SANDBOX_URL,
+  didiMcpSandbox: 'true',
+  amapMcpKey: '',
+  amapMcpUrl: DEFAULT_AMAP_MCP_URL,
+  rideMockEnabled: 'false',
   googleMapsApiKey: '',
   googleOauthClientId: '',
   googleOauthClientSecret: '',
@@ -1200,8 +1205,145 @@ interface MapsToolArgs {
   id?: string;
 }
 
-type PaymentToolArgValue = Object | string | number | boolean | null | undefined;
-type PaymentToolArgRecord = Record<string, PaymentToolArgValue>;
+type ToolArgValue = Object | string | number | boolean | null | undefined;
+type ToolArgRecord = Record<string, ToolArgValue>;
+type PaymentToolArgValue = ToolArgValue;
+type PaymentToolArgRecord = ToolArgRecord;
+
+interface RideRouteArgs {
+  origin?: ToolArgValue;
+  from?: ToolArgValue;
+  start?: ToolArgValue;
+  destination?: ToolArgValue;
+  to?: ToolArgValue;
+  end?: ToolArgValue;
+  city?: ToolArgValue;
+}
+
+interface RideOrderArgs {
+  productCategory?: ToolArgValue;
+  product_category?: ToolArgValue;
+  estimateTraceId?: ToolArgValue;
+  estimate_trace_id?: ToolArgValue;
+  traceId?: ToolArgValue;
+  confirmed?: ToolArgValue;
+  confirmation?: ToolArgValue;
+  orderId?: ToolArgValue;
+  order_id?: ToolArgValue;
+  reason?: ToolArgValue;
+}
+
+interface RideDidiRequestArgs {
+  from_lng: string;
+  from_lat: string;
+  to_lng: string;
+  to_lat: string;
+  from_name?: string;
+  to_name?: string;
+}
+
+interface RideDidiTextSearchArgs {
+  keywords: string;
+  city: string;
+}
+
+interface RideDidiCreateOrderArgs {
+  product_category: string;
+  estimate_trace_id: string;
+}
+
+interface RideDidiCancelOrderArgs {
+  order_id: string;
+  reason?: string;
+}
+
+interface RideDidiDriverLocationArgs {
+  order_id: string;
+}
+
+interface RideAmapAppLinkArgs {
+  slon: string;
+  slat: string;
+  sname: string;
+  dlon: string;
+  dlat: string;
+  dname: string;
+}
+
+interface RideLinkPreview {
+  didiLink: number;
+  amapLink: number;
+}
+
+interface RideOrderActionArgs {
+  productCategory?: string;
+  product_category?: string;
+  productName?: string;
+  priceText?: string;
+  routeText?: string;
+  origin?: string;
+  destination?: string;
+  pickupLocation?: string;
+  originLocation?: string;
+  destinationLocation?: string;
+  estimateCacheJson?: string;
+  estimateTraceId?: string;
+  estimate_trace_id?: string;
+  traceId?: string;
+  confirmed?: boolean;
+  confirmation?: string;
+  orderId?: string;
+  order_id?: string;
+  reason?: string;
+}
+
+interface RideOrderRouteContext {
+  routeText: string;
+  pickupLocation: string;
+  destinationLocation: string;
+  selectedVehicleText: string;
+  estimateCacheJson: string;
+}
+
+interface RideEstimateCacheProductRecord {
+  productName: string;
+  productCategory: string;
+  priceText: string;
+}
+
+interface RideEstimateCachePayload {
+  traceId: string;
+  products: RideEstimateCacheProductRecord[];
+}
+
+interface RideMockEstimateContent {
+  items: RideEstimateCacheProductRecord[];
+  traceId: string;
+}
+
+interface RideMockEstimatePayload {
+  structuredContent: RideMockEstimateContent;
+}
+
+interface RideMockOrderPayload {
+  orderId: string;
+  status: string;
+}
+
+interface RideMockDriverPayload {
+  location: string;
+  driverName: string;
+  eta: string;
+  status: string;
+}
+
+interface RideMockCancelPayload {
+  status: string;
+}
+
+const RIDE_ORDER_CREATE_DEDUP_MS: number = 120000;
+let lastRideOrderCreateKey: string = '';
+let lastRideOrderCreateAtMs: number = 0;
 
 interface PaymentToolActionArgs {
   recipient?: PaymentToolArgValue;
@@ -1369,6 +1511,13 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     mcdMcpUrl: config.mcdMcpUrl.trim().length > 0 ? config.mcdMcpUrl.trim() : DEFAULT_MCD_MCP_URL,
     luckinMcpToken: config.luckinMcpToken.trim(),
     luckinMcpUrl: config.luckinMcpUrl.trim().length > 0 ? config.luckinMcpUrl.trim() : DEFAULT_LUCKIN_MCP_URL,
+    didiMcpKey: config.didiMcpKey.trim(),
+    didiMcpUrl: config.didiMcpUrl.trim().length > 0 ? config.didiMcpUrl.trim() :
+      (config.didiMcpSandbox.trim().toLowerCase() === 'false' ? DEFAULT_DIDI_MCP_URL : DEFAULT_DIDI_MCP_SANDBOX_URL),
+    didiMcpSandbox: config.didiMcpSandbox.trim().toLowerCase() === 'false' ? 'false' : 'true',
+    amapMcpKey: config.amapMcpKey.trim().length > 0 ? config.amapMcpKey.trim() : config.amapKey.trim(),
+    amapMcpUrl: config.amapMcpUrl.trim().length > 0 ? config.amapMcpUrl.trim() : DEFAULT_AMAP_MCP_URL,
+    rideMockEnabled: config.rideMockEnabled.trim().toLowerCase() === 'true' ? 'true' : 'false',
     googleMapsApiKey: config.googleMapsApiKey.trim(),
     googleOauthClientId: config.googleOauthClientId.trim(),
     googleOauthClientSecret: config.googleOauthClientSecret.trim(),
@@ -1420,6 +1569,10 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' taobaoPidChars=' + localProviderConfig.taobaoFlashPid.length.toString() +
     ' mcdMcpTokenChars=' + localProviderConfig.mcdMcpToken.length.toString() +
     ' luckinMcpTokenChars=' + localProviderConfig.luckinMcpToken.length.toString() +
+    ' didiMcpKeyChars=' + localProviderConfig.didiMcpKey.length.toString() +
+    ' didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ' amapMcpKeyChars=' + localProviderConfig.amapMcpKey.length.toString() +
+    ' rideMockEnabled=' + localProviderConfig.rideMockEnabled +
     ' googleMapsApiKeyChars=' + localProviderConfig.googleMapsApiKey.length.toString() +
     ' googleOauthClientIdChars=' + localProviderConfig.googleOauthClientId.length.toString() +
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
@@ -1436,6 +1589,23 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' stripeReceivingAgentJsonChars=' + localProviderConfig.stripeReceivingAgentJson.length.toString() +
     ' paymentAccountBookJsonChars=' + localProviderConfig.paymentAccountBookJson.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
+}
+
+export function configureDidiMcpSandboxForRuntime(enabled: boolean): void {
+  localProviderConfig.didiMcpSandbox = enabled ? 'true' : 'false';
+  const currentUrl = localProviderConfig.didiMcpUrl.trim();
+  if (currentUrl.length === 0 ||
+    currentUrl === DEFAULT_DIDI_MCP_URL ||
+    currentUrl === DEFAULT_DIDI_MCP_SANDBOX_URL) {
+    localProviderConfig.didiMcpUrl = enabled ? DEFAULT_DIDI_MCP_SANDBOX_URL : DEFAULT_DIDI_MCP_URL;
+  }
+  aiLogInfo('[AIPhone][DidiMcpSandboxRuntime] didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ' didiMcpUrl=' + (localProviderConfig.didiMcpUrl === DEFAULT_DIDI_MCP_SANDBOX_URL ? 'sandbox' :
+      (localProviderConfig.didiMcpUrl === DEFAULT_DIDI_MCP_URL ? 'production' : 'custom')));
+}
+
+export function rideDidiMcpSandboxEnabledForRuntime(): boolean {
+  return localProviderConfig.didiMcpSandbox === 'true';
 }
 
 export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
@@ -1472,6 +1642,12 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     mcdMcpUrl: firstText([parsed.MCD_MCP_URL, parsed.mcdMcpUrl]),
     luckinMcpToken: firstText([parsed.LUCKIN_MCP_TOKEN, parsed.luckinMcpToken]),
     luckinMcpUrl: firstText([parsed.LUCKIN_MCP_URL, parsed.luckinMcpUrl]),
+    didiMcpKey: firstText([parsed.DIDI_MCP_KEY, parsed.didiMcpKey]),
+    didiMcpUrl: firstText([parsed.DIDI_MCP_URL, parsed.didiMcpUrl]),
+    didiMcpSandbox: firstText([parsed.DIDI_MCP_SANDBOX, parsed.didiMcpSandbox]),
+    amapMcpKey: firstText([parsed.AMAP_MCP_KEY, parsed.amapMcpKey]),
+    amapMcpUrl: firstText([parsed.AMAP_MCP_URL, parsed.amapMcpUrl]),
+    rideMockEnabled: firstText([parsed.RIDE_MOCK_ENABLED, parsed.rideMockEnabled]),
     googleMapsApiKey: firstText([parsed.GOOGLE_MAPS_API_KEY, parsed.googleMapsApiKey]),
     googleOauthClientId: firstText([parsed.GOOGLE_OAUTH_CLIENT_ID, parsed.GMAIL_OAUTH_CLIENT_ID, parsed.googleOauthClientId]),
     googleOauthClientSecret: firstText([parsed.GOOGLE_OAUTH_CLIENT_SECRET, parsed.GMAIL_OAUTH_CLIENT_SECRET, parsed.googleOauthClientSecret]),
@@ -1526,6 +1702,12 @@ export function localProviderConfigDebugSummary(): string {
     ', taobaoPid=' + (localProviderConfig.taobaoFlashPid.length > 0 ? 'present(' + localProviderConfig.taobaoFlashPid.length.toString() + ')' : 'missing') +
     ', mcdMcpToken=' + (localProviderConfig.mcdMcpToken.length > 0 ? 'present(' + localProviderConfig.mcdMcpToken.length.toString() + ')' : 'missing') +
     ', luckinMcpToken=' + (localProviderConfig.luckinMcpToken.length > 0 ? 'present(' + localProviderConfig.luckinMcpToken.length.toString() + ')' : 'missing') +
+    ', didiMcpKey=' + (localProviderConfig.didiMcpKey.length > 0 ? 'present(' + localProviderConfig.didiMcpKey.length.toString() + ')' : 'missing') +
+    ', didiMcpUrl=' + (localProviderConfig.didiMcpUrl.length > 0 ? 'present' : 'missing') +
+    ', didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ', amapMcpKey=' + (localProviderConfig.amapMcpKey.length > 0 ? 'present(' + localProviderConfig.amapMcpKey.length.toString() + ')' : 'missing') +
+    ', amapMcpUrl=' + (localProviderConfig.amapMcpUrl.length > 0 ? 'present' : 'missing') +
+    ', rideMockEnabled=' + localProviderConfig.rideMockEnabled +
     ', googleMapsApiKey=' + (localProviderConfig.googleMapsApiKey.length > 0 ? 'present(' + localProviderConfig.googleMapsApiKey.length.toString() + ')' : 'missing') +
     ', googleOauthClientId=' + (localProviderConfig.googleOauthClientId.length > 0 ? 'present(' + localProviderConfig.googleOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
@@ -2261,7 +2443,16 @@ function mcpToolPayloadFromText(text: string): Object {
     throw new Error('MCP 返回中没有 result。');
   }
   if (result.isError === true) {
-    throw new Error('MCP 工具返回错误状态。');
+    const errorParts: string[] = [];
+    const errorContent = result.content === undefined ? [] : result.content;
+    for (let index = 0; index < errorContent.length; index++) {
+      const item = errorContent[index];
+      const itemText = firstText([item.text, item.data]).trim();
+      if (itemText.length > 0) {
+        errorParts.push(itemText);
+      }
+    }
+    throw new Error(errorParts.length > 0 ? errorParts.join('；').substring(0, 300) : 'MCP 工具返回错误状态。');
   }
   if (result.structuredContent !== undefined && result.structuredContent !== null) {
     return result.structuredContent;
@@ -2276,6 +2467,9 @@ function mcpToolPayloadFromText(text: string): Object {
     const jsonSlice = firstJsonSlice(textValue);
     if (jsonSlice.length > 0) {
       return JSON.parse(jsonSlice) as Object;
+    }
+    if (textValue.length > 0) {
+      return JSON.parse('{"text":' + JSON.stringify(textValue) + '}') as Object;
     }
   }
   throw new Error('MCP 工具没有返回可解析的结构化 JSON。');
@@ -2328,19 +2522,7 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
   if (!isReadonlyBrandMcpTool(provider, toolName)) {
     throw new Error(provider + ' MCP 工具 ' + toolName + ' 不在只读查询白名单内。');
   }
-  const initRequest: McpInitializeRequest = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: new EmptyMcpCapabilities(),
-      clientInfo: {
-        name: 'AIPhoneDemo',
-        version: '0.1'
-      }
-    }
-  };
+  const initRequest = buildInitializeRequest(1);
   const initBody = JSON.stringify(initRequest);
   const init = await postJsonText(url, mcpHeaders(token), initBody);
   if (init.code < 200 || init.code >= 300) {
@@ -2367,15 +2549,7 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
       aiLogInfo('[AIPhone][BrandMcpInitializedIgnored] provider=' + provider + ' error=' + describeThrown(error));
     }
   }
-  const callRequest: McpToolCallRequest = {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: {
-      name: toolName,
-      arguments: args
-    }
-  };
+  const callRequest = buildToolsCallRequest(2, toolName, args);
   const callBody = JSON.stringify(callRequest);
   aiLogInfo('[AIPhone][BrandMcpRequest] provider=' + provider + ' tool=' + toolName + ' url=' + url + ' bodyChars=' + callBody.length.toString());
   const response = await postJsonText(url, mcpHeaders(token, sessionId), callBody);
@@ -2383,6 +2557,1449 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
     throw new Error(brandMcpHttpError(provider, toolName, response.code, response.text));
   }
   return mcpToolPayloadFromText(response.text);
+}
+
+function rideMcpHeaders(sessionId: string = ''): HttpRequestHeaders {
+  if (sessionId.length > 0) {
+    return {
+      'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+      'Accept': 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
+      'Mcp-Session-Id': sessionId
+    };
+  }
+  const headers: HttpRequestHeaders = {
+    'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+    'Accept': 'application/json, text/event-stream',
+    'Content-Type': 'application/json',
+    'MCP-Protocol-Version': MCP_PROTOCOL_VERSION
+  };
+  return headers;
+}
+
+function rideMcpUrlWithKey(baseUrl: string, key: string): string {
+  const trimmed = baseUrl.trim();
+  if (trimmed.indexOf('{key}') >= 0) {
+    return trimmed.replace('{key}', encodeURIComponent(key));
+  }
+  if (trimmed.indexOf('YOUR_MCP_KEY') >= 0) {
+    return trimmed.replace('YOUR_MCP_KEY', encodeURIComponent(key));
+  }
+  if (trimmed.indexOf('key=') >= 0) {
+    return trimmed;
+  }
+  return trimmed + (trimmed.indexOf('?') >= 0 ? '&' : '?') + 'key=' + encodeURIComponent(key);
+}
+
+function isAllowedRideMcpTool(provider: string, toolName: string): boolean {
+  if (provider === '滴滴') {
+    return ['maps_textsearch', 'taxi_estimate', 'taxi_generate_ride_app_link', 'taxi_create_order', 'taxi_cancel_order', 'taxi_get_driver_location'].indexOf(toolName) >= 0;
+  }
+  if (provider === '高德') {
+    const lower = toolName.toLowerCase();
+    return lower.indexOf('taxi') >= 0 || lower.indexOf('ride') >= 0 || toolName.indexOf('打车') >= 0;
+  }
+  return false;
+}
+
+async function rideMcpToolNames(url: string): Promise<DynamicMcpTool[]> {
+  const registration = rideMcpRegistration('ride.tools.list', '打车 MCP', url, 'tools/list');
+  const preflight = await new GenericMcpClient().preflight(registration, '');
+  return preflight.ok ? preflight.tools : [];
+}
+
+async function selectRideMcpToolName(provider: string, url: string, fallbackNames: string[], needles: string[]): Promise<string> {
+  let tools: DynamicMcpTool[] = [];
+  try {
+    tools = await rideMcpToolNames(url);
+  } catch (error) {
+    aiLogInfo('[AIPhone][RideMcpToolsListIgnored] provider=' + provider + ' error=' + describeThrown(error));
+  }
+  for (let fallbackIndex = 0; fallbackIndex < fallbackNames.length; fallbackIndex++) {
+    for (let toolIndex = 0; toolIndex < tools.length; toolIndex++) {
+      if (tools[toolIndex].name === fallbackNames[fallbackIndex]) {
+        return fallbackNames[fallbackIndex];
+      }
+    }
+  }
+  for (let toolIndex = 0; toolIndex < tools.length; toolIndex++) {
+    const haystack = (tools[toolIndex].name + ' ' + tools[toolIndex].description).toLowerCase();
+    for (let needleIndex = 0; needleIndex < needles.length; needleIndex++) {
+      if (haystack.indexOf(needles[needleIndex].toLowerCase()) >= 0) {
+        return tools[toolIndex].name;
+      }
+    }
+  }
+  return fallbackNames.length > 0 ? fallbackNames[0] : '';
+}
+
+function rideMcpRegistration(toolId: string, displayName: string, url: string, toolName: string): DynamicToolRegistration {
+  return {
+    toolId: toolId,
+    manifestId: 'ride.mcp',
+    displayName: displayName,
+    status: 'enabled',
+    transport: {
+      type: 'streamable_http',
+      url: url,
+      command: '',
+      args: [],
+      headers: {},
+      env: {}
+    },
+    mcpToolName: toolName,
+    credentialRef: '',
+    sourceUrl: url,
+    lastError: ''
+  };
+}
+
+async function callRideMcpTool(provider: string, url: string, toolName: string, args: Object): Promise<Object> {
+  if (!isAllowedRideMcpTool(provider, toolName)) {
+    throw new Error(provider + ' MCP 工具 ' + toolName + ' 不在打车只读/唤端白名单内。');
+  }
+  const initRequest = buildInitializeRequest(1);
+  const init = await postJsonText(url, rideMcpHeaders(), JSON.stringify(initRequest));
+  if (init.code < 200 || init.code >= 300) {
+    throw new Error(provider + ' MCP initialize HTTP ' + init.code.toString() + '：' + init.text.substring(0, 300));
+  }
+  const initParsed = parseMcpJsonRpcText(init.text);
+  if (initParsed.error !== undefined) {
+    throw new Error(provider + ' MCP initialize 返回错误：' + firstText([initParsed.error.message, initParsed.error.code, initParsed.error.data, 'MCP initialize error']));
+  }
+  const sessionId = headerValueFromJson(init.headers, 'mcp-session-id');
+  if (sessionId.length > 0) {
+    try {
+      const initializedNotification: McpInitializedNotification = {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized'
+      };
+      await postJsonText(url, rideMcpHeaders(sessionId), JSON.stringify(initializedNotification));
+    } catch (error) {
+      aiLogInfo('[AIPhone][RideMcpInitializedIgnored] provider=' + provider + ' error=' + describeThrown(error));
+    }
+  }
+  const callRequest = buildToolsCallRequest(2, toolName, args);
+  const callBody = JSON.stringify(callRequest);
+  aiLogInfo('[AIPhone][RideMcpRequest] provider=' + provider + ' tool=' + toolName + ' urlChars=' + url.length.toString() + ' bodyChars=' + callBody.length.toString());
+  const response = await postJsonText(url, rideMcpHeaders(sessionId), callBody);
+  if (response.code < 200 || response.code >= 300) {
+    throw new Error(provider + ' MCP ' + toolName + ' HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+  }
+  return mcpToolPayloadFromText(response.text);
+}
+
+interface RideRoute {
+  origin: string;
+  destination: string;
+  city: string;
+}
+
+interface RidePoint {
+  name: string;
+  lng: string;
+  lat: string;
+  location: string;
+  city: string;
+}
+
+interface RideProduct {
+  productName: string;
+  productCategory: string;
+  priceText: string;
+}
+
+function rideArgs(args: Object | null): RideRouteArgs {
+  if (args === null) {
+    return JSON.parse('{}') as RideRouteArgs;
+  }
+  return args as RideRouteArgs;
+}
+
+function rideArgText(args: RideRouteArgs, keys: string[]): string {
+  const record = args as PaymentToolArgRecord;
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(record[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function rideRouteFromArgs(args: Object | null): RideRoute {
+  const parsed = rideArgs(args);
+  const origin = rideArgText(parsed, ['origin', 'from', 'start']);
+  const destination = rideArgText(parsed, ['destination', 'to', 'end']);
+  const city = rideArgText(parsed, ['city']);
+  return {
+    origin: origin,
+    destination: destination,
+    city: city
+  };
+}
+
+function rideOrderArgs(args: Object | null): RideOrderArgs {
+  if (args === null) {
+    return JSON.parse('{}') as RideOrderArgs;
+  }
+  return args as RideOrderArgs;
+}
+
+function rideOrderArgText(args: RideOrderArgs, keys: string[]): string {
+  const record = args as ToolArgRecord;
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(record[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function rideOrderConfirmed(args: RideOrderArgs): boolean {
+  const record = args as ToolArgRecord;
+  const confirmed = record.confirmed;
+  if (confirmed === true) {
+    return true;
+  }
+  const confirmedText = textOf(confirmed).trim().toLowerCase();
+  if (confirmedText === 'true' || confirmedText === 'yes') {
+    return true;
+  }
+  const confirmation = textOf(record.confirmation).trim();
+  return confirmation.indexOf('确认') >= 0 && confirmation.indexOf('下单') >= 0;
+}
+
+function rideDidiCreateOrderArgs(args: Object | null): RideDidiCreateOrderArgs {
+  const parsed = rideOrderArgs(args);
+  return {
+    product_category: rideOrderArgText(parsed, ['product_category', 'productCategory']),
+    estimate_trace_id: rideOrderArgText(parsed, ['estimate_trace_id', 'estimateTraceId', 'traceId'])
+  };
+}
+
+function rideOrderRouteContext(args: Object | null): RideOrderRouteContext {
+  const parsed = rideOrderArgs(args);
+  return {
+    routeText: rideOrderArgText(parsed, ['routeText', 'route']),
+    pickupLocation: rideOrderArgText(parsed, ['pickupLocation', 'originLocation', 'fromLocation']),
+    destinationLocation: rideOrderArgText(parsed, ['destinationLocation', 'toLocation']),
+    selectedVehicleText: rideOrderArgText(parsed, ['productName', 'vehicle', 'productCategory', 'product_category']),
+    estimateCacheJson: rideOrderArgText(parsed, ['estimateCacheJson'])
+  };
+}
+
+function hasRideRowLabel(rows: A2uiLabelValueData[], label: string): boolean {
+  for (let index = 0; index < rows.length; index++) {
+    if (rows[index].label === label) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function appendRideRouteContextRows(rows: A2uiLabelValueData[], context: RideOrderRouteContext): void {
+  if (context.routeText.length > 0) {
+    rows.push({ label: '路线', value: context.routeText });
+  }
+  if (context.pickupLocation.length > 0) {
+    rows.push({ label: '起点坐标', value: context.pickupLocation });
+  }
+  if (context.destinationLocation.length > 0) {
+    rows.push({ label: '终点坐标', value: context.destinationLocation });
+  }
+  if (context.selectedVehicleText.length > 0 && !hasRideRowLabel(rows, '车型')) {
+    rows.push({ label: '车型', value: context.selectedVehicleText });
+  }
+}
+
+function rideEstimateCacheJson(products: RideProduct[], traceId: string): string {
+  const records: RideEstimateCacheProductRecord[] = [];
+  products.forEach((product: RideProduct) => {
+    const record: RideEstimateCacheProductRecord = {
+      productName: product.productName,
+      productCategory: product.productCategory,
+      priceText: product.priceText
+    };
+    records.push(record);
+  });
+  const payload: RideEstimateCachePayload = {
+    traceId: traceId,
+    products: records
+  };
+  return JSON.stringify(payload);
+}
+
+function rideDidiCancelOrderArgs(args: Object | null): RideDidiCancelOrderArgs {
+  const parsed = rideOrderArgs(args);
+  const orderArgs: RideDidiCancelOrderArgs = {
+    order_id: rideOrderArgText(parsed, ['order_id', 'orderId'])
+  };
+  const reason = rideOrderArgText(parsed, ['reason']);
+  if (reason.length > 0) {
+    orderArgs.reason = reason;
+  }
+  return orderArgs;
+}
+
+function rideDidiDriverLocationArgs(args: Object | null): RideDidiDriverLocationArgs {
+  const parsed = rideOrderArgs(args);
+  return {
+    order_id: rideOrderArgText(parsed, ['order_id', 'orderId'])
+  };
+}
+
+export function rideDidiCreateOrderArgsForTest(args: Object | null): Object {
+  return rideDidiCreateOrderArgs(args);
+}
+
+export function rideDidiCancelOrderArgsForTest(args: Object | null): Object {
+  return rideDidiCancelOrderArgs(args);
+}
+
+export function rideDidiDriverLocationArgsForTest(args: Object | null): Object {
+  return rideDidiDriverLocationArgs(args);
+}
+
+export function rideOrderConfirmedForTest(args: Object | null): boolean {
+  return rideOrderConfirmed(rideOrderArgs(args));
+}
+
+function rideErrorResult(sourceTag: string, toolName: string, title: string, summary: string): DynamicGenericToolResult {
+  return {
+    sourceTag: sourceTag,
+    toolName: toolName,
+    title: title,
+    status: 'error',
+    summary: summary,
+    rows: [
+      { label: '状态', value: summary }
+    ],
+    rawPreview: summary
+  };
+}
+
+function rideObjectValue(value: Object, key: string): Object | string | number | boolean | null | undefined {
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  return record[key];
+}
+
+function rideNestedObject(payload: Object, key: string): Object | null {
+  const value = rideObjectValue(payload, key);
+  if (value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Object;
+  }
+  return null;
+}
+
+function ridePayloadRoot(payload: Object): Object {
+  const structured = rideNestedObject(payload, 'structuredContent');
+  return structured === null ? payload : structured;
+}
+
+function ridePayloadItems(payload: Object): Object[] {
+  const root = ridePayloadRoot(payload);
+  if (Array.isArray(root)) {
+    return root as Object[];
+  }
+  const rootRecord = root as Record<string, Object | Object[] | string | number | boolean | null | undefined>;
+  if (Array.isArray(rootRecord.items)) {
+    return rootRecord.items as Object[];
+  }
+  if (Array.isArray(rootRecord.data)) {
+    return rootRecord.data as Object[];
+  }
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    const dataRecord = data as Record<string, Object | Object[] | string | number | boolean | null | undefined>;
+    if (Array.isArray(dataRecord.items)) {
+      return dataRecord.items as Object[];
+    }
+    if (Array.isArray(dataRecord.list)) {
+      return dataRecord.list as Object[];
+    }
+  }
+  return [];
+}
+
+function rideTraceId(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  return firstText([
+    rideObjectValue(root, 'traceId'),
+    rideObjectValue(root, 'trace_id'),
+    rideObjectValue(root, 'estimate_trace_id')
+  ]);
+}
+
+function rideProductsFromPayload(payload: Object): RideProduct[] {
+  const items = ridePayloadItems(payload);
+  const products: RideProduct[] = [];
+  items.forEach((item: Object) => {
+    const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+    const productName = firstText([record.productName, record.name, record.title]);
+    const productCategory = firstText([record.productCategory, record.category, record.product_category]);
+    const priceText = firstText([record.priceText, record.price, record.estimatePrice, record.amount]);
+    if (productName.length > 0 || priceText.length > 0) {
+      products.push({
+        productName: productName.length > 0 ? productName : '车型',
+        productCategory: productCategory,
+        priceText: priceText.length > 0 ? priceText : '价格未返回'
+      });
+    }
+  });
+  return products;
+}
+
+function rideLinkFromPayload(payload: Object): string {
+  const json = JSON.stringify(payload);
+  const linkMatch = /((?:diditaxi|amapuri):\/\/[^"\s\\]+|https?:\/\/[^"\s\\]+)/.exec(json);
+  return linkMatch !== null && linkMatch.length > 1 ? jsonTextUnescape(linkMatch[1]) : '';
+}
+
+function rideCoordinateString(value: Object | string | number | boolean | null | undefined): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text)) {
+      return text.replace(/\s+/g, '');
+    }
+    const lngMatch = /(经度|lng|lon|longitude)\s*[:：]\s*(-?\d+(?:\.\d+)?)/i.exec(text);
+    const latMatch = /(纬度|lat|latitude)\s*[:：]\s*(-?\d+(?:\.\d+)?)/i.exec(text);
+    if (lngMatch !== null && lngMatch.length > 2 && latMatch !== null && latMatch.length > 2) {
+      return lngMatch[2] + ',' + latMatch[2];
+    }
+    return '';
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  const lng = firstText([record.lng, record.lon, record.longitude]);
+  const lat = firstText([record.lat, record.latitude]);
+  return lng.length > 0 && lat.length > 0 ? lng + ',' + lat : '';
+}
+
+function rideCoordinateFromPayload(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  const candidates: Array<Object | string | number | boolean | null | undefined> = [
+    rideObjectValue(root, 'location'),
+    rideObjectValue(root, 'coordinate'),
+    rideObjectValue(root, 'point')
+  ];
+  const items = ridePayloadItems(payload);
+  if (items.length > 0) {
+    const first = items[0];
+    candidates.push(first);
+    candidates.push(rideObjectValue(first, 'location'));
+  }
+  for (let index = 0; index < candidates.length; index++) {
+    const coordinate = rideCoordinateString(candidates[index]);
+    if (coordinate.length > 0) {
+      return coordinate;
+    }
+  }
+  return '';
+}
+
+function ridePointFromSearchPayload(name: string, payload: Object): RidePoint {
+  const location = rideCoordinateFromPayload(payload);
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: ''
+  };
+}
+
+function ridePointFromAmapResolution(name: string, resolution: AmapLocationResolution): RidePoint {
+  const parts = resolution.location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: resolution.location,
+    city: rideDidiCityText(resolution.city)
+  };
+}
+
+function rideDidiCityFromRouteOrAmap(routeCity: string, origin: RidePoint | null, destination: RidePoint | null): string {
+  const direct = rideDidiCityText(routeCity);
+  if (direct.length > 0) {
+    return direct;
+  }
+  return rideDidiCityText(firstText([
+    origin === null ? '' : origin.city,
+    destination === null ? '' : destination.city
+  ]));
+}
+
+function rideKnownMockLocation(name: string, fallback: string): string {
+  const normalized = name.replace(/\s+/g, '');
+  if (normalized.indexOf('华为坂田基地') >= 0 || normalized.indexOf('坂田') >= 0) {
+    return '114.066231,22.657805';
+  }
+  if (normalized.indexOf('秋港花园') >= 0) {
+    return '114.060432,22.548829';
+  }
+  if (normalized.indexOf('深圳北') >= 0) {
+    return '114.029415,22.609722';
+  }
+  if (normalized.indexOf('深圳湾万象城') >= 0) {
+    return '113.943021,22.523382';
+  }
+  return fallback;
+}
+
+function rideMockPoint(name: string, fallbackLocation: string): RidePoint {
+  const location = rideKnownMockLocation(name, fallbackLocation);
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: '深圳'
+  };
+}
+
+function rideMockTraceId(origin: RidePoint, destination: RidePoint): string {
+  return 'mock-' + origin.location.replace(',', '') + '-' + destination.location.replace(',', '');
+}
+
+function rideMockEstimatePayload(traceId: string): RideMockEstimatePayload {
+  const items: RideEstimateCacheProductRecord[] = [
+    { productName: '特惠快车', productCategory: 'discount_express', priceText: '10' },
+    { productName: '快车', productCategory: 'express', priceText: '15' },
+    { productName: '专车', productCategory: 'premium', priceText: '30' },
+    { productName: '豪华车', productCategory: 'luxury', priceText: '100' }
+  ];
+  return {
+    structuredContent: {
+      items: items,
+      traceId: traceId
+    }
+  };
+}
+
+function rideMockOrderId(requestArgs: RideDidiCreateOrderArgs): string {
+  const category = requestArgs.product_category.length > 0 ? requestArgs.product_category : 'ride';
+  return 'MOCK-' + category.toUpperCase().replace(/[^A-Z0-9_]/g, '') + '-001';
+}
+
+function rideMockOrderPayload(requestArgs: RideDidiCreateOrderArgs): RideMockOrderPayload {
+  return {
+    orderId: rideMockOrderId(requestArgs),
+    status: 'mock_order_created'
+  };
+}
+
+function rideMockDriverPayload(_requestArgs: RideDidiDriverLocationArgs): RideMockDriverPayload {
+  return {
+    location: '114.063920,22.637910',
+    driverName: '陈师傅',
+    eta: '预计 6 分钟接驾',
+    status: 'mock_driver_en_route'
+  };
+}
+
+function rideMockCancelPayload(): RideMockCancelPayload {
+  return {
+    status: 'mock_cancelled'
+  };
+}
+
+function rideRouteOriginText(routeText: string): string {
+  const parts = routeText.split('→');
+  return parts.length > 0 ? parts[0].trim() : '';
+}
+
+function rideRouteDestinationText(routeText: string): string {
+  const parts = routeText.split('→');
+  return parts.length > 1 ? parts[1].trim() : '';
+}
+
+function rideOrderConfirmAction(product: RideProduct, traceId: string, origin: RidePoint, destination: RidePoint, estimateCacheJson: string, isPrimary: boolean): A2uiAction {
+  const args: RideOrderActionArgs = {
+    productCategory: product.productCategory,
+    product_category: product.productCategory,
+    productName: product.productName,
+    priceText: product.priceText,
+    routeText: origin.name + ' → ' + destination.name,
+    origin: origin.name,
+    destination: destination.name,
+    pickupLocation: origin.location,
+    originLocation: origin.location,
+    destinationLocation: destination.location,
+    estimateCacheJson: estimateCacheJson,
+    estimateTraceId: traceId,
+    estimate_trace_id: traceId,
+    traceId: traceId,
+    confirmed: true,
+    confirmation: '确认下单'
+  };
+  return {
+    id: 'ride.order.confirm',
+    label: '确认叫' + product.productName,
+    prompt: '确认下单：' + product.productName + ' ' + product.priceText,
+    kind: 'prompt',
+    variant: isPrimary ? 'primary' : 'secondary',
+    args: args
+  };
+}
+
+function rideOrderConfirmActions(products: RideProduct[], traceId: string, origin: RidePoint, destination: RidePoint): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  if (traceId.length === 0) {
+    return actions;
+  }
+  const estimateCache = rideEstimateCacheJson(products, traceId);
+  products.forEach((product: RideProduct) => {
+    if (product.productCategory.length > 0) {
+      actions.push(rideOrderConfirmAction(product, traceId, origin, destination, estimateCache, actions.length === 0));
+    }
+  });
+  return actions;
+}
+
+function rideEstimateResult(origin: RidePoint, destination: RidePoint, estimatePayload: Object): DynamicGenericToolResult {
+  const products = rideProductsFromPayload(estimatePayload);
+  const traceId = rideTraceId(estimatePayload);
+  if (products.length === 0) {
+    return rideErrorResult('滴滴', 'ride.estimate', '滴滴价格预估未返回车型', '滴滴 MCP 没有返回可展示的车型和价格。');
+  }
+  const rows: A2uiLabelValueData[] = [
+    { label: '路线', value: origin.name + ' → ' + destination.name },
+    { label: '起点坐标', value: origin.location },
+    { label: '终点坐标', value: destination.location }
+  ];
+  products.forEach((product: RideProduct) => {
+    const category = product.productCategory.length > 0 ? '（' + product.productCategory + '）' : '';
+    rows.push({
+      label: product.productName + category,
+      value: product.priceText
+    });
+  });
+  if (traceId.length > 0) {
+    rows.push({
+      label: 'traceId',
+      value: traceId.length > 16 ? traceId.substring(0, 8) + '...' + traceId.substring(traceId.length - 6) : traceId
+    });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_estimate' });
+  const summaryParts: string[] = [];
+  products.forEach((product: RideProduct) => summaryParts.push(product.productName + ' ' + product.priceText));
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.estimate',
+    title: '滴滴价格预估',
+    status: 'success',
+    summary: summaryParts.join('；') + '。',
+    rows: rows,
+    rawPreview: JSON.stringify(estimatePayload).substring(0, 1200),
+    actions: rideOrderConfirmActions(products, traceId, origin, destination)
+  };
+}
+
+function rideLinkActions(didiLink: string, amapLink: string): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  if (didiLink.length > 0) {
+    actions.push({
+      id: 'ride.open.didi',
+      label: '打开滴滴',
+      prompt: didiLink,
+      kind: 'client',
+      variant: 'primary'
+    });
+  }
+  if (amapLink.length > 0) {
+    actions.push({
+      id: 'ride.open.amap',
+      label: '打开高德',
+      prompt: amapLink,
+      kind: 'client',
+      variant: didiLink.length > 0 ? 'secondary' : 'primary'
+    });
+  }
+  return actions;
+}
+
+function rideShouldSurfaceAppLinkError(toolId: string): boolean {
+  return toolId === 'ride.app.link';
+}
+
+export function rideShouldSurfaceAppLinkErrorForTest(toolId: string): boolean {
+  return rideShouldSurfaceAppLinkError(toolId);
+}
+
+function rideLinkResult(origin: string, destination: string, didiLink: string, amapLink: string, originLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult {
+  const rows: A2uiLabelValueData[] = [
+    { label: '路线', value: origin + ' → ' + destination }
+  ];
+  if (originLocation.length > 0) {
+    rows.push({ label: '起点坐标', value: originLocation });
+  }
+  if (destinationLocation.length > 0) {
+    rows.push({ label: '终点坐标', value: destinationLocation });
+  }
+  if (didiLink.length > 0) {
+    rows.push({ label: '滴滴链接', value: didiLink });
+  }
+  if (amapLink.length > 0) {
+    rows.push({ label: '高德链接', value: amapLink });
+  }
+  rows.push({ label: '来源', value: '滴滴 App 链接 / 高德打车唤端链接' });
+  const rawPreview: RideLinkPreview = {
+    didiLink: didiLink.length,
+    amapLink: amapLink.length
+  };
+  return {
+    sourceTag: '滴滴 / 高德',
+    toolName: 'ride.app.link',
+    title: 'App 打车链接',
+    status: didiLink.length > 0 || amapLink.length > 0 ? 'success' : 'error',
+    summary: didiLink.length > 0 || amapLink.length > 0 ? '已生成可手动打开的 App 打车链接；不会自动叫车。' : '没有可打开的 App 打车链接。',
+    rows: rows,
+    rawPreview: JSON.stringify(rawPreview),
+    actions: rideLinkActions(didiLink, amapLink)
+  };
+}
+
+function rideOrderPayloadText(payload: Object, keys: string[]): string {
+  const root = ridePayloadRoot(payload);
+  const items = ridePayloadItems(payload);
+  for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+    const value = firstText([rideObjectValue(root, keys[keyIndex])]);
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  if (items.length > 0) {
+    const first = items[0];
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+      const value = firstText([rideObjectValue(first, keys[keyIndex])]);
+      if (value.length > 0) {
+        return value;
+      }
+    }
+  }
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+      const value = firstText([rideObjectValue(data, keys[keyIndex])]);
+      if (value.length > 0) {
+        return value;
+      }
+    }
+  }
+  return '';
+}
+
+function rideCancelAction(orderId: string, context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {
+    orderId: orderId,
+    order_id: orderId,
+    reason: '用户取消'
+  };
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.order.cancel',
+    label: '取消订单',
+    prompt: '取消滴滴打车订单',
+    kind: 'prompt',
+    variant: 'secondary',
+    args: args
+  };
+}
+
+function rideDriverLocationAction(orderId: string, isPrimary: boolean, context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {
+    orderId: orderId,
+    order_id: orderId
+  };
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.driver.location.refresh',
+    label: '刷新司机位置',
+    prompt: '刷新滴滴司机位置',
+    kind: 'prompt',
+    variant: isPrimary ? 'primary' : 'secondary',
+    args: args
+  };
+}
+
+function rideRetryQueryAction(context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {};
+  if (context !== null) {
+    const origin = rideRouteOriginText(context.routeText);
+    const destination = rideRouteDestinationText(context.routeText);
+    args.routeText = context.routeText;
+    args.origin = origin;
+    args.destination = destination;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.query.retry',
+    label: '重新查询',
+    prompt: context !== null && context.routeText.length > 0 ? '重新查询打车方案：' + context.routeText : '重新查询打车方案',
+    kind: 'prompt',
+    variant: 'primary',
+    args: args
+  };
+}
+
+function rideChangeVehicleAction(context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {};
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.vehicle.change',
+    label: '换车型',
+    prompt: '恢复车型选择',
+    kind: 'client',
+    variant: 'secondary',
+    args: args
+  };
+}
+
+function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrderArgs, context: RideOrderRouteContext): DynamicGenericToolResult {
+  const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status']);
+  const rows: A2uiLabelValueData[] = [
+    { label: '车型', value: context.selectedVehicleText.length > 0 ? context.selectedVehicleText : requestArgs.product_category },
+    { label: 'traceId', value: requestArgs.estimate_trace_id.length > 16 ? requestArgs.estimate_trace_id.substring(0, 8) + '...' + requestArgs.estimate_trace_id.substring(requestArgs.estimate_trace_id.length - 6) : requestArgs.estimate_trace_id }
+  ];
+  appendRideRouteContextRows(rows, context);
+  if (orderId.length > 0) {
+    rows.push({ label: '订单号', value: orderId });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_create_order（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.order.create',
+    title: '滴滴订单已提交',
+    status: 'success',
+    summary: orderId.length > 0 ? '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 下单接口，但响应里没有返回订单号。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: orderId.length > 0 ? [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)] : []
+  };
+}
+
+function rideCancelOrderResult(payload: Object, requestArgs: RideDidiCancelOrderArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'cancelStatus', 'cancel_status']);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: requestArgs.order_id }
+  ];
+  if (requestArgs.reason !== undefined && requestArgs.reason.length > 0) {
+    rows.push({ label: '原因', value: requestArgs.reason });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_cancel_order（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.order.cancel',
+    title: '滴滴订单已取消',
+    status: 'success',
+    summary: '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 取消订单接口。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: [rideRetryQueryAction(context), rideChangeVehicleAction(context)]
+  };
+}
+
+function rideDriverCoordinate(payload: Object, lngKeys: string[], latKeys: string[]): string {
+  const root = ridePayloadRoot(payload);
+  const location = firstText([
+    rideObjectValue(root, 'location'),
+    rideObjectValue(root, 'driver_location'),
+    rideObjectValue(root, 'driverLocation'),
+    rideObjectValue(root, 'text')
+  ]).trim();
+  const locationCoordinate = rideCoordinateString(location);
+  if (locationCoordinate.length > 0) {
+    return locationCoordinate;
+  }
+  const data = rideNestedObject(root, 'data');
+  const candidates: Object[] = data === null ? [root] : [root, data];
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+    const candidate = candidates[candidateIndex];
+    let lng = '';
+    let lat = '';
+    for (let index = 0; index < lngKeys.length; index++) {
+      lng = firstText([rideObjectValue(candidate, lngKeys[index])]).trim();
+      if (lng.length > 0) {
+        break;
+      }
+    }
+    for (let index = 0; index < latKeys.length; index++) {
+      lat = firstText([rideObjectValue(candidate, latKeys[index])]).trim();
+      if (lat.length > 0) {
+        break;
+      }
+    }
+    if (lng.length > 0 && lat.length > 0) {
+      return lng + ',' + lat;
+    }
+  }
+  return '';
+}
+
+function rideDriverEtaText(payload: Object): string {
+  const raw = rideOrderPayloadText(payload, [
+    'eta',
+    'ETA',
+    'driverEta',
+    'driver_eta',
+    'driverArrivalEta',
+    'driver_arrival_eta',
+    'estimatedArrivalTime',
+    'estimated_arrival_time',
+    'estimatedTime',
+    'estimated_time',
+    'arrivalTime',
+    'arrival_time'
+  ]).trim();
+  if (raw.length === 0) {
+    return '';
+  }
+  if (raw.indexOf('预计') >= 0 || raw.indexOf('分钟') >= 0 || raw.indexOf('接驾') >= 0) {
+    return raw;
+  }
+  const numeric = Number(raw);
+  if (!isNaN(numeric)) {
+    const minutes = numeric > 30 ? Math.max(1, Math.round(numeric / 60)) : Math.max(1, Math.round(numeric));
+    return '预计 ' + minutes.toString() + ' 分钟接驾';
+  }
+  return raw;
+}
+
+function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLocationArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
+  const location = rideDriverCoordinate(payload, ['lng', 'lon', 'longitude', 'driver_lng', 'driverLng'], ['lat', 'latitude', 'driver_lat', 'driverLat']);
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'driverStatus', 'driver_status']);
+  const driverName = rideOrderPayloadText(payload, ['driverName', 'driver_name', 'name']);
+  const etaText = rideDriverEtaText(payload);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: requestArgs.order_id }
+  ];
+  if (context !== null) {
+    appendRideRouteContextRows(rows, context);
+  }
+  if (location.length > 0) {
+    rows.push({ label: '司机位置', value: location });
+  }
+  if (driverName.length > 0) {
+    rows.push({ label: '司机', value: driverName });
+  }
+  if (etaText.length > 0) {
+    rows.push({ label: '预计接驾时间', value: etaText });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_get_driver_location（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.driver.location',
+    title: '滴滴司机位置',
+    status: 'success',
+    summary: location.length > 0 ? '已返回司机当前位置。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 刷新司机位置接口，但响应里没有可展示的位置。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: [rideDriverLocationAction(requestArgs.order_id, true, context), rideCancelAction(requestArgs.order_id, context)]
+  };
+}
+
+export function rideDriverLocationResultForTest(payload: Object, orderId: string, pickupLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult {
+  const context: RideOrderRouteContext | null = pickupLocation.length > 0 || destinationLocation.length > 0 ? {
+    routeText: '测试起点 → 测试终点',
+    pickupLocation: pickupLocation,
+    destinationLocation: destinationLocation,
+    selectedVehicleText: '',
+    estimateCacheJson: ''
+  } : null;
+  return rideDriverLocationResult(payload, { order_id: orderId }, context);
+}
+
+export function rideCancelOrderResultForTest(payload: Object, orderId: string): DynamicGenericToolResult {
+  return rideCancelOrderResult(payload, { order_id: orderId, reason: '用户取消' });
+}
+
+export function rideResultsFromMcpPayloadsForTest(origin: string, destination: string, estimatePayload: Object, didiLinkPayload: Object, amapLinkPayload: Object, originLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult[] {
+  return [
+    rideEstimateResult(ridePointForTest(origin, originLocation), ridePointForTest(destination, destinationLocation), estimatePayload),
+    rideLinkResult(origin, destination, rideLinkFromPayload(didiLinkPayload), rideLinkFromPayload(amapLinkPayload), originLocation, destinationLocation)
+  ];
+}
+
+function rideDidiRequestArgs(origin: RidePoint, destination: RidePoint, includeNames: boolean): RideDidiRequestArgs {
+  const args: RideDidiRequestArgs = {
+    from_lng: origin.lng,
+    from_lat: origin.lat,
+    to_lng: destination.lng,
+    to_lat: destination.lat
+  };
+  if (includeNames) {
+    args.from_name = origin.name;
+    args.to_name = destination.name;
+  }
+  return args;
+}
+
+function rideAmapRequestArgs(origin: RidePoint, destination: RidePoint): RideAmapAppLinkArgs {
+  return {
+    slon: origin.lng,
+    slat: origin.lat,
+    sname: origin.name,
+    dlon: destination.lng,
+    dlat: destination.lat,
+    dname: destination.name
+  };
+}
+
+function ridePointForTest(name: string, location: string): RidePoint {
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: ''
+  };
+}
+
+export function rideAmapRequestArgsForTest(origin: string, destination: string): Object {
+  return rideAmapRequestArgs(
+    ridePointForTest('起点', origin),
+    ridePointForTest('终点', destination)
+  );
+}
+
+export function rideAmapGeocodePointForTest(name: string, payload: Object): Object {
+  return ridePointFromAmapResolution(name, amapResolutionFromGeocodePayload(payload as AmapPayload));
+}
+
+export function rideDidiCityFromAmapGeocodeForTest(payload: Object): string {
+  return rideDidiCityText(amapResolutionFromGeocodePayload(payload as AmapPayload).city);
+}
+
+function rideAmapGeocodeKey(): string {
+  const webKey = localProviderConfig.amapKey.trim();
+  return webKey.length > 0 ? webKey : localProviderConfig.amapMcpKey.trim();
+}
+
+export function rideAmapGeocodeKeyForTest(): string {
+  return rideAmapGeocodeKey();
+}
+
+export function rideAmapWebKeyForUi(): string {
+  return localProviderConfig.amapKey.trim();
+}
+
+export function rideLinkFromMcpResponseTextForTest(text: string): string {
+  return rideLinkFromPayload(mcpToolPayloadFromText(text));
+}
+
+async function resolveDidiRidePoint(url: string, name: string, city: string): Promise<RidePoint> {
+  const args: RideDidiTextSearchArgs = {
+    keywords: name,
+    city: city
+  };
+  const payload = await callRideMcpTool('滴滴', url, 'maps_textsearch', args);
+  const point = ridePointFromSearchPayload(name, payload);
+  if (point.location.length === 0) {
+    throw new Error('滴滴 maps_textsearch 未返回 ' + name + ' 的经纬度。');
+  }
+  return point;
+}
+
+async function resolveAmapRidePoint(name: string, cityHint: string, key: string): Promise<RidePoint> {
+  const city = rideDidiCityText(cityHint);
+  if (isLandmarkPlace(name)) {
+    const poi = await searchAmapPoiLocation(name, city.length > 0 ? city : inferAmapCityFromPlace(name), key);
+    if (poi.location.length > 0) {
+      return ridePointFromAmapResolution(name, poi);
+    }
+  }
+  const geo = await geocodeAmapAddress(name, key, city);
+  if (geo.location.length > 0) {
+    return ridePointFromAmapResolution(name, geo);
+  }
+  const poi = await searchAmapPoiLocation(name, city.length > 0 ? city : inferAmapCityFromPlace(name), key);
+  if (poi.location.length > 0) {
+    return ridePointFromAmapResolution(name, poi);
+  }
+  throw new Error('高德地理编码未返回 ' + name + ' 的经纬度。');
+}
+
+function rideDidiQueryMcpUrl(): string {
+  return rideMcpUrlWithKey(localProviderConfig.didiMcpUrl, localProviderConfig.didiMcpKey.trim());
+}
+
+export function rideDidiQueryMcpUrlForTest(): string {
+  return rideDidiQueryMcpUrl();
+}
+
+function rideDidiOrderMcpUrl(): string {
+  return rideMcpUrlWithKey(localProviderConfig.didiMcpUrl, localProviderConfig.didiMcpKey.trim());
+}
+
+export function rideDidiOrderMcpUrlForTest(): string {
+  return rideDidiOrderMcpUrl();
+}
+
+function rideMockEnabled(): boolean {
+  if (localProviderConfig.didiMcpSandbox === 'false') {
+    return false;
+  }
+  return localProviderConfig.rideMockEnabled.trim().toLowerCase() === 'true';
+}
+
+function rideDidiMcpModeLabel(): string {
+  return localProviderConfig.didiMcpSandbox === 'false' ? 'production' : 'sandbox';
+}
+
+function rideOrderCreateDedupKey(args: RideDidiCreateOrderArgs): string {
+  if (args.product_category.length === 0 || args.estimate_trace_id.length === 0) {
+    return '';
+  }
+  return args.product_category + '|' + args.estimate_trace_id;
+}
+
+function rideOrderCreateDedupBlocked(previousKey: string, currentKey: string, elapsedMs: number): boolean {
+  return previousKey.length > 0 &&
+    currentKey.length > 0 &&
+    previousKey === currentKey &&
+    elapsedMs >= 0 &&
+    elapsedMs < RIDE_ORDER_CREATE_DEDUP_MS;
+}
+
+export function rideOrderCreateDedupBlockedForTest(previousKey: string, currentKey: string, elapsedMs: number): boolean {
+  return rideOrderCreateDedupBlocked(previousKey, currentKey, elapsedMs);
+}
+
+function rideOrderCreateErrorTitle(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.indexOf('user_taxi_create_order') >= 0 &&
+    (lower.indexOf('quota') >= 0 || lower.indexOf('rate limit') >= 0)) {
+    return '下单额度已耗尽';
+  }
+  return '滴滴下单失败';
+}
+
+export function rideOrderCreateErrorTitleForTest(message: string): string {
+  return rideOrderCreateErrorTitle(message);
+}
+
+function rideOrderCreateErrorSummary(message: string): string {
+  if (rideOrderCreateErrorTitle(message) === '下单额度已耗尽') {
+    return '滴滴 MCP 的 user_taxi_create_order 下单额度已耗尽。请稍后再试，或先使用打开滴滴/高德入口继续人工叫车。';
+  }
+  return message;
+}
+
+async function callLocalDidiRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const parsed = rideOrderArgs(args);
+  const requestArgs = rideDidiCreateOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 下单接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (!rideOrderConfirmed(parsed)) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '需要明确确认车型', '请先查看滴滴价格预估，并明确点击某个车型的确认下单按钮。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少下单参数', '滴滴下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  const dedupKey = rideOrderCreateDedupKey(requestArgs);
+  const nowMs = new Date().getTime();
+  if (rideOrderCreateDedupBlocked(lastRideOrderCreateKey, dedupKey, nowMs - lastRideOrderCreateAtMs)) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '下单请求已提交', '短时间内已经提交过同一车型的下单请求，为避免重复消耗 provider quota，本次没有再次调用 taxi_create_order。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  lastRideOrderCreateKey = dedupKey;
+  lastRideOrderCreateAtMs = nowMs;
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_create_order', requestArgs);
+    const createResult = rideCreateOrderResult(payload, requestArgs, routeContext);
+    results.push(createResult);
+    const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+    if (orderId.length > 0) {
+      const driverLocationArgs: RideDidiDriverLocationArgs = { order_id: orderId };
+      try {
+        const driverPayload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', driverLocationArgs);
+        results.push(rideDriverLocationResult(driverPayload, driverLocationArgs, routeContext));
+      } catch (locationError) {
+        results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(locationError)));
+      }
+    }
+  } catch (error) {
+    const message = describeThrown(error);
+    results.push(rideErrorResult('滴滴', 'ride.order.create', rideOrderCreateErrorTitle(message), rideOrderCreateErrorSummary(message)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+}
+
+async function callLocalDidiRideCancelOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const requestArgs = rideDidiCancelOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 取消订单接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+  }
+  if (requestArgs.order_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '缺少订单号', '取消滴滴订单需要 order_id；请从已提交订单卡片点击取消。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+  }
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_cancel_order', requestArgs);
+    results.push(rideCancelOrderResult(payload, requestArgs, routeContext));
+  } catch (error) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '滴滴取消订单失败', describeThrown(error)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+}
+
+async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const requestArgs = rideDidiDriverLocationArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 司机位置接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  }
+  if (requestArgs.order_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少订单号', '刷新滴滴司机位置需要 order_id；请从订单卡片点击刷新。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  }
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', requestArgs);
+    results.push(rideDriverLocationResult(payload, requestArgs, routeContext));
+  } catch (error) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(error)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+}
+
+async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args: Object | null): Promise<string> {
+  const route = rideRouteFromArgs(args);
+  if (route.origin.length === 0 || route.destination.length === 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      rideErrorResult('模拟打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；模拟数据也需要明确路线。')
+    ]);
+  }
+  const originPoint = rideMockPoint(route.origin, '114.066231,22.657805');
+  const destinationPoint = rideMockPoint(route.destination, '114.060432,22.548829');
+  const traceId = rideMockTraceId(originPoint, destinationPoint);
+  const estimatePayload = rideMockEstimatePayload(traceId);
+  const results: DynamicGenericToolResult[] = [
+    rideEstimateResult(originPoint, destinationPoint, estimatePayload)
+  ];
+  if (toolId === 'ride.app.link' || toolId === 'ride.estimate') {
+    results.push(rideLinkResult(
+      route.origin,
+      route.destination,
+      'diditaxi://mock/ride?traceId=' + encodeURIComponent(traceId),
+      'amapuri://mock/taxi?sourceApplication=aiphone',
+      originPoint.location,
+      destinationPoint.location
+    ));
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, results);
+}
+
+async function callLocalMockRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const parsed = rideOrderArgs(args);
+  const requestArgs = rideDidiCreateOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (!rideOrderConfirmed(parsed)) {
+    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '需要明确确认车型', '请先查看模拟价格预估，并明确点击某个车型的确认叫车按钮。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
+    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '缺少下单参数', '模拟下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  const payload = rideMockOrderPayload(requestArgs);
+  const createResult = rideCreateOrderResult(payload, requestArgs, routeContext);
+  results.push(createResult);
+  const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+  if (orderId.length > 0) {
+    const driverLocationArgs: RideDidiDriverLocationArgs = { order_id: orderId };
+    results.push(rideDriverLocationResult(rideMockDriverPayload(driverLocationArgs), driverLocationArgs, routeContext));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+}
+
+async function callLocalMockRideCancelOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const requestArgs = rideDidiCancelOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (requestArgs.order_id.length === 0) {
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', [
+      rideErrorResult('模拟滴滴', 'ride.order.cancel', '缺少订单号', '取消模拟订单需要 order_id；请从订单卡片点击取消。')
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', [
+    rideCancelOrderResult(rideMockCancelPayload(), requestArgs, routeContext)
+  ]);
+}
+
+async function callLocalMockRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+  const requestArgs = rideDidiDriverLocationArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (requestArgs.order_id.length === 0) {
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+      rideErrorResult('模拟滴滴', 'ride.driver.location', '缺少订单号', '刷新模拟司机位置需要 order_id；请从订单卡片点击刷新。')
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+    rideDriverLocationResult(rideMockDriverPayload(requestArgs), requestArgs, routeContext)
+  ]);
+}
+
+async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'ride.order.create') {
+    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.order.cancel') {
+    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.driver.location') {
+    return rideMockEnabled() ? callLocalMockRideDriverLocation(surfaceId, args) : callLocalDidiRideDriverLocation(surfaceId, args);
+  }
+  if (rideMockEnabled() && (toolId === 'ride.estimate' || toolId === 'ride.app.link')) {
+    return callLocalMockRideEstimate(surfaceId, toolId, args);
+  }
+  const route = rideRouteFromArgs(args);
+  if (route.origin.length === 0 || route.destination.length === 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      rideErrorResult('打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；AIPhone 不会使用记忆坐标或猜测坐标。')
+    ]);
+  }
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const amapMcpKey = localProviderConfig.amapMcpKey.trim();
+  const amapGeocodeKey = rideAmapGeocodeKey();
+  let originPoint: RidePoint | null = null;
+  let destinationPoint: RidePoint | null = null;
+  let amapOriginPoint: RidePoint | null = null;
+  let amapDestinationPoint: RidePoint | null = null;
+  let didiLink = '';
+  let amapLink = '';
+  let didiUrl = '';
+  let amapResolveError = '';
+  if (amapGeocodeKey.length > 0) {
+    try {
+      amapOriginPoint = await resolveAmapRidePoint(route.origin, route.city, amapGeocodeKey);
+      amapDestinationPoint = await resolveAmapRidePoint(route.destination, route.city, amapGeocodeKey);
+    } catch (error) {
+      amapResolveError = describeThrown(error);
+    }
+  }
+  const didiCity = rideDidiCityFromRouteOrAmap(route.city, amapOriginPoint, amapDestinationPoint);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', toolId, '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。'));
+  } else if (didiCity.length === 0) {
+    results.push(rideErrorResult('滴滴', toolId, '需要补充城市', '请提供起终点所在城市，或确保高德地理编码可返回城市；滴滴 maps_textsearch 要求 city 参数，AIPhone 不会猜测城市或坐标。'));
+  } else {
+    try {
+      didiUrl = rideDidiQueryMcpUrl();
+      originPoint = await resolveDidiRidePoint(didiUrl, route.origin, didiCity);
+      destinationPoint = await resolveDidiRidePoint(didiUrl, route.destination, didiCity);
+    } catch (error) {
+      results.push(rideErrorResult('滴滴', toolId, '滴滴 MCP 调用失败', describeThrown(error)));
+    }
+    if (originPoint !== null && destinationPoint !== null) {
+      if (toolId === 'ride.estimate') {
+        try {
+          const estimatePayload = await callRideMcpTool('滴滴', didiUrl, 'taxi_estimate', rideDidiRequestArgs(originPoint, destinationPoint, true));
+          results.push(rideEstimateResult(originPoint, destinationPoint, estimatePayload));
+        } catch (error) {
+          results.push(rideErrorResult('滴滴', toolId, '滴滴价格预估失败', describeThrown(error)));
+        }
+      }
+      try {
+        const didiPayload = await callRideMcpTool('滴滴', didiUrl, 'taxi_generate_ride_app_link', rideDidiRequestArgs(originPoint, destinationPoint, false));
+        didiLink = rideLinkFromPayload(didiPayload);
+      } catch (error) {
+        if (rideShouldSurfaceAppLinkError(toolId)) {
+          results.push(rideErrorResult('滴滴', 'ride.app.link', '滴滴唤端链接生成失败', describeThrown(error)));
+        } else {
+          aiLogInfo('[AIPhone][RideOptionalAppLinkIgnored] provider=滴滴 tool=taxi_generate_ride_app_link error=' + describeThrown(error));
+        }
+      }
+    }
+  }
+  if (amapMcpKey.length > 0) {
+    try {
+      if (amapResolveError.length > 0) {
+        throw new Error(amapResolveError);
+      }
+      if (amapOriginPoint === null || amapDestinationPoint === null) {
+        throw new Error('高德 maps_schema_take_taxi 需要起终点经纬度；高德地理编码未返回完整坐标。');
+      }
+      const amapUrl = rideMcpUrlWithKey(localProviderConfig.amapMcpUrl, amapMcpKey);
+      const amapTool = await selectRideMcpToolName('高德', amapUrl, ['maps_schema_take_taxi', 'maps_taxi', 'taxi', 'ride_hailing', 'amap_taxi'], ['打车', 'taxi', 'ride']);
+      const amapArgs = rideAmapRequestArgs(amapOriginPoint, amapDestinationPoint);
+      const amapPayload = await callRideMcpTool('高德', amapUrl, amapTool, amapArgs);
+      amapLink = rideLinkFromPayload(amapPayload);
+    } catch (error) {
+      if (rideShouldSurfaceAppLinkError(toolId)) {
+        results.push(rideErrorResult('高德', 'ride.app.link', '高德打车唤端链接生成失败', describeThrown(error)));
+      } else {
+        aiLogInfo('[AIPhone][RideOptionalAppLinkIgnored] provider=高德 tool=maps_schema_take_taxi error=' + describeThrown(error));
+      }
+    }
+  }
+  if (didiLink.length > 0 || amapLink.length > 0 || toolId === 'ride.app.link') {
+    const originLocation = originPoint !== null ? originPoint.location : (amapOriginPoint !== null ? amapOriginPoint.location : '');
+    const destinationLocation = destinationPoint !== null ? destinationPoint.location : (amapDestinationPoint !== null ? amapDestinationPoint.location : '');
+    results.push(rideLinkResult(route.origin, route.destination, didiLink, amapLink, originLocation, destinationLocation));
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, results);
 }
 
 function build12306LeftTicketUrl(path: string, date: string, fromCode: string, toCode: string): string {
@@ -3756,6 +5373,54 @@ function inferAmapCityFromPlace(place: string): string {
   return match === null ? '' : match[1];
 }
 
+function emptyAmapLocationResolution(source: string = 'none'): AmapLocationResolution {
+  return { location: '', locationSource: source, locationLabel: '', city: '' };
+}
+
+function rideDidiCityText(city: string): string {
+  const trimmed = city.trim();
+  if (trimmed === '[]') {
+    return '';
+  }
+  if (trimmed.length > 1 && trimmed.endsWith('市')) {
+    return trimmed.substring(0, trimmed.length - 1);
+  }
+  return trimmed;
+}
+
+function amapScalarText(value: Object | string | number | boolean | null | undefined): string {
+  if (Array.isArray(value)) {
+    return '';
+  }
+  return textOf(value).trim();
+}
+
+function amapResolutionCityFromGeocode(first: AmapGeocode): string {
+  const city = amapScalarText(first.city);
+  return city.length > 0 ? city : amapScalarText(first.province);
+}
+
+function amapResolutionCityFromPoi(first: AmapPoi): string {
+  return firstText([first.cityname, first.pname]).trim();
+}
+
+function amapResolutionFromGeocodePayload(payload: AmapPayload): AmapLocationResolution {
+  if (textOf(payload.status) !== '1') {
+    return emptyAmapLocationResolution();
+  }
+  const geocodes = payload.geocodes === undefined ? [] : payload.geocodes;
+  if (geocodes.length === 0) {
+    return emptyAmapLocationResolution();
+  }
+  const first = geocodes[0];
+  return {
+    location: textOf(first.location),
+    locationSource: 'geocode',
+    locationLabel: firstText([first.formatted_address, first.level]),
+    city: amapResolutionCityFromGeocode(first)
+  };
+}
+
 function isLandmarkPlace(place: string): boolean {
   return /华为|基地|园区|总部|云谷|大学|医院|站|广场|大厦|小区/u.test(place);
 }
@@ -3768,36 +5433,24 @@ async function amapJsonGet(url: string): Promise<AmapPayload> {
   return JSON.parse(response.text) as AmapPayload;
 }
 
-async function geocodeAmapAddress(address: string, key: string): Promise<AmapLocationResolution> {
+async function geocodeAmapAddress(address: string, key: string, cityHint: string = ''): Promise<AmapLocationResolution> {
   const trimmed = address.trim();
   if (trimmed.length === 0 || key.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
-  const city = inferAmapCityFromPlace(trimmed);
+  const city = cityHint.trim().length > 0 ? cityHint.trim() : inferAmapCityFromPlace(trimmed);
   const payload = await amapJsonGet(buildQueryUrl(
     'https://restapi.amap.com/v3/geocode/geo',
     ['key', 'address', 'city'],
     [key, trimmed, city]
   ));
-  if (textOf(payload.status) !== '1') {
-    return { location: '', locationSource: 'none', locationLabel: '' };
-  }
-  const geocodes = payload.geocodes === undefined ? [] : payload.geocodes;
-  if (geocodes.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
-  }
-  const first = geocodes[0];
-  return {
-    location: textOf(first.location),
-    locationSource: 'geocode',
-    locationLabel: firstText([first.formatted_address, first.level])
-  };
+  return amapResolutionFromGeocodePayload(payload);
 }
 
 async function searchAmapPoiLocation(keywords: string, city: string, key: string): Promise<AmapLocationResolution> {
   const trimmed = keywords.trim();
   if (trimmed.length === 0 || key.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const payload = await amapJsonGet(buildQueryUrl(
     'https://restapi.amap.com/v3/place/text',
@@ -3805,17 +5458,18 @@ async function searchAmapPoiLocation(keywords: string, city: string, key: string
     [key, trimmed, city, '5', '1']
   ));
   if (textOf(payload.status) !== '1') {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const pois = payload.pois === undefined ? [] : payload.pois;
   if (pois.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const first = pois[0];
   return {
     location: textOf(first.location),
     locationSource: 'poi_text',
-    locationLabel: firstText([first.name, first.address])
+    locationLabel: firstText([first.name, first.address]),
+    city: amapResolutionCityFromPoi(first)
   };
 }
 
@@ -3835,7 +5489,7 @@ async function resolveFoodSearchLocation(place: string, key: string): Promise<Am
   if (poi.location.length > 0) {
     return poi;
   }
-  return { location: '', locationSource: 'none', locationLabel: '' };
+  return emptyAmapLocationResolution();
 }
 
 function foodRecordForA2ui(item: AmapPoi): A2uiFoodData {
@@ -8068,6 +9722,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isPaymentToolId(toolId)) {
     return callLocalPaymentTool(toolId, prompt, surfaceId, args);
+  }
+  if (isRideToolId(toolId)) {
+    return callLocalRideTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);

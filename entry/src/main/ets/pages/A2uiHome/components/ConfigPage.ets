@@ -66,6 +66,9 @@ export struct ConfigPage {
   @Link foodProviderDelayEnabled: boolean;
   @Link foodProviderDelayMs: string;
   @Link foodPartialThrottleMs: string;
+  @Link htmlHomeDebugExportEnabled: boolean;
+  @Prop htmlHomeDebugExportPath: string = '';
+  @Link didiMcpSandboxEnabled: boolean;
   @Link showAdvancedSettings: boolean;
   @Prop connectionStatus: string = 'idle';
   @Prop connectionMessage: string = '';
@@ -92,6 +95,8 @@ export struct ConfigPage {
   onSelectPersona: (personaId: string) => void = (_personaId: string) => {};
   onSavePersona: () => void = () => {};
   onResetPersona: () => void = () => {};
+  onExportHtmlHomeDocument: () => void = () => {};
+  onToggleDidiMcpSandbox: (isOn: boolean) => void = (_isOn: boolean) => {};
 
   @Builder
   InputLabel(label: string, top: number) {
@@ -869,6 +874,38 @@ export struct ConfigPage {
 
             Row() {
               Column() {
+                Text('滴滴 MCP Sandbox')
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(COLOR_INK)
+                Text('默认开启 sandbox；关闭后滴滴查询、估价、下单、司机位置全部走真实 MCP')
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 4 })
+                Text('当前 DIDI_MCP_SANDBOX=' + (this.didiMcpSandboxEnabled ? 'true' : 'false'))
+                  .fontSize(11)
+                  .fontColor(COLOR_ACCENT)
+                  .margin({ top: 4 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Toggle({ type: ToggleType.Switch, isOn: this.didiMcpSandboxEnabled })
+                .selectedColor(COLOR_ACCENT)
+                .onChange((isOn: boolean) => {
+                  this.didiMcpSandboxEnabled = isOn;
+                  this.onToggleDidiMcpSandbox(isOn);
+                })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+
+            Divider()
+              .color(COLOR_LINE)
+              .margin({ top: 16, bottom: 12 })
+
+            Row() {
+              Column() {
                 Text('餐饮来源延时')
                   .fontSize(13)
                   .fontWeight(FontWeight.Medium)
@@ -919,6 +956,55 @@ export struct ConfigPage {
               .onChange((value: string) => {
                 this.foodPartialThrottleMs = value;
               })
+
+            Divider()
+              .color(COLOR_LINE)
+              .margin({ top: 16, bottom: 12 })
+
+            Row() {
+              Column() {
+                Text('导出 HtmlHome JSON')
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(COLOR_INK)
+                Text('写入当前 WebView renderer 的中间结构')
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 4 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Toggle({ type: ToggleType.Switch, isOn: this.htmlHomeDebugExportEnabled })
+                .selectedColor(COLOR_ACCENT)
+                .onChange((isOn: boolean) => {
+                  this.htmlHomeDebugExportEnabled = isOn;
+                })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+
+            Button('立即导出')
+              .height(36)
+              .width('100%')
+              .fontSize(12)
+              .fontColor(COLOR_INK)
+              .backgroundColor(COLOR_CARD_RAISED)
+              .borderRadius(9)
+              .border({ width: 1, color: COLOR_CARD_EDGE })
+              .margin({ top: 10 })
+              .onClick(() => {
+                this.onExportHtmlHomeDocument();
+              })
+
+            if (this.htmlHomeDebugExportPath.length > 0) {
+              Text(this.htmlHomeDebugExportPath)
+                .fontSize(11)
+                .fontColor(COLOR_MUTED)
+                .lineHeight(16)
+                .copyOption(CopyOptions.InApp)
+                .margin({ top: 8 })
+            }
           }
 
           Button(this.isBusy ? '检查中' : '测试连接')

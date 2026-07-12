@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   directPaymentToolIdForActionId,
+  directRideToolIdForActionId,
   resolveA2uiHomeToolRequest,
   surfaceHasSatisfiedToolResult,
   surfaceHasVisibleToolResult
@@ -345,6 +346,14 @@ export default function a2uiHomeToolRequestTest() {
       expect(directPaymentToolIdForActionId('payment.confirm')).assertEqual('payment.send');
       expect(directPaymentToolIdForActionId('payment.capture')).assertEqual('payment.send');
       expect(directPaymentToolIdForActionId('payment.checkout.open')).assertEqual('');
+    });
+
+    it('keeps ride order confirmation actions off the model path', 0, () => {
+      expect(directRideToolIdForActionId('ride.order.confirm')).assertEqual('ride.order.create');
+      expect(directRideToolIdForActionId('ride.order.cancel')).assertEqual('ride.order.cancel');
+      expect(directRideToolIdForActionId('ride.driver.location.refresh')).assertEqual('ride.driver.location');
+      expect(directRideToolIdForActionId('ride.vehicle.change')).assertEqual('');
+      expect(directRideToolIdForActionId('ride.open.didi')).assertEqual('');
     });
 
     it('reroutes model note tool to payment for explicit Stripe payment prompts', 0, () => {

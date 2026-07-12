@@ -4,6 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
+import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
@@ -16,6 +17,8 @@ import {
   A2uiDynamicToolConnectData,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
+  A2uiLabelValueData,
   A2uiMessage,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
@@ -40,6 +43,7 @@ import {
   COMPOSIO_USER_ID_PREFIX,
   ComposioAuthConfigItem,
   ComposioAuthProxyClient,
+  configureDidiMcpSandboxForRuntime,
   configureComposioUserId,
   configureLocalPaymentAccountBookJson,
   configureLocalStripeReceivingAgentJson,
@@ -84,6 +88,8 @@ import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
   A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
+  HTML_HOME_DEBUG_EXPORT_FILE_NAME,
+  htmlHomeDebugExportJson,
   normalizeFoodPartialThrottleMs,
   normalizeFoodProviderDelayMs
 } from './state/A2uiHomeDebugSettings';
@@ -100,6 +106,7 @@ import {
 import {
   A2uiHomeResolvedToolRequest,
   directPaymentToolIdForActionId,
+  directRideToolIdForActionId,
   resolveA2uiHomeToolRequest,
   surfaceHasSatisfiedToolResult,
   surfaceHasVisibleToolResult
@@ -118,6 +125,31 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+
+type RideActionArgValue = Object | string | number | boolean | null | undefined;
+
+interface RideCachedProduct {
+  productName: string;
+  productCategory: string;
+  priceText: string;
+}
+
+interface RideLocalOrderActionArgs {
+  productCategory?: RideActionArgValue;
+  product_category?: RideActionArgValue;
+  productName?: RideActionArgValue;
+  priceText?: RideActionArgValue;
+  routeText?: RideActionArgValue;
+  pickupLocation?: RideActionArgValue;
+  originLocation?: RideActionArgValue;
+  destinationLocation?: RideActionArgValue;
+  estimateCacheJson?: RideActionArgValue;
+  estimateTraceId?: RideActionArgValue;
+  estimate_trace_id?: RideActionArgValue;
+  traceId?: RideActionArgValue;
+  confirmed?: RideActionArgValue;
+  confirmation?: RideActionArgValue;
+}
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -230,6 +262,9 @@ struct Index {
   @State foodProviderDelayEnabled: boolean = false;
   @State foodProviderDelayMs: string = '0';
   @State foodPartialThrottleMs: string = A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS.toString();
+  @State htmlHomeDebugExportEnabled: boolean = false;
+  @State htmlHomeDebugExportPath: string = '';
+  @State didiMcpSandboxEnabled: boolean = true;
   @State isBusy: boolean = false;
   @State connectionStatus: string = initialConnectionState.connectionStatus;
   @State connectionMessage: string = initialConnectionState.connectionMessage;
@@ -271,6 +306,7 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
 
   aboutToAppear(): void {
+    this.configureDidiMcpSandboxRuntime(true);
     this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
@@ -888,6 +924,9 @@ struct Index {
     }
     const document = this.currentHtmlHomeDocument();
     const html = renderHtmlHomeDocument(document, this.isBusy);
+    if (this.htmlHomeDebugExportEnabled) {
+      this.writeHtmlHomeDebugExport(document, 'auto');
+    }
     this.htmlHomeCacheKey = key;
     this.htmlHomeCacheHtml = html;
     aiLogInfo('[AIPhone][HtmlHomeDocument] source=' + document.source +
@@ -896,6 +935,42 @@ struct Index {
       ' blocks=' + document.blocks.length.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
     return html;
+  }
+
+  private writeHtmlHomeDebugExport(document: HtmlHomeDocument, reason: string): void {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      this.htmlHomeDebugExportPath = '导出失败：缺少应用上下文';
+      aiLogInfo('[AIPhone][HtmlHomeDebugExport] ok=false reason=missing_context');
+      return;
+    }
+    const path = context.filesDir + '/' + HTML_HOME_DEBUG_EXPORT_FILE_NAME;
+    let file: fs.File | null = null;
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, htmlHomeDebugExportJson(document, this.isBusy));
+      fs.closeSync(file);
+      file = null;
+      this.htmlHomeDebugExportPath = path;
+      aiLogInfo('[AIPhone][HtmlHomeDebugExport] ok=true reason=' + reason +
+        ' path=' + path +
+        ' kind=' + document.kind +
+        ' blocks=' + document.blocks.length.toString());
+    } catch (error) {
+      if (file !== null) {
+        try {
+          fs.closeSync(file);
+        } catch (_closeError) {
+        }
+      }
+      this.htmlHomeDebugExportPath = '导出失败：' + JSON.stringify(error);
+      aiLogInfo('[AIPhone][HtmlHomeDebugExport] ok=false reason=' + reason +
+        ' error=' + JSON.stringify(error));
+    }
+  }
+
+  private exportCurrentHtmlHomeDocument(): void {
+    this.writeHtmlHomeDebugExport(this.currentHtmlHomeDocument(), 'manual');
   }
 
   private applySurface(surface: A2uiSurfaceState): void {
@@ -1985,6 +2060,180 @@ struct Index {
     }
   }
 
+  private rideActionArgText(action: A2uiAction, keys: string[]): string {
+    const args = action.args as Record<string, RideActionArgValue> | undefined;
+    if (args === undefined || args === null) {
+      return '';
+    }
+    for (let index = 0; index < keys.length; index++) {
+      const value = args[keys[index]];
+      if (value !== undefined && value !== null) {
+        const text = String(value).trim();
+        if (text.length > 0) {
+          return text;
+        }
+      }
+    }
+    return '';
+  }
+
+  private rideCachedProducts(cacheJson: string): RideCachedProduct[] {
+    if (cacheJson.length === 0) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(cacheJson) as Record<string, Object | string | number | boolean | null | undefined>;
+      const productsValue = parsed.products;
+      if (!Array.isArray(productsValue)) {
+        return [];
+      }
+      const products: RideCachedProduct[] = [];
+      productsValue.forEach((item: Object | string | number | boolean | null | undefined) => {
+        if (item === null || item === undefined || typeof item !== 'object' || Array.isArray(item)) {
+          return;
+        }
+        const record = item as Record<string, RideActionArgValue>;
+        const productName = String(record.productName === undefined || record.productName === null ? '' : record.productName).trim();
+        const productCategory = String(record.productCategory === undefined || record.productCategory === null ? '' : record.productCategory).trim();
+        const priceText = String(record.priceText === undefined || record.priceText === null ? '' : record.priceText).trim();
+        if (productName.length > 0 || priceText.length > 0) {
+          products.push({
+            productName: productName.length > 0 ? productName : '车型',
+            productCategory: productCategory,
+            priceText: priceText
+          });
+        }
+      });
+      return products;
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  private rideTraceIdFromCache(cacheJson: string): string {
+    try {
+      const parsed = JSON.parse(cacheJson) as Record<string, RideActionArgValue>;
+      const traceId = parsed.traceId;
+      return traceId === undefined || traceId === null ? '' : String(traceId).trim();
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private rideConfirmActionFromCache(
+    product: RideCachedProduct,
+    traceId: string,
+    routeText: string,
+    pickupLocation: string,
+    destinationLocation: string,
+    estimateCacheJson: string,
+    isPrimary: boolean
+  ): A2uiAction {
+    const args: RideLocalOrderActionArgs = {
+      productCategory: product.productCategory,
+      product_category: product.productCategory,
+      productName: product.productName,
+      priceText: product.priceText,
+      routeText: routeText,
+      pickupLocation: pickupLocation,
+      originLocation: pickupLocation,
+      destinationLocation: destinationLocation,
+      estimateCacheJson: estimateCacheJson,
+      estimateTraceId: traceId,
+      estimate_trace_id: traceId,
+      traceId: traceId,
+      confirmed: true,
+      confirmation: '确认下单'
+    };
+    return {
+      id: 'ride.order.confirm',
+      label: '确认叫' + product.productName,
+      prompt: '确认下单：' + product.productName + ' ' + product.priceText,
+      kind: 'prompt',
+      variant: isPrimary ? 'primary' : 'secondary',
+      args: args
+    };
+  }
+
+  private restoreRideVehicleSelection(action: A2uiAction): void {
+    const estimateCacheJson = this.rideActionArgText(action, ['estimateCacheJson']);
+    const products = this.rideCachedProducts(estimateCacheJson);
+    const traceId = this.rideTraceIdFromCache(estimateCacheJson);
+    if (products.length === 0 || traceId.length === 0) {
+      this.logHtmlHomeActionError(action, 'missing_ride_estimate_cache');
+      return;
+    }
+    const model = this.parsedDataModel();
+    if (model === null) {
+      this.logHtmlHomeActionError(action, 'invalid_ride_surface_model');
+      return;
+    }
+    const routeText = this.rideActionArgText(action, ['routeText', 'route']);
+    const pickupLocation = this.rideActionArgText(action, ['pickupLocation', 'originLocation']);
+    const destinationLocation = this.rideActionArgText(action, ['destinationLocation']);
+    const rows: A2uiLabelValueData[] = [];
+    if (routeText.length > 0) {
+      rows.push({ label: '路线', value: routeText });
+    }
+    if (pickupLocation.length > 0) {
+      rows.push({ label: '起点坐标', value: pickupLocation });
+    }
+    if (destinationLocation.length > 0) {
+      rows.push({ label: '终点坐标', value: destinationLocation });
+    }
+    products.forEach((product: RideCachedProduct) => {
+      const category = product.productCategory.length > 0 ? '（' + product.productCategory + '）' : '';
+      rows.push({ label: product.productName + category, value: product.priceText });
+    });
+    rows.push({ label: 'traceId', value: traceId.length > 16 ? traceId.substring(0, 8) + '...' + traceId.substring(traceId.length - 6) : traceId });
+    rows.push({ label: '来源', value: '滴滴 taxi_estimate（已恢复）' });
+    const actions: A2uiAction[] = [];
+    products.forEach((product: RideCachedProduct) => {
+      if (product.productCategory.length > 0) {
+        actions.push(this.rideConfirmActionFromCache(
+          product,
+          traceId,
+          routeText,
+          pickupLocation,
+          destinationLocation,
+          estimateCacheJson,
+          actions.length === 0
+        ));
+      }
+    });
+    const result: A2uiGenericToolResultData = {
+      sourceTag: '滴滴',
+      toolName: 'ride.estimate',
+      title: '滴滴价格预估',
+      status: 'success',
+      summary: '已恢复之前查询到的车型选择。',
+      rows: rows,
+      rawPreview: '{"restored":true}',
+      actions: actions
+    };
+    model.genericToolResults = [result];
+    model.summary = {
+      text: result.summary,
+      toolName: 'ride.estimate',
+      dataLabel: 'genericToolResults',
+      count: 1
+    };
+    const nextSurface = this.surfaceSnapshot(this.currentSurface);
+    nextSurface.title = '滴滴价格预估';
+    nextSurface.status = 'ready';
+    nextSurface.dataModelJson = JSON.stringify(model);
+    nextSurface.sequence = this.currentSurface.sequence + 1;
+    this.applySurface(nextSurface);
+    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+      ok: true,
+      status: 'ready',
+      message: '已恢复车型选择页。',
+      requestDebug: this.lastModelRequest,
+      assistantDebug: this.lastModelOutput,
+      error: ''
+    }));
+  }
+
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
     if (this.isPersonaEditorAction(action)) {
@@ -2081,6 +2330,18 @@ struct Index {
       return;
     }
     if (action.id === 'maps.open.web') {
+      await this.openExternalUrl(action.prompt);
+      return;
+    }
+    if (action.id === 'ride.vehicle.change') {
+      this.restoreRideVehicleSelection(action);
+      return;
+    }
+    if (action.id === 'ride.open.didi' || action.id === 'ride.open.amap') {
+      if (action.prompt.length === 0) {
+        this.logHtmlHomeActionError(action, 'missing_ride_app_link');
+        return;
+      }
       await this.openExternalUrl(action.prompt);
       return;
     }
@@ -2276,6 +2537,16 @@ struct Index {
       );
       return;
     }
+    const directRideToolId = directRideToolIdForActionId(action.id);
+    if (directRideToolId.length > 0) {
+      await this.callToolById(
+        directRideToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);
@@ -2313,6 +2584,12 @@ struct Index {
     await this.callToolById(request.toolId, request.prompt, request.actionId, request.args);
   }
 
+  private configureDidiMcpSandboxRuntime(isSandbox: boolean): void {
+    this.didiMcpSandboxEnabled = isSandbox;
+    configureDidiMcpSandboxForRuntime(isSandbox);
+    aiLogInfo('[AIPhone][A2uiHomeDidiMcpSandboxToggle] enabled=' + (isSandbox ? 'true' : 'false'));
+  }
+
   private async callToolById(toolId: string, prompt: string, actionId: string, args: Object | null = null): Promise<boolean> {
     if (!isRegisteredToolId(toolId)) {
       const message = '模型请求了未注册工具：' + toolId;
@@ -2332,6 +2609,7 @@ struct Index {
       ' promptChars=' + prompt.length.toString() +
       ' actionId=' + actionId +
       ' gateway=' + TOOL_GATEWAY_URL);
+    configureDidiMcpSandboxForRuntime(this.didiMcpSandboxEnabled);
     configureLocalToolDebugConfig({
       foodProviderDelayEnabled: this.foodProviderDelayEnabled,
       foodProviderDelayMs: normalizeFoodProviderDelayMs(this.foodProviderDelayMs),
@@ -2482,6 +2760,9 @@ struct Index {
         foodProviderDelayEnabled: $foodProviderDelayEnabled,
         foodProviderDelayMs: $foodProviderDelayMs,
         foodPartialThrottleMs: $foodPartialThrottleMs,
+        htmlHomeDebugExportEnabled: $htmlHomeDebugExportEnabled,
+        htmlHomeDebugExportPath: this.htmlHomeDebugExportPath,
+        didiMcpSandboxEnabled: $didiMcpSandboxEnabled,
         showAdvancedSettings: $showAdvancedSettings,
         connectionStatus: this.connectionStatus,
         connectionMessage: this.connectionMessage,
@@ -2521,6 +2802,12 @@ struct Index {
         },
         onResetPersona: () => {
           this.resetPersonaDraft();
+        },
+        onExportHtmlHomeDocument: () => {
+          this.exportCurrentHtmlHomeDocument();
+        },
+        onToggleDidiMcpSandbox: (isOn: boolean) => {
+          this.configureDidiMcpSandboxRuntime(isOn);
         }
       })
     } else {

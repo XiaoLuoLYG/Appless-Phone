@@ -10,6 +10,7 @@ import { actionsOf, genericToolResults } from '@loop/agent-core';
 import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
 import { mailReplyDraftAction } from '@loop/agent-core';
 import { mediaVideoPlaybackAction } from '@loop/agent-core';
+import { isRideToolResult } from '../state/RideToolResultsState';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_DARK,
@@ -28,6 +29,7 @@ import {
 import { A2UI_PANEL_BACKGROUND_COLOR, A2UI_PANEL_BORDER_COLOR, A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { a2uiEnterTransition } from '../style/A2uiHomeMotion';
 import { ActionBarView } from './ActionBarView';
+import { RideToolResultsView } from './RideToolResultsView';
 import { StatusBadgeView } from './StatusBadgeView';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 
@@ -86,6 +88,16 @@ export struct GenericToolResultsView {
     const rows = this.results();
     for (let index = 0; index < rows.length; index++) {
       if (this.isGmailResult(rows[index])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isRideResults(): boolean {
+    const rows = this.results();
+    for (let index = 0; index < rows.length; index++) {
+      if (isRideToolResult(rows[index])) {
         return true;
       }
     }
@@ -255,6 +267,13 @@ export struct GenericToolResultsView {
     return action === null ? [] : [action];
   }
 
+  private resultActions(item: A2uiGenericToolResultData): A2uiAction[] {
+    if (item.actions !== undefined && item.actions.length > 0) {
+      return item.actions;
+    }
+    return this.mediaVideoActions(item);
+  }
+
   private gmailHeaderTitle(): string {
     const rows = this.results();
     for (let index = 0; index < rows.length; index++) {
@@ -338,10 +357,12 @@ export struct GenericToolResultsView {
     Column() {
       A2uiPanelAccentView()
       Column() {
-        Text(this.componentTitle())
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_INK)
+        if (!this.isRideResults()) {
+          Text(this.componentTitle())
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+        }
 
         if (this.results().length === 0) {
           Text('工具没有返回可展示结果。')
@@ -610,6 +631,12 @@ export struct GenericToolResultsView {
           .backgroundColor(COLOR_CARD_INSET)
           .borderRadius(14)
           .border({ width: 1, color: COLOR_CARD_EDGE })
+        } else if (this.isRideResults()) {
+          RideToolResultsView({
+            results: this.results(),
+            isBusy: this.isBusy,
+            onAction: this.onAction
+          })
         } else {
           ForEach(this.results(), (item: A2uiGenericToolResultData, index: number) => {
             Column() {
@@ -742,9 +769,9 @@ export struct GenericToolResultsView {
                   .margin({ top: 10 })
               }
 
-              if (this.mediaVideoActions(item).length > 0) {
+              if (this.resultActions(item).length > 0) {
                 ActionBarView({
-                  actions: this.mediaVideoActions(item),
+                  actions: this.resultActions(item),
                   isBusy: this.isBusy,
                   onAction: this.onAction
                 })

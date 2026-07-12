@@ -525,6 +525,22 @@ export function directPaymentToolIdForActionId(actionId: string): string {
   return '';
 }
 
+export function directRideToolIdForActionId(actionId: string): string {
+  if (actionId === 'ride.order.confirm') {
+    return 'ride.order.create';
+  }
+  if (actionId === 'ride.order.cancel') {
+    return 'ride.order.cancel';
+  }
+  if (actionId === 'ride.driver.location.refresh') {
+    return 'ride.driver.location';
+  }
+  if (actionId === 'ride.query.retry') {
+    return 'ride.estimate';
+  }
+  return '';
+}
+
 export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId: string): boolean {
   const results = genericToolResults(surface);
   for (let index = 0; index < results.length; index++) {

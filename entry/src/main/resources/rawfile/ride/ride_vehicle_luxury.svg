@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="128" viewBox="0 0 240 128" role="img" aria-label="豪华车示例">
+  <defs>
+    <linearGradient id="body" x1="26" y1="50" x2="214" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4d403a"/>
+      <stop offset=".42" stop-color="#151312"/>
+      <stop offset="1" stop-color="#4a211d"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="45" y1="48" x2="198" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity=".52"/>
+      <stop offset=".45" stop-color="#ffffff" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".02"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="72" y1="31" x2="174" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#eef4f6"/>
+      <stop offset=".42" stop-color="#8296a4"/>
+      <stop offset="1" stop-color="#1e2730"/>
+    </linearGradient>
+    <radialGradient id="wheel" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#f2eee7"/>
+      <stop offset=".32" stop-color="#928b83"/>
+      <stop offset=".42" stop-color="#24201e"/>
+      <stop offset="1" stop-color="#0d0c0b"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="240" height="128" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="11" stdDeviation="8" flood-color="#2a1714" flood-opacity=".32"/>
+    </filter>
+  </defs>
+  <ellipse cx="121" cy="102" rx="98" ry="10" fill="#211715" opacity=".2"/>
+  <g filter="url(#shadow)">
+    <path d="M22 77c9-18 25-28 48-31 14-15 34-22 60-22h20c27 0 50 11 70 32l10 3c7 2 12 8 12 16v11c0 5-3 8-8 8H12c-5 0-8-3-8-8v-3c0-7 5-12 12-14l6-2Z" fill="url(#body)"/>
+    <path d="M76 50c13-13 30-20 53-20h19c20 1 38 9 54 25l-126-5Z" fill="url(#glass)" opacity=".95"/>
+    <path d="M125 30v26M158 34l12 24" stroke="#0c0b0a" stroke-width="3" opacity=".58"/>
+    <path d="M38 73c46 6 111 6 184-4" stroke="url(#gloss)" stroke-width="6" opacity=".9"/>
+    <path d="M192 58h28c5 0 9 3 10 8l-28 2c-6 0-10-4-10-10Z" fill="#f1c9a4" opacity=".72"/>
+    <path d="M34 67h33" stroke="#9f4a38" stroke-width="5" stroke-linecap="round" opacity=".52"/>
+    <circle cx="63" cy="91" r="18" fill="#100f0e"/>
+    <circle cx="63" cy="91" r="10" fill="url(#wheel)"/>
+    <circle cx="188" cy="91" r="18" fill="#100f0e"/>
+    <circle cx="188" cy="91" r="10" fill="url(#wheel)"/>
+  </g>
+</svg>

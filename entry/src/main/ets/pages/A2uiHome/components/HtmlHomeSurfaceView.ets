@@ -13,6 +13,10 @@ class HtmlHomeActionBridge {
   postAction(raw: string): void {
     const action = parseHtmlHomeAction(raw);
     if (action !== null) {
+      if (action.id === 'ride.map.route.log') {
+        aiLogInfo('[AIPhone][RideMapRoute] ' + JSON.stringify(action.args));
+        return;
+      }
       this.onAction(action);
     }
   }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,6 +44,12 @@ const providerKeys = [
   'MCD_MCP_URL',
   'LUCKIN_MCP_TOKEN',
   'LUCKIN_MCP_URL',
+  'DIDI_MCP_KEY',
+  'DIDI_MCP_URL',
+  'DIDI_MCP_SANDBOX',
+  'AMAP_MCP_KEY',
+  'AMAP_MCP_URL',
+  'RIDE_MOCK_ENABLED',
   'GOOGLE_MAPS_API_KEY',
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',
@@ -119,6 +125,14 @@ function maskedStatus(config, keys) {
   }).join(' ');
 }
 
+function removeAppleDoubleSibling(path) {
+  const appleDoublePath = join(dirname(path), `._${path.split('/').pop()}`);
+  if (!existsSync(appleDoublePath)) {
+    return;
+  }
+  unlinkSync(appleDoublePath);
+}
+
 if (!existsSync(envPath)) {
   console.error(`Missing ${envPath}. Copy tool-gateway/.env.example to .env.local and fill provider keys first.`);
   process.exit(1);
@@ -137,6 +151,7 @@ for (const key of providerKeys) {
 
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, JSON.stringify(config, null, 2) + '\n');
+removeAppleDoubleSibling(outPath);
 
 console.log(`Wrote ${outPath}`);
 console.log(maskedStatus(config, [
@@ -157,6 +172,10 @@ console.log(maskedStatus(config, [
   'TAOBAO_FLASH_PID',
   'MCD_MCP_TOKEN',
   'LUCKIN_MCP_TOKEN',
+  'DIDI_MCP_KEY',
+  'DIDI_MCP_SANDBOX',
+  'AMAP_MCP_KEY',
+  'RIDE_MOCK_ENABLED',
   'GOOGLE_MAPS_API_KEY',
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',
@@ -184,12 +203,24 @@ console.log(maskedStatus(config, [
 const composioConfig = {
   apiKey: env.COMPOSIO_API_KEY || '',
   baseUrl: env.COMPOSIO_BASE_URL || defaultComposioBaseUrl,
-  userId: env.COMPOSIO_USER_ID || ''
+  userId: env.COMPOSIO_USER_ID || '',
+  proxyBaseUrl: env.COMPOSIO_PROXY_BASE_URL || '',
+  proxyApiKey: env.COMPOSIO_PROXY_API_KEY || ''
 };
+
 writeFileSync(composioOutPath, JSON.stringify(composioConfig, null, 2) + '\n');
+removeAppleDoubleSibling(composioOutPath);
 console.log(`Wrote ${composioOutPath}`);
-console.log(maskedStatus(composioConfig, [
-  'apiKey',
-  'baseUrl',
-  'userId'
+console.log(maskedStatus({
+  COMPOSIO_API_KEY: composioConfig.apiKey,
+  COMPOSIO_BASE_URL: composioConfig.baseUrl,
+  COMPOSIO_USER_ID: composioConfig.userId,
+  COMPOSIO_PROXY_BASE_URL: composioConfig.proxyBaseUrl,
+  COMPOSIO_PROXY_API_KEY: composioConfig.proxyApiKey
+}, [
+  'COMPOSIO_API_KEY',
+  'COMPOSIO_BASE_URL',
+  'COMPOSIO_USER_ID',
+  'COMPOSIO_PROXY_BASE_URL',
+  'COMPOSIO_PROXY_API_KEY'
 ]));

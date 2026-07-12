@@ -156,6 +156,7 @@ export interface A2uiGenericToolResultData {
   summary: string;
   rows: A2uiGenericToolResultRowData[];
   rawPreview: string;
+  actions?: A2uiAction[];
 }
 
 export interface A2uiPersonaData {

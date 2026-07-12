@@ -296,6 +296,10 @@ export class LoopBackend {
       description += '. Use for explicit PayPal account payments, Stripe connected merchant Checkout, or opening a stored Stripe Payment Link. If the user says Google Pay, treat it as args.fundingSource="google_pay" with provider still PayPal or Stripe; Google Pay is not a separate provider/tool. Always produce a confirmation/payment UI before checkout. Never claim money was sent without a real provider confirmation.';
     } else if (definition.toolId === 'payment.account.setup') {
       description += '. Use when the user wants to create, bind, open, verify, or refresh the current agent Stripe receiving account. Do not use this for paying someone; payment.send handles payments.';
+    } else if (definition.toolId === 'ride.estimate') {
+      description += '. Use for taxi/ride-hailing fare estimate requests. Shows Didi price estimates only and also returns Didi/Amap app ride links. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. If origin, destination, or city is missing, ask for it; never guess coordinates. Never create, cancel, query, or track ride orders, even if the user says "直接帮我叫车".';
+    } else if (definition.toolId === 'ride.app.link') {
+      description += '. Use when the user wants taxi/ride-hailing app links without prices. Returns Didi and Amap app ride links for user-tapped handoff only. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. Do not describe Amap as a price estimate provider. Never create, cancel, query, or track ride orders.';
     }
     return description;
   }

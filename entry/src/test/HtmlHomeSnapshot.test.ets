@@ -284,6 +284,32 @@ export default function htmlHomeSnapshotTest() {
       expect(actions.indexOf('committee@example.edu')).assertLarger(-1);
     });
 
+    it('maps ride generic tool results into one ride panel block for HTML home', 0, () => {
+      const results: A2uiComponent = {
+        id: 'ride_results',
+        component: 'GenericToolResults',
+        title: '打车',
+        dataPath: '/genericToolResults'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('dynamic_tool', 'ready', [root('ride_results'), results],
+          '{"genericToolResults":[{"sourceTag":"滴滴","toolName":"ride.estimate","title":"滴滴价格预估","status":"success","summary":"快车 15。","rows":[{"label":"路线","value":"华为坂田基地 → 秋港花园"},{"label":"快车（express）","value":"15"}],"rawPreview":"","actions":[{"id":"ride.order.confirm","label":"确认叫快车","prompt":"确认下单：快车 15","variant":"primary","kind":"prompt"}]},{"sourceTag":"滴滴 / 高德","toolName":"ride.app.link","title":"App 打车链接","status":"success","summary":"已生成可手动打开的 App 链接。","rows":[{"label":"路线","value":"华为坂田基地 → 秋港花园"}],"rawPreview":"","actions":[{"id":"ride.open.didi","label":"打开滴滴","prompt":"diditaxi://ride","variant":"primary","kind":"client"},{"id":"ride.open.amap","label":"打开高德","prompt":"amapuri://drive/takeTaxi","variant":"secondary","kind":"client"}]}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const serialized = JSON.stringify(doc.blocks[0]);
+
+      expect(doc.kind).assertEqual('dynamic-tools');
+      expect(doc.blocks.length).assertEqual(1);
+      expect(doc.blocks[0].kind).assertEqual('ride-tool-panel');
+      expect(doc.blocks[0].title).assertEqual('去秋港花园');
+      expect(serialized.indexOf('"routeText","value":"华为坂田基地 → 秋港花园"')).assertLarger(-1);
+      expect(serialized.indexOf('"showDriverMarker","value":"false"')).assertLarger(-1);
+      expect(serialized.indexOf('estimate|express|快车')).assertLarger(-1);
+      expect(serialized.indexOf('ride.open.didi')).assertLarger(-1);
+    });
+
     it('adds generic mail AI reply draft action to QQ thread result blocks', 0, () => {
       const results: A2uiComponent = {
         id: 'mail_results',

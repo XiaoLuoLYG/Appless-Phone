@@ -2,6 +2,7 @@ import {
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiApplyResult,
+  A2uiAction,
   A2uiComponent,
   A2uiDataValue,
   A2uiDynamicToolConnectData,
@@ -206,6 +207,7 @@ interface LooseGenericToolResultData {
   summary?: Object | string | number | boolean | null;
   rows?: Object[];
   rawPreview?: Object | string | number | boolean | null;
+  actions?: A2uiAction[];
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -395,7 +397,7 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       continue;
     }
     const result = source as LooseGenericToolResultData;
-    normalized.push({
+    const normalizedResult: A2uiGenericToolResultData = {
       sourceTag: textOf(result.sourceTag),
       toolName: textOf(result.toolName),
       title: textOf(result.title),
@@ -403,7 +405,11 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       summary: textOf(result.summary),
       rows: normalizeGenericToolResultRows(result.rows),
       rawPreview: textOf(result.rawPreview)
-    });
+    };
+    if (Array.isArray(result.actions)) {
+      normalizedResult.actions = result.actions;
+    }
+    normalized.push(normalizedResult);
   }
   return normalized;
 }

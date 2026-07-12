@@ -54,6 +54,12 @@ import {
   componentTitleOf,
   findA2uiComponent
 } from '../render/A2uiRenderData';
+import {
+  RideEstimateCard,
+  RideToolPanelState,
+  buildRideToolPanelState,
+  isRideToolResult
+} from '../state/RideToolResultsState';
 import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
 import { mailReplyDraftAction } from '@loop/agent-core';
 import { isMediaVideoResult, mediaVideoPlaybackAction, officialMediaVideoPlaybackUrl } from '@loop/agent-core';
@@ -412,6 +418,10 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     appendGenericComponentBlock(document, surface, component);
     return;
   }
+  if (hasRideToolResults(results)) {
+    appendRideToolPanelBlock(document, results, component);
+    return;
+  }
   results.forEach((item: A2uiGenericToolResultData, index: number) => {
     const block = newBlock(component.id + '-' + index.toString(), 'generic-tool-result', firstText(item.title, item.toolName, component.id));
     block.subtitle = item.summary;
@@ -429,7 +439,7 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     if (mediaEmbed !== null) {
       block.mediaEmbed = mediaEmbed;
     }
-    block.actions = htmlActions(actionsOf(component), component.id);
+    block.actions = htmlActions(actionsOf(component).concat(item.actions === undefined ? [] : item.actions), component.id);
     const mailAction = mailReplyDraftAction(item);
     if (mailAction !== null) {
       block.actions = block.actions.concat(htmlActions([mailAction], component.id));
@@ -452,6 +462,66 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     }
     document.blocks.push(block);
   });
+}
+
+function hasRideToolResults(results: A2uiGenericToolResultData[]): boolean {
+  for (let index = 0; index < results.length; index++) {
+    if (isRideToolResult(results[index])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function rideDangerActions(actions: A2uiAction[]): A2uiAction[] {
+  const next: A2uiAction[] = [];
+  actions.forEach((action: A2uiAction) => {
+    next.push({
+      id: action.id,
+      label: action.label,
+      prompt: action.prompt,
+      kind: action.kind,
+      variant: 'danger',
+      args: action.args
+    });
+  });
+  return next;
+}
+
+function appendRideToolPanelBlock(
+  document: HtmlHomeDocument,
+  results: A2uiGenericToolResultData[],
+  component: A2uiComponent
+): void {
+  const panel: RideToolPanelState = buildRideToolPanelState(results);
+  const block = newBlock(component.id + '-ride', 'ride-tool-panel', panel.title);
+  block.subtitle = firstText(panel.routeText, panel.visualLabel);
+  block.status = panel.stage;
+  block.source = panel.sourceText;
+  appendMetric(block.metrics, 'stage', panel.stage);
+  appendMetric(block.metrics, 'routeText', panel.routeText);
+  appendMetric(block.metrics, 'pickupLocation', panel.pickupLocation);
+  appendMetric(block.metrics, 'destinationLocation', panel.destinationLocation);
+  appendMetric(block.metrics, 'selectedVehicleText', panel.selectedVehicleText);
+  appendMetric(block.metrics, 'visualLabel', panel.visualLabel);
+  appendMetric(block.metrics, 'showDriverMarker', panel.showDriverMarker ? 'true' : 'false');
+  appendMetric(block.metrics, 'orderId', panel.orderId);
+  appendMetric(block.metrics, 'statusText', panel.statusText);
+  appendMetric(block.metrics, 'driverLocation', panel.driverLocation);
+  appendMetric(block.metrics, 'driverName', panel.driverName);
+  appendMetric(block.metrics, 'driverEtaText', panel.driverEtaText);
+  appendMetric(block.metrics, 'sourceText', panel.sourceText);
+  panel.estimateCards.forEach((card: RideEstimateCard) => {
+    appendMetric(block.rows, 'estimate|' + card.category + '|' + card.name, card.priceText);
+  });
+  block.actions = htmlActions(
+    panel.primaryActions
+      .concat(panel.handoffActions)
+      .concat(rideDangerActions(panel.destructiveActions))
+      .concat(panel.secondaryActions),
+    component.id
+  );
+  document.blocks.push(block);
 }
 
 function appendSocialHubBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
