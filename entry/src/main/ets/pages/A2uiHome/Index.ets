@@ -1625,40 +1625,6 @@ struct Index {
     });
   }
 
-  private looksLikeLuckinOrderPrompt(text: string): boolean {
-    const normalized = text.trim();
-    if (normalized.length === 0) {
-      return false;
-    }
-    const lower = normalized.toLowerCase();
-    return normalized.indexOf('瑞幸') >= 0 || lower.indexOf('luckin') >= 0 || normalized.indexOf('生椰') >= 0;
-  }
-
-  private shouldPrefetchLuckinLocation(prompt: string, actionId: string, args: Object | null): boolean {
-    if (actionId !== 'luckin.order.preview' && !this.looksLikeLuckinOrderPrompt(prompt)) {
-      return false;
-    }
-    if (args !== null) {
-      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
-      if (this.actionText(raw.deptId).length > 0) {
-        return false;
-      }
-      if (this.actionText(raw.location).length > 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private async actionArgsWithLuckinLocationIfNeeded(prompt: string, actionId: string, args: Object | null): Promise<Object | null> {
-    if (!this.shouldPrefetchLuckinLocation(prompt, actionId, args)) {
-      return args;
-    }
-    const location = await this.currentDeviceLocation();
-    aiLogInfo('[AIPhone][LuckinPrefetchLocation] source=device chars=' + location.length.toString());
-    return this.mergeLuckinLocationArgs(args, location);
-  }
-
   private async submitPrompt(prompt: string, visibleText: string, actionId: string = '', actionArgs: Object | null = null): Promise<void> {
     const trimmed = prompt.trim();
     if (trimmed.length === 0 || this.isBusy) {
@@ -1686,29 +1652,7 @@ struct Index {
     this.isBusy = true;
     this.isAwaitingFirstSurface = true;
     this.markChecking('正在生成 A2UI...');
-    let modelActionArgs = actionArgs;
     try {
-      if (this.shouldPrefetchLuckinLocation(trimmed, actionId, actionArgs)) {
-        this.markChecking('正在获取当前位置...');
-        try {
-          modelActionArgs = await this.actionArgsWithLuckinLocationIfNeeded(trimmed, actionId, actionArgs);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : JSON.stringify(error);
-          aiLogError('[AIPhone][LuckinPrefetchLocation] ok=false reason=' + message);
-          this.isAwaitingFirstSurface = false;
-          this.isBusy = false;
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: false,
-            status: 'error',
-            message: '瑞幸点单需要定位权限。',
-            requestDebug: this.lastModelRequest,
-            assistantDebug: this.lastModelOutput,
-            error: message
-          }));
-          this.appendMessage('assistant', '瑞幸点单需要定位权限，请允许后再试。');
-          return;
-        }
-      }
       this.markChecking('正在生成 A2UI...');
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
@@ -1731,7 +1675,7 @@ struct Index {
         (update: PersonaMemoryUpdateRequest) => {
           this.applyPersonaMemoryUpdate(update);
         },
-        modelActionArgs
+        actionArgs
       );
       this.isAwaitingFirstSurface = false;
       this.applySurface(result.surface);

@@ -207,13 +207,19 @@ function normalizedMimeCharset(value: string): string {
 
 function decodeMimeBytes(bytes: Uint8Array, charset: string): string {
   const normalized = normalizedMimeCharset(charset);
+  if (normalized === 'utf-8') {
+    return decodeUtf8Bytes(bytes, bytes.length);
+  }
   try {
-    return util.TextDecoder.create(normalized).decodeToString(bytes);
+    const decoded = util.TextDecoder.create(normalized).decodeToString(bytes);
+    if (decoded.length > 0 || bytes.length === 0) {
+      return decoded;
+    }
   } catch (_error) {
     aiLogInfo('[AIPhone][QqMailCharsetFallback] charset=' + normalized +
       ' bytes=' + bytes.length.toString());
-    return decodeUtf8Bytes(bytes, bytes.length);
   }
+  return decodeUtf8Bytes(bytes, bytes.length);
 }
 
 function decodeTransferBody(body: string, encoding: string, charset: string): string {

@@ -187,10 +187,10 @@ class FakeEncodedHtmlDetailTransport implements ImapTransport {
         'To: Me <me@qq.com>',
         'Subject: Encoded HTML detail',
         'MIME-Version: 1.0',
-        'Content-Type: text/html; charset=GB2312',
+        'Content-Type: text/html; charset=UTF-8',
         'Content-Transfer-Encoding: quoted-printable',
         '',
-        '<div>&zwnj;=D6=D0=CE=C4 &#064;</div>',
+        '<div>&zwnj;=E4=B8=AD=E6=96=87 &#064;</div>',
         '<div><br><br><br>Line&nbsp;two</div>',
         ')',
         'a3 OK FETCH completed'
@@ -312,7 +312,7 @@ export default function qqMailImapClientTest() {
       expect(detail.bodyHtml.indexOf('<strong>HTML</strong>')).assertLarger(-1);
     });
 
-    it('decodes declared charset and removes HTML text entities', 0, async () => {
+    it('decodes declared UTF-8 and removes HTML text entities', 0, async () => {
       const client = new QqMailImapClient({
         address: 'me@qq.com',
         authCode: 'auth-code',

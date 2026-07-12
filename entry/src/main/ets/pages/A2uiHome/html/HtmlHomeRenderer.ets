@@ -3018,6 +3018,9 @@ const HTML_HOME_JS: string = `
   }
 	  function isExpandable(block) {
 	    var kind = text(block && block.kind);
+	    if (kind === 'generic-tool-result' && isMailBlock(block)) {
+	      return true;
+	    }
 	    if (kind === 'persona-memory-update' || kind === 'generic-tool-result') {
 	      return false;
 	    }

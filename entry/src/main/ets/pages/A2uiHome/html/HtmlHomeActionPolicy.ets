@@ -48,6 +48,9 @@ interface HtmlMailCalendarPayload {
 
 interface LuckinPreviewArgs {
   deptId?: HtmlHomePolicyValue;
+  productId?: HtmlHomePolicyValue;
+  skuCode?: HtmlHomePolicyValue;
+  location?: HtmlHomePolicyValue;
   attrGroup?: HtmlHomePolicyValue;
   attrChoice?: HtmlHomePolicyValue;
   locationSource?: HtmlHomePolicyValue;
@@ -195,28 +198,27 @@ function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): b
   }
   const actual = action.args as HtmlMailReplyPayload;
   let detailKey = '';
-  let detailExpected: HtmlMailReplyPayload | null = null;
-  let hasReplyTemplate = false;
+  let expected: HtmlMailReplyPayload | null = null;
   for (let index = 0; index < block.actions.length; index++) {
     const candidate = block.actions[index];
     if (candidate.id === 'html_mail_detail_read') {
       detailKey = candidate.prompt;
       if (candidate.args !== undefined) {
-        detailExpected = candidate.args as HtmlMailReplyPayload;
+        expected = candidate.args as HtmlMailReplyPayload;
       }
     }
     if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
       candidate.args !== undefined) {
-      hasReplyTemplate = true;
+      expected = candidate.args as HtmlMailReplyPayload;
     }
   }
-  if (!hasReplyTemplate || detailExpected === null || detailKey.length === 0 ||
+  if (expected === null || detailKey.length === 0 ||
     action.prompt !== detailKey || policyText(actual.requestKey) !== detailKey) {
     return false;
   }
-  return matchesOptionalMailIdentity(actual.provider, detailExpected.provider) &&
-    matchesOptionalMailIdentity(actual.threadId, detailExpected.threadId) &&
-    matchesOptionalMailIdentity(actual.messageId, detailExpected.messageId);
+  return matchesOptionalMailIdentity(actual.provider, expected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, expected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, expected.messageId);
 }
 
 function matchesOptionalMailIdentity(actual: HtmlHomePolicyValue, expected: HtmlHomePolicyValue): boolean {
@@ -412,7 +414,10 @@ function luckinPreviewAllowed(document: HtmlHomeDocument, action: A2uiAction): b
   const attrChoice = policyText(args.attrChoice).trim();
   if (deptId.length > 0) {
     if (attrGroup.length > 0 && attrChoice.length > 0) {
-      return hasLuckinConfirmOrderBlock(document);
+      return hasLuckinConfirmOrderBlock(document) &&
+        policyText(args.productId).trim().length > 0 &&
+        policyText(args.skuCode).trim().length > 0 &&
+        policyText(args.location).trim().length > 0;
     }
     return true;
   }

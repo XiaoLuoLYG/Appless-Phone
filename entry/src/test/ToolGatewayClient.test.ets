@@ -32,6 +32,7 @@ import {
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
+  resolveLuckinLocationForTest,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
@@ -137,6 +138,11 @@ interface LuckinProductsPayloadFixture {
 
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
+    it('falls back to the configured location for Luckin preview', 0, () => {
+      expect(resolveLuckinLocationForTest('', '点一杯咖啡', '114.029506,22.609878'))
+        .assertEqual('114.029506,22.609878');
+    });
+
     it('defaults to the in-app local tool route', 0, () => {
       expect(defaultToolGatewayUrl()).assertEqual('local://aiphone-tools');
       expect(isLocalToolGatewayUrl(defaultToolGatewayUrl())).assertTrue();

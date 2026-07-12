@@ -55,6 +55,12 @@ interface PaymentFallbackArgsFixture {
   fundingSource?: string;
 }
 
+interface LuckinCreateArgsFixture {
+  deptId: string;
+  productId: string;
+  skuCode: string;
+}
+
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
 
@@ -412,6 +418,16 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('client_intent_fallback');
     });
 
+    it('keeps Luckin preference updates out of the order flow', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我只喝瑞幸咖啡',
+        ''
+      );
+
+      expect(resolved.hasTool).assertFalse();
+    });
+
     it('reroutes model-selected food search to Luckin preview for ordering', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('food.search', '点一杯瑞幸冰美式', 'model_tool_request'),
@@ -425,11 +441,16 @@ export default function a2uiHomeToolRequestTest() {
     });
 
     it('maps Luckin confirmation actions directly to order create', 0, () => {
+      const args: LuckinCreateArgsFixture = {
+        deptId: '101',
+        productId: '1',
+        skuCode: 'sku-1'
+      };
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
         '确认创建瑞幸订单',
         'luckin.order.create',
-        { deptId: '101', productId: '1', skuCode: 'sku-1' }
+        args
       );
 
       expect(resolved.hasTool).assertTrue();

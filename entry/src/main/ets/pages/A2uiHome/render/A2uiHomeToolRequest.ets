@@ -450,6 +450,9 @@ function inferredLuckinOrderToolIdForPrompt(prompt: string): string {
   if (!hasLuckin) {
     return '';
   }
+  if (containsAny(prompt, ['只喝', '只买', '只点', '不喝', '不买', '不点', '偏好', '喜欢', '记住', '以后'])) {
+    return '';
+  }
   if (containsAny(prompt, ['订单状态', '取餐码', '取餐号', '刷新订单', '查询订单'])) {
     return 'luckin.order.status';
   }

@@ -39,6 +39,19 @@ interface MailCalendarArgsFixture {
   messageId: string;
 }
 
+interface LuckinArgsFixture {
+  deptId?: string;
+  location?: string;
+  productId?: string;
+  skuCode?: string;
+  quantity?: number;
+  previewPrompt?: string;
+  attrGroup?: string;
+  attrChoice?: string;
+  locationSource?: string;
+  orderId?: string;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -361,6 +374,21 @@ export default function htmlHomeActionPolicyTest() {
     it('allows luckin confirm option preview actions with switched attrs', 0, () => {
       const doc = documentFixture();
       doc.kind = 'luckin';
+      const createArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1
+      };
+      const createAction: HtmlHomeAction = {
+        id: 'luckin.order.create',
+        label: '确认下单',
+        prompt: '确认创建瑞幸订单',
+        variant: 'primary',
+        kind: 'prompt',
+        args: createArgs
+      };
       doc.blocks = [{
         id: 'luckin-confirm',
         kind: 'generic-tool-result',
@@ -370,22 +398,9 @@ export default function htmlHomeActionPolicyTest() {
         source: '瑞幸',
         metrics: [],
         rows: [],
-        actions: [{
-          id: 'luckin.order.create',
-          label: '确认下单',
-          prompt: '确认创建瑞幸订单',
-          variant: 'primary',
-          kind: 'prompt',
-          args: {
-            deptId: '1001',
-            location: '114.0,22.5',
-            productId: '2002',
-            skuCode: 'SKU001',
-            quantity: 1
-          }
-        }]
+        actions: [createAction]
       }];
-      const optionPreview = action('luckin.order.preview', '生椰拿铁，少甜，冰', 'prompt', {
+      const optionArgs: LuckinArgsFixture = {
         deptId: '1001',
         location: '114.0,22.5',
         productId: '2002',
@@ -394,19 +409,36 @@ export default function htmlHomeActionPolicyTest() {
         previewPrompt: '生椰拿铁，少甜，冰',
         attrGroup: '糖度',
         attrChoice: '少甜'
-      });
-
-      expect(isHtmlHomeActionAllowed(doc, optionPreview)).assertTrue();
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', {
+      };
+      const invalidOptionArgs: LuckinArgsFixture = {
         deptId: '1001',
         attrGroup: '糖度',
         attrChoice: '少甜'
-      }))).assertFalse();
+      };
+      const optionPreview = action('luckin.order.preview', '生椰拿铁，少甜，冰', 'prompt', optionArgs);
+
+      expect(isHtmlHomeActionAllowed(doc, optionPreview)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', invalidOptionArgs))).assertFalse();
     });
 
     it('allows luckin create after option switch when sku changes', 0, () => {
       const doc = documentFixture();
       doc.kind = 'luckin';
+      const createArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1
+      };
+      const createAction: HtmlHomeAction = {
+        id: 'luckin.order.create',
+        label: '确认下单',
+        prompt: '确认创建瑞幸订单',
+        variant: 'primary',
+        kind: 'prompt',
+        args: createArgs
+      };
       doc.blocks = [{
         id: 'luckin-confirm',
         kind: 'generic-tool-result',
@@ -416,29 +448,17 @@ export default function htmlHomeActionPolicyTest() {
         source: '瑞幸',
         metrics: [],
         rows: [],
-        actions: [{
-          id: 'luckin.order.create',
-          label: '确认下单',
-          prompt: '确认创建瑞幸订单',
-          variant: 'primary',
-          kind: 'prompt',
-          args: {
-            deptId: '1001',
-            location: '114.0,22.5',
-            productId: '2002',
-            skuCode: 'SKU001',
-            quantity: 1
-          }
-        }]
+        actions: [createAction]
       }];
-      const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', {
+      const switchedArgs: LuckinArgsFixture = {
         deptId: '1001',
         location: '114.0,22.5',
         productId: '2002',
         skuCode: 'SKU002',
         previewPrompt: '生椰拿铁，少甜，冰',
         quantity: 1
-      });
+      };
+      const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', switchedArgs);
 
       expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertTrue();
     });
@@ -446,9 +466,10 @@ export default function htmlHomeActionPolicyTest() {
     it('allows luckin relocate refresh preview on luckin pages', 0, () => {
       const doc = documentFixture();
       doc.kind = 'luckin';
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', '生椰拿铁', 'prompt', {
+      const args: LuckinArgsFixture = {
         locationSource: 'refresh'
-      }))).assertTrue();
+      };
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', '生椰拿铁', 'prompt', args))).assertTrue();
     });
 
     it('allows luckin payment page actions without exact snapshot match', 0, () => {
@@ -467,18 +488,12 @@ export default function htmlHomeActionPolicyTest() {
       }];
       doc.actions = [];
 
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', 'weixin://wxpay/bizpayurl?pr=abc', 'client', {
-        orderId: 'LK001'
-      }))).assertTrue();
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.alipay.open', 'alipays://', 'client', {
-        orderId: 'LK001'
-      }))).assertTrue();
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.googlepay.open', 'google pay', 'client', {
-        orderId: 'LK001'
-      }))).assertTrue();
-      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.status', '查询瑞幸订单状态', 'prompt', {
-        orderId: 'LK001'
-      }))).assertTrue();
+      const args: LuckinArgsFixture = { orderId: 'LK001' };
+
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', 'weixin://wxpay/bizpayurl?pr=abc', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.alipay.open', 'alipays://', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.googlepay.open', 'google pay', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.status', '查询瑞幸订单状态', 'prompt', args))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', '', 'client'))).assertTrue();
     });
 

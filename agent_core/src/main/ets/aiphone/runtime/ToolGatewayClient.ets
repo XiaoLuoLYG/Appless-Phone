@@ -5474,8 +5474,8 @@ function luckinShopStatus(shop: LuckinShopRecord): string {
   return '营业中';
 }
 
-function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): string {
-  const fromArgs = parseCoordinatePair(textOf(request.location));
+export function resolveLuckinLocationForTest(requestLocation: string, prompt: string, defaultLocation: string): string {
+  const fromArgs = parseCoordinatePair(requestLocation);
   if (fromArgs.length > 0) {
     return fromArgs;
   }
@@ -5483,7 +5483,11 @@ function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): 
   if (fromPrompt.length > 0) {
     return fromPrompt;
   }
-  return '';
+  return parseCoordinatePair(defaultLocation);
+}
+
+function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): string {
+  return resolveLuckinLocationForTest(textOf(request.location), prompt, localProviderConfig.amapDefaultLocation);
 }
 
 function luckinShopSelectActions(shops: LuckinShopRecord[], location: string, prompt: string): A2uiAction[] {
@@ -8040,7 +8044,7 @@ export function mailSearchArgs(prompt: string, args: Object | null): MailSearchA
   const query = stripGenericMailQueryTerms(hasExplicitQuery ? explicitQuery : fallbackMailSearchQuery(prompt));
   const normalizedQuery = defaultMailSearchWindow(query);
   return {
-    query: normalizedQuery.length > 0 || hasExplicitQuery ? normalizedQuery : 'newer_than:30d',
+    query: normalizedQuery.length > 0 ? normalizedQuery : 'newer_than:30d',
     pageSize: typeof record.pageSize === 'number' && record.pageSize > 0 ? Math.min(record.pageSize, 10) : 10,
     providers: providers.length > 0 ? providers : ['gmail', 'qq', 'outlook'],
     intentSummary: textOf(record.intentSummary)

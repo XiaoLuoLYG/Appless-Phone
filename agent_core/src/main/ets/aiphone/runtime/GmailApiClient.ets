@@ -134,7 +134,32 @@ function decodeBase64UrlText(value: string): string {
       byteIndex++;
     }
   }
-  return util.TextDecoder.create('utf-8').decodeToString(bytes.slice(0, byteIndex));
+  let result = '';
+  let index = 0;
+  while (index < byteIndex) {
+    const first = bytes[index];
+    if (first < 0x80) {
+      result += String.fromCharCode(first);
+      index++;
+    } else if ((first & 0xe0) === 0xc0 && index + 1 < byteIndex) {
+      result += String.fromCharCode(((first & 0x1f) << 6) | (bytes[index + 1] & 0x3f));
+      index += 2;
+    } else if ((first & 0xf0) === 0xe0 && index + 2 < byteIndex) {
+      result += String.fromCharCode(((first & 0x0f) << 12) |
+        ((bytes[index + 1] & 0x3f) << 6) | (bytes[index + 2] & 0x3f));
+      index += 3;
+    } else if ((first & 0xf8) === 0xf0 && index + 3 < byteIndex) {
+      const code = ((first & 0x07) << 18) | ((bytes[index + 1] & 0x3f) << 12) |
+        ((bytes[index + 2] & 0x3f) << 6) | (bytes[index + 3] & 0x3f);
+      const normalized = code - 0x10000;
+      result += String.fromCharCode(0xd800 + (normalized >> 10));
+      result += String.fromCharCode(0xdc00 + (normalized & 0x3ff));
+      index += 4;
+    } else {
+      index++;
+    }
+  }
+  return result;
 }
 
 function gmailHeader(message: GmailMessage, name: string): string {

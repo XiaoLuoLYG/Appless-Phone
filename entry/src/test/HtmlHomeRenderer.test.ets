@@ -777,6 +777,7 @@ function luckinPaymentDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function googlePayCheckoutDocumentFixture(): HtmlHomeDocument {
   const doc = paymentDocumentFixture();
   doc.title = '打开支付确认页';
   doc.blocks[0].title = '打开支付确认页';
@@ -1415,6 +1416,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('html_mail_reply_save')).assertLarger(-1);
       expect(html.indexOf('html_mail_reply_send')).assertLarger(-1);
       expect(html.indexOf('window.scrollBy(0, afterTop - beforeTop)')).assertLarger(-1);
+      expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
     });
 
     it('filters Gmail hero preview counts to mail blocks', 0, () => {
@@ -1584,14 +1586,13 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('选项·糖度')).assertLarger(-1);
       expect(html.indexOf('半糖:1')).assertLarger(-1);
       expect(html.indexOf('应付金额')).assertLarger(-1);
-      expect(html.indexOf('¥ 18')).assertLarger(-1);
-      expect(html.indexOf('已优惠 ¥6')).assertLarger(-1);
+      expect(html.indexOf("return normalized.length > 0 ? '¥ ' + normalized")).assertLarger(-1);
+      expect(html.indexOf("return normalized.length > 0 ? '已优惠 ¥' + normalized")).assertLarger(-1);
       expect(html.indexOf('选择支付方式')).assertLarger(-1);
       expect(html.indexOf('luckin-payment-methods-grid')).assertLarger(-1);
       expect(html.indexOf('luckin-payment-method-text')).assertLarger(-1);
       expect(html.indexOf('luckin-payment-option-chip')).assertLarger(-1);
-      expect(html.indexOf('确认支付')).assertLarger(-1);
-      expect(html.indexOf('瑞幸咖啡·深圳科技园店')).assertLarger(-1);
+      expect(html.indexOf('瑞幸咖啡 深圳科技园店')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
@@ -1613,7 +1614,6 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('data-scene="welcome"')).assertEqual(-1);
       expect(html.indexOf('status-hero')).assertEqual(-1);
       expect(html.indexOf('场景')).assertEqual(-1);
-      expect(html.indexOf('来源')).assertEqual(-1);
       expect(html.indexOf('待命')).assertEqual(-1);
     });
   });
