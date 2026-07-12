@@ -22,6 +22,36 @@ interface PaymentCheckoutArgsFixture {
   providerSessionId: string;
 }
 
+interface MailReplyArgsFixture {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  to: string[];
+  subject: string;
+  body: string;
+}
+
+interface MailCalendarArgsFixture {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+}
+
+interface LuckinArgsFixture {
+  deptId?: string;
+  location?: string;
+  productId?: string;
+  skuCode?: string;
+  quantity?: number;
+  previewPrompt?: string;
+  attrGroup?: string;
+  attrChoice?: string;
+  locationSource?: string;
+  orderId?: string;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -130,6 +160,117 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('gmail.ai.reply.draft', 'reply', 'prompt', blockedArgs))).assertFalse();
     });
 
+    it('allows mail reply submissions only for the matching visible mail card', 0, () => {
+      const doc = documentFixture();
+      const template: MailReplyArgsFixture = {
+        requestKey: '',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123',
+        to: ['alice@example.com'],
+        subject: 'Re: Status update',
+        body: ''
+      };
+      doc.blocks.push({
+        id: 'gmail-message-123',
+        kind: 'generic-tool-result',
+        title: 'Status update',
+        subtitle: '',
+        status: 'success',
+        source: 'Gmail',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'html_mail_detail_read',
+          label: '加载正文',
+          prompt: 'gmail:thread-123',
+          variant: 'secondary',
+          kind: 'client'
+        }, {
+          id: 'gmail.ai.reply.draft',
+          label: 'AI 回复草稿',
+          prompt: 'reply',
+          variant: 'primary',
+          kind: 'prompt',
+          args: template
+        }]
+      });
+      const allowed: MailReplyArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123',
+        to: ['alice@example.com'],
+        subject: 'Re: Status update',
+        body: 'Confirmed.'
+      };
+      const blocked: MailReplyArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-other',
+        messageId: 'message-123',
+        to: ['alice@example.com'],
+        subject: 'Re: Status update',
+        body: 'Confirmed.'
+      };
+
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_save', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', blocked))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', blocked))).assertFalse();
+    });
+
+    it('allows mail calendar add only for the matching visible mail card', 0, () => {
+      const doc = documentFixture();
+      const detailArgs: MailCalendarArgsFixture = {
+        requestKey: '',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123'
+      };
+      doc.blocks.push({
+        id: 'gmail-meeting-123',
+        kind: 'generic-tool-result',
+        title: 'Meeting invite',
+        subtitle: '',
+        status: 'success',
+        source: 'Gmail',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'html_mail_detail_read',
+          label: '加载正文',
+          prompt: 'gmail:thread-123',
+          variant: 'secondary',
+          kind: 'client',
+          args: detailArgs
+        }]
+      });
+      const allowed: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-123',
+        messageId: 'message-123'
+      };
+      const blocked: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
+        provider: 'gmail',
+        threadId: 'thread-other',
+        messageId: 'message-123'
+      };
+
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_calendar_add', 'gmail:thread-123', 'client', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_calendar_add', 'gmail:thread-123', 'client', blocked))).assertFalse();
+    });
+
     it('allows only matching payment actions from the current HTML document', 0, () => {
       const doc = documentFixture();
       const expectedArgs: ThreadOnlyArgsFixture = {
@@ -228,6 +369,132 @@ export default function htmlHomeActionPolicyTest() {
 
       expect(isHtmlHomeActionAllowed(doc, action('payment.capture', 'capture', 'prompt', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('payment.capture', 'capture', 'prompt', wrongOrder))).assertFalse();
+    });
+
+    it('allows luckin confirm option preview actions with switched attrs', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      const createArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1
+      };
+      const createAction: HtmlHomeAction = {
+        id: 'luckin.order.create',
+        label: '确认下单',
+        prompt: '确认创建瑞幸订单',
+        variant: 'primary',
+        kind: 'prompt',
+        args: createArgs
+      };
+      doc.blocks = [{
+        id: 'luckin-confirm',
+        kind: 'generic-tool-result',
+        title: '确认瑞幸订单',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [createAction]
+      }];
+      const optionArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1,
+        previewPrompt: '生椰拿铁，少甜，冰',
+        attrGroup: '糖度',
+        attrChoice: '少甜'
+      };
+      const invalidOptionArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        attrGroup: '糖度',
+        attrChoice: '少甜'
+      };
+      const optionPreview = action('luckin.order.preview', '生椰拿铁，少甜，冰', 'prompt', optionArgs);
+
+      expect(isHtmlHomeActionAllowed(doc, optionPreview)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', invalidOptionArgs))).assertFalse();
+    });
+
+    it('allows luckin create after option switch when sku changes', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      const createArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU001',
+        quantity: 1
+      };
+      const createAction: HtmlHomeAction = {
+        id: 'luckin.order.create',
+        label: '确认下单',
+        prompt: '确认创建瑞幸订单',
+        variant: 'primary',
+        kind: 'prompt',
+        args: createArgs
+      };
+      doc.blocks = [{
+        id: 'luckin-confirm',
+        kind: 'generic-tool-result',
+        title: '确认瑞幸订单',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [createAction]
+      }];
+      const switchedArgs: LuckinArgsFixture = {
+        deptId: '1001',
+        location: '114.0,22.5',
+        productId: '2002',
+        skuCode: 'SKU002',
+        previewPrompt: '生椰拿铁，少甜，冰',
+        quantity: 1
+      };
+      const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', switchedArgs);
+
+      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertTrue();
+    });
+
+    it('allows luckin relocate refresh preview on luckin pages', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      const args: LuckinArgsFixture = {
+        locationSource: 'refresh'
+      };
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', '生椰拿铁', 'prompt', args))).assertTrue();
+    });
+
+    it('allows luckin payment page actions without exact snapshot match', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'luckin';
+      doc.blocks = [{
+        id: 'luckin-payment',
+        kind: 'generic-tool-result',
+        title: '瑞幸订单已创建',
+        subtitle: '',
+        status: 'success',
+        source: '瑞幸',
+        metrics: [{ label: 'toolName', value: 'luckin.order.create' }],
+        rows: [{ label: '订单号', value: 'LK001' }],
+        actions: []
+      }];
+      doc.actions = [];
+
+      const args: LuckinArgsFixture = { orderId: 'LK001' };
+
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', 'weixin://wxpay/bizpayurl?pr=abc', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.alipay.open', 'alipays://', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.demo.googlepay.open', 'google pay', 'client', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.order.status', '查询瑞幸订单状态', 'prompt', args))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, action('luckin.pay.open', '', 'client'))).assertTrue();
     });
 
     it('allows only the current Stripe onboarding URL to open from HTML', 0, () => {

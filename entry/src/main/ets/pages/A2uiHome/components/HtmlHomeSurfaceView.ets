@@ -13,16 +13,31 @@ class HtmlHomeActionBridge {
   postAction(raw: string): void {
     const action = parseHtmlHomeAction(raw);
     if (action !== null) {
+      if (action.id === 'luckin.pay.open' ||
+        action.id === 'luckin.demo.alipay.open' ||
+        action.id === 'luckin.demo.googlepay.open' ||
+        action.id === 'luckin.order.status') {
+        aiLogInfo('[AIPhone][HtmlHomePostAction] id=' + action.id +
+          ' kind=' + action.kind +
+          ' promptChars=' + action.prompt.length.toString());
+      }
       this.onAction(action);
+      return;
     }
+    aiLogError('[AIPhone][HtmlHomePostActionParseError] rawChars=' + raw.length.toString());
   }
 }
 
 @Component
 export struct HtmlHomeSurfaceView {
-  @Prop @Watch('onRenderStateChange') html: string = '';
-  @Prop @Watch('onRenderStateChange') isBusy: boolean = false;
+  @Prop @Watch('onHtmlOrBusyChange') html: string = '';
+  @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
+  @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
+  @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
+  @Prop @Watch('onHtmlOrBusyChange') isBusy: boolean = false;
   @Prop renderTick: number = 0;
+  @Prop luckinInlinePatchJson: string = '';
+  @Prop @Watch('onLuckinPatchTickChange') luckinInlinePatchTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   private popupController: webview.WebviewController = new webview.WebviewController();
@@ -30,6 +45,10 @@ export struct HtmlHomeSurfaceView {
   private loadedKey: string = '';
   private webReady: boolean = false;
   private busyFrameLoaded: boolean = false;
+  private lastMailDetailEventJson: string = '';
+  private lastMailReplyEventJson: string = '';
+  private lastMailCalendarEventJson: string = '';
+  private appliedLuckinPatchTick: number = -1;
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
 
@@ -43,6 +62,11 @@ export struct HtmlHomeSurfaceView {
     if (!this.webReady) {
       return;
     }
+    const patchPending = this.luckinInlinePatchTick > this.appliedLuckinPatchTick &&
+      this.luckinInlinePatchJson.length > 0;
+    if (patchPending && this.html === this.loadedKey) {
+      return;
+    }
     if (this.html.length === 0 || this.html === this.loadedKey) {
       return;
     }
@@ -52,6 +76,10 @@ export struct HtmlHomeSurfaceView {
     try {
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
+      this.lastMailDetailEventJson = '';
+      this.lastMailReplyEventJson = '';
+      this.lastMailCalendarEventJson = '';
+      this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
       if (this.isBusy) {
         this.busyFrameLoaded = true;
       }
@@ -62,11 +90,102 @@ export struct HtmlHomeSurfaceView {
     }
   }
 
-  onRenderStateChange(): void {
+  onHtmlOrBusyChange(): void {
     if (!this.isBusy) {
       this.busyFrameLoaded = false;
     }
     this.loadHtmlIfNeeded();
+  }
+
+  private pushMailDetailEventIfNeeded(): void {
+    if (!this.webReady || this.mailDetailEventJson.length === 0 ||
+      this.mailDetailEventJson === this.lastMailDetailEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailDetailEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailDetail) { window.__aiphoneApplyMailDetail(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailDetailEventJson = this.mailDetailEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailDetailPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailDetailEventChange(): void {
+    this.pushMailDetailEventIfNeeded();
+  }
+
+  private pushMailReplyEventIfNeeded(): void {
+    if (!this.webReady || this.mailReplyEventJson.length === 0 ||
+      this.mailReplyEventJson === this.lastMailReplyEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailReplyEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailReply) { window.__aiphoneApplyMailReply(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailReplyEventJson = this.mailReplyEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailReplyPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailReplyEventChange(): void {
+    this.pushMailReplyEventIfNeeded();
+  }
+
+  private pushMailCalendarEventIfNeeded(): void {
+    if (!this.webReady || this.mailCalendarEventJson.length === 0 ||
+      this.mailCalendarEventJson === this.lastMailCalendarEventJson) {
+      return;
+    }
+    try {
+      const encoded = JSON.stringify(this.mailCalendarEventJson);
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMailCalendar) { window.__aiphoneApplyMailCalendar(JSON.parse(' + encoded + ')); }'
+      );
+      this.lastMailCalendarEventJson = this.mailCalendarEventJson;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMailCalendarPushError] ' + JSON.stringify(error));
+    }
+  }
+
+  onMailCalendarEventChange(): void {
+    this.pushMailCalendarEventIfNeeded();
+  }
+
+  onLuckinPatchTickChange(): void {
+    this.tryApplyLuckinInlinePatch();
+  }
+
+  private tryApplyLuckinInlinePatch(): boolean {
+    if (!this.webReady || this.luckinInlinePatchTick <= this.appliedLuckinPatchTick ||
+      this.luckinInlinePatchJson.length === 0) {
+      return false;
+    }
+    this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
+    const script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinConfirm){AIPhoneHome.patchLuckinConfirm(' +
+      JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+    try {
+      this.controller.runJavaScript(script);
+      aiLogInfo('[AIPhone][HtmlHomeLuckinPatch] tick=' + this.luckinInlinePatchTick.toString());
+      return true;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeLuckinPatchError] ' + JSON.stringify(error));
+      this.clearLuckinOptionUpdating();
+      return false;
+    }
+  }
+
+  private clearLuckinOptionUpdating(): void {
+    try {
+      this.controller.runJavaScript('try{if(window.AIPhoneHome&&AIPhoneHome.clearLuckinOptionUpdating){AIPhoneHome.clearLuckinOptionUpdating();}}catch(e){}');
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeLuckinUpdatingClearError] ' + JSON.stringify(error));
+    }
   }
 
   build() {
@@ -89,6 +208,9 @@ export struct HtmlHomeSurfaceView {
         .onPageEnd(() => {
           this.webReady = true;
           this.loadHtmlIfNeeded();
+          this.pushMailDetailEventIfNeeded();
+          this.pushMailReplyEventIfNeeded();
+          this.pushMailCalendarEventIfNeeded();
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           this.popupTitle = popupTitleFromUrl(event.targetUrl);

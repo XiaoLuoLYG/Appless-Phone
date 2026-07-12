@@ -260,7 +260,13 @@ export class LoopBackend {
     } else if (definition.toolId === 'flight.search') {
       description += '. Use for flight, airline, airport, or flight-board requests.';
     } else if (definition.toolId === 'food.search') {
-      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
+      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, menus, coupons, delivery, and food or beverage places near a location. Do not use for Luckin order placement; use luckin.order.preview for ordering Luckin coffee.';
+    } else if (definition.toolId === 'luckin.order.preview') {
+      description += '. Use when the user wants to order, buy, get, or preview Luckin/Ruixing coffee, including requests like "点一杯瑞幸咖啡", "来一杯瑞幸", "买瑞幸生椰拿铁", or choosing a Luckin store. This is the first step for Luckin ordering: it queries nearby stores, product SKU/options, and previewOrder pricing. Input must be JSON; at minimum pass {"prompt":"<original user request>"} or {"query":"<original user request>"}. Do not answer with note or food.search for Luckin ordering.';
+    } else if (definition.toolId === 'luckin.order.create') {
+      description += '. Use only after a Luckin order preview card returned real deptId, productId, and skuCode, and the user confirms creating the order. Do not use directly from an initial "order coffee" request.';
+    } else if (definition.toolId === 'luckin.order.status') {
+      description += '. Use when the user asks to check, refresh, or view a Luckin order status, pickup code, or existing orderId.';
     } else if (definition.toolId === 'social.feed.search') {
       description += '. Use for ordinary SocialHub X/Twitter DM, Slack DM, WeCom DM, private-message inbox, or connection-state requests. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. If the user explicitly says Composio Slack, Discord, LinkedIn, WhatsApp, Instagram, TikTok, or another unsupported social toolkit, use dynamic.search instead. Never fabricate social messages.';
     } else if (definition.toolId === 'social.reply.draft') {
@@ -270,13 +276,13 @@ export class LoopBackend {
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
     } else if (definition.toolId === 'mail.search') {
-      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
+      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. Action input must be JSON with providers, query, and pageSize. Always include query; if the user wants latest/recent mail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
     } else if (definition.toolId === 'mail.thread.read') {
       description += '. Use only when the user opens or reads a specific aggregate mail result and provider plus messageId/threadId are available.';
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query; do not pass plain keywords. Generate args.query from the user request; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR submission OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query and args.pageSize; do not pass plain keywords. Always include query; if the user wants latest/recent Gmail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. Generate args.query from the user request only when the user is searching by keyword; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {

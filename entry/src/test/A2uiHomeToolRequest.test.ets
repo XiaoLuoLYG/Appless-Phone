@@ -55,6 +55,12 @@ interface PaymentFallbackArgsFixture {
   fundingSource?: string;
 }
 
+interface LuckinCreateArgsFixture {
+  deptId: string;
+  productId: string;
+  skuCode: string;
+}
+
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
 
@@ -398,6 +404,58 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.toolId).assertEqual('food.search');
       expect(argText(resolved.args, 'brandPreference')).assertEqual('瑞幸');
       expect(argText(resolved.args, 'sweetness')).assertEqual('半糖');
+    });
+
+    it('routes explicit Luckin ordering prompts to Luckin preview', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我点一杯瑞幸生椰拿铁，半糖少冰',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('keeps Luckin preference updates out of the order flow', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我只喝瑞幸咖啡',
+        ''
+      );
+
+      expect(resolved.hasTool).assertFalse();
+    });
+
+    it('reroutes model-selected food search to Luckin preview for ordering', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', '点一杯瑞幸冰美式', 'model_tool_request'),
+        '点一杯瑞幸冰美式',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_luckin_order_reroute');
+    });
+
+    it('maps Luckin confirmation actions directly to order create', 0, () => {
+      const args: LuckinCreateArgsFixture = {
+        deptId: '101',
+        productId: '1',
+        skuCode: 'sku-1'
+      };
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '确认创建瑞幸订单',
+        'luckin.order.create',
+        args
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.create');
+      expect(argText(resolved.args, 'deptId')).assertEqual('101');
     });
 
     it('keeps explicit gmap requests on Google Maps search', 0, () => {

@@ -90,6 +90,14 @@ interface StripeOnboardingActionArgs {
   onboardingUrl: string;
 }
 
+interface MailDetailActionArgs {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  subject: string;
+}
+
 export interface CreateHtmlHomeDocumentParams {
   surface?: A2uiSurfaceState;
   messages: A2uiMessage[];
@@ -449,6 +457,9 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
       block.mediaEmbed = mediaEmbed;
     }
     block.actions = htmlActions(actionsOf(component), component.id);
+    if (block.actions.length === 0 && document.actions.length > 0) {
+      block.actions = document.actions.slice();
+    }
     const mailAction = mailReplyDraftAction(item);
     if (mailAction !== null) {
       block.actions = block.actions.concat(htmlActions([mailAction], component.id));
@@ -460,6 +471,10 @@ function appendGenericToolResultBlocks(document: HtmlHomeDocument, surface: A2ui
     const gmailOpenDraft = gmailOpenDraftAction(item);
     if (gmailOpenDraft !== null) {
       block.actions = block.actions.concat(htmlActions([gmailOpenDraft], component.id));
+    }
+    const mailDetailRead = mailDetailReadAction(item);
+    if (mailDetailRead !== null) {
+      block.actions = block.actions.concat(htmlActions([mailDetailRead], component.id));
     }
     const mapsOpenWeb = mapsOpenWebAction(item);
     if (mapsOpenWeb !== null) {
@@ -816,6 +831,39 @@ function genericResultRowValue(result: A2uiGenericToolResultData, label: string)
   return '';
 }
 
+function mailDetailReadAction(result: A2uiGenericToolResultData): A2uiAction | null {
+  const source = result.sourceTag.toLowerCase();
+  const rowProvider = genericResultRowValue(result, 'Provider').toLowerCase();
+  const provider = rowProvider === 'qq' || source.indexOf('qq mail') >= 0 ? 'qq' :
+    (rowProvider === 'gmail' || source.indexOf('gmail') >= 0 ? 'gmail' : '');
+  if (provider.length === 0 || result.status !== 'success') {
+    return null;
+  }
+  const threadId = genericResultRowValue(result, 'Thread ID');
+  const messageId = genericResultRowValue(result, 'Message ID');
+  const identity = provider === 'gmail' ? threadId : messageId;
+  if (identity.length === 0) {
+    return null;
+  }
+  const requestKey = provider + ':' + identity;
+  const args: MailDetailActionArgs = {
+    requestKey: requestKey,
+    provider: provider,
+    threadId: threadId,
+    messageId: messageId,
+    subject: result.title
+  };
+  const action: A2uiAction = {
+    id: 'html_mail_detail_read',
+    label: '加载正文',
+    prompt: requestKey,
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+  return action;
+}
+
 function appendGenericComponentBlock(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
   if (component.component === A2UI_COMPONENT_INFO_ROWS && component.id === 'memory_update') {
     appendPersonaMemoryUpdateBlock(document, surface, component);
@@ -952,6 +1000,9 @@ function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
   if (surface.intent === 'payment' || surface.intent === 'payment.account.setup' || hasPaymentData(surface)) {
     return 'payment';
   }
+  if (surface.intent === 'luckin') {
+    return 'luckin';
+  }
   if (hasComponent(surface, A2UI_COMPONENT_TOOL_CONNECT_CARD) ||
     hasComponent(surface, A2UI_COMPONENT_GENERIC_TOOL_RESULTS) ||
     surface.intent === 'dynamic_tool' ||
@@ -970,7 +1021,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search') {
+  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin') {
     return 'tool';
   }
   return 'model';

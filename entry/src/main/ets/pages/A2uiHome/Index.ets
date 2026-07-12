@@ -1,9 +1,10 @@
 import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
 import router from '@ohos.router';
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
+import { geoLocationManager } from '@kit.LocationKit';
 import util from '@ohos.util';
 import {
   A2UI_COMPONENT_SOCIAL_HUB,
@@ -68,6 +69,17 @@ import {
 import { AssetCredentialStore } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri } from '@loop/agent-core';
 import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
+import {
+  MailDetail,
+  MailDetailRequest,
+  MailCalendarSuggestion,
+  MailReplyCommand,
+  MailReplyOperationResult,
+  addHuaweiCalendarEvent,
+  readConfiguredMailDetail,
+  saveConfiguredMailDraft,
+  sendConfiguredMailReply
+} from '@loop/agent-core';
 import { copyPersonaData } from '../../model/PersonaA2ui';
 import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
@@ -81,7 +93,7 @@ import { socialHubComposioToolkitCandidates } from './components/SocialHubViewDa
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
-import { HtmlHomeDocument } from './html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
   A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
   normalizeFoodPartialThrottleMs,
@@ -119,6 +131,10 @@ const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
+const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
+const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
+const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
+const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
 
@@ -127,6 +143,66 @@ interface HtmlDynamicCredentialPayload {
   credentialValue?: HtmlActionValue;
   toolId?: HtmlActionValue;
   prompt?: HtmlActionValue;
+}
+
+interface MailDetailUiEvent {
+  sequence: number;
+  requestKey: string;
+  status: string;
+  detail?: MailDetail;
+  calendarSuggestion?: MailCalendarSuggestion;
+  error: string;
+}
+
+interface MailCalendarUiEvent {
+  sequence: number;
+  requestKey: string;
+  status: string;
+  message: string;
+  eventId: string;
+  error: string;
+}
+
+interface MailCalendarActionArgs {
+  requestKey?: HtmlActionValue;
+  provider?: HtmlActionValue;
+  threadId?: HtmlActionValue;
+  messageId?: HtmlActionValue;
+}
+
+interface MailCalendarSuggestionSchemaText {
+  isWorkRelated: string;
+  hasMeeting: string;
+  title: string;
+  start: string;
+  end: string;
+  displayTime: string;
+  timezone: string;
+  location: string;
+  description: string;
+  confidence: string;
+  reason: string;
+}
+
+interface MailReplyUiEvent {
+  sequence: number;
+  requestKey: string;
+  operation: string;
+  status: string;
+  message: string;
+  error: string;
+}
+
+interface MailReplyAiArgs {
+  requestKey?: HtmlActionValue;
+  provider?: HtmlActionValue;
+  accountLabel?: HtmlActionValue;
+  threadId?: HtmlActionValue;
+  messageId?: HtmlActionValue;
+  to?: HtmlActionValue;
+  subject?: HtmlActionValue;
+  replyMode?: HtmlActionValue;
+  contextSummary?: HtmlActionValue;
 }
 
 interface HtmlPinPayload {
@@ -202,6 +278,25 @@ interface PaymentSavedPreviewArgs {
   originalQuery: string;
 }
 
+interface PaymentFallbackArgs {
+  provider: string;
+  fundingSource: string;
+  recipient: string;
+  amountText: string;
+  currency: string;
+  note: string;
+  originalQuery: string;
+}
+
+interface LuckinOrderStatusArgs {
+  orderId: string;
+}
+
+interface LocationPermissionResult {
+  permissions: string[];
+  authResults: number[];
+}
+
 function logSnippet(text: string): string {
   if (text.length <= LOG_SNIPPET_LIMIT) {
     return text;
@@ -215,6 +310,76 @@ function modelPromptWithActionContext(prompt: string, actionId: string, args: Ob
   }
   return prompt + '\n\nAction ID: ' + actionId + '\nStructured action args JSON: ' +
     (args === null ? '{}' : JSON.stringify(args));
+}
+
+function stripMailReplyAiText(text: string): string {
+  let value = text.trim();
+  const finalAnswerIndex = value.lastIndexOf('final_answer:');
+  if (finalAnswerIndex >= 0) {
+    value = value.substring(finalAnswerIndex + 'final_answer:'.length).trim();
+  }
+  const finalIndex = value.lastIndexOf('Final:');
+  if (finalIndex >= 0) {
+    value = value.substring(finalIndex + 'Final:'.length).trim();
+  }
+  const modelIndex = value.lastIndexOf('MODEL:');
+  if (modelIndex >= 0) {
+    value = value.substring(modelIndex + 'MODEL:'.length).trim();
+  }
+  const errorIndex = value.indexOf('\nERROR:');
+  if (errorIndex >= 0) {
+    value = value.substring(0, errorIndex).trim();
+  }
+  if (value.startsWith('```')) {
+    const firstBreak = value.indexOf('\n');
+    const lastFence = value.lastIndexOf('```');
+    if (firstBreak >= 0 && lastFence > firstBreak) {
+      value = value.substring(firstBreak + 1, lastFence).trim();
+    }
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('“') && value.endsWith('”'))) {
+    value = value.substring(1, value.length - 1).trim();
+  }
+  return value;
+}
+
+function jsonObjectTextFromModel(text: string): string {
+  let value = text.trim();
+  const finalAnswerIndex = value.lastIndexOf('final_answer:');
+  if (finalAnswerIndex >= 0) {
+    value = value.substring(finalAnswerIndex + 'final_answer:'.length).trim();
+  }
+  const finalIndex = value.lastIndexOf('Final:');
+  if (finalIndex >= 0) {
+    value = value.substring(finalIndex + 'Final:'.length).trim();
+  }
+  if (value.startsWith('```')) {
+    const firstBreak = value.indexOf('\n');
+    const lastFence = value.lastIndexOf('```');
+    if (firstBreak >= 0 && lastFence > firstBreak) {
+      value = value.substring(firstBreak + 1, lastFence).trim();
+    }
+  }
+  const left = value.indexOf('{');
+  const right = value.lastIndexOf('}');
+  if (left >= 0 && right > left) {
+    return value.substring(left, right + 1);
+  }
+  return value;
+}
+
+function calendarPermissionGranted(permissions: string[], authResults: number[]): boolean {
+  if (authResults.length === 0) {
+    return false;
+  }
+  const readIndex = permissions.indexOf(READ_CALENDAR_PERMISSION);
+  const writeIndex = permissions.indexOf(WRITE_CALENDAR_PERMISSION);
+  if (permissions.length === 0) {
+    return authResults.length >= 2 && authResults[0] === 0 && authResults[1] === 0;
+  }
+  return readIndex >= 0 && writeIndex >= 0 &&
+    authResults.length > readIndex && authResults.length > writeIndex &&
+    authResults[readIndex] === 0 && authResults[writeIndex] === 0;
 }
 
 @Entry
@@ -263,19 +428,108 @@ struct Index {
   @State composioAuthItems: ComposioAuthConfigItem[] = [];
   @State composioAuthMessage: string = '';
   @State composioAuthBusy: boolean = false;
+  @State mailDetailEventJson: string = '';
+  @State mailReplyEventJson: string = '';
+  @State mailCalendarEventJson: string = '';
+  private mailCalendarSuggestions: Record<string, MailCalendarSuggestion> = {};
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
+  @State htmlHomeStableHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
   private voiceSessionSeq: number = 0;
   private voiceBaseInputText: string = '';
   private voiceStopRequested: boolean = false;
   private voiceCompletionHandled: boolean = false;
+  private luckinReturnSurface: A2uiSurfaceState | null = null;
+  @State luckinInlinePatchJson: string = '';
+  @State luckinInlinePatchTick: number = 0;
+  private luckinOptionSwitchInFlight: boolean = false;
+
+  private isLuckinOptionSwitchArgs(args: Object | null): boolean {
+    if (args === null) {
+      return false;
+    }
+    const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+    return this.actionText(raw.attrGroup).length > 0 && this.actionText(raw.attrChoice).length > 0;
+  }
+
+  private luckinConfirmBlockJson(document: HtmlHomeDocument): string {
+    for (let index = 0; index < document.blocks.length; index++) {
+      if (document.blocks[index].title.indexOf('确认瑞幸订单') >= 0) {
+        return JSON.stringify(document.blocks[index]);
+      }
+    }
+    return '';
+  }
+
+  private applyLuckinInlineConfirmPatch(surface: A2uiSurfaceState): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    const patchJson = this.luckinConfirmBlockJson(document);
+    if (patchJson.length === 0) {
+      return false;
+    }
+    this.storeSurfaceSilently(surface);
+    this.htmlHomeCacheKey = this.currentHtmlHomeCacheKey();
+    this.htmlHomeCacheHtml = renderHtmlHomeDocument(document, false);
+    this.luckinInlinePatchJson = patchJson;
+    this.luckinInlinePatchTick = this.luckinInlinePatchTick + 1;
+    return true;
+  }
+
+  private finishLuckinOptionSwitch(inFlight: boolean = false): void {
+    this.luckinOptionSwitchInFlight = inFlight;
+  }
+
+  private storeSurfaceSilently(surface: A2uiSurfaceState): void {
+    this.currentSurface = this.surfaceSnapshot(surface);
+    aiLogInfo('[AIPhone][A2uiHomeSurfaceSilentUpdate] surfaceId=' + surface.surfaceId +
+      ' sequence=' + surface.sequence.toString());
+  }
+
+  private syncHtmlHomeStableHtml(): void {
+    this.htmlHomeStableHtml = this.currentHtmlHomeHtml();
+  }
+
+  private hasLuckinConfirmBlockInSurface(surface: A2uiSurfaceState = this.currentSurface): boolean {
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    return this.luckinConfirmBlockJson(document).length > 0;
+  }
+
+  private shouldKeepLuckinConfirmWebHtmlStable(): boolean {
+    return this.hasLuckinConfirmBlockInSurface();
+  }
+
+  private htmlHomeHtmlForView(): string {
+    if (this.currentSurface.intent === 'social') {
+      return '';
+    }
+    if (this.shouldKeepLuckinConfirmWebHtmlStable()) {
+      return this.htmlHomeStableHtml.length > 0 ? this.htmlHomeStableHtml : this.currentHtmlHomeHtml();
+    }
+    return this.currentHtmlHomeHtml();
+  }
+
+  private clearLuckinInlinePatchState(): void {
+    this.luckinInlinePatchJson = '';
+    this.finishLuckinOptionSwitch(false);
+  }
 
   aboutToAppear(): void {
     this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
+    void this.requestLocationPermissionOnLaunch();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -905,12 +1159,60 @@ struct Index {
     }
     this.currentSurface = this.surfaceSnapshot(surface);
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
+  }
+
+  private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
+    this.currentSurface = this.surfaceSnapshot(surface);
+    this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+    aiLogInfo('[AIPhone][A2uiHomeSurfaceForceUpdate] reason=' + reason +
+      ' surfaceId=' + surface.surfaceId +
+      ' status=' + surface.status +
+      ' components=' + surface.components.length.toString() +
+      ' dataChars=' + surface.dataModelJson.length.toString() +
+      ' sequence=' + surface.sequence.toString() +
+      ' renderTick=' + this.surfaceRenderTick.toString());
+  }
+
+  private rememberLuckinReturnSurface(reason: string): void {
+    if (this.currentSurface.intent !== 'luckin') {
+      return;
+    }
+    this.luckinReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    aiLogInfo('[AIPhone][LuckinReturnSurfaceRemember] reason=' + reason +
+      ' title=' + this.currentSurface.title +
+      ' dataChars=' + this.currentSurface.dataModelJson.length.toString());
+  }
+
+  private restoreLuckinReturnSurface(reason: string): void {
+    if (this.luckinReturnSurface === null) {
+      aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=false');
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.luckinReturnSurface);
+    this.luckinReturnSurface = null;
+    this.showPaymentCheckout = false;
+    this.forceApplySurface(surface, reason);
+    this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+      ok: true,
+      status: 'ready',
+      message: '已返回瑞幸下单页面。',
+      requestDebug: this.lastModelRequest,
+      assistantDebug: this.lastModelOutput,
+      error: ''
+    }));
+    aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=true');
   }
 
   private socialHubComposioAuthItem(platform: SocialHubPlatform): ComposioAuthConfigItem | null {
@@ -1246,6 +1548,8 @@ struct Index {
     this.messages = [];
     this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.syncHtmlHomeStableHtml();
     this.inputText = '';
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.resetPanelState();
@@ -1349,6 +1653,7 @@ struct Index {
     this.isAwaitingFirstSurface = true;
     this.markChecking('正在生成 A2UI...');
     try {
+      this.markChecking('正在生成 A2UI...');
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
         modelPrompt,
@@ -1689,9 +1994,22 @@ struct Index {
   }
 
   private logHtmlHomeActionError(action: A2uiAction, reason: string): void {
+    const argsChars = action.args === undefined ? 0 : JSON.stringify(action.args).length;
     aiLogError('[AIPhone][HtmlHomeAction] id=' + action.id +
       ' ok=false reason=' + reason +
-      ' promptChars=' + action.prompt.length.toString());
+      ' kind=' + action.kind +
+      ' promptChars=' + action.prompt.length.toString() +
+      ' argsChars=' + argsChars.toString());
+    if (action.id === 'html_mail_reply_ai_generate' && action.args !== undefined) {
+      const args = action.args as MailReplyAiArgs;
+      aiLogError('[AIPhone][HtmlHomeMailReplyAiBlocked] prompt=' + action.prompt +
+        ' requestKey=' + this.actionText(args.requestKey) +
+        ' provider=' + this.actionText(args.provider) +
+        ' threadId=' + this.actionText(args.threadId) +
+        ' messageId=' + this.actionText(args.messageId) +
+        ' subjectChars=' + this.actionText(args.subject).length.toString() +
+        ' contextChars=' + this.actionText(args.contextSummary).length.toString());
+    }
   }
 
   private async handleHtmlPinAction(action: A2uiAction): Promise<boolean> {
@@ -1819,6 +2137,377 @@ struct Index {
     return '';
   }
 
+  private emptyMailCalendarSuggestion(detail: MailDetail, reason: string): MailCalendarSuggestion {
+    return {
+      requestKey: detail.requestKey,
+      provider: detail.provider,
+      threadId: detail.threadId,
+      messageId: detail.messageId,
+      isWorkRelated: false,
+      hasMeeting: false,
+      title: '',
+      start: '',
+      end: '',
+      displayTime: '',
+      timezone: 'Asia/Shanghai',
+      location: '',
+      description: '',
+      confidence: 'low',
+      reason: reason
+    };
+  }
+
+  private payloadBool(payload: Record<string, HtmlActionValue>, key: string): boolean {
+    const value = payload[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    return this.actionText(value).trim().toLowerCase() === 'true';
+  }
+
+  private payloadText(payload: Record<string, HtmlActionValue>, key: string): string {
+    return this.actionText(payload[key]).trim();
+  }
+
+  private cleanMailCalendarDescription(value: string): string {
+    const lines: string[] = value.split('\n');
+    const kept: string[] = [];
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      if (/^(来源|邮件来源|Source|发件人|From)\s*[:：]/i.test(line)) {
+        continue;
+      }
+      kept.push(line);
+    }
+    return kept.join('\n')
+      .replace(/[；;，,。\s]*(来源|邮件来源|Source|发件人|From)\s*[:：][^\n]*$/i, '')
+      .trim();
+  }
+
+  private mailCalendarSuggestionPrompt(detail: MailDetail): string {
+    const schema: MailCalendarSuggestionSchemaText = {
+      isWorkRelated: 'boolean，邮件是否与工作/学习/会议协作相关',
+      hasMeeting: 'boolean，正文是否明确包含可加入日历的会议/活动/面试/评审等日程',
+      title: 'string，适合放入日历的短标题',
+      start: 'string，ISO 8601 日期时间，必须含时区，例如 2026-07-10T15:00:00+08:00；无法确定则空字符串',
+      end: 'string，ISO 8601 日期时间，必须含时区；无法确定结束时间则按开始后30分钟估计',
+      displayTime: 'string，面向界面展示的中文时间，例如 7月10日 15:00-15:30；无法确定则空字符串',
+      timezone: 'string，默认 Asia/Shanghai',
+      location: 'string，会议地点、线上会议链接或空字符串',
+      description: 'string，100字以内会议内容摘要，只写会议/活动本身；不得包含来源、邮件来源、发件人、邮箱等信息',
+      confidence: 'string，只能是 high/medium/low',
+      reason: 'string，简短说明判断依据'
+    };
+    return '请分析下面邮件是否为工作相关会议，并抽取可写入手机日历的结构化信息。' +
+      '不要调用工具，不要写邮件，不要解释。必须只输出一个 JSON 对象，且完全符合这个 schema：' +
+      JSON.stringify(schema) +
+      '\n规则：' +
+      '\n1. 只有明确有会议、面试、评审、同步会、deadline 日程等时间安排时 hasMeeting=true。' +
+      '\n2. 时间必须基于邮件标题和正文，不要编造日期；只有相对日期但无法确定基准日期时 start 置空。' +
+      '\n3. 如果有开始时间但没有结束时间，end 使用开始时间后 30 分钟。' +
+      '\n4. displayTime 是 start/end 的中文可读表达，不要输出 ISO 原文。' +
+      '\n5. description 不要写“来源：...”“邮件来源：...”“From：...”或发件人邮箱，来源由界面单独展示。' +
+      '\n6. 如果不是工作相关或没有明确时间，仍输出完整 JSON，但按钮字段应为 false/空字符串。' +
+      '\n当前设备时间: ' + new Date().toISOString() +
+      '\n邮件主题: ' + detail.subject +
+      '\nFrom: ' + detail.from +
+      '\nTo: ' + JSON.stringify(detail.to) +
+      '\n正文:\n' + detail.bodyText;
+  }
+
+  private parseMailCalendarSuggestion(detail: MailDetail, raw: string): MailCalendarSuggestion {
+    try {
+      const jsonText = jsonObjectTextFromModel(raw);
+      const payload = JSON.parse(jsonText) as Record<string, HtmlActionValue>;
+      const start = this.payloadText(payload, 'start');
+      const end = this.payloadText(payload, 'end');
+      const isWorkRelated = this.payloadBool(payload, 'isWorkRelated');
+      const hasMeeting = this.payloadBool(payload, 'hasMeeting') && start.length > 0;
+      return {
+        requestKey: detail.requestKey,
+        provider: detail.provider,
+        threadId: detail.threadId,
+        messageId: detail.messageId,
+        isWorkRelated: isWorkRelated,
+        hasMeeting: hasMeeting,
+        title: this.payloadText(payload, 'title'),
+        start: start,
+        end: end,
+        displayTime: this.payloadText(payload, 'displayTime'),
+        timezone: this.payloadText(payload, 'timezone').length > 0 ? this.payloadText(payload, 'timezone') : 'Asia/Shanghai',
+        location: this.payloadText(payload, 'location'),
+        description: this.cleanMailCalendarDescription(this.payloadText(payload, 'description')),
+        confidence: this.payloadText(payload, 'confidence').length > 0 ? this.payloadText(payload, 'confidence') : 'low',
+        reason: this.payloadText(payload, 'reason')
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailCalendarSuggestionParseFailed] ' + message.substring(0, 240));
+      return this.emptyMailCalendarSuggestion(detail, '日程解析失败：' + message.substring(0, 120));
+    }
+  }
+
+  private async extractMailCalendarSuggestion(detail: MailDetail): Promise<MailCalendarSuggestion> {
+    if (this.baseUrl.trim().length === 0 || detail.bodyText.trim().length === 0) {
+      return this.emptyMailCalendarSuggestion(detail, '模型未配置或正文为空。');
+    }
+    const prompt = this.mailCalendarSuggestionPrompt(detail);
+    aiLogInfo('[AIPhone][MailCalendarSuggestionRequest] requestKey=' + detail.requestKey +
+      ' subjectChars=' + detail.subject.length.toString() +
+      ' bodyChars=' + detail.bodyText.length.toString() +
+      ' promptChars=' + prompt.length.toString());
+    try {
+      const result: A2uiCallResult = await callLocalModel(
+        this.getSettings(),
+        prompt,
+        this.recentMessages(),
+        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
+        null,
+        null,
+        null
+      );
+      const raw = result.assistantDebug.length > 0 ? result.assistantDebug : result.raw;
+      if (!result.ok || raw.trim().length === 0) {
+        return this.emptyMailCalendarSuggestion(detail, result.error.length > 0 ? result.error : '模型没有返回日程结构。');
+      }
+      const suggestion = this.parseMailCalendarSuggestion(detail, raw);
+      aiLogInfo('[AIPhone][MailCalendarSuggestionDone] requestKey=' + detail.requestKey +
+        ' work=' + (suggestion.isWorkRelated ? 'true' : 'false') +
+        ' meeting=' + (suggestion.hasMeeting ? 'true' : 'false') +
+        ' start=' + suggestion.start);
+      return suggestion;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailCalendarSuggestionFailed] ' + message.substring(0, 240));
+      return this.emptyMailCalendarSuggestion(detail, message);
+    }
+  }
+
+  private mailReplyAiPrompt(args: MailReplyAiArgs): string {
+    const recipients = args.to === undefined ? '' : JSON.stringify(args.to);
+    return '请为下面这封邮件生成一段简短、礼貌、工作风格的回复正文。' +
+      '不要调用工具，不要保存草稿，不要发送邮件。最后必须只用一行输出，格式为 Final: <回复正文>。' +
+      '不要输出 JSON，不要输出 Action。' +
+      '\n收件人: ' + recipients +
+      '\n主题: ' + this.actionText(args.subject) +
+      '\n邮件上下文:\n' + this.actionText(args.contextSummary);
+  }
+
+  private mailReplyAiEvent(requestKey: string, status: string, message: string, error: string): void {
+    const event: MailReplyUiEvent = {
+      sequence: Date.now(),
+      requestKey: requestKey,
+      operation: 'ai',
+      status: status,
+      message: message,
+      error: error
+    };
+    this.mailReplyEventJson = JSON.stringify(event);
+  }
+
+  private async generateMailReplyDraft(action: A2uiAction): Promise<void> {
+    if (action.args === undefined) {
+      this.logHtmlHomeActionError(action, 'missing_mail_reply_ai_args');
+      return;
+    }
+    const requestKey = action.prompt.trim();
+    if (requestKey.length === 0) {
+      this.logHtmlHomeActionError(action, 'invalid_mail_reply_ai_request_key');
+      return;
+    }
+    if (this.baseUrl.trim().length === 0) {
+      this.mailReplyAiEvent(requestKey, 'error', '', '请先填写 Base URL。');
+      return;
+    }
+    const args = action.args as MailReplyAiArgs;
+    const prompt = this.mailReplyAiPrompt(args);
+    aiLogInfo('[AIPhone][MailReplyAiDraftRequest] requestKey=' + requestKey +
+      ' provider=' + this.actionText(args.provider) +
+      ' threadId=' + this.actionText(args.threadId) +
+      ' messageId=' + this.actionText(args.messageId) +
+      ' toCount=' + (Array.isArray(args.to) ? args.to.length : 0).toString() +
+      ' subjectChars=' + this.actionText(args.subject).length.toString() +
+      ' contextChars=' + this.actionText(args.contextSummary).length.toString() +
+      ' promptChars=' + prompt.length.toString());
+    try {
+      const result: A2uiCallResult = await callLocalModel(
+        this.getSettings(),
+        prompt,
+        this.recentMessages(),
+        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
+        null,
+        null,
+        action.args
+      );
+      aiLogInfo('[AIPhone][MailReplyAiDraft] ok=' + (result.ok ? 'true' : 'false') +
+        ' errorChars=' + result.error.length.toString() +
+        ' rawChars=' + result.raw.length.toString() +
+        ' assistantChars=' + result.assistantDebug.length.toString());
+      aiLogInfo('[AIPhone][MailReplyAiDraftRaw] ' + logSnippet(result.raw));
+      if (result.error.length > 0) {
+        aiLogError('[AIPhone][MailReplyAiDraftError] ' + logSnippet(result.error));
+      }
+      if (result.assistantDebug.length > 0) {
+        aiLogInfo('[AIPhone][MailReplyAiDraftAssistant] ' + logSnippet(result.assistantDebug));
+      }
+      const text = stripMailReplyAiText(result.assistantDebug.length > 0 ? result.assistantDebug : result.raw);
+      if (!result.ok || text.length === 0) {
+        const message = result.error.length > 0 ? result.error : 'AI 回复生成失败。';
+        this.mailReplyAiEvent(requestKey, 'error', '', message);
+        return;
+      }
+      this.mailReplyAiEvent(requestKey, 'success', text, '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][MailReplyAiDraftFailed] error=' + message.substring(0, 240));
+      this.mailReplyAiEvent(requestKey, 'error', '', message);
+    }
+  }
+
+  private mailCalendarEvent(requestKey: string, status: string, message: string, eventId: string, error: string): void {
+    const event: MailCalendarUiEvent = {
+      sequence: Date.now(),
+      requestKey: requestKey,
+      status: status,
+      message: message,
+      eventId: eventId,
+      error: error
+    };
+    this.mailCalendarEventJson = JSON.stringify(event);
+  }
+
+  private async ensureCalendarPermissions(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const permission = await abilityAccessCtrl.createAtManager()
+      .requestPermissionsFromUser(context, [READ_CALENDAR_PERMISSION, WRITE_CALENDAR_PERMISSION]);
+    if (!calendarPermissionGranted(permission.permissions, permission.authResults)) {
+      throw new Error('日历权限未授权');
+    }
+  }
+
+  private async addSuggestedMailCalendarEvent(action: A2uiAction): Promise<void> {
+    if (action.args === undefined) {
+      this.logHtmlHomeActionError(action, 'missing_mail_calendar_args');
+      return;
+    }
+    const args = action.args as MailCalendarActionArgs;
+    const requestKey = this.actionText(args.requestKey).trim();
+    if (requestKey.length === 0 || action.prompt.trim() !== requestKey) {
+      this.logHtmlHomeActionError(action, 'invalid_mail_calendar_request_key');
+      return;
+    }
+    const suggestion = this.mailCalendarSuggestions[requestKey];
+    if (suggestion === undefined) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '没有找到已解析的日程信息。');
+      return;
+    }
+    if (!suggestion.isWorkRelated || !suggestion.hasMeeting || suggestion.start.trim().length === 0) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '这封邮件没有可添加的会议日程。');
+      return;
+    }
+    if (this.actionText(args.provider).trim() !== suggestion.provider ||
+      this.actionText(args.threadId).trim() !== suggestion.threadId ||
+      this.actionText(args.messageId).trim() !== suggestion.messageId) {
+      this.mailCalendarEvent(requestKey, 'error', '', '', '邮件身份校验失败。');
+      return;
+    }
+    try {
+      await this.ensureCalendarPermissions();
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const result = await addHuaweiCalendarEvent(context, suggestion);
+      this.mailCalendarEvent(requestKey, result.status, result.message, result.eventId, '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.mailCalendarEvent(requestKey, 'error', '', '', message);
+    }
+  }
+
+  private locationPermissionGranted(result: LocationPermissionResult): boolean {
+    for (let index = 0; index < result.permissions.length; index++) {
+      const permission = result.permissions[index];
+      const granted = result.authResults.length > index && result.authResults[index] === 0;
+      if ((permission === PRECISE_LOCATION_PERMISSION || permission === APPROX_LOCATION_PERMISSION) && granted) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async ensureLocationPermission(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const permission = await abilityAccessCtrl.createAtManager()
+      .requestPermissionsFromUser(context, [APPROX_LOCATION_PERMISSION, PRECISE_LOCATION_PERMISSION]);
+    if (!this.locationPermissionGranted({
+      permissions: permission.permissions,
+      authResults: permission.authResults
+    })) {
+      throw new Error('定位权限未授权');
+    }
+  }
+
+  private async requestLocationPermissionOnLaunch(): Promise<void> {
+    try {
+      await this.ensureLocationPermission();
+      aiLogInfo('[AIPhone][LocationPermissionLaunch] ok=true');
+    } catch (error) {
+      aiLogError('[AIPhone][LocationPermissionLaunch] ok=false reason=' +
+        (error instanceof Error ? error.message : JSON.stringify(error)));
+    }
+  }
+
+  private async currentDeviceLocation(): Promise<string> {
+    await this.ensureLocationPermission();
+    const current = await geoLocationManager.getCurrentLocation();
+    const longitude = current.longitude;
+    const latitude = current.latitude;
+    if (longitude === undefined || latitude === undefined) {
+      throw new Error('系统未返回当前位置');
+    }
+    return longitude.toString() + ',' + latitude.toString();
+  }
+
+  private mergeLuckinLocationArgs(args: Object | null, location: string): Object {
+    const merged: Record<string, Object | string | number | boolean | null | undefined> = {};
+    if (args !== null) {
+      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+      Object.keys(raw).forEach((key: string) => {
+        merged[key] = raw[key];
+      });
+    }
+    merged.location = location;
+    merged.locationSource = 'device_current';
+    return merged;
+  }
+
+  private async argsWithCurrentLocationForTool(toolId: string, args: Object | null): Promise<Object | null> {
+    if (toolId !== 'luckin.order.preview') {
+      return args;
+    }
+    if (args !== null) {
+      const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+      const selectedDeptId = raw.deptId;
+      if (this.actionText(selectedDeptId).length > 0) {
+        return args;
+      }
+      const forceRefresh = this.actionText(raw.locationSource) === 'refresh';
+      const existingLocation = this.actionText(raw.location);
+      if (existingLocation.length > 0 && !forceRefresh) {
+        return args;
+      }
+    }
+    try {
+      const location = await this.currentDeviceLocation();
+      aiLogInfo('[AIPhone][LuckinCurrentLocation] source=device chars=' + location.length.toString());
+      return this.mergeLuckinLocationArgs(args, location);
+    } catch (error) {
+      aiLogError('[AIPhone][LuckinCurrentLocation] ok=false reason=' + (error instanceof Error ? error.message : JSON.stringify(error)));
+      return args;
+    }
+  }
+
   private isPaymentCheckoutUrl(url: string): boolean {
     const lower = url.trim().toLowerCase();
     return lower.startsWith('https://checkout.stripe.com/') ||
@@ -1853,6 +2542,152 @@ struct Index {
       return fromArgs;
     }
     return action.prompt.trim();
+  }
+
+  private luckinPayUrlForAction(action: A2uiAction): string {
+    if (action.args !== undefined) {
+      const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const payOrderUrl = payload.payOrderUrl;
+      const qrCodeUrl = payload.payOrderQrCodeUrl;
+      if (typeof payOrderUrl === 'string' && payOrderUrl.trim().length > 0) {
+        return payOrderUrl.trim();
+      }
+      if (typeof qrCodeUrl === 'string' && qrCodeUrl.trim().length > 0) {
+        return qrCodeUrl.trim();
+      }
+    }
+    return action.prompt.trim();
+  }
+
+  private isLuckinPayUrl(url: string): boolean {
+    const lower = url.trim().toLowerCase();
+    return lower.startsWith('https://') ||
+      lower.startsWith('http://') ||
+      lower.startsWith('weixin://') ||
+      lower.startsWith('weixin');
+  }
+
+  private isLuckinPaymentActionId(actionId: string): boolean {
+    return actionId === 'luckin.pay.open' ||
+      actionId === 'luckin.demo.alipay.open' ||
+      actionId === 'luckin.demo.googlepay.open' ||
+      actionId === 'luckin.order.status';
+  }
+
+  private luckinPaymentOrderIdFromAction(action: A2uiAction): string {
+    if (action.args === undefined) {
+      return '';
+    }
+    const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+    return this.actionText(payload.orderId).trim();
+  }
+
+  private luckinPayUrlFromDocument(document: HtmlHomeDocument): string {
+    const pools: A2uiAction[] = [];
+    document.actions.forEach((action: HtmlHomeAction) => {
+      pools.push(action as A2uiAction);
+    });
+    document.blocks.forEach((block: HtmlHomeBlock) => {
+      block.actions.forEach((action: HtmlHomeAction) => {
+        pools.push(action as A2uiAction);
+      });
+    });
+    for (let index = 0; index < pools.length; index += 1) {
+      const action = pools[index];
+      if (action.id === 'luckin.pay.open') {
+        const payUrl = this.luckinPayUrlForAction(action);
+        if (this.isLuckinPayUrl(payUrl)) {
+          return payUrl;
+        }
+      }
+    }
+    for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex += 1) {
+      const block = document.blocks[blockIndex];
+      for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex += 1) {
+        const row = block.rows[rowIndex];
+        if ((row.label === '支付链接' || row.label === '支付二维码') && this.isLuckinPayUrl(row.value)) {
+          return row.value.trim();
+        }
+      }
+    }
+    return '';
+  }
+
+  private luckinCreateArgsFromAction(action: A2uiAction): Object | null {
+    if (action.args === undefined) {
+      return null;
+    }
+    const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+    const deptId = this.actionText(payload.deptId).trim();
+    const productId = this.actionText(payload.productId).trim();
+    const skuCode = this.actionText(payload.skuCode).trim();
+    if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
+      return null;
+    }
+    return action.args;
+  }
+
+  private async resolveLuckinPayUrlForAction(action: A2uiAction): Promise<string> {
+    let payUrl = this.luckinPayUrlForAction(action);
+    if (this.isLuckinPayUrl(payUrl)) {
+      return payUrl;
+    }
+    const orderId = this.luckinPaymentOrderIdFromAction(action);
+    if (orderId.length > 0) {
+      this.logLuckinPaymentAction(action, 'refresh_pay_url_start');
+      payUrl = await this.refreshLuckinPayUrlForAction(action);
+      if (this.isLuckinPayUrl(payUrl)) {
+        return payUrl;
+      }
+    }
+    const createArgs = this.luckinCreateArgsFromAction(action);
+    if (createArgs !== null) {
+      this.logLuckinPaymentAction(action, 'retry_create_start');
+      const ok = await this.callToolById('luckin.order.create', '确认创建瑞幸订单', 'luckin.pay.open', createArgs);
+      if (ok) {
+        payUrl = this.luckinPayUrlFromDocument(this.currentHtmlHomeDocument());
+        if (this.isLuckinPayUrl(payUrl)) {
+          return payUrl;
+        }
+      }
+    }
+    return '';
+  }
+
+  private async refreshLuckinPayUrlForAction(action: A2uiAction): Promise<string> {
+    const orderId = this.luckinPaymentOrderIdFromAction(action);
+    if (orderId.length === 0) {
+      return '';
+    }
+    let args: Object;
+    if (action.args === undefined) {
+      const statusArgs: LuckinOrderStatusArgs = {
+        orderId: orderId
+      };
+      args = statusArgs as Object;
+    } else {
+      args = action.args;
+    }
+    const ok = await this.callToolById('luckin.order.status', '查询瑞幸订单状态', 'luckin.pay.open', args);
+    if (!ok) {
+      return '';
+    }
+    return this.luckinPayUrlFromDocument(this.currentHtmlHomeDocument());
+  }
+
+  private logLuckinPaymentAction(action: A2uiAction, stage: string, extra: string = ''): void {
+    const document = this.currentHtmlHomeDocument();
+    const allowed = isHtmlHomeActionAllowed(document, action);
+    const suffix = extra.length > 0 ? ' ' + extra : '';
+    aiLogInfo('[AIPhone][LuckinPaymentAction] stage=' + stage +
+      ' id=' + action.id +
+      ' kind=' + action.kind +
+      ' busy=' + (this.isBusy ? 'true' : 'false') +
+      ' allowed=' + (allowed ? 'true' : 'false') +
+      ' surfaceKind=' + document.kind +
+      ' orderId=' + this.luckinPaymentOrderIdFromAction(action) +
+      ' promptChars=' + action.prompt.length.toString() +
+      ' payUrlChars=' + this.luckinPayUrlForAction(action).length.toString() + suffix);
   }
 
   private paymentCheckoutPayload(action: A2uiAction): PaymentCheckoutActionPayload {
@@ -1996,6 +2831,97 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'html_mail_detail_read') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_detail_args');
+        return;
+      }
+      const request = action.args as MailDetailRequest;
+      const requestKey = this.actionText(request.requestKey).trim();
+      if (requestKey.length === 0 || this.actionText(request.provider).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_detail_args');
+        return;
+      }
+      try {
+        const detail = await readConfiguredMailDetail(request);
+        const suggestion = await this.extractMailCalendarSuggestion(detail);
+        this.mailCalendarSuggestions[requestKey] = suggestion;
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'success',
+          detail: detail,
+          calendarSuggestion: suggestion,
+          error: ''
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailDetailUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          status: 'error',
+          error: message
+        };
+        this.mailDetailEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailDetailReadFailed] provider=' + this.actionText(request.provider) +
+          ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_calendar_add') {
+      await this.addSuggestedMailCalendarEvent(action);
+      return;
+    }
+    if (action.id === 'html_mail_reply_save' || action.id === 'html_mail_reply_send') {
+      if (action.args === undefined) {
+        this.logHtmlHomeActionError(action, 'missing_mail_reply_args');
+        return;
+      }
+      const command = action.args as MailReplyCommand;
+      const requestKey = this.actionText(command.requestKey).trim();
+      const operation = action.id === 'html_mail_reply_save' ? 'draft' : 'send';
+      if (requestKey.length === 0 || this.actionText(command.provider).trim().length === 0 ||
+        this.actionText(command.body).trim().length === 0) {
+        this.logHtmlHomeActionError(action, 'invalid_mail_reply_args');
+        return;
+      }
+      try {
+        let result: MailReplyOperationResult;
+        if (operation === 'draft') {
+          result = await saveConfiguredMailDraft(command);
+        } else {
+          result = await sendConfiguredMailReply(command);
+        }
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: result.status,
+          message: result.message,
+          error: ''
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        const event: MailReplyUiEvent = {
+          sequence: Date.now(),
+          requestKey: requestKey,
+          operation: operation,
+          status: 'error',
+          message: '',
+          error: message
+        };
+        this.mailReplyEventJson = JSON.stringify(event);
+        aiLogError('[AIPhone][MailReplyOperationFailed] provider=' + this.actionText(command.provider) +
+          ' operation=' + operation + ' error=' + message.substring(0, 240));
+      }
+      return;
+    }
+    if (action.id === 'html_mail_reply_ai_generate') {
+      await this.generateMailReplyDraft(action);
+      return;
+    }
     if (this.isPersonaEditorAction(action)) {
       this.openPersonaEditor(action.prompt, action.id === 'persona_soul_edit' ? 'soul' : 'memory');
       return;
@@ -2007,6 +2933,10 @@ struct Index {
         return;
       }
       await this.openExternalUrl(onboardingUrl);
+      return;
+    }
+    if (action.id === 'luckin.demo.googlepay.return') {
+      this.restoreLuckinReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
       return;
     }
     if (this.isStripeReceivingActionId(action)) {
@@ -2065,6 +2995,44 @@ struct Index {
       this.rememberPaymentCheckout(action, checkoutUrl);
       this.showPaymentCheckout = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
+      return;
+    }
+    if (action.id === 'luckin.pay.open') {
+      const payUrl = await this.resolveLuckinPayUrlForAction(action);
+      if (!this.isLuckinPayUrl(payUrl)) {
+        this.logLuckinPaymentAction(action, 'invalid_pay_url');
+        this.logHtmlHomeActionError(action, 'invalid_luckin_pay_url');
+        return;
+      }
+      aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl);
+      await this.openExternalUrl(payUrl);
+      return;
+    }
+    if (action.id === 'luckin.demo.alipay.open') {
+      const url = action.prompt.trim().length > 0 ? action.prompt.trim() : 'alipays://';
+      aiLogInfo('[AIPhone][LuckinDemoAlipayOpen] chars=' + url.length.toString());
+      await this.openExternalUrl(url);
+      return;
+    }
+    if (action.id === 'luckin.demo.googlepay.open') {
+      this.rememberLuckinReturnSurface(action.id);
+      const args: PaymentFallbackArgs = {
+        provider: 'paypal',
+        fundingSource: 'google_pay',
+        recipient: '罗一格',
+        amountText: '5',
+        currency: 'USD',
+        note: 'Luckin Google Pay demo only; does not pay the Luckin order.',
+        originalQuery: '用 Google Pay 给罗一格转 5 美金'
+      };
+      aiLogInfo('[AIPhone][LuckinDemoGooglePayPayment] recipient=' + args.recipient +
+        ' amount=' + args.amountText + ' currency=' + args.currency);
+      await this.callToolById(
+        'payment.send',
+        '用 Google Pay 给罗一格转 5 美金',
+        action.id,
+        args
+      );
       return;
     }
     if (action.id === 'gmail.authorize') {
@@ -2255,7 +3223,13 @@ struct Index {
   }
 
   private async sendAction(action: A2uiAction): Promise<void> {
+    if (this.isLuckinPaymentActionId(action.id)) {
+      this.logLuckinPaymentAction(action, 'received');
+    }
     if (this.isBusy) {
+      if (this.isLuckinPaymentActionId(action.id)) {
+        this.logLuckinPaymentAction(action, 'ignored_busy');
+      }
       aiLogInfo('[AIPhone][A2uiHomeActionIgnored] id=' + action.id + ' reason=busy');
       return;
     }
@@ -2272,13 +3246,28 @@ struct Index {
       return;
     }
     if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
+      if (this.isLuckinPaymentActionId(action.id)) {
+        this.logLuckinPaymentAction(action, 'blocked_not_allowed');
+      }
       this.logHtmlHomeActionError(action, 'not_allowed');
       return;
+    }
+    if (this.isLuckinPaymentActionId(action.id)) {
+      this.logLuckinPaymentAction(action, 'dispatch');
     }
     const directPaymentToolId = directPaymentToolIdForActionId(action.id);
     if (directPaymentToolId.length > 0) {
       await this.callToolById(
         directPaymentToolId,
+        action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
+    if (action.id === 'luckin.order.preview' || action.id === 'luckin.order.create' || action.id === 'luckin.order.status') {
+      await this.callToolById(
+        action.id,
         action.prompt.length > 0 ? action.prompt : action.label,
         action.id,
         action.args === undefined ? null : action.args
@@ -2363,7 +3352,18 @@ struct Index {
       foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
     });
     const personaSourceSurface = this.currentSurface;
-    this.markChecking('正在调用工具：' + toolId);
+    const inlineLuckinSwitch = toolId === 'luckin.order.preview' && this.isLuckinOptionSwitchArgs(args);
+    if (inlineLuckinSwitch) {
+      if (this.luckinOptionSwitchInFlight) {
+        aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchIgnored] reason=in_flight');
+        return false;
+      }
+      this.finishLuckinOptionSwitch(true);
+    }
+    if (!inlineLuckinSwitch) {
+      this.markChecking('正在调用工具：' + toolId);
+    }
+    const callArgs = await this.argsWithCurrentLocationForTool(toolId, args);
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
       toolId,
@@ -2371,6 +3371,9 @@ struct Index {
       this.toolSurfaceId(),
       actionId,
       (surface: A2uiSurfaceState, raw: string) => {
+        if (inlineLuckinSwitch) {
+          return;
+        }
         const nextSurface = copyPersonaData(personaSourceSurface, surface);
         this.applySurface(nextSurface);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -2383,7 +3386,7 @@ struct Index {
         }));
       },
       null,
-      args
+      callArgs
     );
 
     aiLogInfo('[AIPhone][A2uiHomeToolResult] ok=' + (result.ok ? 'true' : 'false') +
@@ -2391,6 +3394,22 @@ struct Index {
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
     const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    if (inlineLuckinSwitch) {
+      if (result.ok && this.applyLuckinInlineConfirmPatch(resultSurface)) {
+        this.finishLuckinOptionSwitch(false);
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: true,
+          status: 'ready',
+          message: '规格已更新。',
+          requestDebug: result.requestDebug,
+          assistantDebug: result.raw.length > 0 ? result.raw : this.lastModelOutput,
+          error: ''
+        }));
+        return true;
+      }
+      this.finishLuckinOptionSwitch(false);
+      aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchFallback] ok=' + (result.ok ? 'true' : 'false'));
+    }
     this.applySurface(resultSurface);
     if (toolId === 'payment.account.setup') {
       await this.saveStripeReceivingProfile(resultSurface);
@@ -2407,7 +3426,9 @@ struct Index {
       this.appendMessage('assistant', '工具返回异常：' + result.error);
       return false;
     }
-    this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
+    if (!inlineLuckinSwitch) {
+      this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
+    }
     if (toolId === 'gmail.open.web') {
       await this.openExternalUrl(GMAIL_WEB_URL);
     }
@@ -2555,8 +3576,13 @@ struct Index {
         showHistory: this.showHistory,
         messages: this.messages,
         currentSurface: this.currentSurface,
-        htmlHomeHtml: this.currentSurface.intent === 'social' ? '' : this.currentHtmlHomeHtml(),
+        htmlHomeHtml: this.htmlHomeHtmlForView(),
+        mailDetailEventJson: this.mailDetailEventJson,
+        mailReplyEventJson: this.mailReplyEventJson,
+        mailCalendarEventJson: this.mailCalendarEventJson,
         surfaceRenderTick: this.surfaceRenderTick,
+        luckinInlinePatchJson: this.luckinInlinePatchJson,
+        luckinInlinePatchTick: this.luckinInlinePatchTick,
         isAwaitingFirstSurface: this.isAwaitingFirstSurface,
         inputPlaceholder: this.inputPlaceholder,
         isVoiceListening: this.isVoiceListening,

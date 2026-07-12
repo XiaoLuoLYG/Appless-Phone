@@ -6,6 +6,7 @@ import {
   isCalendarToolId,
   isGmailToolId,
   isKnownDomainToolId,
+  isLuckinToolId,
   isLocalAdapterToolId,
   isMailToolId,
   isMapsToolId,
@@ -37,6 +38,9 @@ export default function toolDefinitionRegistryTest() {
     it('recognizes existing local adapters and Gmail tools through one registry', 0, () => {
       expect(isKnownDomainToolId('travel.search')).assertTrue();
       expect(isKnownDomainToolId('food.search')).assertTrue();
+      expect(isKnownDomainToolId('luckin.order.preview')).assertTrue();
+      expect(isKnownDomainToolId('luckin.order.create')).assertTrue();
+      expect(isKnownDomainToolId('luckin.order.status')).assertTrue();
       expect(isKnownDomainToolId('social.reply.send')).assertFalse();
       expect(isKnownDomainToolId('social.feed.search')).assertTrue();
       expect(isKnownDomainToolId('social.reply.draft')).assertTrue();
@@ -60,6 +64,9 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('youtube.unknown')).assertFalse();
 
       expect(isLocalAdapterToolId('travel.search')).assertTrue();
+      expect(isLocalAdapterToolId('luckin.order.preview')).assertTrue();
+      expect(isLuckinToolId('luckin.order.create')).assertTrue();
+      expect(isLuckinToolId('food.search')).assertFalse();
       expect(isLocalAdapterToolId('gmail.mail.search')).assertFalse();
       expect(isGmailToolId('gmail.mail.search')).assertTrue();
       expect(isGmailToolId('food.search')).assertFalse();
@@ -203,6 +210,21 @@ export default function toolDefinitionRegistryTest() {
       expect(payment.outputSchema).assertEqual('paymentCheckout');
       expect(payment.a2uiComponent).assertEqual('GenericToolResults');
       expect(payment.actions[0]).assertEqual('payment.confirm');
+    });
+
+    it('registers Luckin order tools as local adapters with confirmation boundary', 0, () => {
+      const preview = toolDefinitionForToolId('luckin.order.preview') as ToolDefinition;
+      const create = toolDefinitionForToolId('luckin.order.create') as ToolDefinition;
+      const status = toolDefinitionForToolId('luckin.order.status') as ToolDefinition;
+
+      expect(preview.domain).assertEqual('luckin');
+      expect(preview.riskLevel).assertEqual('draft');
+      expect(preview.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(preview.outputSchema).assertEqual('genericToolResults');
+      expect(preview.actions[0]).assertEqual('luckin.order.create');
+      expect(create.riskLevel).assertEqual('confirm_required');
+      expect(create.actions[0]).assertEqual('luckin.order.status');
+      expect(status.riskLevel).assertEqual('read');
     });
 
     it('resolves available Gmail backends before returning an auth-needed reason', 0, () => {

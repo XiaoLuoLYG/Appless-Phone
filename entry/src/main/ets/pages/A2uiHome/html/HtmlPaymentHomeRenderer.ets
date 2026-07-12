@@ -545,6 +545,9 @@ const PAYMENT_HOME_JS: string = `
   }
   function postAction(action) {
     if (isBusy) { return; }
+    postActionAllowBusy(action);
+  }
+  function postActionAllowBusy(action) {
     try {
       if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
         window.AIPhoneHome.postAction(JSON.stringify({
@@ -772,10 +775,25 @@ const PAYMENT_HOME_JS: string = `
     node.className = 'google-pay-status' + (className ? ' ' + className : '');
     node.style.display = message.length > 0 ? 'block' : 'none';
   }
+  function returnLuckinAfterGooglePay(status, reason) {
+    if (!status || status.getAttribute('data-luckin-return-posted') === 'true') { return; }
+    status.setAttribute('data-luckin-return-posted', 'true');
+    window.setTimeout(function () {
+      postActionAllowBusy({
+        id: 'luckin.demo.googlepay.return',
+        label: '返回瑞幸订单',
+        prompt: reason,
+        variant: 'secondary',
+        kind: 'client',
+        args: { reason: reason }
+      });
+    }, 500);
+  }
   function openGooglePaySheet(paymentsClient, paymentDataRequest, status) {
     setGooglePayStatus(status, '正在打开 Google Pay；如果面板空白，请返回并使用打开确认页。', '');
     withTimeout(paymentsClient.loadPaymentData(paymentDataRequest), 'Google Pay 确认面板').catch(function (error) {
       setGooglePayStatus(status, 'Google Pay 没有完成授权：' + googlePayErrorText(error), 'error');
+      returnLuckinAfterGooglePay(status, 'googlepay_cancel_or_failed');
     });
   }
   function mountGooglePayButton(slot, status, config) {
@@ -784,6 +802,7 @@ const PAYMENT_HOME_JS: string = `
       var fallback = slot.querySelector('.google-pay-placeholder');
       if (config.clientId.length === 0 || config.orderId.length === 0) {
         setGooglePayStatus(status, '缺少 PayPal client id 或 order id，不能启动 Google Pay。', 'error');
+        returnLuckinAfterGooglePay(status, 'googlepay_missing_config');
         return;
       }
       slot.setAttribute('data-gpay-state', 'loading');
@@ -830,9 +849,11 @@ const PAYMENT_HOME_JS: string = `
                     });
                   }
                   setGooglePayStatus(status, 'PayPal 未批准此 Google Pay 订单：' + providerStatus, 'error');
+                  returnLuckinAfterGooglePay(status, 'googlepay_provider_rejected');
                   return { transactionState: 'ERROR' };
                 }).catch(function (error) {
                   setGooglePayStatus(status, 'PayPal confirmOrder 失败：' + googlePayErrorText(error), 'error');
+                  returnLuckinAfterGooglePay(status, 'googlepay_confirm_failed');
                   return { transactionState: 'ERROR' };
                 });
               }
