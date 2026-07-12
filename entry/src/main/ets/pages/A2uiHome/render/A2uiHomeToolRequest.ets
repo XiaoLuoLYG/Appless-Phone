@@ -70,6 +70,10 @@ function hasExplicitYouTubeIntent(prompt: string): boolean {
   return prompt.toLowerCase().indexOf('youtube') >= 0 || prompt.indexOf('油管') >= 0;
 }
 
+function hasGmailContext(prompt: string): boolean {
+  return prompt.toLowerCase().indexOf('gmail') >= 0 || containsAny(prompt, ['谷歌邮箱', '谷歌邮件']);
+}
+
 function hasBilibiliIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
   return lowerPrompt.indexOf('bilibili') >= 0 ||
@@ -222,7 +226,7 @@ function forcedDynamicToolIdForPrompt(prompt: string): string {
 }
 
 function forcedGmailToolIdForPrompt(prompt: string): string {
-  if (!containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件'])) {
+  if (!hasGmailContext(prompt)) {
     return '';
   }
   if (containsAny(prompt, ['直接发送', '立刻发送', '马上发送', '不用确认', '不确认直接发', '直接发'])) {
@@ -239,7 +243,7 @@ function inferredGmailToolIdForPrompt(prompt: string): string {
   if (forcedToolId.length > 0) {
     return forcedToolId;
   }
-  if (!containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件'])) {
+  if (!hasGmailContext(prompt)) {
     return '';
   }
   if (containsAny(prompt, ['写一封', '写邮件', '起草', '草稿', '回复', '撰写'])) {
@@ -252,7 +256,7 @@ function inferredGmailToolIdForPrompt(prompt: string): string {
 }
 
 function inferredMailToolIdForPrompt(prompt: string): string {
-  const hasGmail = containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件']);
+  const hasGmail = hasGmailContext(prompt);
   const hasQqMail = containsAny(prompt, ['QQ邮箱', 'QQ 邮箱', 'QQ邮件', 'QQ 邮件']);
   if ((hasGmail && !hasQqMail) ||
     !containsAny(prompt, ['邮箱', '邮件', '收件箱', 'QQ邮箱', 'QQ 邮箱'])) {
@@ -456,7 +460,7 @@ function inferredLuckinOrderToolIdForPrompt(prompt: string): string {
   if (containsAny(prompt, ['订单状态', '取餐码', '取餐号', '刷新订单', '查询订单'])) {
     return 'luckin.order.status';
   }
-  if (containsAny(prompt, ['点', '下单', '下一杯', '买', '来一杯', '要一杯', '咖啡', '拿铁', '美式', '生椰', '澳瑞白', '厚乳', '冰萃'])) {
+  if (containsAny(prompt, ['点一杯', '点杯', '点个瑞幸', '点瑞幸', '帮我点', '我要点', '下单', '下一杯', '买一杯', '帮我买', '购买一杯', '购买瑞幸', '来一杯', '要一杯'])) {
     return 'luckin.order.preview';
   }
   return '';

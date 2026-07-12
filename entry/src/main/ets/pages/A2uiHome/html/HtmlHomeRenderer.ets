@@ -2190,6 +2190,11 @@ body[data-scene="gmail"] .block {
   padding: 0;
   overflow: hidden;
 }
+body[data-scene="gmail"] .block[data-source-key="mail-gmail"],
+body[data-scene="gmail"] .block[data-source-key="mail-qq"],
+body[data-scene="gmail"] .block[data-source-key="composio-outlook"] {
+  background: var(--kind-soft);
+}
 body[data-scene="gmail"] .details {
   border-top-color: rgba(33, 27, 23, 0.06);
 }

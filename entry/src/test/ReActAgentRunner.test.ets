@@ -7,6 +7,7 @@ import {
   ConversationContext,
   DynamicGenericToolResult,
   genericToolResultsA2ui,
+  isExplicitLuckinOrderPrompt,
   LocalModel,
   parseLoopToolInputArgs,
   ReActAgentRunner,
@@ -175,6 +176,21 @@ export default function reActAgentRunnerTest() {
 
       expect(JSON.stringify(parsed).indexOf('"to":["a@example.com"]')).assertLarger(-1);
       expect(JSON.stringify(parsed).indexOf('hello\\nworld')).assertLarger(-1);
+    });
+
+    it('unwraps model tool arguments from a single args envelope', 0, () => {
+      const parsed = parseLoopToolInputArgs('{"args":{"query":"","pageSize":10}}') as Record<string, Object | string | number | undefined>;
+
+      expect(parsed.query).assertEqual('');
+      expect(parsed.pageSize).assertEqual(10);
+      expect(parsed.args === undefined).assertTrue();
+    });
+
+    it('exposes Luckin ordering only for an explicit current-message transaction', 0, () => {
+      expect(isExplicitLuckinOrderPrompt('瑞幸生椰拿铁多少钱')).assertFalse();
+      expect(isExplicitLuckinOrderPrompt('帮我查附近的瑞幸门店')).assertFalse();
+      expect(isExplicitLuckinOrderPrompt('点一杯咖啡')).assertFalse();
+      expect(isExplicitLuckinOrderPrompt('帮我点一杯瑞幸生椰拿铁')).assertTrue();
     });
 
     it('summarizes A2UI observations without leaking raw JSONL or thumbnails', 0, () => {

@@ -294,7 +294,7 @@ function gmailCardFromRecord(record: Object, fallbackTitle: string, fallbackSumm
   const to = nestedField(row, ['to', 'recipient', 'recipients']);
   const date = field(row, ['date', 'receivedDateTime', 'received_at', 'createdAt', 'created_at', 'updatedAt', 'updated_at', 'internalDate']);
   const subject = field(row, ['subject', 'title', 'name']);
-  const snippet = field(row, ['snippet', 'preview', 'summary', 'description', 'text', 'message']);
+  const snippet = field(row, ['snippet', 'preview', 'summary', 'description', 'text', 'message', 'messageText', 'message_text']);
   const title = subject.length > 0 ? subject : (snippet.length > 0 ? snippet.substring(0, 80) :
     (fallbackTitle.length > 0 ? fallbackTitle : 'Gmail message ' + (index + 1).toString()));
   const rows: A2uiLabelValueData[] = [];
