@@ -1408,6 +1408,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf(".block[data-source-key=\"composio-outlook\"]")).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(194, 70, 54, 0.45)')).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="mail-gmail"]')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="mail-qq"]')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="composio-outlook"]')).assertLarger(-1);
+      expect(html.indexOf('background: var(--kind-soft)')).assertLarger(-1);
       expect(html.indexOf('mail-reply-overlay')).assertLarger(-1);
       expect(html.indexOf("'编辑回复'")).assertLarger(-1);
       expect(html.indexOf("'AI回复'")).assertLarger(-1);

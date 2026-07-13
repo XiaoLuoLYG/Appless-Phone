@@ -344,6 +344,10 @@ const retryableProviderLayoutMarkers = [
   '2300028'
 ];
 
+function hasTechnicalGmailArgsCard(text) {
+  return /(?:^|\n)args\n\{[\s\S]{0,180}"query"/.test(text);
+}
+
 const socialHubTruthfulBlockingMarkers = [
   '需要供应商配置',
   '需要配置：',
@@ -383,6 +387,7 @@ const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCas
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
 const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
+const mailActionScrollLimit = Number.parseInt(process.env.AIPHONE_MAIL_ACTION_SCROLL_LIMIT || '16', 10);
 
 function expectedCaseForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
@@ -462,31 +467,31 @@ function expectedCaseForQuery(query) {
       expectedToolId: 'mail.search'
     };
   }
-  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: /写一封|写邮件|起草|草稿|回复|撰写/.test(query) ? 'mail.draft.create' : 'mail.search'
     };
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /打开|网页版|网页/.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.open.web'
     };
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.message.send'
     };
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.draft.create'
     };
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'gmail.mail.search'
@@ -568,6 +573,12 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'train.search'
+    };
+  }
+  if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'luckin.order.preview'
     };
   }
   if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
@@ -834,6 +845,12 @@ function findTextCenter(layout, marker) {
     x: matches[0].bounds.x,
     y: matches[0].bounds.y
   };
+}
+
+function findExactTextCenter(layout, marker) {
+  const match = findTextMatches(layout, marker).find((item) =>
+    item.text.split('|').some((value) => value.trim() === marker));
+  return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
 }
 
 function findTextCenters(layout, marker) {
@@ -1205,7 +1222,7 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
 }
 
 function isGmailWebQuery(query) {
-  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /打开|网页版|网页/.test(query);
+  return /Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /打开|网页版|网页/.test(query);
 }
 
 function isPersonaCoffeeQuery(query) {
@@ -1221,7 +1238,7 @@ function hasLuckinMemoryEvidence(text) {
 }
 
 function isGmailEccvQuery(query) {
-  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && /eccv/i.test(query);
+  return /Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /eccv/i.test(query);
 }
 
 function isQqMailQuery(query) {
@@ -1229,7 +1246,7 @@ function isQqMailQuery(query) {
 }
 
 function isMailAggregationQuery(query) {
-  return /Gmail|谷歌邮箱|谷歌邮件/.test(query) && isQqMailQuery(query);
+  return /Gmail|谷歌邮箱|谷歌邮件/i.test(query) && isQqMailQuery(query);
 }
 
 function isYouTubeBilibiliQuery(query) {
@@ -1396,22 +1413,22 @@ function layoutExpectationsForQuery(query) {
   if (isQqMailQuery(query)) {
     return ['mail.search', 'QQ Mail', '不会模拟'];
   }
-  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+  if (/邮箱|邮件|收件箱/.test(query) && !/Gmail|谷歌邮箱|谷歌邮件/i.test(query)) {
     return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
   }
   if (isGmailWebQuery(query)) {
     return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
     return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
     return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
   }
   if (isGmailEccvQuery(query)) {
     return ['Composio', 'Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
   }
-  if (/Gmail|谷歌邮箱|谷歌邮件/.test(query)) {
+  if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query)) {
     return ['Composio', 'Gmail', 'gmail.mail.search', '不会模拟 Gmail 邮件'];
   }
   if (/PayPal|Google\s*Pay|GPay|支付|转账|付款/i.test(query)) {
@@ -1453,6 +1470,9 @@ function layoutExpectationsForQuery(query) {
   }
   if (/高铁|火车|车票|12306/.test(query)) {
     return ['高铁', '12306', 'train.search'];
+  }
+  if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
+    return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
   }
   if (/附近|周边|外卖|咖啡|奶茶|肯德基|麦当劳|瑞幸|汉堡|餐饮|美食/.test(query)) {
     if (isPersonaCoffeeQuery(query)) {
@@ -1548,13 +1568,13 @@ async function findVisibleReplyDraftAction(layout, index) {
   let actionLayoutPath = '';
   let actionTextPath = '';
   let actionScreenPath = '';
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < mailActionScrollLimit; attempt += 1) {
     actionLayoutPath = join(outDir, `query-${index + 1}-mail-action-${attempt + 1}-layout.json`);
     actionTextPath = join(outDir, `query-${index + 1}-mail-action-${attempt + 1}-layout-text.txt`);
     writeFileSync(actionLayoutPath, JSON.stringify(currentLayout, null, 2));
     writeFileSync(actionTextPath, actionText + '\n');
     actionScreenPath = captureScreen(`query-${index + 1}-mail-action-${attempt + 1}-screen.png`);
-    if (actionText.includes('AI 回复草稿')) {
+    if (actionText.includes('AI 回复草稿') || actionText.split('\n').includes('回复')) {
       return {
         layout: currentLayout,
         text: actionText,
@@ -1575,6 +1595,140 @@ async function findVisibleReplyDraftAction(layout, index) {
     layoutPath: actionLayoutPath,
     textPath: actionTextPath,
     screenPath: actionScreenPath
+  };
+}
+
+function mailReplyEditorText(layout) {
+  const values = [];
+  walk(layout, (node) => {
+    const attrs = node.attributes || {};
+    if (String(attrs.type || '').toLowerCase() !== 'textfield') {
+      return;
+    }
+    const value = typeof attrs.text === 'string' ? attrs.text.trim() : '';
+    if (value.length > 0) {
+      values.push(value);
+    }
+  });
+  return values.join('\n');
+}
+
+async function verifyMailReplyComposer(actionEvidence, index) {
+  const replyCenter = findExactTextCenter(actionEvidence.layout, '回复');
+  if (replyCenter === null) {
+    return null;
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(replyCenter.x), String(replyCenter.y)]);
+  await sleep(900);
+  let composerLayout = dumpLayout(`query-${index + 1}-mail-reply-editor-layout.json`);
+  let composerText = collectLayoutText(composerLayout).join('\n');
+  const editorLayoutPath = join(outDir, `query-${index + 1}-mail-reply-editor-layout.json`);
+  const editorTextPath = join(outDir, `query-${index + 1}-mail-reply-editor-layout-text.txt`);
+  writeFileSync(editorTextPath, composerText + '\n');
+  const editorScreenPath = captureScreen(`query-${index + 1}-mail-reply-editor-screen.png`);
+  const aiCenter = findExactTextCenter(composerLayout, 'AI回复');
+  if (aiCenter === null) {
+    return {
+      clicked: true,
+      actionVisible: true,
+      draftClicked: false,
+      draftToolRequested: false,
+      draftToolOk: false,
+      draftVisible: false,
+      reason: 'Reply editor opened without an AI reply button.',
+      layoutPath: editorLayoutPath,
+      layoutTextPath: editorTextPath,
+      screenPath: editorScreenPath
+    };
+  }
+  clearHilog();
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(aiCenter.x), String(aiCenter.y)]);
+  let generated = '';
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    await sleep(2000);
+    composerLayout = dumpLayout(`query-${index + 1}-mail-reply-ai-layout.json`);
+    generated = mailReplyEditorText(composerLayout);
+    if (generated.length > 0) {
+      break;
+    }
+  }
+  const aiLayoutPath = join(outDir, `query-${index + 1}-mail-reply-ai-layout.json`);
+  const aiTextPath = join(outDir, `query-${index + 1}-mail-reply-ai-layout-text.txt`);
+  composerText = collectLayoutText(composerLayout).join('\n');
+  writeFileSync(aiTextPath, composerText + '\n');
+  const aiScreenPath = captureScreen(`query-${index + 1}-mail-reply-ai-screen.png`);
+  if (generated.length === 0) {
+    return {
+      clicked: true,
+      actionVisible: true,
+      draftClicked: true,
+      draftToolRequested: false,
+      draftToolOk: false,
+      draftVisible: false,
+      reason: 'AI reply button did not populate the editor.',
+      layoutPath: aiLayoutPath,
+      layoutTextPath: aiTextPath,
+      screenPath: aiScreenPath
+    };
+  }
+  let saveCenter = findExactTextCenter(composerLayout, '保存草稿');
+  for (let attempt = 0; saveCenter === null && attempt < 5; attempt += 1) {
+    hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '1350', '650', '650', '500']);
+    await sleep(800);
+    composerLayout = dumpLayout(`query-${index + 1}-mail-reply-save-${attempt + 1}-layout.json`);
+    saveCenter = findExactTextCenter(composerLayout, '保存草稿');
+  }
+  if (saveCenter === null) {
+    return {
+      clicked: true,
+      actionVisible: true,
+      draftClicked: true,
+      draftToolRequested: false,
+      draftToolOk: false,
+      draftVisible: true,
+      reason: 'AI reply was generated but the save draft button was not reachable.',
+      layoutPath: aiLayoutPath,
+      layoutTextPath: aiTextPath,
+      screenPath: aiScreenPath
+    };
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(saveCenter.x), String(saveCenter.y)]);
+  let saved = false;
+  let savedLayout = composerLayout;
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    await sleep(2000);
+    savedLayout = dumpLayout(`query-${index + 1}-mail-reply-saved-layout.json`);
+    if (!collectLayoutText(savedLayout).includes('编辑回复')) {
+      saved = true;
+      break;
+    }
+  }
+  const savedLayoutPath = join(outDir, `query-${index + 1}-mail-reply-saved-layout.json`);
+  const savedTextPath = join(outDir, `query-${index + 1}-mail-reply-saved-layout-text.txt`);
+  const savedText = collectLayoutText(savedLayout).join('\n');
+  writeFileSync(savedTextPath, savedText + '\n');
+  const savedScreenPath = captureScreen(`query-${index + 1}-mail-reply-saved-screen.png`);
+  const draftLogs = hdc(['shell', 'hilog', '-x']);
+  const draftLogPath = join(outDir, `query-${index + 1}-mail-draft.log`);
+  writeFileSync(draftLogPath, draftLogs);
+  const draftToolRequested = draftLogs.includes('id=html_mail_reply_save');
+  const draftToolOk = saved && draftToolRequested && !draftLogs.includes('[AIPhone][MailReplyOperationFailed]');
+  return {
+    clicked: true,
+    actionVisible: true,
+    draftClicked: true,
+    draftToolRequested,
+    draftToolOk,
+    draftVisible: generated.length > 0,
+    draftModelFailed: false,
+    draftProviderFailed: !draftToolOk,
+    layoutPath: actionEvidence.layoutPath,
+    layoutTextPath: actionEvidence.textPath,
+    screenPath: actionEvidence.screenPath,
+    draftLogPath,
+    draftLayoutPath: savedLayoutPath,
+    draftTextPath: savedTextPath,
+    draftScreenPath: savedScreenPath
   };
 }
 
@@ -1602,8 +1756,15 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
       lastExpandedLayoutPath = actionEvidence.layoutPath;
       lastExpandedScreenPath = actionEvidence.screenPath;
       currentLayout = actionEvidence.layout;
-      if (!actionEvidence.text.includes('AI 回复草稿')) {
+      if (!actionEvidence.text.includes('AI 回复草稿') && !actionEvidence.text.split('\n').includes('回复')) {
         continue;
+      }
+      const composerEvidence = await verifyMailReplyComposer(actionEvidence, index);
+      if (composerEvidence !== null) {
+        return {
+          ...composerEvidence,
+          targetMarker
+        };
       }
       const draftCenter = findTextCenter(actionEvidence.layout, 'AI 回复草稿');
       if (draftCenter === null) {
@@ -1797,6 +1958,9 @@ async function runQuery(query, index, expectedTool) {
     }
     return evidenceText.includes(marker);
   });
+  if (expectedToolId === 'gmail.mail.search' && hasTechnicalGmailArgsCard(evidenceText)) {
+    layoutBlockingHits.push('gmail-technical-args-card');
+  }
   if (expectedToolId === 'gmail.message.send') {
     for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
       if (blockingPattern.pattern.test(evidenceText)) {
@@ -2121,6 +2285,9 @@ const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
   }
   return finalLayoutText.includes(marker);
 });
+if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.mail.search' && hasTechnicalGmailArgsCard(finalLayoutText)) {
+  finalLayoutBlockingHits.push('gmail-technical-args-card');
+}
 for (const blockingPattern of finalLayoutBlockingPatterns) {
   if (finalSummary !== null && finalSummary.expectedToolId.startsWith('calendar.')) {
     continue;

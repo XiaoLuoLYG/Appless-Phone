@@ -418,6 +418,30 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('client_intent_fallback');
     });
 
+    it('keeps Luckin discovery prompts on food search', 0, () => {
+      const prompt = '帮我查附近的瑞幸咖啡门店';
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', prompt, 'model_tool_request'),
+        prompt,
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('food.search');
+      expect(resolved.actionId).assertEqual('model_tool_request');
+    });
+
+    it('keeps Luckin product browsing on the model-selected food tool', 0, () => {
+      const prompt = '瑞幸生椰拿铁多少钱';
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', prompt, 'model_tool_request'),
+        prompt,
+        ''
+      );
+
+      expect(resolved.toolId).assertEqual('food.search');
+    });
+
     it('keeps Luckin preference updates out of the order flow', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
@@ -438,6 +462,17 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.hasTool).assertTrue();
       expect(resolved.toolId).assertEqual('luckin.order.preview');
       expect(resolved.actionId).assertEqual('client_luckin_order_reroute');
+    });
+
+    it('recognizes lowercase gmail as dedicated Gmail search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '查看gmail里最新的重要邮件',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('gmail.mail.search');
     });
 
     it('maps Luckin confirmation actions directly to order create', 0, () => {

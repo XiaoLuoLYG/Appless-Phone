@@ -84,6 +84,13 @@ class AiphoneTool implements AgentTool {
   }
 }
 
+export function isExplicitLuckinOrderPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  const hasLuckin = /瑞幸|luckin|ruixing/i.test(text);
+  const hasTransaction = /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|买瑞幸|帮我买|购买一杯|购买瑞幸|来一杯|要一杯|\border\b|\bbuy\b/i.test(text);
+  return hasLuckin && hasTransaction;
+}
+
 function escapeRawLineBreaksInJsonStrings(value: string): string {
   let result = '';
   let inString = false;
@@ -117,6 +124,14 @@ function escapeRawLineBreaksInJsonStrings(value: string): string {
   return result;
 }
 
+function unwrapSingleArgsEnvelope(parsed: Object): Object {
+  const record = parsed as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(record);
+  const args = record.args;
+  return keys.length === 1 && keys[0] === 'args' && args !== null && args !== undefined &&
+    typeof args === 'object' && !Array.isArray(args) ? args as Object : parsed;
+}
+
 export function parseLoopToolInputArgs(input: string): Object | null {
   const trimmed = input.trim();
   if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
@@ -125,13 +140,13 @@ export function parseLoopToolInputArgs(input: string): Object | null {
   try {
     const parsed = JSON.parse(trimmed) as Object | null;
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
+      return unwrapSingleArgsEnvelope(parsed);
     }
   } catch (_error) {
     try {
       const parsed = JSON.parse(escapeRawLineBreaksInJsonStrings(trimmed)) as Object | null;
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
+        return unwrapSingleArgsEnvelope(parsed);
       }
     } catch (_repairError) {
     }
@@ -228,7 +243,12 @@ export class LoopBackend {
 
   private buildToolRegistry(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): ToolRegistry {
     const registry = new ToolRegistry();
+    const currentPrompt = request.userPrompt === undefined || request.userPrompt.trim().length === 0 ?
+      request.prompt : request.userPrompt;
     for (const definition of allToolDefinitions()) {
+      if (definition.toolId === 'luckin.order.preview' && !isExplicitLuckinOrderPrompt(currentPrompt)) {
+        continue;
+      }
       registry.register(new AiphoneTool(
         definition.toolId,
         this.describeAiphoneTool(definition),
@@ -262,7 +282,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'food.search') {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, menus, coupons, delivery, and food or beverage places near a location. Do not use for Luckin order placement; use luckin.order.preview for ordering Luckin coffee.';
     } else if (definition.toolId === 'luckin.order.preview') {
-      description += '. Use when the user wants to order, buy, get, or preview Luckin/Ruixing coffee, including requests like "点一杯瑞幸咖啡", "来一杯瑞幸", "买瑞幸生椰拿铁", or choosing a Luckin store. This is the first step for Luckin ordering: it queries nearby stores, product SKU/options, and previewOrder pricing. Input must be JSON; at minimum pass {"prompt":"<original user request>"} or {"query":"<original user request>"}. Do not answer with note or food.search for Luckin ordering.';
+      description += '. Use only when the current user message itself explicitly names Luckin/Ruixing and explicitly asks to place or prepare a real order, for example "点一杯瑞幸咖啡", "帮我买一杯瑞幸生椰拿铁", or "瑞幸下单". Do not infer Luckin ordering from saved brand preferences or memory. A Luckin brand mention, store discovery, menu browsing, product question, or price question is not an order and must use food.search instead. This is the first step for explicit Luckin ordering: it queries nearby stores, product SKU/options, and previewOrder pricing. Input must be JSON; at minimum pass {"prompt":"<original user request>"} or {"query":"<original user request>"}. Do not answer with note or food.search when the current message explicitly requests a Luckin order.';
     } else if (definition.toolId === 'luckin.order.create') {
       description += '. Use only after a Luckin order preview card returned real deptId, productId, and skuCode, and the user confirms creating the order. Do not use directly from an initial "order coffee" request.';
     } else if (definition.toolId === 'luckin.order.status') {

@@ -8128,13 +8128,12 @@ export async function saveConfiguredMailDraft(command: MailReplyCommand): Promis
       threadId: command.threadId,
       replyMode: command.replyMode
     };
-    const result = await composioFixedAppResult(
+    const results = await configuredGmailResults(
       'gmail.draft.create',
-      'Gmail',
       '保存 Gmail 回复草稿',
-      '草稿',
       args as Object
     );
+    const result = results[0];
     if (result.status !== 'success') {
       throw new Error(result.summary);
     }
@@ -8442,6 +8441,56 @@ function gmailResultErrorSummary(results: DynamicGenericToolResult[]): string {
   return results[0].summary.length > 0 ? results[0].summary : results[0].title;
 }
 
+async function gmailOAuthFallbackResults(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DynamicGenericToolResult[]> {
+  const mcpToolName = gmailMcpToolNameForToolId(toolId);
+  if (mcpToolName.length === 0) {
+    return [];
+  }
+  try {
+    const accessToken = await gmailAccessTokenForMcp();
+    if (accessToken.length === 0) {
+      return [];
+    }
+    aiLogInfo('[AIPhone][GmailLocalOAuthFallback] toolId=' + toolId +
+      ' accessChars=' + accessToken.length.toString());
+    if (gmailMcpClient === genericMcpClient) {
+      return await callGmailApiTool(toolId, prompt, accessToken, args);
+    }
+    return [await gmailMcpClient.callTool(
+      gmailMcpRegistration(toolId, mcpToolName),
+      accessToken,
+      gmailMcpArgsForPrompt(toolId, prompt, args)
+    )];
+  } catch (error) {
+    aiLogError('[AIPhone][GmailLocalOAuthFallbackFailed] toolId=' + toolId +
+      ' reason=' + describeThrown(error).substring(0, 200));
+    return [];
+  }
+}
+
+async function configuredGmailResults(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DynamicGenericToolResult[]> {
+  const composioResult = await composioFixedAppResult(
+    toolId,
+    'Gmail',
+    prompt,
+    toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
+    args
+  );
+  if (composioResult.status === 'success') {
+    return [composioResult];
+  }
+  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
+  return fallbackResults.length > 0 ? fallbackResults : [composioResult];
+}
+
 function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
   return mediaVideoQueryFromArgs(prompt, args);
 }
@@ -8623,17 +8672,11 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
   try {
-    const result = await composioFixedAppResult(
-      toolId,
-      'Gmail',
-      prompt,
-      toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
-      args
-    );
+    const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-      return gmailDraftPreviewA2ui(surfaceId, result);
+      return gmailDraftPreviewA2ui(surfaceId, results[0]);
     }
-    return gmailThreadResultsA2ui(surfaceId, toolId, [result]);
+    return gmailThreadResultsA2ui(surfaceId, toolId, results);
   } catch (error) {
     return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(toolId, describeThrown(error))]);
   }
@@ -8648,14 +8691,15 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
 
     if (parsed.providers.indexOf('gmail') >= 0) {
       try {
-        const gmailResult = await composioFixedAppResult('gmail.mail.search', 'Gmail', parsed.query, '邮件', parsed as Object);
+        const gmailResults = await configuredGmailResults('gmail.mail.search', parsed.query, parsed as Object);
+        const gmailResult = gmailResults[0];
         statuses.push({
           provider: 'gmail',
           status: gmailResult.status,
           title: gmailResult.title,
           message: gmailResult.summary
         });
-        extras.push(gmailResult);
+        gmailResults.forEach((result: DynamicGenericToolResult) => extras.push(result));
       } catch (error) {
         statuses.push(mailProviderError('gmail', describeThrown(error)));
       }

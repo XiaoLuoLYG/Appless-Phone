@@ -4,12 +4,16 @@ import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
-import { MailDraftArgs, MailSearchArgs } from '@loop/agent-core';
+import { DynamicToolRegistration, GenericMcpClient, MemoryCredentialStore } from '@loop/agent-core';
+import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
+import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
   configureComposioConfigFromRawJson,
+  configureGmailCredentialStoreForTests,
+  configureGmailMcpClientForTests,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
@@ -33,11 +37,26 @@ import {
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
   resolveLuckinLocationForTest,
+  saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '@loop/agent-core';
+
+class SuccessfulGmailMcpClient extends GenericMcpClient {
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    return {
+      sourceTag: 'Gmail OAuth',
+      toolName: 'search_threads',
+      title: 'Gmail message',
+      status: 'success',
+      summary: 'Real Gmail OAuth result',
+      rows: [{ label: 'Subject', value: 'Latest important mail' }],
+      rawPreview: 'gmail-oauth-result'
+    };
+  }
+}
 
 interface YouTubeSearchArgsFixture {
   query: string;
@@ -549,6 +568,65 @@ export default function toolGatewayClientTest() {
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('falls back to existing device Gmail OAuth when Composio is unavailable', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(new SuccessfulGmailMcpClient());
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '查看gmail里最新的重要邮件',
+          'surface_gmail_oauth_fallback',
+          'model_tool_request',
+          noop
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].status).assertEqual('success');
+        expect(rendered[0].sourceTag).assertEqual('Gmail OAuth');
+        expect(rendered[0].title).assertEqual('Gmail message');
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('uses the same Gmail OAuth fallback when saving a reply draft', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(new SuccessfulGmailMcpClient());
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const command: MailReplyCommand = {
+          requestKey: 'gmail-thread-1',
+          provider: 'gmail',
+          accountLabel: 'Gmail',
+          threadId: 'thread-1',
+          messageId: 'message-1',
+          internetMessageId: '',
+          to: ['author@example.com'],
+          subject: 'Re: ECCV',
+          body: 'Thanks for the update.',
+          replyMode: 'reply',
+          contextSummary: 'ECCV decision update'
+        };
+
+        const result = await saveConfiguredMailDraft(command);
+        expect(result.status).assertEqual('success');
+        expect(result.operation).assertEqual('draft');
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
       }
     });
 
