@@ -122,6 +122,45 @@ function clearExecutedToolRequests(surface: A2uiSurfaceState): A2uiSurfaceState 
   };
 }
 
+function clientToolRequest(toolCalls: LoopToolTrace[], prompt: string, actionId: string): A2uiToolRequestData | null {
+  for (let index = 0; index < toolCalls.length; index++) {
+    if (toolCalls[index].toolId === 'worldcup.open') {
+      return {
+        toolId: 'worldcup.open',
+        prompt: prompt,
+        actionId: actionId
+      };
+    }
+  }
+  return null;
+}
+
+function attachToolRequest(surface: A2uiSurfaceState, request: A2uiToolRequestData | null): A2uiSurfaceState {
+  if (request === null) {
+    return surface;
+  }
+  let dataModelJson = surface.dataModelJson;
+  try {
+    const model = JSON.parse(dataModelJson.length > 0 ? dataModelJson : '{}') as A2uiRuntimeDataModel;
+    model.toolRequest = request;
+    model.toolRequests = [request];
+    dataModelJson = JSON.stringify(model);
+  } catch (_err) {
+    return surface;
+  }
+  return {
+    surfaceId: surface.surfaceId,
+    rootId: surface.rootId,
+    title: surface.title,
+    intent: surface.intent,
+    status: surface.status,
+    components: surface.components,
+    dataModelJson: dataModelJson,
+    error: surface.error,
+    sequence: surface.sequence
+  };
+}
+
 function loopyAssistantText(finalAnswer: string, raw: string): string {
   if (finalAnswer.trim().length > 0) {
     return finalAnswer;
@@ -252,6 +291,7 @@ export async function callLocalModel(
     if (raw.trim().length === 0 && error.length > 0) {
       store.applyError('Loopy 后端异常', error);
     }
+    const clientRequest = clientToolRequest(result.toolCalls, preparedPersona.userPrompt, request.actionId);
     const memoryUpdate = firstPersonaMemoryUpdate(result.toolCalls, preparedPersona.runtime.id);
     if (memoryUpdate !== null && error.length === 0) {
       if (onPersonaMemoryUpdate !== null) {
@@ -268,13 +308,14 @@ export async function callLocalModel(
         surface: updateSurface
       };
     }
+    const resultSurface = attachToolRequest(surfaceWithPersona(store.getSurface()), clientRequest);
     return {
       ok: result.ok && error.length === 0,
       raw: raw,
       error: error,
       requestDebug: debug,
       assistantDebug: loopyAssistantText(result.finalAnswer, loopDebug.length > 0 ? loopDebug : result.raw),
-      surface: surfaceWithPersona(store.getSurface())
+      surface: resultSurface
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : JSON.stringify(err);

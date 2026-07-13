@@ -34,6 +34,11 @@ export struct ComposioAuthPage {
     return item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug;
   }
 
+  private toolkitInitial(item: ComposioAuthConfigItem): string {
+    const label = this.displayToolkitName(item).trim();
+    return label.length > 0 ? label.substring(0, 1).toUpperCase() : '?';
+  }
+
   private subtitle(item: ComposioAuthConfigItem): string {
     if (item.connectedAccountLabel.length > 0) {
       return item.connectedAccountLabel;
@@ -46,16 +51,21 @@ export struct ComposioAuthPage {
 
   @Builder
   ToolkitBadge(item: ComposioAuthConfigItem) {
-    if (composioToolkitLogoResource(item.toolkitSlug) !== null) {
-      Image(composioToolkitLogoResource(item.toolkitSlug) as Resource)
-        .width(36)
-        .height(36)
-        .objectFit(ImageFit.Contain)
-    } else {
-      Blank()
-        .width(36)
-        .height(36)
+    Stack({ alignContent: Alignment.Center }) {
+      if (composioToolkitLogoResource(item.toolkitSlug) !== null) {
+        Image(composioToolkitLogoResource(item.toolkitSlug) as Resource)
+          .width(36)
+          .height(36)
+          .objectFit(ImageFit.Contain)
+      } else {
+        Text(this.toolkitInitial(item))
+          .fontSize(15)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_INK)
+      }
     }
+    .width(36)
+    .height(36)
   }
 
   @Builder

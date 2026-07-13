@@ -1,4 +1,4 @@
-import { A2uiSurfaceState } from '@loop/agent-core';
+import { A2uiSurfaceState, aggregateSearchQueryFromArgs } from '@loop/agent-core';
 import { genericToolResults, summaryData, toolRequest } from '@loop/agent-core';
 
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
@@ -15,6 +15,11 @@ interface DraftFormData {
 
 interface MediaFallbackArgs {
   sources: string[];
+}
+
+interface AggregateFallbackArgs {
+  sources: string[];
+  query?: string;
 }
 
 interface YouTubeFallbackArgs {
@@ -65,6 +70,10 @@ function hasExplicitYouTubeIntent(prompt: string): boolean {
   return prompt.toLowerCase().indexOf('youtube') >= 0 || prompt.indexOf('油管') >= 0;
 }
 
+function hasGmailContext(prompt: string): boolean {
+  return prompt.toLowerCase().indexOf('gmail') >= 0 || containsAny(prompt, ['谷歌邮箱', '谷歌邮件']);
+}
+
 function hasBilibiliIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
   return lowerPrompt.indexOf('bilibili') >= 0 ||
@@ -82,8 +91,48 @@ function hasMediaAggregationIntent(prompt: string): boolean {
     (prompt.indexOf('聚合') >= 0 && containsAny(prompt, ['视频', '短视频', '媒体']));
 }
 
+function hasAggregateSearchIntent(prompt: string): boolean {
+  if (hasSocialHubContext(prompt)) {
+    return false;
+  }
+  const lowerPrompt = prompt.toLowerCase();
+  const cleanedQuery = aggregateSearchQueryFromArgs(prompt, null);
+  const hasCompactTopic = cleanedQuery.length > 0 && cleanedQuery !== prompt.trim();
+  const wantsTopic = hasCompactTopic || containsAny(prompt, ['有关', '关于', '看看', '搜索', '搜', '聚合', '整理', '汇总', '追踪', '了解']);
+  const wantsDiscussion = containsAny(prompt, ['新闻', '讨论', '热议', '舆论', '观点', '帖子', 'po文', '公开动态']) ||
+    lowerPrompt.indexOf('post') >= 0 ||
+    lowerPrompt.indexOf('reaction') >= 0 ||
+    lowerPrompt.indexOf('public') >= 0 ||
+    (containsAny(prompt, ['聚合搜索', '媒体聚合', '多来源', '多平台']) && hasCompactTopic);
+  if (!wantsTopic || !wantsDiscussion) {
+    return false;
+  }
+  const mentionsVideoSource = hasExplicitYouTubeIntent(prompt) || hasBilibiliIntent(prompt);
+  const mentionsTextSource = hasXPostContext(prompt) ||
+    containsAny(prompt, ['知乎', 'Hacker News', 'HackNews', 'HackerNews', 'Reddit', 'reddit', '红迪']) ||
+    prompt.indexOf('HN') >= 0;
+  const asksMixedView = containsAny(prompt, ['聚合', '多来源', '多平台', '汇总']) ||
+    (containsAny(prompt, ['新闻']) && containsAny(prompt, ['讨论', '观点', '热议', '舆论'])) ||
+    (containsAny(prompt, ['视频', '短视频']) && containsAny(prompt, ['讨论', '帖子', 'po文', '观点', '热议', '舆论']) &&
+      (!mentionsVideoSource || mentionsTextSource));
+  if (mentionsVideoSource && !mentionsTextSource && !asksMixedView) {
+    return false;
+  }
+  if (allowsXPostSearchPrompt(prompt) && !mentionsVideoSource && !asksMixedView) {
+    return false;
+  }
+  return asksMixedView || mentionsVideoSource && mentionsTextSource || !mentionsVideoSource && !mentionsTextSource;
+}
+
 function hasComposioDynamicIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0 ||
+    lowerPrompt.indexOf('zhihu') >= 0 || prompt.indexOf('知乎') >= 0) {
+    return false;
+  }
+  if ((lowerPrompt.indexOf('reddit') >= 0 || prompt.indexOf('红迪') >= 0) && hasAggregateSearchIntent(prompt)) {
+    return false;
+  }
   const explicitComposio = lowerPrompt.indexOf('composio') >= 0;
   const unsupportedToolkit = lowerPrompt.indexOf('notion') >= 0 ||
     lowerPrompt.indexOf('google drive') >= 0 ||
@@ -109,7 +158,9 @@ function hasComposioDynamicIntent(prompt: string): boolean {
     lowerPrompt.indexOf('tiktok') >= 0 ||
     lowerPrompt.indexOf('tik tok') >= 0 ||
     lowerPrompt.indexOf('ticketmaster') >= 0 ||
-    lowerPrompt.indexOf('ticket master') >= 0;
+    lowerPrompt.indexOf('ticket master') >= 0 ||
+    lowerPrompt.indexOf('reddit') >= 0 ||
+    prompt.indexOf('红迪') >= 0;
   return explicitComposio || unsupportedToolkit;
 }
 
@@ -130,6 +181,22 @@ function mediaArgsForPrompt(prompt: string): Object | null {
     return args;
   }
   return null;
+}
+
+function aggregateArgsForPrompt(prompt: string): Object | null {
+  if (!hasAggregateSearchIntent(prompt)) {
+    return null;
+  }
+  const query = aggregateSearchQueryFromArgs(prompt, null);
+  const args: AggregateFallbackArgs = { sources: ['youtube', 'bilibili', 'x', 'hackernews', 'reddit', 'zhihu'] };
+  if (query.length > 0 && query !== prompt.trim()) {
+    args.query = query;
+  }
+  return args;
+}
+
+function inferredAggregateSearchToolIdForPrompt(prompt: string): string {
+  return aggregateArgsForPrompt(prompt) === null ? '' : 'media.aggregate.search';
 }
 
 function forcedDynamicToolIdForPrompt(prompt: string): string {
@@ -159,7 +226,7 @@ function forcedDynamicToolIdForPrompt(prompt: string): string {
 }
 
 function forcedGmailToolIdForPrompt(prompt: string): string {
-  if (!containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件'])) {
+  if (!hasGmailContext(prompt)) {
     return '';
   }
   if (containsAny(prompt, ['直接发送', '立刻发送', '马上发送', '不用确认', '不确认直接发', '直接发'])) {
@@ -176,7 +243,7 @@ function inferredGmailToolIdForPrompt(prompt: string): string {
   if (forcedToolId.length > 0) {
     return forcedToolId;
   }
-  if (!containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件'])) {
+  if (!hasGmailContext(prompt)) {
     return '';
   }
   if (containsAny(prompt, ['写一封', '写邮件', '起草', '草稿', '回复', '撰写'])) {
@@ -189,7 +256,7 @@ function inferredGmailToolIdForPrompt(prompt: string): string {
 }
 
 function inferredMailToolIdForPrompt(prompt: string): string {
-  const hasGmail = containsAny(prompt, ['Gmail', '谷歌邮箱', '谷歌邮件']);
+  const hasGmail = hasGmailContext(prompt);
   const hasQqMail = containsAny(prompt, ['QQ邮箱', 'QQ 邮箱', 'QQ邮件', 'QQ 邮件']);
   if ((hasGmail && !hasQqMail) ||
     !containsAny(prompt, ['邮箱', '邮件', '收件箱', 'QQ邮箱', 'QQ 邮箱'])) {
@@ -381,6 +448,24 @@ function inferredSocialHubToolIdForPrompt(prompt: string): string {
   return '';
 }
 
+function inferredLuckinOrderToolIdForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  const hasLuckin = prompt.indexOf('瑞幸') >= 0 || lowerPrompt.indexOf('luckin') >= 0 || lowerPrompt.indexOf('ruixing') >= 0;
+  if (!hasLuckin) {
+    return '';
+  }
+  if (containsAny(prompt, ['只喝', '只买', '只点', '不喝', '不买', '不点', '偏好', '喜欢', '记住', '以后'])) {
+    return '';
+  }
+  if (containsAny(prompt, ['订单状态', '取餐码', '取餐号', '刷新订单', '查询订单'])) {
+    return 'luckin.order.status';
+  }
+  if (containsAny(prompt, ['点一杯', '点杯', '点个瑞幸', '点瑞幸', '帮我点', '我要点', '下单', '下一杯', '买一杯', '帮我买', '购买一杯', '购买瑞幸', '来一杯', '要一杯'])) {
+    return 'luckin.order.preview';
+  }
+  return '';
+}
+
 function hasHotVideoIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
   return containsAny(prompt, ['最火', '最热门', '热门', '播放量最高']) ||
@@ -466,6 +551,10 @@ function inferredToolIdForPrompt(prompt: string): string {
   if (mapsToolId.length > 0) {
     return mapsToolId;
   }
+  const aggregateToolId = inferredAggregateSearchToolIdForPrompt(prompt);
+  if (aggregateToolId.length > 0) {
+    return aggregateToolId;
+  }
   const youtubeToolId = inferredYouTubeToolIdForPrompt(prompt);
   if (youtubeToolId.length > 0) {
     return youtubeToolId;
@@ -477,6 +566,10 @@ function inferredToolIdForPrompt(prompt: string): string {
   const socialHubToolId = inferredSocialHubToolIdForPrompt(prompt);
   if (socialHubToolId.length > 0) {
     return socialHubToolId;
+  }
+  const luckinOrderToolId = inferredLuckinOrderToolIdForPrompt(prompt);
+  if (luckinOrderToolId.length > 0) {
+    return luckinOrderToolId;
   }
   if (containsAny(prompt, ['附近', '周边', '外卖', '咖啡', '奶茶', '餐饮', '美食', '肯德基']) &&
     containsAny(prompt, ['查', '查询', '搜索', '帮我搜', '附近', '周边'])) {
@@ -505,6 +598,15 @@ function toolIdForActionId(actionId: string): string {
     actionId === 'payment.provider.select' ||
     actionId === 'payment.checkout.open') {
     return 'payment.send';
+  }
+  if (actionId === 'luckin.order.create') {
+    return 'luckin.order.create';
+  }
+  if (actionId === 'luckin.order.preview') {
+    return 'luckin.order.preview';
+  }
+  if (actionId === 'luckin.order.status') {
+    return 'luckin.order.status';
   }
   if (actionId === 'stripe.account.create' ||
     actionId === 'stripe.account.onboard' ||
@@ -555,6 +657,13 @@ export function surfaceHasSatisfiedToolResult(surface: A2uiSurfaceState, toolId:
       }
     }
   }
+  if (toolId === 'media.aggregate.search') {
+    for (let index = 0; index < surface.components.length; index++) {
+      if (surface.components[index].component === 'AggregateSearch') {
+        return true;
+      }
+    }
+  }
   // ponytail: Gmail surfaces can expose raw Google tool names; add aliases here when real providers need them.
   return toolNameSatisfied(toolId, summaryData(surface).toolName);
 }
@@ -564,7 +673,8 @@ export function surfaceHasVisibleToolResult(surface: A2uiSurfaceState): boolean 
     return true;
   }
   for (let index = 0; index < surface.components.length; index++) {
-    if (surface.components[index].component === 'SocialHub') {
+    if (surface.components[index].component === 'SocialHub' ||
+      surface.components[index].component === 'AggregateSearch') {
       return true;
     }
   }
@@ -697,14 +807,16 @@ export function resolveA2uiHomeToolRequest(
   let toolId = request.toolId;
   let prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
+  const originalPrompt = fallbackPrompt.length > 0 ? fallbackPrompt : prompt;
   const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
   const forcedGmailToolId = forcedGmailToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedStripeReceivingToolId = inferredStripeReceivingAccountToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedPaymentToolId = inferredPaymentToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
+  const forcedLuckinOrderToolId = inferredLuckinOrderToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedMapsToolId = inferredMapsToolIdForPrompt(prompt);
+  const forcedAggregateToolId = inferredAggregateSearchToolIdForPrompt(originalPrompt);
   const forcedMediaToolId = inferredMediaToolIdForPrompt(prompt);
   const actionToolId = toolIdForActionId(fallbackActionId);
-  const originalPrompt = fallbackPrompt.length > 0 ? fallbackPrompt : prompt;
   if (forcedDynamicToolId.length > 0) {
     toolId = forcedDynamicToolId;
     if (actionId.length === 0) {
@@ -725,6 +837,10 @@ export function resolveA2uiHomeToolRequest(
     actionId = request.toolId.length > 0 ? 'client_payment_explicit_reroute' : 'client_intent_fallback';
     toolId = forcedPaymentToolId;
     prompt = originalPrompt;
+  } else if (forcedLuckinOrderToolId.length > 0 && request.toolId !== forcedLuckinOrderToolId) {
+    actionId = request.toolId.length > 0 ? 'client_luckin_order_reroute' : 'client_intent_fallback';
+    toolId = forcedLuckinOrderToolId;
+    prompt = originalPrompt;
   } else if (actionToolId.length > 0) {
     if (actionId.length === 0) {
       actionId = 'client_action_fallback';
@@ -733,6 +849,10 @@ export function resolveA2uiHomeToolRequest(
   } else if (forcedMapsToolId.length > 0 && toolId !== forcedMapsToolId) {
     actionId = request.toolId.length > 0 ? 'client_maps_explicit_reroute' : 'client_intent_fallback';
     toolId = forcedMapsToolId;
+  } else if (forcedAggregateToolId.length > 0 && toolId !== forcedAggregateToolId) {
+    actionId = request.toolId.length > 0 ? 'client_aggregate_search_reroute' : 'client_intent_fallback';
+    toolId = forcedAggregateToolId;
+    prompt = originalPrompt;
   } else if (forcedMediaToolId.length > 0 && toolId !== forcedMediaToolId) {
     actionId = request.toolId.length > 0 ? 'client_media_explicit_reroute' : 'client_intent_fallback';
     toolId = forcedMediaToolId;
@@ -751,6 +871,9 @@ export function resolveA2uiHomeToolRequest(
   let args = mergeArgs(fallbackArgs, request.args === undefined || request.args === null ? null : request.args);
   if (toolId === 'media.video.search') {
     args = mergeArgs(mediaArgsForPrompt(prompt), args);
+  }
+  if (toolId === 'media.aggregate.search') {
+    args = mergeArgs(aggregateArgsForPrompt(prompt), args);
   }
   if (toolId === 'youtube.video.search') {
     args = mergeArgs(youtubeArgsForPrompt(prompt), args);

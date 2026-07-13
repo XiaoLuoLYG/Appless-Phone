@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult } from '@loop/agent-core';
+import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -61,6 +61,11 @@ export default function socialHubClientTest() {
       expect(Object.keys(missing).indexOf('X-API-Key')).assertEqual(-1);
       expect(present['X-API-Key']).assertEqual('secret');
       expect(present['Accept']).assertEqual('application/json');
+    });
+
+    it('keeps aggregate X public post prompts as keyword searches', 0, () => {
+      expect(xSearchQuery('X 公开 post 搜索关键词: openai codex', '')).assertEqual('openai codex');
+      expect(xSearchQuery('帮我搜索 X 上 openai 最近的公开 post', '')).assertEqual('from:openai');
     });
   });
 }

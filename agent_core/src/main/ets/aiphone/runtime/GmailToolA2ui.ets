@@ -294,7 +294,7 @@ function gmailCardFromRecord(record: Object, fallbackTitle: string, fallbackSumm
   const to = nestedField(row, ['to', 'recipient', 'recipients']);
   const date = field(row, ['date', 'receivedDateTime', 'received_at', 'createdAt', 'created_at', 'updatedAt', 'updated_at', 'internalDate']);
   const subject = field(row, ['subject', 'title', 'name']);
-  const snippet = field(row, ['snippet', 'preview', 'summary', 'description', 'text', 'message']);
+  const snippet = field(row, ['snippet', 'preview', 'summary', 'description', 'text', 'message', 'messageText', 'message_text']);
   const title = subject.length > 0 ? subject : (snippet.length > 0 ? snippet.substring(0, 80) :
     (fallbackTitle.length > 0 ? fallbackTitle : 'Gmail message ' + (index + 1).toString()));
   const rows: A2uiLabelValueData[] = [];
@@ -420,7 +420,7 @@ export function gmailReplyDraftAction(result: A2uiGenericToolResultData): A2uiAc
     replyMode: 'reply',
     contextSummary: result.summary
   };
-  const prompt = 'Action ID: gmail.ai.reply.draft。请基于真实 Gmail 线程生成一封简短、礼貌、可审核的回复草稿。只选择 gmail.draft.create，不要发送，不要编造事实。' +
+  const prompt = 'Action ID: gmail.ai.reply.draft。请只基于 args.contextSummary 中的真实邮件标题与正文生成一封简短、礼貌、可审核的回复草稿。只选择 gmail.draft.create，不要发送，不要编造事实。' +
     '/toolRequest.args 必须保留 threadId、to、subject、replyMode，并由你撰写 args.body；args.body 必须是单行 JSON 字符串，换行写成 \\n，不要在 JSON 字符串里输出真实换行。Structured action args JSON: ' + JSON.stringify(args);
   return action('gmail.ai.reply.draft', 'AI 回复草稿', prompt, 'primary', 'prompt', args);
 }

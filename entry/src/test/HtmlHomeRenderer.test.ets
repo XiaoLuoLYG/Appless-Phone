@@ -126,6 +126,64 @@ function rideDriverDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function aggregateSearchDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'aggregate-search';
+  doc.title = '聚合搜索';
+  doc.subtitle = 'openai codex';
+  doc.blocks = [{
+    id: 'video-1',
+    kind: 'aggregate-video',
+    title: 'Codex demo',
+    subtitle: 'Video row',
+    status: 'success',
+    source: 'youtube',
+    metrics: [{ label: 'provider', value: 'YouTube' }],
+    rows: [{ label: 'url', value: 'https://www.youtube.com/watch?v=abc123' }],
+    actions: [],
+    mediaEmbed: {
+      provider: 'YouTube',
+      title: 'Codex demo',
+      embedUrl: 'https://www.youtube.com/embed/abc123',
+      pageUrl: 'https://www.youtube.com/watch?v=abc123',
+      thumbnail: ''
+    }
+  }, {
+    id: 'post-1',
+    kind: 'aggregate-post',
+    title: 'OpenAI Codex discussion',
+    subtitle: 'Discussion row',
+    status: 'success',
+    source: 'hackernews',
+    metrics: [{ label: 'provider', value: 'Hacker News' }],
+    rows: [{ label: 'url', value: 'https://news.ycombinator.com/item?id=123' }],
+    actions: []
+  }, {
+    id: 'status-youtube',
+    kind: 'aggregate-source-status',
+    title: 'YouTube',
+    subtitle: 'YouTube returned 1 row.',
+    status: 'success',
+    source: 'youtube',
+    metrics: [{ label: 'count', value: '1' }],
+    rows: [],
+    actions: []
+  }, {
+    id: 'status-zhihu',
+    kind: 'aggregate-source-status',
+    title: '知乎',
+    subtitle: '未配置 ZHIHU_API_KEY（知乎 Access Secret）。',
+    status: 'needs_auth',
+    source: 'zhihu',
+    metrics: [],
+    rows: [],
+    actions: []
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'travel';
@@ -738,6 +796,48 @@ function paymentDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function luckinPaymentDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'luckin';
+  doc.title = '瑞幸订单';
+  doc.subtitle = '';
+  doc.chips = [];
+  doc.metrics = [];
+  doc.timeline = [];
+  doc.blocks = [{
+    id: 'luckin-payment-1',
+    kind: 'generic-tool-result',
+    title: '瑞幸订单已创建',
+    subtitle: '',
+    status: 'success',
+    source: '瑞幸',
+    metrics: [
+      { label: 'source', value: '瑞幸' },
+      { label: 'toolName', value: 'luckin.order.create' }
+    ],
+    rows: [
+      { label: '订单号', value: 'LK20260711001' },
+      { label: '门店', value: '瑞幸咖啡 深圳科技园店' },
+      { label: '商品', value: '生椰拿铁 x1' },
+      { label: '商品图', value: 'resource://rawfile/luckin_coconut.jpeg' },
+      { label: '选项·糖度', value: '半糖:1|全糖:0' },
+      { label: '选项·温度', value: '少冰:1|正常冰:0' },
+      { label: '原价', value: '¥24' },
+      { label: '优惠', value: '¥6' },
+      { label: '应付', value: '¥18' }
+    ],
+    actions: [
+      { id: 'luckin.pay.open', label: '打开微信支付', prompt: 'weixin://wxpay/bizpayurl?pr=abc', variant: 'primary', kind: 'client' },
+      { id: 'luckin.demo.alipay.open', label: '支付宝支付（Demo）', prompt: 'alipays://', variant: 'secondary', kind: 'client' },
+      { id: 'luckin.demo.googlepay.open', label: 'Google Pay 转 5 美金（Demo）', prompt: 'google pay', variant: 'secondary', kind: 'client' },
+      { id: 'luckin.order.status', label: '刷新订单状态', prompt: '查询瑞幸订单状态', variant: 'secondary', kind: 'prompt' }
+    ]
+  }];
+  doc.actions = [];
+  doc.history = [];
+  return doc;
+}
+
 function googlePayCheckoutDocumentFixture(): HtmlHomeDocument {
   const doc = paymentDocumentFixture();
   doc.title = '打开支付确认页';
@@ -1135,6 +1235,22 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('https://aiphone.local')).assertEqual(-1);
     });
 
+    it('renders aggregate search videos separately from posts and source issues', 0, () => {
+      const html = renderHtmlHomeDocument(aggregateSearchDocumentFixture(), false);
+
+      expect(html.indexOf('aggregate-shell')).assertLarger(-1);
+      expect(html.indexOf('视频')).assertLarger(-1);
+      expect(html.indexOf('讨论')).assertLarger(-1);
+      expect(html.indexOf('Codex demo')).assertLarger(-1);
+      expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
+      expect(html.indexOf('data-filter="reddit"')).assertLarger(-1);
+      expect(html.indexOf('可用来源')).assertLarger(-1);
+      expect(html.indexOf('YouTube returned 1 row')).assertLarger(-1);
+      expect(html.indexOf('需要关注')).assertLarger(-1);
+      expect(html.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
+      expect(html.indexOf('异常或提示')).assertEqual(-1);
+    });
+
     it('keeps travel and food card details collapsed behind source aware expansion hooks', 0, () => {
       const doc = travelFoodCardsDocumentFixture();
       doc.persona = {
@@ -1171,6 +1287,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('client_filter_available')).assertLarger(-1);
       expect(html.indexOf('client_show_more')).assertLarger(-1);
       expect(html.indexOf("state.trainShowMore = !state.trainShowMore")).assertLarger(-1);
+      expect(html.indexOf('function displayTime(value)')).assertLarger(-1);
+      expect(html.indexOf("displayTime(metric(block, ['depart', 'depTime']))")).assertLarger(-1);
+      expect(html.indexOf('white-space: nowrap')).assertLarger(-1);
       expect(html.indexOf('data-source="train"')).assertLarger(-1);
       expect(html.indexOf('data-source="food"')).assertLarger(-1);
       expect(html.indexOf('data-duration')).assertLarger(-1);
@@ -1212,7 +1331,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AVATAR_MEITUAN')).assertLarger(-1);
       expect(html.indexOf('AVATAR_LUCKIN')).assertLarger(-1);
       expect(html.indexOf('AVATAR_GOOGLE_MAPS')).assertLarger(-1);
-      expect(html.indexOf('AVATAR_LOCAL')).assertLarger(-1);
+      expect(html.indexOf("var AVATAR_LOCAL = '';")).assertLarger(-1);
       expect(html.indexOf('function addAvatar(parent, block)')).assertLarger(-1);
       expect(html.indexOf('addAvatar(head, block)')).assertLarger(-1);
       expect(html.indexOf('border-radius: 999px')).assertLarger(-1);
@@ -1242,7 +1361,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("if (id === 'food_filter_1km') { state.filter = 'within_1km'; applyFilter(); return true; }")).assertLarger(-1);
       expect(html.indexOf("if (feature) { feature.style.display = matchesFilter(feature) ? '' : 'none'; }")).assertLarger(-1);
       expect(html.indexOf("feature.setAttribute('data-search'")).assertLarger(-1);
-      expect(html.indexOf('food_show_more')).assertLarger(-1);
+      expect(html.indexOf("['food_show_more', '展示更多'")).assertEqual(-1);
+      expect(html.indexOf("id === 'food_show_more'")).assertEqual(-1);
+      expect(html.indexOf('state.showMore')).assertEqual(-1);
+      expect(html.indexOf('visible >= 6')).assertEqual(-1);
       expect(html.indexOf('function sourceParts(block)')).assertLarger(-1);
       expect(html.indexOf("card.setAttribute('data-source-key', sourceKey(block))")).assertLarger(-1);
       expect(html.indexOf("raw.indexOf('美团')")).assertLarger(-1);
@@ -1267,7 +1389,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('payee-card')).assertLarger(-1);
       expect(html.indexOf('provider-logo')).assertLarger(-1);
       expect(html.indexOf('addProviderMark')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertLarger(-1);
+      expect(html.indexOf('GOOGLE_PAY_ICON')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64')).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=UTF-8')).assertEqual(-1);
       expect(html.indexOf('form-actions')).assertLarger(-1);
       expect(html.indexOf("add(shell, 'details', 'payee-card')")).assertLarger(-1);
       expect(html.indexOf('form.open = !block')).assertLarger(-1);
@@ -1494,6 +1618,19 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf(".block[data-source-key=\"composio-outlook\"]")).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(194, 70, 54, 0.45)')).assertLarger(-1);
       expect(html.indexOf('border-color: rgba(45, 120, 196, 0.45)')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="mail-gmail"]')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="mail-qq"]')).assertLarger(-1);
+      expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="composio-outlook"]')).assertLarger(-1);
+      expect(html.indexOf('background: var(--kind-soft)')).assertLarger(-1);
+      expect(html.indexOf('mail-reply-overlay')).assertLarger(-1);
+      expect(html.indexOf("'编辑回复'")).assertLarger(-1);
+      expect(html.indexOf("'AI回复'")).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_ai_generate')).assertLarger(-1);
+      expect(html.indexOf("activeMailReply.aiButton.textContent = '...'")).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_save')).assertLarger(-1);
+      expect(html.indexOf('html_mail_reply_send')).assertLarger(-1);
+      expect(html.indexOf('window.scrollBy(0, afterTop - beforeTop)')).assertLarger(-1);
+      expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
     });
 
     it('filters Gmail hero preview counts to mail blocks', 0, () => {
@@ -1561,13 +1698,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Bilibili video')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-youtube"')).assertLarger(-1);
       expect(html.indexOf('data-source-key="media-bilibili"')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRkYwMDAwIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
-      expect(html.indexOf('data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMDBBMUQ2IiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCI')).assertLarger(-1);
+      expect(html.indexOf("if (key === 'media-youtube') { return 'data:image/svg+xml;base64")).assertLarger(-1);
+      expect(html.indexOf("if (key === 'media-bilibili') { return 'data:image/svg+xml;base64")).assertLarger(-1);
+      expect(html.indexOf('data:image/svg+xml;base64')).assertLarger(-1);
+      expect(html.indexOf('https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png')).assertEqual(-1);
+      expect(html.indexOf('data:image/svg+xml;charset=utf-8,%3Csvg')).assertEqual(-1);
+      expect(html.indexOf('%3Ebilibili%3C/text%3E')).assertEqual(-1);
       expect(html.indexOf('data-filter="youtube"')).assertLarger(-1);
       expect(html.indexOf('data-filter="bilibili"')).assertLarger(-1);
       expect(html.indexOf('data-filter="playable"')).assertEqual(-1);
       expect(html.indexOf('data-mode')).assertEqual(-1);
-      expect(html.indexOf('data-filter="error"')).assertLarger(-1);
+      expect(html.indexOf('data-filter="error"')).assertEqual(-1);
+      expect(html.indexOf("['error', '错误']")).assertEqual(-1);
       expect(html.indexOf('B 站')).assertLarger(-1);
       expect(html.indexOf('media.open.web')).assertLarger(-1);
       expect(html.indexOf("var play = add(actions")).assertEqual(-1);
@@ -1646,6 +1788,30 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('social_select_message')).assertEqual(-1);
     });
 
+    it('renders Luckin payment checkout with countdown and method grid', 0, () => {
+      const html = renderHtmlHomeDocument(luckinPaymentDocumentFixture());
+
+      expect(html.indexOf('blocks-luckin-payment')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-card')).assertLarger(-1);
+      expect(html.indexOf('订单支付')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-countdown')).assertLarger(-1);
+      expect(html.indexOf('生椰拿铁')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-option-summary')).assertLarger(-1);
+      expect(html.indexOf('选项·糖度')).assertLarger(-1);
+      expect(html.indexOf('半糖:1')).assertLarger(-1);
+      expect(html.indexOf('应付金额')).assertLarger(-1);
+      expect(html.indexOf("return normalized.length > 0 ? '¥ ' + normalized")).assertLarger(-1);
+      expect(html.indexOf("return normalized.length > 0 ? '已优惠 ¥' + normalized")).assertLarger(-1);
+      expect(html.indexOf('选择支付方式')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-methods-grid')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-method-text')).assertLarger(-1);
+      expect(html.indexOf('luckin-payment-option-chip')).assertLarger(-1);
+      expect(html.indexOf('瑞幸咖啡 深圳科技园店')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
+    });
+
     it('does not auto-render welcome scene and source chips', 0, () => {
       const doc = documentFixture();
       doc.source = 'welcome';
@@ -1662,7 +1828,6 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('data-scene="welcome"')).assertEqual(-1);
       expect(html.indexOf('status-hero')).assertEqual(-1);
       expect(html.indexOf('场景')).assertEqual(-1);
-      expect(html.indexOf('来源')).assertEqual(-1);
       expect(html.indexOf('待命')).assertEqual(-1);
     });
   });

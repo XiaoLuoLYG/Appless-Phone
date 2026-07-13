@@ -428,7 +428,8 @@ button:disabled { cursor: default; opacity: 0.52; }
 }
 .time-block b {
   display: block;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-size: 22px;
   line-height: 1;
@@ -617,6 +618,12 @@ const TRAVEL_HOME_JS: string = `
     var minutes = raw.match(/([0-9]+)\\s*(?:m|分钟|分)/i);
     var total = (hours ? Number(hours[1]) * 60 : 0) + (minutes ? Number(minutes[1]) : 0);
     return total > 0 ? total : 999999;
+  }
+  function displayTime(value) {
+    var raw = text(value).trim();
+    var match = raw.match(/([01]?\\d|2[0-3]):([0-5]\\d)(?::[0-5]\\d)?/);
+    if (!match) { return raw; }
+    return (match[1].length === 1 ? '0' + match[1] : match[1]) + ':' + match[2];
   }
   function available(value) {
     var raw = text(value);
@@ -902,11 +909,11 @@ const TRAVEL_HOME_JS: string = `
     card.addEventListener('click', function () { setExpanded(key); });
     var mainline = add(card, 'div', 'journey-mainline');
     var left = add(mainline, 'div', 'time-block');
-    add(left, 'b', '', metric(block, ['depart', 'depTime']) || '--');
+    add(left, 'b', '', displayTime(metric(block, ['depart', 'depTime'])) || '--');
     add(left, 'span', '', metric(block, ['from', 'dep']) || '出发');
     add(mainline, 'div', 'track');
     var right = add(mainline, 'div', 'time-block');
-    add(right, 'b', '', metric(block, ['arrive', 'arrTime']) || '--');
+    add(right, 'b', '', displayTime(metric(block, ['arrive', 'arrTime'])) || '--');
     add(right, 'span', '', metric(block, ['to', 'arr']) || '到达');
     var metrics = add(card, 'div', 'journey-metrics');
     [

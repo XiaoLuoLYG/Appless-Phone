@@ -52,7 +52,12 @@ export struct HomePage {
   @Prop messages: A2uiMessage[] = [];
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop htmlHomeHtml: string = '';
+  @Prop mailDetailEventJson: string = '';
+  @Prop mailReplyEventJson: string = '';
+  @Prop mailCalendarEventJson: string = '';
   @Prop surfaceRenderTick: number = 0;
+  @Prop luckinInlinePatchJson: string = '';
+  @Prop luckinInlinePatchTick: number = 0;
   @Prop isAwaitingFirstSurface: boolean = false;
   @Prop inputPlaceholder: string = '告诉 Appless Phone 你想完成什么';
   @Prop isVoiceListening: boolean = false;
@@ -67,7 +72,6 @@ export struct HomePage {
   onToggleHistory: () => void = () => {};
   onOpenConfig: () => void = () => {};
   onOpenSocialHub: () => void = () => {};
-  onOpenStyleLab: () => void = () => {};
   onSendPrompt: () => void = () => {};
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
@@ -324,19 +328,6 @@ export struct HomePage {
               this.onOpenConfig();
             })
             .margin({ left: A2UI_HEADER_BUTTON_GAP })
-
-          A2uiButtonView({
-            icon: $r('app.media.icon_lab'),
-            hasIcon: true,
-            shape: 'circle',
-            circleSize: A2UI_HEADER_BUTTON_SIZE,
-            iconSize: A2UI_HEADER_BUTTON_ICON_SIZE,
-            tone: 'secondary'
-          })
-            .onClick(() => {
-              this.onOpenStyleLab();
-            })
-            .margin({ left: A2UI_HEADER_BUTTON_GAP })
         }
         .width('100%')
         .height(44)
@@ -382,8 +373,13 @@ export struct HomePage {
       } else {
         HtmlHomeSurfaceView({
           html: this.htmlHomeHtml,
+          mailDetailEventJson: this.mailDetailEventJson,
+          mailReplyEventJson: this.mailReplyEventJson,
+          mailCalendarEventJson: this.mailCalendarEventJson,
           isBusy: this.isBusy,
           renderTick: this.surfaceRenderTick,
+          luckinInlinePatchJson: this.luckinInlinePatchJson,
+          luckinInlinePatchTick: this.luckinInlinePatchTick,
           onAction: this.onAction
         })
         .layoutWeight(1)

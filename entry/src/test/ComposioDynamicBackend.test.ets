@@ -26,6 +26,33 @@ function composioTool(raw: string): ComposioSearchTool {
   return JSON.parse(raw) as ComposioSearchTool;
 }
 
+interface TestComposioHeader {
+  name: string;
+  value: string;
+}
+
+interface TestComposioMessagePayload {
+  headers: TestComposioHeader[];
+}
+
+interface TestComposioMessage {
+  threadId: string;
+  messageId: string;
+  sender: string;
+  subject: string;
+  messageText: string;
+  payload: TestComposioMessagePayload;
+}
+
+interface TestComposioObservationData {
+  messages: TestComposioMessage[];
+}
+
+interface TestComposioObservation {
+  data: TestComposioObservationData;
+  error: null;
+}
+
 export default function composioDynamicBackendTest() {
   describe('composioDynamicBackend', () => {
     it('recognizes unsupported high-frequency app queries', 0, () => {
@@ -46,6 +73,10 @@ export default function composioDynamicBackendTest() {
       expect(isComposioDynamicPrompt('帮我用 soptify 搜适合 demo 的播放列表')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 TikTok 搜 AIPhoneDemo 相关短视频')).assertTrue();
       expect(isComposioDynamicPrompt('帮我用 Ticketmaster 查深圳本周末演唱会')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Reddit 查 openai codex 讨论')).assertTrue();
+      expect(isComposioDynamicPrompt('帮我用 Weibo 查 openai codex 讨论')).assertFalse();
+      expect(isComposioDynamicPrompt('帮我用 Composio Weibo 查 openai codex 讨论')).assertFalse();
+      expect(isComposioDynamicPrompt('帮我用知乎查 openai codex 讨论')).assertFalse();
       expect(isComposioDynamicPrompt('帮我查最近重要邮件')).assertFalse();
     });
 
@@ -87,6 +118,17 @@ export default function composioDynamicBackendTest() {
         looseObject('{"threadId":"thread-999"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(threadArgs.threadId).assertEqual('thread-999');
+
+      const replyTool = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"recipient_email\\":{\\"type\\":\\"string\\"},\\"message_body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"}}}"}');
+      const replyArgs = composioArgumentsForTool(
+        replyTool,
+        '回复 Gmail 线程',
+        'gmail.reply.send',
+        looseObject('{"recipientEmail":"alice@example.com","body":"Confirmed.","threadId":"thread-999"}')
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(replyArgs.recipient_email).assertEqual('alice@example.com');
+      expect(replyArgs.message_body).assertEqual('Confirmed.');
+      expect(replyArgs.thread_id).assertEqual('thread-999');
 
       const searchTool = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},\\"max_results\\":{\\"type\\":\\"number\\"},\\"include_payload\\":{\\"type\\":\\"boolean\\"},\\"verbose\\":{\\"type\\":\\"boolean\\"}}}"}');
       const searchArgs = composioArgumentsForTool(
@@ -143,19 +185,22 @@ export default function composioDynamicBackendTest() {
     });
 
     it('keeps Composio Gmail execute previews compact and parseable', 0, () => {
-      const observation = JSON.stringify({
+      const headers: TestComposioHeader[] = [{ name: 'X-Large', value: 'x'.repeat(20000) }];
+      const messages: TestComposioMessage[] = [{
+        threadId: 'thread-1',
+        messageId: 'message-1',
+        sender: 'OpenReview <noreply@openreview.net>',
+        subject: '[ECCV 2026] Paper Decision Notification',
+        messageText: 'ECCV decision '.repeat(2000),
+        payload: { headers: headers }
+      }];
+      const payload: TestComposioObservation = {
         data: {
-          messages: [{
-            threadId: 'thread-1',
-            messageId: 'message-1',
-            sender: 'OpenReview <noreply@openreview.net>',
-            subject: '[ECCV 2026] Paper Decision Notification',
-            messageText: 'ECCV decision '.repeat(2000),
-            payload: { headers: [{ name: 'X-Large', value: 'x'.repeat(20000) }] }
-          }]
+          messages: messages
         },
         error: null
-      });
+      };
+      const observation = JSON.stringify(payload);
       const result = composioDynamicResultFromObservation('execute', observation, 'GMAIL_FETCH_EMAILS', 'Gmail ECCV');
       const preview = JSON.parse(result.rawPreview) as Record<string, Object[]>;
 
@@ -253,12 +298,18 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('帮我看今天的 Google Calendar 日程', calendarCreate, 'calendar.events.search'));
 
       const gmailRead = composioTool('{"toolSlug":"GMAIL_GET_THREAD","description":"Read Gmail thread"}');
+      const gmailThreadRead = composioTool('{"toolSlug":"GMAIL_FETCH_MESSAGE_BY_THREAD_ID","description":"Fetch Message by Thread ID"}');
+      const gmailReply = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","description":"Reply to Gmail thread"}');
       const gmailDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
       const gmailEmails = composioTool('{"toolSlug":"GMAIL_FETCH_EMAILS","description":"Fetch Gmail emails"}');
       const gmailThreads = composioTool('{"toolSlug":"GMAIL_LIST_THREADS","description":"List Gmail threads"}');
       const gmailPeople = composioTool('{"toolSlug":"GMAIL_SEARCH_PEOPLE","description":"Search Gmail people and contacts"}');
       expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailRead, 'gmail.thread.read'))
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailThreadRead, 'gmail.thread.read'))
+        .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailEmails, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('回复这封 Gmail 邮件', gmailReply, 'gmail.reply.send'))
+        .assertLarger(composioPreferredToolScore('回复这封 Gmail 邮件', gmailDraft, 'gmail.reply.send'));
       expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
         .assertLarger(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailThreads, 'gmail.mail.search'));
       expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
@@ -408,6 +459,56 @@ export default function composioDynamicBackendTest() {
       expect(ticketmasterResult.title).assertEqual('Composio Ticketmaster 结果');
       expect(ticketmasterResult.summary.indexOf('返回 1 条')).assertLarger(-1);
       expect(JSON.stringify(ticketmasterResult.rows).indexOf('Shenzhen Live')).assertLarger(-1);
+    });
+
+    it('recognizes Hacker News search prompts and maps execute rows', 0, () => {
+      expect(isComposioDynamicPrompt('帮我用 Composio Hacker News 搜 openai codex 的帖子')).assertTrue();
+      expect(shouldAttemptComposioDynamic('帮我用 Composio Hacker News 搜 openai codex 的帖子', 'execute', false)).assertTrue();
+
+      const observation = '{"data":{"hits":[{"title":"OpenAI Codex discussion","author":"pg","points":128,"num_comments":42,"url":"https://news.ycombinator.com/item?id=123","created_at":"2026-07-09T01:00:00Z"}]}}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'HACKERNEWS_SEARCH_POSTS',
+        '帮我用 Composio Hacker News 搜 openai codex 的帖子'
+      );
+
+      expect(result.title).assertEqual('Composio Hacker News 结果');
+      expect(result.status).assertEqual('success');
+      expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('OpenAI Codex discussion')).assertLarger(-1);
+    });
+
+    it('recognizes Reddit search prompts and maps execute rows', 0, () => {
+      expect(isComposioDynamicPrompt('帮我用 Reddit 查 openai codex 讨论')).assertTrue();
+      expect(shouldAttemptComposioDynamic('帮我用 Reddit 查 openai codex 讨论', 'execute', false)).assertTrue();
+
+      const observation = '{"data":{"children":[{"data":{"title":"OpenAI Codex on Reddit","author":"dev_user","ups":88,"num_comments":12,"permalink":"/r/OpenAI/comments/1/codex","selftext":"Long discussion"}}]}}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'REDDIT_SEARCH_POSTS',
+        '帮我用 Reddit 查 openai codex 讨论'
+      );
+
+      expect(result.title).assertEqual('Composio Reddit 结果');
+      expect(result.status).assertEqual('success');
+      expect(result.summary.indexOf('返回 1 条')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('OpenAI Codex on Reddit')).assertLarger(-1);
+    });
+
+    it('keeps john on the GitHub path instead of Hacker News', 0, () => {
+      const prompt = '帮我用 Composio GitHub 查 john 的 PR';
+
+      expect(isComposioDynamicPrompt(prompt)).assertTrue();
+      expect(shouldAttemptComposioDynamic(prompt, 'execute', false)).assertTrue();
+
+      const observation = '{"source":"Composio","authorizedToolkits":["github"],"tools":[{"toolSlug":"GITHUB_FIND_PULL_REQUESTS","description":"Search GitHub pull requests","inputSchema":"{}"}]}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation('search', observation, '', prompt);
+
+      expect(result.title).assertEqual('Composio GitHub 结果');
+      expect(JSON.stringify(result.rows).indexOf('GITHUB_FIND_PULL_REQUESTS')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf('Hacker News')).assertEqual(-1);
     });
 
     it('keeps target app identity when Composio has no authorized matching tool', 0, () => {

@@ -37,6 +37,9 @@ class AiphoneTool implements AgentTool {
     if (this.toolId === 'memory.update') {
       return this.runMemoryUpdate(input);
     }
+    if (this.toolId === 'worldcup.open') {
+      return 'Client intent accepted: worldcup.open. The app will open the World Cup experience.';
+    }
     const parsedArgs = this.parseInputArgs(input);
     const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
     const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
@@ -81,6 +84,13 @@ class AiphoneTool implements AgentTool {
   }
 }
 
+export function isExplicitLuckinOrderPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  const hasLuckin = /瑞幸|luckin|ruixing/i.test(text);
+  const hasTransaction = /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|买瑞幸|帮我买|购买一杯|购买瑞幸|来一杯|要一杯|\border\b|\bbuy\b/i.test(text);
+  return hasLuckin && hasTransaction;
+}
+
 function escapeRawLineBreaksInJsonStrings(value: string): string {
   let result = '';
   let inString = false;
@@ -114,6 +124,14 @@ function escapeRawLineBreaksInJsonStrings(value: string): string {
   return result;
 }
 
+function unwrapSingleArgsEnvelope(parsed: Object): Object {
+  const record = parsed as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(record);
+  const args = record.args;
+  return keys.length === 1 && keys[0] === 'args' && args !== null && args !== undefined &&
+    typeof args === 'object' && !Array.isArray(args) ? args as Object : parsed;
+}
+
 export function parseLoopToolInputArgs(input: string): Object | null {
   const trimmed = input.trim();
   if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
@@ -122,13 +140,13 @@ export function parseLoopToolInputArgs(input: string): Object | null {
   try {
     const parsed = JSON.parse(trimmed) as Object | null;
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
+      return unwrapSingleArgsEnvelope(parsed);
     }
   } catch (_error) {
     try {
       const parsed = JSON.parse(escapeRawLineBreaksInJsonStrings(trimmed)) as Object | null;
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
+        return unwrapSingleArgsEnvelope(parsed);
       }
     } catch (_repairError) {
     }
@@ -225,7 +243,12 @@ export class LoopBackend {
 
   private buildToolRegistry(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): ToolRegistry {
     const registry = new ToolRegistry();
+    const currentPrompt = request.userPrompt === undefined || request.userPrompt.trim().length === 0 ?
+      request.prompt : request.userPrompt;
     for (const definition of allToolDefinitions()) {
+      if (definition.toolId === 'luckin.order.preview' && !isExplicitLuckinOrderPrompt(currentPrompt)) {
+        continue;
+      }
       registry.register(new AiphoneTool(
         definition.toolId,
         this.describeAiphoneTool(definition),
@@ -241,7 +264,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use dynamic.search for payment, ordinary SocialHub DM inbox, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -257,7 +280,13 @@ export class LoopBackend {
     } else if (definition.toolId === 'flight.search') {
       description += '. Use for flight, airline, airport, or flight-board requests.';
     } else if (definition.toolId === 'food.search') {
-      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
+      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, menus, coupons, delivery, and food or beverage places near a location. Do not use for Luckin order placement; use luckin.order.preview for ordering Luckin coffee.';
+    } else if (definition.toolId === 'luckin.order.preview') {
+      description += '. Use only when the current user message itself explicitly names Luckin/Ruixing and explicitly asks to place or prepare a real order, for example "点一杯瑞幸咖啡", "帮我买一杯瑞幸生椰拿铁", or "瑞幸下单". Do not infer Luckin ordering from saved brand preferences or memory. A Luckin brand mention, store discovery, menu browsing, product question, or price question is not an order and must use food.search instead. This is the first step for explicit Luckin ordering: it queries nearby stores, product SKU/options, and previewOrder pricing. Input must be JSON; at minimum pass {"prompt":"<original user request>"} or {"query":"<original user request>"}. Do not answer with note or food.search when the current message explicitly requests a Luckin order.';
+    } else if (definition.toolId === 'luckin.order.create') {
+      description += '. Use only after a Luckin order preview card returned real deptId, productId, and skuCode, and the user confirms creating the order. Do not use directly from an initial "order coffee" request.';
+    } else if (definition.toolId === 'luckin.order.status') {
+      description += '. Use when the user asks to check, refresh, or view a Luckin order status, pickup code, or existing orderId.';
     } else if (definition.toolId === 'social.feed.search') {
       description += '. Use for ordinary SocialHub X/Twitter DM, Slack DM, WeCom DM, private-message inbox, or connection-state requests. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. If the user explicitly says Composio Slack, Discord, LinkedIn, WhatsApp, Instagram, TikTok, or another unsupported social toolkit, use dynamic.search instead. Never fabricate social messages.';
     } else if (definition.toolId === 'social.reply.draft') {
@@ -267,13 +296,13 @@ export class LoopBackend {
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
     } else if (definition.toolId === 'mail.search') {
-      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
+      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. Action input must be JSON with providers, query, and pageSize. Always include query; if the user wants latest/recent mail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
     } else if (definition.toolId === 'mail.thread.read') {
       description += '. Use only when the user opens or reads a specific aggregate mail result and provider plus messageId/threadId are available.';
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query; do not pass plain keywords. Generate args.query from the user request; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR submission OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query and args.pageSize; do not pass plain keywords. Always include query; if the user wants latest/recent Gmail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. Generate args.query from the user request only when the user is searching by keyword; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {
@@ -286,6 +315,10 @@ export class LoopBackend {
       description += '. Blocked safety fallback. Do not use for ordinary writing, composing, replying, or "send an email saying..." requests; use gmail.draft.create. Use only if the user explicitly asks to bypass review or confirmation and send immediately, and expect the client to block it.';
     } else if (definition.toolId === 'media.video.search') {
       description += '. Use for Bilibili/B站/哔哩哔哩 video search or multi-source video search. If the same request mentions YouTube and Bilibili, choose media.video.search with sources ["youtube","bilibili"].';
+    } else if (definition.toolId === 'media.aggregate.search') {
+      description += '. Use only for mixed-content topic research where the user asks for videos plus news, discussions, posts, or public reactions around one topic; use media.video.search for video-only requests. It aggregates YouTube, Bilibili, X public posts, Hacker News and Reddit via Composio, and Zhihu via its official REST API. Never fabricate media or posts.';
+    } else if (definition.toolId === 'worldcup.open') {
+      description += '. Use when the user wants to open the World Cup experience, view World Cup schedules, next match time, previews, highlights, teams, players, or matchup cards. Use media tools instead for explicit YouTube-only, Bilibili-only, or mixed-content search requests.';
     } else if (definition.toolId === 'youtube.video.search') {
       description += '. Use only for explicit YouTube-only public video search; use media.video.search for Bilibili or multi-source video requests.';
     } else if (definition.toolId === 'calendar.events.search') {

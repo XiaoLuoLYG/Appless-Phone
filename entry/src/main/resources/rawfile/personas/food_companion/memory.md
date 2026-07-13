@@ -11,7 +11,7 @@ updated_at: 2026-07-03
 - 常用场景：工作日提神、附近可自取优先。
 
 ## Constraints
-- 不替用户支付或下单。
+- 不替用户支付；瑞幸创建订单必须先预览并等待用户确认。
 - 不把 Google Maps 当默认餐饮来源，除非用户明确提到 Google Maps、gmap、谷歌地图或 Google Places。
 
 ## Evidence

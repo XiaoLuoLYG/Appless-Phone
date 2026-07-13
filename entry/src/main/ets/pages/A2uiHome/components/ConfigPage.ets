@@ -268,6 +268,11 @@ export struct ConfigPage {
     return count;
   }
 
+  private composioToolkitInitial(summary: ComposioToolkitSummary): string {
+    const label = summary.name.trim().length > 0 ? summary.name.trim() : summary.slug.trim();
+    return label.length > 0 ? label.substring(0, 1).toUpperCase() : '?';
+  }
+
   private composioToolkitNameFontSize(summary: ComposioToolkitSummary): number {
     return summary.name.length > 12 ? 9 : 11;
   }
@@ -276,16 +281,21 @@ export struct ConfigPage {
   ComposioToolkitTile(summary: ComposioToolkitSummary) {
     Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
-        if (composioToolkitLogoResource(summary.slug) !== null) {
-          Image(composioToolkitLogoResource(summary.slug) as Resource)
-            .width(30)
-            .height(30)
-            .objectFit(ImageFit.Contain)
-        } else {
-          Blank()
-            .width(30)
-            .height(30)
+        Stack({ alignContent: Alignment.Center }) {
+          if (composioToolkitLogoResource(summary.slug) !== null) {
+            Image(composioToolkitLogoResource(summary.slug) as Resource)
+              .width(30)
+              .height(30)
+              .objectFit(ImageFit.Contain)
+          } else {
+            Text(this.composioToolkitInitial(summary))
+              .fontSize(13)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_INK)
+          }
         }
+          .width(30)
+          .height(30)
         Text(summary.name)
           .fontSize(this.composioToolkitNameFontSize(summary))
           .fontWeight(FontWeight.Medium)

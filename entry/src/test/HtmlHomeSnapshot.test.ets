@@ -1,7 +1,17 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { isHtmlHomeActionAllowed } from '../main/ets/pages/A2uiHome/html/HtmlHomeActionPolicy';
-import { A2uiAction, A2uiComponent, A2uiMessage, A2uiSurfaceState } from '@loop/agent-core';
+import {
+  A2uiAction,
+  A2uiComponent,
+  A2uiMessage,
+  A2uiSurfaceState,
+  AggregateSearchPost,
+  AggregateSearchResult,
+  AggregateSearchRowData,
+  AggregateSearchSourceStatus,
+  AggregateSearchVideo
+} from '@loop/agent-core';
 
 function surface(intent: string, status: string, components: A2uiComponent[], dataModelJson: string): A2uiSurfaceState {
   return {
@@ -27,6 +37,17 @@ function root(child: string): A2uiComponent {
 
 interface StripeOnboardingActionArgs {
   onboardingUrl: string;
+}
+
+interface AggregateSearchFixtureDataModel {
+  aggregateSearch: AggregateSearchResult;
+}
+
+function aggregateSearchDataModelJson(result: AggregateSearchResult): string {
+  const model: AggregateSearchFixtureDataModel = {
+    aggregateSearch: result
+  };
+  return JSON.stringify(model);
 }
 
 export default function htmlHomeSnapshotTest() {
@@ -206,6 +227,109 @@ export default function htmlHomeSnapshotTest() {
 
       expect(serialized.indexOf('AIPhone 正在处理')).assertEqual(-1);
       expect(serialized.indexOf('Coffee')).assertLarger(-1);
+    });
+
+    it('maps aggregate search data into media and post blocks', 0, () => {
+      const aggregateComponent: A2uiComponent = {
+        id: 'aggregate_search',
+        component: 'AggregateSearch',
+        title: '聚合搜索',
+        dataPath: '/aggregateSearch',
+        status: 'ready'
+      };
+      const videoRows: AggregateSearchRowData[] = [{ label: 'Video ID', value: 'abc123' }];
+      const videos: AggregateSearchVideo[] = [{
+        id: 'youtube-1',
+        source: 'youtube',
+        provider: 'YouTube',
+        title: 'Codex demo',
+        summary: 'Video row',
+        url: 'https://www.youtube.com/watch?v=abc123',
+        thumbnail: '',
+        publishedAt: '',
+        duration: '',
+        status: 'success',
+        rows: videoRows
+      }];
+      const postRows: AggregateSearchRowData[] = [{ label: 'points', value: '128' }];
+      const posts: AggregateSearchPost[] = [{
+        id: 'hn-1',
+        source: 'hackernews',
+        provider: 'Hacker News',
+        title: 'OpenAI Codex discussion',
+        author: 'pg',
+        handle: 'pg',
+        text: 'Discussion row',
+        url: 'https://news.ycombinator.com/item?id=123',
+        publishedAt: '',
+        score: '128',
+        commentCount: '42',
+        status: 'success',
+        rows: postRows
+      }];
+      const sourceStatuses: AggregateSearchSourceStatus[] = [
+        { source: 'youtube', label: 'YouTube', status: 'success', message: '1 result', count: 1 },
+        { source: 'zhihu', label: '知乎', status: 'needs_auth', message: '未配置 ZHIHU_API_KEY（知乎 Access Secret）。', count: 0 }
+      ];
+      const aggregateSearch: AggregateSearchResult = {
+        query: 'openai codex',
+        videos: videos,
+        posts: posts,
+        sourceStatuses: sourceStatuses,
+        summary: '1 video, 1 discussion'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('aggregate_search', 'ready', [root('aggregate_search'), aggregateComponent],
+          aggregateSearchDataModelJson(aggregateSearch)),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(doc.kind).assertEqual('aggregate-search');
+      expect(doc.title).assertEqual('聚合搜索');
+      expect(doc.subtitle).assertEqual('openai codex');
+      expect(JSON.stringify(doc.blocks).indexOf('aggregate-video')).assertLarger(-1);
+      expect(JSON.stringify(doc.blocks).indexOf('aggregate-post')).assertLarger(-1);
+      expect(JSON.stringify(doc.blocks).indexOf('aggregate-source-status')).assertLarger(-1);
+    });
+
+    it('maps aggregate search data without a matching component', 0, () => {
+      const videos: AggregateSearchVideo[] = [{
+        id: 'youtube-1',
+        source: 'youtube',
+        provider: 'YouTube',
+        title: 'Codex demo',
+        summary: 'Video row',
+        url: 'https://www.youtube.com/watch?v=abc123',
+        thumbnail: '',
+        publishedAt: '',
+        duration: '',
+        status: 'success',
+        rows: []
+      }];
+      const posts: AggregateSearchPost[] = [];
+      const sourceStatuses: AggregateSearchSourceStatus[] = [
+        { source: 'youtube', label: 'YouTube', status: 'success', message: '1 result', count: 1 }
+      ];
+      const aggregateSearch: AggregateSearchResult = {
+        query: 'openai codex',
+        videos: videos,
+        posts: posts,
+        sourceStatuses: sourceStatuses,
+        summary: '1 video'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('aggregate_search', 'ready', [root('missing_aggregate')],
+          aggregateSearchDataModelJson(aggregateSearch)),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(doc.kind).assertEqual('aggregate-search');
+      expect(JSON.stringify(doc.blocks).indexOf('aggregate-video')).assertLarger(-1);
+      expect(JSON.stringify(doc.blocks).indexOf('Codex demo')).assertLarger(-1);
     });
 
     it('tolerates partial travel and food rows', 0, () => {

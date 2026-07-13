@@ -308,14 +308,15 @@ function removeDanglingQuoteAfterClosedGroup(query: string): string {
 }
 
 function gmailSearchQueryFromArgs(args: GmailArgRecord): string {
+  const hasExplicitQuery = args['query'] !== undefined;
   let query = stringArg(args, 'query').trim();
   let usedPromptFallback = false;
-  if (query.length === 0) {
+  if (query.length === 0 && !hasExplicitQuery) {
     const prompt = stringArg(args, 'prompt').trim();
     query = prompt.length > 0 ? gmailSearchTermsFromPrompt(prompt) : '';
     usedPromptFallback = query.length > 0;
   }
-  if (query.length === 0) {
+  if (query.length === 0 && !hasExplicitQuery) {
     query = 'newer_than:30d';
   } else if (usedPromptFallback &&
     query.indexOf('newer_than:') < 0 &&

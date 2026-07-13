@@ -56,6 +56,42 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'luckin.order.preview',
+    domain: 'luckin',
+    intent: 'luckin.order.preview',
+    riskLevel: 'draft',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderPreviewRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.create']
+  },
+  {
+    toolId: 'luckin.order.create',
+    domain: 'luckin',
+    intent: 'luckin.order.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.status']
+  },
+  {
+    toolId: 'luckin.order.status',
+    domain: 'luckin',
+    intent: 'luckin.order.status',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderStatusQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'social.feed.search',
     domain: 'social',
     intent: 'social.feed.search',
@@ -222,6 +258,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'mediaVideos',
     a2uiComponent: 'GenericToolResults',
     actions: ['media.open.web']
+  },
+  {
+    toolId: 'media.aggregate.search',
+    domain: 'media',
+    intent: 'media.aggregate.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'oauth', 'mcp_auth'],
+    inputSchema: 'aggregateMediaSearchQuery',
+    outputSchema: 'aggregateSearch',
+    a2uiComponent: 'AggregateSearch',
+    actions: ['media.open.web']
+  },
+  {
+    toolId: 'worldcup.open',
+    domain: 'media',
+    intent: 'worldcup.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['system'],
+    inputSchema: 'worldCupExperienceRequest',
+    outputSchema: 'worldCupExperience',
+    a2uiComponent: 'AnythingDemo',
+    actions: []
   },
   {
     toolId: 'youtube.mine.playlists',
@@ -466,6 +526,11 @@ export function isPaymentToolId(toolId: string): boolean {
 export function isRideToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'ride';
+}
+
+export function isLuckinToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'luckin';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

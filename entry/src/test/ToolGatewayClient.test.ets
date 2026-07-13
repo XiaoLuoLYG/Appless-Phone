@@ -4,13 +4,17 @@ import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
-import { MailDraftArgs, MailSearchArgs } from '@loop/agent-core';
+import { DynamicToolRegistration, GenericMcpClient, MemoryCredentialStore } from '@loop/agent-core';
+import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
+import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
   configureComposioConfigFromRawJson,
   configureDidiMcpSandboxForRuntime,
+  configureGmailCredentialStoreForTests,
+  configureGmailMcpClientForTests,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
@@ -51,11 +55,27 @@ import {
   rideOrderConfirmedForTest,
   rideResultsFromMcpPayloadsForTest,
   rideShouldSurfaceAppLinkErrorForTest,
+  resolveLuckinLocationForTest,
+  saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '@loop/agent-core';
+
+class SuccessfulGmailMcpClient extends GenericMcpClient {
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    return {
+      sourceTag: 'Gmail OAuth',
+      toolName: 'search_threads',
+      title: 'Gmail message',
+      status: 'success',
+      summary: 'Real Gmail OAuth result',
+      rows: [{ label: 'Subject', value: 'Latest important mail' }],
+      rawPreview: 'gmail-oauth-result'
+    };
+  }
+}
 
 interface YouTubeSearchArgsFixture {
   query: string;
@@ -145,6 +165,7 @@ interface LuckinProductFixture {
   productName: string;
   price: number;
   skuCode: string;
+  pictureUrl: string;
   productAttrs: LuckinProductAttributeFixture[];
   tags: string[];
 }
@@ -155,6 +176,11 @@ interface LuckinProductsPayloadFixture {
 
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
+    it('falls back to the configured location for Luckin preview', 0, () => {
+      expect(resolveLuckinLocationForTest('', '点一杯咖啡', '114.029506,22.609878'))
+        .assertEqual('114.029506,22.609878');
+    });
+
     it('defaults to the in-app local tool route', 0, () => {
       expect(defaultToolGatewayUrl()).assertEqual('local://aiphone-tools');
       expect(isLocalToolGatewayUrl(defaultToolGatewayUrl())).assertTrue();
@@ -850,6 +876,20 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('loads Zhihu aggregate search key from local provider raw JSON without exposing secrets', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ZHIHU_API_KEY: 'zhihu-api-key'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('zhihuApiKey=present(13)')).assertLarger(-1);
+        expect(summary.indexOf('zhihu-api-key')).assertEqual(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('renders Maps missing-key errors without falling back to food search', 0, async () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');
@@ -946,6 +986,65 @@ export default function toolGatewayClientTest() {
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('falls back to existing device Gmail OAuth when Composio is unavailable', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(new SuccessfulGmailMcpClient());
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.mail.search',
+          '查看gmail里最新的重要邮件',
+          'surface_gmail_oauth_fallback',
+          'model_tool_request',
+          noop
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].status).assertEqual('success');
+        expect(rendered[0].sourceTag).assertEqual('Gmail OAuth');
+        expect(rendered[0].title).assertEqual('Gmail message');
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('uses the same Gmail OAuth fallback when saving a reply draft', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(new SuccessfulGmailMcpClient());
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const command: MailReplyCommand = {
+          requestKey: 'gmail-thread-1',
+          provider: 'gmail',
+          accountLabel: 'Gmail',
+          threadId: 'thread-1',
+          messageId: 'message-1',
+          internetMessageId: '',
+          to: ['author@example.com'],
+          subject: 'Re: ECCV',
+          body: 'Thanks for the update.',
+          replyMode: 'reply',
+          contextSummary: 'ECCV decision update'
+        };
+
+        const result = await saveConfiguredMailDraft(command);
+        expect(result.status).assertEqual('success');
+        expect(result.operation).assertEqual('draft');
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
       }
     });
 
@@ -1361,14 +1460,15 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps brand MCP adapters query-only', 0, () => {
+    it('keeps brand MCP adapters allowlisted', 0, () => {
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-nearby-stores')).assertTrue();
       expect(isReadonlyBrandMcpTool('麦当劳', 'query-meals')).assertTrue();
       expect(isReadonlyBrandMcpTool('麦当劳', 'create-order')).assertFalse();
       expect(isReadonlyBrandMcpTool('麦当劳', 'auto-bind-coupons')).assertFalse();
       expect(isReadonlyBrandMcpTool('瑞幸', 'queryShopList')).assertTrue();
       expect(isReadonlyBrandMcpTool('瑞幸', 'searchProductForMcp')).assertTrue();
-      expect(isReadonlyBrandMcpTool('瑞幸', 'createOrder')).assertFalse();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'previewOrder')).assertTrue();
+      expect(isReadonlyBrandMcpTool('瑞幸', 'createOrder')).assertTrue();
       expect(isReadonlyBrandMcpTool('瑞幸', 'cancelOrder')).assertFalse();
     });
 
@@ -1434,8 +1534,9 @@ export default function toolGatewayClientTest() {
             productName: '生椰拿铁',
             price: 19,
             skuCode: 'SKU001',
+            pictureUrl: 'https://img.luckincoffeecdn.com/example/latte.png',
             productAttrs: [
-              { attributeName: '温度', productSubAttrs: [{ attributeName: '冰', selected: true }] }
+              { attributeName: '温度', productSubAttrs: [{ attributeName: '冰', selected: true }, { attributeName: '热', selected: false }] }
             ],
             tags: ['人气']
           }

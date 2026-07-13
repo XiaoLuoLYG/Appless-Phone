@@ -283,7 +283,7 @@ export function mailReplyDraftAction(result: A2uiGenericToolResultData): A2uiAct
   return {
     id: 'mail.ai.reply.draft',
     label: 'AI 回复草稿',
-    prompt: 'Action ID: mail.ai.reply.draft。请基于真实邮件生成一封简短、礼貌、可审核的回复草稿。只选择 mail.draft.create，不要发送，不要编造事实。/toolRequest.args 必须保留 provider、messageId、threadId、to、subject、replyMode，并由你撰写 args.body。Structured action args JSON: ' + JSON.stringify(args),
+    prompt: 'Action ID: mail.ai.reply.draft。请只基于 args.contextSummary 中的真实邮件标题与正文生成一封简短、礼貌、可审核的回复草稿。只选择 mail.draft.create，不要发送，不要编造事实。/toolRequest.args 必须保留 provider、messageId、threadId、to、subject、replyMode，并由你撰写 args.body。Structured action args JSON: ' + JSON.stringify(args),
     variant: 'primary',
     kind: 'prompt',
     args: args

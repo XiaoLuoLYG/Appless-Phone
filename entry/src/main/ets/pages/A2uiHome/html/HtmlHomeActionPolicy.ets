@@ -29,6 +29,46 @@ interface HtmlPaymentCapturePayload {
   providerSessionId?: HtmlHomePolicyValue;
 }
 
+interface HtmlMailReplyPayload {
+  requestKey?: HtmlHomePolicyValue;
+  provider?: HtmlHomePolicyValue;
+  threadId?: HtmlHomePolicyValue;
+  messageId?: HtmlHomePolicyValue;
+  to?: HtmlHomePolicyValue;
+  subject?: HtmlHomePolicyValue;
+  body?: HtmlHomePolicyValue;
+}
+
+interface HtmlMailCalendarPayload {
+  requestKey?: HtmlHomePolicyValue;
+  provider?: HtmlHomePolicyValue;
+  threadId?: HtmlHomePolicyValue;
+  messageId?: HtmlHomePolicyValue;
+}
+
+interface LuckinPreviewArgs {
+  deptId?: HtmlHomePolicyValue;
+  productId?: HtmlHomePolicyValue;
+  skuCode?: HtmlHomePolicyValue;
+  location?: HtmlHomePolicyValue;
+  attrGroup?: HtmlHomePolicyValue;
+  attrChoice?: HtmlHomePolicyValue;
+  locationSource?: HtmlHomePolicyValue;
+}
+
+interface LuckinCreateArgs {
+  deptId?: HtmlHomePolicyValue;
+  productId?: HtmlHomePolicyValue;
+  skuCode?: HtmlHomePolicyValue;
+  location?: HtmlHomePolicyValue;
+}
+
+interface LuckinPaymentArgs {
+  orderId?: HtmlHomePolicyValue;
+  payOrderUrl?: HtmlHomePolicyValue;
+  payOrderQrCodeUrl?: HtmlHomePolicyValue;
+}
+
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
   if (action.id.length === 0) {
     return false;
@@ -55,13 +95,135 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     if (action.id === 'payment.capture' && paymentCaptureAllowed(block, action)) {
       return true;
     }
+    if ((action.id === 'html_mail_reply_save' || action.id === 'html_mail_reply_send') &&
+      mailReplySubmissionAllowed(block, action)) {
+      return true;
+    }
+    if (action.id === 'html_mail_reply_ai_generate' && mailReplyAiGenerateAllowed(block, action)) {
+      return true;
+    }
+    if (action.id === 'html_mail_calendar_add' && mailCalendarAddAllowed(block, action)) {
+      return true;
+    }
     for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
       if (sameAction(block.actions[actionIndex], action)) {
         return true;
       }
     }
   }
+  if (luckinPreviewAllowed(document, action)) {
+    return true;
+  }
+  if (luckinCreateAllowed(document, action)) {
+    return true;
+  }
+  if (luckinPaymentPageAllowed(document, action)) {
+    return true;
+  }
   return false;
+}
+
+function mailCalendarAddAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailCalendarPayload;
+  let detailKey = '';
+  let detailExpected: HtmlMailCalendarPayload | null = null;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+      if (candidate.args !== undefined) {
+        detailExpected = candidate.args as HtmlMailCalendarPayload;
+      }
+    }
+  }
+  if (detailExpected === null || detailKey.length === 0 ||
+    action.prompt !== detailKey || policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, detailExpected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, detailExpected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, detailExpected.messageId);
+}
+
+function policyStringList(value: HtmlHomePolicyValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  value.forEach((item: Object | string | number | boolean | null | undefined) => {
+    const text = policyText(item).trim();
+    if (text.length > 0) {
+      result.push(text);
+    }
+  });
+  return result;
+}
+
+function mailReplySubmissionAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailReplyPayload;
+  const recipients = policyStringList(actual.to);
+  if (policyText(actual.body).trim().length === 0 || recipients.length === 0) {
+    return false;
+  }
+  let detailKey = '';
+  let expected: HtmlMailReplyPayload | null = null;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+    }
+    if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
+      candidate.args !== undefined) {
+      expected = candidate.args as HtmlMailReplyPayload;
+    }
+  }
+  if (expected === null || detailKey.length === 0 || action.prompt !== detailKey ||
+    policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, expected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, expected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, expected.messageId);
+}
+
+function mailReplyAiGenerateAllowed(block: HtmlHomeBlock, action: A2uiAction): boolean {
+  if (block.kind !== 'generic-tool-result' || action.kind !== 'client' || action.args === undefined) {
+    return false;
+  }
+  const actual = action.args as HtmlMailReplyPayload;
+  let detailKey = '';
+  let expected: HtmlMailReplyPayload | null = null;
+  for (let index = 0; index < block.actions.length; index++) {
+    const candidate = block.actions[index];
+    if (candidate.id === 'html_mail_detail_read') {
+      detailKey = candidate.prompt;
+      if (candidate.args !== undefined) {
+        expected = candidate.args as HtmlMailReplyPayload;
+      }
+    }
+    if ((candidate.id === 'mail.ai.reply.draft' || candidate.id === 'gmail.ai.reply.draft') &&
+      candidate.args !== undefined) {
+      expected = candidate.args as HtmlMailReplyPayload;
+    }
+  }
+  if (expected === null || detailKey.length === 0 ||
+    action.prompt !== detailKey || policyText(actual.requestKey) !== detailKey) {
+    return false;
+  }
+  return matchesOptionalMailIdentity(actual.provider, expected.provider) &&
+    matchesOptionalMailIdentity(actual.threadId, expected.threadId) &&
+    matchesOptionalMailIdentity(actual.messageId, expected.messageId);
+}
+
+function matchesOptionalMailIdentity(actual: HtmlHomePolicyValue, expected: HtmlHomePolicyValue): boolean {
+  const expectedText = policyText(expected).trim();
+  return expectedText.length === 0 || policyText(actual).trim() === expectedText;
 }
 
 function sameAction(expected: HtmlHomeAction, actual: A2uiAction): boolean {
@@ -187,6 +349,113 @@ function blockHasMetric(block: HtmlHomeBlock, label: string, value: string): boo
     if (policyText(rows[index].label).trim().toLowerCase() === label.toLowerCase() &&
       policyText(rows[index].value).trim() === value) {
       return true;
+    }
+  }
+  return false;
+}
+
+function hasLuckinConfirmOrderBlock(document: HtmlHomeDocument): boolean {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const title = policyText(document.blocks[index].title).trim();
+    if (title.indexOf('确认瑞幸订单') >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasLuckinPaymentOrderBlock(document: HtmlHomeDocument): boolean {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const title = policyText(document.blocks[index].title).trim();
+    if (title.indexOf('瑞幸订单已创建') >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function luckinPaymentOrderId(action: A2uiAction): string {
+  if (action.args === undefined) {
+    return '';
+  }
+  const args = action.args as LuckinPaymentArgs;
+  return policyText(args.orderId).trim();
+}
+
+function luckinPaymentPageAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || !hasLuckinPaymentOrderBlock(document)) {
+    return false;
+  }
+  if (action.id === 'luckin.pay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.demo.alipay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.demo.googlepay.open' && action.kind === 'client') {
+    return true;
+  }
+  if (action.id === 'luckin.order.status' && action.kind === 'prompt') {
+    return action.prompt.indexOf('查询瑞幸订单状态') >= 0 || luckinPaymentOrderId(action).length > 0;
+  }
+  return false;
+}
+
+function luckinPreviewAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || action.id !== 'luckin.order.preview') {
+    return false;
+  }
+  if (action.args === undefined) {
+    return false;
+  }
+  const args = action.args as LuckinPreviewArgs;
+  const deptId = policyText(args.deptId).trim();
+  const attrGroup = policyText(args.attrGroup).trim();
+  const attrChoice = policyText(args.attrChoice).trim();
+  if (deptId.length > 0) {
+    if (attrGroup.length > 0 && attrChoice.length > 0) {
+      return hasLuckinConfirmOrderBlock(document) &&
+        policyText(args.productId).trim().length > 0 &&
+        policyText(args.skuCode).trim().length > 0 &&
+        policyText(args.location).trim().length > 0;
+    }
+    return true;
+  }
+  return policyText(args.locationSource).trim() === 'refresh';
+}
+
+function luckinCreateAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (document.kind !== 'luckin' || action.id !== 'luckin.order.create') {
+    return false;
+  }
+  if (!hasLuckinConfirmOrderBlock(document)) {
+    return false;
+  }
+  if (action.args === undefined) {
+    return false;
+  }
+  const args = action.args as LuckinCreateArgs;
+  const deptId = policyText(args.deptId).trim();
+  const productId = policyText(args.productId).trim();
+  const skuCode = policyText(args.skuCode).trim();
+  if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
+    return false;
+  }
+  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
+    const block = document.blocks[blockIndex];
+    if (policyText(block.title).indexOf('确认瑞幸订单') < 0) {
+      continue;
+    }
+    for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
+      const expected = block.actions[actionIndex];
+      if (expected.id !== 'luckin.order.create' || expected.args === undefined) {
+        continue;
+      }
+      const expectedArgs = expected.args as LuckinCreateArgs;
+      if (policyText(expectedArgs.deptId).trim() === deptId &&
+        policyText(expectedArgs.productId).trim() === productId) {
+        return true;
+      }
     }
   }
   return false;

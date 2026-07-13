@@ -239,8 +239,30 @@ export function inferCredentialFromMcpFailure(httpStatus: number, message: strin
   return null;
 }
 
+function rowsFromArray(label: string, items: Object[]): A2uiLabelValueData[] {
+  return items.slice(0, 8).map((item: Object, index: number) => {
+    const row: A2uiLabelValueData = {
+      label: label + ' ' + (index + 1).toString(),
+      value: textOf(item).substring(0, 4000)
+    };
+    return row;
+  });
+}
+
 function rowsFromObject(value: Object): A2uiLabelValueData[] {
-  return Object.keys(value).slice(0, 8).map((key: string) => {
+  if (Array.isArray(value)) {
+    return rowsFromArray('item', value);
+  }
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    const item = record[key];
+    if (Array.isArray(item)) {
+      return rowsFromArray(key, item);
+    }
+  }
+  return keys.slice(0, 8).map((key: string) => {
     const record = value as Record<string, Object | string | number | boolean | null | undefined>;
     const row: A2uiLabelValueData = {
       label: key,

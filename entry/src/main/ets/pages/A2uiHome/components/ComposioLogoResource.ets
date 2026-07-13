@@ -72,6 +72,12 @@ export function composioToolkitLogoResource(toolkitSlug: string): Resource | nul
   if (slug === 'ticketmaster') {
     return $r('app.media.logo_ticketmaster');
   }
+  if (slug === 'hackernews' || slug === 'hackernewssearchposts') {
+    return $r('app.media.logo_hackernews');
+  }
+  if (slug === 'reddit' || slug === 'redditsearchposts' || slug === 'redditsearchacrosssubreddits') {
+    return $r('app.media.logo_reddit');
+  }
   if (slug === 'hubspot') {
     return $r('app.media.logo_hubspot');
   }

@@ -11,6 +11,11 @@ interface ComposioExecuteArgs {
   fixedArgs?: Object;
 }
 
+export interface ComposioRawExecution {
+  toolSlug: string;
+  observation: string;
+}
+
 export interface ComposioSearchTool {
   toolSlug?: string;
   description?: string;
@@ -219,6 +224,12 @@ function composioToolkitFromPrompt(prompt: string): string {
   if (lower.indexOf('ticketmaster') >= 0 || lower.indexOf('ticket master') >= 0) {
     return 'ticketmaster';
   }
+  if (lower.indexOf('hacker news') >= 0 || lower.indexOf('hackernews') >= 0 || prompt.indexOf('黑客新闻') >= 0) {
+    return 'hackernews';
+  }
+  if (lower.indexOf('reddit') >= 0 || prompt.indexOf('红迪') >= 0) {
+    return 'reddit';
+  }
   if (lower.indexOf('github') >= 0) {
     return 'github';
   }
@@ -314,6 +325,12 @@ function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): st
   if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
     return 'Create a Gmail draft for review';
   }
+  if (fixedToolId === 'gmail.reply.send') {
+    return 'Reply to an existing Gmail thread';
+  }
+  if (fixedToolId === 'gmail.thread.read') {
+    return 'Read the full Gmail thread content by thread ID';
+  }
   if (toolkit === 'gmail') {
     return 'Search Gmail messages for ' + keyword;
   }
@@ -350,6 +367,12 @@ function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): st
   if (toolkit === 'ticketmaster') {
     return 'Search Ticketmaster events for ' + keyword;
   }
+  if (toolkit === 'hackernews') {
+    return 'Search Hacker News posts for ' + keyword;
+  }
+  if (toolkit === 'reddit') {
+    return 'Search Reddit posts for ' + keyword;
+  }
   if (containsAny(prompt, ['slack']) && containsAny(prompt, ['最近30', '最近 30', '近30', '近 30', '私信', 'dm', 'direct message'])) {
     return 'List recent Slack direct messages and channel messages from the last 30 days';
   }
@@ -378,6 +401,9 @@ function fixedToolAllowsSideEffectSlug(fixedToolId: string, slug: string): boole
   if (fixedToolId === 'gmail.draft.apply') {
     return isSafeGmailDraftApplySlug(slug);
   }
+  if (fixedToolId === 'gmail.reply.send') {
+    return slug === 'gmail_reply_to_thread';
+  }
   if (fixedToolId === 'calendar.event.create') {
     return slugContainsAny(slug, ['create', 'insert', 'add']);
   }
@@ -391,7 +417,7 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
   if (toolId === 'gmail.mail.search') {
     return [
       { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
-      { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults'] }
+      { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults', 'max_results'] }
     ];
   }
   if (toolId === 'gmail.thread.read') {
@@ -400,10 +426,18 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
   if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
     return [
       { source: 'to', targets: ['to', 'to_addresses', 'recipients', 'emails'] },
+      { source: 'recipientEmail', targets: ['recipient_email'] },
       { source: 'subject', targets: ['subject', 'title'] },
       { source: 'body', targets: ['body', 'message', 'content', 'text'] },
       { source: 'threadId', targets: ['threadId', 'thread_id'] },
       { source: 'replyMode', targets: ['replyMode', 'reply_mode', 'mode'] }
+    ];
+  }
+  if (toolId === 'gmail.reply.send') {
+    return [
+      { source: 'recipientEmail', targets: ['recipient_email'] },
+      { source: 'body', targets: ['message_body', 'body', 'message'] },
+      { source: 'threadId', targets: ['thread_id', 'threadId'] }
     ];
   }
   if (toolId === 'calendar.events.search') {
@@ -438,6 +472,9 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
 function fixedWritePreservedArgs(toolId: string): string[] {
   if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
     return ['to', 'subject', 'body', 'threadId', 'replyMode'];
+  }
+  if (toolId === 'gmail.reply.send') {
+    return ['recipientEmail', 'body', 'threadId'];
   }
   if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
     return ['eventId', 'title', 'start', 'end', 'timezone', 'calendarId'];
@@ -477,6 +514,15 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
   if (fixedToolId === 'gmail.draft.apply') {
     const missing: string[] = [];
     ['threadId', 'to', 'subject', 'replyMode', 'body'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
+  }
+  if (fixedToolId === 'gmail.reply.send') {
+    const missing: string[] = [];
+    ['threadId', 'recipientEmail', 'body'].forEach((name: string) => {
       if (!hasMeaningfulValue(record[name])) {
         missing.push(name);
       }
@@ -535,7 +581,8 @@ function mergeFixedArguments(
   const record = argumentRecord(fixedArgs);
   fixedArgumentAliases(fixedToolId).forEach((alias: FixedArgumentAlias) => {
     const value = record[alias.source];
-    if (!hasMeaningfulValue(value)) {
+    const explicitEmptyQuery = alias.source === 'query' && value === '';
+    if (!hasMeaningfulValue(value) && !explicitEmptyQuery) {
       return;
     }
     alias.targets.forEach((targetName: string) => setIfSupported(target, schema, targetName, value as Object | string | number | boolean));
@@ -586,11 +633,20 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
     (slugContainsAny(slug, ['get', 'read', 'fetch']) && slugContainsAny(slug, ['gmail', 'thread', 'message']))) {
     score += 400;
   }
+  if (fixedToolId === 'gmail.thread.read' && slug === 'gmail_fetch_message_by_thread_id') {
+    score += 1000;
+  }
+  if (fixedToolId === 'gmail.thread.read' && slug === 'gmail_fetch_emails') {
+    score -= 900;
+  }
   if (fixedToolId === 'gmail.draft.create' && isSafeGmailDraftCreateSlug(slug)) {
     score += 700;
   }
   if (fixedToolId === 'gmail.draft.apply' && isSafeGmailDraftApplySlug(slug)) {
     score += 700;
+  }
+  if (fixedToolId === 'gmail.reply.send' && slug === 'gmail_reply_to_thread') {
+    score += 1200;
   }
   if (fixedToolId === 'calendar.events.search' &&
     (slugContainsAny(slug, ['search', 'find', 'list', 'get']) && slugContainsAny(slug, ['calendar', 'event']))) {
@@ -641,6 +697,31 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
   }
   if (toolkit === 'ticketmaster' && (slug.indexOf('event') >= 0 || description.indexOf('event') >= 0)) {
     score += 80;
+  }
+  if (toolkit === 'hackernews') {
+    if (slug === 'hackernews_search_posts') {
+      score += 220;
+    }
+    if (slug.indexOf('search') >= 0 && (slug.indexOf('post') >= 0 || description.indexOf('post') >= 0)) {
+      score += 80;
+    }
+  }
+  if (toolkit === 'reddit') {
+    if (slug === 'reddit_search_across_subreddits') {
+      score += 260;
+    }
+    if (slug === 'reddit_search_posts') {
+      score += 240;
+    }
+    if (slug.indexOf('post') >= 0 || description.indexOf('post') >= 0) {
+      score += 120;
+    }
+    if (slug === 'reddit_get_r_top' || slug === 'reddit_retrieve_reddit_post') {
+      score -= 260;
+    }
+    if (slug.indexOf('subreddit') >= 0 && slug !== 'reddit_search_across_subreddits' && slug.indexOf('post') < 0) {
+      score -= 180;
+    }
   }
   if (containsAny(prompt, ['github']) && containsAny(prompt, ['pr', 'pull request', 'pull requests'])) {
     if (slug === 'github_find_pull_requests') {
@@ -785,9 +866,23 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
     setIfSupported(args, schema, 'count', 5);
     return args;
   }
+  if (lower === 'hackernews_search_posts') {
+    setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'size', 5);
+    setIfSupported(args, schema, 'page', 0);
+    return args;
+  }
+  if (lower === 'reddit_search_across_subreddits') {
+    setIfSupported(args, schema, 'search_query', keyword);
+    setIfSupported(args, schema, 'query', keyword);
+    setIfSupported(args, schema, 'limit', 5);
+    setIfSupported(args, schema, 'count', 5);
+    return args;
+  }
   const toolkit = composioToolkitFromPrompt(prompt);
   if (toolkit === 'outlook' || toolkit === 'discord' || toolkit === 'linkedin' || toolkit === 'whatsapp' ||
-    toolkit === 'instagram' || toolkit === 'spotify' || toolkit === 'tiktok' || toolkit === 'ticketmaster') {
+    toolkit === 'instagram' || toolkit === 'spotify' || toolkit === 'tiktok' || toolkit === 'ticketmaster' ||
+    toolkit === 'reddit') {
     setIfSupported(args, schema, 'query', keyword);
     setIfSupported(args, schema, 'q', keyword);
     setIfSupported(args, schema, 'search', keyword);
@@ -966,6 +1061,10 @@ function itemDetail(item: Object): string {
   if (url.length > 0) {
     parts.push(url);
   }
+  const image = stringField(record, ['thumbnail_pic', 'bmiddle_pic', 'original_pic', 'image', 'image_url', 'imageUrl', 'cover', 'thumbnail', 'pic', 'pics', 'images']);
+  if (image.length > 0) {
+    parts.push(image);
+  }
   const snippet = stringField(record, ['snippet', 'text', 'message', 'body', 'content', 'description']);
   if (snippet.length > 0 && parts.join(' ').indexOf(snippet.substring(0, 40)) < 0) {
     parts.push(snippet.substring(0, 180));
@@ -1001,7 +1100,8 @@ function firstArrayHit(value: Object | string | number | boolean | null | undefi
     return { found: false, label: '', items: [] };
   }
   const record = value as Record<string, Object | string | number | boolean | null | undefined>;
-  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents', 'messages', 'emails', 'mails', 'posts', 'comments', 'tracks', 'playlists', 'videos', 'events'];
+  const preferred = ['pull_requests', 'files', 'matches', 'items', 'results', 'documents', 'messages', 'emails', 'mails',
+    'posts', 'comments', 'answers', 'articles', 'questions', 'statuses', 'feeds', 'tracks', 'playlists', 'videos', 'events'];
   for (let index = 0; index < preferred.length; index++) {
     const hit = arrayHit(preferred[index], record[preferred[index]]);
     if (hit.found) {
@@ -1260,6 +1360,12 @@ function resultTitleForTool(toolSlug: string): string {
   if (lower.indexOf('ticketmaster') >= 0) {
     return 'Composio Ticketmaster 结果';
   }
+  if (lower.indexOf('hackernews') >= 0 || lower.indexOf('hacker_news') >= 0) {
+    return 'Composio Hacker News 结果';
+  }
+  if (lower.indexOf('reddit') >= 0) {
+    return 'Composio Reddit 结果';
+  }
   return 'Composio 工具结果';
 }
 
@@ -1316,6 +1422,10 @@ export function isComposioConfigured(): boolean {
 
 export function isComposioDynamicPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
+  if (lower.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0 ||
+    lower.indexOf('zhihu') >= 0 || prompt.indexOf('知乎') >= 0) {
+    return false;
+  }
   return lower.indexOf('notion') >= 0 ||
     lower.indexOf('gmail') >= 0 ||
     lower.indexOf('google calendar') >= 0 ||
@@ -1346,6 +1456,11 @@ export function isComposioDynamicPrompt(prompt: string): boolean {
     lower.indexOf('tik tok') >= 0 ||
     lower.indexOf('ticketmaster') >= 0 ||
     lower.indexOf('ticket master') >= 0 ||
+    lower.indexOf('hacker news') >= 0 ||
+    lower.indexOf('hackernews') >= 0 ||
+    lower.indexOf('reddit') >= 0 ||
+    prompt.indexOf('黑客新闻') >= 0 ||
+    prompt.indexOf('红迪') >= 0 ||
     prompt.indexOf('谷歌邮箱') >= 0 ||
     prompt.indexOf('谷歌邮件') >= 0 ||
     prompt.indexOf('谷歌日历') >= 0 ||
@@ -1472,6 +1587,32 @@ async function callComposioSearchAndExecute(
   const slug = textOf(tool.toolSlug).trim();
   const args = composioArgumentsForTool(tool, prompt, fixedToolId, parsed.fixedArgs ?? null);
   return composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
+}
+
+export async function callComposioFixedRaw(
+  prompt: string,
+  fixedToolId: string,
+  fixedArgs: Object
+): Promise<ComposioRawExecution> {
+  const current = await clientForPrompt(prompt);
+  const searchObservation = await current.search(normalizedComposioUseCase(prompt, fixedToolId));
+  let payload: ComposioSearchObservation;
+  try {
+    payload = JSON.parse(searchObservation) as ComposioSearchObservation;
+  } catch (_error) {
+    throw new Error('Composio returned an invalid tool search response.');
+  }
+  const tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  if (tool === null) {
+    throw new Error('Composio did not find a Gmail thread read tool.');
+  }
+  const toolSlug = textOf(tool.toolSlug).trim();
+  const toolArgs = composioArgumentsForTool(tool, prompt, fixedToolId, fixedArgs);
+  const result: ComposioRawExecution = {
+    toolSlug: toolSlug,
+    observation: await current.execute(toolSlug, toolArgs)
+  };
+  return result;
 }
 
 async function client(): Promise<ComposioSessionClient> {

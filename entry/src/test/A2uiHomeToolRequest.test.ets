@@ -56,6 +56,12 @@ interface PaymentFallbackArgsFixture {
   fundingSource?: string;
 }
 
+interface LuckinCreateArgsFixture {
+  deptId: string;
+  productId: string;
+  skuCode: string;
+}
+
 type ToolRequestArgValue = Object | string | number | boolean | null | undefined;
 type ToolRequestArgRecord = Record<string, ToolRequestArgValue>;
 
@@ -409,6 +415,93 @@ export default function a2uiHomeToolRequestTest() {
       expect(argText(resolved.args, 'sweetness')).assertEqual('半糖');
     });
 
+    it('routes explicit Luckin ordering prompts to Luckin preview', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我点一杯瑞幸生椰拿铁，半糖少冰',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+    });
+
+    it('keeps Luckin discovery prompts on food search', 0, () => {
+      const prompt = '帮我查附近的瑞幸咖啡门店';
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', prompt, 'model_tool_request'),
+        prompt,
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('food.search');
+      expect(resolved.actionId).assertEqual('model_tool_request');
+    });
+
+    it('keeps Luckin product browsing on the model-selected food tool', 0, () => {
+      const prompt = '瑞幸生椰拿铁多少钱';
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', prompt, 'model_tool_request'),
+        prompt,
+        ''
+      );
+
+      expect(resolved.toolId).assertEqual('food.search');
+    });
+
+    it('keeps Luckin preference updates out of the order flow', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我只喝瑞幸咖啡',
+        ''
+      );
+
+      expect(resolved.hasTool).assertFalse();
+    });
+
+    it('reroutes model-selected food search to Luckin preview for ordering', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('food.search', '点一杯瑞幸冰美式', 'model_tool_request'),
+        '点一杯瑞幸冰美式',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.preview');
+      expect(resolved.actionId).assertEqual('client_luckin_order_reroute');
+    });
+
+    it('recognizes lowercase gmail as dedicated Gmail search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '查看gmail里最新的重要邮件',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('gmail.mail.search');
+    });
+
+    it('maps Luckin confirmation actions directly to order create', 0, () => {
+      const args: LuckinCreateArgsFixture = {
+        deptId: '101',
+        productId: '1',
+        skuCode: 'sku-1'
+      };
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '确认创建瑞幸订单',
+        'luckin.order.create',
+        args
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('luckin.order.create');
+      expect(argText(resolved.args, 'deptId')).assertEqual('101');
+    });
+
     it('keeps explicit gmap requests on Google Maps search', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
@@ -463,6 +556,65 @@ export default function a2uiHomeToolRequestTest() {
       expect(sources[0]).assertEqual('youtube');
       expect(sources[1]).assertEqual('bilibili');
       expect(argText(resolved.args, 'query')).assertEqual('');
+    });
+
+    it('falls back mixed news and discussion prompts to aggregate media search', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '我想看看有关 openai codex 的相关新闻和讨论',
+        ''
+      );
+      const sources = argSources(resolved.args);
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(resolved.actionId).assertEqual('client_intent_fallback');
+      expect(sources.indexOf('youtube')).assertLarger(-1);
+      expect(sources.indexOf('bilibili')).assertLarger(-1);
+      expect(sources.indexOf('x')).assertLarger(-1);
+      expect(sources.indexOf('hackernews')).assertLarger(-1);
+      expect(sources.indexOf('reddit')).assertLarger(-1);
+      expect(argText(resolved.args, 'query')).assertEqual('openai codex');
+    });
+
+    it('accepts compact aggregate news discussion prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        'openai codex 新闻讨论',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(argText(resolved.args, 'query')).assertEqual('openai codex');
+    });
+
+    it('reroutes mistaken X-only tool choice for mixed aggregate prompts', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('x.post.search', '我想看看有关 openai codex 的相关新闻和讨论', 'model_tool_request', null),
+        '我想看看有关 openai codex 的相关新闻和讨论',
+        ''
+      );
+
+      expect(resolved.hasTool).assertTrue();
+      expect(resolved.toolId).assertEqual('media.aggregate.search');
+      expect(resolved.actionId).assertEqual('client_aggregate_search_reroute');
+    });
+
+    it('does not steal single-source YouTube or X public post prompts', 0, () => {
+      const youtube = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '帮我整理 YouTube 上 openai codex 的新闻视频',
+        ''
+      );
+      const xPost = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', '', null),
+        '帮我整理 X 上 openai 最近的公开 post',
+        ''
+      );
+
+      expect(youtube.toolId).assertEqual('youtube.video.search');
+      expect(xPost.toolId).assertEqual('x.post.search');
     });
 
     it('reroutes mistaken dynamic media prompts to aggregate video search', 0, () => {
@@ -610,6 +762,26 @@ export default function a2uiHomeToolRequestTest() {
         '帮我查看 Slack 最近的消息',
         ''
       );
+      const composioWeibo = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Composio Weibo 查 openai codex 讨论',
+        ''
+      );
+      const aggregateWithZhihu = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我想看看有关 openai codex 的相关新闻和讨论，知乎也看',
+        ''
+      );
+      const reddit = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '帮我用 Reddit 查 openai codex 讨论',
+        ''
+      );
+      const aggregateWithReddit = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '我想看看有关 openai codex 的相关新闻和讨论，Reddit也看',
+        ''
+      );
 
       expect(googleDocs.toolId).assertEqual('dynamic.search');
       expect(googleDocs.actionId).assertEqual('client_intent_fallback');
@@ -618,6 +790,10 @@ export default function a2uiHomeToolRequestTest() {
       expect(outlook.toolId).assertEqual('dynamic.search');
       expect(discord.toolId).assertEqual('dynamic.search');
       expect(plainSlack.toolId).assertEqual('social.feed.search');
+      expect(composioWeibo.toolId).assertEqual('');
+      expect(aggregateWithZhihu.toolId).assertEqual('media.aggregate.search');
+      expect(reddit.toolId).assertEqual('dynamic.search');
+      expect(aggregateWithReddit.toolId).assertEqual('media.aggregate.search');
     });
 
     it('does not infer X post search from Xcode or generic post text', 0, () => {
