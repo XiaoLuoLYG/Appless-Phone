@@ -234,7 +234,7 @@ export struct HtmlHomeSurfaceView {
                 .fontColor('#211B17')
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text('安全弹窗 · 仍在 App 内')
+              Text(popupSubtitleFromTitle(this.popupTitle))
                 .fontSize(12)
                 .fontColor('#786E66')
                 .maxLines(1)
@@ -243,7 +243,7 @@ export struct HtmlHomeSurfaceView {
             }
             .layoutWeight(1)
 
-            Button('关闭')
+            Button('返回')
               .height(36)
               .width(68)
               .fontSize(13)
@@ -251,7 +251,11 @@ export struct HtmlHomeSurfaceView {
               .backgroundColor('#F5F2EE')
               .borderRadius(18)
               .onClick(() => {
-                this.popupVisible = false;
+                if (this.popupController.accessBackward()) {
+                  this.popupController.backward();
+                } else {
+                  this.popupVisible = false;
+                }
               })
           }
           .width('100%')
@@ -336,6 +340,9 @@ function actionObject(value: HtmlHomeActionValue): Object | undefined {
 
 function popupTitleFromUrl(url: string): string {
   const lower = url.toLowerCase();
+  if (lower.indexOf('google.com/maps/') >= 0 || lower.indexOf('maps.google.com/') >= 0) {
+    return 'Google Maps 路线';
+  }
   if (lower.indexOf('google') >= 0 || lower.indexOf('gpay') >= 0) {
     return 'Google Pay 确认';
   }
@@ -343,4 +350,8 @@ function popupTitleFromUrl(url: string): string {
     return 'PayPal 确认';
   }
   return '支付确认';
+}
+
+function popupSubtitleFromTitle(title: string): string {
+  return title === 'Google Maps 路线' ? '路线由 Google Maps 实时提供' : '安全确认页面';
 }

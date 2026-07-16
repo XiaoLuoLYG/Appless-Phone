@@ -42,6 +42,13 @@ interface MapsOpeningHours {
   openNow?: boolean;
 }
 
+export interface MapsRouteArgs {
+  origin?: string;
+  destination?: string;
+  travelMode?: string;
+  navigate?: boolean;
+}
+
 interface GoogleApiError {
   message?: string;
   status?: string;
@@ -76,6 +83,70 @@ function responseText(result: Object | string | number | boolean | ArrayBuffer):
 
 function encodeParam(value: string): string {
   return encodeURIComponent(value);
+}
+
+function routeArgs(value: Object | null): MapsRouteArgs {
+  return value === null ? JSON.parse('{}') as MapsRouteArgs : value as MapsRouteArgs;
+}
+
+function routeTravelMode(value: string | undefined): string {
+  const mode = textOf(value).trim().toLowerCase();
+  return ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler'].indexOf(mode) >= 0 ? mode : 'driving';
+}
+
+export function googleMapsDirectionsUrl(value: Object | null): string {
+  const args = routeArgs(value);
+  const origin = textOf(args.origin).trim();
+  const destination = textOf(args.destination).trim();
+  if (origin.length === 0 || destination.length === 0) {
+    return '';
+  }
+  let url = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeParam(origin) +
+    '&destination=' + encodeParam(destination) + '&travelmode=' + routeTravelMode(args.travelMode);
+  if (args.navigate === true) {
+    url += '&dir_action=navigate';
+  }
+  return url;
+}
+
+export function mapsRouteResult(value: Object | null): DynamicGenericToolResult {
+  const args = routeArgs(value);
+  const origin = textOf(args.origin).trim();
+  const destination = textOf(args.destination).trim();
+  const url = googleMapsDirectionsUrl(value);
+  if (url.length === 0) {
+    const missing: A2uiLabelValueData[] = [];
+    if (origin.length === 0) {
+      missing.push({ label: 'Missing', value: 'origin' });
+    }
+    if (destination.length === 0) {
+      missing.push({ label: 'Missing', value: 'destination' });
+    }
+    return {
+      sourceTag: 'Google Maps URL',
+      toolName: 'maps.route.open',
+      title: '需要路线起终点',
+      status: 'needs_input',
+      summary: '请提供起点和终点后再查询路线。',
+      rows: missing,
+      rawPreview: 'missing route endpoints'
+    };
+  }
+  return {
+    sourceTag: 'Google Maps',
+    toolName: 'maps.route.open',
+    title: origin + ' → ' + destination,
+    status: 'success',
+    summary: '路线已准备好。',
+    rows: [
+      { label: 'Origin', value: origin },
+      { label: 'Destination', value: destination },
+      { label: 'Travel Mode', value: routeTravelMode(args.travelMode) },
+      { label: 'Maps URL', value: url }
+    ],
+    rawPreview: url,
+    actions: [{ id: 'maps.open.web', label: '查看路线', prompt: url, variant: 'primary', kind: 'client' }]
+  };
 }
 
 export function mapsTextSearchBody(query: string): MapsTextSearchRequest {

@@ -22,7 +22,7 @@ import {
   A2uiTrainData,
   A2uiTripData
 } from '@loop/agent-core';
-import { emptySocialHub } from '@loop/agent-core';
+import { emptyA2uiSurface, emptySocialHub } from '@loop/agent-core';
 
 interface ToolRequestArgsFixture {
   query: string;
@@ -296,6 +296,50 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('client_intent_fallback');
     });
 
+    it('routes structured Google Maps directions without parsing endpoints from the prompt', 0, () => {
+      const args = JSON.parse('{"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"driving","navigate":true}') as Object;
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('maps.place.search', '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航', 'model_tool_request', args),
+        '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航',
+        ''
+      );
+
+      expect(resolved.toolId).assertEqual('maps.route.open');
+      expect(argText(resolved.args, 'origin')).assertEqual('深圳北站');
+      expect(argText(resolved.args, 'destination')).assertEqual('深圳湾口岸');
+    });
+
+    it('routes WhatsApp Business sends before generic Composio search', 0, () => {
+      const args = JSON.parse('{"toNumber":"+8613800138000","text":"十分钟后到"}') as Object;
+      const resolved = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('whatsapp.message.send', '发 WhatsApp', 'model_tool_request', args),
+        '用 WhatsApp 给 +8613800138000 发消息：十分钟后到',
+        ''
+      );
+
+      expect(resolved.toolId).assertEqual('whatsapp.message.send');
+      expect(argText(resolved.args, 'toNumber')).assertEqual('+8613800138000');
+      expect(argText(resolved.args, 'text')).assertEqual('十分钟后到');
+    });
+
+    it('maps WhatsApp and Calendar confirmation actions back to fixed tools', 0, () => {
+      const whatsapp = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '确认发送 WhatsApp 消息',
+        'whatsapp.message.send.confirm',
+        JSON.parse('{"toNumber":"+8613800138000","text":"十分钟后到","confirmed":true}') as Object
+      );
+      const calendar = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '确认删除 Google Calendar 日程',
+        'calendar.event.delete.confirm',
+        JSON.parse('{"eventId":"evt-1","confirmed":true}') as Object
+      );
+
+      expect(whatsapp.toolId).assertEqual('whatsapp.message.send');
+      expect(calendar.toolId).assertEqual('calendar.event.delete');
+    });
+
     it('infers PayPal payment only for explicit payment prompts', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
@@ -348,9 +392,11 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.actionId).assertEqual('stripe.account.onboard');
     });
 
-    it('keeps payment confirmation actions off the model path', 0, () => {
+    it('keeps confirmed payment, WhatsApp, and Calendar actions off the model path', 0, () => {
       expect(directPaymentToolIdForActionId('payment.confirm')).assertEqual('payment.send');
       expect(directPaymentToolIdForActionId('payment.capture')).assertEqual('payment.send');
+      expect(directPaymentToolIdForActionId('whatsapp.message.send.confirm')).assertEqual('whatsapp.message.send');
+      expect(directPaymentToolIdForActionId('calendar.event.delete.confirm')).assertEqual('calendar.event.delete');
       expect(directPaymentToolIdForActionId('payment.checkout.open')).assertEqual('');
     });
 
@@ -864,10 +910,16 @@ export default function a2uiHomeToolRequestTest() {
         '把 AIPhoneDemo smoke 日程改到明天下午4点',
         ''
       );
+      const remove = resolveA2uiHomeToolRequest(
+        surfaceWithToolRequest('', '', ''),
+        '删除 Google Calendar 日程',
+        ''
+      );
 
       expect(search.toolId).assertEqual('calendar.events.search');
       expect(create.toolId).assertEqual('calendar.event.create');
       expect(update.toolId).assertEqual('calendar.event.update');
+      expect(remove.toolId).assertEqual('calendar.event.delete');
       expect(create.args === null).assertTrue();
     });
 
@@ -1016,6 +1068,19 @@ export default function a2uiHomeToolRequestTest() {
       expect(resolved.toolId).assertEqual('gmail.mail.search');
       expect(serializedArgs.indexOf('committee@example.edu')).assertLarger(-1);
       expect(serializedArgs.indexOf('pageSize')).assertLarger(-1);
+    });
+
+    it('does not infer a tool after Loopy explicitly asks the user for missing input', 0, () => {
+      const resolved = resolveA2uiHomeToolRequest(
+        emptyA2uiSurface('surface_missing_calendar_input'),
+        '给我明天创建一个标题为 CalendarCRUDQA 的日程',
+        '',
+        null,
+        false
+      );
+
+      expect(resolved.hasTool).assertFalse();
+      expect(resolved.toolId).assertEqual('');
     });
 
     it('routes Gmail AI reply action and merges action context with model body args', 0, () => {

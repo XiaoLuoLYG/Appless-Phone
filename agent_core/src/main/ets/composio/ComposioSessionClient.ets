@@ -1,6 +1,7 @@
 import http from '@ohos.net.http';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposioConfig } from './ComposioConfig';
+import { bindComposioPhysicalNetwork, ComposioNetworkLease, restoreComposioNetwork } from './ComposioNetwork';
 import { normalizeComposioAuthConfigsResponse } from './ComposioAuthClient';
 
 const LOG_DOMAIN: number = 0x1200;
@@ -554,10 +555,15 @@ export class ComposioSessionClient {
 
   private async request(method: http.RequestMethod, path: string, body: string): Promise<HttpResult> {
     const request = http.createHttp();
+    let networkLease: ComposioNetworkLease | null = null;
     const requestPath = this.requestPath(path);
     const url = `${this.requestBaseUrl()}${requestPath}`;
     hilog.info(LOG_DOMAIN, LOG_TAG, 'request method=%{public}s path=%{public}s', `${method}`, path);
     try {
+      if (this.config.proxyBaseUrl.length === 0) {
+        networkLease = await bindComposioPhysicalNetwork();
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'physical network bound=%{public}s', networkLease.bound ? 'true' : 'false');
+      }
       const response = await request.request(url, {
         method: method,
         header: this.requestHeaders(),
@@ -574,6 +580,10 @@ export class ComposioSessionClient {
       return result;
     } finally {
       request.destroy();
+      if (networkLease !== null) {
+        await restoreComposioNetwork(networkLease);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'restored app network');
+      }
     }
   }
 

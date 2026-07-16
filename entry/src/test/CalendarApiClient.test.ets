@@ -4,10 +4,13 @@ import {
   calendarEventMatchesArgs,
   calendarCreateBody,
   calendarEventRequiredFields,
+  calendarResultsFromComposioObservation,
   calendarEventResultsFromListPayload,
   calendarMatchingExistingEventFromListPayload,
   calendarMissingArgsResult,
+  calendarProviderDateTime,
   calendarSearchQueryText,
+  calendarUpdateArgsFromResultsForTest,
   calendarUpdateBody,
   normalizedCalendarArgsForPrompt
 } from '@loop/agent-core';
@@ -42,15 +45,53 @@ export default function calendarApiClientTest() {
       expect(JSON.stringify(update).indexOf('"dateTime":"2026-06-30T16:00:00+08:00"')).assertLarger(-1);
     });
 
+    it('keeps model-owned new values while resolving one real event for update', 0, () => {
+      const matches = calendarEventResultsFromListPayload(
+        '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
+      );
+      const resolved = calendarUpdateArgsFromResultsForTest({
+        query: '团队同步',
+        timeMin: '2026-07-18T16:00:00+08:00',
+        timeMax: '2026-07-18T17:00:00+08:00',
+        start: '2026-07-18T16:30:00+08:00',
+        end: '2026-07-18T17:00:00+08:00',
+        timezone: 'Asia/Shanghai'
+      }, matches) as CalendarEventArgs;
+
+      expect(resolved.eventId).assertEqual('event-123');
+      expect(resolved.title).assertEqual('团队同步');
+      expect(resolved.start).assertEqual('2026-07-18T16:30:00+08:00');
+      expect(resolved.end).assertEqual('2026-07-18T17:00:00+08:00');
+    });
+
+    it('preserves model-owned wall time when adapting to the Composio Calendar schema', 0, () => {
+      expect(calendarProviderDateTime('2026-07-17T15:00:00+08:00')).assertEqual('2026-07-17T15:00:00');
+      expect(calendarProviderDateTime('2026-07-17T15:30+08:00')).assertEqual('2026-07-17T15:30');
+    });
+
     it('returns real missing-field errors instead of guessing dates', 0, () => {
       const missing = calendarEventRequiredFields('calendar.event.create', {
         title: 'AIPhoneDemo smoke'
       });
       const result = calendarMissingArgsResult('calendar.event.create', missing);
       expect(missing.join(',')).assertEqual('start,end');
-      expect(result.status).assertEqual('error');
-      expect(result.summary.indexOf('start')).assertLarger(-1);
-      expect(result.summary.indexOf('end')).assertLarger(-1);
+      expect(result.status).assertEqual('needs_input');
+      expect(result.summary.indexOf('开始时间')).assertLarger(-1);
+      expect(result.summary.indexOf('结束时间')).assertLarger(-1);
+    });
+
+    it('rejects natural-language timestamps before the Calendar Provider call', 0, () => {
+      const missing = calendarEventRequiredFields('calendar.event.create', {
+        title: 'CalendarCRUDQA-C-20260716',
+        start: '明天 15:00',
+        end: '明天 15:30',
+        timezone: 'Asia/Shanghai'
+      });
+      const result = calendarMissingArgsResult('calendar.event.create', missing);
+
+      expect(missing.join(',')).assertEqual('start,end');
+      expect(result.status).assertEqual('needs_input');
+      expect(result.summary.indexOf('明确')).assertLarger(-1);
     });
 
     it('does not use the whole prompt as the Calendar search query', 0, () => {
@@ -101,6 +142,54 @@ export default function calendarApiClientTest() {
       expect(args.calendarId).assertEqual('primary');
     });
 
+    it('normalizes an absolute date argument into an exact search window', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search',
+        '查看我 2026年7月31日的 Google Calendar 日程', {
+          date: '2026-07-31',
+          calendarId: 'primary'
+        }, new Date('2026-07-16T09:00:00+08:00'));
+
+      expect(args.timeMin).assertEqual('2026-07-31T00:00:00+08:00');
+      expect(args.timeMax).assertEqual('2026-08-01T00:00:00+08:00');
+      expect(args.timezone).assertEqual('Asia/Shanghai');
+    });
+
+    it('maps nested Composio Calendar payloads into real event cards', 0, () => {
+      const observation = '{"data":{"items":[{"id":"event-composio-1","summary":"AIPhoneDemo 真机测试","start":{"dateTime":"2026-07-31T15:00:00+08:00"},"end":{"dateTime":"2026-07-31T15:30:00+08:00"},"htmlLink":"https://calendar.google.com/event?eid=1"}]},"error":null}';
+      const results = calendarResultsFromComposioObservation('calendar.events.search', observation, {
+        timeMin: '2026-07-31T00:00:00+08:00',
+        timeMax: '2026-08-01T00:00:00+08:00'
+      });
+
+      expect(results.length).assertEqual(1);
+      expect(results[0].title).assertEqual('AIPhoneDemo 真机测试');
+      expect(results[0].sourceTag).assertEqual('Composio Google Calendar');
+      expect(results[0].rows[0].value).assertEqual('event-composio-1');
+      expect(results[0].rows[1].value).assertEqual('2026-07-31T15:00:00+08:00');
+    });
+
+    it('maps a Composio Calendar create payload into a visible confirmation event', 0, () => {
+      const observation = '{"data":{"id":"event-created-1","summary":"AIPhoneDemo 创建测试","start":{"dateTime":"2026-08-01T15:00:00+08:00"},"end":{"dateTime":"2026-08-01T15:30:00+08:00"},"htmlLink":"https://calendar.google.com/event?eid=2"},"error":null}';
+      const results = calendarResultsFromComposioObservation('calendar.event.create', observation);
+
+      expect(results.length).assertEqual(1);
+      expect(results[0].toolName).assertEqual('calendar.event.create');
+      expect(results[0].title).assertEqual('AIPhoneDemo 创建测试');
+      expect(results[0].rows[0].value).assertEqual('event-created-1');
+      expect(results[0].summary.indexOf('已直接写入')).assertLarger(-1);
+    });
+
+    it('unwraps the real Composio create response_data payload', 0, () => {
+      const observation = '{"data":{"composio_execution_message":null,"display_url":"https://calendar.google.com/event?eid=3","response_data":{"id":"event-created-real","summary":"AIPhoneDemo Calendar 修复验证","start":{"dateTime":"2026-08-01T15:00:00+08:00","timeZone":"Asia/Shanghai"},"end":{"dateTime":"2026-08-01T15:30:00+08:00","timeZone":"Asia/Shanghai"},"htmlLink":"https://calendar.google.com/event?eid=3"}},"error":null}';
+      const results = calendarResultsFromComposioObservation('calendar.event.create', observation);
+
+      expect(results.length).assertEqual(1);
+      expect(results[0].title).assertEqual('AIPhoneDemo Calendar 修复验证');
+      expect(results[0].rows[0].value).assertEqual('event-created-real');
+      expect(results[0].rows[1].value).assertEqual('2026-08-01T15:00:00+08:00');
+      expect(results[0].status).assertEqual('success');
+    });
+
     it('normalizes current week search prompts before calling Calendar', 0, () => {
       const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search', '帮我查看我本周的calendar日程', {
         timeRange: 'this week',
@@ -113,7 +202,21 @@ export default function calendarApiClientTest() {
       expect(args.calendarId).assertEqual('primary');
     });
 
-    it('normalizes stale model dates for relative create prompts without changing time', 0, () => {
+    it('replaces model timezone placeholders with a valid IANA timezone', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search',
+        '帮我看本月的 Google Calendar 日程', {
+          timeMin: '本月开始',
+          timeMax: '本月结束',
+          timezone: '用户时区',
+          calendarId: 'primary'
+        }, new Date('2026-07-16T09:00:00+08:00'));
+
+      expect(args.timezone).assertEqual('Asia/Shanghai');
+      expect(args.timeMin).assertEqual('2026-07-01T00:00:00+08:00');
+      expect(args.timeMax).assertEqual('2026-08-01T00:00:00+08:00');
+    });
+
+    it('does not rewrite model-owned Calendar write parameters from prompt text', 0, () => {
       const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.event.create', '帮我在明天下午创建一个一对一会议的日程，4:30开始持续半个小时', {
         title: '一对一会议',
         start: '2023-10-05T16:30:00+08:00',
@@ -123,8 +226,8 @@ export default function calendarApiClientTest() {
       }, new Date('2026-07-01T09:00:00+08:00'));
 
       expect(args.title).assertEqual('一对一会议');
-      expect(args.start).assertEqual('2026-07-02T16:30:00+08:00');
-      expect(args.end).assertEqual('2026-07-02T17:00:00+08:00');
+      expect(args.start).assertEqual('2023-10-05T16:30:00+08:00');
+      expect(args.end).assertEqual('2023-10-05T17:00:00+08:00');
       expect(args.timezone).assertEqual('Asia/Shanghai');
     });
   });

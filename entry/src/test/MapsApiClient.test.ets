@@ -1,5 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { mapsFoodRecordFromResult, mapsTextSearchBody, mapsTextSearchResultsFromPayload } from '@loop/agent-core';
+import {
+  googleMapsDirectionsUrl,
+  mapsFoodRecordFromResult,
+  mapsRouteResult,
+  mapsTextSearchBody,
+  mapsTextSearchResultsFromPayload
+} from '@loop/agent-core';
 
 export default function mapsApiClientTest() {
   describe('mapsApiClient', () => {
@@ -27,6 +33,28 @@ export default function mapsApiClientTest() {
       expect(food.name).assertEqual('Coffee Lab');
       expect(food.location).assertEqual('114.029506,22.609878');
       expect(tags[0]).assertEqual('Google Maps');
+    });
+
+    it('builds an in-app Google Maps directions URL from structured route args', 0, () => {
+      const url = googleMapsDirectionsUrl(JSON.parse('{"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"driving","navigate":true}') as Object);
+      expect(url.indexOf('https://www.google.com/maps/dir/?api=1')).assertEqual(0);
+      expect(url.indexOf('origin=' + encodeURIComponent('深圳北站'))).assertLarger(-1);
+      expect(url.indexOf('destination=' + encodeURIComponent('深圳湾口岸'))).assertLarger(-1);
+      expect(url.indexOf('travelmode=driving')).assertLarger(-1);
+      expect(url.indexOf('dir_action=navigate')).assertLarger(-1);
+      expect(googleMapsDirectionsUrl(JSON.parse('{"origin":"深圳北站"}') as Object)).assertEqual('');
+    });
+
+    it('returns a real Maps URL action without falling back to Places', 0, () => {
+      const result = mapsRouteResult(JSON.parse('{"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"teleport"}') as Object);
+      expect(result.toolName).assertEqual('maps.route.open');
+      expect(result.status).assertEqual('success');
+      expect(JSON.stringify(result.rows).indexOf('travelmode=driving')).assertLarger(-1);
+      expect(result.actions === undefined ? 0 : result.actions.length).assertEqual(1);
+      if (result.actions !== undefined) {
+        expect(result.actions[0].id).assertEqual('maps.open.web');
+        expect(result.actions[0].label).assertEqual('查看路线');
+      }
     });
   });
 }

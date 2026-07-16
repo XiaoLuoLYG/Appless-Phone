@@ -7,6 +7,7 @@ import { aiLogError, aiLogInfo } from './AiphoneLogger';
 const CALENDAR_API_BASE_URL: string = 'https://www.googleapis.com/calendar/v3/calendars';
 
 export interface CalendarEventArgs {
+  date?: string;
   eventId?: string;
   title?: string;
   start?: string;
@@ -21,6 +22,15 @@ export interface CalendarEventArgs {
 
 interface CalendarListPayload {
   items?: CalendarEventPayload[];
+}
+
+interface CalendarComposioPayload {
+  data?: Object;
+  error?: Object | string | null;
+}
+
+interface CalendarComposioData {
+  response_data?: CalendarEventPayload;
 }
 
 interface CalendarEventBodyTime {
@@ -170,6 +180,7 @@ function calendarArgs(args: Object | null): CalendarEventArgs {
 
 function cloneCalendarArgs(args: CalendarEventArgs): CalendarEventArgs {
   return {
+    date: textOf(args.date),
     eventId: textOf(args.eventId),
     title: textOf(args.title),
     start: textOf(args.start),
@@ -263,20 +274,33 @@ function startOfLocalMonth(date: Date): string {
   return localDateString(firstDay) + 'T00:00:00+08:00';
 }
 
-function replaceDatePart(value: string, date: string): string {
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return date + value.substring(10);
+function absoluteDateArg(args: CalendarEventArgs): Date | null {
+  const value = textOf(args.date).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
   }
-  return value;
+  const year = Number.parseInt(value.substring(0, 4), 10);
+  const month = Number.parseInt(value.substring(5, 7), 10);
+  const day = Number.parseInt(value.substring(8, 10), 10);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+
+function normalizedCalendarTimezone(value: string): string {
+  const timezone = value.trim();
+  return timezone === 'UTC' || /^[A-Za-z_]+\/[A-Za-z0-9_+\/-]+$/.test(timezone) ? timezone : 'Asia/Shanghai';
 }
 
 export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, args: CalendarEventArgs, now: Date = new Date()): CalendarEventArgs {
   const normalized = cloneCalendarArgs(args);
+  normalized.timezone = normalizedCalendarTimezone(textOf(normalized.timezone));
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    return normalized;
+  }
   const relativeText = prompt + ' ' + textOf(normalized.timeRange);
   const offset = relativeDayOffset(relativeText);
   if (offset >= 0) {
     const targetDate = localDateAfter(now, offset);
-    const targetDateText = localDateString(targetDate);
     if (textOf(normalized.timezone).length === 0) {
       normalized.timezone = 'Asia/Shanghai';
     }
@@ -285,10 +309,14 @@ export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, 
       normalized.timeMax = startOfLocalDay(localDateAfter(now, offset + 1));
       return normalized;
     }
-    if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
-      normalized.start = replaceDatePart(textOf(normalized.start), targetDateText);
-      normalized.end = replaceDatePart(textOf(normalized.end), targetDateText);
-    }
+    return normalized;
+  }
+
+  const absoluteDate = absoluteDateArg(normalized);
+  if (absoluteDate !== null && toolId === 'calendar.events.search') {
+    normalized.timezone = textOf(normalized.timezone).length > 0 ? normalized.timezone : 'Asia/Shanghai';
+    normalized.timeMin = startOfLocalDay(absoluteDate);
+    normalized.timeMax = startOfLocalDay(localDateAfter(absoluteDate, 1));
     return normalized;
   }
 
@@ -338,13 +366,26 @@ export function calendarEventRequiredFields(toolId: string, args: CalendarEventA
   if ((toolId === 'calendar.event.create' || toolId === 'calendar.event.update') && textOf(args.title).trim().length === 0) {
     missing.push('title');
   }
-  if ((toolId === 'calendar.event.create' || toolId === 'calendar.event.update') && textOf(args.start).trim().length === 0) {
+  if ((toolId === 'calendar.event.create' || toolId === 'calendar.event.update') && !isCalendarProviderDateTime(textOf(args.start))) {
     missing.push('start');
   }
-  if ((toolId === 'calendar.event.create' || toolId === 'calendar.event.update') && textOf(args.end).trim().length === 0) {
+  if ((toolId === 'calendar.event.create' || toolId === 'calendar.event.update') && !isCalendarProviderDateTime(textOf(args.end))) {
     missing.push('end');
   }
   return missing;
+}
+
+function isCalendarProviderDateTime(value: string): boolean {
+  const text = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{1,2}(:?\d{2})?)?$/.test(text)) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(text));
+}
+
+export function calendarProviderDateTime(value: string): string {
+  const text = value.trim();
+  return text.substring(0, text.length > 16 && text.charAt(16) === ':' ? 19 : 16);
 }
 
 export function calendarEventResultsFromListPayload(rawJson: string, args: CalendarEventArgs | null = null): DynamicGenericToolResult[] {
@@ -375,6 +416,95 @@ export function calendarEventResultsFromListPayload(rawJson: string, args: Calen
   return results;
 }
 
+function composioCalendarResults(results: DynamicGenericToolResult[]): DynamicGenericToolResult[] {
+  results.forEach((result: DynamicGenericToolResult) => result.sourceTag = 'Composio Google Calendar');
+  return results;
+}
+
+export function calendarResultsFromComposioObservation(
+  toolId: string,
+  rawJson: string,
+  args: CalendarEventArgs | null = null
+): DynamicGenericToolResult[] {
+  try {
+    const payload = JSON.parse(rawJson) as CalendarComposioPayload;
+    if (payload.error !== undefined && payload.error !== null && textOf(payload.error).trim().length > 0) {
+      return composioCalendarResults([errorResult(toolId, 'Google Calendar 调用失败', textOf(payload.error))]);
+    }
+    if (payload.data === undefined || payload.data === null) {
+      return composioCalendarResults([errorResult(toolId, 'Google Calendar 返回无效', 'Provider 未返回 data。')]);
+    }
+    if (toolId === 'calendar.events.search') {
+      return composioCalendarResults(calendarEventResultsFromListPayload(JSON.stringify(payload.data), args));
+    }
+    if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+      const data = payload.data as CalendarComposioData;
+      const item = data.response_data === undefined ? payload.data as CalendarEventPayload : data.response_data;
+      if (textOf(item.id).trim().length === 0) {
+        return composioCalendarResults([errorResult(toolId, 'Google Calendar 返回无效', 'Provider 未返回 Event ID。')]);
+      }
+      return composioCalendarResults([eventResult(toolId, item, toolId === 'calendar.event.create' ?
+        '已直接写入真实 Google Calendar。' : '已直接更新真实 Google Calendar。')]);
+    }
+    if (toolId === 'calendar.event.delete') {
+      const eventId = args === null ? '' : textOf(args.eventId).trim();
+      return [{
+        sourceTag: 'Composio Google Calendar',
+        toolName: toolId,
+        title: '日程已删除',
+        status: 'success',
+        summary: '已从真实 Google Calendar 删除日程。',
+        rows: eventId.length > 0 ? [{ label: 'Event ID', value: eventId }] : [],
+        rawPreview: 'deleted eventId=' + eventId
+      }];
+    }
+    return composioCalendarResults([errorResult(toolId, '不支持的 Google Calendar 工具', toolId)]);
+  } catch (error) {
+    return composioCalendarResults([errorResult(toolId, 'Google Calendar 返回无效', error instanceof Error ? error.message : JSON.stringify(error))]);
+  }
+}
+
+function calendarResultRow(result: DynamicGenericToolResult, label: string): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    if (result.rows[index].label === label) {
+      return result.rows[index].value;
+    }
+  }
+  return '';
+}
+
+export function calendarDeleteTargetFromResultsForTest(results: DynamicGenericToolResult[]): CalendarEventArgs | null {
+  if (results.length !== 1 || results[0].status !== 'success') {
+    return null;
+  }
+  const eventId = calendarResultRow(results[0], 'Event ID').trim();
+  if (eventId.length === 0) {
+    return null;
+  }
+  return {
+    eventId: eventId,
+    title: results[0].title,
+    start: calendarResultRow(results[0], 'Start'),
+    end: calendarResultRow(results[0], 'End')
+  };
+}
+
+export function calendarUpdateArgsFromResultsForTest(
+  args: CalendarEventArgs,
+  results: DynamicGenericToolResult[]
+): CalendarEventArgs | null {
+  const target = calendarDeleteTargetFromResultsForTest(results);
+  if (target === null) {
+    return null;
+  }
+  const updated = cloneCalendarArgs(args);
+  updated.eventId = target.eventId;
+  if (textOf(updated.title).trim().length === 0) {
+    updated.title = target.title;
+  }
+  return updated;
+}
+
 export function calendarCreateBody(args: CalendarEventArgs): CalendarEventBody {
   return {
     summary: textOf(args.title),
@@ -388,13 +518,26 @@ export function calendarUpdateBody(args: CalendarEventArgs): CalendarEventBody {
 }
 
 export function calendarMissingArgsResult(toolId: string, missing: string[]): DynamicGenericToolResult {
+  const needs: string[] = [];
+  if (missing.indexOf('eventId') >= 0) {
+    needs.push('请先查询并选择要修改的真实日程');
+  }
+  if (missing.indexOf('title') >= 0) {
+    needs.push('请补充日程标题');
+  }
+  if (missing.indexOf('start') >= 0) {
+    needs.push('请补充明确的开始时间');
+  }
+  if (missing.indexOf('end') >= 0) {
+    needs.push('请补充明确的结束时间或时长');
+  }
   return {
     sourceTag: 'Google Calendar API',
     toolName: toolId,
-    title: '缺少 Google Calendar 参数',
-    status: 'error',
-    summary: '缺少字段：' + missing.join(', '),
-    rows: missing.map((name: string): A2uiLabelValueData => ({ label: 'Missing', value: name })),
+    title: '还需要补充日程信息',
+    status: 'needs_input',
+    summary: needs.join('；') + '。',
+    rows: needs.map((value: string): A2uiLabelValueData => ({ label: '需要补充', value: value })),
     rawPreview: 'missing=' + missing.join(',')
   };
 }
