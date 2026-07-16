@@ -21,6 +21,7 @@ export interface LoopBackendRequest {
   surfaceId: string;
   actionId: string;
   args?: Object;
+  toolArgsByToolId?: Record<string, Object>;
   persona?: Object;
   maxSteps: number;
 }

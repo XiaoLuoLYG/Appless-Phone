@@ -171,6 +171,37 @@ export default function reActAgentRunnerTest() {
       expect(actionText).assertEqual('gmail.draft.create({"to":["a@example.com"],"body":"hi"})');
     });
 
+    it('executes multiple independent actions from one model response', 0, async () => {
+      const train = new FixedTool('train.search', genericToolResultsA2ui('surface_train', 'train.search', [mediaResult()]));
+      const food = new FixedTool('food.search', genericToolResultsA2ui('surface_food', 'food.search', [mediaResult()]));
+      const registry = new ToolRegistry();
+      registry.register(train);
+      registry.register(food);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: run both searches\n' +
+          'Action: train.search({"from":"北京南","to":"上海虹桥"})\n' +
+          'Action: food.search({"location":"上海虹桥站"})'
+        ),
+        registry,
+        1
+      );
+      const actionIds: string[] = [];
+      const observationIds: string[] = [];
+      await runner.run('search train and food', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actionIds.push(event.toolId);
+        } else if (event.kind === AgentEventKind.OBSERVATION) {
+          observationIds.push(event.toolId);
+        }
+      });
+
+      expect(train.calls.length).assertEqual(1);
+      expect(food.calls.length).assertEqual(1);
+      expect(actionIds.join(',')).assertEqual('train.search,food.search');
+      expect(observationIds.join(',')).assertEqual('train.search,food.search');
+    });
+
     it('repairs raw line breaks inside JSON string tool args', 0, () => {
       const parsed = parseLoopToolInputArgs('{"to":["a@example.com"],"body":"hello\nworld"}') as Record<string, Object | string | undefined>;
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { configureDefaultPersonaStoreForTests, updatePersonaPackText } from '../main/ets/model/PersonaStore';
-import { preparePersonaPrompt } from '../main/ets/model/PersonaPrompt';
+import { PersonaBinding, personaBindingForToolId, preparePersonaPrompt } from '../main/ets/model/PersonaPrompt';
 
 export default function personaPromptTest() {
   describe('personaPrompt', () => {
@@ -62,6 +62,29 @@ export default function personaPromptTest() {
       expect(prepared.modelPrompt.indexOf('# Food Search')).assertLarger(-1);
       expect(prepared.modelPrompt.indexOf('coffee-order')).assertLarger(-1);
       expect(prepared.modelPrompt.indexOf('Planned capability')).assertEqual(-1);
+    });
+
+    it('keeps every matching persona in a composite request', 0, () => {
+      configureDefaultPersonaStoreForTests();
+      const prepared = preparePersonaPrompt('查北京到上海的高铁，再看看上海虹桥站附近有什么吃的');
+
+      expect(prepared.modelPrompt.indexOf('饮食搭子 (food_companion)')).assertLarger(-1);
+      expect(prepared.modelPrompt.indexOf('旅行搭子 (travel_companion)')).assertLarger(-1);
+      expect(prepared.modelPrompt.indexOf('Call every independent tool needed')).assertLarger(-1);
+      expect(prepared.modelPrompt.indexOf('Call exactly one best-fit tool')).assertEqual(-1);
+    });
+
+    it('binds each composite tool surface to its own persona', 0, () => {
+      configureDefaultPersonaStoreForTests();
+      const prepared = preparePersonaPrompt('查北京到上海的高铁，再看看上海虹桥站附近有什么吃的');
+      const fallback: PersonaBinding = {
+        runtime: prepared.runtime,
+        memoryRuntime: prepared.memoryRuntime,
+        toolArgs: prepared.toolArgs
+      };
+
+      expect(personaBindingForToolId('train.search', fallback).runtime.id).assertEqual('travel_companion');
+      expect(personaBindingForToolId('food.search', fallback).runtime.id).assertEqual('food_companion');
     });
   });
 }

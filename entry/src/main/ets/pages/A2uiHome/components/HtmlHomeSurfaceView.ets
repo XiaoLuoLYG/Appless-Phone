@@ -2,10 +2,57 @@ import { webview } from '@kit.ArkWeb';
 import { A2uiAction } from '@loop/agent-core';
 import { aiLogError, aiLogInfo } from '@loop/agent-core';
 import { COLOR_PAGE } from '../style/A2uiHomeTheme';
+import {
+  HtmlHomeSceneUpdate,
+  HtmlHomeSceneUpdateListener,
+  registerHtmlHomeSceneUpdateListener,
+  unregisterHtmlHomeSceneUpdateListener
+} from './HtmlHomeSceneUpdates';
 
 type HtmlHomeActionValue = Object | string | number | boolean | null | undefined;
 
 type HtmlHomePostedAction = Record<string, HtmlHomeActionValue>;
+
+interface HtmlHomeDocumentVersion {
+  surfaceId: string;
+  sequence: number;
+  status: string;
+}
+
+function parseHtmlHomeDocumentVersion(key: string): HtmlHomeDocumentVersion | null {
+  const parts = key.split(':');
+  if (parts.length !== 3) {
+    return null;
+  }
+  const sequence = Number(parts[1]);
+  if (parts[0].length === 0 || sequence < 0 || Math.floor(sequence) !== sequence) {
+    return null;
+  }
+  return {
+    surfaceId: parts[0],
+    sequence: sequence,
+    status: parts[2]
+  };
+}
+
+function isBusyDocumentStatus(status: string): boolean {
+  return status === 'thinking' || status === 'calling_tool';
+}
+
+function isSameOrStaleDocument(requestedKey: string, loadedKey: string): boolean {
+  if (requestedKey === loadedKey) {
+    return true;
+  }
+  const requested = parseHtmlHomeDocumentVersion(requestedKey);
+  const loaded = parseHtmlHomeDocumentVersion(loadedKey);
+  if (requested === null || loaded === null || requested.surfaceId !== loaded.surfaceId) {
+    return false;
+  }
+  if (requested.sequence < loaded.sequence) {
+    return true;
+  }
+  return isBusyDocumentStatus(requested.status) && isBusyDocumentStatus(loaded.status);
+}
 
 class HtmlHomeActionBridge {
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
@@ -34,12 +81,14 @@ class HtmlHomeActionBridge {
 
 @Component
 export struct HtmlHomeSurfaceView {
+  @Prop surfaceId: string = '';
   @Prop @Watch('onHtmlOrBusyChange') html: string = '';
+  @Prop @Watch('onHtmlOrBusyChange') documentKey: string = '';
   @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
   @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
   @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
   @Prop @Watch('onHtmlOrBusyChange') isBusy: boolean = false;
-  @Prop renderTick: number = 0;
+  @Prop @Watch('onHtmlOrBusyChange') renderTick: number = 0;
   @Prop luckinInlinePatchJson: string = '';
   @Prop @Watch('onLuckinPatchTickChange') luckinInlinePatchTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
@@ -47,12 +96,18 @@ export struct HtmlHomeSurfaceView {
   private popupController: webview.WebviewController = new webview.WebviewController();
   private bridge: HtmlHomeActionBridge = new HtmlHomeActionBridge();
   private loadedKey: string = '';
+  private loadedDocumentKey: string = '';
   private webReady: boolean = false;
   private busyFrameLoaded: boolean = false;
   private lastMailDetailEventJson: string = '';
   private lastMailReplyEventJson: string = '';
   private lastMailCalendarEventJson: string = '';
   private appliedLuckinPatchTick: number = -1;
+  private pendingSceneUpdate: HtmlHomeSceneUpdate | null = null;
+  private sceneUpdateListener: HtmlHomeSceneUpdateListener = (update: HtmlHomeSceneUpdate): void => {
+    this.receiveSceneUpdate(update);
+  };
+  @State private documentLoading: boolean = false;
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
 
@@ -60,26 +115,77 @@ export struct HtmlHomeSurfaceView {
     this.bridge.onAction = (action: A2uiAction): void => {
       this.onAction(action);
     };
+    registerHtmlHomeSceneUpdateListener(this.surfaceId, this.sceneUpdateListener);
+  }
+
+  aboutToDisappear(): void {
+    unregisterHtmlHomeSceneUpdateListener(this.surfaceId, this.sceneUpdateListener);
+  }
+
+  private receiveSceneUpdate(update: HtmlHomeSceneUpdate): void {
+    if (update.surfaceId !== this.surfaceId || update.html.length === 0 ||
+      isSameOrStaleDocument(update.documentKey, this.loadedDocumentKey)) {
+      return;
+    }
+    if (!this.webReady || this.documentLoading) {
+      this.pendingSceneUpdate = update;
+      return;
+    }
+    this.rewriteSceneDocument(update);
+  }
+
+  private rewriteSceneDocument(update: HtmlHomeSceneUpdate): void {
+    try {
+      const encodedHtml = JSON.stringify(update.html);
+      this.controller.runJavaScript(
+        '(function(){var nextHtml=' + encodedHtml +
+          ';document.open();document.write(nextHtml);document.close();})();'
+      );
+      this.loadedKey = update.html;
+      this.loadedDocumentKey = update.documentKey;
+      this.busyFrameLoaded = update.isBusy;
+      this.pendingSceneUpdate = null;
+      this.lastMailDetailEventJson = '';
+      this.lastMailReplyEventJson = '';
+      this.lastMailCalendarEventJson = '';
+      aiLogInfo('[AIPhone][HtmlHomeSceneRewrite] surfaceId=' + update.surfaceId +
+        ' chars=' + update.html.length.toString() +
+        ' renderTick=' + update.renderTick.toString());
+    } catch (error) {
+      this.pendingSceneUpdate = update;
+      aiLogError('[AIPhone][HtmlHomeSceneRewriteError] surfaceId=' + update.surfaceId +
+        ' error=' + JSON.stringify(error));
+    }
+  }
+
+  private applyPendingSceneUpdate(): void {
+    const update = this.pendingSceneUpdate;
+    if (update !== null && !this.documentLoading) {
+      this.rewriteSceneDocument(update);
+    }
   }
 
   private loadHtmlIfNeeded(): void {
     if (!this.webReady) {
       return;
     }
+    const requestedKey = this.documentKey.length > 0 ? this.documentKey : this.html;
     const patchPending = this.luckinInlinePatchTick > this.appliedLuckinPatchTick &&
       this.luckinInlinePatchJson.length > 0;
-    if (patchPending && this.html === this.loadedKey) {
+    if (patchPending && isSameOrStaleDocument(requestedKey, this.loadedDocumentKey)) {
       return;
     }
-    if (this.html.length === 0 || this.html === this.loadedKey) {
+    if (this.html.length === 0 || isSameOrStaleDocument(requestedKey, this.loadedDocumentKey)) {
       return;
     }
     if (this.isBusy && this.busyFrameLoaded) {
       return;
     }
     try {
+      this.documentLoading = true;
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
+      this.loadedDocumentKey = requestedKey;
       this.lastMailDetailEventJson = '';
       this.lastMailReplyEventJson = '';
       this.lastMailCalendarEventJson = '';
@@ -90,6 +196,7 @@ export struct HtmlHomeSurfaceView {
       aiLogInfo('[AIPhone][HtmlHomeSurfaceLoad] chars=' + this.html.length.toString() +
         ' renderTick=' + this.renderTick.toString());
     } catch (error) {
+      this.documentLoading = false;
       aiLogError('[AIPhone][HtmlHomeSurfaceLoadError] ' + JSON.stringify(error));
     }
   }
@@ -208,10 +315,19 @@ export struct HtmlHomeSurfaceView {
         .width('100%')
         .height('100%')
         .backgroundColor(COLOR_PAGE)
-        .opacity(1)
+        .opacity(this.documentLoading || (this.html.length > 0 &&
+          (this.documentKey.length > 0 ? !isSameOrStaleDocument(this.documentKey, this.loadedDocumentKey) :
+            this.html !== this.loadedKey)) ? 0 : 1)
         .onPageEnd(() => {
+          const firstPage = !this.webReady;
           this.webReady = true;
+          if (!firstPage) {
+            this.documentLoading = false;
+          }
           this.loadHtmlIfNeeded();
+          if (!firstPage) {
+            this.applyPendingSceneUpdate();
+          }
           this.pushMailDetailEventIfNeeded();
           this.pushMailReplyEventIfNeeded();
           this.pushMailCalendarEventIfNeeded();

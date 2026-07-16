@@ -1,4 +1,5 @@
 import { AgentEvent, LoopBackend, LoopBackendRequest, LoopMessage, LoopToolTrace } from '@loop/agent-core';
+import { allToolDefinitions, ToolDefinition } from '@loop/agent-core';
 import {
   A2uiCallResult,
   A2uiEnvelope,
@@ -19,7 +20,7 @@ import {
   parsePersonaMemoryUpdateInput,
   PersonaMemoryUpdateRequest
 } from './PersonaMemoryUpdate';
-import { preparePersonaPrompt } from './PersonaPrompt';
+import { PersonaBinding, personaBindingForToolId, preparePersonaPrompt } from './PersonaPrompt';
 import { PersonaMemoryRuntimeData, PersonaRuntimeData } from './PersonaTypes';
 
 export interface A2uiStreamMeta {
@@ -52,19 +53,36 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
   return cleaned + '/v1/chat/completions';
 }
 
-function mergeToolArgs(baseArgs: Object | undefined, overrideArgs: Object | null): Object | undefined {
-  if (overrideArgs === null) {
-    return baseArgs;
+function toolSurfaceSuffix(toolId: string): string {
+  return toolId.replace(/[^A-Za-z0-9_]/g, '_');
+}
+
+export function toolIdForSurfaceId(surfaceId: string, baseSurfaceId: string = 'surface_model'): string {
+  const definitions = allToolDefinitions();
+  for (let index = 0; index < definitions.length; index++) {
+    if (surfaceId === baseSurfaceId + '_' + toolSurfaceSuffix(definitions[index].toolId)) {
+      return definitions[index].toolId;
+    }
   }
-  if (baseArgs === undefined) {
-    return overrideArgs;
+  if (surfaceId === baseSurfaceId + '_memory_update') {
+    return 'memory.update';
   }
-  const merged = JSON.parse(JSON.stringify(baseArgs)) as Record<string, Object | string | number | boolean | null | undefined>;
-  const overrides = overrideArgs as Record<string, Object | string | number | boolean | null | undefined>;
-  Object.keys(overrides).forEach((key: string) => {
-    merged[key] = overrides[key];
+  if (surfaceId === baseSurfaceId + '_dynamic_search') {
+    return 'dynamic.search';
+  }
+  return '';
+}
+
+function personaToolArgs(primary: PersonaBinding): Record<string, Object> {
+  const result: Record<string, Object> = {};
+  const definitions = allToolDefinitions();
+  definitions.forEach((definition: ToolDefinition) => {
+    const binding = personaBindingForToolId(definition.toolId, primary);
+    if (binding.toolArgs !== undefined) {
+      result[definition.toolId] = binding.toolArgs;
+    }
   });
-  return merged;
+  return result;
 }
 
 function loopHistory(history: A2uiMessage[]): LoopMessage[] {
@@ -80,15 +98,20 @@ function loopHistory(history: A2uiMessage[]): LoopMessage[] {
   return messages;
 }
 
-function applyEnvelopes(store: A2uiSurfaceStore, envelopes: A2uiEnvelope[]): string {
-  let error = '';
-  envelopes.forEach((envelope: A2uiEnvelope) => {
-    const result = store.apply(envelope);
-    if (!result.ok && error.length === 0) {
-      error = result.error;
-    }
-  });
-  return error;
+function envelopeSurfaceId(envelope: A2uiEnvelope, fallback: string): string {
+  if (envelope.createSurface !== undefined && envelope.createSurface !== null) {
+    return envelope.createSurface.surfaceId;
+  }
+  if (envelope.updateComponents !== undefined && envelope.updateComponents !== null) {
+    return envelope.updateComponents.surfaceId;
+  }
+  if (envelope.updateDataModel !== undefined && envelope.updateDataModel !== null) {
+    return envelope.updateDataModel.surfaceId;
+  }
+  if (envelope.deleteSurface !== undefined && envelope.deleteSurface !== null) {
+    return envelope.deleteSurface.surfaceId;
+  }
+  return fallback;
 }
 
 function emptyToolRequest(): A2uiToolRequestData {
@@ -215,19 +238,31 @@ export async function callLocalModel(
   onPersonaMemoryUpdate: PersonaMemoryUpdateCallback | null = null,
   toolArgs: Object | null = null
 ): Promise<A2uiCallResult> {
-  const store = new A2uiSurfaceStore();
+  const fallbackStore = new A2uiSurfaceStore();
+  const surfaceStores: Map<string, A2uiSurfaceStore> = new Map();
+  let latestStore = fallbackStore;
   if (initialSurface !== null) {
-    store.seed(initialSurface);
+    fallbackStore.seed(initialSurface);
+    surfaceStores.set(initialSurface.surfaceId, fallbackStore);
   }
 
   let raw = '';
   let error = '';
   let loopDebug = '';
   const preparedPersona = preparePersonaPrompt(prompt);
-  const runtimePersona = a2uiPersonaData(preparedPersona.runtime);
-  const runtimePersonaMemory = a2uiPersonaMemoryData(preparedPersona.memoryRuntime);
+  const primaryBinding: PersonaBinding = {
+    runtime: preparedPersona.runtime,
+    memoryRuntime: preparedPersona.memoryRuntime,
+    toolArgs: preparedPersona.toolArgs
+  };
   const surfaceWithPersona = (surface: A2uiSurfaceState): A2uiSurfaceState => {
-    return clearExecutedToolRequests(attachPersonaDataToSurface(surface, runtimePersona, runtimePersonaMemory));
+    const toolId = toolIdForSurfaceId(surface.surfaceId);
+    const binding = toolId.length > 0 ? personaBindingForToolId(toolId, primaryBinding) : primaryBinding;
+    return clearExecutedToolRequests(attachPersonaDataToSurface(
+      surface,
+      a2uiPersonaData(binding.runtime),
+      a2uiPersonaMemoryData(binding.memoryRuntime)
+    ));
   };
   const debug = requestDebug(settings, prompt, history);
   const backend = new LoopBackend();
@@ -244,7 +279,8 @@ export async function callLocalModel(
     },
     surfaceId: 'surface_model',
     actionId: 'model_tool_request',
-    args: mergeToolArgs(preparedPersona.toolArgs, toolArgs),
+    args: toolArgs === null ? undefined : toolArgs,
+    toolArgsByToolId: personaToolArgs(primaryBinding),
     persona: preparedPersona.runtime as Object,
     maxSteps: 6
   };
@@ -263,13 +299,24 @@ export async function callLocalModel(
           aiLogError('[AIPhone][LoopyA2uiParseError] ' + parsed.error);
           return;
         }
-        const applyError = applyEnvelopes(store, parsed.envelopes);
-        if (applyError.length > 0) {
-          error = applyError;
-          aiLogError('[AIPhone][LoopyA2uiApplyError] ' + applyError);
-          return;
-        }
-        onSurface(surfaceWithPersona(store.getSurface()), raw, { thinkClosed: true });
+        parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+          const surfaceId = envelopeSurfaceId(envelope, request.surfaceId);
+          let targetStore = surfaceStores.get(surfaceId);
+          if (targetStore === undefined) {
+            targetStore = new A2uiSurfaceStore();
+            surfaceStores.set(surfaceId, targetStore);
+          }
+          const applyResult = targetStore.apply(envelope);
+          if (!applyResult.ok) {
+            if (error.length === 0) {
+              error = applyResult.error;
+            }
+            aiLogError('[AIPhone][LoopyA2uiApplyError] surfaceId=' + surfaceId + ' ' + applyResult.error);
+            return;
+          }
+          latestStore = targetStore;
+          onSurface(surfaceWithPersona(targetStore.getSurface()), raw, { thinkClosed: true });
+        });
       }
     });
     if (result.ok) {
@@ -289,7 +336,7 @@ export async function callLocalModel(
       error = result.error;
     }
     if (raw.trim().length === 0 && error.length > 0) {
-      store.applyError('Loopy 后端异常', error);
+      latestStore.applyError('Loopy 后端异常', error);
     }
     const clientRequest = clientToolRequest(result.toolCalls, preparedPersona.userPrompt, request.actionId);
     const memoryUpdate = firstPersonaMemoryUpdate(result.toolCalls, preparedPersona.runtime.id);
@@ -308,7 +355,7 @@ export async function callLocalModel(
         surface: updateSurface
       };
     }
-    const resultSurface = attachToolRequest(surfaceWithPersona(store.getSurface()), clientRequest);
+    const resultSurface = attachToolRequest(surfaceWithPersona(latestStore.getSurface()), clientRequest);
     return {
       ok: result.ok && error.length === 0,
       raw: raw,
@@ -320,14 +367,14 @@ export async function callLocalModel(
   } catch (err) {
     const message = err instanceof Error ? err.message : JSON.stringify(err);
     aiLogError('[AIPhone][LoopyException] ' + message);
-    store.applyError('Loopy 后端异常', message);
+    latestStore.applyError('Loopy 后端异常', message);
     return {
       ok: false,
       raw: raw,
       error: message,
       requestDebug: debug,
       assistantDebug: loopDebug,
-      surface: surfaceWithPersona(store.getSurface())
+      surface: surfaceWithPersona(latestStore.getSurface())
     };
   }
 }

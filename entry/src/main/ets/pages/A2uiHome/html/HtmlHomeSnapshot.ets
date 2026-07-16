@@ -191,7 +191,7 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     appendAggregateSearchBlocks(document, surface, aggregateSearchFallbackComponent(surface));
   }
 
-  dropCompletedThinkingBlocks(document, params.isBusy);
+  dropCompletedPendingBlocks(document, params.isBusy);
   return document;
 }
 
@@ -1024,20 +1024,25 @@ function removeStripeReceivingActions(actions: HtmlHomeAction[]): void {
   }
 }
 
-function dropCompletedThinkingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {
-  if (isBusy || !hasNonThinkingBlock(document.blocks)) {
+function dropCompletedPendingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {
+  if (isBusy || !hasNonPendingBlock(document.blocks)) {
     return;
   }
-  document.blocks = document.blocks.filter((block: HtmlHomeBlock) => !isThinkingBlock(block));
+  document.blocks = document.blocks.filter((block: HtmlHomeBlock) => !isPendingBlock(block));
 }
 
-function hasNonThinkingBlock(blocks: HtmlHomeBlock[]): boolean {
+function hasNonPendingBlock(blocks: HtmlHomeBlock[]): boolean {
   for (let index = 0; index < blocks.length; index++) {
-    if (!isThinkingBlock(blocks[index])) {
+    if (!isPendingBlock(blocks[index])) {
       return true;
     }
   }
   return false;
+}
+
+function isPendingBlock(block: HtmlHomeBlock): boolean {
+  const status = block.status === undefined ? '' : block.status.toLowerCase();
+  return isThinkingBlock(block) || status === 'calling_tool' || status === 'thinking' || status === 'pending';
 }
 
 function isThinkingBlock(block: HtmlHomeBlock): boolean {

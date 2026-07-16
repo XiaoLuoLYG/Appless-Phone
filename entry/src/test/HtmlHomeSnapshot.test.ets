@@ -229,6 +229,35 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('Coffee')).assertLarger(-1);
     });
 
+    it('drops a stale pending info row after train results arrive', 0, () => {
+      const pending: A2uiComponent = {
+        id: 'rows',
+        component: 'InfoRows',
+        title: 'train.search',
+        status: 'calling_tool',
+        dataPath: '/rows'
+      };
+      const trains: A2uiComponent = {
+        id: 'results',
+        component: 'TrainOptions',
+        title: '12306 余票查询',
+        status: 'ready',
+        dataPath: '/trains'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('travel', 'ready', [root('results'), pending, trains],
+          '{"rows":[{"label":"状态","value":"正在调用 train.search"}],"trains":[{"trainCode":"G1","from":"北京南","to":"上海虹桥","depart":"07:00","arrive":"11:30","duration":"04:30","seats":"二等有票","status":"available","business":"","first":"","second":"有","noSeat":"","hardSeat":"","sleeperSoft":""}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const serialized = JSON.stringify(doc.blocks);
+
+      expect(doc.blocks.length).assertEqual(1);
+      expect(serialized.indexOf('train.search')).assertEqual(-1);
+      expect(serialized.indexOf('G1')).assertLarger(-1);
+    });
+
     it('maps aggregate search data into media and post blocks', 0, () => {
       const aggregateComponent: A2uiComponent = {
         id: 'aggregate_search',

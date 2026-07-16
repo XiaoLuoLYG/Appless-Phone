@@ -1,11 +1,18 @@
-import { PersonaMemoryRuntimeData, PersonaPack, PersonaRuntimeData } from './PersonaTypes';
+import { toolDefinitionForToolId } from '@loop/agent-core';
+import { PersonaMemoryRuntimeData, PersonaPack, PersonaRoute, PersonaRuntimeData } from './PersonaTypes';
 import { markdownSectionValue, parsePersonaMarkdown, PersonaSkillMarkdown } from './PersonaMarkdown';
-import { personaPackForId } from './PersonaStore';
-import { routePersonaForPrompt } from './PersonaRouter';
+import { allPersonaPacks, personaPackForId } from './PersonaStore';
+import { routePersonasForPrompt } from './PersonaRouter';
 
 export interface PreparedPersonaPrompt {
   modelPrompt: string;
   userPrompt: string;
+  runtime: PersonaRuntimeData;
+  memoryRuntime: PersonaMemoryRuntimeData;
+  toolArgs?: Object;
+}
+
+export interface PersonaBinding {
   runtime: PersonaRuntimeData;
   memoryRuntime: PersonaMemoryRuntimeData;
   toolArgs?: Object;
@@ -63,21 +70,60 @@ function skillSummaries(pack: PersonaPack): string {
   return lines.join('\n');
 }
 
-export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
-  const route = routePersonaForPrompt(prompt);
-  const pack = personaPackForId(route.personaId);
+function bindingForPack(pack: PersonaPack, reason: string): PersonaBinding {
   const preferences = memoryPreferences(pack.memory);
-  const runtime: PersonaRuntimeData = {
-    id: pack.manifest.id,
-    name: pack.manifest.name,
-    avatarKey: pack.manifest.avatarKey,
-    status: 'online',
-    reason: route.reason
+  return {
+    runtime: {
+      id: pack.manifest.id,
+      name: pack.manifest.name,
+      avatarKey: pack.manifest.avatarKey,
+      status: 'online',
+      reason: reason
+    },
+    memoryRuntime: {
+      summary: memorySummary(preferences),
+      preferences: preferences
+    },
+    toolArgs: memoryToolArgs(preferences)
   };
-  const memoryRuntime: PersonaMemoryRuntimeData = {
-    summary: memorySummary(preferences),
-    preferences: preferences
-  };
+}
+
+export function personaBindingForToolId(toolId: string, fallback: PersonaBinding): PersonaBinding {
+  const packs = allPersonaPacks();
+  for (let index = 0; index < packs.length; index++) {
+    if (packs[index].manifest.defaultTools.indexOf(toolId) >= 0) {
+      return bindingForPack(packs[index], '工具 ' + toolId + ' 属于' + packs[index].manifest.name + '。');
+    }
+  }
+  const definition = toolDefinitionForToolId(toolId);
+  if (definition !== null) {
+    for (let index = 0; index < packs.length; index++) {
+      if (packs[index].manifest.domains.indexOf(definition.domain) >= 0) {
+        return bindingForPack(packs[index], '工具 ' + toolId + ' 的领域为 ' + definition.domain + '。');
+      }
+    }
+  }
+  return fallback;
+}
+
+function relevantPersonaContext(routes: PersonaRoute[]): string {
+  const sections: string[] = [];
+  for (let index = 0; index < routes.length; index++) {
+    const pack = personaPackForId(routes[index].personaId);
+    sections.push([
+      '- ' + pack.manifest.name + ' (' + pack.manifest.id + '): ' + routes[index].reason,
+      '  Active skill: ' + pack.activeSkill.description,
+      '  Memory: ' + preferenceMemoryText(pack.memory)
+    ].join('\n'));
+  }
+  return sections.join('\n');
+}
+
+export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
+  const routes = routePersonasForPrompt(prompt);
+  const route = routes[0];
+  const pack = personaPackForId(route.personaId);
+  const binding = bindingForPack(pack, route.reason);
   const modelPrompt = [
     'Persona: ' + pack.manifest.name,
     'Persona id: ' + pack.manifest.id,
@@ -90,8 +136,10 @@ export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
     skillSummaries(pack),
     'Memory:',
     pack.memory,
+    'Relevant personas for this request:',
+    relevantPersonaContext(routes),
     'Tool args instruction:',
-    'Call exactly one best-fit tool when a tool is needed. Preserve the original user task. For food.search, include brandPreference and sweetness JSON args when memory says 瑞幸 or 半糖. Include brandStrict=true when memory says 只喝瑞幸.',
+    'Call every independent tool needed to satisfy the original user task. Multiple Action lines may be emitted together and will run in parallel. Keep each tool input scoped to that tool. For food.search, include brandPreference and sweetness JSON args when food memory says 瑞幸 or 半糖. Include brandStrict=true when food memory says 只喝瑞幸.',
     'Memory update instruction:',
     'When the user states a durable preference, identity fact, or stable constraint for the active persona, call memory.update with JSON { personaId, summary, memoryText, reason, suggestedAction }. Do not call search tools in the same turn. For the coffee preference example, suggestedAction should let the user rerun the previous coffee task, such as label=按新偏好重新查咖啡 and prompt=点一杯咖啡.',
     'User task:',
@@ -100,8 +148,8 @@ export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
   return {
     modelPrompt: modelPrompt,
     userPrompt: prompt,
-    runtime: runtime,
-    memoryRuntime: memoryRuntime,
-    toolArgs: memoryToolArgs(preferences)
+    runtime: binding.runtime,
+    memoryRuntime: binding.memoryRuntime,
+    toolArgs: binding.toolArgs
   };
 }

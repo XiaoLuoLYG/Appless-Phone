@@ -1,5 +1,5 @@
 import { AgentEvent, AgentEventKind } from './AgentEvent';
-import { summarizeA2uiObservation } from './A2uiObservationDigest';
+import { A2uiObservationDigest, summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
@@ -8,6 +8,7 @@ export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
+const MAX_PARALLEL_ACTIONS = 6;
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
 
 class ToolCall {
@@ -17,6 +18,20 @@ class ToolCall {
   constructor(name: string, input: string) {
     this.name = name;
     this.input = input;
+  }
+}
+
+class ToolExecutionResult {
+  call: ToolCall;
+  observationForModel: string;
+  digest: A2uiObservationDigest;
+  error: string;
+
+  constructor(call: ToolCall, observationForModel: string, digest: A2uiObservationDigest, error: string = '') {
+    this.call = call;
+    this.observationForModel = observationForModel;
+    this.digest = digest;
+    this.error = error;
   }
 }
 
@@ -59,50 +74,87 @@ export class ReActAgentRunner {
         return;
       }
 
-      const call = this.parseAction(response);
-      if (call === null) {
+      const calls = this.parseActions(response);
+      if (calls.length === 0) {
         listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
         return;
       }
 
-      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      calls.forEach((call: ToolCall) => {
+        listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`, call.name, call.input));
+      });
 
-      let observation: string;
-      try {
-        if (call.name === UI_TOOL_NAME) {
-          if (this.uiHandler === null) {
-            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
-            return;
-          }
-          observation = await this.runUiTool(call.input, listener);
-        } else {
-          observation = await this.tools.run(call.name, call.input);
+      const tasks: Promise<ToolExecutionResult>[] = [];
+      calls.forEach((call: ToolCall) => {
+        tasks.push(this.executeToolCall(call, listener));
+      });
+      const executions: ToolExecutionResult[] = await Promise.all(tasks);
+      let hasA2uiStop = false;
+      let hasA2uiError = false;
+      let hasA2uiFailure = false;
+      let executionError = '';
+      scratchpad.push(response);
+      executions.forEach((execution: ToolExecutionResult) => {
+        scratchpad.push(execution.observationForModel);
+        listener(new AgentEvent(
+          AgentEventKind.OBSERVATION,
+          execution.observationForModel,
+          execution.call.name,
+          execution.call.input
+        ));
+        if (execution.error.length > 0 && executionError.length === 0) {
+          executionError = execution.error;
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `${error}`;
-        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        if (execution.digest.isA2ui && execution.digest.shouldStop) {
+          hasA2uiStop = true;
+          if (execution.digest.failureKey.indexOf(':error') >= 0) {
+            hasA2uiError = true;
+          } else if (execution.digest.failureKey.length > 0) {
+            hasA2uiFailure = true;
+          }
+        }
+      });
+
+      if (executionError.length > 0) {
+        listener(new AgentEvent(AgentEventKind.ERROR, executionError));
         return;
       }
 
-      const digest = summarizeA2uiObservation(observation);
-      const observationForModel = digest.isA2ui ? digest.text : `Observation: ${observation}`;
-      scratchpad.push(response);
-      scratchpad.push(observationForModel);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observationForModel));
-
-      if (digest.isA2ui && digest.shouldStop) {
-        if (digest.failureKey.indexOf(':error') >= 0) {
+      if (hasA2uiStop) {
+        if (hasA2uiError) {
           listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
-        } else if (digest.failureKey.length > 0) {
+        } else if (hasA2uiFailure) {
           listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
         } else {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具结果已更新到主页。'));
+          const countText = executions.length > 1 ? executions.length.toString() + ' 个' : '';
+          listener(new AgentEvent(AgentEventKind.FINAL, countText + '工具结果已更新到主页。'));
         }
         return;
       }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private async executeToolCall(call: ToolCall, listener: AgentListener): Promise<ToolExecutionResult> {
+    let observation = '';
+    try {
+      if (call.name === UI_TOOL_NAME) {
+        if (this.uiHandler === null) {
+          observation = call.input;
+        } else {
+          observation = await this.runUiTool(call.input, listener);
+        }
+      } else {
+        observation = await this.tools.run(call.name, call.input);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      return new ToolExecutionResult(call, `Observation: Tool ${call.name} failed: ${message}`, summarizeA2uiObservation(''), `Tool ${call.name} failed: ${message}`);
+    }
+    const digest = summarizeA2uiObservation(observation);
+    const observationForModel = digest.isA2ui ? digest.text : `Observation: ${observation}`;
+    return new ToolExecutionResult(call, observationForModel, digest);
   }
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
@@ -128,6 +180,7 @@ export class ReActAgentRunner {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
     prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
+    prompt += 'When one user request contains multiple independent tool goals and all arguments can be inferred from the request, return one Action line per goal in the same response, up to 6 Action lines. These Action lines run concurrently. Prefer this over choosing only one requested goal, and do not omit one merely because another tool renders UI.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -211,23 +264,37 @@ export class ReActAgentRunner {
     return previous === '\n' || previous === '\r' || previous === ' ' || previous === '\t';
   }
 
-  private parseAction(response: string): ToolCall | null {
-    const action = this.readLineValue(response, 'Action:');
-    if (action === null) {
-      return null;
+  private parseActions(response: string): ToolCall[] {
+    const calls: ToolCall[] = [];
+    let cursor = 0;
+    while (cursor < response.length && calls.length < MAX_PARALLEL_ACTIONS) {
+      const remaining = response.substring(cursor);
+      const relativeStart = this.findTagStart(remaining, 'Action:');
+      if (relativeStart < 0) {
+        break;
+      }
+      const valueStart = cursor + relativeStart + 'Action:'.length;
+      const tail = response.substring(valueStart);
+      const next = this.findNextTagStart(tail, '');
+      const action = (next < 0 ? tail : tail.substring(0, next)).trim();
+      const call = this.parseActionValue(action);
+      if (call !== null) {
+        calls.push(call);
+      }
+      if (next < 0) {
+        break;
+      }
+      cursor = valueStart + next;
     }
+    return calls;
+  }
 
+  private parseActionValue(action: string): ToolCall | null {
     const parenCall = this.parseDelimitedAction(action, '(', ')');
     if (parenCall !== null) {
       return parenCall;
     }
-
-    const bracketCall = this.parseDelimitedAction(action, '[', ']');
-    if (bracketCall !== null) {
-      return bracketCall;
-    }
-
-    return null;
+    return this.parseDelimitedAction(action, '[', ']');
   }
 
   private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {

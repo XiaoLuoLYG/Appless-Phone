@@ -120,6 +120,54 @@ export function aiphoneInfoJsonl(surfaceId: string, title: string, body: string)
   return JSON.stringify(create) + '\n' + JSON.stringify(components) + '\n' + JSON.stringify(rows) + '\n';
 }
 
+export function aiphonePendingJsonl(surfaceId: string, title: string, intent: string): string {
+  const create: AiphoneCreateSurfaceEnvelope = {
+    version: A2UI_VERSION,
+    createSurface: {
+      surfaceId: surfaceId,
+      root: 'root',
+      status: 'calling_tool',
+      title: title,
+      intent: intent,
+      sendDataModel: true
+    }
+  };
+  const components: AiphoneUpdateComponentsEnvelope = {
+    version: A2UI_VERSION,
+    updateComponents: {
+      surfaceId: surfaceId,
+      components: [
+        {
+          id: 'root',
+          component: 'SurfaceRoot',
+          child: 'rows',
+          title: title,
+          status: 'calling_tool'
+        },
+        {
+          id: 'rows',
+          component: 'InfoRows',
+          title: title,
+          status: 'calling_tool',
+          dataPath: '/rows',
+          actions: []
+        }
+      ]
+    }
+  };
+  const rows: AiphoneUpdateDataModelEnvelope = {
+    version: A2UI_VERSION,
+    updateDataModel: {
+      surfaceId: surfaceId,
+      path: '/rows',
+      value: [
+        { label: '状态', value: '正在调用 ' + title }
+      ]
+    }
+  };
+  return JSON.stringify(create) + '\n' + JSON.stringify(components) + '\n' + JSON.stringify(rows) + '\n';
+}
+
 export function splitJsonl(jsonl: string): string[] {
   return jsonl.split(/\r?\n/).map((line: string) => line.trim()).filter((line: string) => line.length > 0);
 }

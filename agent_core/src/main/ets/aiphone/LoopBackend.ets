@@ -7,7 +7,7 @@ import { LlmProvider } from '../model/LlmProvider';
 import { LocalModel } from '../model/LocalModel';
 import { OpenAiCompatibleModel } from '../model/OpenAiCompatibleModel';
 import { ScriptedLocalModel } from '../model/ScriptedLocalModel';
-import { aiphoneInfoJsonl, splitJsonl } from './AiphoneA2ui';
+import { aiphoneErrorJsonl, aiphoneInfoJsonl, aiphonePendingJsonl, splitJsonl } from './AiphoneA2ui';
 import { allToolDefinitions, ToolDefinition } from './AiphoneToolDefinitions';
 import { runAiphoneTool } from './AiphoneToolExecutor';
 import { LoopBackendCallbacks, LoopBackendRequest, LoopRunResult, LoopToolTrace } from './LoopBackendTypes';
@@ -17,12 +17,14 @@ class AiphoneTool implements AgentTool {
   private descriptionText: string;
   private request: LoopBackendRequest;
   private callbacks: LoopBackendCallbacks;
+  private surfaceId: string;
 
-  constructor(toolId: string, descriptionText: string, request: LoopBackendRequest, callbacks: LoopBackendCallbacks) {
+  constructor(toolId: string, descriptionText: string, request: LoopBackendRequest, callbacks: LoopBackendCallbacks, surfaceId: string) {
     this.toolId = toolId;
     this.descriptionText = descriptionText;
     this.request = request;
     this.callbacks = callbacks;
+    this.surfaceId = surfaceId;
   }
 
   name(): string {
@@ -43,20 +45,38 @@ class AiphoneTool implements AgentTool {
     const parsedArgs = this.parseInputArgs(input);
     const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
     const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
-    const jsonl = await runAiphoneTool(
-      this.toolId,
-      promptForTool,
-      this.request.surfaceId,
-      this.request.actionId,
-      this.mergeArgs(this.request.args, parsedArgs)
-    );
+    for (const line of splitJsonl(aiphonePendingJsonl(this.surfaceId, this.toolId, this.toolId.split('.')[0]))) {
+      this.callbacks.onA2uiJsonl?.(line);
+    }
+    let jsonl = '';
+    try {
+      jsonl = await runAiphoneTool(
+        this.toolId,
+        promptForTool,
+        this.surfaceId,
+        this.request.actionId,
+        this.mergeArgs(this.mergeArgs(this.request.args, this.toolArgsForCurrentTool()), parsedArgs)
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      jsonl = aiphoneErrorJsonl(this.surfaceId, this.toolId + ' 调用失败', message);
+    }
     for (const line of splitJsonl(jsonl)) {
       this.callbacks.onA2uiJsonl?.(line);
     }
     return jsonl;
   }
 
-  private mergeArgs(baseArgs: Object | undefined, overrideArgs: Object | null): Object | null {
+  private toolArgsForCurrentTool(): Object | null {
+    const argsByToolId = this.request.toolArgsByToolId;
+    if (argsByToolId === undefined) {
+      return null;
+    }
+    const args = argsByToolId[this.toolId];
+    return args === undefined ? null : args;
+  }
+
+  private mergeArgs(baseArgs: Object | null | undefined, overrideArgs: Object | null): Object | null {
     if (baseArgs === undefined || baseArgs === null) {
       return overrideArgs;
     }
@@ -207,8 +227,8 @@ export class LoopBackend {
         lastAction = this.parseActionTrace(event.text);
       } else if (event.kind === AgentEventKind.OBSERVATION) {
         toolCalls.push({
-          toolId: lastAction.toolId,
-          input: lastAction.input,
+          toolId: event.toolId.length > 0 ? event.toolId : lastAction.toolId,
+          input: event.toolInput.length > 0 ? event.toolInput : lastAction.input,
           observation: event.text
         });
       }
@@ -253,22 +273,29 @@ export class LoopBackend {
         definition.toolId,
         this.describeAiphoneTool(definition),
         request,
-        callbacks
+        callbacks,
+        this.toolSurfaceId(request.surfaceId, definition.toolId)
       ));
     }
     registry.register(new AiphoneTool(
       'memory.update',
       'memory.update inputSchema=personaMemoryUpdate outputSchema=personaMemoryUpdateCard. Use only when the user states a durable preference, identity fact, or stable constraint that should affect future turns for the active persona. Do not use for one-off tasks. Input must be JSON with personaId, summary, memoryText, reason, and optional suggestedAction { label, prompt, toolId }. Default to the active persona when the user does not name another persona. This tool only records memory; it does not search providers or fabricate results.',
       request,
-      callbacks
+      callbacks,
+      this.toolSurfaceId(request.surfaceId, 'memory.update')
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
       'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
-      callbacks
+      callbacks,
+      this.toolSurfaceId(request.surfaceId, 'dynamic.search')
     ));
     return registry;
+  }
+
+  private toolSurfaceId(baseSurfaceId: string, toolId: string): string {
+    return baseSurfaceId + '_' + toolId.replace(/[^A-Za-z0-9_]/g, '_');
   }
 
   private describeAiphoneTool(definition: ToolDefinition): string {

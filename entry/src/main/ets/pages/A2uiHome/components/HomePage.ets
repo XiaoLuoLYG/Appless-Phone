@@ -31,6 +31,7 @@ import {
   A2UI_HOME_MAX_WIDTH
 } from '../style/A2uiHomeLayout';
 import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS } from '../style/A2uiHomeMotion';
+import { A2uiWorkspaceScene, isWorkspaceSceneBusy } from '../state/A2uiWorkspaceState';
 
 const A2UI_HISTORY_EMPTY_HEIGHT: number = 108;
 const A2UI_HISTORY_ROW_HEIGHT: number = 76;
@@ -43,6 +44,93 @@ const A2UI_HEADER_LOGO_SIZE: number = 28;
 const A2UI_HEADER_TITLE_FONT_SIZE: number = 16;
 const A2UI_VOICE_DOCK_HEIGHT: number = 72;
 const A2UI_VOICE_PULSE_STEPS: number = 12;
+const A2UI_SCENE_SWIPE_THRESHOLD: number = 52;
+
+@Component
+struct WorkspaceSceneTab {
+  @Prop title: string = '';
+  @Prop sceneId: string = '';
+  @Prop isActive: boolean = false;
+  onSelect: () => void = (): void => {};
+
+  build() {
+    Row({ space: 7 }) {
+      if (this.isActive) {
+        Circle({ width: 7, height: 7 })
+          .fill(COLOR_ACCENT_DEEP)
+      }
+
+      Text(this.title.trim().length > 0 ? this.title : this.sceneId)
+        .fontSize(13)
+        .fontWeight(this.isActive ? FontWeight.Bold : FontWeight.Medium)
+        .fontColor(this.isActive ? COLOR_INK : COLOR_MUTED)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .layoutWeight(1)
+    .height(38)
+    .justifyContent(FlexAlign.Center)
+    .padding({ left: 10, right: 10 })
+    .borderRadius(12)
+    .backgroundColor(this.isActive ? COLOR_CARD : COLOR_PAGE)
+    .border({
+      width: 1,
+      color: this.isActive ? COLOR_CARD_EDGE : '#00000000'
+    })
+    .onClick(() => {
+      this.onSelect();
+    })
+  }
+}
+
+@Component
+struct WorkspaceSceneSurfaceHost {
+  @Prop surface: A2uiSurfaceState = emptyA2uiSurface();
+  @Prop html: string = '';
+  @Prop documentKey: string = '';
+  @Prop renderTick: number = 0;
+  @Prop isActive: boolean = false;
+  @Prop isBusy: boolean = false;
+  @Prop mailDetailEventJson: string = '';
+  @Prop mailReplyEventJson: string = '';
+  @Prop mailCalendarEventJson: string = '';
+  @Prop luckinInlinePatchJson: string = '';
+  @Prop luckinInlinePatchTick: number = 0;
+  onAction: (action: A2uiAction) => void = (_action: A2uiAction): void => {};
+
+  build() {
+    Column() {
+      if (this.surface.intent === 'social') {
+        A2uiSurfaceView({
+          surface: this.surface,
+          renderTick: this.renderTick,
+          isBusy: this.isBusy,
+          showPendingSurface: false,
+          onAction: this.onAction
+        })
+        .height('100%')
+      } else {
+        HtmlHomeSurfaceView({
+          surfaceId: this.surface.surfaceId,
+          html: this.html,
+          documentKey: this.documentKey,
+          mailDetailEventJson: this.isActive ? this.mailDetailEventJson : '',
+          mailReplyEventJson: this.isActive ? this.mailReplyEventJson : '',
+          mailCalendarEventJson: this.isActive ? this.mailCalendarEventJson : '',
+          isBusy: this.isBusy,
+          renderTick: this.renderTick,
+          luckinInlinePatchJson: this.isActive ? this.luckinInlinePatchJson : '',
+          luckinInlinePatchTick: this.isActive ? this.luckinInlinePatchTick : 0,
+          onAction: this.onAction
+        })
+        .height('100%')
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .visibility(this.isActive ? Visibility.Visible : Visibility.Hidden)
+  }
+}
 
 @Component
 export struct HomePage {
@@ -51,6 +139,8 @@ export struct HomePage {
   @Prop showHistory: boolean = false;
   @Prop messages: A2uiMessage[] = [];
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
+  @Prop workspaceScenes: A2uiWorkspaceScene[] = [];
+  @Prop activeSceneIndex: number = 0;
   @Prop htmlHomeHtml: string = '';
   @Prop mailDetailEventJson: string = '';
   @Prop mailReplyEventJson: string = '';
@@ -77,6 +167,7 @@ export struct HomePage {
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
   onClosePaymentCheckout: () => void = () => {};
+  onSelectScene: (index: number) => void = (_index: number): void => {};
   onPaymentCheckoutReturn: (url: string) => void = (_url: string): void => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
@@ -131,6 +222,52 @@ export struct HomePage {
 
   private useNativeSurface(): boolean {
     return this.currentSurface.intent === 'social';
+  }
+
+  private surfaceDocumentKey(surface: A2uiSurfaceState): string {
+    return surface.surfaceId + ':' + surface.sequence.toString() + ':' + surface.status;
+  }
+
+  private selectScene(index: number): void {
+    if (index < 0 || index >= this.workspaceScenes.length || index === this.activeSceneIndex) {
+      return;
+    }
+    this.onSelectScene(index);
+  }
+
+  private currentSceneIndex(): number {
+    return this.activeSceneIndex >= 0 && this.activeSceneIndex < this.workspaceScenes.length ?
+      this.activeSceneIndex : 0;
+  }
+
+  private selectAdjacentScene(offset: number): void {
+    this.selectScene(this.currentSceneIndex() + offset);
+  }
+
+  private handleSceneSwipe(event: GestureEvent): void {
+    if (event.offsetX <= -A2UI_SCENE_SWIPE_THRESHOLD) {
+      this.selectAdjacentScene(1);
+    } else if (event.offsetX >= A2UI_SCENE_SWIPE_THRESHOLD) {
+      this.selectAdjacentScene(-1);
+    }
+  }
+
+  @Builder
+  private WorkspaceSceneTabs() {
+    Row({ space: 8 }) {
+      ForEach(this.workspaceScenes, (scene: A2uiWorkspaceScene, index: number) => {
+        WorkspaceSceneTab({
+          title: scene.title,
+          sceneId: scene.sceneId,
+          isActive: index === this.activeSceneIndex,
+          onSelect: () => {
+            this.selectScene(index);
+          }
+        })
+      }, (scene: A2uiWorkspaceScene) => scene.sceneId + '-' + scene.renderTick.toString())
+    }
+    .width('100%')
+    .margin({ bottom: 8 })
   }
 
   private voiceWaveHeight(index: number): number {
@@ -360,6 +497,40 @@ export struct HomePage {
           .margin({ top: 12 })
           .borderRadius(22)
           .clip(true)
+      } else if (this.workspaceScenes.length > 0) {
+        Column() {
+          if (this.workspaceScenes.length > 1) {
+            this.WorkspaceSceneTabs()
+          }
+          Stack() {
+            ForEach(this.workspaceScenes, (scene: A2uiWorkspaceScene, index: number) => {
+              WorkspaceSceneSurfaceHost({
+                surface: scene.surface,
+                html: scene.html,
+                documentKey: this.surfaceDocumentKey(scene.surface),
+                renderTick: scene.renderTick,
+                isActive: index === this.activeSceneIndex,
+                isBusy: isWorkspaceSceneBusy(scene),
+                mailDetailEventJson: this.mailDetailEventJson,
+                mailReplyEventJson: this.mailReplyEventJson,
+                mailCalendarEventJson: this.mailCalendarEventJson,
+                luckinInlinePatchJson: this.luckinInlinePatchJson,
+                luckinInlinePatchTick: this.luckinInlinePatchTick,
+                onAction: this.onAction
+              })
+            }, (scene: A2uiWorkspaceScene) => scene.sceneId)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .gesture(
+            PanGesture({ direction: PanDirection.Horizontal, distance: 24 })
+              .onActionEnd((event: GestureEvent) => {
+                this.handleSceneSwipe(event);
+              })
+          )
+        }
+        .layoutWeight(1)
+        .margin({ top: 6 })
       } else if (this.useNativeSurface()) {
         A2uiSurfaceView({
           surface: this.currentSurface,
@@ -372,7 +543,9 @@ export struct HomePage {
         .margin({ top: 12 })
       } else {
         HtmlHomeSurfaceView({
+          surfaceId: this.currentSurface.surfaceId,
           html: this.htmlHomeHtml,
+          documentKey: this.surfaceDocumentKey(this.currentSurface),
           mailDetailEventJson: this.mailDetailEventJson,
           mailReplyEventJson: this.mailReplyEventJson,
           mailCalendarEventJson: this.mailCalendarEventJson,

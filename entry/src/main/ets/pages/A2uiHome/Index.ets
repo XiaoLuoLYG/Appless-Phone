@@ -92,6 +92,11 @@ import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
+import {
+  clearHtmlHomeSceneUpdates,
+  HtmlHomeSceneUpdate,
+  publishHtmlHomeSceneUpdate
+} from './components/HtmlHomeSceneUpdates';
 import { ConfigPage } from './components/ConfigPage';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
@@ -115,6 +120,7 @@ import {
   updateConnectionPanelState,
   voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
+import { A2uiWorkspaceScene, isWorkspaceSceneBusy } from './state/A2uiWorkspaceState';
 import {
   A2uiHomeResolvedToolRequest,
   directPaymentToolIdForActionId,
@@ -440,6 +446,8 @@ struct Index {
   @State refreshTick: number = initialConnectionState.refreshTick;
   @State currentSurface: A2uiSurfaceState = initialSurface;
   @State surfaceRenderTick: number = 0;
+  @State workspaceScenes: A2uiWorkspaceScene[] = [];
+  @State activeSceneIndex: number = 0;
   @State isAwaitingFirstSurface: boolean = false;
   @State inputText: string = '';
   @State isVoiceListening: boolean = false;
@@ -1132,6 +1140,131 @@ struct Index {
     };
   }
 
+  private workspaceSceneIndex(surfaceId: string): number {
+    for (let index = 0; index < this.workspaceScenes.length; index++) {
+      if (this.workspaceScenes[index].sceneId === surfaceId) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private workspaceSceneHtml(surface: A2uiSurfaceState): string {
+    const sceneBusy = surface.status === 'thinking' || surface.status === 'calling_tool';
+    const document = createHtmlHomeDocument({
+      surface: surface,
+      messages: this.messages,
+      isBusy: sceneBusy,
+      isAwaitingFirstSurface: false
+    });
+    return renderHtmlHomeDocument(document, sceneBusy);
+  }
+
+  private workspaceScene(surface: A2uiSurfaceState, renderTick: number, isActive: boolean): A2uiWorkspaceScene {
+    const snapshot = this.surfaceSnapshot(surface);
+    return new A2uiWorkspaceScene(
+      snapshot.surfaceId,
+      snapshot.title,
+      snapshot,
+      snapshot.intent === 'social' ? '' : this.workspaceSceneHtml(snapshot),
+      renderTick,
+      isActive
+    );
+  }
+
+  private replaceWorkspaceScene(index: number, surface: A2uiSurfaceState): void {
+    if (index < 0 || index >= this.workspaceScenes.length) {
+      return;
+    }
+    const scene = this.workspaceScenes[index];
+    const snapshot = this.surfaceSnapshot(surface);
+    const next = this.workspaceScenes.slice();
+    next[index] = new A2uiWorkspaceScene(
+      snapshot.surfaceId,
+      snapshot.title,
+      snapshot,
+      snapshot.intent === 'social' ? '' : this.workspaceSceneHtml(snapshot),
+      scene.renderTick + 1,
+      scene.isActive
+    );
+    this.workspaceScenes = next;
+    const updatedScene = next[index];
+    publishHtmlHomeSceneUpdate(new HtmlHomeSceneUpdate(
+      updatedScene.sceneId,
+      updatedScene.surface.surfaceId + ':' + updatedScene.surface.sequence.toString() + ':' +
+        updatedScene.surface.status,
+      updatedScene.html,
+      isWorkspaceSceneBusy(updatedScene),
+      updatedScene.renderTick
+    ));
+  }
+
+  private syncCurrentWorkspaceScene(): void {
+    const index = this.workspaceSceneIndex(this.currentSurface.surfaceId);
+    if (index >= 0) {
+      this.replaceWorkspaceScene(index, this.currentSurface);
+      return;
+    }
+    if (this.workspaceScenes.length > 0 && this.activeSceneIndex >= 0 &&
+      this.activeSceneIndex < this.workspaceScenes.length) {
+      this.replaceWorkspaceScene(this.activeSceneIndex, this.currentSurface);
+    }
+  }
+
+  private applyModelSurface(surface: A2uiSurfaceState): void {
+    let index = this.workspaceSceneIndex(surface.surfaceId);
+    if (index < 0) {
+      const next = this.workspaceScenes.slice();
+      next.push(this.workspaceScene(surface, 1, next.length === 0));
+      this.workspaceScenes = next;
+      index = next.length - 1;
+      aiLogInfo('[AIPhone][WorkspaceSceneCreate] sceneId=' + surface.surfaceId +
+        ' index=' + index.toString() + ' title=' + surface.title);
+    }
+    if (this.workspaceScenes.length === 1 || index === this.activeSceneIndex) {
+      this.activeSceneIndex = index;
+      this.applySurface(surface);
+      return;
+    }
+    this.replaceWorkspaceScene(index, surface);
+    aiLogInfo('[AIPhone][WorkspaceSceneUpdate] sceneId=' + surface.surfaceId +
+      ' index=' + index.toString() + ' active=false sequence=' + surface.sequence.toString());
+  }
+
+  private selectWorkspaceScene(index: number): void {
+    if (index < 0 || index >= this.workspaceScenes.length || index === this.activeSceneIndex) {
+      return;
+    }
+    const next: A2uiWorkspaceScene[] = [];
+    for (let sceneIndex = 0; sceneIndex < this.workspaceScenes.length; sceneIndex++) {
+      const scene = this.workspaceScenes[sceneIndex];
+      next.push(new A2uiWorkspaceScene(
+        scene.sceneId,
+        scene.title,
+        scene.surface,
+        scene.html,
+        scene.renderTick,
+        sceneIndex === index
+      ));
+    }
+    this.workspaceScenes = next;
+    this.activeSceneIndex = index;
+    this.currentSurface = this.surfaceSnapshot(this.workspaceScenes[index].surface);
+    this.surfaceRenderTick = this.surfaceRenderTick + 1;
+    this.clearLuckinInlinePatchState();
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+    this.syncHtmlHomeStableHtml();
+    aiLogInfo('[AIPhone][WorkspaceSceneSelect] sceneId=' + this.currentSurface.surfaceId +
+      ' index=' + index.toString());
+  }
+
+  private clearWorkspace(): void {
+    this.workspaceScenes = [];
+    this.activeSceneIndex = 0;
+    clearHtmlHomeSceneUpdates();
+  }
+
   private parsedDataModel(): A2uiRuntimeDataModel | null {
     try {
       return JSON.parse(this.currentSurface.dataModelJson) as A2uiRuntimeDataModel;
@@ -1236,6 +1369,7 @@ struct Index {
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
+    this.syncCurrentWorkspaceScene();
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
@@ -1251,6 +1385,7 @@ struct Index {
     this.syncHtmlHomeStableHtml();
     this.htmlHomeCacheKey = '';
     this.htmlHomeCacheHtml = '';
+    this.syncCurrentWorkspaceScene();
     aiLogInfo('[AIPhone][A2uiHomeSurfaceForceUpdate] reason=' + reason +
       ' surfaceId=' + surface.surfaceId +
       ' status=' + surface.status +
@@ -1394,6 +1529,7 @@ struct Index {
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    this.clearWorkspace();
     await this.refreshComposioAuth();
     this.applySurface(this.createSocialHubSurface());
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -1621,6 +1757,7 @@ struct Index {
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
     this.messages = [];
+    this.clearWorkspace();
     this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
@@ -1719,6 +1856,7 @@ struct Index {
       return;
     }
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
+    this.clearWorkspace();
     this.appendMessage('user', visibleText);
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + modelPrompt.length.toString() +
       ' model=' + this.selectedModel +
@@ -1735,7 +1873,7 @@ struct Index {
         this.recentMessages(),
         (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
           this.isAwaitingFirstSurface = false;
-          this.applySurface(surface);
+          this.applyModelSurface(surface);
           const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
           this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
             ok: true,
@@ -1753,7 +1891,7 @@ struct Index {
         actionArgs
       );
       this.isAwaitingFirstSurface = false;
-      this.applySurface(result.surface);
+      this.applyModelSurface(result.surface);
       aiLogInfo('[AIPhone][A2uiHomeModelResult] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
         ' rawChars=' + result.raw.length.toString() +
@@ -3863,6 +4001,8 @@ struct Index {
         showHistory: this.showHistory,
         messages: this.messages,
         currentSurface: this.currentSurface,
+        workspaceScenes: this.workspaceScenes,
+        activeSceneIndex: this.activeSceneIndex,
         htmlHomeHtml: this.htmlHomeHtmlForView(),
         mailDetailEventJson: this.mailDetailEventJson,
         mailReplyEventJson: this.mailReplyEventJson,
@@ -3902,6 +4042,9 @@ struct Index {
         },
         onClosePaymentCheckout: () => {
           this.showPaymentCheckout = false;
+        },
+        onSelectScene: (index: number) => {
+          this.selectWorkspaceScene(index);
         },
         onPaymentCheckoutReturn: (url: string) => {
           this.handlePaymentCheckoutReturn(url);
