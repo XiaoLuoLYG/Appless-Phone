@@ -1770,7 +1770,8 @@ struct Index {
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
+          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(
+            result.surface, modelPrompt, actionId, actionArgs, false);
           if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
           } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {

@@ -79,13 +79,29 @@ import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient } from 
 import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
-import { callCalendarTool } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
+import {
+  CalendarEventArgs,
+  calendarEventRequiredFields,
+  calendarDeleteTargetFromResultsForTest,
+  calendarUpdateArgsFromResultsForTest,
+  calendarMissingArgsResult,
+  calendarProviderDateTime,
+  calendarResultsFromComposioObservation,
+  normalizedCalendarArgsForPrompt
+} from './CalendarApiClient';
+import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
-import { callComposioDynamic, callComposioFixedRaw, ComposioRawExecution } from './ComposioDynamicBackend';
+import {
+  callComposioDynamic,
+  callComposioFixedRaw,
+  composioDynamicResultFromObservation,
+  composioPhoneNumberIdsFromObservation,
+  ComposioRawExecution,
+  refreshComposioConnections
+} from './ComposioDynamicBackend';
 import { aggregateSearchA2ui } from './AggregateSearchA2ui';
 import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
@@ -1309,6 +1325,49 @@ interface MapsToolArgs {
   keyword?: string;
   placeId?: string;
   id?: string;
+}
+
+interface WhatsAppSendArgs {
+  toNumber?: ToolArgValue;
+  text?: ToolArgValue;
+  phoneNumberId?: ToolArgValue;
+  wabaId?: ToolArgValue;
+  previewUrl?: ToolArgValue;
+  confirmed?: ToolArgValue;
+}
+
+interface WhatsAppProviderArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  previewUrl: boolean;
+}
+
+interface WhatsAppConfirmArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  wabaId: string;
+  previewUrl: boolean;
+  confirmed: boolean;
+}
+
+interface WhatsAppPhoneNumbersArgs {
+  wabaId?: string;
+}
+
+interface CalendarComposioArgs extends CalendarEventArgs {
+  confirmed?: boolean;
+  sendUpdates?: string;
+}
+
+interface CalendarDeleteConfirmArgs {
+  eventId: string;
+  calendarId: string;
+  title: string;
+  start: string;
+  end: string;
+  confirmed: boolean;
 }
 
 type ToolArgValue = Object | string | number | boolean | null | undefined;
@@ -10464,10 +10523,381 @@ function calendarAuthUnavailableMessage(toolId: string, prompt: string): string 
   return 'Google Calendar OAuth 未授权：工具 ' + toolId + ' 已注册，但当前设备没有可用的 Calendar scope；请先授权 Calendar。AIPhone 不会模拟日程或 eventId。请求：' + prompt.substring(0, 160);
 }
 
-async function callLocalCalendarTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  return genericToolResultsA2ui(surfaceId, toolId, [
-    await composioFixedAppResult(toolId, 'Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更', args)
-  ]);
+function calendarComposioArgs(toolId: string, prompt: string, args: Object | null): CalendarComposioArgs {
+  const source = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  const normalized = normalizedCalendarArgsForPrompt(toolId, prompt, source) as CalendarComposioArgs;
+  normalized.calendarId = textOf(normalized.calendarId).trim().length > 0 ? textOf(normalized.calendarId).trim() : 'primary';
+  normalized.confirmed = source.confirmed === true;
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    normalized.start = calendarProviderDateTime(textOf(normalized.start));
+    normalized.end = calendarProviderDateTime(textOf(normalized.end));
+  }
+  if (toolId === 'calendar.event.delete') {
+    normalized.sendUpdates = 'none';
+  }
+  return normalized;
+}
+
+export function calendarDeleteConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  return actionId === 'calendar.event.delete.confirm' && parsed.confirmed === true;
+}
+
+function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
+  const eventId = textOf(args.eventId).trim();
+  if (eventId.length === 0) {
+    return {
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.delete',
+      title: '需要日程 Event ID',
+      status: 'needs_input',
+      summary: '请先选择一条真实日程再删除。',
+      rows: [{ label: 'Missing', value: 'eventId' }],
+      rawPreview: 'missing=eventId'
+    };
+  }
+  const confirmArgs: CalendarDeleteConfirmArgs = {
+    eventId: eventId,
+    calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
+    title: textOf(args.title),
+    start: textOf(args.start),
+    end: textOf(args.end),
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '确认删除日程',
+    status: 'confirm_required',
+    summary: '删除后无法在本 App 内撤销，请确认。',
+    rows: [
+      { label: 'Event ID', value: eventId },
+      { label: 'Title', value: textOf(args.title) },
+      { label: 'Start', value: textOf(args.start) }
+    ],
+    rawPreview: 'confirm calendar delete eventId=' + eventId,
+    actions: [{
+      id: 'calendar.event.delete.confirm',
+      label: '确认删除',
+      prompt: '确认删除 Google Calendar 日程',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function calendarDeleteSelectorResult(): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '请选择要删除的日程',
+    status: 'needs_input',
+    summary: '请说明日期和时间段，或先从日程列表中选择一条日程。',
+    rows: [],
+    rawPreview: 'missing structured calendar delete selector'
+  };
+}
+
+function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
+  const start = Date.parse(textOf(args.timeMin));
+  const end = Date.parse(textOf(args.timeMax));
+  return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
+}
+
+async function callLocalCalendarTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
+  const normalized = calendarComposioArgs(toolId, prompt, args);
+  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
+    if (textOf(normalized.eventId).trim().length === 0) {
+      if (!hasCalendarLookupSelector(normalized)) {
+        return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
+      }
+      try {
+        const lookup = await callComposioFixedRaw(
+          composioProviderPrompt('Google Calendar', prompt, '待删除日程'),
+          'calendar.events.search',
+          normalized as Object
+        );
+        const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+        if (generic.status === 'error') {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+            composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+          ]);
+        }
+        const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+        const target = calendarDeleteTargetFromResultsForTest(matches);
+        if (target === null) {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+        }
+        normalized.eventId = target.eventId;
+        normalized.title = target.title;
+        normalized.start = target.start;
+        normalized.end = target.end;
+      } catch (_error) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待删除日程', normalized as Object)
+        ]);
+      }
+    }
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteConfirmationResult(normalized)]);
+  }
+  if (toolId === 'calendar.event.update' && textOf(normalized.eventId).trim().length === 0 &&
+    hasCalendarLookupSelector(normalized)) {
+    try {
+      const lookup = await callComposioFixedRaw(
+        composioProviderPrompt('Google Calendar', prompt, '待修改日程'),
+        'calendar.events.search',
+        normalized as Object
+      );
+      const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+      if (generic.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+        ]);
+      }
+      const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+      const resolved = calendarUpdateArgsFromResultsForTest(normalized, matches);
+      if (resolved === null) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+      }
+      normalized.eventId = resolved.eventId;
+      normalized.title = resolved.title;
+    } catch (_error) {
+      return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+        await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
+      ]);
+    }
+  }
+  const missing = calendarEventRequiredFields(toolId, normalized);
+  if (missing.length > 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarMissingArgsResult(toolId, missing)]);
+  }
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更'),
+      toolId,
+      normalized as Object
+    );
+    const generic = composioDynamicResultFromObservation('execute', execution.observation, execution.toolSlug, prompt);
+    if (generic.status === 'error') {
+      return genericToolResultsA2ui(surfaceId, toolId, [composioFixedResult(toolId, 'Google Calendar', generic, normalized as Object)]);
+    }
+    return genericToolResultsA2ui(surfaceId, toolId,
+      calendarResultsFromComposioObservation(toolId, execution.observation, normalized));
+  } catch (error) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      await composioFixedAppResult(toolId, 'Google Calendar', prompt,
+        toolId === 'calendar.events.search' ? '日程' : '日程变更', normalized as Object)
+    ]);
+  }
+}
+
+function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
+  return args === null ? JSON.parse('{}') as WhatsAppSendArgs : args as WhatsAppSendArgs;
+}
+
+function whatsAppRecipientDigits(value: string): string {
+  const input = value.trim();
+  if (input.length === 0 || input.charAt(0) !== '+') {
+    return '';
+  }
+  let digits = '';
+  for (let index = 1; index < input.length; index++) {
+    const char = input.charAt(index);
+    if (char >= '0' && char <= '9') {
+      digits += char;
+    } else if (char !== ' ' && char !== '-' && char !== '(' && char !== ')') {
+      return '';
+    }
+  }
+  return digits.length >= 8 && digits.length <= 15 ? digits : '';
+}
+
+export function whatsAppSendConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = whatsAppArgs(args);
+  return actionId === 'whatsapp.message.send.confirm' && parsed.confirmed === true;
+}
+
+export function whatsAppProviderFailureSummaryForTest(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.indexOf('no active connection found') >= 0 || lower.indexOf('没有 active connected account') >= 0) {
+    return 'WhatsApp 授权刚完成，请返回 App 后重试一次。';
+  }
+  if ((lower.indexOf('code 100') >= 0 && lower.indexOf('error_subcode 33') >= 0) ||
+    lower.indexOf('object does not exist') >= 0 || lower.indexOf('unsupported get request') >= 0) {
+    return '当前 Business 账户的 WABA 配置无效或缺少管理权限，请重新授权。';
+  }
+  if (lower.indexOf('133010') >= 0 || lower.indexOf('account not registered') >= 0) {
+    return '当前 Business 发送号码尚未注册到 WhatsApp Cloud API，请先在 Meta 后台完成号码验证与 API 注册。';
+  }
+  if (lower.indexOf('not_verified') >= 0 || lower.indexOf('not verified') >= 0) {
+    return '当前 Business 发送号码尚未完成验证，请先在 Meta 后台完成验证。';
+  }
+  return 'WhatsApp Business 暂时无法发送，请刷新授权后重试。';
+}
+
+function whatsAppProviderFailureResult(raw: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: 'WhatsApp Business 发送失败',
+    status: 'error',
+    summary: whatsAppProviderFailureSummaryForTest(raw),
+    rows: [],
+    rawPreview: raw
+  };
+}
+
+function whatsAppInputResult(toNumber: string, text: string): DynamicGenericToolResult | null {
+  const missing: A2uiLabelValueData[] = [];
+  if (whatsAppRecipientDigits(toNumber).length === 0) {
+    missing.push({ label: 'Missing', value: 'toNumber (+country code)' });
+  }
+  if (text.trim().length === 0 || text.trim().length > 4096) {
+    missing.push({ label: 'Missing', value: 'text (1-4096 chars)' });
+  }
+  if (missing.length === 0) {
+    return null;
+  }
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要 WhatsApp Business 发送信息',
+    status: 'needs_input',
+    summary: '请提供带国家码的手机号和 1-4096 字符消息。',
+    rows: missing,
+    rawPreview: 'invalid whatsapp send input'
+  };
+}
+
+function whatsAppConfirmationResult(
+  toNumber: string,
+  text: string,
+  phoneNumberId: string,
+  wabaId: string,
+  previewUrl: boolean
+): DynamicGenericToolResult {
+  const confirmArgs: WhatsAppConfirmArgs = {
+    toNumber: toNumber,
+    text: text,
+    phoneNumberId: phoneNumberId,
+    wabaId: wabaId,
+    previewUrl: previewUrl,
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '确认发送 WhatsApp 消息',
+    status: 'confirm_required',
+    summary: '将通过已授权的 WhatsApp Business 账号发送。',
+    rows: [
+      { label: '收件人', value: toNumber },
+      { label: '消息', value: text }
+    ],
+    rawPreview: 'confirm whatsapp send to=' + toNumber,
+    actions: [{
+      id: 'whatsapp.message.send.confirm',
+      label: '确认发送',
+      prompt: '确认通过 WhatsApp Business 发送消息',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function whatsAppPhoneSelectionResult(count: number): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要选择 WhatsApp Business 发送号码',
+    status: 'needs_input',
+    summary: count === 0 ? '当前账号没有可用的 Business 发送号码。' : '当前账号有多个 Business 发送号码，请指定 phoneNumberId。',
+    rows: [{ label: 'Phone Number IDs', value: count.toString() }],
+    rawPreview: 'phoneNumberId count=' + count.toString()
+  };
+}
+
+async function callLocalWhatsAppTool(
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null
+): Promise<string> {
+  const parsed = whatsAppArgs(args);
+  const toNumber = textOf(parsed.toNumber).trim();
+  const message = textOf(parsed.text).trim();
+  const inputError = whatsAppInputResult(toNumber, message);
+  if (inputError !== null) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [inputError]);
+  }
+  if (!whatsAppSendConfirmedForTest(actionId, args)) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppConfirmationResult(
+        toNumber,
+        message,
+        textOf(parsed.phoneNumberId).trim(),
+        textOf(parsed.wabaId).trim(),
+        parsed.previewUrl === true
+      )
+    ]);
+  }
+  // A user may finish Composio authorization while this app process is still alive.
+  // Drop the stale Tool Router session before the confirmed send discovers its account.
+  refreshComposioConnections();
+  let phoneNumberId = textOf(parsed.phoneNumberId).trim();
+  if (phoneNumberId.length === 0) {
+    try {
+      const lookupArgs: WhatsAppPhoneNumbersArgs = {};
+      const wabaId = textOf(parsed.wabaId).trim();
+      if (wabaId.length > 0) {
+        lookupArgs.wabaId = wabaId;
+      }
+      const lookup = await callComposioFixedRaw(
+        'WhatsApp Business phone numbers',
+        'whatsapp.phone_numbers.list',
+        lookupArgs as Object
+      );
+      const lookupResult = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, 'WhatsApp Business phone numbers');
+      if (lookupResult.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+          whatsAppProviderFailureResult(lookupResult.summary + ' ' + lookupResult.rawPreview)
+        ]);
+      }
+      const ids = composioPhoneNumberIdsFromObservation(lookup.observation);
+      if (ids.length !== 1) {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [whatsAppPhoneSelectionResult(ids.length)]);
+      }
+      phoneNumberId = ids[0];
+    } catch (error) {
+      return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+        whatsAppProviderFailureResult(describeThrown(error))
+      ]);
+    }
+  }
+  const providerArgs: WhatsAppProviderArgs = {
+    toNumber: whatsAppRecipientDigits(toNumber),
+    text: message,
+    phoneNumberId: phoneNumberId,
+    previewUrl: parsed.previewUrl === true
+  };
+  const result = await composioFixedAppResult('whatsapp.message.send', 'WhatsApp Business', prompt, '消息', providerArgs as Object);
+  if (result.status === 'success') {
+    result.title = 'WhatsApp Business 消息已发送';
+    result.summary = 'Provider 已确认发送成功。';
+  } else {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppProviderFailureResult(result.summary + ' ' + result.rawPreview)
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [result]);
 }
 
 function mapsArgs(args: Object | null): MapsToolArgs {
@@ -10495,6 +10925,9 @@ function mapsPlaceId(args: MapsToolArgs): string {
 }
 
 async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'maps.route.open') {
+    return genericToolResultsA2ui(surfaceId, toolId, [mapsRouteResult(args)]);
+  }
   const parsed = mapsArgs(args);
   if (toolId === 'maps.place.details') {
     return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceDetails(mapsPlaceId(parsed), localProviderConfig.googleMapsApiKey));
@@ -11348,8 +11781,11 @@ async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: 
 }
 
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  if (toolId === 'whatsapp.message.send') {
+    return callLocalWhatsAppTool(prompt, surfaceId, actionId, args);
+  }
   if (isCalendarToolId(toolId)) {
-    return callLocalCalendarTool(toolId, prompt, surfaceId, args);
+    return callLocalCalendarTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isMapsToolId(toolId)) {
     return callLocalMapsTool(toolId, prompt, surfaceId, args);

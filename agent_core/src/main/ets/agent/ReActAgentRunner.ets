@@ -10,6 +10,19 @@ export type UiRenderHandler = (description: string) => Promise<string[]>;
 const UI_TOOL_NAME = 'ui';
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
 
+function padDatePart(value: number): string {
+  return value < 10 ? '0' + value.toString() : value.toString();
+}
+
+function currentLocalDateTime(now: Date = new Date()): string {
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  return now.getFullYear().toString() + '-' + padDatePart(now.getMonth() + 1) + '-' + padDatePart(now.getDate()) +
+    'T' + padDatePart(now.getHours()) + ':' + padDatePart(now.getMinutes()) + ':' + padDatePart(now.getSeconds()) +
+    sign + padDatePart(Math.floor(absoluteOffset / 60)) + ':' + padDatePart(absoluteOffset % 60);
+}
+
 class ToolCall {
   name: string;
   input: string;
@@ -96,7 +109,8 @@ export class ReActAgentRunner {
         } else if (digest.failureKey.length > 0) {
           listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
         } else {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具结果已更新到主页。'));
+          listener(new AgentEvent(AgentEventKind.FINAL,
+            digest.finalText.length > 0 ? digest.finalText : '工具结果已更新到主页。'));
         }
         return;
       }
@@ -126,6 +140,7 @@ export class ReActAgentRunner {
 
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
+    prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
     prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
     if (this.uiHandler !== null) {

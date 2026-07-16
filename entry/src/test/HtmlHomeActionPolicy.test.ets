@@ -39,6 +39,12 @@ interface MailCalendarArgsFixture {
   messageId: string;
 }
 
+interface CalendarDeleteArgsFixture {
+  eventId: string;
+  calendarId: string;
+  confirmed: boolean;
+}
+
 interface LuckinArgsFixture {
   deptId?: string;
   location?: string;
@@ -118,6 +124,34 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('gmail.open.web', 'https://evil.example/'))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":0,"name":"Coffee"}'))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":99,"name":"Other"}'))).assertFalse();
+    });
+
+    it('allows Calendar delete only for a visible real event after confirmation', 0, () => {
+      const doc = documentFixture();
+      doc.blocks.push({
+        id: 'calendar-event-1',
+        kind: 'generic-tool-result',
+        title: '产品同步',
+        subtitle: '',
+        status: 'success',
+        source: 'Google Calendar API',
+        toolId: 'calendar.events.search',
+        metrics: [],
+        rows: [{ label: 'Event ID', value: 'event-1' }],
+        actions: []
+      });
+      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: true };
+      const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary', confirmed: true };
+      const unconfirmed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: false };
+
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed))).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'prompt', wrongEvent))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'prompt', unconfirmed))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'client', allowed))).assertFalse();
     });
 
     it('allows dynamic credential save only for the current dynamic block', 0, () => {

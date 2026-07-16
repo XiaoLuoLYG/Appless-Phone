@@ -216,6 +216,30 @@ export default function reActAgentRunnerTest() {
       expect(digest.text.indexOf('must not leak')).assertEqual(-1);
     });
 
+    it('keeps real Calendar Event IDs in the next-turn model context', 0, () => {
+      const calendarResult: DynamicGenericToolResult = {
+        sourceTag: 'Composio Google Calendar',
+        toolName: 'calendar.events.search',
+        title: '全量QA',
+        status: 'success',
+        summary: 'Google Calendar event returned by the real API.',
+        rows: [
+          { label: 'Event ID', value: 'event-real-123' },
+          { label: 'Start', value: '2026-07-17T09:00:00+08:00' },
+          { label: 'End', value: '2026-07-17T11:00:00+08:00' }
+        ],
+        rawPreview: 'must not leak'
+      };
+      const digest = summarizeA2uiObservation(
+        genericToolResultsA2ui('surface_calendar', 'calendar.events.search', [calendarResult])
+      );
+
+      expect(digest.text.indexOf('Event ID: event-real-123')).assertLarger(-1);
+      expect(digest.finalText.indexOf('event-real-123')).assertLarger(-1);
+      expect(digest.finalText.indexOf('全量QA')).assertLarger(-1);
+      expect(digest.finalText.indexOf('must not leak')).assertEqual(-1);
+    });
+
     it('marks terminal A2UI statuses and failure keys', 0, () => {
       const stopStatuses: string[] = ['blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
       stopStatuses.forEach((status: string) => {

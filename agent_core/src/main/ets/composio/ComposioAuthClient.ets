@@ -1,5 +1,6 @@
 import http from '@ohos.net.http';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { bindComposioPhysicalNetwork, ComposioNetworkLease, restoreComposioNetwork } from './ComposioNetwork';
 
 const LOG_DOMAIN: number = 0x1200;
 const LOG_TAG: string = 'LoopComposioAuth';
@@ -43,7 +44,6 @@ interface DirectComposioLinkRequest {
   auth_config_id: string;
   user_id: string;
   callback_url: string;
-  alias: string;
 }
 
 interface ComposioHttpErrorPayload {
@@ -268,8 +268,13 @@ export class ComposioAuthProxyClient {
 
   private async requestJson(method: http.RequestMethod, path: string, body: Object | null): Promise<Object> {
     const request = http.createHttp();
+    let networkLease: ComposioNetworkLease | null = null;
     hilog.info(LOG_DOMAIN, LOG_TAG, 'request method=%{public}s direct=%{public}s path=%{public}s', `${method}`, this.directApi ? 'true' : 'false', path);
     try {
+      if (this.directApi) {
+        networkLease = await bindComposioPhysicalNetwork();
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'physical network bound=%{public}s', networkLease.bound ? 'true' : 'false');
+      }
       const options: http.HttpRequestOptions = {
         method: method,
         header: this.headers(),
@@ -288,6 +293,10 @@ export class ComposioAuthProxyClient {
       return normalizeComposioHttpResponse(response.responseCode, text);
     } finally {
       request.destroy();
+      if (networkLease !== null) {
+        await restoreComposioNetwork(networkLease);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'restored app network');
+      }
     }
   }
 
@@ -309,8 +318,7 @@ export class ComposioAuthProxyClient {
       const requestBody: DirectComposioLinkRequest = {
         auth_config_id: authConfigId,
         user_id: userId,
-        callback_url: 'aiphone://composio/callback',
-        alias: toolkitSlug.trim().length > 0 ? toolkitSlug.trim().toLowerCase() + ':' + userId : userId
+        callback_url: 'aiphone://composio/callback'
       };
       const payload = await this.requestJson(http.RequestMethod.POST, '/connected_accounts/link', requestBody);
       return normalizeComposioLinkResponse(payload);

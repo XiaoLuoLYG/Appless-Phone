@@ -351,6 +351,35 @@ function googleMapsDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function googleMapsRouteDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'generic';
+  doc.title = 'Google Maps 路线';
+  doc.subtitle = '深圳北站到深圳湾口岸';
+  doc.blocks = [{
+    id: 'maps-route-0',
+    kind: 'generic-tool-result',
+    title: '深圳北站 → 深圳湾口岸',
+    subtitle: '路线已准备好。',
+    status: 'success',
+    source: 'Google Maps',
+    metrics: [
+      { label: 'source', value: 'Google Maps' },
+      { label: 'toolName', value: 'maps.route.open' }
+    ],
+    rows: [
+      { label: 'Origin', value: '深圳北站' },
+      { label: 'Destination', value: '深圳湾口岸' },
+      { label: 'Maps URL', value: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b' }
+    ],
+    actions: [
+      { id: 'maps.open.web', label: '查看路线', prompt: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b', variant: 'primary', kind: 'client' }
+    ]
+  }];
+  doc.actions = [];
+  return doc;
+}
+
 function composioResultsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -600,6 +629,41 @@ function calendarCreateDocumentFixture(): HtmlHomeDocument {
     { label: 'End', value: '2026-07-02T17:00:00+08:00' },
     { label: 'Link', value: 'https://calendar.google.com/calendar/event?eid=event-create-1' }
   ];
+  return doc;
+}
+
+function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
+  const doc = calendarSearchDocumentFixture();
+  doc.title = '确认删除日程';
+  doc.subtitle = '删除后无法在本 App 内撤销，请确认。';
+  doc.blocks[0].title = '确认删除日程';
+  doc.blocks[0].subtitle = '删除后无法在本 App 内撤销，请确认。';
+  doc.blocks[0].status = 'confirm_required';
+  doc.blocks[0].metrics = [
+    { label: 'source', value: 'Composio Google Calendar' },
+    { label: 'toolName', value: 'calendar.event.delete' }
+  ];
+  doc.blocks[0].rows = [{ label: 'Event ID', value: 'event-delete-1' }];
+  const confirmAction: HtmlHomeAction = {
+    id: 'calendar.event.delete.confirm',
+    label: '确认删除',
+    prompt: '确认删除 Google Calendar 日程',
+    variant: 'danger',
+    kind: 'prompt',
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+  };
+  doc.blocks[0].actions = [confirmAction];
+  return doc;
+}
+
+function calendarDeleteSuccessDocumentFixture(): HtmlHomeDocument {
+  const doc = calendarDeleteConfirmationDocumentFixture();
+  doc.title = 'Google Calendar';
+  doc.subtitle = '把上一条日程改到明天下午4点30分';
+  doc.blocks[0].title = '日程已删除';
+  doc.blocks[0].subtitle = '已从真实 Google Calendar 删除日程。';
+  doc.blocks[0].status = 'success';
+  doc.blocks[0].actions = [];
   return doc;
 }
 
@@ -1499,7 +1563,47 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('22.609878,114.029506')).assertLarger(-1);
       expect(html.indexOf('maps.open.web')).assertLarger(-1);
       expect(html.indexOf('打开 Google Maps')).assertLarger(-1);
+      expect(html.indexOf("window.open(text(action && action.prompt), '_blank')")).assertLarger(-1);
+      expect(html.indexOf('opacity: 0.18')).assertEqual(-1);
+      expect(html.indexOf('content: "Maps"')).assertEqual(-1);
       expect(html.indexOf('calendar-shell')).assertEqual(-1);
+    });
+
+    it('renders WhatsApp send confirmation as one clean card', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'dynamic-tools';
+      doc.blocks = [{
+        id: 'whatsapp-send-confirm',
+        kind: 'generic-tool-result',
+        title: '确认发送 WhatsApp 消息',
+        subtitle: '将通过已授权的 WhatsApp Business 账号发送。',
+        status: 'confirm_required',
+        source: 'Composio WhatsApp Business',
+        metrics: [
+          { label: 'source', value: 'Composio WhatsApp Business' },
+          { label: 'toolName', value: 'whatsapp.message.send' }
+        ],
+        rows: [
+          { label: '收件人', value: '+8613800138000' },
+          { label: '消息', value: 'test' }
+        ],
+        rawPreview: 'confirm whatsapp send to=+8613800138000',
+        actions: [{
+          id: 'whatsapp.message.send.confirm',
+          label: '确认发送',
+          prompt: '确认通过 WhatsApp Business 发送消息',
+          variant: 'danger',
+          kind: 'prompt'
+        }]
+      }];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('whatsapp-send-card')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card::before')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card .actions')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card .action')).assertLarger(-1);
+      expect(html.indexOf('function whatsAppSendActions(block)')).assertLarger(-1);
+      expect(html.indexOf("key === 'composio-whatsapp' && isWhatsAppSendBlock(block)")).assertLarger(-1);
     });
 
     it('renders Composio results with app logos and visible preview cards', 0, () => {
@@ -1546,14 +1650,58 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarSearchDocumentFixture());
 
       expect(html.indexOf('calendar-shell')).assertLarger(-1);
+      expect(html.indexOf('<div class="calendar-status-bar')).assertEqual(-1);
+      expect(html.indexOf('Google Calendar API 查询成功。')).assertEqual(
+        html.lastIndexOf('Google Calendar API 查询成功。')
+      );
       expect(html.indexOf('calendar-view-day')).assertLarger(-1);
       expect(html.indexOf('calendar-view-week')).assertLarger(-1);
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
+      expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
+      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
       expect(html.indexOf('10:00')).assertLarger(-1);
+      expect(html.indexOf('images.unsplash.com/photo-1506784983877-45594efa4cbe')).assertLarger(-1);
+      expect(html.indexOf('min-height: 302px')).assertLarger(-1);
+      expect(html.indexOf('calendar-detail-grid')).assertEqual(-1);
+      expect(html.indexOf('data-detail-source')).assertEqual(-1);
+      expect(html.indexOf('data-detail-id')).assertEqual(-1);
       expect(html.indexOf('任务结果')).assertEqual(-1);
+    });
+
+    it('submits a Calendar delete confirmation card without another drawer or modal', 0, () => {
+      const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
+
+      expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
+    });
+
+    it('renders a completed Calendar delete as only a success result', 0, () => {
+      const html = renderHtmlHomeDocument(calendarDeleteSuccessDocumentFixture());
+
+      expect(html.indexOf('日程已删除')).assertLarger(-1);
+      expect(html.indexOf('calendar-delete-success-card')).assertLarger(-1);
+      expect(html.indexOf('<main class="calendar-shell">')).assertEqual(-1);
+      expect(html.indexOf('<nav class="calendar-view-switch"')).assertEqual(-1);
+      expect(html.indexOf('<button class="calendar-delete-button"')).assertEqual(-1);
+      expect(html.indexOf('Composio')).assertEqual(-1);
+      expect(html.indexOf('Event ID')).assertEqual(-1);
+      expect(html.indexOf('把上一条日程改到明天下午4点30分')).assertEqual(-1);
+    });
+
+    it('renders Maps routes without debug rows or an eager map iframe', 0, () => {
+      const html = renderHtmlHomeDocument(googleMapsRouteDocumentFixture());
+
+      expect(html.indexOf("function isGoogleMapsRouteBlock(block)")).assertLarger(-1);
+      expect(html.indexOf("if (!isGoogleMapsBlock(block) || isGoogleMapsRouteBlock(block)) { return; }")).assertLarger(-1);
+      expect(html.indexOf("addActions(detailHost, mapsRouteActions(block))")).assertLarger(-1);
+      expect(html.indexOf('在 App 内查看路线')).assertEqual(-1);
     });
 
     it('uses the requested Google Calendar search window for empty results', 0, () => {
@@ -1575,6 +1723,21 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Google Calendar API · 已同步')).assertEqual(-1);
     });
 
+    it('shows the complete Google Calendar provider error without a false synced state', 0, () => {
+      const doc = calendarEmptySearchDocumentFixture();
+      doc.subtitle = 'invalid request data provided: start_datetime is required';
+      doc.blocks[0].status = 'error';
+      doc.blocks[0].subtitle = doc.subtitle;
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 同步失败')).assertLarger(-1);
+      expect(html.indexOf('calendar-status-bar')).assertEqual(-1);
+      expect(html.indexOf('invalid request data provided: start_datetime is required')).assertLarger(-1);
+      expect(html.indexOf('overflow-wrap: anywhere')).assertLarger(-1);
+      expect(html.indexOf('.calendar-undated-card h3,\n.calendar-undated-card p {\n  overflow-wrap: anywhere;\n  white-space: normal;')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已同步')).assertEqual(-1);
+    });
+
     it('renders Google Calendar create results as a write confirmation', 0, () => {
       const html = renderHtmlHomeDocument(calendarCreateDocumentFixture());
 
@@ -1583,6 +1746,33 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('16:30')).assertLarger(-1);
       expect(html.indexOf('17:00')).assertLarger(-1);
       expect(html.indexOf('已写入')).assertLarger(-1);
+    });
+
+    it('does not show a write confirmation for a failed Calendar create', 0, () => {
+      const doc = calendarCreateDocumentFixture();
+      doc.subtitle = '缺少字段：title, start, end。固定写工具不会从 prompt 补全这些参数。';
+      doc.blocks[0].status = 'error';
+      doc.blocks[0].subtitle = doc.subtitle;
+      doc.blocks[0].rows = [];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 同步失败')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-confirmation">')).assertEqual(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
+    it('shows Calendar create missing input without a false write state', 0, () => {
+      const doc = calendarCreateDocumentFixture();
+      doc.subtitle = '请补充明确的开始时间；请补充明确的结束时间或时长。';
+      doc.blocks[0].status = 'needs_input';
+      doc.blocks[0].title = '还需要补充日程信息';
+      doc.blocks[0].subtitle = doc.subtitle;
+      doc.blocks[0].rows = [];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 待补充')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-confirmation">')).assertEqual(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
     });
 
     it('renders Gmail, QQ, and Outlook mail sources with app icons and separate card frames', 0, () => {

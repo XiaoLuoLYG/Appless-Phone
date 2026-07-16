@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   GMAIL_TOOL_IDS,
+  aiphoneToolDescriptionForModel,
   allToolDefinitions,
   backendLabel,
   isCalendarToolId,
@@ -55,8 +56,11 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('calendar.events.search')).assertTrue();
       expect(isKnownDomainToolId('calendar.event.create')).assertTrue();
       expect(isKnownDomainToolId('calendar.event.update')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.delete')).assertTrue();
       expect(isKnownDomainToolId('maps.place.search')).assertTrue();
       expect(isKnownDomainToolId('maps.place.details')).assertTrue();
+      expect(isKnownDomainToolId('maps.route.open')).assertTrue();
+      expect(isKnownDomainToolId('whatsapp.message.send')).assertTrue();
       expect(isKnownDomainToolId('ride.estimate')).assertTrue();
       expect(isKnownDomainToolId('ride.app.link')).assertTrue();
       expect(isKnownDomainToolId('ride.order.create')).assertTrue();
@@ -122,13 +126,45 @@ export default function toolDefinitionRegistryTest() {
       expect(calendarCreate.outputSchema).assertEqual('calendarEvent');
       expect(calendarUpdate.riskLevel).assertEqual('confirm_required');
       expect(isCalendarToolId('calendar.events.search')).assertTrue();
-      expect(isCalendarToolId('calendar.event.delete')).assertFalse();
+      const calendarDelete = toolDefinitionForToolId('calendar.event.delete') as ToolDefinition;
+      const mapsRoute = toolDefinitionForToolId('maps.route.open') as ToolDefinition;
+      const whatsappSend = toolDefinitionForToolId('whatsapp.message.send') as ToolDefinition;
+      expect(isCalendarToolId('calendar.event.delete')).assertTrue();
+      expect(calendarDelete.riskLevel).assertEqual('confirm_required');
+      expect(calendarDelete.actions[0]).assertEqual('calendar.event.delete.confirm');
+      expect(calendarDelete.inputSchema.indexOf('timeMin')).assertLarger(-1);
+      expect(calendarDelete.inputSchema.indexOf('timeMax')).assertLarger(-1);
       expect(mapsSearch.domain).assertEqual('maps');
       expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
       expect(mapsSearch.outputSchema).assertEqual('places');
       expect(isMapsToolId('maps.place.details')).assertTrue();
-      expect(toolDefinitionForToolId('maps.route.plan')).assertEqual(null);
-      expect(toolDefinitionForToolId('calendar.event.delete')).assertEqual(null);
+      expect(isMapsToolId('maps.route.open')).assertTrue();
+      expect(mapsRoute.riskLevel).assertEqual('read');
+      expect(mapsRoute.actions[0]).assertEqual('maps.open.web');
+      expect(whatsappSend.domain).assertEqual('whatsapp');
+      expect(whatsappSend.riskLevel).assertEqual('confirm_required');
+      expect(whatsappSend.actions[0]).assertEqual('whatsapp.message.send.confirm');
+    });
+
+    it('gives the model a structured Calendar write contract', 0, () => {
+      const searchDescription = aiphoneToolDescriptionForModel('calendar.events.search');
+      const createDescription = aiphoneToolDescriptionForModel('calendar.event.create');
+      const updateDescription = aiphoneToolDescriptionForModel('calendar.event.update');
+      const deleteDescription = aiphoneToolDescriptionForModel('calendar.event.delete');
+
+      expect(searchDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(searchDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(createDescription.indexOf('RFC3339')).assertLarger(-1);
+      expect(createDescription.indexOf('ask the user')).assertLarger(-1);
+      expect(createDescription.indexOf('Never invent')).assertLarger(-1);
+      expect(updateDescription.indexOf('call calendar.event.update directly')).assertLarger(-1);
+      expect(updateDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(updateDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(updateDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
+      expect(deleteDescription.indexOf('call calendar.event.delete directly')).assertLarger(-1);
+      expect(deleteDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(deleteDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(deleteDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
     });
 
     it('keeps Gmail definitions declarative and direct send blocked', 0, () => {

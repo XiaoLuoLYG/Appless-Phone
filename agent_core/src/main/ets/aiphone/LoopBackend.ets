@@ -154,6 +154,34 @@ export function parseLoopToolInputArgs(input: string): Object | null {
   return null;
 }
 
+function calendarToolDescription(definition: ToolDefinition): string {
+  let description = definition.intent + ' risk=' + definition.riskLevel + ' inputSchema=' + definition.inputSchema +
+    ' outputSchema=' + definition.outputSchema;
+  if (definition.toolId === 'calendar.events.search') {
+    return description + '. Use for reading Google Calendar events and as the first step before update or delete when no real Event ID is present in conversation context. Input must be JSON with args.query, args.timeMin, args.timeMax, args.timezone, and optional args.calendarId. Resolve relative dates from the current device local datetime into RFC3339 timeMin/timeMax; never pass phrases such as tomorrow or 明天. If zero or multiple events match a requested write, let the user select one; never guess an Event ID.';
+  }
+  if (definition.toolId === 'calendar.event.create') {
+    return description + '. Use for creating Google Calendar events. Required JSON args are title, start, end, and timezone; calendarId is optional. start and end must be RFC3339 timestamps with a numeric offset, for example 2026-07-17T15:00:00+08:00. Resolve relative dates from the current device local datetime. If the title, date, start time, end time, or duration is missing, ask the user in Final and do not call this tool. Never invent a time or pass natural-language time text.';
+  }
+  if (definition.toolId === 'calendar.event.update') {
+    return description + '. For a natural-language update request, call calendar.event.update directly with structured args.query, args.timeMin, args.timeMax, args.start, args.end, args.timezone, and optional args.title or args.calendarId. timeMin/timeMax identify the existing event; start/end are the requested new RFC3339 times. The client searches real events internally and updates only when exactly one match exists; zero or multiple matches are shown for refinement. When a visible event action already provides args.eventId, preserve it. Never ask the user to type or know an Event ID. If the new start, end, or duration is missing, ask the user instead of inventing it.';
+  }
+  if (definition.toolId === 'calendar.event.delete') {
+    return description + '. For a natural-language delete request, call calendar.event.delete directly with structured args.query, args.timeMin, args.timeMax, args.timezone, and optional args.calendarId; resolve relative dates into RFC3339 and never pass phrases such as tomorrow or 明天. The client searches real events internally: exactly one match proceeds to confirmation, while zero or multiple matches are shown for user selection. When the user selected a visible event, pass its internal args.eventId. Never ask the user to type or know an Event ID. The client requires explicit delete confirmation before the Provider call.';
+  }
+  return description;
+}
+
+export function aiphoneToolDescriptionForModel(toolId: string): string {
+  const definitions = allToolDefinitions();
+  for (let index = 0; index < definitions.length; index++) {
+    if (definitions[index].toolId === toolId) {
+      return calendarToolDescription(definitions[index]);
+    }
+  }
+  return '';
+}
+
 export class LoopBackend {
   async run(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): Promise<LoopRunResult> {
     const conversation = this.buildConversation(request);
@@ -264,7 +292,7 @@ export class LoopBackend {
     ));
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp, Instagram, Spotify, TikTok, or Ticketmaster. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. Use dynamic.search when the user names unsupported external apps or SaaS toolkits such as Notion pages/databases, Google Drive files, Google Docs documents, Linear issues, Trello cards/checklists, Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Discord, LinkedIn, WhatsApp history/search, Instagram, Spotify, TikTok, or Ticketmaster. WhatsApp Business message sending uses whatsapp.message.send, never dynamic.search. Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use those fixed tool IDs instead of dynamic.search. Use dynamic.search for Slack only when the user explicitly says Composio Slack or asks to use Composio for Slack; ordinary Slack/social DM inbox requests use SocialHub. Use dynamic.search for Outlook only when the user explicitly names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, next-match, preview, team, or player-card requests are covered by worldcup.open, not dynamic.search. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, ordinary SocialHub, Maps, Food, Travel, World Cup page/schedule requests, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -272,6 +300,9 @@ export class LoopBackend {
   }
 
   private describeAiphoneTool(definition: ToolDefinition): string {
+    if (definition.domain === 'calendar') {
+      return calendarToolDescription(definition);
+    }
     let description = definition.intent + ' risk=' + definition.riskLevel + ' inputSchema=' + definition.inputSchema + ' outputSchema=' + definition.outputSchema;
     if (definition.toolId === 'travel.search') {
       description += '. Use for general train/flight travel options. Do not use for ferry or boat tickets; use dynamic.search for those unsupported transport domains.';
@@ -295,6 +326,10 @@ export class LoopBackend {
       description += '. Use only for explicit X/Twitter/x.com public post searches, not arbitrary letter X or Xcode requests. Never fabricate posts.';
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
+    } else if (definition.toolId === 'maps.route.open') {
+      description += '. Use for Google Maps directions or navigation only when structured args include origin and destination. Do not parse or guess endpoints from free text.';
+    } else if (definition.toolId === 'whatsapp.message.send') {
+      description += '. Use for real WhatsApp Business text messages. Include structured args.toNumber and args.text. Preserve args.phoneNumberId or args.wabaId when the user configured a sender. The client requires explicit confirmation and the Provider may reject free text outside the 24-hour conversation window.';
     } else if (definition.toolId === 'mail.search') {
       description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail, QQ Mail, and Outlook search. Action input must be JSON with providers, query, and pageSize. Always include query; if the user wants latest/recent mail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq","outlook"]. Never fabricate mail rows.';
     } else if (definition.toolId === 'mail.thread.read') {
@@ -321,10 +356,6 @@ export class LoopBackend {
       description += '. Use when the user wants to open the World Cup experience, view World Cup schedules, next match time, previews, highlights, teams, players, or matchup cards. Use media tools instead for explicit YouTube-only, Bilibili-only, or mixed-content search requests.';
     } else if (definition.toolId === 'youtube.video.search') {
       description += '. Use only for explicit YouTube-only public video search; use media.video.search for Bilibili or multi-source video requests.';
-    } else if (definition.toolId === 'calendar.events.search') {
-      description += '. Use for reading Google Calendar events or schedules.';
-    } else if (definition.toolId === 'calendar.event.create') {
-      description += '. Use for drafting or creating Google Calendar events; confirm_required. Input must be JSON with args.title, args.start, args.end, args.timezone, and optional args.calendarId; extract title from phrases like "标题为 X" or the meeting name.';
     } else if (definition.toolId === 'payment.send') {
       description += '. Use for explicit PayPal account payments, Stripe connected merchant Checkout, or opening a stored Stripe Payment Link. If the user says Google Pay, treat it as args.fundingSource="google_pay" with provider still PayPal or Stripe; Google Pay is not a separate provider/tool. Always produce a confirmation/payment UI before checkout. Never claim money was sent without a real provider confirmation.';
     } else if (definition.toolId === 'payment.account.setup') {

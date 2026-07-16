@@ -256,10 +256,13 @@ const visibleDomainMarkers = [
   'Google Calendar',
   'calendar.events.search',
   'calendar.event.create',
+  'calendar.event.delete',
   'Google OAuth',
   'Google Places',
   'Google Maps',
   'maps.place.search',
+  'maps.route.open',
+  'whatsapp.message.send',
   'GOOGLE_MAPS_API_KEY',
   'Gmail Web',
   'google.gmail',
@@ -311,6 +314,11 @@ const finalLayoutBlockingMarkers = [
   'Internal error',
   '2300999',
   'Bad Request',
+  'invalid request data provided',
+  'Composio 调用失败',
+  'Failed to resolve the host name',
+  '同步失败',
+  'WhatsApp Business 账号不可用',
   '暂无可展示数据',
   '暂不支持的组件',
   '把一句话变成可执行界面',
@@ -341,7 +349,12 @@ const retryableProviderLayoutMarkers = [
   'QQ 邮箱调用失败',
   'QQ IMAP timeout',
   'Operation timeout',
-  '2300028'
+  '2300028',
+  'invalid request data provided',
+  'Composio 调用失败',
+  'Failed to resolve the host name',
+  '同步失败',
+  'WhatsApp Business 账号不可用'
 ];
 
 function hasTechnicalGmailArgsCard(text) {
@@ -389,6 +402,14 @@ const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000
 const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 const mailActionScrollLimit = Number.parseInt(process.env.AIPHONE_MAIL_ACTION_SCROLL_LIMIT || '16', 10);
 
+function isWhatsAppSendQuery(query) {
+  return /WhatsApp|Whats\s*App/i.test(query) && /发|发送|消息给|send/i.test(query) && /消息|信息|message/i.test(query);
+}
+
+function isMapsRouteQuery(query) {
+  return /Google\s*Maps?|GMap|谷歌地图/i.test(query) && /路线|导航|怎么走|directions?|navigate|从.+到/.test(query);
+}
+
 function expectedCaseForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
     return {
@@ -428,6 +449,12 @@ function expectedCaseForQuery(query) {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
       expectedDiscoveredToolId: 'ppt.generate'
+    };
+  }
+  if (isWhatsAppSendQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'whatsapp.message.send'
     };
   }
   if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
@@ -534,6 +561,12 @@ function expectedCaseForQuery(query) {
     };
   }
   if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
+    if (/删除|取消/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.delete'
+      };
+    }
     if (/创建|新建|添加|安排|预约/.test(query)) {
       return {
         expectsTool: true,
@@ -554,7 +587,8 @@ function expectedCaseForQuery(query) {
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
     return {
       expectsTool: true,
-      expectedToolId: /详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search'
+      expectedToolId: isMapsRouteQuery(query) ? 'maps.route.open' :
+        (/详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search')
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -1179,7 +1213,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     failedConnect: /failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|server is not running|CURLcode result 7|curl_code":7|os_errno":111/i.test(text),
     providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) ||
       /\[AIPhone\]\[LocalToolException\]/.test(text) ||
+      /\[AIPhone\]\[A2uiHomeToolOutput\][^\n]*"status":"error"/.test(text) ||
       /Google Calendar API 调用失败/.test(text) ||
+      /invalid request data provided|Composio 调用失败|WhatsApp Business 账号不可用/i.test(text) ||
       (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
@@ -1340,7 +1376,7 @@ function isComposioCardQuery(query) {
     (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) ||
     (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
     (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query));
+    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query) && !isWhatsAppSendQuery(query));
 }
 
 function layoutExpectationsForQuery(query) {
@@ -1367,6 +1403,9 @@ function layoutExpectationsForQuery(query) {
   }
   if (/LinkedIn/i.test(query)) {
     return ['Composio LinkedIn 结果', 'LinkedIn'];
+  }
+  if (isWhatsAppSendQuery(query)) {
+    return ['WhatsApp Business', 'whatsapp.message.send', '确认发送'];
   }
   if (/WhatsApp/i.test(query)) {
     return ['Composio WhatsApp 结果', 'WhatsApp'];
@@ -1453,14 +1492,18 @@ function layoutExpectationsForQuery(query) {
     return ['哔哩哔哩', 'media.video.search', '跳转'];
   }
   if (isCalendarQuery(query)) {
-    return /创建|新建|添加|安排|预约/.test(query)
+    return /删除|取消/.test(query)
+      ? ['Composio', 'Google Calendar', 'calendar.event.delete']
+      : (/创建|新建|添加|安排|预约/.test(query)
       ? ['Composio', 'Google Calendar', 'calendar.event.create']
       : (/改到|改成|更新|挪到|延期/.test(query)
         ? ['Composio', 'Google Calendar', 'calendar.event.update']
-        : ['Composio', 'Google Calendar', 'calendar.events.search']);
+        : ['Composio', 'Google Calendar', 'calendar.events.search']));
   }
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
-    return ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
+    return isMapsRouteQuery(query)
+      ? ['Google Maps', '查看路线']
+      : ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
@@ -1977,7 +2020,8 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutScrolledFoundMarkers = scrollEvidence.foundMarkers;
   summary.layoutScrollTextPaths = scrollEvidence.textPaths;
   summary.layoutScrollScreenPaths = scrollEvidence.screenPaths;
-  summary.screenPath = captureScreen(`query-${index + 1}-final-screen.png`);
+  const evidenceToolName = (expectedToolId.length > 0 ? expectedToolId : 'no-tool').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+  summary.screenPath = captureScreen(`query-${index + 1}-${evidenceToolName}-final-screen.png`);
   summary.layoutExpectedHits = expectedHits;
   summary.layoutExpectedMisses = expectedMisses;
   summary.socialHubVisibleOutput = socialHubVisibleOutput;

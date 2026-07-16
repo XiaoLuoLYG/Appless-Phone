@@ -175,7 +175,7 @@ function verifySourceContracts() {
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
   assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
   assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
-  assertContains(runner, 'isA2uiObservation(observation)', 'ReAct runner stops after A2UI tool observations');
+  assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
 
   assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
