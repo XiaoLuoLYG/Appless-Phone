@@ -65,6 +65,7 @@ import personaPromptTest from './PersonaPrompt.test';
 import personaA2uiTest from './PersonaA2ui.test';
 import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
+import skillMarkdownParserTest from './SkillMarkdownParser.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -126,6 +127,7 @@ export default function testsuite() {
   socialHubClientTest();
   voiceInputBridgeTest();
   personaMarkdownTest();
+  skillMarkdownParserTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

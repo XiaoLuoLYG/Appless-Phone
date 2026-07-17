@@ -85,3 +85,17 @@ export * from './src/main/ets/aiphone/payment/StripePaymentClient';
 export * from './src/main/ets/aiphone/payment/StripeConnectClient';
 export * from './src/main/ets/aiphone/payment/StripeReceivingAccountA2ui';
 export * from './src/main/ets/aiphone/payment/StripeReceivingAccountCore';
+export { SandboxFileWriteTool } from './src/main/ets/file/SandboxFileWriteTool';
+export { AgentSkill } from './src/main/ets/skill/AgentSkill';
+export { parseSkillMarkdown } from './src/main/ets/skill/SkillMarkdownParser';
+export { loadSkillsFromContext } from './src/main/ets/skill/SkillLoader';
+export { buildSkillCatalog } from './src/main/ets/skill/SkillCatalog';
+export { SkillReadTool } from './src/main/ets/skill/SkillReadTool';
+export { ensureBundledSkillsInSandbox, loadSandboxSkills, sandboxSkillsRoot } from './src/main/ets/skill/SkillStore';
+export {
+  SkillSnapshot,
+  createSkillSnapshot,
+  buildSkillsSection,
+  buildReActFormatRules,
+  buildLoopSystemPrompt
+} from './src/main/ets/skill/SkillSnapshot';
