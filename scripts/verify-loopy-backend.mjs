@@ -129,6 +129,23 @@ function verifySourceContracts() {
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
   const genericMcp = read('agent_core/src/main/ets/aiphone/runtime/GenericMcpClient.ets');
   const modelScope = read('agent_core/src/main/ets/modelscope/ModelScopeDirectClient.ets');
+  const modelScopeSearchStart = modelScope.indexOf('async search(useCase: string)');
+  const modelScopeExecuteStart = modelScope.indexOf('async execute(qualifiedName: string', modelScopeSearchStart);
+  const modelScopeExecuteEnd = modelScope.indexOf('private async fetchOperationalServers', modelScopeExecuteStart);
+  const modelScopeSearch = modelScopeSearchStart >= 0 && modelScopeExecuteStart > modelScopeSearchStart
+    ? modelScope.slice(modelScopeSearchStart, modelScopeExecuteStart)
+    : '';
+  const modelScopeExecute = modelScopeExecuteStart >= 0 && modelScopeExecuteEnd > modelScopeExecuteStart
+    ? modelScope.slice(modelScopeExecuteStart, modelScopeExecuteEnd)
+    : '';
+  const modelScopeEmptyGuard = modelScopeSearch.indexOf('if (emptyObservation.length > MAX_OBSERVATION_CHARS)');
+  const modelScopeCandidateLoop = modelScopeSearch.indexOf('for (let index = 0; index < selected.length; index++)');
+  const modelScopeCandidateBound = modelScopeSearch.indexOf('if (candidateObservation.length > MAX_OBSERVATION_CHARS)');
+  const modelScopeCandidateRollback = modelScopeSearch.indexOf('candidates.pop()', modelScopeCandidateBound);
+  const modelScopeAuthorization = modelScopeSearch.indexOf(
+    'this.discoveredTools.add(candidates[index].qualifiedName)',
+    modelScopeCandidateRollback
+  );
   const registry = read('agent_core/src/main/ets/agent/ToolRegistry.ets');
   const runtimeDir = resolve(repoRoot, 'agent_core/src/main/ets/aiphone/runtime');
   const streamablePath = resolve(repoRoot, 'agent_core/src/main/ets/modelscope/StreamableMcpClient.ets');
@@ -246,7 +263,28 @@ function verifySourceContracts() {
   assertContains(modelScope, "from '../aiphone/runtime/GenericMcpClient'", 'ModelScope reuses GenericMcpClient');
   assertContains(modelScope, 'annotations.readOnlyHint !== true', 'ModelScope requires explicit read-only annotations');
   assertContains(modelScope, 'annotations.destructiveHint === true', 'ModelScope blocks destructive annotations');
-  assertContains(modelScope, '尚未通过最近一次 search 发现', 'ModelScope rejects unsearched tool names');
+  assertContains(modelScopeSearch, 'this.discoveredTools.clear()', 'ModelScope search resets the executable discovery set');
+  assertContains(modelScopeSearch, 'annotations: tool.mcpTool.annotations', 'ModelScope search returns MCP annotations');
+  assert(
+    modelScopeEmptyGuard >= 0 &&
+      modelScopeCandidateLoop > modelScopeEmptyGuard &&
+      modelScopeCandidateBound > modelScopeCandidateLoop &&
+      modelScopeCandidateRollback > modelScopeCandidateBound &&
+      modelScopeAuthorization > modelScopeCandidateRollback &&
+      modelScopeSearch.indexOf('return JSON.stringify(observation)', modelScopeAuthorization) > modelScopeAuthorization,
+    'ModelScope authorizes only complete bounded search candidates',
+    'missing ordered empty guard, candidate rollback, final-set authorization, or complete observation return'
+  );
+  assertContains(
+    modelScopeExecute,
+    'modelScopeExecutionDecision(this.discoveredTools.has(normalized), selectedMcpTool)',
+    'ModelScope execute uses the latest-search safety gate'
+  );
+  assertContains(
+    modelScopeExecute,
+    "this.mcp.callTool(tool.registration, '', args)",
+    'ModelScope execute calls the selected MCP registration'
+  );
   assert(!modelScope.includes('domainBoost'), 'ModelScope has no domain boost');
   assert(!/飞常准|12306|天气|weather|searchFlightsByDepArr|searchFlightItineraries|getFlightPriceByCities/i.test(modelScope), 'ModelScope has no domain-specific routing');
   assert(!existsSync(streamablePath), 'ModelScope does not duplicate MCP transport');

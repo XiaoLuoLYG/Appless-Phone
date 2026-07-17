@@ -3,7 +3,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   DynamicGenericToolResult,
   DynamicMcpTool,
-  DynamicToolRegistration
+  DynamicToolRegistration,
+  McpToolAnnotations
 } from '../aiphone/runtime/DynamicToolTypes';
 import { GenericMcpClient } from '../aiphone/runtime/GenericMcpClient';
 import { ModelScopeClient } from './ModelScopeClient';
@@ -75,6 +76,7 @@ interface SearchCandidate {
   description: string;
   risk: string;
   inputSchema: Object;
+  annotations?: McpToolAnnotations;
 }
 
 interface SearchObservation {
@@ -236,19 +238,6 @@ export class ModelScopeDirectClient implements ModelScopeClient {
     this.discoveredTools.clear();
     const selected = this.rankTools(this.tools, query);
     const candidates: SearchCandidate[] = [];
-    for (let index = 0; index < selected.length; index++) {
-      const tool = selected[index].tool;
-      this.discoveredTools.add(tool.qualifiedName);
-      candidates.push({
-        qualifiedName: tool.qualifiedName,
-        serverId: tool.serverId,
-        serverName: tool.serverName,
-        name: tool.name,
-        description: tool.description,
-        risk: tool.risk,
-        inputSchema: tool.inputSchema
-      });
-    }
     const observation: SearchObservation = {
       source: 'ModelScope',
       mode: 'direct',
@@ -256,7 +245,32 @@ export class ModelScopeDirectClient implements ModelScopeClient {
       tools: candidates,
       instruction: 'Choose exactly one returned qualifiedName. Arguments must match inputSchema. Execute only tools whose risk is read. Output Action: modelscope({"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{}}).'
     };
-    return this.limitObservation(JSON.stringify(observation));
+    const emptyObservation = JSON.stringify(observation);
+    if (emptyObservation.length > MAX_OBSERVATION_CHARS) {
+      return this.limitObservation(emptyObservation);
+    }
+    for (let index = 0; index < selected.length; index++) {
+      const tool = selected[index].tool;
+      candidates.push({
+        qualifiedName: tool.qualifiedName,
+        serverId: tool.serverId,
+        serverName: tool.serverName,
+        name: tool.name,
+        description: tool.description,
+        risk: tool.risk,
+        inputSchema: tool.inputSchema,
+        annotations: tool.mcpTool.annotations
+      });
+      const candidateObservation = JSON.stringify(observation);
+      if (candidateObservation.length > MAX_OBSERVATION_CHARS) {
+        candidates.pop();
+        break;
+      }
+    }
+    for (let index = 0; index < candidates.length; index++) {
+      this.discoveredTools.add(candidates[index].qualifiedName);
+    }
+    return JSON.stringify(observation);
   }
 
   async execute(qualifiedName: string, args: Object): Promise<string> {
