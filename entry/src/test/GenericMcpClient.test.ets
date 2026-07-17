@@ -40,12 +40,14 @@ export default function genericMcpClientTest() {
     });
 
     it('parses tools/list JSON-RPC responses', 0, () => {
-      const parsed = parseMcpJsonRpcResponse('{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"maps_weather","description":"weather","inputSchema":{"type":"object"}}]}}');
+      const parsed = parseMcpJsonRpcResponse('{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"maps_weather","description":"weather","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true,"destructiveHint":false}}]}}');
 
       expect(parsed.ok).assertTrue();
       expect(parsed.tools.length).assertEqual(1);
       expect(parsed.tools[0].name).assertEqual('maps_weather');
       expect(parsed.tools[0].description).assertEqual('weather');
+      expect(parsed.tools[0].annotations?.readOnlyHint).assertTrue();
+      expect(parsed.tools[0].annotations?.destructiveHint).assertFalse();
     });
 
     it('parses tools/list JSON-RPC responses from event-stream data', 0, () => {

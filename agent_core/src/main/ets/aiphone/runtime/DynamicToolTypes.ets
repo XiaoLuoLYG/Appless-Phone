@@ -27,10 +27,19 @@ export interface DynamicToolTransport {
   forecastQuery?: string;
 }
 
+export interface McpToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface DynamicMcpTool {
   name: string;
   description: string;
   inputSchema: Object;
+  annotations?: McpToolAnnotations;
 }
 
 export interface DynamicToolManifest {
