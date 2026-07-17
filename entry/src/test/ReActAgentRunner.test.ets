@@ -2,6 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   AgentEvent,
   AgentEventKind,
+  AgentSkill,
   AgentTool,
   A2uiEnvelope,
   ConversationContext,
@@ -11,6 +12,7 @@ import {
   LocalModel,
   parseLoopToolInputArgs,
   ReActAgentRunner,
+  SkillSnapshot,
   summarizeA2uiObservation,
   ToolRegistry
 } from '@loop/agent-core';
@@ -150,6 +152,42 @@ function longText(prefix: string): string {
 
 export default function reActAgentRunnerTest() {
   describe('reActAgentRunner', () => {
+    it('emits the selected skill while preserving the normal observation', 0, async () => {
+      const skill = new AgentSkill(
+        'weather',
+        'Read real weather',
+        '',
+        '',
+        '/skills/weather/SKILL.md',
+        'Use the real weather provider.'
+      );
+      const snapshot = new SkillSnapshot([skill], '<available_skills></available_skills>');
+      const read = new FixedTool('read', '# Skill: weather\n\nUse the real weather provider.');
+      const registry = new ToolRegistry();
+      registry.register(read);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel('Thought: load skill\nAction: read(weather)'),
+        registry,
+        1,
+        undefined,
+        snapshot
+      );
+      let selectedSkill = '';
+      let observation = '';
+
+      await runner.run('weather', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.SKILL) {
+          selectedSkill = event.text;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observation = event.text;
+        }
+      });
+
+      expect(selectedSkill).assertEqual('weather');
+      expect(observation.indexOf('# Skill: weather')).assertLarger(-1);
+    });
+
     it('parses parenthesized JSON actions that contain arrays', 0, async () => {
       const tool = new CaptureTool();
       const registry = new ToolRegistry();
