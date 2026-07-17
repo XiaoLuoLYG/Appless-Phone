@@ -470,5 +470,25 @@ export default function reActAgentRunnerTest() {
       expect(model.prompts.length).assertEqual(1);
       expect(finalText.indexOf('工具执行失败')).assertLarger(-1);
     });
+
+    it('adds ModelScope guidance only when the registry contains the tool', 0, async () => {
+      const withoutModelScope = new SequenceModel(['Final: done']);
+      const withoutRegistry = new ToolRegistry();
+      await new ReActAgentRunner(withoutModelScope, withoutRegistry, 1).run(
+        'plain task',
+        (_event: AgentEvent): void => {}
+      );
+
+      const withModelScope = new SequenceModel(['Final: done']);
+      const withRegistry = new ToolRegistry();
+      withRegistry.register(new FixedTool('modelscope', 'unavailable'));
+      await new ReActAgentRunner(withModelScope, withRegistry, 1).run(
+        'provider task',
+        (_event: AgentEvent): void => {}
+      );
+
+      expect(withoutModelScope.prompts[0].indexOf('Call modelscope only')).assertEqual(-1);
+      expect(withModelScope.prompts[0].indexOf('Call modelscope only')).assertLarger(-1);
+    });
   });
 }

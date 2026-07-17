@@ -16,6 +16,14 @@ export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
 export { ScriptedA2uiModel, buildTaskCardComponents } from './src/main/ets/a2ui/ScriptedA2uiModel';
 export { OpenAiCompatibleModel } from './src/main/ets/model/OpenAiCompatibleModel';
 export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/ets/model/LoopModelFactory';
+export { ModelScopeClient } from './src/main/ets/modelscope/ModelScopeClient';
+export { ModelScopeConfig } from './src/main/ets/modelscope/ModelScopeConfig';
+export {
+  ModelScopeDirectClient,
+  ModelScopeExecutionDecision,
+  modelScopeExecutionDecision
+} from './src/main/ets/modelscope/ModelScopeDirectClient';
+export { ModelScopeTool } from './src/main/ets/modelscope/ModelScopeTool';
 export { ComposioConfig } from './src/main/ets/composio/ComposioConfig';
 export * from './src/main/ets/composio/ComposioAuthClient';
 export { ComposioSessionClient, describeComposioFailure } from './src/main/ets/composio/ComposioSessionClient';

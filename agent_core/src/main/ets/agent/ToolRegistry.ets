@@ -3,6 +3,9 @@ import { ComposioConfig } from '../composio/ComposioConfig';
 import { ComposioSessionClient } from '../composio/ComposioSessionClient';
 import { ComposioTool } from '../composio/ComposioTool';
 import { SandboxFileWriteTool } from '../file/SandboxFileWriteTool';
+import { ModelScopeConfig } from '../modelscope/ModelScopeConfig';
+import { ModelScopeDirectClient } from '../modelscope/ModelScopeDirectClient';
+import { ModelScopeTool } from '../modelscope/ModelScopeTool';
 import { SkillReadTool } from '../skill/SkillReadTool';
 import { SkillSnapshot } from '../skill/SkillSnapshot';
 import { AgentTool } from './AgentTool';
@@ -98,6 +101,10 @@ export async function createConfiguredLoopToolRegistry(
   await client.initialize();
   registry.register(new ComposioTool(client));
   registry.registerCloseHandler(async (): Promise<void> => client.close());
+  const modelScopeConfig = await ModelScopeConfig.fromContext(context);
+  const modelScopeClient = new ModelScopeDirectClient(modelScopeConfig);
+  await modelScopeClient.initialize();
+  registry.register(new ModelScopeTool(modelScopeClient));
   return registry;
 }
 

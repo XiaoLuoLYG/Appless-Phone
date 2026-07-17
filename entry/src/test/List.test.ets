@@ -66,6 +66,7 @@ import personaA2uiTest from './PersonaA2ui.test';
 import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
 import skillMarkdownParserTest from './SkillMarkdownParser.test';
+import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -128,6 +129,7 @@ export default function testsuite() {
   voiceInputBridgeTest();
   personaMarkdownTest();
   skillMarkdownParserTest();
+  modelScopeDirectClientTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
