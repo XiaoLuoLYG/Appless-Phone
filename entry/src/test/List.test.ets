@@ -1,4 +1,5 @@
 import localUnitTest from './LocalUnit.test';
+import conversationContextTest from './ConversationContext.test';
 import reActAgentRunnerTest from './ReActAgentRunner.test';
 import a2uiParserTest from './A2uiParser.test';
 import localModelClientTest from './LocalModelClient.test';
@@ -64,9 +65,12 @@ import personaPromptTest from './PersonaPrompt.test';
 import personaA2uiTest from './PersonaA2ui.test';
 import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
+import skillMarkdownParserTest from './SkillMarkdownParser.test';
+import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 
 export default function testsuite() {
   localUnitTest();
+  conversationContextTest();
   reActAgentRunnerTest();
   a2uiParserTest();
   localModelClientTest();
@@ -124,6 +128,8 @@ export default function testsuite() {
   socialHubClientTest();
   voiceInputBridgeTest();
   personaMarkdownTest();
+  skillMarkdownParserTest();
+  modelScopeDirectClientTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

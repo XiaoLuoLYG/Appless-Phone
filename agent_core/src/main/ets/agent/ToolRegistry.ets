@@ -1,5 +1,17 @@
+import { common } from '@kit.AbilityKit';
+import { ComposioConfig } from '../composio/ComposioConfig';
+import { ComposioSessionClient } from '../composio/ComposioSessionClient';
+import { ComposioTool } from '../composio/ComposioTool';
+import { SandboxFileWriteTool } from '../file/SandboxFileWriteTool';
+import { ModelScopeConfig } from '../modelscope/ModelScopeConfig';
+import { ModelScopeDirectClient } from '../modelscope/ModelScopeDirectClient';
+import { ModelScopeTool } from '../modelscope/ModelScopeTool';
+import { SkillReadTool } from '../skill/SkillReadTool';
+import { SkillSnapshot } from '../skill/SkillSnapshot';
 import { AgentTool } from './AgentTool';
 import { UiTool } from './UiTool';
+
+export type ToolRegistryCloseHandler = () => Promise<void>;
 
 class NoteTool implements AgentTool {
   name(): string {
@@ -32,6 +44,7 @@ class TimeTool implements AgentTool {
 
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
+  private closeHandlers: ToolRegistryCloseHandler[] = [];
 
   constructor() {
     this.register(new NoteTool());
@@ -40,6 +53,14 @@ export class ToolRegistry {
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name(), tool);
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  registerCloseHandler(handler: ToolRegistryCloseHandler): void {
+    this.closeHandlers.push(handler);
   }
 
   describeTools(): string {
@@ -57,10 +78,41 @@ export class ToolRegistry {
     }
     return await tool.run(input ?? '');
   }
+
+  async close(): Promise<void> {
+    for (let index = 0; index < this.closeHandlers.length; index++) {
+      try {
+        await this.closeHandlers[index]();
+      } catch (_error) {
+      }
+    }
+  }
 }
 
-export function createLoopToolRegistry(): ToolRegistry {
+export async function createConfiguredLoopToolRegistry(
+  context: common.UIAbilityContext,
+  skillSnapshot?: SkillSnapshot | null
+): Promise<ToolRegistry> {
+  const registry = createLoopToolRegistry(skillSnapshot);
+  if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
+    registry.register(new SandboxFileWriteTool(context));
+  }
+  const client = new ComposioSessionClient(await ComposioConfig.fromContext(context));
+  await client.initialize();
+  registry.register(new ComposioTool(client));
+  registry.registerCloseHandler(async (): Promise<void> => client.close());
+  const modelScopeConfig = await ModelScopeConfig.fromContext(context);
+  const modelScopeClient = new ModelScopeDirectClient(modelScopeConfig);
+  await modelScopeClient.initialize();
+  registry.register(new ModelScopeTool(modelScopeClient));
+  return registry;
+}
+
+export function createLoopToolRegistry(skillSnapshot?: SkillSnapshot | null): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(new UiTool());
+  if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
+    registry.register(new SkillReadTool(skillSnapshot));
+  }
   return registry;
 }

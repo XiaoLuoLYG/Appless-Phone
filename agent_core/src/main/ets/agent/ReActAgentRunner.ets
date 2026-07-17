@@ -3,11 +3,14 @@ import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
+import { skillLogInfo, skillLogWarn } from '../skill/SkillLog';
+import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
+const READ_TOOL_NAME = 'read';
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
 
 function padDatePart(value: number): string {
@@ -36,6 +39,8 @@ class ToolCall {
 export class ReActAgentRunner {
   private model: LocalModel;
   private tools: ToolRegistry;
+  private skillSnapshot: SkillSnapshot | null;
+  private skillsInSystemPrompt: boolean;
   private maxSteps: number;
   private uiHandler: UiRenderHandler | null;
 
@@ -43,10 +48,14 @@ export class ReActAgentRunner {
     model: LocalModel,
     tools: ToolRegistry,
     maxSteps: number,
-    uiHandler?: UiRenderHandler
+    uiHandler?: UiRenderHandler,
+    skillSnapshot?: SkillSnapshot,
+    skillsInSystemPrompt: boolean = false
   ) {
     this.model = model;
     this.tools = tools;
+    this.skillSnapshot = skillSnapshot ?? null;
+    this.skillsInSystemPrompt = skillsInSystemPrompt;
     this.maxSteps = maxSteps;
     this.uiHandler = uiHandler ?? null;
   }
@@ -89,7 +98,13 @@ export class ReActAgentRunner {
           }
           observation = await this.runUiTool(call.input, listener);
         } else {
+          if (call.name === READ_TOOL_NAME) {
+            skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+          }
           observation = await this.tools.run(call.name, call.input);
+          if (call.name === READ_TOOL_NAME) {
+            this.emitSkillRead(call.input, observation, listener);
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
@@ -117,6 +132,20 @@ export class ReActAgentRunner {
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
+    if (this.skillSnapshot === null || !observation.startsWith('# Skill:')) {
+      skillLogWarn(`ReActAgentRunner: skill read did not return skill content input=${input}`);
+      return;
+    }
+    const skill = this.skillSnapshot.findByName(input.trim());
+    if (skill !== null) {
+      skillLogInfo(`ReActAgentRunner: skill selected name=${skill.name}`);
+      listener(new AgentEvent(AgentEventKind.SKILL, skill.name));
+    } else {
+      skillLogWarn(`ReActAgentRunner: skill content returned but snapshot lookup failed input=${input}`);
+    }
   }
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
@@ -151,10 +180,21 @@ export class ReActAgentRunner {
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
     prompt += 'If a tool observation already contains UI or A2UI protocol output, return Final; the visible result is already on screen.\n';
     prompt += 'Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
+    if (this.tools.has('modelscope')) {
+      prompt += 'Call modelscope only for an activated ModelScope MCP. First call modelscope with operation=search and the full task; then execute one returned qualifiedName whose risk is read.\n';
+      prompt += 'Never invent a ModelScope qualifiedName. If ModelScope blocks an unsafe or unannotated tool, stop and explain that a real confirmation flow is required.\n';
+    }
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
       prompt += conversation.formatPriorConversation();
+    }
+
+    if (!this.skillsInSystemPrompt) {
+      const skillsSection = buildSkillsSection(this.skillSnapshot);
+      if (skillsSection.length > 0) {
+        prompt += `${skillsSection}\n\n`;
+      }
     }
 
     prompt += 'Tools:\n';

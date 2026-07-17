@@ -4,7 +4,8 @@ import {
   DynamicGenericToolResult,
   DynamicMcpTool,
   DynamicPreflightResult,
-  DynamicToolRegistration
+  DynamicToolRegistration,
+  McpToolAnnotations
 } from './DynamicToolTypes';
 import { A2uiLabelValueData } from './A2uiTypes';
 
@@ -67,6 +68,7 @@ interface McpToolRecord {
   name?: string;
   description?: string;
   inputSchema?: Object;
+  annotations?: McpToolAnnotations;
 }
 
 export interface McpToolContentItem {
@@ -157,7 +159,8 @@ function toolsFromResult(result: Object | undefined): DynamicMcpTool[] {
     return {
       name: textOf(tool.name),
       description: textOf(tool.description),
-      inputSchema: tool.inputSchema === undefined || tool.inputSchema === null ? new Object() : tool.inputSchema
+      inputSchema: tool.inputSchema === undefined || tool.inputSchema === null ? new Object() : tool.inputSchema,
+      annotations: tool.annotations
     };
   }).filter((tool: DynamicMcpTool) => tool.name.length > 0);
 }

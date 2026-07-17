@@ -1,8 +1,14 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
-export { ToolRegistry, createLoopToolRegistry } from './src/main/ets/agent/ToolRegistry';
+export {
+  ToolRegistry,
+  ToolRegistryCloseHandler,
+  createConfiguredLoopToolRegistry,
+  createLoopToolRegistry
+} from './src/main/ets/agent/ToolRegistry';
 export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
 export { LocalModel } from './src/main/ets/model/LocalModel';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
@@ -10,6 +16,14 @@ export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
 export { ScriptedA2uiModel, buildTaskCardComponents } from './src/main/ets/a2ui/ScriptedA2uiModel';
 export { OpenAiCompatibleModel } from './src/main/ets/model/OpenAiCompatibleModel';
 export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/ets/model/LoopModelFactory';
+export { ModelScopeClient } from './src/main/ets/modelscope/ModelScopeClient';
+export { ModelScopeConfig } from './src/main/ets/modelscope/ModelScopeConfig';
+export {
+  ModelScopeDirectClient,
+  ModelScopeExecutionDecision,
+  modelScopeExecutionDecision
+} from './src/main/ets/modelscope/ModelScopeDirectClient';
+export { ModelScopeTool } from './src/main/ets/modelscope/ModelScopeTool';
 export { ComposioConfig } from './src/main/ets/composio/ComposioConfig';
 export * from './src/main/ets/composio/ComposioAuthClient';
 export { ComposioSessionClient, describeComposioFailure } from './src/main/ets/composio/ComposioSessionClient';
@@ -84,3 +98,17 @@ export * from './src/main/ets/aiphone/payment/StripePaymentClient';
 export * from './src/main/ets/aiphone/payment/StripeConnectClient';
 export * from './src/main/ets/aiphone/payment/StripeReceivingAccountA2ui';
 export * from './src/main/ets/aiphone/payment/StripeReceivingAccountCore';
+export { SandboxFileWriteTool } from './src/main/ets/file/SandboxFileWriteTool';
+export { AgentSkill } from './src/main/ets/skill/AgentSkill';
+export { parseSkillMarkdown } from './src/main/ets/skill/SkillMarkdownParser';
+export { loadSkillsFromContext } from './src/main/ets/skill/SkillLoader';
+export { buildSkillCatalog } from './src/main/ets/skill/SkillCatalog';
+export { SkillReadTool } from './src/main/ets/skill/SkillReadTool';
+export { ensureBundledSkillsInSandbox, loadSandboxSkills, sandboxSkillsRoot } from './src/main/ets/skill/SkillStore';
+export {
+  SkillSnapshot,
+  createSkillSnapshot,
+  buildSkillsSection,
+  buildReActFormatRules,
+  buildLoopSystemPrompt
+} from './src/main/ets/skill/SkillSnapshot';

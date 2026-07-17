@@ -1,5 +1,6 @@
 export enum AgentEventKind {
   THOUGHT = 'THOUGHT',
+  SKILL = 'SKILL',
   ACTION = 'ACTION',
   OBSERVATION = 'OBSERVATION',
   UI = 'UI',

@@ -11,6 +11,18 @@ export interface ChatMessage {
 export class ConversationContext {
   private turns: ChatMessage[] = [];
 
+  static fromMessages(messages: ChatMessage[]): ConversationContext {
+    const conversation = new ConversationContext();
+    for (const message of messages) {
+      if (message.role === ConversationRole.USER) {
+        conversation.addUser(message.content);
+      } else if (message.role === ConversationRole.ASSISTANT) {
+        conversation.addAssistant(message.content);
+      }
+    }
+    return conversation;
+  }
+
   addUser(text: string): void {
     this.turns.push({ role: ConversationRole.USER, content: text.trim() });
   }
