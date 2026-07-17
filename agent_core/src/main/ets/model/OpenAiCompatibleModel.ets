@@ -1,5 +1,7 @@
 import http from '@ohos.net.http';
+import util from '@ohos.util';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
+import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
 import { LocalModel } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
 
@@ -11,6 +13,7 @@ interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   temperature: number;
+  stream: boolean;
 }
 
 interface ChatChoice {
@@ -19,6 +22,18 @@ interface ChatChoice {
 
 interface ChatResponse {
   choices?: ChatChoice[];
+}
+
+interface ChatDelta {
+  content?: string;
+}
+
+interface ChatStreamChoice {
+  delta?: ChatDelta;
+}
+
+interface ChatStreamResponse {
+  choices?: ChatStreamChoice[];
 }
 
 export class OpenAiCompatibleModel implements LocalModel {
@@ -49,27 +64,56 @@ export class OpenAiCompatibleModel implements LocalModel {
 
   private async completeOnce(prompt: string, conversation?: ConversationContext): Promise<string> {
     const httpRequest = http.createHttp();
+    const decoder = util.TextDecoder.create('utf-8');
+    const requestStartMs = Date.now();
+    let rawResponse = '';
+    let chunkSequence = 0;
+    let streamEndResolve: () => void = () => {};
+    const streamEnd = new Promise<void>((resolve: () => void) => {
+      streamEndResolve = resolve;
+    });
+    httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+      chunkSequence++;
+      const chunk = decoder.decodeToString(new Uint8Array(data), { stream: true });
+      rawResponse += chunk;
+      const preview = chunk.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+      aiLogInfo(
+        '[AIPhone][ModelResponseChunk] seq=' + chunkSequence.toString() +
+        ' bytes=' + data.byteLength.toString() +
+        ' chars=' + chunk.length.toString() +
+        ' elapsedMs=' + (Date.now() - requestStartMs).toString() +
+        ' data=' + preview
+      );
+    });
+    httpRequest.on('dataEnd', () => {
+      streamEndResolve();
+    });
     try {
-      const response = await httpRequest.request(this.provider.chatCompletionsUrl(), {
+      const endpoint = this.provider.chatCompletionsUrl();
+      aiLogInfo(
+        '[AIPhone][ModelRequestStart] model=' + this.provider.model +
+        ' endpoint=' + endpoint +
+        ' stream=true'
+      );
+      const statusCode = await httpRequest.requestInStream(endpoint, {
         method: http.RequestMethod.POST,
         header: {
           'Authorization': `Bearer ${this.provider.apiKey}`,
           'Content-Type': 'application/json; charset=utf-8',
-          'Accept': 'application/json'
+          'Accept': 'text/event-stream'
         },
         extraData: this.buildRequestJson(prompt, conversation),
-        expectDataType: http.HttpDataType.STRING,
         connectTimeout: MODEL_CONNECT_TIMEOUT_MS,
         readTimeout: MODEL_READ_TIMEOUT_MS
       });
+      await streamEnd;
+      rawResponse += decoder.decodeToString(new Uint8Array(0), { stream: false });
 
-      const statusCode = response.responseCode;
-      const body = `${response.result ?? ''}`;
       if (statusCode < 200 || statusCode >= 300) {
-        throw new Error(`LLM request failed with HTTP ${statusCode}: ${body}`);
+        throw new Error(`LLM request failed with HTTP ${statusCode}: ${rawResponse}`);
       }
 
-      return this.parseContent(body);
+      return this.parseContent(rawResponse);
     } catch (error) {
       throw new Error(this.describeThrown(error));
     } finally {
@@ -130,7 +174,8 @@ export class OpenAiCompatibleModel implements LocalModel {
     return {
       model: this.provider.model,
       messages,
-      temperature: 0.2
+      temperature: 0.2,
+      stream: true
     };
   }
 
@@ -159,6 +204,39 @@ export class OpenAiCompatibleModel implements LocalModel {
   }
 
   private parseContent(body: string): string {
+    const trimmed = body.trim();
+    if (trimmed.startsWith('{')) {
+      return this.parseJsonContent(trimmed);
+    }
+
+    let content = '';
+    const lines = body.replace(/\r\n/g, '\n').split('\n');
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (!line.startsWith('data:')) {
+        continue;
+      }
+      const payload = line.substring('data:'.length).trim();
+      if (payload.length === 0 || payload === '[DONE]') {
+        continue;
+      }
+      const event = JSON.parse(payload) as ChatStreamResponse;
+      const choices = event.choices;
+      if (choices === undefined || choices.length === 0 || choices[0].delta === undefined) {
+        continue;
+      }
+      const deltaContent = choices[0].delta?.content;
+      if (deltaContent !== undefined) {
+        content += deltaContent;
+      }
+    }
+    if (content.length === 0) {
+      throw new Error('No streaming message content returned.');
+    }
+    return content.trim();
+  }
+
+  private parseJsonContent(body: string): string {
     const json = JSON.parse(body) as ChatResponse;
     const choices = json.choices;
     if (choices === undefined || choices.length === 0) {
