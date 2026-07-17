@@ -1,4 +1,5 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
