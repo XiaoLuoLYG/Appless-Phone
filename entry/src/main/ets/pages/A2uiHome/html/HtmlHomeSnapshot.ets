@@ -200,7 +200,7 @@ function welcomeDocument(params: CreateHtmlHomeDocumentParams): HtmlHomeDocument
     version: HTML_HOME_VERSION,
     source: 'welcome',
     kind: 'welcome',
-    title: 'Appless Phone',
+    title: 'Appless',
     subtitle: '',
     chips: [],
     metrics: [],
