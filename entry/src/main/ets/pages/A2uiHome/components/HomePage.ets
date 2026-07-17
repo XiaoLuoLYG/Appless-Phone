@@ -59,7 +59,7 @@ export struct HomePage {
   @Prop luckinInlinePatchJson: string = '';
   @Prop luckinInlinePatchTick: number = 0;
   @Prop isAwaitingFirstSurface: boolean = false;
-  @Prop inputPlaceholder: string = '告诉 Appless Phone 你想完成什么';
+  @Prop inputPlaceholder: string = '告诉 Appless 你想完成什么';
   @Prop isVoiceListening: boolean = false;
   @Prop voiceInputMessage: string = '';
   @Prop showWelcome: boolean = false;
@@ -255,7 +255,7 @@ export struct HomePage {
             .objectFit(ImageFit.Contain)
             .margin({ right: 8 })
 
-          Text('Appless Phone')
+          Text('Appless')
             .fontSize(A2UI_HEADER_TITLE_FONT_SIZE)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_INK)

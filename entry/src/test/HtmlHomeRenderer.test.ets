@@ -2057,7 +2057,7 @@ export default function htmlHomeRendererTest() {
       const doc = documentFixture();
       doc.source = 'welcome';
       doc.kind = 'welcome';
-      doc.title = 'Appless Phone';
+      doc.title = 'Appless';
       doc.subtitle = '';
       doc.chips = [];
       doc.metrics = [];

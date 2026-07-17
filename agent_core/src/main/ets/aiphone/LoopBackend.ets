@@ -215,7 +215,7 @@ export class LoopBackend {
       if (event.kind === AgentEventKind.FINAL) {
         finalAnswer = event.text;
         if (a2uiLineCount === 0) {
-          const jsonl = aiphoneInfoJsonl(request.surfaceId, 'Appless Phone', event.text);
+          const jsonl = aiphoneInfoJsonl(request.surfaceId, 'Appless', event.text);
           raw += `A2UI: ${jsonl}`;
           for (const line of splitJsonl(jsonl)) {
             try {

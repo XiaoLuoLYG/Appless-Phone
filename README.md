@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/assets/readme/appless-phone-banner.png" alt="Appless Phone banner" />
+  <img src="docs/assets/readme/appless-phone-banner.png" alt="Appless banner" />
 </p>
 
-<h1 align="center">Appless Phone</h1>
+<h1 align="center">Appless</h1>
 
 <p align="center">
   <strong>Mobile Codex for the apps you no longer have to open.</strong>
 </p>
 
 <p align="center">
-  Tell Appless Phone what you want. It builds a task-specific mobile interface in real time, pulls the work across the apps behind it, and finishes multi-app jobs in one place instead of making you switch screens. Each request gets the interface it needs, not the interface a single app shipped with.
+  Tell Appless what you want. It builds a task-specific mobile interface in real time, pulls the work across the apps behind it, and finishes multi-app jobs in one place instead of making you switch screens. Each request gets the interface it needs, not the interface a single app shipped with.
 </p>
 
 <p align="center">
@@ -22,9 +22,9 @@
 
 ## ✨ What it does
 
-Appless Phone is built around the AI phone idea: the agent is the entry point, and apps become tools behind the task.
+Appless is built around the AI phone idea: the agent is the entry point, and apps become tools behind the task.
 
-Ordering coffee, checking mail, planning a trip, searching videos, updating a calendar, or looking through SaaS tools should not mean jumping across a dozen apps. Appless Phone gives those jobs one mobile surface. It gathers real provider results, shows the source, and lets you review the final action.
+Ordering coffee, checking mail, planning a trip, searching videos, updating a calendar, or looking through SaaS tools should not mean jumping across a dozen apps. Appless gives those jobs one mobile surface. It gathers real provider results, shows the source, and lets you review the final action.
 
 Current capabilities include:
 

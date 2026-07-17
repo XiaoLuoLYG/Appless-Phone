@@ -62,7 +62,7 @@ export default function htmlHomeSnapshotTest() {
       expect(doc.version).assertEqual(1);
       expect(doc.source).assertEqual('welcome');
       expect(doc.kind).assertEqual('welcome');
-      expect(doc.title).assertEqual('Appless Phone');
+      expect(doc.title).assertEqual('Appless');
       expect(doc.rawSurfaceRoot === null).assertTrue();
       expect(doc.generatedAt.length).assertLarger(0);
     });
