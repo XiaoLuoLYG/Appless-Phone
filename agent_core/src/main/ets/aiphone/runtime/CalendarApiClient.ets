@@ -269,6 +269,14 @@ function startOfLocalDay(date: Date): string {
   return localDateString(date) + 'T00:00:00+08:00';
 }
 
+function calendarWindowWithinDay(args: CalendarEventArgs, day: Date, nextDay: Date): boolean {
+  const start = Date.parse(textOf(args.timeMin));
+  const end = Date.parse(textOf(args.timeMax));
+  const dayStart = Date.parse(startOfLocalDay(day));
+  const dayEnd = Date.parse(startOfLocalDay(nextDay));
+  return !Number.isNaN(start) && !Number.isNaN(end) && start >= dayStart && start < dayEnd && end > start && end <= dayEnd;
+}
+
 function startOfLocalMonth(date: Date): string {
   const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
   return localDateString(firstDay) + 'T00:00:00+08:00';
@@ -305,8 +313,12 @@ export function normalizedCalendarArgsForPrompt(toolId: string, prompt: string, 
       normalized.timezone = 'Asia/Shanghai';
     }
     if (toolId === 'calendar.events.search') {
+      const nextDate = localDateAfter(now, offset + 1);
+      if (calendarWindowWithinDay(normalized, targetDate, nextDate)) {
+        return normalized;
+      }
       normalized.timeMin = startOfLocalDay(targetDate);
-      normalized.timeMax = startOfLocalDay(localDateAfter(now, offset + 1));
+      normalized.timeMax = startOfLocalDay(nextDate);
       return normalized;
     }
     return normalized;
@@ -502,6 +514,14 @@ export function calendarUpdateArgsFromResultsForTest(
   if (textOf(updated.title).trim().length === 0) {
     updated.title = target.title;
   }
+  if (textOf(updated.end).trim().length === 0 && isCalendarProviderDateTime(textOf(updated.start)) &&
+    textOf(target.start).indexOf('T') >= 0 && textOf(target.end).indexOf('T') >= 0) {
+    const duration = Date.parse(textOf(target.end)) - Date.parse(textOf(target.start));
+    const wallStart = Date.parse(calendarProviderDateTime(textOf(updated.start)) + 'Z');
+    if (duration > 0 && !Number.isNaN(wallStart)) {
+      updated.end = new Date(wallStart + duration).toISOString().substring(0, 19);
+    }
+  }
   return updated;
 }
 
@@ -540,6 +560,16 @@ export function calendarMissingArgsResult(toolId: string, missing: string[]): Dy
     rows: needs.map((value: string): A2uiLabelValueData => ({ label: '需要补充', value: value })),
     rawPreview: 'missing=' + missing.join(',')
   };
+}
+
+export function calendarUpdateNeedsInputResults(
+  matches: DynamicGenericToolResult[],
+  missing: string[]
+): DynamicGenericToolResult[] {
+  const results: DynamicGenericToolResult[] = [];
+  matches.forEach((match: DynamicGenericToolResult) => results.push(match));
+  results.push(calendarMissingArgsResult('calendar.event.update', missing));
+  return results;
 }
 
 async function requestJson(method: http.RequestMethod, url: string, accessToken: string, body: Object | null): Promise<Object> {

@@ -209,6 +209,17 @@ export default function reActAgentRunnerTest() {
       expect(actionText).assertEqual('gmail.draft.create({"to":["a@example.com"],"body":"hi"})');
     });
 
+    it('puts the Calendar write-routing rule before the tool list', 0, async () => {
+      const model = new SequenceModel(['Final: need a specific morning time']);
+      const runner = new ReActAgentRunner(model, new ToolRegistry(), 1);
+
+      await runner.run('把明天下午的日程移到上午', (_event: AgentEvent) => {});
+
+      expect(model.prompts[0].indexOf('Calendar write rule')).assertLarger(-1);
+      expect(model.prompts[0].indexOf('never calendar.events.search')).assertLarger(-1);
+      expect(model.prompts[0].indexOf('omit missing new start or end')).assertLarger(-1);
+    });
+
     it('repairs raw line breaks inside JSON string tool args', 0, () => {
       const parsed = parseLoopToolInputArgs('{"to":["a@example.com"],"body":"hello\nworld"}') as Record<string, Object | string | undefined>;
 
@@ -275,6 +286,8 @@ export default function reActAgentRunnerTest() {
       expect(digest.text.indexOf('Event ID: event-real-123')).assertLarger(-1);
       expect(digest.finalText.indexOf('event-real-123')).assertLarger(-1);
       expect(digest.finalText.indexOf('全量QA')).assertLarger(-1);
+      expect(digest.finalText.indexOf('用户无需输入 Event ID')).assertLarger(-1);
+      expect(digest.finalText.indexOf('必须使用')).assertEqual(-1);
       expect(digest.finalText.indexOf('must not leak')).assertEqual(-1);
     });
 

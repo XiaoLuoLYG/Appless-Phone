@@ -11,6 +11,7 @@ import {
   calendarProviderDateTime,
   calendarSearchQueryText,
   calendarUpdateArgsFromResultsForTest,
+  calendarUpdateNeedsInputResults,
   calendarUpdateBody,
   normalizedCalendarArgsForPrompt
 } from '@loop/agent-core';
@@ -62,6 +63,36 @@ export default function calendarApiClientTest() {
       expect(resolved.title).assertEqual('团队同步');
       expect(resolved.start).assertEqual('2026-07-18T16:30:00+08:00');
       expect(resolved.end).assertEqual('2026-07-18T17:00:00+08:00');
+    });
+
+    it('keeps the real event duration when moving it to a new start time', 0, () => {
+      const matches = calendarEventResultsFromListPayload(
+        '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
+      );
+      const resolved = calendarUpdateArgsFromResultsForTest({
+        query: '团队同步',
+        timeMin: '2026-07-18T12:00:00+08:00',
+        timeMax: '2026-07-18T18:00:00+08:00',
+        start: '2026-07-18T09:00:00',
+        end: '',
+        timezone: 'Asia/Shanghai'
+      }, matches) as CalendarEventArgs;
+
+      expect(resolved.eventId).assertEqual('event-123');
+      expect(resolved.start).assertEqual('2026-07-18T09:00:00');
+      expect(resolved.end).assertEqual('2026-07-18T09:30:00');
+    });
+
+    it('keeps the resolved real event visible while asking for a missing destination time', 0, () => {
+      const matches = calendarEventResultsFromListPayload(
+        '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
+      );
+      const results = calendarUpdateNeedsInputResults(matches, ['start', 'end']);
+
+      expect(results.length).assertEqual(2);
+      expect(results[0].title).assertEqual('团队同步');
+      expect(results[1].status).assertEqual('needs_input');
+      expect(results[1].summary.indexOf('开始时间')).assertLarger(-1);
     });
 
     it('preserves model-owned wall time when adapting to the Composio Calendar schema', 0, () => {
@@ -140,6 +171,18 @@ export default function calendarApiClientTest() {
       expect(args.timeMin).assertEqual('2026-07-02T00:00:00+08:00');
       expect(args.timeMax).assertEqual('2026-07-03T00:00:00+08:00');
       expect(args.calendarId).assertEqual('primary');
+    });
+
+    it('keeps a valid sub-day window on the requested relative day', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search',
+        '查看我明天下午的 Google Calendar 日程', {
+          timeMin: '2026-07-18T12:00:00+08:00',
+          timeMax: '2026-07-18T18:00:00+08:00',
+          timezone: 'Asia/Shanghai'
+        }, new Date('2026-07-17T10:00:00+08:00'));
+
+      expect(args.timeMin).assertEqual('2026-07-18T12:00:00+08:00');
+      expect(args.timeMax).assertEqual('2026-07-18T18:00:00+08:00');
     });
 
     it('normalizes an absolute date argument into an exact search window', 0, () => {

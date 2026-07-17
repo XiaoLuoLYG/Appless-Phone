@@ -84,6 +84,7 @@ import {
   calendarEventRequiredFields,
   calendarDeleteTargetFromResultsForTest,
   calendarUpdateArgsFromResultsForTest,
+  calendarUpdateNeedsInputResults,
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarResultsFromComposioObservation,
@@ -92,7 +93,7 @@ import {
 import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
+import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import {
   callComposioDynamic,
@@ -10069,80 +10070,6 @@ async function composioFixedAppResult(
   }
 }
 
-function firstUrlInText(value: string): string {
-  const parts = value.split('|').join(' ').split(' ');
-  for (let index = 0; index < parts.length; index++) {
-    let part = parts[index].trim();
-    while (part.length > 0) {
-      const last = part.charAt(part.length - 1);
-      if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
-        part = part.substring(0, part.length - 1);
-      } else {
-        break;
-      }
-    }
-    if (part.indexOf('https://') === 0 || part.indexOf('http://') === 0) {
-      return part;
-    }
-  }
-  return '';
-}
-
-function isComposioSystemLabel(label: string): boolean {
-  return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
-    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段' || label === 'Tool ID';
-}
-
-function isSlackDirectMessageRow(row: A2uiLabelValueData): boolean {
-  const text = (row.label + ' ' + row.value).toLowerCase();
-  return text.indexOf('/archives/d') >= 0;
-}
-
-function socialConnectionStatus(status: string): string {
-  if (status === 'success') {
-    return 'connected';
-  }
-  if (status === 'needs_auth' || status === 'auth_required') {
-    return 'needs_auth';
-  }
-  return 'error';
-}
-
-function composioSocialFeedResult(platform: SocialHubPlatform, displayName: string, result: DynamicGenericToolResult): SocialHubFeedResult {
-  const connections: SocialHubConnectionData[] = [{
-    platform: platform,
-    status: socialConnectionStatus(result.status),
-    displayName: displayName,
-    accountId: '',
-    message: result.summary
-  } as SocialHubConnectionData];
-  const items: SocialHubItemData[] = [];
-  result.rows.forEach((row: A2uiLabelValueData, index: number) => {
-    if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
-      return;
-    }
-    if (platform === 'slack' && !isSlackDirectMessageRow(row)) {
-      return;
-    }
-    items.push({
-      id: 'composio-' + platform + '-' + index.toString(),
-      platform: platform,
-      kind: 'message',
-      author: row.label,
-      handle: displayName,
-      text: row.value,
-      timestamp: '',
-      url: firstUrlInText(row.value),
-      mediaUrl: '',
-      channel: 'Composio',
-      channelId: '',
-      threadId: '',
-      unread: false
-    } as SocialHubItemData);
-  });
-  return { items: items, connections: connections };
-}
-
 function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
   return results.length > 0 && results[0].status === 'error';
 }
@@ -10227,6 +10154,62 @@ interface SocialHubDraftRequestArgs {
   instruction?: Object | string | number | boolean | null;
 }
 
+interface SocialHubFeedRequestArgs {
+  platforms?: Object[];
+}
+
+interface SocialXListArgs {
+  maxResults: number;
+  expansions: string[];
+  eventTypes: string[];
+  userFields: string[];
+  dmEventFields: string[];
+}
+
+interface SocialXProfileArgs {
+  userFields: string[];
+}
+
+interface SocialSlackSearchArgs {
+  query: string;
+  sort: string;
+  count: number;
+}
+
+interface SocialInstagramConversationArgs {
+  limit: number;
+}
+
+interface SocialInstagramProfileArgs {
+  igUserId: string;
+}
+
+interface SocialInstagramMessageArgs {
+  conversationId: string;
+  limit: number;
+}
+
+interface InstagramConversationPayload {
+  id?: Object | string | number | boolean | null;
+}
+
+interface InstagramConversationPage {
+  data?: Object[];
+}
+
+interface InstagramConversationEnvelope {
+  data?: InstagramConversationPage | null;
+}
+
+interface SocialProfilePayload {
+  id?: Object | string | number | boolean | null;
+  data?: Object | null;
+}
+
+interface SocialProfileEnvelope {
+  data?: Object | null;
+}
+
 function emptySocialHubDraftRequestArgs(): SocialHubDraftRequestArgs {
   return {
     itemId: '',
@@ -10266,28 +10249,211 @@ function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProvid
   };
 }
 
-function shouldUseComposioSocialAggregate(prompt: string): boolean {
-  return prompt.trim().length > 0;
+function socialHubDefaultPlatforms(): SocialHubPlatform[] {
+  return ['x', 'slack', 'wecom', 'discord', 'linkedin', 'whatsapp', 'instagram'];
 }
 
-async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
-  const query = prompt.trim().length > 0 ? prompt.trim() : '最近消息';
+function socialHubRequestedPlatforms(args: Object | null): SocialHubPlatform[] {
+  if (args === null) {
+    return socialHubDefaultPlatforms();
+  }
+  const request = args as SocialHubFeedRequestArgs;
+  if (!Array.isArray(request.platforms) || request.platforms.length === 0) {
+    return socialHubDefaultPlatforms();
+  }
+  const platforms: SocialHubPlatform[] = [];
+  request.platforms.forEach((value: Object) => {
+    const text = textOf(value).trim().toLowerCase();
+    if (text === 'all') {
+      return;
+    }
+    const platform = socialHubPlatformFromText(text);
+    if (platform !== 'unknown' && platforms.indexOf(platform) < 0) {
+      platforms.push(platform);
+    }
+  });
+  return platforms.length > 0 ? platforms : socialHubDefaultPlatforms();
+}
+
+function socialHubConnectionResult(
+  platform: SocialHubPlatform,
+  displayName: string,
+  status: string,
+  message: string
+): SocialHubFeedResult {
+  return {
+    items: [],
+    connections: [{
+      platform: platform,
+      status: status,
+      displayName: displayName,
+      accountId: '',
+      message: message
+    } as SocialHubConnectionData]
+  };
+}
+
+function socialHubAfterDate(): string {
+  return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+}
+
+async function composioXSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const profileArgs: SocialXProfileArgs = { userFields: ['id', 'name', 'username'] };
+    const args: SocialXListArgs = {
+      maxResults: 25,
+      expansions: ['sender_id'],
+      eventTypes: ['MessageCreate'],
+      userFields: ['id', 'name', 'username'],
+      dmEventFields: ['id', 'event_type', 'text', 'sender_id', 'dm_conversation_id', 'created_at']
+    };
+    const executions = await Promise.all([
+      callComposioFixedRaw('Authenticated Twitter X profile', 'social.x.profile', profileArgs),
+      callComposioFixedRaw('Twitter X recent direct messages', 'social.x.dm.list', args)
+    ]);
+    return parseComposioSocialFeed('x', executions[1].observation, '', socialProfileId(executions[0].observation));
+  } catch (error) {
+    return socialHubConnectionResult('x', 'X', 'error', describeThrown(error));
+  }
+}
+
+async function composioSlackSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const args: SocialSlackSearchArgs = {
+      query: 'after:' + socialHubAfterDate(),
+      sort: 'timestamp',
+      count: 25
+    };
+    const execution = await callComposioFixedRaw(
+      'Slack recent direct messages',
+      'social.slack.message.search',
+      args
+    );
+    return parseComposioSocialFeed('slack', execution.observation);
+  } catch (error) {
+    return socialHubConnectionResult('slack', 'Slack', 'error', describeThrown(error));
+  }
+}
+
+function instagramConversationIds(raw: string): string[] {
+  try {
+    const payload = JSON.parse(raw) as InstagramConversationEnvelope;
+    if (payload.data === undefined || payload.data === null || !Array.isArray(payload.data.data)) {
+      return [];
+    }
+    const ids: string[] = [];
+    payload.data.data.forEach((value: Object) => {
+      const conversation = value as InstagramConversationPayload;
+      const id = textOf(conversation.id).trim();
+      if (id.length > 0 && ids.indexOf(id) < 0) {
+        ids.push(id);
+      }
+    });
+    return ids.slice(0, 5);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function socialProfileId(raw: string): string {
+  try {
+    const envelope = JSON.parse(raw) as SocialProfileEnvelope;
+    if (envelope.data === undefined || envelope.data === null) {
+      return '';
+    }
+    const profile = envelope.data as SocialProfilePayload;
+    const direct = textOf(profile.id).trim();
+    if (direct.length > 0) {
+      return direct;
+    }
+    if (profile.data === undefined || profile.data === null) {
+      return '';
+    }
+    return textOf((profile.data as SocialProfilePayload).id).trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+async function composioInstagramSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const profileArgs: SocialInstagramProfileArgs = { igUserId: 'me' };
+    const conversationArgs: SocialInstagramConversationArgs = { limit: 5 };
+    const initial = await Promise.all([
+      callComposioFixedRaw('Authenticated Instagram profile', 'social.instagram.profile', profileArgs),
+      callComposioFixedRaw('Instagram messaging conversations', 'social.instagram.conversations.list', conversationArgs)
+    ]);
+    const ownAccountId = socialProfileId(initial[0].observation);
+    const conversations = initial[1];
+    const conversationState = parseComposioSocialFeed('instagram', conversations.observation);
+    if (conversationState.connections[0].status === 'error') {
+      return conversationState;
+    }
+    const ids = instagramConversationIds(conversations.observation);
+    if (ids.length === 0) {
+      return conversationState;
+    }
+    const executions: ComposioRawExecution[] = await Promise.all(ids.map((id: string) =>
+      {
+        const messageArgs: SocialInstagramMessageArgs = { conversationId: id, limit: 25 };
+        return callComposioFixedRaw(
+          'Instagram messages in conversation',
+          'social.instagram.messages.list',
+          messageArgs
+        );
+      }
+    ));
+    const items: SocialHubItemData[] = [];
+    let connection = conversationState.connections[0];
+    executions.forEach((execution: ComposioRawExecution, index: number) => {
+      const parsed = parseComposioSocialFeed('instagram', execution.observation, ids[index], ownAccountId);
+      parsed.items.forEach((item: SocialHubItemData) => items.push(item));
+      if (parsed.connections[0].status === 'error') {
+        connection = parsed.connections[0];
+      }
+    });
+    return { items: items, connections: [connection] };
+  } catch (error) {
+    return socialHubConnectionResult('instagram', 'Instagram', 'error', describeThrown(error));
+  }
+}
+
+async function socialHubPlatformFeed(platform: SocialHubPlatform): Promise<SocialHubFeedResult> {
+  if (platform === 'x') {
+    return composioXSocialFeed();
+  }
+  if (platform === 'slack') {
+    return composioSlackSocialFeed();
+  }
+  if (platform === 'instagram') {
+    return composioInstagramSocialFeed();
+  }
+  if (platform === 'whatsapp') {
+    return socialHubConnectionResult(
+      'whatsapp',
+      'WhatsApp',
+      'limited',
+      '当前 WhatsApp 工具只提供 Business 发送记录，不提供收件箱消息正文。'
+    );
+  }
+  if (platform === 'discord') {
+    return socialHubConnectionResult('discord', 'Discord', 'limited', '当前授权未提供 Discord 消息读取工具。');
+  }
+  if (platform === 'linkedin') {
+    return socialHubConnectionResult('linkedin', 'LinkedIn', 'limited', '当前授权未提供 LinkedIn 私信读取工具。');
+  }
+  if (platform === 'wecom') {
+    return socialHubConnectionResult('wecom', '企业微信', 'needs_auth', '企业微信尚未配置消息接口。');
+  }
+  return socialHubConnectionResult(platform, 'SocialHub', 'disabled', '当前来源不受支持。');
+}
+
+async function composioSocialAggregate(args: Object | null): Promise<SocialHubFeedResult> {
   const items: SocialHubItemData[] = [];
   const connections: SocialHubConnectionData[] = [];
-  const results: SocialHubFeedResult[] = await Promise.all([
-    composioAppResult('Twitter', query, '最近 30 天私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('x', 'X', result)),
-    composioAppResult('Slack', query, '最近 30 天 DM 私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('slack', 'Slack', result)),
-    composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('discord', 'Discord', result)),
-    composioAppResult('LinkedIn', query, '私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('linkedin', 'LinkedIn', result)),
-    composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
-    composioAppResult('Instagram', query, '私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('instagram', 'Instagram', result))
-  ]);
+  const results = await Promise.all(socialHubRequestedPlatforms(args).map((platform: SocialHubPlatform) =>
+    socialHubPlatformFeed(platform)
+  ));
   results.forEach((result: SocialHubFeedResult) => {
     result.items.forEach((item: SocialHubItemData) => items.push(item));
     result.connections.forEach((connection: SocialHubConnectionData) => connections.push(connection));
@@ -10313,8 +10479,8 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
-  if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
-    const result = await composioSocialAggregate(prompt);
+  if (toolId === 'social.feed.search') {
+    const result = await composioSocialAggregate(args);
     return socialHubFeedA2ui(surfaceId, result.items, result.connections);
   }
   return socialHubFeedA2ui(surfaceId, [], []);
@@ -10613,6 +10779,7 @@ async function callLocalCalendarTool(
   args: Object | null = null
 ): Promise<string> {
   const normalized = calendarComposioArgs(toolId, prompt, args);
+  let updateMatches: DynamicGenericToolResult[] = [];
   if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
     if (textOf(normalized.eventId).trim().length === 0) {
       if (!hasCalendarLookupSelector(normalized)) {
@@ -10666,8 +10833,11 @@ async function callLocalCalendarTool(
       if (resolved === null) {
         return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
       }
+      updateMatches = matches;
       normalized.eventId = resolved.eventId;
       normalized.title = resolved.title;
+      normalized.start = resolved.start;
+      normalized.end = resolved.end;
     } catch (_error) {
       return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
         await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
@@ -10676,7 +10846,9 @@ async function callLocalCalendarTool(
   }
   const missing = calendarEventRequiredFields(toolId, normalized);
   if (missing.length > 0) {
-    return genericToolResultsA2ui(surfaceId, toolId, [calendarMissingArgsResult(toolId, missing)]);
+    const results = toolId === 'calendar.event.update' && updateMatches.length > 0 ?
+      calendarUpdateNeedsInputResults(updateMatches, missing) : [calendarMissingArgsResult(toolId, missing)];
+    return genericToolResultsA2ui(surfaceId, toolId, results);
   }
   try {
     const execution = await callComposioFixedRaw(

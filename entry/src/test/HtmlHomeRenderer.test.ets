@@ -1674,6 +1674,57 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('任务结果')).assertEqual(-1);
     });
 
+    it('keeps other monthly events out of the selected day timeline', 0, () => {
+      const doc = calendarSearchDocumentFixture();
+      doc.blocks.push({
+        id: 'calendar-search-21',
+        kind: 'generic-tool-result',
+        title: '月中复盘',
+        subtitle: 'Google Calendar API 查询成功。',
+        status: 'success',
+        source: 'Google Calendar API',
+        metrics: [
+          { label: 'source', value: 'Google Calendar API' },
+          { label: 'toolName', value: 'calendar.events.search' }
+        ],
+        rows: [
+          { label: 'Event ID', value: 'event-21' },
+          { label: 'Start', value: '2026-07-21T11:00:00+08:00' },
+          { label: 'End', value: '2026-07-21T11:30:00+08:00' }
+        ],
+        actions: []
+      });
+      doc.blocks.push({
+        id: 'calendar-search-30',
+        kind: 'generic-tool-result',
+        title: '月底发布',
+        subtitle: 'Google Calendar API 查询成功。',
+        status: 'success',
+        source: 'Google Calendar API',
+        metrics: [
+          { label: 'source', value: 'Google Calendar API' },
+          { label: 'toolName', value: 'calendar.events.search' }
+        ],
+        rows: [
+          { label: 'Event ID', value: 'event-30' },
+          { label: 'Start', value: '2026-07-30T15:00:00+08:00' },
+          { label: 'End', value: '2026-07-30T15:30:00+08:00' }
+        ],
+        actions: []
+      });
+
+      const html = renderHtmlHomeDocument(doc);
+      const dayStart = html.indexOf('<section class="calendar-view calendar-view-day active"');
+      const weekStart = html.indexOf('<section class="calendar-view calendar-view-week"');
+      const dayHtml = html.substring(dayStart, weekStart);
+
+      expect(dayHtml.indexOf('产品同步')).assertLarger(-1);
+      expect(dayHtml.indexOf('月中复盘')).assertEqual(-1);
+      expect(dayHtml.indexOf('月底发布')).assertEqual(-1);
+      expect(html.indexOf('月中复盘')).assertLarger(-1);
+      expect(html.indexOf('月底发布')).assertLarger(-1);
+    });
+
     it('submits a Calendar delete confirmation card without another drawer or modal', 0, () => {
       const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
 

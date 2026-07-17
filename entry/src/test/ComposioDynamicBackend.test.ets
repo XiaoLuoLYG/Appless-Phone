@@ -193,6 +193,12 @@ export default function composioDynamicBackendTest() {
     });
 
     it('pins WhatsApp and Calendar fixed tools to their real Composio slugs', 0, () => {
+      expect(composioExactToolSlugForFixedTool('social.x.profile')).assertEqual('TWITTER_USER_LOOKUP_ME');
+      expect(composioExactToolSlugForFixedTool('social.x.dm.list')).assertEqual('TWITTER_GET_RECENT_DM_EVENTS');
+      expect(composioExactToolSlugForFixedTool('social.slack.message.search')).assertEqual('SLACK_SEARCH_MESSAGES');
+      expect(composioExactToolSlugForFixedTool('social.instagram.profile')).assertEqual('INSTAGRAM_GET_USER_INFO');
+      expect(composioExactToolSlugForFixedTool('social.instagram.conversations.list')).assertEqual('INSTAGRAM_LIST_ALL_CONVERSATIONS');
+      expect(composioExactToolSlugForFixedTool('social.instagram.messages.list')).assertEqual('INSTAGRAM_LIST_ALL_MESSAGES');
       expect(composioExactToolSlugForFixedTool('whatsapp.phone_numbers.list')).assertEqual('WHATSAPP_GET_PHONE_NUMBERS');
       expect(composioExactToolSlugForFixedTool('whatsapp.message.send')).assertEqual('WHATSAPP_SEND_MESSAGE');
       expect(composioExactToolSlugForFixedTool('calendar.events.search')).assertEqual('GOOGLECALENDAR_EVENTS_LIST');
@@ -247,6 +253,19 @@ export default function composioDynamicBackendTest() {
       expect((args.query as string).indexOf('after:')).assertEqual(0);
       expect(args.sort).assertEqual('timestamp');
       expect(args.count).assertEqual(5);
+    });
+
+    it('does not invent opaque provider ids from a natural-language read request', 0, () => {
+      const historyTool = composioTool('{"toolSlug":"WHATSAPP_GET_MESSAGE_HISTORY","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"phone_number_id\\"],\\"properties\\":{\\"phone_number_id\\":{\\"type\\":\\"string\\"},\\"limit\\":{\\"type\\":\\"number\\"}}}"}');
+      const args = composioArgumentsForTool(
+        historyTool,
+        '帮我用 WhatsApp 查看我最近的消息',
+        '',
+        null
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(args.phone_number_id === undefined).assertTrue();
+      expect(args.limit).assertEqual(5);
     });
 
     it('keeps Composio Gmail execute previews compact and parseable', 0, () => {

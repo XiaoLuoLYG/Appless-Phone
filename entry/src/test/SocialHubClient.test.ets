@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
+import { parseComposioSocialFeed, parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -66,6 +66,45 @@ export default function socialHubClientTest() {
     it('keeps aggregate X public post prompts as keyword searches', 0, () => {
       expect(xSearchQuery('X 公开 post 搜索关键词: openai codex', '')).assertEqual('openai codex');
       expect(xSearchQuery('帮我搜索 X 上 openai 最近的公开 post', '')).assertEqual('from:openai');
+    });
+
+    it('parses real Composio social message payloads without turning errors into messages', 0, () => {
+      const x = parseComposioSocialFeed(
+        'x',
+        '{"data":{"data":[{"id":"dm-in","event_type":"MessageCreate","text":"Can we move the demo?","sender_id":"user-2","dm_conversation_id":"dm-1","created_at":"2026-07-17T01:00:00.000Z"},{"id":"dm-out","event_type":"MessageCreate","text":"Sure","sender_id":"user-me","dm_conversation_id":"dm-1","created_at":"2026-07-17T01:05:00.000Z"}],"includes":{"users":[{"id":"user-me","name":"Me","username":"me"},{"id":"user-2","name":"Ada","username":"ada"}]}},"error":null}',
+        '',
+        'user-me'
+      );
+      expect(x.items.length).assertEqual(1);
+      expect(x.items[0].author).assertEqual('Ada');
+      expect(x.items[0].handle).assertEqual('@ada');
+      expect(x.items[0].text).assertEqual('Can we move the demo?');
+
+      const slack = parseComposioSocialFeed(
+        'slack',
+        '{"data":{"messages":{"matches":[{"iid":"slack-dm","ts":"1784250000.000100","channel":{"id":"D123","name":"Ada"},"username":"Ada","text":"Please review the launch copy","permalink":"https://workspace.slack.com/archives/D123/p1784250000000100"},{"iid":"slack-channel","ts":"1784250001.000100","channel":{"id":"C123","name":"general"},"username":"Bob","text":"public channel","permalink":"https://workspace.slack.com/archives/C123/p1784250001000100"}]}},"error":null}'
+      );
+      expect(slack.items.length).assertEqual(1);
+      expect(slack.items[0].id).assertEqual('slack-dm');
+      expect(slack.items[0].channelId).assertEqual('D123');
+
+      const instagram = parseComposioSocialFeed(
+        'instagram',
+        '{"data":{"data":[{"id":"ig-in","created_time":"2026-07-17T02:00:00.000Z","from":{"id":"ig-ada","username":"ada"},"message":"Is the prototype ready?","to":{"data":[{"id":"ig-me"}]}},{"id":"ig-out","created_time":"2026-07-17T02:05:00.000Z","from":{"id":"ig-me","username":"me"},"message":"Almost","to":{"data":[{"id":"ig-ada"}]}}]},"error":null}',
+        'conversation-1',
+        'ig-me'
+      );
+      expect(instagram.items.length).assertEqual(1);
+      expect(instagram.items[0].author).assertEqual('ada');
+      expect(instagram.items[0].threadId).assertEqual('conversation-1');
+
+      const failed = parseComposioSocialFeed(
+        'whatsapp',
+        '{"data":null,"error":{"message":"Account not registered"}}'
+      );
+      expect(failed.items.length).assertEqual(0);
+      expect(failed.connections[0].status).assertEqual('error');
+      expect(failed.connections[0].message).assertEqual('Account not registered');
     });
   });
 }

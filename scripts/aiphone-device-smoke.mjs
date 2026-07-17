@@ -457,7 +457,14 @@ function expectedCaseForQuery(query) {
       expectedToolId: 'whatsapp.message.send'
     };
   }
-  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
+  if (isSocialFeedQuery(query) &&
+    (!isXPostSearchQuery(query) || !/公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'social.feed.search'
+    };
+  }
+  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
@@ -1313,7 +1320,7 @@ function isAggregateMediaSearchQuery(query) {
 }
 
 function isSocialFeedQuery(query) {
-  return /社交|消息聚合|多平台消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
+  return /社交|消息聚合|多平台消息|已授权应用.*私信|私信消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
 }
 
 function isSocialHubExpectedToolId(expectedToolId) {
@@ -1336,8 +1343,9 @@ function isXPostSearchQuery(query) {
 
 function hasTruthfulSocialHubState(text) {
   return /SocialHub/.test(text) &&
-    /社交工作台/.test(text) &&
-    /待授权|等待授权接入|异常|受限|已连接|在线|connected|未配置|Social bridge unavailable|HTTP|scope|rate|token|configured|可搜索你有权限看到的消息|真实数据接入前|还没有真实消息/i.test(text);
+    /授权状态/.test(text) &&
+    /来源\s*·|暂无可读消息/.test(text) &&
+    /发信人\s*·|当前.*不提供|读取失败|尚未连接|没有可读消息|暂无可读消息/i.test(text);
 }
 
 function hasVisibleSocialHubOutput(text, expectedToolId) {
@@ -1348,11 +1356,8 @@ function hasVisibleSocialHubOutput(text, expectedToolId) {
     return /\bX\b/.test(text);
   }
   if (expectedToolId === 'social.feed.search') {
-    return /\bX\b/.test(text) &&
-      /Slack/.test(text) &&
-      /企业微信/.test(text) &&
-      ((/Discord/.test(text) && /LinkedIn/.test(text) && /WhatsApp/.test(text) && /Instagram/.test(text)) ||
-        /回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
+    return /来源\s*·/.test(text) && /发信人\s*·/.test(text) && /回复/.test(text) ||
+      /暂无可读消息/.test(text);
   }
   return false;
 }
@@ -1375,13 +1380,16 @@ function isComposioCardQuery(query) {
   return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
     (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) ||
     (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query) && !isWhatsAppSendQuery(query));
+    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query) && !isSocialFeedQuery(query)) ||
+    (/Outlook|Spotify|Soptify|TikTok|Ticketmaster/i.test(query) && !isSocialFeedQuery(query));
 }
 
 function layoutExpectationsForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
     return [];
+  }
+  if (isSocialFeedQuery(query) && !isWhatsAppSendQuery(query)) {
+    return ['SocialHub', '授权状态'];
   }
   if (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) {
     return ['Composio 工具结果', 'Composio GitHub 结果', 'GITHUB_FIND_PULL_REQUESTS', 'Appless-Phone'];
@@ -1406,12 +1414,6 @@ function layoutExpectationsForQuery(query) {
   }
   if (isWhatsAppSendQuery(query)) {
     return ['WhatsApp Business', 'whatsapp.message.send', '确认发送'];
-  }
-  if (/WhatsApp/i.test(query)) {
-    return ['Composio WhatsApp 结果', 'WhatsApp'];
-  }
-  if (/Instagram|Instgram/i.test(query)) {
-    return ['Composio Instagram 结果', 'Instagram'];
   }
   if (/Spotify|Soptify/i.test(query)) {
     return ['Composio Spotify 结果', 'Spotify'];
@@ -1441,10 +1443,7 @@ function layoutExpectationsForQuery(query) {
     return ['Composio', 'x.post.search', 'Twitter'];
   }
   if (isSocialFeedQuery(query)) {
-    if (/社交聚合|消息聚合|多平台消息/.test(query)) {
-      return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'Discord', 'LinkedIn', 'WhatsApp', 'Instagram'];
-    }
-    return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'social.feed.search'];
+    return ['SocialHub'];
   }
   if (isMailAggregationQuery(query)) {
     return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];

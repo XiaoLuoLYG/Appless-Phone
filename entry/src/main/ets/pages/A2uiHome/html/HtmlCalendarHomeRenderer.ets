@@ -994,7 +994,7 @@ function viewSwitch(): string {
 }
 
 function dayView(events: CalendarHomeEvent[], target: Date): string {
-  const dated = timedEvents(events);
+  const dated = eventsForDate(timedEvents(events), dateKeyOf(target));
   const hours: string[] = [];
   for (let hour = HOUR_START; hour < HOUR_END; hour++) {
     hours.push('<div class="calendar-hour">' + pad2(hour) + ':00</div>');

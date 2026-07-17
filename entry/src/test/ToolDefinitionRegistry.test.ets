@@ -154,14 +154,21 @@ export default function toolDefinitionRegistryTest() {
 
       expect(searchDescription.indexOf('timeMin')).assertLarger(-1);
       expect(searchDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(searchDescription.indexOf('first step before update or delete')).assertEqual(-1);
+      expect(searchDescription.indexOf('NEVER use calendar.events.search for a write request')).assertLarger(-1);
+      expect(searchDescription.indexOf('query contains only event title text')).assertLarger(-1);
       expect(createDescription.indexOf('RFC3339')).assertLarger(-1);
       expect(createDescription.indexOf('ask the user')).assertLarger(-1);
       expect(createDescription.indexOf('Never invent')).assertLarger(-1);
       expect(updateDescription.indexOf('call calendar.event.update directly')).assertLarger(-1);
+      expect(updateDescription.indexOf('even when the requested new time is incomplete')).assertLarger(-1);
+      expect(updateDescription.indexOf('omit missing start or end')).assertLarger(-1);
+      expect(updateDescription.indexOf('query contains only event title text')).assertLarger(-1);
       expect(updateDescription.indexOf('timeMin')).assertLarger(-1);
       expect(updateDescription.indexOf('timeMax')).assertLarger(-1);
       expect(updateDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
       expect(deleteDescription.indexOf('call calendar.event.delete directly')).assertLarger(-1);
+      expect(deleteDescription.indexOf('query contains only event title text')).assertLarger(-1);
       expect(deleteDescription.indexOf('timeMin')).assertLarger(-1);
       expect(deleteDescription.indexOf('timeMax')).assertLarger(-1);
       expect(deleteDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);

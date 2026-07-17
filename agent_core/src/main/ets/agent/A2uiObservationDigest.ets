@@ -205,7 +205,7 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
       }
     }
     finalText = eventSummaries.length > 0 ?
-      'Google Calendar 查询完成。已找到：' + eventSummaries.join('。') + '。后续修改或删除必须使用上面的真实 Event ID。' :
+      'Google Calendar 查询完成。已找到：' + eventSummaries.join('。') + '。系统会在后续修改或删除时使用上面的真实 Event ID，用户无需输入 Event ID。' :
       'Google Calendar 查询完成，没有找到可修改或删除的日程。';
   }
 
