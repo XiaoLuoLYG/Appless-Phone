@@ -66,6 +66,40 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function hotelDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'hotel';
+  doc.title = '深圳酒店';
+  doc.subtitle = '2026-08-15 → 2026-08-17 · 2 成人 · 1 间';
+  doc.blocks = [{
+    id: 'hotel-rate-1',
+    kind: 'generic-tool-result',
+    title: '豪华大床房',
+    subtitle: '550 CNY · 不含早餐',
+    status: 'success',
+    source: 'RollingGo',
+    metrics: [
+      { label: 'source', value: 'RollingGo' },
+      { label: 'toolName', value: 'hotel.detail' }
+    ],
+    rows: [
+      { label: '酒店 ID', value: '47675' },
+      { label: 'Rate plan ID', value: '5nAv6vObodN-6idXNkFPe3z' },
+      { label: '入住', value: '2026-08-15 → 2026-08-17' },
+      { label: '客人', value: '2 成人 · 1 间' },
+      { label: '平均价', value: '550 CNY' },
+      { label: '床型', value: '1 大床' },
+      { label: '餐食', value: '不含早餐' },
+      { label: '取消政策', value: '免费取消截止至酒店当地时间 2026-08-12 08:00:00' },
+      { label: '税费与有效期', value: '税费拆分与报价有效期：供应商未返回' },
+      { label: '能力边界', value: 'Appless 暂不支持创建或跟踪酒店订单' }
+    ],
+    actions: []
+  }];
+  doc.actions = [];
+  return doc;
+}
+
 function rideDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -2069,6 +2103,22 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
+    });
+
+    it('renders a dedicated hotel rate scene with provider-truth fields', 0, () => {
+      const html = renderHtmlHomeDocument(hotelDocumentFixture());
+
+      expect(html.indexOf('data-scene="hotel"')).assertLarger(-1);
+      expect(html.indexOf('hotel-scene-note')).assertLarger(-1);
+      expect(html.indexOf('hotel-rate-card')).assertLarger(-1);
+      expect(html.indexOf('47675')).assertLarger(-1);
+      expect(html.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
+      expect(html.indexOf('550 CNY')).assertLarger(-1);
+      expect(html.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
+      expect(html.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
+      expect(html.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(html.indexOf('下单成功')).assertEqual(-1);
+      expect(html.indexOf('订单编号')).assertEqual(-1);
     });
 
     it('does not auto-render welcome scene and source chips', 0, () => {

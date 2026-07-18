@@ -3546,6 +3546,15 @@ struct Index {
       );
       return;
     }
+    if (action.id === 'hotel.detail') {
+      await this.callToolById(
+        'hotel.detail',
+        action.prompt,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
     const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);

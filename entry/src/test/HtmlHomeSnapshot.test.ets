@@ -704,6 +704,33 @@ export default function htmlHomeSnapshotTest() {
       expect(isHtmlHomeActionAllowed(doc, openAction)).assertTrue();
     });
 
+    it('classifies hotel generic results as a dedicated hotel scene', 0, () => {
+      const results: A2uiComponent = {
+        id: 'results',
+        component: 'GenericToolResults',
+        title: '深圳酒店',
+        dataPath: '/genericToolResults'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('hotel', 'ready', [root('results'), results],
+          '{"genericToolResults":[{"sourceTag":"RollingGo","toolName":"hotel.detail","title":"豪华大床房","status":"success","summary":"550 CNY · 不含早餐","rows":[{"label":"酒店 ID","value":"47675"},{"label":"Rate plan ID","value":"5nAv6vObodN-6idXNkFPe3z"},{"label":"入住","value":"2026-08-15 → 2026-08-17"},{"label":"客人","value":"2 成人 · 1 间"},{"label":"平均价","value":"550 CNY"},{"label":"取消政策","value":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"},{"label":"能力边界","value":"Appless 暂不支持创建或跟踪酒店订单"}],"rawPreview":""}]}'),
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const serialized = JSON.stringify(doc);
+
+      expect(doc.source).assertEqual('tool');
+      expect(doc.kind).assertEqual('hotel');
+      expect(doc.blocks.length).assertEqual(1);
+      expect(doc.blocks[0].kind).assertEqual('generic-tool-result');
+      expect(serialized.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
+      expect(serialized.indexOf('550 CNY')).assertLarger(-1);
+      expect(serialized.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
+      expect(serialized.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(serialized.indexOf('订单编号')).assertEqual(-1);
+    });
+
     it('includes persona metadata when present', 0, () => {
       const doc = createHtmlHomeDocument({
         surface: surface('food', 'ready', [root('food_results')],

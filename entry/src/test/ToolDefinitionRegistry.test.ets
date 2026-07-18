@@ -6,6 +6,7 @@ import {
   backendLabel,
   isCalendarToolId,
   isGmailToolId,
+  isHotelToolId,
   isKnownDomainToolId,
   isLuckinToolId,
   isLocalAdapterToolId,
@@ -40,6 +41,8 @@ export default function toolDefinitionRegistryTest() {
     it('recognizes existing local adapters and Gmail tools through one registry', 0, () => {
       expect(isKnownDomainToolId('travel.search')).assertTrue();
       expect(isKnownDomainToolId('food.search')).assertTrue();
+      expect(isKnownDomainToolId('hotel.search')).assertTrue();
+      expect(isKnownDomainToolId('hotel.detail')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.preview')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.create')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.status')).assertTrue();
@@ -74,6 +77,10 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('youtube.unknown')).assertFalse();
 
       expect(isLocalAdapterToolId('travel.search')).assertTrue();
+      expect(isLocalAdapterToolId('hotel.search')).assertTrue();
+      expect(isHotelToolId('hotel.search')).assertTrue();
+      expect(isHotelToolId('hotel.detail')).assertTrue();
+      expect(isHotelToolId('hotel.create')).assertFalse();
       expect(isLocalAdapterToolId('luckin.order.preview')).assertTrue();
       expect(isLuckinToolId('luckin.order.create')).assertTrue();
       expect(isLuckinToolId('food.search')).assertFalse();
@@ -113,6 +120,48 @@ export default function toolDefinitionRegistryTest() {
       expect(xPost.a2uiComponent).assertEqual('GenericToolResults');
       expect(xPost.actions.length).assertEqual(0);
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
+    });
+
+    it('registers only verified hotel read tools with exact progression', 0, () => {
+      const search = toolDefinitionForToolId('hotel.search') as ToolDefinition;
+      const detail = toolDefinitionForToolId('hotel.detail') as ToolDefinition;
+
+      expect(search.domain).assertEqual('hotel');
+      expect(search.riskLevel).assertEqual('read');
+      expect(search.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(search.authModes.join(',')).assertEqual('provider_key');
+      expect(search.inputSchema).assertEqual('hotelSearchRequest');
+      expect(search.outputSchema).assertEqual('hotelSearchResults');
+      expect(search.a2uiComponent).assertEqual('GenericToolResults');
+      expect(search.actions.join(',')).assertEqual('hotel.detail');
+      expect(detail.domain).assertEqual('hotel');
+      expect(detail.riskLevel).assertEqual('read');
+      expect(detail.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(detail.authModes.join(',')).assertEqual('provider_key');
+      expect(detail.inputSchema).assertEqual('hotelDetailRequest');
+      expect(detail.outputSchema).assertEqual('hotelRatePlans');
+      expect(detail.a2uiComponent).assertEqual('GenericToolResults');
+      expect(detail.actions.length).assertEqual(0);
+      expect(toolDefinitionForToolId('hotel.create')).assertEqual(null);
+      expect(toolDefinitionForToolId('hotel.status')).assertEqual(null);
+      expect(toolDefinitionForToolId('hotel.cancel')).assertEqual(null);
+      expect(isRegisteredAiphoneToolId('hotel.search')).assertTrue();
+      expect(isRegisteredAiphoneToolId('hotel.detail')).assertTrue();
+      expect(isRegisteredAiphoneToolId('hotel.create')).assertFalse();
+    });
+
+    it('gives the model exact structured hotel contracts without order claims', 0, () => {
+      const search = aiphoneToolDescriptionForModel('hotel.search');
+      const detail = aiphoneToolDescriptionForModel('hotel.detail');
+
+      expect(search.indexOf('checkInDate')).assertLarger(-1);
+      expect(search.indexOf('stayNights')).assertLarger(-1);
+      expect(search.indexOf('adultCount')).assertLarger(-1);
+      expect(search.indexOf('roomCount')).assertLarger(-1);
+      expect(detail.indexOf('hotelId')).assertLarger(-1);
+      expect(detail.indexOf('checkOutDate')).assertLarger(-1);
+      expect(detail.indexOf('ratePlanId')).assertLarger(-1);
+      expect(detail.indexOf('does not create')).assertLarger(-1);
     });
 
     it('registers Calendar writes and Maps POI search explicitly', 0, () => {

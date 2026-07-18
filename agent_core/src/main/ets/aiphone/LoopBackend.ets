@@ -169,6 +169,12 @@ function calendarToolDescription(definition: ToolDefinition): string {
   if (definition.toolId === 'calendar.event.delete') {
     return description + '. For a natural-language delete request, call calendar.event.delete directly with structured args.query, args.timeMin, args.timeMax, args.timezone, and optional args.calendarId. query contains only event title text; use an empty query when the request specifies only a date or time. Resolve relative dates into RFC3339 and never pass phrases such as tomorrow or 明天. The client searches real events internally: exactly one match proceeds to confirmation, while zero or multiple matches are shown for user selection. When the user selected a visible event, pass its internal args.eventId. Never ask the user to type or know an Event ID. The client requires explicit delete confirmation before the Provider call.';
   }
+  if (definition.toolId === 'hotel.search') {
+    return description + '. Use for real hotel discovery through RollingGo. Input must be JSON with originQuery, place, placeType, countryCode, checkInDate in YYYY-MM-DD, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and optional size. Never omit place or dates: the provider otherwise defaults to unrelated inventory. This tool is read-only and does not create a reservation.';
+  }
+  if (definition.toolId === 'hotel.detail') {
+    return description + '. Use only after hotel.search returns a real hotelId. Preserve the action args exactly: hotelId, checkInDate, checkOutDate, countryCode, currency, adultCount, childCount, childAgeDetails, and roomCount. It returns live room ratePlanId, average price/currency, bed, meal, availability, and cancellation policy. It does not create, confirm, or track an order.';
+  }
   return description;
 }
 
@@ -310,6 +316,10 @@ export class LoopBackend {
       description += '. Use for railway, high-speed rail, bullet train, station-to-station, 12306, or train schedule requests.';
     } else if (definition.toolId === 'flight.search') {
       description += '. Use for flight, airline, airport, or flight-board requests.';
+    } else if (definition.toolId === 'hotel.search') {
+      description += '. Use for real hotel discovery through RollingGo. Input must be JSON with originQuery, place, placeType, countryCode, checkInDate in YYYY-MM-DD, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and optional size. Never omit place or dates: the provider otherwise defaults to unrelated inventory. This tool is read-only and does not create a reservation.';
+    } else if (definition.toolId === 'hotel.detail') {
+      description += '. Use only after hotel.search returns a real hotelId. Preserve hotelId, checkInDate, checkOutDate, countryCode, currency, adultCount, childCount, childAgeDetails, and roomCount. It returns live room ratePlanId, average price/currency, bed, meal, availability, and cancellation policy. It does not create, confirm, or track an order.';
     } else if (definition.toolId === 'food.search') {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, menus, coupons, delivery, and food or beverage places near a location. Do not use for Luckin order placement; use luckin.order.preview for ordering Luckin coffee.';
     } else if (definition.toolId === 'luckin.order.preview') {

@@ -12,6 +12,8 @@ import dynamicToolRenderDataTest from './DynamicToolRenderData.test';
 import dynamicToolRegistryTest from './DynamicToolRegistry.test';
 import dynamicCredentialStoreTest from './DynamicCredentialStore.test';
 import genericMcpClientTest from './GenericMcpClient.test';
+import hotelToolTypesTest from './HotelToolTypes.test';
+import hotelToolA2uiTest from './HotelToolA2ui.test';
 import dynamicToolA2uiTest from './DynamicToolA2ui.test';
 import composioConfigTest from './ComposioConfig.test';
 import composioAuthClientTest from './ComposioAuthClient.test';
@@ -83,6 +85,8 @@ export default function testsuite() {
   dynamicToolRegistryTest();
   dynamicCredentialStoreTest();
   genericMcpClientTest();
+  hotelToolTypesTest();
+  hotelToolA2uiTest();
   dynamicToolA2uiTest();
   composioConfigTest();
   composioAuthClientTest();

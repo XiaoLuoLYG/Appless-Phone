@@ -1073,6 +1073,9 @@ function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
   if (surface.intent === 'luckin') {
     return 'luckin';
   }
+  if (surface.intent === 'hotel') {
+    return 'hotel';
+  }
   if (hasComponent(surface, A2UI_COMPONENT_TOOL_CONNECT_CARD) ||
     hasComponent(surface, A2UI_COMPONENT_GENERIC_TOOL_RESULTS) ||
     surface.intent === 'dynamic_tool' ||
@@ -1091,7 +1094,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin') {
+  if (kind === 'travel' || kind === 'hotel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin') {
     return 'tool';
   }
   return 'model';

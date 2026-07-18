@@ -2,6 +2,7 @@ import { HtmlHomeDocument } from './HtmlHomeTypes';
 import { renderAggregateSearchHomeDocument, shouldRenderAggregateSearchHomeDocument } from './HtmlAggregateSearchHomeRenderer';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
+import { renderHotelHomeDocument, shouldRenderHotelHomeDocument } from './HtmlHotelHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
 import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } from './HtmlRideHailingHomeRenderer';
@@ -5379,6 +5380,9 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
   }
   if (shouldRenderTravelHomeDocument(document)) {
     return renderTravelHomeDocument(document, isBusy);
+  }
+  if (shouldRenderHotelHomeDocument(document)) {
+    return renderHotelHomeDocument(document, isBusy);
   }
   if (shouldRenderFoodHomeDocument(document)) {
     return renderFoodHomeDocument(document, isBusy);

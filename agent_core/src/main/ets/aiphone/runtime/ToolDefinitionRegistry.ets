@@ -44,6 +44,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'hotel.search',
+    domain: 'hotel',
+    intent: 'hotel.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'hotelSearchRequest',
+    outputSchema: 'hotelSearchResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['hotel.detail']
+  },
+  {
+    toolId: 'hotel.detail',
+    domain: 'hotel',
+    intent: 'hotel.detail',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'hotelDetailRequest',
+    outputSchema: 'hotelRatePlans',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'food.search',
     domain: 'food',
     intent: 'local.food.search',
@@ -567,6 +591,11 @@ export function isRideToolId(toolId: string): boolean {
 export function isLuckinToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'luckin';
+}
+
+export function isHotelToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'hotel';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

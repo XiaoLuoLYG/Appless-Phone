@@ -329,6 +329,25 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('loads RollingGo hotel config without exposing the credential', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('hotelKey=present(17)')).assertLarger(-1);
+        expect(summary.indexOf('hotelUrl=present')).assertLarger(-1);
+        expect(summary.indexOf('hotel-test-secret')).assertEqual(-1);
+        expect(isRegisteredToolId('hotel.search')).assertTrue();
+        expect(isRegisteredToolId('hotel.detail')).assertTrue();
+        expect(isRegisteredToolId('hotel.create')).assertFalse();
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('defaults ride tools to real provider mode unless mock is explicitly enabled', 0, () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');

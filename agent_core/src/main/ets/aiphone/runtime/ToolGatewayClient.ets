@@ -75,7 +75,18 @@ import {
   saveXOAuthPending,
   saveXOAuthTokenSet
 } from './XOAuthClient';
-import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient } from './GenericMcpClient';
+import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
+import { hotelDetailA2ui, hotelFailureA2ui, hotelSearchA2ui } from './HotelToolA2ui';
+import {
+  HotelDetailParseResult,
+  HotelSearchParseResult,
+  hotelDetailProviderArgs,
+  hotelSearchProviderArgs,
+  normalizeHotelDetailResult,
+  normalizeHotelSearchResult,
+  parseHotelDetailRequest,
+  parseHotelSearchRequest
+} from './HotelToolTypes';
 import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
@@ -108,7 +119,7 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
 import {
   PaymentAccount,
   PaymentMode,
@@ -254,6 +265,8 @@ interface LocalProviderConfig {
   slackBotToken: string;
   flightMcpKey: string;
   variflightApiUrl: string;
+  hotelMcpKey: string;
+  hotelMcpUrl: string;
   amapKey: string;
   amapDefaultLocation: string;
   amapRadius: string;
@@ -331,6 +344,8 @@ interface LocalProviderRawConfig {
   FLIGHT_API_KEY?: string;
   VARIFLIGHT_API_URL?: string;
   FLIGHT_VARIFLIGHT_URL?: string;
+  ROLLINGGO_HOTEL_MCP_KEY?: string;
+  ROLLINGGO_HOTEL_MCP_URL?: string;
   AMAP_KEY?: string;
   AMAP_DEFAULT_LOCATION?: string;
   FOOD_DEFAULT_LOCATION?: string;
@@ -396,6 +411,8 @@ interface LocalProviderRawConfig {
   PAYMENT_LIVE_MAX_AMOUNT_MINOR?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
+  hotelMcpKey?: string;
+  hotelMcpUrl?: string;
   amapKey?: string;
   amapDefaultLocation?: string;
   amapRadius?: string;
@@ -1245,6 +1262,8 @@ let localProviderConfig: LocalProviderConfig = {
   slackBotToken: '',
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
+  hotelMcpKey: '',
+  hotelMcpUrl: '',
   amapKey: '',
   amapDefaultLocation: '',
   amapRadius: DEFAULT_AMAP_RADIUS,
@@ -1659,6 +1678,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     slackBotToken: config.slackBotToken.trim(),
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
+    hotelMcpKey: config.hotelMcpKey.trim(),
+    hotelMcpUrl: config.hotelMcpUrl.trim(),
     amapKey: config.amapKey.trim(),
     amapDefaultLocation: config.amapDefaultLocation.trim(),
     amapRadius: config.amapRadius.trim().length > 0 ? config.amapRadius.trim() : DEFAULT_AMAP_RADIUS,
@@ -1728,6 +1749,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' slackUserTokenChars=' + localProviderConfig.slackUserToken.length.toString() +
     ' slackBotTokenChars=' + localProviderConfig.slackBotToken.length.toString() +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
+    ' hotelKeyChars=' + localProviderConfig.hotelMcpKey.length.toString() +
+    ' hotelUrlPresent=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'true' : 'false') +
     ' amapKeyChars=' + localProviderConfig.amapKey.length.toString() +
     ' tencentMapKeyChars=' + localProviderConfig.tencentMapKey.length.toString() +
     ' baiduMapAkChars=' + localProviderConfig.baiduMapAk.length.toString() +
@@ -1792,6 +1815,8 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     slackBotToken: firstText([parsed.SLACK_BOT_TOKEN, parsed.slackBotToken]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
+    hotelMcpKey: firstText([parsed.ROLLINGGO_HOTEL_MCP_KEY, parsed.hotelMcpKey]),
+    hotelMcpUrl: firstText([parsed.ROLLINGGO_HOTEL_MCP_URL, parsed.hotelMcpUrl]),
     amapKey: firstText([parsed.AMAP_KEY, parsed.amapKey]),
     amapDefaultLocation: firstText([parsed.AMAP_DEFAULT_LOCATION, parsed.FOOD_DEFAULT_LOCATION, parsed.amapDefaultLocation]),
     amapRadius: firstText([parsed.AMAP_RADIUS, parsed.amapRadius]),
@@ -1863,6 +1888,8 @@ export function localProviderConfigDebugSummary(): string {
     ', slackUserToken=' + (localProviderConfig.slackUserToken.length > 0 ? 'present(' + localProviderConfig.slackUserToken.length.toString() + ')' : 'missing') +
     ', slackBotToken=' + (localProviderConfig.slackBotToken.length > 0 ? 'present(' + localProviderConfig.slackBotToken.length.toString() + ')' : 'missing') +
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
+    ', hotelKey=' + (localProviderConfig.hotelMcpKey.length > 0 ? 'present(' + localProviderConfig.hotelMcpKey.length.toString() + ')' : 'missing') +
+    ', hotelUrl=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'present' : 'missing') +
     ', amapKey=' + (localProviderConfig.amapKey.length > 0 ? 'present(' + localProviderConfig.amapKey.length.toString() + ')' : 'missing') +
     ', tencentMapKey=' + (localProviderConfig.tencentMapKey.length > 0 ? 'present(' + localProviderConfig.tencentMapKey.length.toString() + ')' : 'missing') +
     ', baiduMapAk=' + (localProviderConfig.baiduMapAk.length > 0 ? 'present(' + localProviderConfig.baiduMapAk.length.toString() + ')' : 'missing') +
@@ -4404,6 +4431,9 @@ function intentForTool(toolId: string): string {
   if (toolId === 'food.search') {
     return 'food';
   }
+  if (toolId === 'hotel.search' || toolId === 'hotel.detail') {
+    return 'hotel';
+  }
   if (toolId === 'travel.search' || toolId === 'train.search' || toolId === 'flight.search') {
     return 'travel';
   }
@@ -4471,6 +4501,12 @@ function titleForTool(toolId: string): string {
   if (toolId === 'food.search') {
     return '附近餐饮查询';
   }
+  if (toolId === 'hotel.search') {
+    return '酒店搜索';
+  }
+  if (toolId === 'hotel.detail') {
+    return '实时房型与报价';
+  }
   return '工具调用';
 }
 
@@ -4507,7 +4543,8 @@ function pendingA2ui(toolId: string, prompt: string, surfaceId: string): string 
     ? '正在同时等待 12306 和飞常准返回'
     : (toolId === 'train.search'
     ? '正在等待 12306 返回'
-    : (toolId === 'flight.search' ? '正在等待飞常准返回' : (toolId === 'food.search' ? '正在等待外卖聚合来源返回' : '正在调用工具')));
+    : (toolId === 'flight.search' ? '正在等待飞常准返回' : (toolId === 'food.search' ? '正在等待外卖聚合来源返回' :
+      (toolId === 'hotel.search' || toolId === 'hotel.detail' ? '正在等待 RollingGo 返回真实酒店数据' : '正在调用工具'))));
   const components: A2uiComponent[] = [
     {
       id: 'root',
@@ -11952,6 +11989,66 @@ async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: 
   return paymentValidationA2ui(surfaceId, checkout);
 }
 
+function hotelMcpRegistration(toolId: string, mcpToolName: string): DynamicToolRegistration {
+  return {
+    toolId: toolId,
+    manifestId: 'rollinggo-hotel',
+    displayName: 'RollingGo',
+    status: 'enabled',
+    transport: {
+      type: 'streamable_http',
+      url: localProviderConfig.hotelMcpUrl,
+      command: '',
+      args: [],
+      headers: {},
+      env: {}
+    },
+    mcpToolName: mcpToolName,
+    credentialRef: 'provider:rollinggo-hotel',
+    sourceUrl: '',
+    lastError: ''
+  };
+}
+
+async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
+  if (localProviderConfig.hotelMcpKey.length === 0 || localProviderConfig.hotelMcpUrl.length === 0) {
+    return hotelFailureA2ui(
+      surfaceId,
+      toolId,
+      '缺少本机 ignored 配置 ROLLINGGO_HOTEL_MCP_KEY 或 ROLLINGGO_HOTEL_MCP_URL。'
+    );
+  }
+  const rawArgs = args === null ? new Object() : args;
+  if (toolId === 'hotel.search') {
+    const parsed: HotelSearchParseResult = parseHotelSearchRequest(rawArgs);
+    if (!parsed.ok || parsed.value === null) {
+      return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+    }
+    const response: McpToolCallResult = await genericMcpClient.callToolPayload(
+      hotelMcpRegistration(toolId, 'searchHotels'),
+      localProviderConfig.hotelMcpKey,
+      hotelSearchProviderArgs(parsed.value)
+    );
+    if (!response.ok || response.result === null) {
+      return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+    }
+    return hotelSearchA2ui(surfaceId, normalizeHotelSearchResult(response.result, parsed.value));
+  }
+  const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
+  if (!parsed.ok || parsed.value === null) {
+    return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+  }
+  const response: McpToolCallResult = await genericMcpClient.callToolPayload(
+    hotelMcpRegistration(toolId, 'getHotelDetail'),
+    localProviderConfig.hotelMcpKey,
+    hotelDetailProviderArgs(parsed.value)
+  );
+  if (!response.ok || response.result === null) {
+    return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+  }
+  return hotelDetailA2ui(surfaceId, normalizeHotelDetailResult(response.result, parsed.value));
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   if (toolId === 'whatsapp.message.send') {
     return callLocalWhatsAppTool(prompt, surfaceId, actionId, args);
@@ -11991,6 +12088,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isLuckinToolId(toolId)) {
     return callLocalLuckinTool(toolId, prompt, surfaceId, args);
+  }
+  if (isHotelToolId(toolId)) {
+    return callLocalHotelTool(toolId, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);

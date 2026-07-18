@@ -40,7 +40,7 @@ export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/
 export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { aiphoneToolDefinitionCount, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel } from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
-export { GMAIL_TOOL_IDS, allToolDefinitions, backendLabel, isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
+export { GMAIL_TOOL_IDS, allToolDefinitions, backendLabel, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
 export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, xOAuthConfigFromProvider, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from './src/main/ets/aiphone/runtime/GmailToolA2ui';
 export { AssetCredentialStore, CredentialStore, credentialRefFor } from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
@@ -67,6 +67,8 @@ export * from './src/main/ets/aiphone/runtime/DynamicToolSamples';
 export * from './src/main/ets/aiphone/runtime/DynamicToolTypes';
 export * from './src/main/ets/aiphone/runtime/FoodNavigation';
 export * from './src/main/ets/aiphone/runtime/GenericMcpClient';
+export * from './src/main/ets/aiphone/runtime/HotelToolA2ui';
+export * from './src/main/ets/aiphone/runtime/HotelToolTypes';
 export * from './src/main/ets/aiphone/runtime/GmailApiClient';
 export * from './src/main/ets/aiphone/runtime/GmailOAuthClient';
 export * from './src/main/ets/aiphone/runtime/GmailToolA2ui';
