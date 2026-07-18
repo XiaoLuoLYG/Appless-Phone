@@ -410,6 +410,10 @@ function isMapsRouteQuery(query) {
   return /Google\s*Maps?|GMap|谷歌地图/i.test(query) && /路线|导航|怎么走|directions?|navigate|从.+到/.test(query);
 }
 
+function isHotelQuery(query) {
+  return /酒店|hotel/i.test(query);
+}
+
 function expectedCaseForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
     return {
@@ -614,6 +618,12 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'train.search'
+    };
+  }
+  if (isHotelQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'hotel.search'
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -1513,6 +1523,9 @@ function layoutExpectationsForQuery(query) {
   if (/高铁|火车|车票|12306/.test(query)) {
     return ['高铁', '12306', 'train.search'];
   }
+  if (isHotelQuery(query)) {
+    return ['酒店搜索', '酒店结果', 'RollingGo'];
+  }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
   }
@@ -2332,7 +2345,8 @@ if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.mail.search'
   finalLayoutBlockingHits.push('gmail-technical-args-card');
 }
 for (const blockingPattern of finalLayoutBlockingPatterns) {
-  if (finalSummary !== null && finalSummary.expectedToolId.startsWith('calendar.')) {
+  if (finalSummary !== null &&
+    (finalSummary.expectedToolId.startsWith('calendar.') || finalSummary.expectedToolId.startsWith('hotel.'))) {
     continue;
   }
   if (finalSummary !== null &&
