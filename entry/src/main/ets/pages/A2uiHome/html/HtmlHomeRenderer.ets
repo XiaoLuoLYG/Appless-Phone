@@ -21,18 +21,18 @@ const HTML_HOME_CSS: string = `
   color-scheme: light;
   --paper: #f5f2ee;
   --paper-deep: #ebe5dc;
-  --panel: rgba(255, 255, 255, 0.86);
+  --panel: rgba(255, 255, 255, 0.88);
   --panel-strong: #ffffff;
   --ink: #211b17;
   --ink-soft: #493f38;
-  --muted: #786e66;
+  --muted: #7a6e64;
   --line: rgba(33, 27, 23, 0.12);
   --accent: #995f4c;
   --accent-soft: rgba(153, 95, 76, 0.13);
   --red: #b04a42;
   --red-soft: rgba(176, 74, 66, 0.1);
   --amber: #9a6a22;
-  --shadow: 0 14px 34px rgba(44, 34, 26, 0.08);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
   --train: #397a55;
   --train-soft: rgba(57, 122, 85, 0.12);
   --flight: #476f9f;
@@ -2702,11 +2702,11 @@ body[data-scene] .media-player {
 @media (prefers-reduced-motion: no-preference) {
   body[data-scene] .hero,
   body[data-scene] .block {
-    animation: scene-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: scene-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 }
 @keyframes scene-rise {
-  from { opacity: 0; transform: translateY(14px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (min-width: 620px) {
@@ -2756,6 +2756,36 @@ body[data-scene] .media-player {
     padding-top: 0;
   }
   body[data-scene] .scene-visual { align-self: center; }
+}
+body[data-scene] .hero {
+  min-height: 280px;
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+body[data-scene] h1 {
+  font-size: 32px;
+}
+body[data-scene] .block,
+.block,
+.timeline-item,
+.empty,
+.history-item,
+.persona-banner {
+  box-shadow: none;
+}
+.action {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 `;
 

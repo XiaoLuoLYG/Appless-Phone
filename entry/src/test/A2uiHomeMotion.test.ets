@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  A2UI_ENTER_OFFSET_Y,
+  A2UI_MOTION_NORMAL_MS,
   a2uiThinkingDotOpacity,
   a2uiThinkingDotScale,
   a2uiThinkingDotsActive
@@ -24,6 +26,11 @@ export default function a2uiHomeMotionTest() {
       expect(a2uiThinkingDotsActive(true, 'calling_tool')).assertTrue();
       expect(a2uiThinkingDotsActive(true, 'ready')).assertFalse();
       expect(a2uiThinkingDotsActive(false, 'thinking')).assertFalse();
+    });
+
+    it('keeps result motion brief and restrained', 0, () => {
+      expect(A2UI_MOTION_NORMAL_MS).assertEqual(220);
+      expect(A2UI_ENTER_OFFSET_Y).assertEqual(6);
     });
   });
 }

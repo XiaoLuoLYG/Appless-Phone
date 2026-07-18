@@ -1075,8 +1075,26 @@ function socialHubDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function expectCalmUtilityPalette(document: HtmlHomeDocument): void {
+  const html = renderHtmlHomeDocument(document);
+  expect(html.indexOf('--paper: #f5f2ee;')).assertLarger(-1);
+  expect(html.indexOf('--ink: #211b17;')).assertLarger(-1);
+  expect(html.indexOf('--accent: #995f4c;')).assertLarger(-1);
+}
+
 export default function htmlHomeRendererTest() {
   describe('htmlHomeRenderer', () => {
+    it('uses the calm utility palette across result templates', 0, () => {
+      expectCalmUtilityPalette(documentFixture());
+      expectCalmUtilityPalette(calendarSearchDocumentFixture());
+      expectCalmUtilityPalette(aggregateSearchDocumentFixture());
+      expectCalmUtilityPalette(travelFoodCardsDocumentFixture());
+      expectCalmUtilityPalette(foodDocumentFixture());
+      expectCalmUtilityPalette(mediaAggregateDocumentFixture());
+      expectCalmUtilityPalette(rideDocumentFixture());
+      expectCalmUtilityPalette(paymentDocumentFixture());
+    });
+
     it('returns a full HTML document with document content', 0, () => {
       const html = renderHtmlHomeDocument(documentFixture());
 

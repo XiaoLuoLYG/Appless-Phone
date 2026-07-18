@@ -33,17 +33,19 @@ const HOUR_END: number = 21;
 const CALENDAR_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --paper: #f7f2ea;
-  --ink: #1f1a15;
-  --muted: #746a60;
-  --line: rgba(31, 26, 21, 0.12);
-  --panel: rgba(255, 251, 244, 0.94);
-  --panel-strong: #fffaf2;
-  --accent: #2f6f78;
+  --paper: #f5f2ee;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: #ffffff;
+  --ink: #211b17;
+  --ink-soft: #493f38;
+  --muted: #7a6e64;
+  --line: rgba(33, 27, 23, 0.12);
+  --accent: #995f4c;
+  --accent-soft: rgba(153, 95, 76, 0.13);
   --accent-2: #b36b45;
   --success: #34785f;
   --danger: #b3483d;
-  --shadow: 0 18px 42px rgba(42, 31, 20, 0.13);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -574,6 +576,55 @@ h1, h2, h3, p { margin: 0; }
   .calendar-confirmation { align-self: end; }
   .calendar-board { padding: 0 18px; }
   .calendar-detail-drawer { margin: 16px 18px; }
+}
+.calendar-hero {
+  min-height: 280px;
+}
+.calendar-hero h1 {
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1.04;
+}
+.calendar-delete-success-card,
+.calendar-confirmation,
+.calendar-day-stage,
+.calendar-detail-drawer {
+  border-radius: 20px;
+}
+.calendar-event-block,
+.calendar-week-day,
+.calendar-month-day,
+.calendar-undated-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.calendar-chip,
+.calendar-delete-confirmation {
+  border-radius: 12px;
+}
+.calendar-view-button,
+.calendar-chip,
+.calendar-open-link,
+.calendar-delete-button,
+.calendar-confirm-delete,
+.calendar-cancel-delete {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.calendar-view-button:active,
+.calendar-chip:active,
+.calendar-open-link:active,
+.calendar-delete-button:active,
+.calendar-confirm-delete:active,
+.calendar-cancel-delete:active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 `;
 
