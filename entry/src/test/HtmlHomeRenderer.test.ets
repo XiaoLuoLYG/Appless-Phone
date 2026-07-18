@@ -83,6 +83,7 @@ function hotelDocumentFixture(): HtmlHomeDocument {
       { label: 'toolName', value: 'hotel.detail' }
     ],
     rows: [
+      { label: '酒店图片', value: 'https://images.example.com/hotel.jpg' },
       { label: '酒店 ID', value: '47675' },
       { label: 'Rate plan ID', value: '5nAv6vObodN-6idXNkFPe3z' },
       { label: '入住', value: '2026-08-15 → 2026-08-17' },
@@ -2111,6 +2112,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('data-scene="hotel"')).assertLarger(-1);
       expect(html.indexOf('hotel-scene-note')).assertLarger(-1);
       expect(html.indexOf('hotel-rate-card')).assertLarger(-1);
+      expect(html.indexOf('image.onerror')).assertLarger(-1);
       expect(html.indexOf('47675')).assertLarger(-1);
       expect(html.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
       expect(html.indexOf('550 CNY')).assertLarger(-1);

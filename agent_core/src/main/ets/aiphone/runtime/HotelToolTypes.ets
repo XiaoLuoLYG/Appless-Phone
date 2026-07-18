@@ -11,7 +11,7 @@ interface HotelSearchRawArgs {
   stayNights?: number;
   adultCount?: number;
   childCount?: number;
-  childAgeDetails?: number[];
+  childAgeDetails?: HotelValue;
   roomCount?: number;
   currency?: string;
   size?: number;
@@ -25,7 +25,7 @@ interface HotelDetailRawArgs {
   currency?: string;
   adultCount?: number;
   childCount?: number;
-  childAgeDetails?: number[];
+  childAgeDetails?: HotelValue;
   roomCount?: number;
 }
 
@@ -127,18 +127,18 @@ interface RollingGoHotelSearchItemRecord {
   longitude?: number;
   distanceInMeters?: number | null;
   starRating?: number;
-  price?: RollingGoHotelPriceRecord;
+  price?: HotelValue;
   areaCode?: string;
   description?: string;
   imageUrl?: string;
-  hotelAmenities?: string[];
-  tags?: string[];
+  hotelAmenities?: HotelValue;
+  tags?: HotelValue;
 }
 
 interface RollingGoHotelSearchResponse {
   success?: boolean;
   message?: string;
-  hotelInformationList?: RollingGoHotelSearchItemRecord[];
+  hotelInformationList?: HotelValue;
 }
 
 interface RollingGoHotelRateRecord {
@@ -146,12 +146,12 @@ interface RollingGoHotelRateRecord {
   roomNameCn?: string | null;
   ratePlanId?: string;
   ratePlanName?: string;
-  averagePrice?: number;
+  averagePrice?: HotelValue;
   bedTypeDescription?: string;
-  currency?: string;
+  currency?: HotelValue;
   mealAmount?: number;
   mealTypeStr?: string;
-  isOnRequest?: boolean;
+  isOnRequest?: HotelValue;
   cancelPolicy?: string;
 }
 
@@ -163,7 +163,7 @@ interface RollingGoHotelDetailResponse {
   nameEn?: string;
   checkIn?: string;
   checkOut?: string;
-  roomRatePlans?: RollingGoHotelRateRecord[];
+  roomRatePlans?: HotelValue;
   message?: string;
 }
 
@@ -207,12 +207,12 @@ export interface HotelRatePlan {
   roomNameCn: string;
   ratePlanId: string;
   ratePlanName: string;
-  averagePrice: number;
+  averagePrice: number | null;
   bedTypeDescription: string;
   currency: string;
   mealAmount: number;
   mealTypeStr: string;
-  isOnRequest: boolean;
+  isOnRequest: boolean | null;
   cancelPolicy: string;
 }
 
@@ -243,33 +243,74 @@ function textOf(value: HotelValue): string {
   return '';
 }
 
-function positiveInteger(value: number | undefined): number {
-  if (value === undefined || !Number.isInteger(value) || value <= 0) {
+function positiveInteger(value: HotelValue): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     return 0;
   }
   return value;
 }
 
-function nonNegativeInteger(value: number | undefined): number {
+function nonNegativeInteger(value: HotelValue): number {
   if (value === undefined) {
     return 0;
   }
-  if (!Number.isInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     return -1;
   }
   return value;
 }
 
-function numberOf(value: number | null | undefined): number {
-  return value === null || value === undefined || !Number.isFinite(value) ? 0 : value;
+function numberOf(value: HotelValue): number {
+  return typeof value !== 'number' || !Number.isFinite(value) ? 0 : value;
 }
 
-function stringArrayOf(value: string[] | undefined): string[] {
-  return value === undefined ? [] : value.slice();
+function optionalNumberOf(value: HotelValue): number | null {
+  return typeof value !== 'number' || !Number.isFinite(value) ? null : value;
 }
 
-function integerArrayOf(value: number[] | undefined): number[] {
-  return value === undefined ? [] : value.slice();
+function currencyOf(value: HotelValue): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const currency = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : '';
+}
+
+function stringArrayOf(value: HotelValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const source = value as HotelValue[];
+  const result: string[] = [];
+  source.forEach((item: HotelValue) => {
+    if (typeof item === 'string' && item.trim().length > 0) {
+      result.push(item.trim());
+    }
+  });
+  return result;
+}
+
+function integerArrayOf(value: HotelValue): number[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const source = value as HotelValue[];
+  const result: number[] = [];
+  for (let index = 0; index < source.length; index++) {
+    const item = source[index];
+    if (typeof item !== 'number' || !Number.isInteger(item) || item < 0) {
+      return null;
+    }
+    result.push(item);
+  }
+  return result;
+}
+
+function isRecordValue(value: HotelValue): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isAbsoluteDate(value: string): boolean {
@@ -328,6 +369,9 @@ export function parseHotelSearchRequest(args: Object): HotelSearchParseResult {
     return searchParseFailure('stayNights, adultCount, and roomCount must be positive integers; childCount cannot be negative.');
   }
   const childAgeDetails = integerArrayOf(raw.childAgeDetails);
+  if (childAgeDetails === null) {
+    return searchParseFailure('childAgeDetails must be an array of non-negative integer ages.');
+  }
   if (childAgeDetails.length !== childCount) {
     return searchParseFailure('childAgeDetails must contain one age for each child.');
   }
@@ -374,6 +418,9 @@ export function parseHotelDetailRequest(args: Object): HotelDetailParseResult {
     return detailParseFailure('adultCount and roomCount must be positive integers; childCount cannot be negative.');
   }
   const childAgeDetails = integerArrayOf(raw.childAgeDetails);
+  if (childAgeDetails === null) {
+    return detailParseFailure('childAgeDetails must be an array of non-negative integer ages.');
+  }
   if (childAgeDetails.length !== childCount) {
     return detailParseFailure('childAgeDetails must contain one age for each child.');
   }
@@ -462,11 +509,13 @@ function emptyDetailResult(request: HotelDetailRequest, error: string): HotelDet
 
 function normalizeHotelPrice(price: RollingGoHotelPriceRecord | undefined): HotelPrice {
   const source: RollingGoHotelPriceRecord = price === undefined ? {} : price;
+  const amount = optionalNumberOf(source.lowestPrice);
+  const currency = currencyOf(source.currency);
   return {
     message: textOf(source.message),
-    hasPrice: source.hasPrice === true,
-    currency: textOf(source.currency),
-    lowestPrice: numberOf(source.lowestPrice)
+    hasPrice: source.hasPrice === true && amount !== null && currency.length > 0,
+    currency: currency,
+    lowestPrice: amount === null ? 0 : amount
   };
 }
 
@@ -483,7 +532,8 @@ function normalizeHotelItem(item: RollingGoHotelSearchItemRecord): HotelSearchIt
     longitude: numberOf(item.longitude),
     distanceInMeters: numberOf(item.distanceInMeters),
     starRating: numberOf(item.starRating),
-    price: normalizeHotelPrice(item.price),
+    price: isRecordValue(item.price) ? normalizeHotelPrice(item.price as RollingGoHotelPriceRecord) :
+      normalizeHotelPrice(undefined),
     areaCode: textOf(item.areaCode),
     description: textOf(item.description),
     imageUrl: textOf(item.imageUrl),
@@ -498,12 +548,12 @@ function normalizeRatePlan(item: RollingGoHotelRateRecord): HotelRatePlan {
     roomNameCn: textOf(item.roomNameCn),
     ratePlanId: textOf(item.ratePlanId),
     ratePlanName: textOf(item.ratePlanName),
-    averagePrice: numberOf(item.averagePrice),
+    averagePrice: optionalNumberOf(item.averagePrice),
     bedTypeDescription: textOf(item.bedTypeDescription),
-    currency: textOf(item.currency),
+    currency: currencyOf(item.currency),
     mealAmount: numberOf(item.mealAmount),
     mealTypeStr: textOf(item.mealTypeStr),
-    isOnRequest: item.isOnRequest === true,
+    isOnRequest: typeof item.isOnRequest === 'boolean' ? item.isOnRequest : null,
     cancelPolicy: textOf(item.cancelPolicy)
   };
 }
@@ -520,14 +570,22 @@ export function normalizeHotelSearchResult(payload: McpToolResultPayload, reques
     const message = textOf(response.message);
     return emptySearchResult(request, message.length > 0 ? message : 'RollingGo searchHotels failed.');
   }
+  if (response.hotelInformationList !== undefined && !Array.isArray(response.hotelInformationList)) {
+    return emptySearchResult(request, 'RollingGo searchHotels returned an invalid hotelInformationList.');
+  }
   const hotels: HotelSearchItem[] = [];
-  const source = response.hotelInformationList === undefined ? [] : response.hotelInformationList;
-  source.forEach((item: RollingGoHotelSearchItemRecord) => {
-    const normalized = normalizeHotelItem(item);
+  const source: HotelValue[] = response.hotelInformationList === undefined ? [] :
+    response.hotelInformationList as HotelValue[];
+  for (let index = 0; index < source.length; index++) {
+    const item = source[index];
+    if (!isRecordValue(item)) {
+      return emptySearchResult(request, 'RollingGo searchHotels returned an invalid hotelInformationList item.');
+    }
+    const normalized = normalizeHotelItem(item as RollingGoHotelSearchItemRecord);
     if (normalized.hotelId > 0) {
       hotels.push(normalized);
     }
-  });
+  }
   return {
     ok: true,
     error: '',
@@ -553,14 +611,22 @@ export function normalizeHotelDetailResult(payload: McpToolResultPayload, reques
   if (providerHotelId <= 0 || providerHotelId !== request.hotelId) {
     return emptyDetailResult(request, 'RollingGo getHotelDetail returned a mismatched hotelId.');
   }
+  if (response.roomRatePlans !== undefined && !Array.isArray(response.roomRatePlans)) {
+    return emptyDetailResult(request, 'RollingGo getHotelDetail returned invalid roomRatePlans.');
+  }
   const rates: HotelRatePlan[] = [];
-  const source = response.roomRatePlans === undefined ? [] : response.roomRatePlans;
-  source.forEach((item: RollingGoHotelRateRecord) => {
-    const normalized = normalizeRatePlan(item);
+  const source: HotelValue[] = response.roomRatePlans === undefined ? [] :
+    response.roomRatePlans as HotelValue[];
+  for (let index = 0; index < source.length; index++) {
+    const item = source[index];
+    if (!isRecordValue(item)) {
+      return emptyDetailResult(request, 'RollingGo getHotelDetail returned an invalid roomRatePlans item.');
+    }
+    const normalized = normalizeRatePlan(item as RollingGoHotelRateRecord);
     if (normalized.ratePlanId.length > 0) {
       rates.push(normalized);
     }
-  });
+  }
   return {
     ok: true,
     error: '',

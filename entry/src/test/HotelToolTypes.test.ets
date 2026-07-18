@@ -94,6 +94,18 @@ export default function hotelToolTypesTest() {
       expect(parsed.error.indexOf('YYYY-MM-DD')).assertLarger(-1);
     });
 
+    it('rejects malformed child age arrays at the request boundary', 0, () => {
+      const parsed = parseHotelSearchRequest(structured(
+        '{"originQuery":"深圳亲子酒店","place":"深圳","placeType":"CITY","countryCode":"CN",' +
+        '"checkInDate":"2026-08-15","stayNights":2,"adultCount":2,"childCount":1,' +
+        '"childAgeDetails":["8"],"roomCount":1,"currency":"CNY","size":10}'
+      ));
+
+      expect(parsed.ok).assertFalse();
+      expect(parsed.value === null).assertTrue();
+      expect(parsed.error.indexOf('childAgeDetails')).assertLarger(-1);
+    });
+
     it('maps search input one-to-one to searchHotels', 0, () => {
       const parsed = parseHotelSearchRequest(searchArgs());
       expect(parsed.ok).assertTrue();
@@ -160,6 +172,40 @@ export default function hotelToolTypesTest() {
       expect(serialized.indexOf('taxes')).assertEqual(-1);
     });
 
+    it('returns a controlled error for malformed provider result arrays', 0, () => {
+      const searchRequest = parseHotelSearchRequest(searchArgs());
+      if (searchRequest.value === null) {
+        return;
+      }
+      const searchPayload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"message":"酒店搜索成功","hotelInformationList":{"hotelId":47675}}'
+        )
+      };
+
+      const searchResult = normalizeHotelSearchResult(searchPayload, searchRequest.value);
+
+      expect(searchResult.ok).assertFalse();
+      expect(searchResult.error.indexOf('hotelInformationList')).assertLarger(-1);
+
+      const detailRequest = parseHotelDetailRequest(detailArgs());
+      if (detailRequest.value === null) {
+        return;
+      }
+      const detailPayload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelId":47675,"roomRatePlans":[null]}'
+        )
+      };
+
+      const detailResult = normalizeHotelDetailResult(detailPayload, detailRequest.value);
+
+      expect(detailResult.ok).assertFalse();
+      expect(detailResult.error.indexOf('roomRatePlans')).assertLarger(-1);
+    });
+
     it('maps hotel detail input and preserves exact live rate fields', 0, () => {
       const parsed = parseHotelDetailRequest(detailArgs());
       expect(parsed.ok).assertTrue();
@@ -194,6 +240,27 @@ export default function hotelToolTypesTest() {
       expect(result.rates[0].cancelPolicy.indexOf('免费取消')).assertLarger(-1);
       expect(serialized.indexOf('orderId')).assertEqual(-1);
       expect(serialized.indexOf('quoteExpiry')).assertEqual(-1);
+    });
+
+    it('preserves unknown malformed rate facts instead of inventing zero or availability', 0, () => {
+      const parsed = parseHotelDetailRequest(detailArgs());
+      if (parsed.value === null) {
+        return;
+      }
+      const payload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelId":47675,"roomRatePlans":[{"ratePlanId":"provider-rate-unknown",' +
+          '"averagePrice":"550","currency":123,"isOnRequest":"false"}]}'
+        )
+      };
+
+      const result = normalizeHotelDetailResult(payload, parsed.value);
+
+      expect(result.ok).assertTrue();
+      expect(result.rates[0].averagePrice === null).assertTrue();
+      expect(result.rates[0].currency).assertEqual('');
+      expect(result.rates[0].isOnRequest === null).assertTrue();
     });
   });
 }

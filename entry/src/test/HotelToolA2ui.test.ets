@@ -82,6 +82,7 @@ export default function hotelToolA2uiTest() {
       expect(jsonl.indexOf('"checkOutDate":"2026-08-17"')).assertLarger(-1);
       expect(jsonl.indexOf('"adultCount":2')).assertLarger(-1);
       expect(jsonl.indexOf('"roomCount":1')).assertLarger(-1);
+      expect(jsonl.indexOf('搜索阶段仅传成人数')).assertLarger(-1);
       expect(jsonl.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
       expect(jsonl.indexOf('orderId')).assertEqual(-1);
     });
@@ -123,6 +124,37 @@ export default function hotelToolA2uiTest() {
       expect(jsonl.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
       expect(jsonl.indexOf('下单成功')).assertEqual(-1);
       expect(jsonl.indexOf('订单编号')).assertEqual(-1);
+    });
+
+    it('renders unknown provider price and availability as unknown', 0, () => {
+      const args: HotelDetailArgsFixture = {
+        hotelId: 47675,
+        checkInDate: '2026-08-15',
+        checkOutDate: '2026-08-17',
+        countryCode: 'CN',
+        currency: 'CNY',
+        adultCount: 2,
+        childCount: 0,
+        childAgeDetails: [],
+        roomCount: 1
+      };
+      const request = parseHotelDetailRequest(args);
+      if (request.value === null) {
+        return;
+      }
+      const payload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelId":47675,"name":"深圳测试酒店","roomRatePlans":[' +
+          '{"ratePlanId":"provider-rate-unknown","averagePrice":"550","currency":123,"isOnRequest":"false"}]}'
+        )
+      };
+      const jsonl = hotelDetailA2ui('hotel_detail', normalizeHotelDetailResult(payload, request.value));
+
+      expect(jsonl.indexOf('"label":"平均价","value":"供应商未返回"')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"供应商确认","value":"供应商未返回"')).assertLarger(-1);
+      expect(jsonl.indexOf('当前可订')).assertEqual(-1);
+      expect(jsonl.indexOf('0 123')).assertEqual(-1);
     });
   });
 }

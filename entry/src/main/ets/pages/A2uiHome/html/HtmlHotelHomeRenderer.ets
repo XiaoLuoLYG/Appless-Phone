@@ -314,6 +314,7 @@ const HOTEL_HOME_JS: string = `
       image.src = imageUrl;
       image.alt = text(block && block.title) || '酒店图片';
       image.loading = 'lazy';
+      image.onerror = function () { image.style.display = 'none'; };
     }
     var body = add(card, 'div', 'hotel-card-body');
     var top = add(body, 'div', 'hotel-card-top');
@@ -341,6 +342,7 @@ const HOTEL_HOME_JS: string = `
     addFact(facts, '床型', rowValue(block, ['床型']));
     addFact(facts, '餐食', rowValue(block, ['餐食']));
     addFact(facts, '房态', rowValue(block, ['供应商确认']));
+    addFact(facts, '参考价口径', rowValue(block, ['参考价口径']));
     addFact(facts, '价格说明', rowValue(block, ['价格说明']));
     addFact(facts, '设施', rowValue(block, ['设施']));
     addFact(facts, '标签', rowValue(block, ['标签']));

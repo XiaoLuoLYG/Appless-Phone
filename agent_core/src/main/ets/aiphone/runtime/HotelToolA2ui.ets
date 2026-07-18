@@ -13,6 +13,7 @@ import {
 const HOTEL_SOURCE: string = 'RollingGo';
 const HOTEL_LIMITATION: string = 'Appless 暂不支持创建或跟踪酒店订单';
 const HOTEL_PRICE_LIMITATION: string = '税费拆分与报价有效期：供应商未返回';
+const HOTEL_SEARCH_PRICE_SCOPE: string = '搜索阶段仅传成人数；完整客人与房间数在实时房型中查询';
 
 function row(label: string, value: string): A2uiLabelValueData {
   return {
@@ -31,6 +32,20 @@ function occupancyText(adults: number, children: number, rooms: number): string 
     value += ' · ' + children.toString() + ' 儿童';
   }
   return value + ' · ' + rooms.toString() + ' 间';
+}
+
+function ratePriceText(rate: HotelRatePlan): string {
+  if (rate.averagePrice === null || rate.currency.length === 0) {
+    return '供应商未返回';
+  }
+  return numberText(rate.averagePrice) + ' ' + rate.currency;
+}
+
+function rateAvailabilityText(rate: HotelRatePlan): string {
+  if (rate.isOnRequest === null) {
+    return '供应商未返回';
+  }
+  return rate.isOnRequest ? '需二次确认' : '当前可订';
 }
 
 function searchErrorResult(result: HotelSearchResult): DynamicGenericToolResult {
@@ -97,6 +112,7 @@ function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLa
     row('地址', hotel.address),
     row('星级', hotel.starRating > 0 ? hotel.starRating.toString() : '供应商未返回'),
     row('参考价', hotel.price.hasPrice ? numberText(hotel.price.lowestPrice) + ' ' + hotel.price.currency : '供应商未返回'),
+    row('参考价口径', HOTEL_SEARCH_PRICE_SCOPE),
     row('价格说明', hotel.price.message),
     row('设施', hotel.hotelAmenities.join(' · ')),
     row('标签', hotel.tags.join(' · ')),
@@ -135,10 +151,10 @@ function rateRows(result: HotelDetailResult, rate: HotelRatePlan): A2uiLabelValu
     row('Rate plan ID', rate.ratePlanId),
     row('入住', result.checkIn + ' → ' + result.checkOut),
     row('客人', occupancyText(result.query.adultCount, result.query.childCount, result.query.roomCount)),
-    row('平均价', numberText(rate.averagePrice) + ' ' + rate.currency),
+    row('平均价', ratePriceText(rate)),
     row('床型', rate.bedTypeDescription),
     row('餐食', rate.mealTypeStr),
-    row('供应商确认', rate.isOnRequest ? '需二次确认' : '当前可订'),
+    row('供应商确认', rateAvailabilityText(rate)),
     row('取消政策', rate.cancelPolicy),
     row('税费与有效期', HOTEL_PRICE_LIMITATION),
     row('能力边界', HOTEL_LIMITATION)
@@ -152,12 +168,16 @@ function rateRows(result: HotelDetailResult, rate: HotelRatePlan): A2uiLabelValu
 function rateResultFor(result: HotelDetailResult, rate: HotelRatePlan): DynamicGenericToolResult {
   const roomName = rate.roomNameCn.length > 0 ? rate.roomNameCn :
     (rate.roomName.length > 0 ? rate.roomName : rate.ratePlanName);
+  const summaryParts: string[] = [ratePriceText(rate)];
+  if (rate.mealTypeStr.length > 0) {
+    summaryParts.push(rate.mealTypeStr);
+  }
   return {
     sourceTag: HOTEL_SOURCE,
     toolName: 'hotel.detail',
     title: roomName,
     status: 'success',
-    summary: numberText(rate.averagePrice) + ' ' + rate.currency + ' · ' + rate.mealTypeStr,
+    summary: summaryParts.join(' · '),
     rows: rateRows(result, rate),
     rawPreview: ''
   };
