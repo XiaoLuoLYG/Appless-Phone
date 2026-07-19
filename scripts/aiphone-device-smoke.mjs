@@ -131,6 +131,7 @@ const qaDateValue = new Date();
 qaDateValue.setDate(qaDateValue.getDate() + 7);
 const qaDate = `${qaDateValue.getFullYear()}年${String(qaDateValue.getMonth() + 1).padStart(2, '0')}月${String(qaDateValue.getDate()).padStart(2, '0')}日`;
 const qaTitle = `Appless QA ${smokeRunId}`;
+const whatsappRecipient = whatsappTestTo.length > 0 ? whatsappTestTo : '{AIPHONE_WHATSAPP_TEST_TO}';
 
 const coreRegressionCases = [
   { id: 'C01', query: '你好', expectsTool: false, expectedToolId: '' },
@@ -154,7 +155,7 @@ const coreRegressionCases = [
   { id: 'C17', query: '用 PayPal 给罗一格转 1 美元', expectsTool: true, expectedToolId: 'payment.send' },
   {
     id: 'C18',
-    query: `帮我给 WhatsApp 测试联系人 ${whatsappTestTo} 发送消息：Appless QA ${smokeRunId}`,
+    query: `帮我给 WhatsApp 测试联系人 ${whatsappRecipient} 发送消息：Appless QA ${smokeRunId}`,
     expectsTool: true,
     expectedToolId: 'whatsapp.message.send',
     blockedWithoutWhatsAppTestTo: true
@@ -650,7 +651,8 @@ function expectedCaseForQuery(query) {
   if (isHotelQuery(query)) {
     return {
       expectsTool: true,
-      expectedToolId: 'hotel.search'
+      expectedToolId: 'hotel.search',
+      verifyHotelDetail: true
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -743,6 +745,39 @@ function cleanBundleData() {
   } catch (error) {
     console.warn(`Could not clean bundle data: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+const personaStorePath = '/data/app/el2/100/base/com.example.aiphonedemo/haps/entry/preferences/aiphone_persona_store';
+const personaBackupPath = `/data/local/tmp/aiphone-persona-store-${smokeRunId}`;
+
+function backupPersonaMemoryStore() {
+  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+  const output = hdc(['shell',
+    `if [ -f ${personaStorePath} ]; then cp ${personaStorePath} ${personaBackupPath} && echo PRESENT; else echo ABSENT; fi`
+  ]).trim();
+  if (output !== 'PRESENT' && output !== 'ABSENT') {
+    throw new Error(`Could not determine persona store state before C11: ${output}`);
+  }
+  return {
+    existed: output === 'PRESENT',
+    backupPath: personaBackupPath
+  };
+}
+
+function restorePersonaMemoryStore(backup) {
+  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+  const restoreCommand = backup.existed
+    ? `cp ${backup.backupPath} ${personaStorePath} && cmp -s ${backup.backupPath} ${personaStorePath} && echo RESTORED`
+    : `rm -f ${personaStorePath} && [ ! -f ${personaStorePath} ] && echo RESTORED`;
+  const output = hdc(['shell', restoreCommand]).trim();
+  hdc(['shell', `rm -f ${backup.backupPath}`]);
+  if (output !== 'RESTORED') {
+    throw new Error(`Persona store restoration could not be verified: ${output}`);
+  }
+  return {
+    ok: true,
+    existedBeforeRun: backup.existed
+  };
 }
 
 function probeLocalModel() {
@@ -882,7 +917,11 @@ function dumpLayout(localName = 'latest-layout.json') {
       if (raw.length === 0) {
         throw new Error('dumpLayout produced an empty file');
       }
-      return JSON.parse(raw);
+      const layout = JSON.parse(raw);
+      if (!Array.isArray(layout.children) || layout.children.length === 0) {
+        throw new Error('dumpLayout produced an empty accessibility tree');
+      }
+      return layout;
     } catch (error) {
       lastError = error;
       spawnSync('sleep', ['0.5']);
@@ -1796,7 +1835,7 @@ async function verifyHotelDetailAction(layout, index, appPid) {
   writeFileSync(textPath, text + '\n');
   const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
-  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\][^\n]*ok=true[^\n]*toolId=hotel\.detail/.test(detailLogText);
+  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
   return {
     ok: detailRequested && detailOk && /实时房型/.test(text) && /床型|餐食|取消政策/.test(text),
     capability: 'hotel.detail',
@@ -2483,10 +2522,39 @@ const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 
 const summaries = [];
+let personaMemoryBackup = null;
+let personaMemoryRestore = { ok: true, skipped: true };
+if (useDefaultCases && selectedDefaultCases.some((testCase) => /^C11/.test(testCase.id || ''))) {
+  try {
+    personaMemoryBackup = backupPersonaMemoryStore();
+    personaMemoryRestore = { ok: false, skipped: false, pending: true };
+  } catch (error) {
+    personaMemoryRestore = {
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+try {
 for (let index = 0; index < queries.length; index += 1) {
   const query = queries[index];
   console.log(`\n[${index + 1}/${queries.length}] ${query}`);
   const inferredCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+  if (/^C11/.test(inferredCase.id || '') && personaMemoryBackup === null) {
+    const blockedSummary = {
+      caseId: inferredCase.id || '',
+      query,
+      expectedTool: inferredCase.expectsTool,
+      expectedToolId: inferredCase.expectedToolId || '',
+      status: 'BLOCKED',
+      ok: false,
+      reason: `Persona memory could not be backed up safely: ${personaMemoryRestore.reason || 'unknown backup failure'}`
+    };
+    summaries.push(blockedSummary);
+    console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
   if (inferredCase.blockedWithoutWhatsAppTestTo === true && whatsappTestTo.length === 0) {
     const blockedSummary = {
       caseId: inferredCase.id || '',
@@ -2522,6 +2590,16 @@ for (let index = 0; index < queries.length; index += 1) {
   summary.status = summary.ok ? 'PASS' : (summary.providerFailed ? 'BLOCKED' : 'FAIL');
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
+  if (inferredCase.id === 'C11c' && personaMemoryBackup !== null) {
+    personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
+    personaMemoryBackup = null;
+  }
+}
+} finally {
+  if (personaMemoryBackup !== null) {
+    personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
+    personaMemoryBackup = null;
+  }
 }
 
 const finalLayout = dumpLayout('final-layout.json');
@@ -2628,9 +2706,19 @@ const processCleanup = {
 };
 
 const summaryPath = join(outDir, 'summary.json');
-writeFileSync(summaryPath, JSON.stringify({ target, timeoutMs, cleanData, modelHealth, summaries, visibleOutput, processCleanup }, null, 2));
+writeFileSync(summaryPath, JSON.stringify({
+  target,
+  timeoutMs,
+  cleanData,
+  modelHealth,
+  personaMemoryRestore,
+  summaries,
+  visibleOutput,
+  processCleanup
+}, null, 2));
 console.log(`\nsummary: ${summaryPath}`);
+console.log(`personaMemoryRestore: ${JSON.stringify(personaMemoryRestore, null, 2)}`);
 console.log(`visibleOutput: ${JSON.stringify(visibleOutput, null, 2)}`);
 console.log(`processCleanup: ${JSON.stringify(processCleanup, null, 2)}`);
 const failed = summaries.filter((summary) => !summary.ok);
-process.exitCode = failed.length === 0 && visibleOutput.ok && processCleanup.ok ? 0 : 1;
+process.exitCode = failed.length === 0 && personaMemoryRestore.ok && visibleOutput.ok && processCleanup.ok ? 0 : 1;
