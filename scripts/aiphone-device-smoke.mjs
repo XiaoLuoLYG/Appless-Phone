@@ -168,7 +168,7 @@ const coreRegressionCases = [
   { id: 'C19f', query: `再次查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程，确认它不存在`, expectsTool: true, expectedToolId: 'calendar.events.search', expectAbsentText: qaTitle },
   {
     id: 'C20',
-    query: '帮我搜索2026年8月8日至10日深圳南山区科技园附近的酒店，2位成人1间房',
+    query: '帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房',
     expectsTool: true,
     expectedToolId: 'hotel.search',
     verifyHotelDetail: true

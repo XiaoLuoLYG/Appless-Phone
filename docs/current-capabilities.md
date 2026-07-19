@@ -12,7 +12,7 @@
 | 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306/铁路结果或真实 provider 错误 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
 | 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
 | 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |
-| 酒店 | `hotel.search` | `帮我搜索2026年8月8日至10日深圳南山区科技园附近的酒店，2位成人1间房` | RollingGo 真实酒店结果、地址、语义标签和带口径的参考价；不伪造库存 | `read` | `ROLLINGGO_HOTEL_MCP_KEY` / `ROLLINGGO_HOTEL_MCP_URL` | 取决于 RollingGo 网络 | 否 | core C20 |
+| 酒店 | `hotel.search` | `帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房` | RollingGo 真实酒店结果、地址、语义标签和带口径的参考价；不伪造库存 | `read` | `ROLLINGGO_HOTEL_MCP_KEY` / `ROLLINGGO_HOTEL_MCP_URL` | 取决于 RollingGo 网络 | 否 | core C20 |
 | 酒店 | `hotel.detail` | 从 C20 的真实酒店卡点击“查看房型” | 使用上一步真实 hotelId 查询房型、价格和取消政策，可返回原搜索结果；不预订 | `read` | 同 `hotel.search`，且必须保留真实 hotelId | 取决于 RollingGo 网络 | 否 | core C20 衍生交互 |
 | 瑞幸 | `luckin.order.preview` | `帮我点一杯瑞幸生椰拿铁，半糖少冰` | 真实门店/菜单匹配与订单确认页；不创建订单 | `confirm_required` | `LUCKIN_MCP_TOKEN` | 取决于瑞幸 MCP 网络 | 否 | core C15 |
 | 瑞幸 | `luckin.order.create` | 从 C15 确认页执行确认动作 | 仅显式确认后创建真实订单；自动回归不点击 | `write` | `LUCKIN_MCP_TOKEN` + 完整门店/商品/规格 ID | 取决于瑞幸 MCP 网络 | 否 | manual-only |
