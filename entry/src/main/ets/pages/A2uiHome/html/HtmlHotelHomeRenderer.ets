@@ -9,76 +9,126 @@ interface HtmlHotelHomeDocumentWithBusy extends HtmlHomeDocument {
 const HOTEL_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --paper: #f4f0e8;
-  --panel: #fffdf8;
-  --ink: #1e2825;
-  --muted: #69736f;
-  --line: rgba(30, 40, 37, 0.13);
-  --accent: #176c60;
-  --accent-soft: rgba(23, 108, 96, 0.1);
-  --warning: #8a5d24;
-  --warning-soft: rgba(138, 93, 36, 0.1);
-  --shadow: 0 16px 38px rgba(37, 43, 39, 0.08);
+  --canvas: #f5f6f8;
+  --surface: #ffffff;
+  --surface-muted: #f1f3f5;
+  --ink: #17191c;
+  --muted: #6e737a;
+  --line: rgba(23, 25, 28, 0.1);
+  --accent: #17685d;
+  --accent-soft: rgba(23, 104, 93, 0.09);
+  --shadow: 0 12px 34px rgba(20, 24, 28, 0.08);
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--paper);
+  background: var(--canvas);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-button { font: inherit; cursor: pointer; }
+button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:disabled { cursor: default; opacity: 0.5; }
+button:focus-visible {
+  outline: 3px solid rgba(23, 104, 93, 0.28);
+  outline-offset: 2px;
+}
 .hotel-shell {
-  width: min(100%, 780px);
+  width: min(100%, 760px);
   margin: 0 auto;
-  padding: 18px 14px calc(96px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 12px calc(92px + env(safe-area-inset-bottom, 0px));
 }
 .hotel-hero {
-  border-bottom: 1px solid var(--line);
-  padding: 8px 2px 18px;
+  position: relative;
+  min-height: 264px;
+  overflow: hidden;
+  border-radius: 26px;
+  background: #273c38;
+  box-shadow: var(--shadow);
+}
+.hotel-hero-media {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 78% 22%, rgba(117, 160, 149, 0.48), transparent 38%),
+    linear-gradient(145deg, #314c46, #17231f);
+}
+.hotel-hero-media::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(9, 15, 13, 0.05) 18%, rgba(9, 15, 13, 0.82) 100%);
+  content: "";
+}
+.hotel-hero-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hotel-hero-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 264px;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 24px 20px 20px;
+  color: #ffffff;
 }
 .hotel-kicker {
-  color: var(--accent);
+  color: rgba(255, 255, 255, 0.82);
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-weight: 720;
+  letter-spacing: 0.04em;
 }
 .hotel-hero h1 {
-  margin: 10px 0 0;
-  max-width: 18em;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 31px;
-  line-height: 1.06;
-  font-weight: 720;
+  margin: 8px 0 0;
+  max-width: 16em;
+  overflow-wrap: anywhere;
+  font-size: clamp(26px, 8vw, 36px);
+  line-height: 1.08;
+  font-weight: 760;
+  letter-spacing: -0.025em;
 }
 .hotel-hero-subtitle {
-  margin: 9px 0 0;
-  color: var(--muted);
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.82);
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.45;
 }
-.hotel-scene-note {
-  margin-top: 14px;
-  border-left: 3px solid var(--warning);
-  padding: 9px 11px;
-  background: var(--warning-soft);
-  color: #69471e;
-  font-size: 12px;
-  line-height: 1.55;
+.hotel-truth {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 7px;
+  margin-top: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: rgba(12, 20, 18, 0.34);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  line-height: 1.2;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.hotel-truth-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8ce0c8;
+  box-shadow: 0 0 0 3px rgba(140, 224, 200, 0.15);
 }
 .hotel-board-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin: 20px 2px 10px;
+  margin: 22px 4px 10px;
 }
 .hotel-board-head h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.2;
 }
 .hotel-count {
@@ -88,22 +138,42 @@ button:disabled { cursor: default; opacity: 0.5; }
 .hotel-board {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 .hotel-rate-card {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 6px 22px rgba(20, 24, 28, 0.05);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.hotel-rate-card.is-expanded {
+  border-color: rgba(23, 104, 93, 0.22);
   box-shadow: var(--shadow);
+}
+.hotel-card-main {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+.hotel-card-main.no-media {
+  grid-template-columns: minmax(0, 1fr);
+}
+.hotel-card-media-wrap {
+  min-height: 112px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-muted);
 }
 .hotel-card-media {
   width: 100%;
-  height: 180px;
+  height: 100%;
+  min-height: 112px;
   object-fit: cover;
-  background: var(--accent-soft);
 }
-.hotel-card-body { padding: 14px; }
+.hotel-card-body { min-width: 0; }
 .hotel-card-top {
   display: flex;
   align-items: flex-start;
@@ -112,52 +182,86 @@ button:disabled { cursor: default; opacity: 0.5; }
 }
 .hotel-card-copy { min-width: 0; }
 .hotel-provider {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 680;
 }
 .hotel-card-title {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   overflow-wrap: anywhere;
-  font-size: 18px;
-  line-height: 1.24;
+  font-size: 17px;
+  line-height: 1.25;
 }
 .hotel-card-summary {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.hotel-card-location {
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
 }
 .hotel-price {
   flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 18px;
+  color: var(--ink);
+  font-size: 16px;
   font-weight: 820;
   white-space: nowrap;
 }
-.hotel-identifiers {
+.hotel-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 12px;
+  gap: 5px;
+  margin-top: 9px;
 }
-.hotel-id {
-  max-width: 100%;
-  border: 1px solid rgba(23, 108, 96, 0.18);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: var(--accent-soft);
-  color: #22564f;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.hotel-tag {
+  max-width: 12em;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: var(--surface-muted);
+  color: #555b61;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.hotel-card-toggle {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  border: 0;
+  padding: 9px 2px;
+  background: transparent;
+  color: var(--accent);
   font-size: 11px;
+  font-weight: 720;
+}
+.hotel-toggle-icon {
+  display: inline-block;
+  font-size: 15px;
+  transition: transform 180ms ease;
+}
+.hotel-card-toggle[aria-expanded="true"] .hotel-toggle-icon {
+  transform: rotate(180deg);
+}
+.hotel-card-details {
+  border-top: 1px solid var(--line);
+  padding: 4px 14px 14px;
+}
+.hotel-card-details[hidden] {
+  display: none;
 }
 .hotel-facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 12px;
-  margin-top: 13px;
-  border-top: 1px solid var(--line);
 }
 .hotel-fact {
   min-width: 0;
@@ -177,9 +281,9 @@ button:disabled { cursor: default; opacity: 0.5; }
   line-height: 1.45;
 }
 .hotel-policy {
-  margin-top: 12px;
-  border-left: 3px solid var(--accent);
-  padding: 9px 11px;
+  margin-top: 10px;
+  border-radius: 12px;
+  padding: 10px 11px;
   background: var(--accent-soft);
 }
 .hotel-policy-label {
@@ -192,13 +296,6 @@ button:disabled { cursor: default; opacity: 0.5; }
   font-size: 12px;
   line-height: 1.55;
 }
-.hotel-external {
-  margin-top: 10px;
-  color: var(--warning);
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  line-height: 1.5;
-}
 .hotel-actions {
   display: flex;
   flex-wrap: wrap;
@@ -206,10 +303,10 @@ button:disabled { cursor: default; opacity: 0.5; }
   margin-top: 13px;
 }
 .hotel-action {
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid var(--accent);
-  border-radius: 10px;
-  padding: 9px 13px;
+  border-radius: 12px;
+  padding: 10px 14px;
   background: var(--accent);
   color: white;
   font-size: 13px;
@@ -219,15 +316,39 @@ button:disabled { cursor: default; opacity: 0.5; }
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 20px;
-  background: var(--panel);
+  background: var(--surface);
   color: var(--muted);
   text-align: center;
 }
+@media (max-width: 420px) {
+  .hotel-card-main { grid-template-columns: 92px minmax(0, 1fr); gap: 10px; }
+  .hotel-card-media-wrap,
+  .hotel-card-media { min-height: 104px; }
+  .hotel-price { font-size: 15px; }
+}
 @media (min-width: 680px) {
-  .hotel-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hotel-shell { padding-top: 18px; }
+  .hotel-hero,
+  .hotel-hero-content { min-height: 322px; }
+  .hotel-hero-content { padding: 30px 28px 26px; }
+  .hotel-card-main { grid-template-columns: 136px minmax(0, 1fr); }
+}
+@media (prefers-contrast: more) {
+  :root { --line: rgba(23, 25, 28, 0.3); }
+  .hotel-truth { border-color: rgba(255, 255, 255, 0.55); background: rgba(0, 0, 0, 0.64); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .hotel-truth {
+    background: rgba(12, 20, 18, 0.86);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  * { scroll-behavior: auto !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 `;
 
@@ -306,35 +427,63 @@ const HOTEL_HOME_JS: string = `
     var url = text(value).trim();
     return url.indexOf('https://') === 0 ? url : '';
   }
-  function renderCard(parent, block) {
+  function addTag(parent, value) {
+    var label = text(value).trim();
+    if (label.length === 0) { return; }
+    add(parent, 'span', 'hotel-tag', label);
+  }
+  function setExpanded(card, details, button, expanded) {
+    card.classList.toggle('is-expanded', expanded);
+    details.hidden = !expanded;
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    var label = button.querySelector('.hotel-toggle-label');
+    if (label) { label.textContent = expanded ? '收起详情' : '查看详情'; }
+  }
+  function renderCard(parent, block, cardIndex) {
     var card = add(parent, 'article', 'hotel-rate-card');
+    var main = add(card, 'div', 'hotel-card-main');
     var imageUrl = safeImageUrl(rowValue(block, ['酒店图片']));
     if (imageUrl.length > 0) {
-      var image = add(card, 'img', 'hotel-card-media');
+      var media = add(main, 'div', 'hotel-card-media-wrap');
+      var image = add(media, 'img', 'hotel-card-media');
       image.src = imageUrl;
       image.alt = text(block && block.title) || '酒店图片';
       image.loading = 'lazy';
-      image.onerror = function () { image.style.display = 'none'; };
+      image.onerror = function () {
+        media.remove();
+        main.classList.add('no-media');
+      };
+    } else {
+      main.classList.add('no-media');
     }
-    var body = add(card, 'div', 'hotel-card-body');
+    var body = add(main, 'div', 'hotel-card-body');
     var top = add(body, 'div', 'hotel-card-top');
     var copy = add(top, 'div', 'hotel-card-copy');
-    add(copy, 'div', 'hotel-provider', text(block && block.source) || 'RollingGo');
+    add(copy, 'div', 'hotel-provider', (text(block && block.source) || 'RollingGo') + ' 实时');
     add(copy, 'h3', 'hotel-card-title', text(block && block.title) || '酒店结果');
     add(copy, 'p', 'hotel-card-summary', text(block && block.subtitle));
+    var location = rowValue(block, ['地址']);
+    if (location.length > 0) { add(copy, 'p', 'hotel-card-location', location); }
     var price = rowValue(block, ['参考价', '平均价']);
     if (price.length > 0) { add(top, 'div', 'hotel-price', price); }
 
-    var identifiers = add(body, 'div', 'hotel-identifiers');
-    var hotelId = rowValue(block, ['酒店 ID']);
-    var destinationId = rowValue(block, ['Destination ID']);
-    var rateId = rowValue(block, ['Rate plan ID']);
-    if (hotelId.length > 0) { add(identifiers, 'span', 'hotel-id', 'hotel ' + hotelId); }
-    if (destinationId.length > 0) { add(identifiers, 'span', 'hotel-id', 'destination ' + destinationId); }
-    if (rateId.length > 0) { add(identifiers, 'span', 'hotel-id', 'rate ' + rateId); }
-    if (identifiers.childNodes.length === 0) { identifiers.remove(); }
+    var tags = add(body, 'div', 'hotel-tags');
+    addTag(tags, rowValue(block, ['星级']));
+    addTag(tags, rowValue(block, ['床型']));
+    addTag(tags, rowValue(block, ['餐食']));
+    addTag(tags, rowValue(block, ['标签']));
+    if (tags.childNodes.length === 0) { tags.remove(); }
 
-    var facts = add(body, 'div', 'hotel-facts');
+    var detailsId = 'hotel-card-details-' + String(cardIndex);
+    var toggle = add(body, 'button', 'hotel-card-toggle');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-controls', detailsId);
+    add(toggle, 'span', 'hotel-toggle-label', '查看详情');
+    add(toggle, 'span', 'hotel-toggle-icon', '⌄');
+
+    var details = add(card, 'div', 'hotel-card-details');
+    details.id = detailsId;
+    var facts = add(details, 'div', 'hotel-facts');
     addFact(facts, '入住', rowValue(block, ['入住']));
     addFact(facts, '客人', rowValue(block, ['客人']));
     addFact(facts, '地址', rowValue(block, ['地址']));
@@ -350,32 +499,43 @@ const HOTEL_HOME_JS: string = `
 
     var cancellation = rowValue(block, ['取消政策']);
     if (cancellation.length > 0) {
-      var policy = add(body, 'div', 'hotel-policy');
+      var policy = add(details, 'div', 'hotel-policy');
       add(policy, 'div', 'hotel-policy-label', '取消政策');
       add(policy, 'div', 'hotel-policy-value', cancellation);
     }
     var taxNotice = rowValue(block, ['税费与有效期']);
     if (taxNotice.length > 0) {
-      var notice = add(body, 'div', 'hotel-policy');
+      var notice = add(details, 'div', 'hotel-policy');
       add(notice, 'div', 'hotel-policy-label', '报价口径');
       add(notice, 'div', 'hotel-policy-value', taxNotice);
     }
-    var external = rowValue(block, ['第三方预订（离开 Appless）']);
-    if (external.length > 0) {
-      add(body, 'div', 'hotel-external', '第三方预订（离开 Appless）：' + external);
-    }
-    addActions(body, block && block.actions);
+    addActions(details, block && block.actions);
+    toggle.addEventListener('click', function () {
+      setExpanded(card, details, toggle, toggle.getAttribute('aria-expanded') !== 'true');
+    });
+    setExpanded(card, details, toggle, false);
   }
 
+  var blocks = list(data.blocks);
   var shell = add(app, 'main', 'hotel-shell');
   var hero = add(shell, 'header', 'hotel-hero');
-  add(hero, 'div', 'hotel-kicker', 'LIVE HOTEL DATA · ROLLINGGO');
-  add(hero, 'h1', '', text(data.title) || '酒店搜索');
-  add(hero, 'p', 'hotel-hero-subtitle', text(data.subtitle));
-  add(hero, 'div', 'hotel-scene-note',
-    '当前仅支持真实酒店搜索与实时房型/报价查询。Appless 暂不支持创建或跟踪酒店订单；税费拆分与报价有效期以供应商最终页面为准。');
+  var heroMedia = add(hero, 'div', 'hotel-hero-media');
+  var heroImageUrl = blocks.length > 0 ? safeImageUrl(rowValue(blocks[0], ['酒店图片'])) : '';
+  if (heroImageUrl.length > 0) {
+    var heroImage = add(heroMedia, 'img', 'hotel-hero-image');
+    heroImage.src = heroImageUrl;
+    heroImage.alt = '';
+    heroImage.setAttribute('aria-hidden', 'true');
+    heroImage.onerror = function () { heroImage.remove(); };
+  }
+  var heroContent = add(hero, 'div', 'hotel-hero-content');
+  add(heroContent, 'div', 'hotel-kicker', '酒店 · 实时房价');
+  add(heroContent, 'h1', '', text(data.title) || '酒店搜索');
+  add(heroContent, 'p', 'hotel-hero-subtitle', text(data.subtitle));
+  var truth = add(heroContent, 'div', 'hotel-truth');
+  add(truth, 'span', 'hotel-truth-dot');
+  add(truth, 'span', '', 'RollingGo 实时数据 · 当前仅支持查询');
 
-  var blocks = list(data.blocks);
   var boardHead = add(shell, 'div', 'hotel-board-head');
   var firstTool = blocks.length > 0 ? metricValue(blocks[0], ['toolName']) : '';
   add(boardHead, 'h2', '', firstTool === 'hotel.detail' ? '实时房型与取消政策' : '酒店结果');
@@ -385,7 +545,7 @@ const HOTEL_HOME_JS: string = `
     return;
   }
   var board = add(shell, 'section', 'hotel-board');
-  blocks.forEach(function (block) { renderCard(board, block); });
+  blocks.forEach(function (block, index) { renderCard(board, block, index); });
 })();
 `;
 

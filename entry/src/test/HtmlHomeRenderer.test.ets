@@ -2110,8 +2110,13 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(hotelDocumentFixture());
 
       expect(html.indexOf('data-scene="hotel"')).assertLarger(-1);
-      expect(html.indexOf('hotel-scene-note')).assertLarger(-1);
+      expect(html.indexOf('hotel-hero-media')).assertLarger(-1);
+      expect(html.indexOf('酒店 · 实时房价')).assertLarger(-1);
       expect(html.indexOf('hotel-rate-card')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-toggle')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-details')).assertLarger(-1);
+      expect(html.indexOf('aria-expanded')).assertLarger(-1);
+      expect(html.indexOf('function setExpanded')).assertLarger(-1);
       expect(html.indexOf('image.onerror')).assertLarger(-1);
       expect(html.indexOf('47675')).assertLarger(-1);
       expect(html.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
@@ -2119,6 +2124,12 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
       expect(html.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
       expect(html.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(html.indexOf('min-height: 44px')).assertLarger(-1);
+      expect(html.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
+      expect(html.indexOf('LIVE HOTEL DATA')).assertEqual(-1);
+      expect(html.indexOf('hotel-scene-note')).assertEqual(-1);
+      expect(html.indexOf('add(identifiers')).assertEqual(-1);
+      expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
       expect(html.indexOf('下单成功')).assertEqual(-1);
       expect(html.indexOf('订单编号')).assertEqual(-1);
     });
