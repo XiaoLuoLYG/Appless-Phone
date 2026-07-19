@@ -1189,7 +1189,8 @@ function nestedStringField(record: Record<string, Object | string | number | boo
 }
 
 function itemTitle(item: Object, index: number): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const title = stringField(record, ['title', 'name', 'subject', 'filename', 'file_name', 'display_name', 'event_name']);
   if (title.length > 0) {
     return title;
@@ -1206,7 +1207,8 @@ function itemTitle(item: Object, index: number): string {
 }
 
 function itemDetail(item: Object): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const parts: string[] = [];
   const number = stringField(record, ['number', 'id']);
   if (number.length > 0) {

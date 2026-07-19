@@ -3067,12 +3067,18 @@ export function rideOrderConfirmedForTest(args: Object | null): boolean {
   return rideOrderConfirmed(rideOrderArgs(args));
 }
 
-function rideErrorResult(sourceTag: string, toolName: string, title: string, summary: string): DynamicGenericToolResult {
+function rideErrorResult(
+  sourceTag: string,
+  toolName: string,
+  title: string,
+  summary: string,
+  status: string = 'error'
+): DynamicGenericToolResult {
   return {
     sourceTag: sourceTag,
     toolName: toolName,
     title: title,
-    status: 'error',
+    status: status,
     summary: summary,
     rows: [
       { label: '状态', value: summary }
@@ -4141,7 +4147,13 @@ async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: str
   }
   const didiCity = rideDidiCityFromRouteOrAmap(route.city, amapOriginPoint, amapDestinationPoint);
   if (didiKey.length === 0) {
-    results.push(rideErrorResult('滴滴', toolId, '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。'));
+    results.push(rideErrorResult(
+      '滴滴',
+      toolId,
+      '缺少滴滴 MCP Key',
+      '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。',
+      'needs_input'
+    ));
   } else if (didiCity.length === 0) {
     results.push(rideErrorResult('滴滴', toolId, '需要补充城市', '请提供起终点所在城市，或确保高德地理编码可返回城市；滴滴 maps_textsearch 要求 city 参数，AIPhone 不会猜测城市或坐标。'));
   } else {

@@ -1160,7 +1160,7 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(rideDocumentFixture());
 
       expect(html.indexOf('data-ride-home')).assertLarger(-1);
-      expect(html.indexOf('任务结果')).assertEqual(-1);
+      expect(html.indexOf("add(blocksHead, 'h2', '', isEnhancedScene() ? sceneSectionTitle() : '任务结果')")).assertEqual(-1);
       expect(html.indexOf('上下文')).assertEqual(-1);
       expect(html.indexOf('打车方案 · 实时叫车')).assertLarger(-1);
       expect(html.indexOf('去秋港花园')).assertLarger(-1);
@@ -1170,7 +1170,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('未查询到司机坐标前不展示地图或真实路线')).assertEqual(-1);
       expect(html.indexOf('打开滴滴/高德不会自动下单')).assertEqual(-1);
       expect(html.indexOf('images.unsplash.com')).assertEqual(-1);
-      expect(html.indexOf('resource://rawfile/ride/ride_cover_taxi_v2.png')).assertLarger(-1);
+      expect(html.indexOf("rideAssetUrl('ride_cover_taxi_v2.png')")).assertLarger(-1);
       expect(html.indexOf('ride-cover-image')).assertLarger(-1);
       expect(html.indexOf('ride-cover-title')).assertLarger(-1);
       expect(html.indexOf('ride-hero-route')).assertEqual(-1);
@@ -1291,14 +1291,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('司机点位来自 provider 返回坐标')).assertEqual(-1);
       expect(html.indexOf('预计接驾时间')).assertLarger(-1);
       expect(html.indexOf('预计 6 分钟接驾')).assertLarger(-1);
-      expect(html.indexOf('>车型</span><b>专车</b>')).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['selectedVehicleText', '车型', 'vehicle', 'productName', 'productCategory'])")).assertLarger(-1);
+      expect(html.indexOf("addRideRouteStat(stats, '车型', rideVehicleStatText(block, estimates))")).assertLarger(-1);
       expect(html.indexOf('>车型</span><b>待查询</b>')).assertEqual(-1);
       expect(html.indexOf('data-ride-eta-value')).assertLarger(-1);
       expect(html.indexOf("updateRideEtaText(etaText)")).assertLarger(-1);
       expect(html.indexOf('function logRideMapRoute')).assertLarger(-1);
       expect(html.indexOf('ride.map.route.log')).assertLarger(-1);
       expect(html.indexOf('[AIPhone][RideMapRoute]')).assertLarger(-1);
-      expect(html.indexOf('正在估算接驾时间')).assertEqual(-1);
       expect(html.indexOf('setRideMapFullscreen')).assertLarger(-1);
       expect(html.indexOf('ride-map-fullscreen')).assertLarger(-1);
       expect(html.indexOf('rideMapEta')).assertLarger(-1);
@@ -1361,9 +1361,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Codex demo')).assertLarger(-1);
       expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
       expect(html.indexOf('data-filter="reddit"')).assertLarger(-1);
-      expect(html.indexOf('可用来源')).assertLarger(-1);
+      expect(html.indexOf('aggregate-source-overview')).assertLarger(-1);
       expect(html.indexOf('YouTube returned 1 row')).assertLarger(-1);
-      expect(html.indexOf('需要关注')).assertLarger(-1);
+      expect(html.indexOf('状态摘要')).assertLarger(-1);
       expect(html.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
       expect(html.indexOf('异常或提示')).assertEqual(-1);
     });

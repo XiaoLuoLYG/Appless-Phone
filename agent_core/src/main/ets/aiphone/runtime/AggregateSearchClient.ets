@@ -446,7 +446,7 @@ function dynamicPostScore(value: string): string {
 }
 
 function dynamicPostCommentCount(value: string): string {
-  const record = parsedDynamicPostRecord(value);
+  const record = dynamicPostRecord(value);
   return record === null ? '' : recordText(record, ['num_comments', 'commentCount', 'comments_count', 'answer_count']);
 }
 

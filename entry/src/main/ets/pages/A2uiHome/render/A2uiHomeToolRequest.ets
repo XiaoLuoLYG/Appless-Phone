@@ -96,6 +96,9 @@ function hasAggregateSearchIntent(prompt: string): boolean {
     return false;
   }
   const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0) {
+    return false;
+  }
   const cleanedQuery = aggregateSearchQueryFromArgs(prompt, null);
   const hasCompactTopic = cleanedQuery.length > 0 && cleanedQuery !== prompt.trim();
   const wantsTopic = hasCompactTopic || containsAny(prompt, ['有关', '关于', '看看', '搜索', '搜', '聚合', '整理', '汇总', '追踪', '了解']);
