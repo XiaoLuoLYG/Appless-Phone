@@ -103,6 +103,16 @@ function detailAction(hotel: HotelSearchItem, request: HotelSearchRequest): A2ui
   };
 }
 
+function restoreSearchAction(): A2uiAction {
+  return {
+    id: 'hotel.search.restore',
+    label: '返回酒店结果',
+    prompt: '返回酒店搜索结果',
+    kind: 'client',
+    variant: 'secondary'
+  };
+}
+
 function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLabelValueData[] {
   const rows: A2uiLabelValueData[] = [
     row('酒店 ID', hotel.hotelId.toString()),
@@ -231,6 +241,9 @@ export function hotelDetailA2ui(surfaceId: string, result: HotelDetailResult): s
         rawPreview: ''
       });
     }
+  }
+  if (items.length > 0) {
+    items[0].actions = [restoreSearchAction()];
   }
   return genericToolResultsA2ui(surfaceId, 'hotel.detail', items, 'hotel', result.name.length > 0 ? result.name : '实时房型与报价');
 }

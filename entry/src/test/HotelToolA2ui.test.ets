@@ -118,6 +118,8 @@ export default function hotelToolA2uiTest() {
 
       expect(jsonl.indexOf('"intent":"hotel"')).assertLarger(-1);
       expect(jsonl.indexOf('"toolName":"hotel.detail"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"hotel.search.restore"')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"返回酒店结果"')).assertLarger(-1);
       expect(jsonl.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
       expect(jsonl.indexOf('550 CNY')).assertLarger(-1);
       expect(jsonl.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);

@@ -95,7 +95,13 @@ function hotelDocumentFixture(): HtmlHomeDocument {
       { label: '税费与有效期', value: '税费拆分与报价有效期：供应商未返回' },
       { label: '能力边界', value: 'Appless 暂不支持创建或跟踪酒店订单' }
     ],
-    actions: []
+    actions: [{
+      id: 'hotel.search.restore',
+      label: '返回酒店结果',
+      prompt: '返回酒店搜索结果',
+      variant: 'secondary',
+      kind: 'client'
+    }]
   }];
   doc.actions = [];
   return doc;
@@ -2111,10 +2117,18 @@ export default function htmlHomeRendererTest() {
 
       expect(html.indexOf('data-scene="hotel"')).assertLarger(-1);
       expect(html.indexOf('hotel-hero-media')).assertLarger(-1);
-      expect(html.indexOf('酒店 · 实时房价')).assertLarger(-1);
-      expect(html.indexOf('hotel-rate-card')).assertLarger(-1);
-      expect(html.indexOf('hotel-card-toggle')).assertLarger(-1);
-      expect(html.indexOf('hotel-card-details')).assertLarger(-1);
+      expect(html.indexOf('.hotel-hero.is-detail h1')).assertLarger(-1);
+      expect(html.indexOf('photo-1742844551986-de16fd4682c3')).assertLarger(-1);
+      expect(html.indexOf('酒店 · 实时房型')).assertLarger(-1);
+      expect(html.indexOf('hotel-search-card')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-card')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-toggle')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-details')).assertLarger(-1);
+      expect(html.indexOf('查看房型')).assertLarger(-1);
+      expect(html.indexOf("button.setAttribute('aria-label', '查看房型：'")).assertLarger(-1);
+      expect(html.indexOf('价格与取消规则')).assertLarger(-1);
+      expect(html.indexOf('返回酒店结果')).assertLarger(-1);
+      expect(html.indexOf('查看详情')).assertEqual(-1);
       expect(html.indexOf('aria-expanded')).assertLarger(-1);
       expect(html.indexOf('function setExpanded')).assertLarger(-1);
       expect(html.indexOf('image.onerror')).assertLarger(-1);

@@ -476,6 +476,7 @@ struct Index {
   private voiceStopRequested: boolean = false;
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
+  private hotelReturnSurface: A2uiSurfaceState | null = null;
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -1288,6 +1289,23 @@ struct Index {
       error: ''
     }));
     aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=true');
+  }
+
+  private rememberHotelReturnSurface(): void {
+    if (this.currentSurface.intent === 'hotel') {
+      this.hotelReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    }
+  }
+
+  private restoreHotelReturnSurface(reason: string): void {
+    if (this.hotelReturnSurface === null) {
+      aiLogInfo('[AIPhone][HotelReturnSurfaceRestore] reason=' + reason + ' ok=false');
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.hotelReturnSurface);
+    this.hotelReturnSurface = null;
+    this.forceApplySurface(surface, reason);
+    aiLogInfo('[AIPhone][HotelReturnSurfaceRestore] reason=' + reason + ' ok=true');
   }
 
   private socialHubComposioAuthItem(platform: SocialHubPlatform): ComposioAuthConfigItem | null {
@@ -3189,6 +3207,10 @@ struct Index {
       this.restoreLuckinReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
       return;
     }
+    if (action.id === 'hotel.search.restore') {
+      this.restoreHotelReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
+      return;
+    }
     if (this.isStripeReceivingActionId(action)) {
       await this.callToolById(
         'payment.account.setup',
@@ -3547,6 +3569,7 @@ struct Index {
       return;
     }
     if (action.id === 'hotel.detail') {
+      this.rememberHotelReturnSurface();
       await this.callToolById(
         'hotel.detail',
         action.prompt,

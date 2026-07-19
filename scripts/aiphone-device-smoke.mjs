@@ -1590,7 +1590,7 @@ function layoutExpectationsForQuery(query) {
     return ['高铁', '12306', 'train.search'];
   }
   if (isHotelQuery(query)) {
-    return ['酒店 · 实时房价', 'RollingGo', '查看详情'];
+    return ['酒店 · 实时搜索', 'RollingGo', '查看房型'];
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
@@ -1606,6 +1606,10 @@ function layoutExpectationsForQuery(query) {
 
 function swipeResultsUp() {
   hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '2200', '650', '950', '600']);
+}
+
+function swipeResultsDown() {
+  hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '950', '650', '2200', '600']);
 }
 
 function requiredScrolledMarkersForQuery(query, expectedToolId) {
@@ -1768,44 +1772,18 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
 
 async function verifyHotelDetailAction(layout, index, appPid) {
   let currentLayout = layout;
-  let expandCenter = null;
+  let detailCenter = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    expandCenter = findTextCenter(currentLayout, '查看详情');
-    if (expandCenter !== null) {
+    detailCenter = findTextCenter(currentLayout, '查看房型');
+    if (detailCenter !== null) {
       break;
     }
     swipeResultsUp();
     await sleep(800);
     currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
   }
-  if (expandCenter === null) {
-    return { ok: false, capability: 'hotel.detail', reason: 'hotel expand button not found' };
-  }
-  hdc(['shell', 'uitest', 'uiInput', 'click', String(expandCenter.x), String(expandCenter.y)]);
-  await sleep(700);
-  currentLayout = dumpLayout(`query-${index + 1}-hotel-expanded-layout.json`);
-  const expandedTextPath = join(outDir, `query-${index + 1}-hotel-expanded-layout-text.txt`);
-  writeFileSync(expandedTextPath, collectLayoutText(currentLayout).join('\n') + '\n');
-  const expandedScreenPath = captureScreen(`query-${index + 1}-hotel-expanded-screen.png`);
-
-  let detailCenter = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    detailCenter = findTextCenter(currentLayout, '查看实时房型');
-    if (detailCenter !== null) {
-      break;
-    }
-    swipeResultsUp();
-    await sleep(800);
-    currentLayout = dumpLayout(`query-${index + 1}-hotel-detail-scroll-${attempt + 1}.json`);
-  }
   if (detailCenter === null) {
-    return {
-      ok: false,
-      capability: 'hotel.detail',
-      reason: 'hotel detail button not found',
-      expandedTextPath,
-      expandedScreenPath
-    };
+    return { ok: false, capability: 'hotel.detail', reason: '查看房型 button not found' };
   }
 
   clearHilog();
@@ -1818,34 +1796,71 @@ async function verifyHotelDetailAction(layout, index, appPid) {
   await sleep(700);
   currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-layout.json`);
 
-  let rateExpand = findTextCenter(currentLayout, '查看详情');
-  for (let attempt = 0; rateExpand === null && attempt < 6; attempt += 1) {
+  let rateExpand = findTextCenter(currentLayout, '价格与取消规则');
+  for (let attempt = 0; rateExpand === null && attempt < 8; attempt += 1) {
     swipeResultsUp();
     await sleep(800);
     currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-scroll-${attempt + 1}.json`);
-    rateExpand = findTextCenter(currentLayout, '查看详情');
+    rateExpand = findTextCenter(currentLayout, '价格与取消规则');
   }
-  if (rateExpand !== null) {
-    hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
-    await sleep(700);
-    currentLayout = dumpLayout(`query-${index + 1}-hotel-rate-expanded-layout.json`);
+  if (rateExpand === null) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: '价格与取消规则 button not found',
+      detailLogPath
+    };
   }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
+  await sleep(700);
+  swipeResultsUp();
+  await sleep(700);
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-rate-expanded-layout.json`);
   const text = collectLayoutText(currentLayout).join('\n');
   const textPath = join(outDir, `query-${index + 1}-hotel-rate-expanded-layout-text.txt`);
   writeFileSync(textPath, text + '\n');
+  const screenPath = captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`);
+
+  let backCenter = findTextCenter(currentLayout, '返回酒店结果');
+  for (let attempt = 0; backCenter === null && attempt < 8; attempt += 1) {
+    swipeResultsDown();
+    await sleep(700);
+    currentLayout = dumpLayout(`query-${index + 1}-hotel-return-scroll-${attempt + 1}.json`);
+    backCenter = findTextCenter(currentLayout, '返回酒店结果');
+  }
+  if (backCenter === null) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: '返回酒店结果 button not found',
+      detailLogPath,
+      textPath,
+      screenPath
+    };
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  await sleep(700);
+  const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
+  const restoredText = collectLayoutText(restoredLayout).join('\n');
+  const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
+  writeFileSync(restoredTextPath, restoredText + '\n');
+  const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
   const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
   const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
+  const restoredOk = /酒店结果/.test(restoredText) && /查看房型/.test(restoredText);
   return {
-    ok: detailRequested && detailOk && /实时房型/.test(text) && /床型|餐食|取消政策/.test(text),
+    ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
+      /床型|餐食|取消政策/.test(text) && restoredOk,
     capability: 'hotel.detail',
     detailRequested,
     detailOk,
-    expandedTextPath,
-    expandedScreenPath,
+    restoredOk,
     detailLogPath,
     textPath,
-    screenPath: captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`)
+    screenPath,
+    restoredTextPath,
+    restoredScreenPath
   };
 }
 
