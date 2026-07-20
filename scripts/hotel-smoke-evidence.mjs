@@ -14,6 +14,28 @@ function positiveHotelId(args) {
   return Number.isInteger(args.hotelId) && args.hotelId > 0;
 }
 
+export function hotelActionEvidenceFromLogs(logText) {
+  let latest = null;
+  for (const line of String(logText || '').split('\n')) {
+    const marker = '[AIPhone][HotelHomeActionEvidence] evidence=';
+    const markerIndex = line.indexOf(marker);
+    if (markerIndex < 0) {
+      continue;
+    }
+    let decoded = line.slice(markerIndex + marker.length).trim();
+    try {
+      decoded = JSON.parse(decoded);
+      if (typeof decoded === 'string') {
+        decoded = JSON.parse(decoded);
+      }
+      if (decoded !== null && typeof decoded === 'object' && !Array.isArray(decoded)) {
+        latest = decoded;
+      }
+    } catch (_error) {}
+  }
+  return latest || { surfaceId: '', actions: [] };
+}
+
 export function foregroundBundleFromAbilityDump(output) {
   const missions = String(output || '').split(/(?=\s*Mission ID #)/);
   const foreground = missions.find((mission) =>

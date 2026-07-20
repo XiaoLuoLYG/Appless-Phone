@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
+  hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   hotelSearchActionEvidence,
   isExpectedHotelSystemBundle,
@@ -54,6 +55,34 @@ test('sanitizes exact action IDs independently of supplied labels', () => {
   assert.equal(evidence.actions[0].clickLabel, 'arbitrary detail label');
   assert.equal(Object.hasOwn(evidence.actions[1], 'clickLabel'), false);
   assert.equal(Object.hasOwn(evidence.actions[2], 'clickLabel'), false);
+});
+
+test('does not treat empty welcome evidence as completed hotel action evidence', () => {
+  const welcome = hotelActionEvidenceFromLogs(
+    '[AIPhone][HotelHomeActionEvidence] evidence=""'
+  );
+  assert.equal(welcome.surfaceId, '');
+  assert.deepEqual(welcome.actions, []);
+
+  const complete = hotelActionEvidenceFromLogs(
+    '[AIPhone][HotelHomeActionEvidence] evidence=' +
+      JSON.stringify(JSON.stringify({
+        surfaceId: 'hotel-search-1',
+        actions: [{ id: 'hotel.detail', args: { hotelId: 101 } }]
+      }))
+  );
+  assert.equal(complete.surfaceId, 'hotel-search-1');
+  assert.equal(complete.actions.length, 1);
+
+  const followedByEmpty = hotelActionEvidenceFromLogs(
+    '[AIPhone][HotelHomeActionEvidence] evidence=' +
+      JSON.stringify(JSON.stringify({
+        surfaceId: 'hotel-search-1',
+        actions: [{ id: 'hotel.detail', args: { hotelId: 101 } }]
+      })) +
+      '\n[AIPhone][HotelHomeActionEvidence] evidence=""'
+  );
+  assert.equal(followedByEmpty.surfaceId, 'hotel-search-1');
 });
 
 test('treats missing optional actions as hidden and invalid present actions as failures', () => {

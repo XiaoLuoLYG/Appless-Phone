@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
+  hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   isExpectedHotelSystemBundle,
   validateHotelSearchActionEvidence,
@@ -1176,7 +1177,10 @@ async function captureWhile(appPid, runAction) {
     while (Date.now() - started < timeoutMs) {
       await sleep(500);
       const text = logs.join('\n');
-      const hasHotelActionEvidence = /\[AIPhone\]\[HotelHomeActionEvidence\] evidence=/.test(text);
+      const hotelActionEvidence = hotelActionEvidenceFromLogs(text);
+      const hasHotelActionEvidence =
+        typeof hotelActionEvidence.surfaceId === 'string' &&
+        hotelActionEvidence.surfaceId.length > 0;
       const done = hasHotelActionEvidence ||
         /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
@@ -1801,30 +1805,6 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
     currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-scroll-${attempt + 1}.json`);
   }
   return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
-}
-
-function hotelActionEvidenceFromLogs(logText) {
-  let latest = null;
-  for (const line of logText.split('\n')) {
-    const marker = '[AIPhone][HotelHomeActionEvidence] evidence=';
-    const markerIndex = line.indexOf(marker);
-    if (markerIndex < 0) {
-      continue;
-    }
-    let decoded = line.slice(markerIndex + marker.length).trim();
-    try {
-      decoded = JSON.parse(decoded);
-      if (typeof decoded === 'string') {
-        decoded = JSON.parse(decoded);
-      }
-      if (decoded !== null && typeof decoded === 'object' && !Array.isArray(decoded)) {
-        latest = decoded;
-      }
-    } catch (_error) {
-      latest = null;
-    }
-  }
-  return latest || { surfaceId: '', actions: [] };
 }
 
 async function locateHotelSystemAction(layout, label, index, actionName) {
