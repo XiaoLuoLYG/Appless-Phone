@@ -40,9 +40,12 @@ function validCoordinate(value: number, minimum: number, maximum: number): boole
   return Number.isFinite(value) && value >= minimum && value <= maximum;
 }
 
-function safeDialPhone(value: string): boolean {
-  const compact = value.trim().replace(/[ ()-]/g, '');
-  return /^\+?[0-9]{5,20}$/.test(compact);
+export function compactHotelDialPhone(value: string): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const compact = value.replace(/[ ()-]/g, '');
+  return /^\+?[0-9]{5,20}$/.test(compact) ? compact : '';
 }
 
 export function hasValidHotelCoordinates(hotel: HotelSearchItem): boolean {
@@ -85,10 +88,14 @@ export function validHotelCallArgs(args: HotelCallArgs): ActionValidationResult 
   if (!Number.isInteger(args.hotelId) || args.hotelId <= 0) {
     return invalid('Hotel call requires a positive hotelId.');
   }
+  const displayCompact = typeof args.displayPhone === 'string' ?
+    compactHotelDialPhone(args.displayPhone) : '';
+  const dialCompact = typeof args.dialPhone === 'string' ?
+    compactHotelDialPhone(args.dialPhone) : '';
   if (typeof args.displayPhone !== 'string' || typeof args.dialPhone !== 'string' ||
     typeof args.provider !== 'string' || typeof args.providerPlaceId !== 'string' ||
-    args.displayPhone.trim().length === 0 || args.provider.trim().length === 0 ||
-    args.providerPlaceId.trim().length === 0 || !safeDialPhone(args.dialPhone)) {
+    displayCompact.length === 0 || dialCompact.length === 0 || displayCompact !== dialCompact ||
+    args.provider.trim().length === 0 || args.providerPlaceId.trim().length === 0) {
     return invalid('Hotel call requires a verified provider phone and place ID.');
   }
   return valid();

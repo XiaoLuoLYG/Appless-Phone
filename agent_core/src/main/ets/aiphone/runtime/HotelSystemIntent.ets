@@ -1,17 +1,13 @@
 import { buildSystemFoodNavigationUri } from './FoodNavigation';
 import {
+  compactHotelDialPhone,
   HotelNavigateArgs,
   validHotelNavigateArgs
 } from './HotelActions';
 
 export function hotelDialUri(dialPhone: string): string {
-  if (typeof dialPhone !== 'string' ||
-    dialPhone.indexOf('\n') >= 0 ||
-    dialPhone.indexOf('\r') >= 0) {
-    return '';
-  }
-  const compact = dialPhone.trim().replace(/[ ()-]/g, '');
-  if (!/^\+?[0-9]{5,20}$/.test(compact)) {
+  const compact = compactHotelDialPhone(dialPhone);
+  if (compact.length === 0) {
     return '';
   }
   return 'tel:' + compact;

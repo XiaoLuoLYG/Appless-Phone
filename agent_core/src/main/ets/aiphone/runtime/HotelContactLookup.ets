@@ -1,4 +1,5 @@
 import { HotelContact, HotelSearchItem } from './HotelToolTypes';
+import { compactHotelDialPhone } from './HotelActions';
 
 const EARTH_RADIUS_METERS: number = 6371000;
 const MAX_MATCH_DISTANCE_METERS: number = 300;
@@ -108,9 +109,8 @@ export function selectHotelContactCandidate(
   return { candidate: null, warning: 'Google Places returned no unique verified hotel identity match.' };
 }
 
-function dialPhone(value: string): string {
-  const compact = value.trim().replace(/[ ()-]/g, '');
-  return /^\+?[0-9]{5,20}$/.test(compact) ? compact : '';
+function trimAsciiPhoneDisplay(value: string): string {
+  return value.replace(/^ +| +$/g, '');
 }
 
 export function hotelContactFromDetails(
@@ -121,10 +121,10 @@ export function hotelContactFromDetails(
   if (placeId.length === 0 || placeId !== expectedPlaceId.trim()) {
     return null;
   }
-  const internationalDisplay = details.internationalPhoneNumber.trim();
-  const internationalDial = dialPhone(internationalDisplay);
-  const nationalDisplay = details.nationalPhoneNumber.trim();
-  const nationalDial = dialPhone(nationalDisplay);
+  const internationalDisplay = trimAsciiPhoneDisplay(details.internationalPhoneNumber);
+  const internationalDial = compactHotelDialPhone(internationalDisplay);
+  const nationalDisplay = trimAsciiPhoneDisplay(details.nationalPhoneNumber);
+  const nationalDial = compactHotelDialPhone(nationalDisplay);
   if (internationalDial.length > 0) {
     return {
       displayPhone: internationalDisplay,

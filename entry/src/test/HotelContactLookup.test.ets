@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   HotelContactCandidate,
+  HotelContactDetails,
   HotelSearchItem,
   callHotelContactLookup,
   hotelContactCandidatesFromPayload,
@@ -8,6 +9,7 @@ import {
   hotelContactFromDetails,
   selectHotelContactCandidate
 } from '@loop/agent-core';
+import { unsafeHotelPhoneValues } from './HotelPhoneSafetyVectors';
 
 function hotel(): HotelSearchItem {
   return JSON.parse(
@@ -121,6 +123,23 @@ export default function hotelContactLookupTest() {
 
       expect(missing === null).assertTrue();
       expect(invalid === null).assertTrue();
+    });
+
+    it('rejects every shared unsafe phone character without normalizing it away', 0, () => {
+      const rejected = unsafeHotelPhoneValues();
+      for (let index = 0; index < rejected.length; index++) {
+        const details: HotelContactDetails = {
+          providerPlaceId: 'place-unsafe',
+          displayName: '深圳测试酒店',
+          formattedAddress: '深圳市南山区科技南路88号',
+          latitude: null,
+          longitude: null,
+          nationalPhoneNumber: '',
+          internationalPhoneNumber: rejected[index]
+        };
+
+        expect(hotelContactFromDetails(details, 'place-unsafe') === null).assertTrue();
+      }
     });
 
     it('skips missing Google configuration with a bounded warning and no source claim', 0, async () => {

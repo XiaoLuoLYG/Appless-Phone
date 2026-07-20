@@ -98,6 +98,29 @@ class FakeUriOpener implements SystemUriOpener {
   }
 }
 
+class RuntimeValueUriOpener implements SystemUriOpener {
+  rawValue: string;
+  calls: number = 0;
+
+  constructor(rawValue: string) {
+    this.rawValue = rawValue;
+  }
+
+  async open(_uri: string): Promise<boolean> {
+    this.calls += 1;
+    return JSON.parse(this.rawValue) as boolean;
+  }
+}
+
+class RejectingUriOpener implements SystemUriOpener {
+  calls: number = 0;
+
+  async open(_uri: string): Promise<boolean> {
+    this.calls += 1;
+    throw new Error('system rejected URI');
+  }
+}
+
 class DeterministicIds implements HotelActionIdFactory {
   next: number = 0;
 
@@ -288,6 +311,40 @@ export default function hotelRegisteredActionExecutorTest() {
 
       expect(result.status).assertEqual('error');
       expect(opener.uris.length).assertEqual(1);
+      expect(JSON.stringify(result).indexOf('OPEN_FAILED')).assertLarger(-1);
+    });
+
+    it('accepts only the exact boolean true from the runtime opener', 0, async () => {
+      const args = navigateArgs();
+      const values: string[] = ['"true"', '1', '{}'];
+      for (let index = 0; index < values.length; index++) {
+        const opener = new RuntimeValueUriOpener(values[index]);
+        const executor = new HotelRegisteredActionExecutor(
+          catalog('hotel.navigate', args),
+          opener,
+          new DeterministicIds()
+        );
+
+        const result = await executor.execute('hotel.navigate', args, context());
+
+        expect(result.status).assertEqual('error');
+        expect(opener.calls).assertEqual(1);
+      }
+    });
+
+    it('contains a rejected opener promise as one typed error', 0, async () => {
+      const args = navigateArgs();
+      const opener = new RejectingUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.navigate', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.navigate', args, context());
+
+      expect(result.status).assertEqual('error');
+      expect(opener.calls).assertEqual(1);
       expect(JSON.stringify(result).indexOf('OPEN_FAILED')).assertLarger(-1);
     });
   });

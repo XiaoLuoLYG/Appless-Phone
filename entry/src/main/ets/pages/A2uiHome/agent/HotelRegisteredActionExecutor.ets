@@ -145,7 +145,7 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
     } catch (_error) {
       opened = false;
     }
-    if (!opened) {
+    if (opened !== true) {
       return {
         status: 'error',
         errorCode: 'HOTEL_SYSTEM_INTENT_OPEN_FAILED',

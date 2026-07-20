@@ -1,10 +1,13 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   buildSystemFoodNavigationUri,
+  HotelCallArgs,
   HotelNavigateArgs,
   hotelDialUri,
-  hotelNavigationUri
+  hotelNavigationUri,
+  validHotelCallArgs
 } from '@loop/agent-core';
+import { unsafeHotelPhoneValues } from './HotelPhoneSafetyVectors';
 
 function navigateArgs(): HotelNavigateArgs {
   return {
@@ -13,6 +16,17 @@ function navigateArgs(): HotelNavigateArgs {
     address: '深圳市南山区科技南路 88 号',
     latitude: 22.5431,
     longitude: 114.0579
+  };
+}
+
+function callArgs(dialPhone: string): HotelCallArgs {
+  return {
+    hotelId: 47675,
+    name: '深圳测试酒店',
+    displayPhone: '+86 138 0013 8000',
+    dialPhone: dialPhone,
+    provider: 'Google Places',
+    providerPlaceId: 'place-real-47675'
   };
 }
 
@@ -61,9 +75,14 @@ export default function hotelSystemIntentTest() {
         '++8613800138000',
         '+86+13800138000'
       ];
+      const shared = unsafeHotelPhoneValues();
+      for (let index = 0; index < shared.length; index++) {
+        rejected.push(shared[index]);
+      }
 
       for (let index = 0; index < rejected.length; index++) {
         expect(hotelDialUri(rejected[index])).assertEqual('');
+        expect(validHotelCallArgs(callArgs(rejected[index])).ok).assertFalse();
       }
     });
 
