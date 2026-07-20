@@ -69,6 +69,7 @@ import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
 import skillMarkdownParserTest from './SkillMarkdownParser.test';
 import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
+import agentMessageTest from './AgentMessage.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -134,6 +135,7 @@ export default function testsuite() {
   personaMarkdownTest();
   skillMarkdownParserTest();
   modelScopeDirectClientTest();
+  agentMessageTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
