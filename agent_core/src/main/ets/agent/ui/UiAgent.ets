@@ -35,7 +35,6 @@ interface UiTurnContext {
   uiTask?: CreateUiTaskPayload;
   pendingDataByTaskId: Map<string, PendingDataEntry>;
   pendingDataOrder: string[];
-  pendingDataErrorMessage: string;
   dataErrorPending: boolean;
   canceled: boolean;
   generation: number;
@@ -223,11 +222,7 @@ export class UiAgent extends MessageDrivenAgent {
       this.publishOwnedDataError(context, pending.invalidCode, pending.invalidMessage);
       return;
     }
-    if (context.pendingDataErrorMessage.length > 0) {
-      const message: string = context.pendingDataErrorMessage;
-      context.pendingDataErrorMessage = '';
-      await this.renderDataError(context, key, message);
-    } else if (pending !== undefined && pending.data !== undefined) {
+    if (pending !== undefined && pending.data !== undefined) {
       await this.renderData(context, key, pending.data);
     }
   }
@@ -306,10 +301,6 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     context.dataErrorPending = false;
-    if (!context.skeletonWritten) {
-      context.pendingDataErrorMessage = errorMessage;
-      return;
-    }
     await this.renderDataError(context, key, errorMessage);
   }
 
@@ -424,7 +415,6 @@ export class UiAgent extends MessageDrivenAgent {
       uiTaskId: '',
       pendingDataByTaskId: new Map<string, PendingDataEntry>(),
       pendingDataOrder: [],
-      pendingDataErrorMessage: '',
       dataErrorPending: false,
       canceled: false,
       generation: 0,
@@ -585,7 +575,6 @@ export class UiAgent extends MessageDrivenAgent {
 
   private clearPendingPayloads(context: UiTurnContext): void {
     context.uiTask = undefined;
-    context.pendingDataErrorMessage = '';
     this.clearPendingData(context);
   }
 
@@ -598,7 +587,6 @@ export class UiAgent extends MessageDrivenAgent {
     context.canceled = true;
     context.generation++;
     context.uiTask = undefined;
-    context.pendingDataErrorMessage = '';
     this.clearPendingData(context);
     context.queuedMessages.clear();
   }

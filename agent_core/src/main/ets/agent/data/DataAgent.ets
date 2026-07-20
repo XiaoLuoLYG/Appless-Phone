@@ -48,6 +48,9 @@ export class DataAgent extends MessageDrivenAgent {
       this.canceled.add(key);
       return;
     }
+    if (this.canceled.has(key)) {
+      return;
+    }
     const task: CreateDataTaskPayload | null = this.dataTask(message.payload, message.taskId);
     if (task === null) {
       this.publishInputError(message, 'DATA_TASK_INVALID', 'Data task payload is malformed');

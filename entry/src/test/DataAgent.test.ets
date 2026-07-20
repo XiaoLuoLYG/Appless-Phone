@@ -322,6 +322,68 @@ export default function dataAgentTest() {
       observer.close();
     });
 
+    it('rejects a valid Data task replay after turn cancellation', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
+      const agent: DataAgent = new DataAgent(bus, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(message(AgentMessageType.TURN_CANCEL, 'conversation-replay', 'turn-replay', 'cancel-replay'));
+      await receiveType(observer, AgentMessageType.TURN_CANCEL);
+      bus.publish(dataTaskMessage('conversation-replay', 'turn-replay', 'data-replay'));
+      await settle();
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+      let terminalOutputs: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.type !== AgentMessageType.ACTION_RUN) {
+        if (observed.type === AgentMessageType.TASK_RESULT_DATA ||
+          observed.type === AgentMessageType.TASK_ERROR) {
+          terminalOutputs++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(executor.calls).assertEqual(0);
+      expect(terminalOutputs).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('silently rejects a malformed Data task replay after turn cancellation', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
+      const agent: DataAgent = new DataAgent(bus, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(message(AgentMessageType.TURN_CANCEL, 'conversation-invalid-replay', 'turn-replay', 'cancel-replay'));
+      await receiveType(observer, AgentMessageType.TURN_CANCEL);
+      bus.publish({
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'conversation-invalid-replay',
+        turnId: 'turn-replay',
+        taskId: 'data-invalid-replay',
+        payload: JSON.parse('null') as Object
+      });
+      await settle();
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+      let terminalOutputs: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.type !== AgentMessageType.ACTION_RUN) {
+        if (observed.type === AgentMessageType.TASK_RESULT_DATA ||
+          observed.type === AgentMessageType.TASK_ERROR) {
+          terminalOutputs++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(executor.calls).assertEqual(0);
+      expect(terminalOutputs).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
     it('suppresses a detached executor completion after stop', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
