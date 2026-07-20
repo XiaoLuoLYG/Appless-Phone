@@ -3,12 +3,16 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  ActionPlan,
+  ActionPlanCreatePayload,
+  ActionPlanReadyPayload,
   CreateUiTaskPayload,
   DataResult,
   DataSource,
   LinkedMessageBus,
   TaskErrorPayload,
   UiAgent,
+  UiRenderResult,
   UiRenderResultPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
@@ -55,27 +59,67 @@ class RecordingRenderer implements UiTaskRenderer {
   readonly calls: string[] = [];
   readonly resultHotelIds: number[] = [];
 
-  async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<string> {
+  async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     this.calls.push(`skeleton:${task.taskId}:${surfaceId}`);
-    return `skeleton:${task.taskId}`;
+    return render(`skeleton:${task.taskId}`);
   }
 
-  async result(task: CreateUiTaskPayload, data: DataResult, surfaceId: string): Promise<string> {
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
     const hotel: HotelResult = data.data as HotelResult;
     this.calls.push(`result:${task.taskId}:${surfaceId}`);
     this.resultHotelIds.push(hotel.hotelId);
-    return `result:${hotel.hotelId}`;
+    return render(`result:${hotel.hotelId}`);
   }
 
-  async error(task: CreateUiTaskPayload, message: string, surfaceId: string): Promise<string> {
+  async error(
+    task: CreateUiTaskPayload,
+    message: string,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
     this.calls.push(`error:${task.taskId}:${surfaceId}`);
-    return `error:${message}`;
+    return render(`error:${message}`);
   }
 
-  async actionStatus(payload: Object, surfaceId: string): Promise<string> {
+  async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
     const status: ActionStatusPayload = payload as ActionStatusPayload;
     this.calls.push(`action:${status.runId}:${surfaceId}`);
-    return `action:${status.status}`;
+    return render(`action:${status.status}`);
+  }
+}
+
+class ProposalRenderer extends RecordingRenderer {
+  proposalSurfaceId: string = '';
+
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const base = await super.result(task, data, surfaceId);
+    this.proposalSurfaceId = surfaceId;
+    const proposal: ActionPlan = JSON.parse(
+      '{"planId":"plan-ui-1","turnId":"turn-1","surfaceId":"' + surfaceId + '",' +
+        '"label":"Open detail and navigate","steps":[' +
+        '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
+        '{"stepId":"navigate","actionId":"hotel.navigate","args":{},' +
+        '"inputFrom":[{"target":"/latitude","stepId":"detail","path":"/latitude"}]}]}'
+    ) as ActionPlan;
+    return {
+      jsonl: base.jsonl,
+      proposals: [proposal]
+    };
+  }
+
+  async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
+    const ready = payload as ActionPlanReadyPayload;
+    this.calls.push(`ready:${ready.runId}:${surfaceId}`);
+    return render(
+      `workflow:${ready.actionId}:${JSON.stringify(ready.args)}`
+    );
   }
 }
 
@@ -126,24 +170,34 @@ class DeferredSkeletonRenderer implements UiTaskRenderer {
   surfaceId: string = '';
   private resolveSkeleton: ((jsonl: string) => void) | null = null;
 
-  async skeleton(_task: CreateUiTaskPayload, surfaceId: string): Promise<string> {
+  async skeleton(_task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     this.surfaceId = surfaceId;
     this.started.open();
-    return new Promise<string>((resolve: (jsonl: string) => void) => {
-      this.resolveSkeleton = resolve;
+    return new Promise<UiRenderResult>((resolve: (result: UiRenderResult) => void) => {
+      this.resolveSkeleton = (jsonl: string): void => {
+        resolve(render(jsonl));
+      };
     });
   }
 
-  async result(_task: CreateUiTaskPayload, _data: DataResult, _surfaceId: string): Promise<string> {
-    return 'result';
+  async result(
+    _task: CreateUiTaskPayload,
+    _data: DataResult,
+    _surfaceId: string
+  ): Promise<UiRenderResult> {
+    return render('result');
   }
 
-  async error(_task: CreateUiTaskPayload, message: string, _surfaceId: string): Promise<string> {
-    return `error:${message}`;
+  async error(
+    _task: CreateUiTaskPayload,
+    message: string,
+    _surfaceId: string
+  ): Promise<UiRenderResult> {
+    return render(`error:${message}`);
   }
 
-  async actionStatus(_payload: Object, _surfaceId: string): Promise<string> {
-    return 'action';
+  async actionStatus(_payload: Object, _surfaceId: string): Promise<UiRenderResult> {
+    return render('action');
   }
 
   finish(): void {
@@ -158,7 +212,7 @@ class DeferredSkeletonRenderer implements UiTaskRenderer {
 class RejectOnceRenderer extends RecordingRenderer {
   private rejectNext: boolean = true;
 
-  async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<string> {
+  async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     if (this.rejectNext) {
       this.rejectNext = false;
       throw new Error('renderer rejected');
@@ -171,14 +225,14 @@ class SlowProgressRenderer extends RecordingRenderer {
   readonly progressStarted: TestGate = new TestGate();
   private releaseProgress: TestGate = new TestGate();
 
-  async actionStatus(payload: Object, surfaceId: string): Promise<string> {
+  async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
     const status: ActionStatusPayload = payload as ActionStatusPayload;
     this.calls.push(`action:${status.runId}:${surfaceId}`);
     if (status.status === 'running') {
       this.progressStarted.open();
       await this.releaseProgress.promise;
     }
-    return `action:${status.status}`;
+    return render(`action:${status.status}`);
   }
 
   finishProgress(): void {
@@ -265,6 +319,13 @@ function turnMessage(
 
 function actionPayload(surfaceId: string, runId: string, status: string): ActionStatusPayload {
   return { surfaceId, runId, status };
+}
+
+function render(jsonl: string): UiRenderResult {
+  return {
+    jsonl,
+    proposals: []
+  };
 }
 
 async function receive(reader: AgentMessageReader): Promise<AgentMessage> {
@@ -680,6 +741,81 @@ export default function uiAgentTest() {
       expect(writer.writes[2].surfaceId === surfaceA).assertFalse();
       expect(renderer.calls.filter((call: string): boolean => call.startsWith('action:')).length).assertEqual(1);
       expect(actionResult.surfaceId).assertEqual(surfaceB);
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('publishes composite proposals and renders only the exact ready workflow identity', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const renderer: ProposalRenderer = new ProposalRenderer();
+      const writer: RecordingSurfaceWriter = new RecordingSurfaceWriter();
+      const agent: UiAgent = new UiAgent(bus, renderer, writer);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      const createMessage = await receiveType(observer, AgentMessageType.ACTION_PLAN_CREATE);
+      const create = createMessage.payload as ActionPlanCreatePayload;
+
+      expect(writer.writes.length).assertEqual(2);
+      expect(writer.writes[1].jsonl).assertEqual('result:101');
+      expect(create.sourceToolId).assertEqual('hotel.search');
+      expect(create.plan.planId).assertEqual('plan-ui-1');
+      expect(create.plan.surfaceId).assertEqual(renderer.proposalSurfaceId);
+
+      const ready: ActionPlanReadyPayload = {
+        surfaceId: create.plan.surfaceId,
+        planId: create.plan.planId,
+        runId: create.runId,
+        label: create.plan.label,
+        actionId: 'workflow.run',
+        args: {
+          planId: create.plan.planId,
+          runId: create.runId
+        }
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-wrong',
+        createMessage.taskId,
+        ready
+      ));
+      const wrongSurface: ActionPlanReadyPayload = {
+        surfaceId: 'surface-wrong',
+        planId: ready.planId,
+        runId: ready.runId,
+        label: ready.label,
+        actionId: ready.actionId,
+        args: ready.args
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-1',
+        createMessage.taskId,
+        wrongSurface
+      ));
+      await settle();
+      expect(writer.writes.length).assertEqual(2);
+
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-1',
+        createMessage.taskId,
+        ready
+      ));
+      await receiveUiState(observer, 'action');
+
+      expect(writer.writes.length).assertEqual(3);
+      expect(writer.writes[2].jsonl).assertEqual(
+        `workflow:workflow.run:{"planId":"plan-ui-1","runId":"${create.runId}"}`
+      );
+      expect(Object.keys(ready.args).sort().join(',')).assertEqual('planId,runId');
 
       agent.stop();
       observer.close();

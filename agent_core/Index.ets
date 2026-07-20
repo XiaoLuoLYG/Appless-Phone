@@ -19,6 +19,8 @@ export {
   setJsonPointer
 } from './src/main/ets/agent/action/JsonPointer';
 export { ActionPlanRunner } from './src/main/ets/agent/action/ActionPlanRunner';
+export { ActionAgent } from './src/main/ets/agent/action/ActionAgent';
+export * from './src/main/ets/agent/action/ActionAgentTypes';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';

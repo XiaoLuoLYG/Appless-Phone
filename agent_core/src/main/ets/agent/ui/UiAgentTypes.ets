@@ -1,4 +1,5 @@
 import { DataResult } from '../message/DataResult';
+import { ActionPlan } from '../action/ActionPlanTypes';
 
 export interface CreateUiTaskPayload {
   taskId: string;
@@ -14,11 +15,16 @@ export interface UiRenderResultPayload {
   state: UiRenderState;
 }
 
+export interface UiRenderResult {
+  jsonl: string;
+  proposals: ActionPlan[];
+}
+
 export interface UiTaskRenderer {
-  skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<string>;
-  result(task: CreateUiTaskPayload, data: DataResult, surfaceId: string): Promise<string>;
-  error(task: CreateUiTaskPayload, message: string, surfaceId: string): Promise<string>;
-  actionStatus(payload: Object, surfaceId: string): Promise<string>;
+  skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult>;
+  result(task: CreateUiTaskPayload, data: DataResult, surfaceId: string): Promise<UiRenderResult>;
+  error(task: CreateUiTaskPayload, message: string, surfaceId: string): Promise<UiRenderResult>;
+  actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult>;
 }
 
 export interface UiSurfaceWriteLease {

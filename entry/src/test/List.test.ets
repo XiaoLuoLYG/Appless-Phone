@@ -76,6 +76,7 @@ import dataAgentTest from './DataAgent.test';
 import uiAgentTest from './UiAgent.test';
 import actionCatalogTest from './ActionCatalog.test';
 import actionPlanRunnerTest from './ActionPlanRunner.test';
+import actionAgentTest from './ActionAgent.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -148,6 +149,7 @@ export default function testsuite() {
   uiAgentTest();
   actionCatalogTest();
   actionPlanRunnerTest();
+  actionAgentTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

@@ -1,4 +1,10 @@
 import { newSurfaceId } from '../../a2ui/A2uiProtocol';
+import {
+  ActionPlanCreatePayload,
+  ActionPlanReadyPayload,
+  WorkflowRunArgs
+} from '../action/ActionAgentTypes';
+import { ActionPlan } from '../action/ActionPlanTypes';
 import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
@@ -9,6 +15,7 @@ import { DataResult } from '../message/DataResult';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   CreateUiTaskPayload,
+  UiRenderResult,
   UiRenderResultPayload,
   UiRenderState,
   UiSurfaceWriteLease,
@@ -27,6 +34,13 @@ interface PendingDataEntry {
   invalidMessage: string;
 }
 
+interface PendingPlanCorrelation {
+  planId: string;
+  runId: string;
+  surfaceId: string;
+  taskId: string;
+}
+
 interface UiTurnContext {
   conversationId: string;
   turnId: string;
@@ -35,6 +49,7 @@ interface UiTurnContext {
   uiTask?: CreateUiTaskPayload;
   pendingDataByTaskId: Map<string, PendingDataEntry>;
   pendingDataOrder: string[];
+  pendingPlans: Map<string, PendingPlanCorrelation>;
   dataErrorPending: boolean;
   canceled: boolean;
   generation: number;
@@ -68,6 +83,7 @@ export class UiAgent extends MessageDrivenAgent {
   private readonly terminated: Set<string> = new Set<string>();
   private readonly terminatedOrder: string[] = [];
   private surfaceSuffix: number = 0;
+  private actionRunSuffix: number = 0;
 
   constructor(bus: LinkedMessageBus, renderer: UiTaskRenderer, writer: UiSurfaceWriter) {
     super(bus);
@@ -101,6 +117,7 @@ export class UiAgent extends MessageDrivenAgent {
     return message.type === AgentMessageType.TASK_CREATE_UI ||
       message.type === AgentMessageType.TASK_RESULT_DATA ||
       message.type === AgentMessageType.TASK_ERROR ||
+      message.type === AgentMessageType.ACTION_PLAN_READY ||
       message.type === AgentMessageType.ACTION_PROGRESS ||
       message.type === AgentMessageType.ACTION_RESULT ||
       message.type === AgentMessageType.TURN_CANCEL;
@@ -201,14 +218,14 @@ export class UiAgent extends MessageDrivenAgent {
     }
     context.uiTask = task;
     context.uiTaskId = message.taskId;
-    const jsonl: string = await this.renderer.skeleton(task, context.surfaceId);
+    const rendered: UiRenderResult = await this.renderer.skeleton(task, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
     await this.writer.write(
       context.turnId,
       context.surfaceId,
-      jsonl,
+      rendered.jsonl,
       new ContextSurfaceWriteLease(context)
     );
     if (!this.isActive(key, context)) {
@@ -271,20 +288,22 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     context.terminalRenderStarted = true;
-    const jsonl: string = await this.renderer.result(task, data, context.surfaceId);
+    const rendered: UiRenderResult =
+      await this.renderer.result(task, data, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
     await this.writer.write(
       context.turnId,
       context.surfaceId,
-      jsonl,
+      rendered.jsonl,
       new ContextSurfaceWriteLease(context)
     );
     if (!this.isActive(key, context)) {
       return;
     }
     context.resultWritten = true;
+    this.publishActionPlans(context, data.toolId, rendered.proposals);
     this.publishUiResult(context, 'result');
     this.clearPendingPayloads(context);
   }
@@ -309,14 +328,15 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     context.terminalRenderStarted = true;
-    const jsonl: string = await this.renderer.error(context.uiTask, message, context.surfaceId);
+    const rendered: UiRenderResult =
+      await this.renderer.error(context.uiTask, message, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
     await this.writer.write(
       context.turnId,
       context.surfaceId,
-      jsonl,
+      rendered.jsonl,
       new ContextSurfaceWriteLease(context)
     );
     if (!this.isActive(key, context)) {
@@ -332,18 +352,29 @@ export class UiAgent extends MessageDrivenAgent {
       this.payloadSurfaceId(message.payload) !== context.surfaceId) {
       return;
     }
-    const jsonl: string = await this.renderer.actionStatus(message.payload, context.surfaceId);
+    let ready: ActionPlanReadyPayload | null = null;
+    if (message.type === AgentMessageType.ACTION_PLAN_READY) {
+      ready = this.actionPlanReady(message, context);
+      if (ready === null) {
+        return;
+      }
+    }
+    const rendered: UiRenderResult =
+      await this.renderer.actionStatus(message.payload, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
     await this.writer.write(
       context.turnId,
       context.surfaceId,
-      jsonl,
+      rendered.jsonl,
       new ContextSurfaceWriteLease(context)
     );
     if (!this.isActive(key, context)) {
       return;
+    }
+    if (ready !== null) {
+      context.pendingPlans.delete(ready.runId);
     }
     this.publishUiResult(context, 'action');
   }
@@ -415,6 +446,7 @@ export class UiAgent extends MessageDrivenAgent {
       uiTaskId: '',
       pendingDataByTaskId: new Map<string, PendingDataEntry>(),
       pendingDataOrder: [],
+      pendingPlans: new Map<string, PendingPlanCorrelation>(),
       dataErrorPending: false,
       canceled: false,
       generation: 0,
@@ -589,9 +621,75 @@ export class UiAgent extends MessageDrivenAgent {
     context.uiTask = undefined;
     this.clearPendingData(context);
     context.queuedMessages.clear();
+    context.pendingPlans.clear();
   }
 
   private turnKey(conversationId: string, turnId: string): string {
     return `${conversationId.length}:${conversationId}${turnId}`;
+  }
+
+  private publishActionPlans(
+    context: UiTurnContext,
+    sourceToolId: string,
+    proposals: ActionPlan[]
+  ): void {
+    if (!Array.isArray(proposals)) {
+      throw new Error('UI renderer action proposals are malformed');
+    }
+    for (let index = 0; index < proposals.length; index++) {
+      const plan = proposals[index];
+      this.actionRunSuffix++;
+      const runId = `${plan.planId}:${this.actionRunSuffix}`;
+      const taskId = `action-plan:${runId}`;
+      const correlation: PendingPlanCorrelation = {
+        planId: plan.planId,
+        runId,
+        surfaceId: context.surfaceId,
+        taskId
+      };
+      context.pendingPlans.set(runId, correlation);
+      const payload: ActionPlanCreatePayload = {
+        runId,
+        sourceToolId,
+        plan
+      };
+      this.bus.publish({
+        type: AgentMessageType.ACTION_PLAN_CREATE,
+        conversationId: context.conversationId,
+        turnId: context.turnId,
+        taskId,
+        payload
+      });
+    }
+  }
+
+  private actionPlanReady(
+    message: AgentMessage,
+    context: UiTurnContext
+  ): ActionPlanReadyPayload | null {
+    if (message.payload === null || typeof message.payload !== 'object') {
+      return null;
+    }
+    const ready = message.payload as ActionPlanReadyPayload;
+    const correlation = context.pendingPlans.get(ready.runId);
+    if (correlation === undefined ||
+      message.taskId !== correlation.taskId ||
+      ready.planId !== correlation.planId ||
+      ready.surfaceId !== correlation.surfaceId ||
+      ready.actionId !== 'workflow.run' ||
+      typeof ready.label !== 'string' ||
+      ready.label.trim().length === 0) {
+      return null;
+    }
+    const args = ready.args as WorkflowRunArgs;
+    if (args === null ||
+      typeof args !== 'object' ||
+      Array.isArray(args) ||
+      Object.keys(args).sort().join(',') !== 'planId,runId' ||
+      args.planId !== ready.planId ||
+      args.runId !== ready.runId) {
+      return null;
+    }
+    return ready;
   }
 }

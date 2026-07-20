@@ -6,6 +6,7 @@ import {
   ActionInputBinding,
   ActionPlan,
   ActionPlanOutcome,
+  ActionPlanPausedOutcome,
   ActionPlanRunContext,
   ActionPlanRunner,
   ActionPlanSuccessOutcome,
@@ -64,6 +65,9 @@ function definition(toolId: string, actions: string[]): ToolDefinition {
 }
 
 class PlanLookup implements ToolDefinitionLookup {
+  confirmDraft: boolean = false;
+  confirmSave: boolean = false;
+
   find(toolId: string): ToolDefinition | null {
     if (toolId === 'gmail.thread.view') {
       return definition(toolId, ['gmail.ai.reply.draft']);
@@ -71,7 +75,12 @@ class PlanLookup implements ToolDefinitionLookup {
     if (toolId === 'gmail.ai.reply.draft' ||
       toolId === 'gmail.draft.create' ||
       toolId === 'gmail.audit.record') {
-      return definition(toolId, []);
+      const current = definition(toolId, []);
+      if ((toolId === 'gmail.ai.reply.draft' && this.confirmDraft) ||
+        (toolId === 'gmail.draft.create' && this.confirmSave)) {
+        current.riskLevel = 'confirm_required';
+      }
+      return current;
     }
     return null;
   }
@@ -183,7 +192,8 @@ class RecordingExecutor implements ActionStepExecutor {
         _context.turnId + '|' +
         _context.surfaceId + '|' +
         _context.sourceToolId + '|' +
-        _context.planId
+        _context.planId + '|' +
+        _context.runId
     );
     return this.results[this.actionIds.length - 1];
   }
@@ -224,7 +234,8 @@ class PendingFirstExecutor implements ActionStepExecutor {
         current.turnId + '|' +
         current.surfaceId + '|' +
         current.sourceToolId + '|' +
-        current.planId
+        current.planId + '|' +
+        current.runId
     );
     if (this.actionIds.length === 1) {
       await this.gate.promise;
@@ -264,17 +275,18 @@ class ThrowingExecutor implements ActionStepExecutor {
 function context(): ActionPlanRunContext {
   return JSON.parse(
     '{"conversationId":"conversation-1","turnId":"turn-1","surfaceId":"surface-1",' +
-      '"sourceToolId":"gmail.thread.view","planId":"plan-1"}'
+      '"sourceToolId":"gmail.thread.view","planId":"plan-1","runId":"run-1"}'
   ) as ActionPlanRunContext;
 }
 
 function runner(
   executor: ActionStepExecutor,
-  validator: ActionArgsValidator = new PlanArgsValidator()
+  validator: ActionArgsValidator = new PlanArgsValidator(),
+  lookup: PlanLookup = new PlanLookup()
 ): ActionPlanRunner {
   return new ActionPlanRunner(
     new ActionCatalog(
-      new PlanLookup(),
+      lookup,
       new ExactPlanSurface(),
       new NoClientActions(),
       validator
@@ -616,10 +628,10 @@ export default function actionPlanRunnerTest() {
         'gmail.ai.reply.draft,gmail.draft.create'
       );
       expect(executor.serializedContexts[0]).assertEqual(
-        'conversation-1|turn-1|surface-1|gmail.thread.view|plan-1'
+        'conversation-1|turn-1|surface-1|gmail.thread.view|plan-1|run-1'
       );
       expect(executor.serializedContexts[1]).assertEqual(
-        'conversation-1|turn-1|surface-1|gmail.thread.view|plan-1'
+        'conversation-1|turn-1|surface-1|gmail.thread.view|plan-1|run-1'
       );
 
       const mismatched = context();
@@ -833,6 +845,81 @@ export default function actionPlanRunnerTest() {
       expect(outcome.status).assertEqual('error');
       expect(outcome.failedStepId).assertEqual('draft');
       expect(outcome.errorCode).assertEqual('ACTION_EXECUTOR_FAILED');
+    });
+
+    it('pauses before confirm required execution and resumes once from cloned prior outputs', 0, async () => {
+      const lookup = new PlanLookup();
+      lookup.confirmSave = true;
+      const firstOutput = json(
+        '{"to":"alice@example.com","subject":"Re: Status","body":"Draft body",' +
+          '"threadId":"thread-real-1"}'
+      );
+      const executor = new RecordingExecutor([
+        success(firstOutput),
+        success(json('{"draftId":"draft-real-1"}'))
+      ]);
+      const actionRunner = runner(executor, new PlanArgsValidator(), lookup);
+
+      const paused = await actionRunner.run(validPlan(), context()) as ActionPlanPausedOutcome;
+      (firstOutput as JsonRecord)['body'] = 'tampered after pause';
+
+      expect(paused.status).assertEqual('paused');
+      expect(paused.failedStepId).assertEqual('save');
+      expect(paused.errorCode).assertEqual('ACTION_CONFIRMATION_REQUIRED');
+      expect(paused.nextStepIndex).assertEqual(1);
+      expect(paused.completedStepIds.join(',')).assertEqual('draft');
+      expect((paused.outputs[0].output as JsonRecord)['body'] as string).assertEqual('Draft body');
+      expect(executor.actionIds.join(',')).assertEqual('gmail.ai.reply.draft');
+
+      const resumed = await actionRunner.resume(
+        validPlan(),
+        context(),
+        paused.nextStepIndex,
+        paused.outputs,
+        'save'
+      );
+
+      expect(resumed.status).assertEqual('success');
+      expect(resumed.completedStepIds.join(',')).assertEqual('draft,save');
+      expect(executor.actionIds.join(',')).assertEqual(
+        'gmail.ai.reply.draft,gmail.draft.create'
+      );
+    });
+
+    it('does not consume confirmation for the wrong step or execute a resumed step twice', 0, async () => {
+      const lookup = new PlanLookup();
+      lookup.confirmDraft = true;
+      const single = plan(
+        '{"planId":"plan-1","turnId":"turn-1","surfaceId":"surface-1","label":"confirm",' +
+          '"steps":[{"stepId":"draft","actionId":"gmail.ai.reply.draft",' +
+          '"args":{"threadId":"thread-real-1"}}]}'
+      );
+      const executor = new RecordingExecutor([
+        success(json('{"draftId":"draft-real-1"}'))
+      ]);
+      const actionRunner = runner(executor, new PlanArgsValidator(), lookup);
+
+      const paused = await actionRunner.run(single, context()) as ActionPlanPausedOutcome;
+      const wrong = await actionRunner.resume(
+        single,
+        context(),
+        paused.nextStepIndex,
+        paused.outputs,
+        'other-step'
+      );
+      const resumed = await actionRunner.resume(
+        single,
+        context(),
+        paused.nextStepIndex,
+        paused.outputs,
+        'draft'
+      );
+
+      expect(paused.status).assertEqual('paused');
+      expect(wrong.status).assertEqual('error');
+      expect(wrong.errorCode).assertEqual('ACTION_CONFIRMATION_MISMATCH');
+      expect(executor.actionIds.length).assertEqual(1);
+      expect(resumed.status).assertEqual('success');
     });
   });
 }

@@ -27,6 +27,7 @@ export interface ActionPlanRunContext {
   surfaceId: string;
   sourceToolId: string;
   planId: string;
+  runId: string;
 }
 
 export interface ActionExecutionContext {
@@ -35,6 +36,7 @@ export interface ActionExecutionContext {
   surfaceId: string;
   sourceToolId: string;
   planId: string;
+  runId: string;
   stepId: string;
 }
 
@@ -97,6 +99,8 @@ export interface ActionPlanPausedOutcome extends ActionPlanOutcomeBase {
   failedStepId: string;
   errorCode: string;
   message: string;
+  nextStepIndex: number;
+  outputs: ActionPlanStepOutput[];
 }
 
 export interface ActionPlanCanceledOutcome extends ActionPlanOutcomeBase {

@@ -6,6 +6,7 @@ import {
   ActionPlan,
   ActionPlanErrorOutcome,
   ActionPlanOutcome,
+  ActionPlanPausedOutcome,
   ActionPlanRunContext,
   ActionPlanStep,
   ActionPlanStepOutput,
@@ -37,6 +38,13 @@ interface ForbiddenFieldResult {
 interface ContextSnapshotResult {
   ok: boolean;
   value: ActionPlanRunContext | null;
+  errorCode: string;
+  message: string;
+}
+
+interface CompletedSnapshotResult {
+  ok: boolean;
+  completed: CompletedStep[];
   errorCode: string;
   message: string;
 }
@@ -90,6 +98,31 @@ function errorOutcome(
   };
 }
 
+function pausedOutcome(
+  stepId: string,
+  errorCode: string,
+  message: string,
+  nextStepIndex: number,
+  completed: CompletedStep[]
+): ActionPlanPausedOutcome {
+  const outputs: ActionPlanStepOutput[] = [];
+  for (let index = 0; index < completed.length; index++) {
+    outputs.push({
+      stepId: completed[index].stepId,
+      output: completed[index].output
+    });
+  }
+  return {
+    status: 'paused',
+    failedStepId: stepId,
+    errorCode,
+    message,
+    nextStepIndex,
+    completedStepIds: completed.map((current: CompletedStep): string => current.stepId),
+    outputs
+  };
+}
+
 function stepArgs(step: ActionPlanStep): Object {
   if (step.args === undefined) {
     const empty: Record<string, JsonValue | undefined> = {};
@@ -119,7 +152,7 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
     };
   }
   const keys = Object.keys(context);
-  const required = ['conversationId', 'turnId', 'surfaceId', 'sourceToolId', 'planId'];
+  const required = ['conversationId', 'turnId', 'surfaceId', 'sourceToolId', 'planId', 'runId'];
   for (let index = 0; index < required.length; index++) {
     if (keys.indexOf(required[index]) < 0) {
       return {
@@ -136,7 +169,8 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
     !isNonemptyString(record['turnId']) ||
     !isNonemptyString(record['surfaceId']) ||
     !isNonemptyString(record['sourceToolId']) ||
-    !isNonemptyString(record['planId'])) {
+    !isNonemptyString(record['planId']) ||
+    !isNonemptyString(record['runId'])) {
     return {
       ok: false,
       value: null,
@@ -151,7 +185,8 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
       turnId: record['turnId'] as string,
       surfaceId: record['surfaceId'] as string,
       sourceToolId: record['sourceToolId'] as string,
-      planId: record['planId'] as string
+      planId: record['planId'] as string,
+      runId: record['runId'] as string
     },
     errorCode: '',
     message: ''
@@ -232,6 +267,7 @@ function executionContext(
     surfaceId: context.surfaceId,
     sourceToolId: context.sourceToolId,
     planId: context.planId,
+    runId: context.runId,
     stepId: stepId
   };
 }
@@ -374,7 +410,33 @@ export class ActionPlanRunner {
   }
 
   async run(plan: ActionPlan, context: ActionPlanRunContext): Promise<ActionPlanOutcome> {
-    const completed: CompletedStep[] = [];
+    return this.runFrom(plan, context, 0, [], '');
+  }
+
+  async resume(
+    plan: ActionPlan,
+    context: ActionPlanRunContext,
+    nextStepIndex: number,
+    priorOutputs: ActionPlanStepOutput[],
+    confirmedStepId: string
+  ): Promise<ActionPlanOutcome> {
+    return this.runFrom(
+      plan,
+      context,
+      nextStepIndex,
+      priorOutputs,
+      confirmedStepId
+    );
+  }
+
+  private async runFrom(
+    plan: ActionPlan,
+    context: ActionPlanRunContext,
+    nextStepIndex: number,
+    priorOutputs: ActionPlanStepOutput[],
+    confirmedStepId: string
+  ): Promise<ActionPlanOutcome> {
+    let completed: CompletedStep[] = [];
     try {
       const contextResult = snapshotContext(context);
       if (!contextResult.ok || contextResult.value === null) {
@@ -402,7 +464,29 @@ export class ActionPlanRunner {
           []
         );
       }
-      for (let index = 0; index < snapshot.steps.length; index++) {
+      const prior = this.snapshotCompleted(snapshot, nextStepIndex, priorOutputs);
+      if (!prior.ok) {
+        return errorOutcome(
+          '',
+          prior.errorCode,
+          prior.message,
+          []
+        );
+      }
+      completed = prior.completed;
+      if (confirmedStepId.length > 0 &&
+        (nextStepIndex >= snapshot.steps.length ||
+          snapshot.steps[nextStepIndex].stepId !== confirmedStepId)) {
+        return errorOutcome(
+          nextStepIndex < snapshot.steps.length ?
+            snapshot.steps[nextStepIndex].stepId : '',
+          'ACTION_CONFIRMATION_MISMATCH',
+          'Action confirmation does not match the next step.',
+          this.completedStepIds(completed)
+        );
+      }
+      let availableConfirmation = confirmedStepId;
+      for (let index = nextStepIndex; index < snapshot.steps.length; index++) {
         const step = snapshot.steps[index];
         const bound = this.bindInputs(step, completed);
         if (!bound.ok || !isArgsObject(bound.value)) {
@@ -427,6 +511,20 @@ export class ActionPlanRunner {
             currentValidation.message,
             this.completedStepIds(completed)
           );
+        }
+        if (currentValidation.definition !== null &&
+          currentValidation.definition.riskLevel === 'confirm_required' &&
+          availableConfirmation !== step.stepId) {
+          return pausedOutcome(
+            step.stepId,
+            'ACTION_CONFIRMATION_REQUIRED',
+            'Action requires confirmation before execution.',
+            index,
+            completed
+          );
+        }
+        if (availableConfirmation === step.stepId) {
+          availableConfirmation = '';
         }
         let rawResult: ActionStepExecutionResult;
         try {
@@ -472,6 +570,15 @@ export class ActionPlanRunner {
               this.completedStepIds(completed)
             );
           }
+          if (result.status === 'paused') {
+            return pausedOutcome(
+              step.stepId,
+              result.errorCode,
+              result.message,
+              index,
+              completed
+            );
+          }
           return {
             status: result.status,
             failedStepId: step.stepId,
@@ -514,6 +621,58 @@ export class ActionPlanRunner {
         this.completedStepIds(completed)
       );
     }
+  }
+
+  private snapshotCompleted(
+    plan: ActionPlan,
+    nextStepIndex: number,
+    priorOutputs: ActionPlanStepOutput[]
+  ): CompletedSnapshotResult {
+    if (nextStepIndex < 0 ||
+      nextStepIndex > plan.steps.length ||
+      nextStepIndex !== Math.floor(nextStepIndex) ||
+      !Array.isArray(priorOutputs) ||
+      priorOutputs.length !== nextStepIndex) {
+      return {
+        ok: false,
+        completed: [],
+        errorCode: 'ACTION_RESUME_STATE_INVALID',
+        message: 'Action resume state is malformed.'
+      };
+    }
+    const completed: CompletedStep[] = [];
+    for (let index = 0; index < priorOutputs.length; index++) {
+      const prior = priorOutputs[index];
+      if (prior === null ||
+        typeof prior !== 'object' ||
+        prior.stepId !== plan.steps[index].stepId) {
+        return {
+          ok: false,
+          completed: [],
+          errorCode: 'ACTION_RESUME_STATE_INVALID',
+          message: 'Action resume outputs do not match the validated plan.'
+        };
+      }
+      const output = cloneJsonValue(prior.output);
+      if (!output.ok || output.value === undefined) {
+        return {
+          ok: false,
+          completed: [],
+          errorCode: 'ACTION_RESUME_STATE_INVALID',
+          message: 'Action resume output is invalid.'
+        };
+      }
+      completed.push({
+        stepId: prior.stepId,
+        output: output.value as JsonValue
+      });
+    }
+    return {
+      ok: true,
+      completed,
+      errorCode: '',
+      message: ''
+    };
   }
 
   private validatePreflightAction(
