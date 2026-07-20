@@ -8,7 +8,10 @@ import {
   foregroundBundleFromAbilityDump,
   hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
+  hotelDetailLifecycleFromLogs,
   hotelDetailClickLocator,
+  hotelToolLifecycleFromLogs,
+  hasSafeHotelSystemIntentOpen,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
   shouldRetryHotelReturnToApp,
@@ -1193,20 +1196,26 @@ async function captureWhile(appPid, runAction) {
         hotelActionEvidence.surfaceId.length > 0;
       const hotelActionEvidencePopulated =
         hasPopulatedHotelActionEvidence(hotelActionEvidence);
+      const hotelToolLifecycle = hotelToolLifecycleFromLogs(text);
+      const hotelToolLifecycleComplete = hotelToolLifecycle.ok;
       const hasTerminalOutcome =
         /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
-      const done = hotelActionEvidencePopulated || hasTerminalOutcome;
+      const done = hotelActionEvidencePopulated ||
+        hotelToolLifecycleComplete ||
+        hasTerminalOutcome;
       const hotelActionRequested =
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
+      const hotelRuntimeRequested = hotelActionRequested || hotelToolLifecycle.requested;
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
       const hotelUiReady = hotelActionEvidencePopulated ||
+        (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
-      if (done && (!hotelActionRequested || hotelUiReady) &&
+      if (done && (!hotelRuntimeRequested || hotelUiReady) &&
         (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
@@ -1216,6 +1225,50 @@ async function captureWhile(appPid, runAction) {
         break;
       }
     }
+  } catch (error) {
+    actionError = error;
+  } finally {
+    child.kill('SIGTERM');
+    await waitForProcessExit(child, 1500);
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await waitForProcessExit(child, 1500);
+    }
+    cleanupHilogProcesses();
+  }
+  if (actionError !== null) {
+    throw actionError;
+  }
+  return logs;
+}
+
+async function captureAppLogsFor(appPid, runAction, durationMs = 2500) {
+  const logs = [];
+  const child = spawn('hdc', ['-t', target, 'hilog'], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  let buffer = '';
+  const onData = (chunk) => {
+    buffer += chunk;
+    const parts = buffer.split('\n');
+    buffer = parts.pop() || '';
+    for (const line of parts) {
+      if (lineMatchesPid(line, appPid) &&
+        (line.includes('AIPhone') || line.includes('aiphonedemo'))) {
+        logs.push(line);
+      }
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+
+  let actionError = null;
+  try {
+    await sleep(800);
+    await runAction();
+    await sleep(durationMs);
   } catch (error) {
     actionError = error;
   } finally {
@@ -1851,7 +1904,15 @@ async function locateHotelSystemAction(layout, label, index, actionName) {
   };
 }
 
-async function exerciseHotelSystemAction(layout, index, actionId, label, actionName, expectedScheme) {
+async function exerciseHotelSystemAction(
+  layout,
+  index,
+  actionId,
+  label,
+  actionName,
+  expectedScheme,
+  appPid
+) {
   const located = await locateHotelSystemAction(layout, label, index, actionName);
   const runtime = {
     buttonVisible: located.center !== null,
@@ -1871,22 +1932,22 @@ async function exerciseHotelSystemAction(layout, index, actionId, label, actionN
   }
 
   clearHilog();
-  hdc([
-    'shell',
-    'uitest',
-    'uiInput',
-    'click',
-    String(located.center.x),
-    String(located.center.y)
-  ]);
-  await sleep(1800);
-  const rawActionLogs = hdc(['shell', 'hilog', '-x']);
+  const capturedActionLogs = await captureAppLogsFor(appPid, async () => {
+    hdc([
+      'shell',
+      'uitest',
+      'uiInput',
+      'click',
+      String(located.center.x),
+      String(located.center.y)
+    ]);
+    await sleep(1800);
+  });
+  const rawActionLogs = capturedActionLogs.join('\n');
   const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
   const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
-  writeFileSync(logPath, actionLogs);
-  const schemeOpened = new RegExp(
-    `\\[AIPhone\\]\\[A2uiHomeOpenUrl\\] ok=true scheme=${expectedScheme} chars=\\d+`
-  ).test(actionLogs);
+  writeFileSync(logPath, actionLogs + '\n');
+  const schemeOpened = hasSafeHotelSystemIntentOpen(actionLogs, expectedScheme);
   const externalForeground = captureForegroundAbility(
     `query-${index + 1}-hotel-${actionName}-external-ability.txt`
   );
@@ -1948,7 +2009,7 @@ async function exerciseHotelSystemAction(layout, index, actionId, label, actionN
   };
 }
 
-async function verifyHotelSystemActions(layout, index, actionEvidence) {
+async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
   const validated = validateHotelSearchActionEvidence(actionEvidence);
   let currentLayout = layout;
   const runtime = {};
@@ -1963,7 +2024,8 @@ async function verifyHotelSystemActions(layout, index, actionEvidence) {
       'hotel.navigate',
       '导航到酒店',
       'navigate',
-      'petalmaps'
+      'petalmaps',
+      appPid
     );
     runtime.navigation = navigationEvidence.runtime;
     currentLayout = navigationEvidence.restoredLayout;
@@ -1980,7 +2042,8 @@ async function verifyHotelSystemActions(layout, index, actionEvidence) {
       'hotel.call',
       '联系酒店',
       'call',
-      'tel'
+      'tel',
+      appPid
     );
     runtime.call = callEvidence.runtime;
     currentLayout = callEvidence.restoredLayout;
@@ -2005,10 +2068,14 @@ async function verifyHotelSystemActions(layout, index, actionEvidence) {
     };
   }
 
+  const navigationReport = { ...navigationEvidence };
+  const callReport = { ...callEvidence };
+  delete navigationReport.restoredLayout;
+  delete callReport.restoredLayout;
   return {
     ...evaluateHotelSystemActionEvidence(actionEvidence, runtime),
-    navigationEvidence,
-    callEvidence
+    navigationEvidence: navigationReport,
+    callEvidence: callReport
   };
 }
 
@@ -2124,9 +2191,12 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
-  const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
+  const detailLifecycle = hotelDetailLifecycleFromLogs(detailLogText);
+  const detailRequested = detailLifecycle.requested ||
+    /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
-  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
+  const detailOk = detailLifecycle.ok ||
+    /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
   const restoredOk = /酒店结果/.test(restoredText);
   const detailActionEvidence = hotelActionEvidenceFromLogs(detailLogText);
   const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
@@ -2139,7 +2209,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const systemActions = await verifyHotelSystemActions(
     restoredLayout,
     index,
-    rawRestoredActionEvidence
+    rawRestoredActionEvidence,
+    appPid
   );
   return {
     ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
@@ -2158,6 +2229,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     restoredSurfaceId: surfaceIdentity.restoredSurfaceId,
     detailRequested,
     detailOk,
+    detailLifecycle,
     restoredOk,
     detailLogPath,
     textPath,
@@ -2629,6 +2701,9 @@ async function runQuery(query, index, expectedTool) {
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
     ? await verifyHotelDetailAction(evidenceLayout, index, appPid, logs)
     : { ok: true, skipped: true };
+  summary.hotelSearchLifecycle = expectedCase.verifyHotelDetail === true
+    ? hotelToolLifecycleFromLogs(logs.join('\n'))
+    : { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
     !evidenceText.includes(summary.expectedAbsentText) ||
@@ -2672,7 +2747,17 @@ async function runQuery(query, index, expectedTool) {
     !summary.syntheticFallback &&
     summary.layoutOk;
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
-  if (isSocialHubCase) {
+  if (expectedCase.verifyHotelDetail === true) {
+    summary.ok = summary.hotelSearchLifecycle.ok &&
+      summary.hotelSearchLifecycle.network200 &&
+      summary.htmlHomeSurfaceLoad.ok &&
+      !summary.htmlLoadError &&
+      !summary.syntheticFallback &&
+      !summary.providerFailed &&
+      expectedMisses.length === 0 &&
+      summary.layoutOk &&
+      summary.hotelDetailAction.ok;
+  } else if (isSocialHubCase) {
     const socialHubRecovered = socialHubVisibleOutput &&
       summary.htmlHomeSurfaceLoad.ok &&
       !summary.htmlLoadError &&

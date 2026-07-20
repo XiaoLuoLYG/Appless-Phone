@@ -43,6 +43,69 @@ export function hasPopulatedHotelActionEvidence(evidence) {
     evidence.actions.length > 0;
 }
 
+export function hotelToolLifecycleFromLogs(logText) {
+  const callingBySurface = new Map();
+  const hotelDocuments = [];
+  const successfulNetworkEvents = [];
+  const readyEvents = [];
+  const lines = String(logText || '').split('\n');
+  lines.forEach((line, index) => {
+    const surface = /\[AIPhone\]\[A2uiHomeSurfaceUpdate\][^\n]*surfaceId=([^ \n]+)[^\n]*status=([^ \n]+)/.exec(line);
+    if (surface !== null) {
+      if (surface[2] === 'calling_tool') {
+        callingBySurface.set(surface[1], index);
+      } else if (surface[2] === 'ready') {
+        readyEvents.push({ surfaceId: surface[1], index });
+      }
+    }
+    if (/\b(?:response_code":200|RespCode:200)\b/.test(line) &&
+      (line.includes('NETSTACK') || line.includes('http_exec.cpp'))) {
+      successfulNetworkEvents.push(index);
+    }
+    const document = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=tool[^\n]*kind=hotel[^\n]*chars=(\d+)[^\n]*blocks=(\d+)/.exec(line);
+    if (document !== null &&
+      Number.parseInt(document[1], 10) > 0 &&
+      Number.parseInt(document[2], 10) > 0) {
+      hotelDocuments.push({
+        index,
+        chars: Number.parseInt(document[1], 10),
+        blocks: Number.parseInt(document[2], 10)
+      });
+    }
+  });
+  const completed = readyEvents.findLast((ready) => {
+    const callingIndex = callingBySurface.get(ready.surfaceId);
+    return callingIndex !== undefined &&
+      successfulNetworkEvents.some((index) =>
+        index > callingIndex && index < ready.index) &&
+      hotelDocuments.some((document) =>
+        document.index > callingIndex && document.index < ready.index);
+  });
+  return {
+    requested: callingBySurface.size > 0,
+    ok: completed !== undefined,
+    surfaceId: completed?.surfaceId || '',
+    network200: completed !== undefined,
+    blocks: completed === undefined
+      ? 0
+      : hotelDocuments.findLast((document) => document.index < completed.index)?.blocks || 0
+  };
+}
+
+export function hotelDetailLifecycleFromLogs(logText) {
+  return hotelToolLifecycleFromLogs(logText);
+}
+
+export function hasSafeHotelSystemIntentOpen(logText, expectedScheme) {
+  if (expectedScheme !== 'petalmaps' && expectedScheme !== 'tel') {
+    return false;
+  }
+  const escapedScheme = expectedScheme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(
+    `\\[AIPhone\\]\\[A2uiHomeOpenUrl\\] ok=true scheme=${escapedScheme} chars=\\d+`
+  ).test(String(logText || ''));
+}
+
 export function foregroundBundleFromAbilityDump(output) {
   const missions = String(output || '').split(/(?=\s*Mission ID #)/);
   const foreground = missions.find((mission) =>

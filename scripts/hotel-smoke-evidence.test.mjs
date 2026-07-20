@@ -5,8 +5,11 @@ import {
   foregroundBundleFromAbilityDump,
   hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
+  hotelDetailLifecycleFromLogs,
   hotelDetailClickLocator,
   hotelSearchActionEvidence,
+  hotelToolLifecycleFromLogs,
+  hasSafeHotelSystemIntentOpen,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
   shouldRetryHotelReturnToApp,
@@ -97,6 +100,64 @@ test('does not treat empty welcome evidence as completed hotel action evidence',
       '\n[AIPhone][HotelHomeActionEvidence] evidence=""'
   );
   assert.equal(followedByEmpty.surfaceId, 'hotel-search-1');
+});
+
+test('requires one hotel surface to progress from calling_tool through real blocks to ready', () => {
+  const complete = hotelDetailLifecycleFromLogs(`
+    [AIPhone][HtmlHomeDocument] source=pending kind=hotel chars=1200 blocks=1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool components=2
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready components=3
+  `);
+  assert.deepEqual(complete, {
+    requested: true,
+    ok: true,
+    surfaceId: 'hotel-detail-2',
+    network200: true,
+    blocks: 64
+  });
+
+  assert.equal(hotelDetailLifecycleFromLogs(`
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=forged-other status=ready
+  `).ok, false);
+  assert.equal(hotelDetailLifecycleFromLogs(`
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=0
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready
+  `).ok, false);
+  assert.equal(hotelDetailLifecycleFromLogs(`
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready
+  `).requested, false);
+  assert.equal(hotelToolLifecycleFromLogs(`
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready
+  `).ok, false);
+});
+
+test('recognizes only redacted successful registered hotel system schemes', () => {
+  assert.equal(hasSafeHotelSystemIntentOpen(
+    '[AIPhone][A2uiHomeOpenUrl] ok=true scheme=petalmaps chars=92',
+    'petalmaps'
+  ), true);
+  assert.equal(hasSafeHotelSystemIntentOpen(
+    '[AIPhone][A2uiHomeOpenUrl] ok=false scheme=petalmaps chars=92 code=1',
+    'petalmaps'
+  ), false);
+  assert.equal(hasSafeHotelSystemIntentOpen(
+    '[AIPhone][A2uiHomeOpenUrl] ok=true scheme=https chars=92',
+    'petalmaps'
+  ), false);
+  assert.equal(hasSafeHotelSystemIntentOpen(
+    '[AIPhone][A2uiHomeOpenUrl] ok=true scheme=javascript chars=92',
+    'javascript'
+  ), false);
 });
 
 test('treats missing optional actions as hidden and invalid present actions as failures', () => {

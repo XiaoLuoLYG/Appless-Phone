@@ -2201,8 +2201,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('hotel-room-details')).assertLarger(-1);
       expect(html.indexOf('var allBlocks = list(data.blocks);')).assertLarger(-1);
       expect(html.indexOf("metricValue(block, ['toolName']) === 'hotel.detail'")).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['toolName']) === 'hotel.search'")).assertLarger(-1);
       expect(html.indexOf('var isDetail = detailBlocks.length > 0;')).assertLarger(-1);
-      expect(html.indexOf('var blocks = isDetail ? detailBlocks : allBlocks;')).assertLarger(-1);
+      expect(html.indexOf('var blocks = isDetail ? detailBlocks : searchBlocks;')).assertLarger(-1);
       expect(html.indexOf("metricValue(blocks[0], ['toolName'])")).assertEqual(-1);
       expect(html.indexOf('detailAction.label')).assertLarger(-1);
       expect(html.indexOf("button.setAttribute('aria-label', text(detailAction.label)")).assertLarger(-1);
@@ -2226,6 +2227,27 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
       expect(html.indexOf('下单成功')).assertEqual(-1);
       expect(html.indexOf('订单编号')).assertEqual(-1);
+    });
+
+    it('drops a retained hotel pending block once real search results exist', 0, () => {
+      const doc = hotelSearchDocumentFixture();
+      doc.blocks.unshift({
+        id: 'pending',
+        kind: 'text',
+        title: '正在查询 RollingGo',
+        subtitle: '正在等待真实酒店结果',
+        status: 'calling_tool',
+        source: '',
+        metrics: [],
+        rows: [],
+        actions: []
+      });
+
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('正在查询 RollingGo')).assertEqual(-1);
+      expect(html.indexOf('深圳测试酒店')).assertLarger(-1);
+      expect(html.indexOf('"toolName","value":"hotel.search"')).assertLarger(-1);
     });
 
     it('renders exact conditional hotel actions from the A2UI snapshot', 0, () => {

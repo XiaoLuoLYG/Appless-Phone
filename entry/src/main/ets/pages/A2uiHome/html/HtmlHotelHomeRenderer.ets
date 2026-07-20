@@ -1,4 +1,4 @@
-import { HtmlHomeDocument } from './HtmlHomeTypes';
+import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
 
 type HtmlHotelTextValue = Object | string | number | boolean | null | undefined;
 
@@ -703,8 +703,11 @@ const HOTEL_HOME_JS: string = `
   var detailBlocks = allBlocks.filter(function (block) {
     return metricValue(block, ['toolName']) === 'hotel.detail';
   });
+  var searchBlocks = allBlocks.filter(function (block) {
+    return metricValue(block, ['toolName']) === 'hotel.search';
+  });
   var isDetail = detailBlocks.length > 0;
-  var blocks = isDetail ? detailBlocks : allBlocks;
+  var blocks = isDetail ? detailBlocks : searchBlocks;
   var shell = add(app, 'main', 'hotel-shell');
   var hero = add(shell, 'header', isDetail ? 'hotel-hero is-detail' : 'hotel-hero');
   add(hero, 'div', 'hotel-hero-media');
@@ -760,7 +763,7 @@ export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: bool
     chips: document.chips,
     metrics: document.metrics,
     timeline: document.timeline,
-    blocks: document.blocks,
+    blocks: hotelResultBlocks(document.blocks),
     actions: document.actions,
     history: [],
     persona: document.persona,
@@ -785,6 +788,19 @@ export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: bool
 <script>${HOTEL_HOME_JS}</script>
 </body>
 </html>`;
+}
+
+function hotelResultBlocks(blocks: HtmlHomeBlock[]): HtmlHomeBlock[] {
+  return blocks.filter((block: HtmlHomeBlock): boolean => {
+    for (let index = 0; index < block.metrics.length; index++) {
+      const metric = block.metrics[index];
+      if (metric.label === 'toolName' &&
+        (metric.value === 'hotel.search' || metric.value === 'hotel.detail')) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 function escapeScriptJson(json: string): string {
