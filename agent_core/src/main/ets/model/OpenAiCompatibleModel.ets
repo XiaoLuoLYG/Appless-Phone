@@ -109,6 +109,7 @@ export class OpenAiCompatibleModel implements LocalModel {
         connectTimeout: MODEL_CONNECT_TIMEOUT_MS,
         readTimeout: MODEL_READ_TIMEOUT_MS
       });
+      streamEndResolve();
       await streamEnd;
       rawResponse += decoder.decodeToString(new Uint8Array(0), { stream: false });
 

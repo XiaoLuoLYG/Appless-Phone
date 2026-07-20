@@ -162,6 +162,11 @@ function verifySourceContracts() {
   assertContains(openAiModel, 'customParametersJson', 'OpenAI-compatible model reads custom parameter JSON');
   assertContains(openAiModel, 'search(/"model"\\s*:/)', 'custom parameters cannot replace model');
   assertContains(openAiModel, 'search(/"messages"\\s*:/)', 'custom parameters cannot replace messages');
+  assertContains(
+    openAiModel,
+    'streamEndResolve();\n      await streamEnd;',
+    'OpenAI-compatible stream completion does not rely only on dataEnd'
+  );
   assertContains(aiphoneA2ui, 'export function aiphoneInfoJsonl', 'AIPhone final answer helper exists');
   assertContains(aiphoneA2ui, "component: 'InfoRows'", 'final answer helper renders InfoRows');
 
