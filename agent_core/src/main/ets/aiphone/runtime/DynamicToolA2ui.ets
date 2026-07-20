@@ -246,8 +246,14 @@ function genericResultComponents(toolId: string, title: string): A2uiComponent[]
   return [root, results];
 }
 
-export function genericToolResultsA2ui(surfaceId: string, toolId: string, results: DynamicGenericToolResult[]): string {
-  const title = genericResultTitle(toolId, results);
+export function genericToolResultsA2ui(
+  surfaceId: string,
+  toolId: string,
+  results: DynamicGenericToolResult[],
+  intent: string = 'dynamic_tool',
+  titleOverride: string = ''
+): string {
+  const title = titleOverride.length > 0 ? titleOverride : genericResultTitle(toolId, results);
   const a2uiResults: A2uiGenericToolResultData[] = results.map((result: DynamicGenericToolResult): A2uiGenericToolResultData => resultOf(result));
   const summary: A2uiSummaryData = {
     text: a2uiResults.length > 0 ? a2uiResults[0].summary : '动态工具没有返回可展示结果。',
@@ -261,7 +267,7 @@ export function genericToolResultsA2ui(surfaceId: string, toolId: string, result
         surfaceId: surfaceId,
         root: 'root',
         title: title,
-        intent: 'dynamic_tool',
+        intent: intent,
         status: 'ready',
         sendDataModel: true
       }

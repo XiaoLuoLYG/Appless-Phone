@@ -1,10 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   GMAIL_TOOL_IDS,
+  aiphoneToolDescriptionForModel,
   allToolDefinitions,
   backendLabel,
   isCalendarToolId,
   isGmailToolId,
+  isHotelToolId,
   isKnownDomainToolId,
   isLuckinToolId,
   isLocalAdapterToolId,
@@ -39,6 +41,8 @@ export default function toolDefinitionRegistryTest() {
     it('recognizes existing local adapters and Gmail tools through one registry', 0, () => {
       expect(isKnownDomainToolId('travel.search')).assertTrue();
       expect(isKnownDomainToolId('food.search')).assertTrue();
+      expect(isKnownDomainToolId('hotel.search')).assertTrue();
+      expect(isKnownDomainToolId('hotel.detail')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.preview')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.create')).assertTrue();
       expect(isKnownDomainToolId('luckin.order.status')).assertTrue();
@@ -55,8 +59,11 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('calendar.events.search')).assertTrue();
       expect(isKnownDomainToolId('calendar.event.create')).assertTrue();
       expect(isKnownDomainToolId('calendar.event.update')).assertTrue();
+      expect(isKnownDomainToolId('calendar.event.delete')).assertTrue();
       expect(isKnownDomainToolId('maps.place.search')).assertTrue();
       expect(isKnownDomainToolId('maps.place.details')).assertTrue();
+      expect(isKnownDomainToolId('maps.route.open')).assertTrue();
+      expect(isKnownDomainToolId('whatsapp.message.send')).assertTrue();
       expect(isKnownDomainToolId('ride.estimate')).assertTrue();
       expect(isKnownDomainToolId('ride.app.link')).assertTrue();
       expect(isKnownDomainToolId('ride.order.create')).assertTrue();
@@ -70,6 +77,10 @@ export default function toolDefinitionRegistryTest() {
       expect(isKnownDomainToolId('youtube.unknown')).assertFalse();
 
       expect(isLocalAdapterToolId('travel.search')).assertTrue();
+      expect(isLocalAdapterToolId('hotel.search')).assertTrue();
+      expect(isHotelToolId('hotel.search')).assertTrue();
+      expect(isHotelToolId('hotel.detail')).assertTrue();
+      expect(isHotelToolId('hotel.create')).assertFalse();
       expect(isLocalAdapterToolId('luckin.order.preview')).assertTrue();
       expect(isLuckinToolId('luckin.order.create')).assertTrue();
       expect(isLuckinToolId('food.search')).assertFalse();
@@ -111,6 +122,48 @@ export default function toolDefinitionRegistryTest() {
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
     });
 
+    it('registers only verified hotel read tools with exact progression', 0, () => {
+      const search = toolDefinitionForToolId('hotel.search') as ToolDefinition;
+      const detail = toolDefinitionForToolId('hotel.detail') as ToolDefinition;
+
+      expect(search.domain).assertEqual('hotel');
+      expect(search.riskLevel).assertEqual('read');
+      expect(search.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(search.authModes.join(',')).assertEqual('provider_key');
+      expect(search.inputSchema).assertEqual('hotelSearchRequest');
+      expect(search.outputSchema).assertEqual('hotelSearchResults');
+      expect(search.a2uiComponent).assertEqual('GenericToolResults');
+      expect(search.actions.join(',')).assertEqual('hotel.detail');
+      expect(detail.domain).assertEqual('hotel');
+      expect(detail.riskLevel).assertEqual('read');
+      expect(detail.backendPriority.join(',')).assertEqual('local_adapter');
+      expect(detail.authModes.join(',')).assertEqual('provider_key');
+      expect(detail.inputSchema).assertEqual('hotelDetailRequest');
+      expect(detail.outputSchema).assertEqual('hotelRatePlans');
+      expect(detail.a2uiComponent).assertEqual('GenericToolResults');
+      expect(detail.actions.length).assertEqual(0);
+      expect(toolDefinitionForToolId('hotel.create')).assertEqual(null);
+      expect(toolDefinitionForToolId('hotel.status')).assertEqual(null);
+      expect(toolDefinitionForToolId('hotel.cancel')).assertEqual(null);
+      expect(isRegisteredAiphoneToolId('hotel.search')).assertTrue();
+      expect(isRegisteredAiphoneToolId('hotel.detail')).assertTrue();
+      expect(isRegisteredAiphoneToolId('hotel.create')).assertFalse();
+    });
+
+    it('gives the model exact structured hotel contracts without order claims', 0, () => {
+      const search = aiphoneToolDescriptionForModel('hotel.search');
+      const detail = aiphoneToolDescriptionForModel('hotel.detail');
+
+      expect(search.indexOf('checkInDate')).assertLarger(-1);
+      expect(search.indexOf('stayNights')).assertLarger(-1);
+      expect(search.indexOf('adultCount')).assertLarger(-1);
+      expect(search.indexOf('roomCount')).assertLarger(-1);
+      expect(detail.indexOf('hotelId')).assertLarger(-1);
+      expect(detail.indexOf('checkOutDate')).assertLarger(-1);
+      expect(detail.indexOf('ratePlanId')).assertLarger(-1);
+      expect(detail.indexOf('does not create')).assertLarger(-1);
+    });
+
     it('registers Calendar writes and Maps POI search explicitly', 0, () => {
       const calendarCreate = toolDefinitionForToolId('calendar.event.create') as ToolDefinition;
       const calendarUpdate = toolDefinitionForToolId('calendar.event.update') as ToolDefinition;
@@ -122,13 +175,52 @@ export default function toolDefinitionRegistryTest() {
       expect(calendarCreate.outputSchema).assertEqual('calendarEvent');
       expect(calendarUpdate.riskLevel).assertEqual('confirm_required');
       expect(isCalendarToolId('calendar.events.search')).assertTrue();
-      expect(isCalendarToolId('calendar.event.delete')).assertFalse();
+      const calendarDelete = toolDefinitionForToolId('calendar.event.delete') as ToolDefinition;
+      const mapsRoute = toolDefinitionForToolId('maps.route.open') as ToolDefinition;
+      const whatsappSend = toolDefinitionForToolId('whatsapp.message.send') as ToolDefinition;
+      expect(isCalendarToolId('calendar.event.delete')).assertTrue();
+      expect(calendarDelete.riskLevel).assertEqual('confirm_required');
+      expect(calendarDelete.actions[0]).assertEqual('calendar.event.delete.confirm');
+      expect(calendarDelete.inputSchema.indexOf('timeMin')).assertLarger(-1);
+      expect(calendarDelete.inputSchema.indexOf('timeMax')).assertLarger(-1);
       expect(mapsSearch.domain).assertEqual('maps');
       expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
       expect(mapsSearch.outputSchema).assertEqual('places');
       expect(isMapsToolId('maps.place.details')).assertTrue();
-      expect(toolDefinitionForToolId('maps.route.plan')).assertEqual(null);
-      expect(toolDefinitionForToolId('calendar.event.delete')).assertEqual(null);
+      expect(isMapsToolId('maps.route.open')).assertTrue();
+      expect(mapsRoute.riskLevel).assertEqual('read');
+      expect(mapsRoute.actions[0]).assertEqual('maps.open.web');
+      expect(whatsappSend.domain).assertEqual('whatsapp');
+      expect(whatsappSend.riskLevel).assertEqual('confirm_required');
+      expect(whatsappSend.actions[0]).assertEqual('whatsapp.message.send.confirm');
+    });
+
+    it('gives the model a structured Calendar write contract', 0, () => {
+      const searchDescription = aiphoneToolDescriptionForModel('calendar.events.search');
+      const createDescription = aiphoneToolDescriptionForModel('calendar.event.create');
+      const updateDescription = aiphoneToolDescriptionForModel('calendar.event.update');
+      const deleteDescription = aiphoneToolDescriptionForModel('calendar.event.delete');
+
+      expect(searchDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(searchDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(searchDescription.indexOf('first step before update or delete')).assertEqual(-1);
+      expect(searchDescription.indexOf('NEVER use calendar.events.search for a write request')).assertLarger(-1);
+      expect(searchDescription.indexOf('query contains only event title text')).assertLarger(-1);
+      expect(createDescription.indexOf('RFC3339')).assertLarger(-1);
+      expect(createDescription.indexOf('ask the user')).assertLarger(-1);
+      expect(createDescription.indexOf('Never invent')).assertLarger(-1);
+      expect(updateDescription.indexOf('call calendar.event.update directly')).assertLarger(-1);
+      expect(updateDescription.indexOf('even when the requested new time is incomplete')).assertLarger(-1);
+      expect(updateDescription.indexOf('omit missing start or end')).assertLarger(-1);
+      expect(updateDescription.indexOf('query contains only event title text')).assertLarger(-1);
+      expect(updateDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(updateDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(updateDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
+      expect(deleteDescription.indexOf('call calendar.event.delete directly')).assertLarger(-1);
+      expect(deleteDescription.indexOf('query contains only event title text')).assertLarger(-1);
+      expect(deleteDescription.indexOf('timeMin')).assertLarger(-1);
+      expect(deleteDescription.indexOf('timeMax')).assertLarger(-1);
+      expect(deleteDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
     });
 
     it('keeps Gmail definitions declarative and direct send blocked', 0, () => {

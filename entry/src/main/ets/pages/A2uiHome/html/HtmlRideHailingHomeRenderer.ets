@@ -14,13 +14,16 @@ interface HtmlRideHomeDocumentWithBusy extends HtmlHomeDocument {
 const RIDE_HAILING_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --paper: #f8f2ea;
+  --paper: #f5f2ee;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: #ffffff;
   --ink: #211b17;
   --ink-soft: #493f38;
-  --muted: #806f61;
+  --muted: #7a6e64;
   --line: rgba(33, 27, 23, 0.12);
-  --panel: rgba(255, 252, 247, 0.86);
-  --ride: #b5654d;
+  --accent: #995f4c;
+  --accent-soft: rgba(153, 95, 76, 0.13);
+  --ride: var(--accent);
   --ride-dark: #7d3e31;
   --ride-soft: rgba(181, 101, 77, 0.13);
   --ride-warm: #d9955f;
@@ -31,7 +34,7 @@ const RIDE_HAILING_HOME_CSS: string = `
   --signal: #d8492f;
   --red: #b04a42;
   --red-soft: rgba(176, 74, 66, 0.1);
-  --shadow: 0 18px 40px rgba(95, 54, 35, 0.13);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -837,6 +840,45 @@ body.ride-map-fullscreen .ride-map-panel[data-fullscreen="true"] .ride-map-frame
 @keyframes travelPulse {
   0%, 100% { opacity: 0.72; }
   50% { opacity: 1; }
+}
+.ride-hero {
+  min-height: 300px;
+}
+.ride-cover-media {
+  min-height: 276px;
+  border-radius: 20px;
+}
+.ride-hero h1 {
+  font-size: 34px;
+  line-height: 1.04;
+}
+.ride-route-map,
+.ride-map-frame {
+  border-radius: 20px;
+}
+.ride-panel-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.ride-estimate {
+  border-radius: 12px;
+}
+.ride-estimate-action {
+  animation-duration: 220ms;
+}
+.ride-estimate-action:active,
+.ride-panel-card:active,
+.ride-action-primary:active,
+.ride-action-secondary:active,
+.ride-action-danger:active,
+.ride-action-link:active {
+  transform: scale(0.98);
+}
+.ride-action-primary,
+.ride-action-secondary,
+.ride-action-danger,
+.ride-action-link {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
 }
 `;
 

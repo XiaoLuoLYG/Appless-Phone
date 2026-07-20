@@ -5,6 +5,8 @@ import {
   composioArgumentsForTool,
   composioDynamicResultFromObservation,
   composioPreferredToolScore,
+  composioExactToolSlugForFixedTool,
+  composioPhoneNumberIdsFromObservation,
   configureComposioConfigFromRawJson,
   proxyToolkitAccountsPreview,
   shouldAttemptComposioDynamic,
@@ -14,6 +16,7 @@ import {
   ComposioSearchTool,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute,
+  normalizedComposioUseCase,
   slackSearchQueryForPrompt
 } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
@@ -90,9 +93,9 @@ export default function composioDynamicBackendTest() {
       expect(result.rawPreview.indexOf('Notion')).assertLarger(-1);
     });
 
-    it('allows Composio side-effect execute after session search selection', 0, () => {
-      expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertFalse();
-      expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertFalse();
+    it('blocks dynamic Composio side effects while allowing reads', 0, () => {
+      expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertTrue();
+      expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertTrue();
       expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
     });
 
@@ -169,6 +172,74 @@ export default function composioDynamicBackendTest() {
       expect(updateArgs.end).assertEqual('2026-07-30T16:30:00+08:00');
     });
 
+    it('uses only canonical Calendar list fields when Composio truncates a large schema', 0, () => {
+      const listTool = composioTool('{"toolSlug":"GOOGLECALENDAR_EVENTS_LIST","inputSchema":"{}"}');
+      const listArgs = composioArgumentsForTool(
+        listTool,
+        '查看我 2026年8月4日的 Google Calendar 日程',
+        'calendar.events.search',
+        looseObject('{"query":"","timeMin":"2026-08-04T00:00:00+08:00","timeMax":"2026-08-05T00:00:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}')
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(listArgs.timeMin).assertEqual('2026-08-04T00:00:00+08:00');
+      expect(listArgs.timeMax).assertEqual('2026-08-05T00:00:00+08:00');
+      expect(listArgs.timeZone).assertEqual('Asia/Shanghai');
+      expect(listArgs.calendarId).assertEqual('primary');
+      expect(listArgs.singleEvents).assertTrue();
+      expect(listArgs.orderBy).assertEqual('startTime');
+      expect(listArgs.start === undefined).assertTrue();
+      expect(listArgs.end === undefined).assertTrue();
+      expect(listArgs.query === undefined).assertTrue();
+    });
+
+    it('pins WhatsApp and Calendar fixed tools to their real Composio slugs', 0, () => {
+      expect(composioExactToolSlugForFixedTool('social.x.profile')).assertEqual('TWITTER_USER_LOOKUP_ME');
+      expect(composioExactToolSlugForFixedTool('social.x.dm.list')).assertEqual('TWITTER_GET_RECENT_DM_EVENTS');
+      expect(composioExactToolSlugForFixedTool('social.slack.message.search')).assertEqual('SLACK_SEARCH_MESSAGES');
+      expect(composioExactToolSlugForFixedTool('social.instagram.profile')).assertEqual('INSTAGRAM_GET_USER_INFO');
+      expect(composioExactToolSlugForFixedTool('social.instagram.conversations.list')).assertEqual('INSTAGRAM_LIST_ALL_CONVERSATIONS');
+      expect(composioExactToolSlugForFixedTool('social.instagram.messages.list')).assertEqual('INSTAGRAM_LIST_ALL_MESSAGES');
+      expect(composioExactToolSlugForFixedTool('whatsapp.phone_numbers.list')).assertEqual('WHATSAPP_GET_PHONE_NUMBERS');
+      expect(composioExactToolSlugForFixedTool('whatsapp.message.send')).assertEqual('WHATSAPP_SEND_MESSAGE');
+      expect(composioExactToolSlugForFixedTool('calendar.events.search')).assertEqual('GOOGLECALENDAR_EVENTS_LIST');
+      expect(composioExactToolSlugForFixedTool('calendar.event.create')).assertEqual('GOOGLECALENDAR_CREATE_EVENT');
+      expect(composioExactToolSlugForFixedTool('calendar.event.update')).assertEqual('GOOGLECALENDAR_PATCH_EVENT');
+      expect(composioExactToolSlugForFixedTool('calendar.event.delete')).assertEqual('GOOGLECALENDAR_DELETE_EVENT');
+      expect(normalizedComposioUseCase('', 'calendar.event.delete')).assertEqual(
+        'Delete a Google Calendar event by event ID');
+    });
+
+    it('maps WhatsApp and Calendar args to exact provider schemas', 0, () => {
+      const phoneNumbersTool = composioTool('{"toolSlug":"WHATSAPP_GET_PHONE_NUMBERS","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"limit\\":{\\"type\\":\\"number\\"},\\"waba_id\\":{\\"type\\":\\"string\\"}}}"}');
+      const phoneNumberArgs = composioArgumentsForTool(phoneNumbersTool, 'WhatsApp Business phone numbers', 'whatsapp.phone_numbers.list', looseObject('{"wabaId":"123456789"}')) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(phoneNumberArgs.waba_id).assertEqual('123456789');
+
+      const sendTool = composioTool('{"toolSlug":"WHATSAPP_SEND_MESSAGE","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"phone_number_id\\",\\"to_number\\",\\"text\\"],\\"properties\\":{\\"phone_number_id\\":{\\"type\\":\\"string\\"},\\"to_number\\":{\\"type\\":\\"string\\"},\\"text\\":{\\"type\\":\\"string\\"},\\"preview_url\\":{\\"type\\":\\"boolean\\"}}}"}');
+      const sendArgs = composioArgumentsForTool(sendTool, 'WhatsApp Business send', 'whatsapp.message.send', looseObject('{"phoneNumberId":"712594308615206","toNumber":"8613800138000","text":"十分钟后到","previewUrl":false}')) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(sendArgs.phone_number_id).assertEqual('712594308615206');
+      expect(sendArgs.to_number).assertEqual('8613800138000');
+      expect(sendArgs.text).assertEqual('十分钟后到');
+      expect(sendArgs.preview_url).assertFalse();
+
+      const createTool = composioTool('{"toolSlug":"GOOGLECALENDAR_CREATE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"start_datetime\\"],\\"properties\\":{\\"summary\\":{\\"type\\":\\"string\\"},\\"start_datetime\\":{\\"type\\":\\"string\\"},\\"end_datetime\\":{\\"type\\":\\"string\\"},\\"timezone\\":{\\"type\\":\\"string\\"},\\"calendar_id\\":{\\"type\\":\\"string\\"}}}"}');
+      const createArgs = composioArgumentsForTool(createTool, '创建日程', 'calendar.event.create', looseObject('{"title":"AIPhoneDemo","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}')) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(createArgs.start_datetime).assertEqual('2026-07-30T15:00:00+08:00');
+      expect(createArgs.end_datetime).assertEqual('2026-07-30T15:30:00+08:00');
+
+      const deleteTool = composioTool('{"toolSlug":"GOOGLECALENDAR_DELETE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"event_id\\"],\\"properties\\":{\\"event_id\\":{\\"type\\":\\"string\\"},\\"calendar_id\\":{\\"type\\":\\"string\\"},\\"send_updates\\":{\\"type\\":\\"string\\"}}}"}');
+      const deleteArgs = composioArgumentsForTool(deleteTool, '删除日程', 'calendar.event.delete', looseObject('{"eventId":"evt-1","calendarId":"primary","sendUpdates":"none"}')) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(deleteArgs.event_id).assertEqual('evt-1');
+      expect(deleteArgs.calendar_id).assertEqual('primary');
+      expect(deleteArgs.send_updates).assertEqual('none');
+    });
+
+    it('extracts only unambiguous WhatsApp phone number ids', 0, () => {
+      expect(composioPhoneNumberIdsFromObservation('{"data":{"items":[]}}').length).assertEqual(0);
+      expect(composioPhoneNumberIdsFromObservation('{"data":{"items":[{"id":"712594308615206"}]}}')[0]).assertEqual('712594308615206');
+      expect(composioPhoneNumberIdsFromObservation('{"data":{"items":[{"id":"1"},{"id":"2"}]}}').length).assertEqual(2);
+      expect(composioPhoneNumberIdsFromObservation('not-json').length).assertEqual(0);
+    });
+
     it('uses a bounded Slack query for default recent-message SocialHub prompts', 0, () => {
       const searchTool = composioTool('{"toolSlug":"SLACK_SEARCH_MESSAGES","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"query\\":{\\"type\\":\\"string\\"},\\"sort\\":{\\"type\\":\\"string\\"},\\"count\\":{\\"type\\":\\"number\\"}}}"}');
       const args = composioArgumentsForTool(
@@ -182,6 +253,19 @@ export default function composioDynamicBackendTest() {
       expect((args.query as string).indexOf('after:')).assertEqual(0);
       expect(args.sort).assertEqual('timestamp');
       expect(args.count).assertEqual(5);
+    });
+
+    it('does not invent opaque provider ids from a natural-language read request', 0, () => {
+      const historyTool = composioTool('{"toolSlug":"WHATSAPP_GET_MESSAGE_HISTORY","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"phone_number_id\\"],\\"properties\\":{\\"phone_number_id\\":{\\"type\\":\\"string\\"},\\"limit\\":{\\"type\\":\\"number\\"}}}"}');
+      const args = composioArgumentsForTool(
+        historyTool,
+        '帮我用 WhatsApp 查看我最近的消息',
+        '',
+        null
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(args.phone_number_id === undefined).assertTrue();
+      expect(args.limit).assertEqual(5);
     });
 
     it('keeps Composio Gmail execute previews compact and parseable', 0, () => {

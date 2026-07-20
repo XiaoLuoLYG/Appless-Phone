@@ -28,19 +28,28 @@ import {
   nextSendSpinnerRotation
 } from '../state/A2uiHomeState';
 import {
-  A2UI_HOME_MAX_WIDTH
+  A2UI_HOME_FLOATING_RADIUS,
+  A2UI_HOME_MAX_WIDTH,
+  A2UI_HOME_PAGE_PADDING_BOTTOM,
+  A2UI_HOME_PAGE_PADDING_TOP,
+  A2UI_HOME_PAGE_PADDING_X,
+  A2UI_HOME_SECTION_GAP
 } from '../style/A2uiHomeLayout';
-import { A2UI_MOTION_CURVE, A2UI_MOTION_NORMAL_MS } from '../style/A2uiHomeMotion';
+import {
+  A2UI_MOTION_CURVE,
+  A2UI_MOTION_MOVE_CURVE,
+  A2UI_MOTION_NORMAL_MS
+} from '../style/A2uiHomeMotion';
 
 const A2UI_HISTORY_EMPTY_HEIGHT: number = 108;
 const A2UI_HISTORY_ROW_HEIGHT: number = 76;
 const A2UI_HISTORY_MAX_HEIGHT: number = 254;
 const A2UI_SEND_SPINNER_INTERVAL_MS: number = 90;
-const A2UI_HEADER_BUTTON_GAP: number = 4;
-const A2UI_HEADER_BUTTON_SIZE: number = 38;
-const A2UI_HEADER_BUTTON_ICON_SIZE: number = 19;
-const A2UI_HEADER_LOGO_SIZE: number = 28;
-const A2UI_HEADER_TITLE_FONT_SIZE: number = 16;
+const A2UI_HEADER_BUTTON_GAP: number = 3;
+const A2UI_HEADER_BUTTON_SIZE: number = 36;
+const A2UI_HEADER_BUTTON_ICON_SIZE: number = 18;
+const A2UI_HEADER_LOGO_SIZE: number = 26;
+const A2UI_HEADER_TITLE_FONT_SIZE: number = 17;
 const A2UI_VOICE_DOCK_HEIGHT: number = 72;
 const A2UI_VOICE_PULSE_STEPS: number = 12;
 
@@ -59,7 +68,7 @@ export struct HomePage {
   @Prop luckinInlinePatchJson: string = '';
   @Prop luckinInlinePatchTick: number = 0;
   @Prop isAwaitingFirstSurface: boolean = false;
-  @Prop inputPlaceholder: string = '告诉 Appless Phone 你想完成什么';
+  @Prop inputPlaceholder: string = '告诉 Appless 你想完成什么';
   @Prop isVoiceListening: boolean = false;
   @Prop voiceInputMessage: string = '';
   @Prop showWelcome: boolean = false;
@@ -181,7 +190,7 @@ export struct HomePage {
       .backgroundColor(index === 4 ? COLOR_ACCENT_DEEP : COLOR_ACCENT)
       .borderRadius(4)
       .opacity(this.voiceWaveOpacity(index))
-      .animation({ duration: 220, curve: A2UI_MOTION_CURVE })
+      .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
   }
 
   @Builder
@@ -192,7 +201,7 @@ export struct HomePage {
           .fill(COLOR_ACCENT_SOFT)
           .opacity(this.voiceOrbOpacity())
           .scale({ x: this.voiceOrbScale(), y: this.voiceOrbScale() })
-          .animation({ duration: 220, curve: A2UI_MOTION_CURVE })
+          .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
 
         Circle({ width: 48, height: 48 })
           .fill('#FFFFFF')
@@ -255,7 +264,7 @@ export struct HomePage {
             .objectFit(ImageFit.Contain)
             .margin({ right: 8 })
 
-          Text('Appless Phone')
+          Text('Appless')
             .fontSize(A2UI_HEADER_TITLE_FONT_SIZE)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_INK)
@@ -333,7 +342,7 @@ export struct HomePage {
         .height(44)
         .alignItems(VerticalAlign.Center)
         .padding({ left: 0, right: 0 })
-        .margin({ bottom: 12 })
+        .margin({ bottom: A2UI_HOME_SECTION_GAP })
 
       Column() {
         if (this.showHistory) {
@@ -347,8 +356,8 @@ export struct HomePage {
       .height(this.historyPanelHeight())
       .opacity(this.showHistory ? 1 : 0)
       .clip(true)
-      .margin({ top: this.showHistory ? 14 : 0 })
-      .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
+      .margin({ top: this.showHistory ? A2UI_HOME_SECTION_GAP : 0 })
+      .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
 
       if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
         PaymentCheckoutOverlay({
@@ -357,8 +366,8 @@ export struct HomePage {
           onReturnUrl: this.onPaymentCheckoutReturn
         })
           .layoutWeight(1)
-          .margin({ top: 12 })
-          .borderRadius(22)
+          .margin({ top: A2UI_HOME_SECTION_GAP })
+          .borderRadius(A2UI_HOME_FLOATING_RADIUS)
           .clip(true)
       } else if (this.useNativeSurface()) {
         A2uiSurfaceView({
@@ -369,7 +378,7 @@ export struct HomePage {
           onAction: this.onAction
         })
         .layoutWeight(1)
-        .margin({ top: 12 })
+        .margin({ top: A2UI_HOME_SECTION_GAP })
       } else {
         HtmlHomeSurfaceView({
           html: this.htmlHomeHtml,
@@ -383,7 +392,7 @@ export struct HomePage {
           onAction: this.onAction
         })
         .layoutWeight(1)
-        .margin({ top: 12 })
+        .margin({ top: A2UI_HOME_SECTION_GAP })
       }
 
       Column() {
@@ -473,29 +482,30 @@ export struct HomePage {
           top: this.isVoiceListening ? 4 : 7,
           bottom: this.isVoiceListening ? 4 : 7
         })
-        .backgroundColor('#FFFCF8')
-        .linearGradient({
-          angle: 110,
-          colors: [['#FFFFFF', 0], ['#FFF8F2', 0.62], ['#F6ECE3', 1]]
-        })
-        .borderRadius(this.isVoiceListening ? 34 : 30)
+        .backgroundColor(COLOR_CARD)
+        .borderRadius(this.isVoiceListening ? A2UI_HOME_FLOATING_RADIUS + 4 : A2UI_HOME_FLOATING_RADIUS)
         .border({ width: 1, color: this.isVoiceListening ? '#D8BCAF' : COLOR_CARD_EDGE })
         .shadow({
-          radius: this.isVoiceListening ? 32 : 22,
+          radius: this.isVoiceListening ? 24 : 18,
           color: this.isVoiceListening ? '#995F4C2E' : COLOR_CARD_GLOW,
           offsetX: 0,
-          offsetY: this.isVoiceListening ? 10 : 7
+          offsetY: this.isVoiceListening ? 8 : 6
         })
-        .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_CURVE })
+        .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
-      .padding({ top: 12, left: 0, right: 0 })
+      .padding({ top: A2UI_HOME_SECTION_GAP, left: 0, right: 0 })
       }
       .width('100%')
       .constraintSize({ maxWidth: A2UI_HOME_MAX_WIDTH })
       .height('100%')
-      .padding({ left: 16, right: 16, top: 16, bottom: 14 })
+      .padding({
+        left: A2UI_HOME_PAGE_PADDING_X,
+        right: A2UI_HOME_PAGE_PADDING_X,
+        top: A2UI_HOME_PAGE_PADDING_TOP,
+        bottom: A2UI_HOME_PAGE_PADDING_BOTTOM
+      })
       .backgroundColor(COLOR_PAGE)
 
     }

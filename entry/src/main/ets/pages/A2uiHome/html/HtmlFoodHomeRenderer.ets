@@ -12,11 +12,16 @@ interface HtmlFoodHomeDocumentWithBusy extends HtmlHomeDocument {
 const FOOD_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --paper: #f8f2e8;
-  --ink: #17120d;
-  --muted: #756c62;
-  --line: rgba(23, 18, 13, 0.12);
-  --cream: #fffaf1;
+  --paper: #f5f2ee;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: #ffffff;
+  --ink: #211b17;
+  --ink-soft: #493f38;
+  --muted: #7a6e64;
+  --line: rgba(33, 27, 23, 0.12);
+  --accent: #995f4c;
+  --accent-soft: rgba(153, 95, 76, 0.13);
+  --cream: #ffffff;
   --tomato: #d8492f;
   --gold: #d8a63f;
   --food-amap: #16875b;
@@ -29,10 +34,10 @@ const FOOD_HOME_CSS: string = `
   --food-luckin: #356fc0;
   --food-google-maps: #4285f4;
   --food-local: #815f3e;
-  --shadow: 0 18px 44px rgba(37, 24, 13, 0.15);
-  --radius-xl: 30px;
-  --radius-lg: 24px;
-  --radius-md: 18px;
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
 }
 * { box-sizing: border-box; }
 body {
@@ -490,6 +495,35 @@ button:disabled { cursor: default; opacity: 0.5; }
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
   }
+}
+.editorial-cover {
+  min-height: 280px;
+}
+.editorial-cover h1 {
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1.04;
+}
+.editorial-feature h2 {
+  font-family: inherit;
+  font-size: 24px;
+}
+.editorial-card {
+  box-shadow: none;
+}
+.merchant-avatar {
+  border-radius: 12px;
+  box-shadow: none;
+}
+.editorial-tab,
+.editorial-expand,
+.editorial-action {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.editorial-tab:active,
+.editorial-expand:active,
+.editorial-action:active {
+  transform: scale(0.98);
 }
 `;
 

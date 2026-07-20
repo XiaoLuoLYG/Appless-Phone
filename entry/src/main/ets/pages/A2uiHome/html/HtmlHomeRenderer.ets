@@ -2,6 +2,7 @@ import { HtmlHomeDocument } from './HtmlHomeTypes';
 import { renderAggregateSearchHomeDocument, shouldRenderAggregateSearchHomeDocument } from './HtmlAggregateSearchHomeRenderer';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
+import { renderHotelHomeDocument, shouldRenderHotelHomeDocument } from './HtmlHotelHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
 import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } from './HtmlRideHailingHomeRenderer';
@@ -21,18 +22,18 @@ const HTML_HOME_CSS: string = `
   color-scheme: light;
   --paper: #f5f2ee;
   --paper-deep: #ebe5dc;
-  --panel: rgba(255, 255, 255, 0.86);
+  --panel: rgba(255, 255, 255, 0.88);
   --panel-strong: #ffffff;
   --ink: #211b17;
   --ink-soft: #493f38;
-  --muted: #786e66;
+  --muted: #7a6e64;
   --line: rgba(33, 27, 23, 0.12);
   --accent: #995f4c;
   --accent-soft: rgba(153, 95, 76, 0.13);
   --red: #b04a42;
   --red-soft: rgba(176, 74, 66, 0.1);
   --amber: #9a6a22;
-  --shadow: 0 14px 34px rgba(44, 34, 26, 0.08);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
   --train: #397a55;
   --train-soft: rgba(57, 122, 85, 0.12);
   --flight: #476f9f;
@@ -403,6 +404,59 @@ h3 {
   --kind-accent: var(--whatsapp);
   --kind-soft: var(--whatsapp-soft);
   border-color: rgba(37, 211, 102, 0.3);
+}
+.block.whatsapp-send-card {
+  padding: 16px;
+  border-color: rgba(18, 140, 126, 0.24);
+  border-radius: 20px;
+  background:
+    linear-gradient(155deg, rgba(230, 255, 240, 0.96), rgba(255, 255, 255, 0.98) 58%);
+  box-shadow: 0 16px 34px rgba(18, 140, 126, 0.10);
+}
+.block.whatsapp-send-card::before {
+  width: 0;
+}
+.whatsapp-send-card .kind-tag {
+  margin-bottom: 10px;
+  padding: 5px 8px;
+  background: rgba(18, 140, 126, 0.10);
+  color: #0d756a;
+}
+.whatsapp-send-card h3 {
+  font-size: 20px;
+  line-height: 1.2;
+}
+.whatsapp-send-card .subtitle {
+  margin-top: 6px;
+  color: #52615d;
+  font-size: 13px;
+}
+.whatsapp-send-card .rows {
+  gap: 0;
+  margin-top: 14px;
+  border: 1px solid rgba(18, 140, 126, 0.14);
+  border-radius: 15px;
+  padding: 2px 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+.whatsapp-send-card .row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+}
+.whatsapp-send-card .row:first-child {
+  border-top: 0;
+}
+.whatsapp-send-card .actions {
+  margin-top: 12px;
+}
+.whatsapp-send-card .action {
+  width: 100%;
+  min-height: 44px;
+  background: #128c7e;
+  box-shadow: 0 10px 20px rgba(18, 140, 126, 0.18);
+  white-space: nowrap;
 }
 .block[data-source-key="composio-instagram"] {
   --kind-accent: var(--instagram);
@@ -862,34 +916,8 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   margin-top: 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background:
-    radial-gradient(circle at 28% 22%, rgba(65, 95, 155, 0.18), transparent 23%),
-    radial-gradient(circle at 72% 68%, rgba(135, 98, 59, 0.16), transparent 25%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(237, 242, 247, 0.92));
+  background: #f5f2ee;
   aspect-ratio: 16 / 9;
-}
-.google-map-preview::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, rgba(33, 27, 23, 0.05) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(33, 27, 23, 0.05) 1px, transparent 1px);
-  background-size: 34px 34px;
-  pointer-events: none;
-}
-.google-map-preview::after {
-  content: "Maps";
-  position: absolute;
-  left: 14px;
-  top: 14px;
-  z-index: 2;
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #2563af;
-  font-weight: 760;
-  box-shadow: 0 8px 18px rgba(44, 34, 26, 0.1);
 }
 .google-map-preview iframe {
   display: block;
@@ -898,7 +926,7 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   width: 100%;
   height: 100%;
   border: 0;
-  opacity: 0.18;
+  opacity: 1;
 }
 .media-player {
   overflow: hidden;
@@ -2675,11 +2703,11 @@ body[data-scene] .media-player {
 @media (prefers-reduced-motion: no-preference) {
   body[data-scene] .hero,
   body[data-scene] .block {
-    animation: scene-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: scene-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 }
 @keyframes scene-rise {
-  from { opacity: 0; transform: translateY(14px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (min-width: 620px) {
@@ -2729,6 +2757,36 @@ body[data-scene] .media-player {
     padding-top: 0;
   }
   body[data-scene] .scene-visual { align-self: center; }
+}
+body[data-scene] .hero {
+  min-height: 280px;
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+body[data-scene] h1 {
+  font-size: 32px;
+}
+body[data-scene] .block,
+.block,
+.timeline-item,
+.empty,
+.history-item,
+.persona-banner {
+  box-shadow: none;
+}
+.action {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 `;
 
@@ -3083,6 +3141,8 @@ const HTML_HOME_JS: string = `
     if (key === 'model') { return '模型结果'; }
     if (key === 'welcome') { return '待输入'; }
     if (key === 'needs_auth') { return '待授权'; }
+    if (key === 'needs_input') { return '待补充'; }
+    if (key === 'confirm_required') { return '待确认'; }
     if (key === 'error' || key === 'failed' || key === 'fail') { return '失败'; }
     return raw;
   }
@@ -3713,6 +3773,14 @@ const HTML_HOME_JS: string = `
     }
     return '';
   }
+  function isWhatsAppSendBlock(block) {
+    return metricValue(block, ['toolName']) === 'whatsapp.message.send';
+  }
+  function whatsAppSendActions(block) {
+    return list(block && block.actions).filter(function (action) {
+      return text(action && action.id) === 'whatsapp.message.send.confirm';
+    }).slice(0, 1);
+  }
   function isGoogleMapsBlock(block) {
     var raw = [
       text(block && block.source),
@@ -3722,6 +3790,14 @@ const HTML_HOME_JS: string = `
     return raw.indexOf('google places') >= 0 ||
       raw.indexOf('google maps') >= 0 ||
       raw.indexOf('maps.place.') >= 0;
+  }
+  function isGoogleMapsRouteBlock(block) {
+    return metricValue(block, ['toolName']) === 'maps.route.open';
+  }
+  function mapsRouteActions(block) {
+    return list(block && block.actions).filter(function (action) {
+      return text(action && action.id) === 'maps.open.web';
+    }).slice(0, 1);
   }
   function validMapLocation(value) {
     return /^-?[0-9]+(?:\\.[0-9]+)?\\s*,\\s*-?[0-9]+(?:\\.[0-9]+)?$/.test(text(value));
@@ -3739,7 +3815,7 @@ const HTML_HOME_JS: string = `
     return location.length > 0 ? 'https://www.google.com/maps?q=' + encodeURIComponent(location) + '&output=embed' : '';
   }
   function addGoogleMapPreview(parent, block) {
-    if (!isGoogleMapsBlock(block)) { return; }
+    if (!isGoogleMapsBlock(block) || isGoogleMapsRouteBlock(block)) { return; }
     var embedUrl = googleMapEmbedUrl(block);
     if (embedUrl.length === 0) { return; }
     var preview = add(parent, 'div', 'google-map-preview');
@@ -3838,6 +3914,15 @@ const HTML_HOME_JS: string = `
   function handleLocalAction(action) {
     if (isBusy) { return false; }
     var id = text(action && action.id);
+    if (id === 'maps.open.web') {
+      var mapsUrl = text(action && action.prompt);
+      if (mapsUrl.indexOf('https://www.google.com/maps/') !== 0 &&
+        mapsUrl.indexOf('https://maps.google.com/') !== 0) {
+        return true;
+      }
+      window.open(text(action && action.prompt), '_blank');
+      return true;
+    }
     if (id === 'mail_filter_all') { localState.mail = 'all'; applyLocalView(); return true; }
     if (id === 'mail_filter_gmail') { localState.mail = 'mail-gmail'; applyLocalView(); return true; }
     if (id === 'mail_filter_qq') { localState.mail = 'mail-qq'; applyLocalView(); return true; }
@@ -3983,6 +4068,7 @@ const HTML_HOME_JS: string = `
   }
   function addComposioPreview(parent, block, key) {
     if (!isComposioSourceKey(key)) { return; }
+    if (key === 'composio-whatsapp' && isWhatsAppSendBlock(block)) { return; }
     var wrap = add(parent, 'div', 'composio-preview');
     var head = add(wrap, 'div', 'composio-preview-head');
     var iconData = mailIconData(key);
@@ -5073,6 +5159,9 @@ const HTML_HOME_JS: string = `
       card.style.animationDelay = String(Math.min(index, 6) * 42) + 'ms';
       var expandable = isExpandable(block);
       var blockSourceKey = sourceKey(block);
+      if (isWhatsAppSendBlock(block)) {
+        card.classList.add('whatsapp-send-card');
+      }
       card.setAttribute('data-kind', text(block.kind));
       card.setAttribute('data-source-key', blockSourceKey);
       if (expandable) {
@@ -5133,6 +5222,11 @@ const HTML_HOME_JS: string = `
         addStripeReceivingOnboarding(detailHost, block);
         if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
           addMailExpandedDetails(detailHost, block, card);
+        } else if (isWhatsAppSendBlock(block)) {
+          addPairs(detailHost, block.rows, 'rows');
+          addActions(detailHost, whatsAppSendActions(block));
+        } else if (isGoogleMapsRouteBlock(block)) {
+          addActions(detailHost, mapsRouteActions(block));
         } else {
           addActions(detailHost, block.actions);
           addPairs(detailHost, block.metrics, 'metrics');
@@ -5286,6 +5380,9 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
   }
   if (shouldRenderTravelHomeDocument(document)) {
     return renderTravelHomeDocument(document, isBusy);
+  }
+  if (shouldRenderHotelHomeDocument(document)) {
+    return renderHotelHomeDocument(document, isBusy);
   }
   if (shouldRenderFoodHomeDocument(document)) {
     return renderFoodHomeDocument(document, isBusy);

@@ -129,7 +129,7 @@ const TOOL_GATEWAY_URL: string = defaultToolGatewayUrl();
 const initialConnectionState: ConnectionPanelState = createInitialConnectionPanelState();
 const initialSurface: A2uiSurfaceState = createSeedA2uiSurface();
 const LOG_SNIPPET_LIMIT: number = 1200;
-const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 Appless Phone 你想完成什么';
+const DEFAULT_INPUT_PLACEHOLDER: string = '告诉 Appless 你想完成什么';
 const TRAIN_EDIT_QUERY_PLACEHOLDER: string = '请输入具体车站和时间，如：深圳北 18:00 后 到香港西九龙';
 const NAVIGATION_CARD_TTL_MS: number = 60 * 60 * 1000;
 const PAYMENT_ACCOUNT_STORE_NAME: string = 'aiphone_payment_account_store';
@@ -477,6 +477,7 @@ struct Index {
   private voiceStopRequested: boolean = false;
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
+  private hotelReturnSurface: A2uiSurfaceState | null = null;
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -1292,6 +1293,23 @@ struct Index {
     aiLogInfo('[AIPhone][LuckinReturnSurfaceRestore] reason=' + reason + ' ok=true');
   }
 
+  private rememberHotelReturnSurface(): void {
+    if (this.currentSurface.intent === 'hotel') {
+      this.hotelReturnSurface = this.surfaceSnapshot(this.currentSurface);
+    }
+  }
+
+  private restoreHotelReturnSurface(reason: string): void {
+    if (this.hotelReturnSurface === null) {
+      aiLogInfo('[AIPhone][HotelReturnSurfaceRestore] reason=' + reason + ' ok=false');
+      return;
+    }
+    const surface = this.surfaceSnapshot(this.hotelReturnSurface);
+    this.hotelReturnSurface = null;
+    this.forceApplySurface(surface, reason);
+    aiLogInfo('[AIPhone][HotelReturnSurfaceRestore] reason=' + reason + ' ok=true');
+  }
+
   private socialHubComposioAuthItem(platform: SocialHubPlatform): ComposioAuthConfigItem | null {
     const candidates = socialHubComposioToolkitCandidates(platform);
     for (let index = 0; index < candidates.length; index++) {
@@ -1777,7 +1795,8 @@ struct Index {
       if (result.ok) {
         this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
         if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
+          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(
+            result.surface, modelPrompt, actionId, actionArgs, false);
           if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
           } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {
@@ -3195,6 +3214,10 @@ struct Index {
       this.restoreLuckinReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
       return;
     }
+    if (action.id === 'hotel.search.restore') {
+      this.restoreHotelReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
+      return;
+    }
     if (this.isStripeReceivingActionId(action)) {
       await this.callToolById(
         'payment.account.setup',
@@ -3547,6 +3570,16 @@ struct Index {
       await this.callToolById(
         action.id,
         action.prompt.length > 0 ? action.prompt : action.label,
+        action.id,
+        action.args === undefined ? null : action.args
+      );
+      return;
+    }
+    if (action.id === 'hotel.detail') {
+      this.rememberHotelReturnSurface();
+      await this.callToolById(
+        'hotel.detail',
+        action.prompt,
         action.id,
         action.args === undefined ? null : action.args
       );

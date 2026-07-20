@@ -96,6 +96,9 @@ function hasAggregateSearchIntent(prompt: string): boolean {
     return false;
   }
   const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0) {
+    return false;
+  }
   const cleanedQuery = aggregateSearchQueryFromArgs(prompt, null);
   const hasCompactTopic = cleanedQuery.length > 0 && cleanedQuery !== prompt.trim();
   const wantsTopic = hasCompactTopic || containsAny(prompt, ['有关', '关于', '看看', '搜索', '搜', '聚合', '整理', '汇总', '追踪', '了解']);
@@ -126,6 +129,11 @@ function hasAggregateSearchIntent(prompt: string): boolean {
 
 function hasComposioDynamicIntent(prompt: string): boolean {
   const lowerPrompt = prompt.toLowerCase();
+  if ((lowerPrompt.indexOf('whatsapp') >= 0 || lowerPrompt.indexOf('whats app') >= 0) &&
+    containsAny(prompt, ['发', '发送', '消息给', '给']) &&
+    containsAny(prompt, ['消息', '信息', 'message'])) {
+    return false;
+  }
   if (lowerPrompt.indexOf('weibo') >= 0 || prompt.indexOf('微博') >= 0 ||
     lowerPrompt.indexOf('zhihu') >= 0 || prompt.indexOf('知乎') >= 0) {
     return false;
@@ -284,7 +292,18 @@ function inferredCalendarToolIdForPrompt(prompt: string): string {
   if (containsAny(prompt, ['修改', '改到', '更新', '调整'])) {
     return 'calendar.event.update';
   }
+  if (containsAny(prompt, ['删除', '取消日程', '移除'])) {
+    return 'calendar.event.delete';
+  }
   return 'calendar.events.search';
+}
+
+function inferredWhatsAppToolIdForPrompt(prompt: string): string {
+  const lowerPrompt = prompt.toLowerCase();
+  const hasWhatsApp = lowerPrompt.indexOf('whatsapp') >= 0 || lowerPrompt.indexOf('whats app') >= 0;
+  const hasSend = containsAny(prompt, ['发送', '发消息', '消息给', '给']) || lowerPrompt.indexOf('send') >= 0;
+  const hasMessage = containsAny(prompt, ['消息', '信息']) || lowerPrompt.indexOf('message') >= 0;
+  return hasWhatsApp && hasSend && hasMessage ? 'whatsapp.message.send' : '';
 }
 
 function paymentProviderForPrompt(prompt: string): string {
@@ -369,6 +388,10 @@ function inferredMapsToolIdForPrompt(prompt: string): string {
   }
   if (containsAny(prompt, ['详情', '详细', 'placeId', 'Place ID'])) {
     return 'maps.place.details';
+  }
+  if (containsAny(prompt, ['路线', '导航', 'directions', 'route']) ||
+    (prompt.indexOf('从') >= 0 && prompt.indexOf('到') >= 0)) {
+    return 'maps.route.open';
   }
   return 'maps.place.search';
 }
@@ -523,6 +546,10 @@ function inferredYouTubeToolIdForPrompt(prompt: string): string {
 }
 
 function inferredToolIdForPrompt(prompt: string): string {
+  const whatsappToolId = inferredWhatsAppToolIdForPrompt(prompt);
+  if (whatsappToolId.length > 0) {
+    return whatsappToolId;
+  }
   const dynamicToolId = forcedDynamicToolIdForPrompt(prompt);
   if (dynamicToolId.length > 0) {
     return dynamicToolId;
@@ -588,6 +615,12 @@ function inferredToolIdForPrompt(prompt: string): string {
 }
 
 function toolIdForActionId(actionId: string): string {
+  if (actionId === 'whatsapp.message.send.confirm') {
+    return 'whatsapp.message.send';
+  }
+  if (actionId === 'calendar.event.delete.confirm') {
+    return 'calendar.event.delete';
+  }
   if (actionId === 'gmail.ai.reply.draft') {
     return 'gmail.draft.create';
   }
@@ -617,6 +650,12 @@ function toolIdForActionId(actionId: string): string {
 }
 
 export function directPaymentToolIdForActionId(actionId: string): string {
+  if (actionId === 'whatsapp.message.send.confirm') {
+    return 'whatsapp.message.send';
+  }
+  if (actionId === 'calendar.event.delete.confirm') {
+    return 'calendar.event.delete';
+  }
   if (actionId === 'payment.confirm' ||
     actionId === 'payment.capture' ||
     actionId === 'payment.cancel' ||
@@ -801,14 +840,26 @@ export function resolveA2uiHomeToolRequest(
   surface: A2uiSurfaceState,
   fallbackPrompt: string,
   fallbackActionId: string,
-  fallbackArgs: Object | null = null
+  fallbackArgs: Object | null = null,
+  allowIntentFallback: boolean = true
 ): A2uiHomeResolvedToolRequest {
   const request = toolRequest(surface);
+  if (!allowIntentFallback && request.toolId.length === 0) {
+    return {
+      hasTool: false,
+      toolId: '',
+      prompt: fallbackPrompt,
+      actionId: fallbackActionId,
+      args: null,
+      modelPromptChars: fallbackPrompt.length
+    };
+  }
   let toolId = request.toolId;
   let prompt = request.prompt.length > 0 ? request.prompt : fallbackPrompt;
   let actionId = request.actionId.length > 0 ? request.actionId : fallbackActionId;
   const originalPrompt = fallbackPrompt.length > 0 ? fallbackPrompt : prompt;
   const forcedDynamicToolId = forcedDynamicToolIdForPrompt(prompt);
+  const forcedWhatsAppToolId = inferredWhatsAppToolIdForPrompt(originalPrompt);
   const forcedGmailToolId = forcedGmailToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedStripeReceivingToolId = inferredStripeReceivingAccountToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
   const forcedPaymentToolId = inferredPaymentToolIdForPrompt(fallbackPrompt.length > 0 ? fallbackPrompt : prompt);
@@ -817,7 +868,12 @@ export function resolveA2uiHomeToolRequest(
   const forcedAggregateToolId = inferredAggregateSearchToolIdForPrompt(originalPrompt);
   const forcedMediaToolId = inferredMediaToolIdForPrompt(prompt);
   const actionToolId = toolIdForActionId(fallbackActionId);
-  if (forcedDynamicToolId.length > 0) {
+  if (forcedWhatsAppToolId.length > 0) {
+    toolId = forcedWhatsAppToolId;
+    if (request.toolId !== forcedWhatsAppToolId && actionId.length === 0) {
+      actionId = request.toolId.length > 0 ? 'client_whatsapp_send_reroute' : 'client_intent_fallback';
+    }
+  } else if (forcedDynamicToolId.length > 0) {
     toolId = forcedDynamicToolId;
     if (actionId.length === 0) {
       actionId = request.toolId.length > 0 ? 'client_dynamic_reroute' : 'client_intent_fallback';
@@ -859,7 +915,7 @@ export function resolveA2uiHomeToolRequest(
   } else if (request.toolId === 'x.post.search' && !allowsXPostSearchPrompt(originalPrompt)) {
     toolId = inferredToolIdForPrompt(originalPrompt);
     actionId = toolId.length > 0 ? 'client_x_post_safety_reroute' : '';
-  } else if ((toolId === 'maps.place.search' || toolId === 'maps.place.details') && !hasExplicitMapsIntent(prompt)) {
+  } else if ((toolId === 'maps.place.search' || toolId === 'maps.place.details' || toolId === 'maps.route.open') && !hasExplicitMapsIntent(prompt)) {
     toolId = inferredToolIdForPrompt(prompt);
     actionId = 'client_maps_safety_reroute';
   } else if (toolId.length === 0) {

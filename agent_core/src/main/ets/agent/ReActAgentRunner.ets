@@ -3,12 +3,28 @@ import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
+import { skillLogInfo, skillLogWarn } from '../skill/SkillLog';
+import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
+const READ_TOOL_NAME = 'read';
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
+
+function padDatePart(value: number): string {
+  return value < 10 ? '0' + value.toString() : value.toString();
+}
+
+function currentLocalDateTime(now: Date = new Date()): string {
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  return now.getFullYear().toString() + '-' + padDatePart(now.getMonth() + 1) + '-' + padDatePart(now.getDate()) +
+    'T' + padDatePart(now.getHours()) + ':' + padDatePart(now.getMinutes()) + ':' + padDatePart(now.getSeconds()) +
+    sign + padDatePart(Math.floor(absoluteOffset / 60)) + ':' + padDatePart(absoluteOffset % 60);
+}
 
 class ToolCall {
   name: string;
@@ -23,6 +39,8 @@ class ToolCall {
 export class ReActAgentRunner {
   private model: LocalModel;
   private tools: ToolRegistry;
+  private skillSnapshot: SkillSnapshot | null;
+  private skillsInSystemPrompt: boolean;
   private maxSteps: number;
   private uiHandler: UiRenderHandler | null;
 
@@ -30,10 +48,14 @@ export class ReActAgentRunner {
     model: LocalModel,
     tools: ToolRegistry,
     maxSteps: number,
-    uiHandler?: UiRenderHandler
+    uiHandler?: UiRenderHandler,
+    skillSnapshot?: SkillSnapshot,
+    skillsInSystemPrompt: boolean = false
   ) {
     this.model = model;
     this.tools = tools;
+    this.skillSnapshot = skillSnapshot ?? null;
+    this.skillsInSystemPrompt = skillsInSystemPrompt;
     this.maxSteps = maxSteps;
     this.uiHandler = uiHandler ?? null;
   }
@@ -76,7 +98,13 @@ export class ReActAgentRunner {
           }
           observation = await this.runUiTool(call.input, listener);
         } else {
+          if (call.name === READ_TOOL_NAME) {
+            skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+          }
           observation = await this.tools.run(call.name, call.input);
+          if (call.name === READ_TOOL_NAME) {
+            this.emitSkillRead(call.input, observation, listener);
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
@@ -96,13 +124,28 @@ export class ReActAgentRunner {
         } else if (digest.failureKey.length > 0) {
           listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
         } else {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具结果已更新到主页。'));
+          listener(new AgentEvent(AgentEventKind.FINAL,
+            digest.finalText.length > 0 ? digest.finalText : '工具结果已更新到主页。'));
         }
         return;
       }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
+    if (this.skillSnapshot === null || !observation.startsWith('# Skill:')) {
+      skillLogWarn(`ReActAgentRunner: skill read did not return skill content input=${input}`);
+      return;
+    }
+    const skill = this.skillSnapshot.findByName(input.trim());
+    if (skill !== null) {
+      skillLogInfo(`ReActAgentRunner: skill selected name=${skill.name}`);
+      listener(new AgentEvent(AgentEventKind.SKILL, skill.name));
+    } else {
+      skillLogWarn(`ReActAgentRunner: skill content returned but snapshot lookup failed input=${input}`);
+    }
   }
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
@@ -126,6 +169,7 @@ export class ReActAgentRunner {
 
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
+    prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
     prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
     if (this.uiHandler !== null) {
@@ -136,10 +180,22 @@ export class ReActAgentRunner {
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
     prompt += 'If a tool observation already contains UI or A2UI protocol output, return Final; the visible result is already on screen.\n';
     prompt += 'Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
+    if (this.tools.has('modelscope')) {
+      prompt += 'Call modelscope only for an activated ModelScope MCP. First call modelscope with operation=search and the full task; then execute one returned qualifiedName whose risk is read.\n';
+      prompt += 'Never invent a ModelScope qualifiedName. If ModelScope blocks an unsafe or unannotated tool, stop and explain that a real confirmation flow is required.\n';
+    }
+    prompt += 'Calendar write rule: when the requested end state creates, updates, moves, or deletes a Google Calendar event, use the matching calendar.event.* write tool, never calendar.events.search. For an update or move with an incomplete destination time, call calendar.event.update with the existing-event query/timeMin/timeMax selector and omit missing new start or end; the client will keep real matches visible and ask for the missing time without writing. Never ask the user for an Event ID.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
       prompt += conversation.formatPriorConversation();
+    }
+
+    if (!this.skillsInSystemPrompt) {
+      const skillsSection = buildSkillsSection(this.skillSnapshot);
+      if (skillsSection.length > 0) {
+        prompt += `${skillsSection}\n\n`;
+      }
     }
 
     prompt += 'Tools:\n';

@@ -21,6 +21,7 @@ export interface A2uiObservationDigest {
   text: string;
   shouldStop: boolean;
   failureKey: string;
+  finalText: string;
 }
 
 const FAILURE_STATUSES: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
@@ -34,6 +35,9 @@ const USEFUL_ROW_LABELS: string[] = [
   'Draft ID',
   'Message ID',
   'Thread ID',
+  'Event ID',
+  'Start',
+  'End',
   'Error',
   'Credential',
   'Query'
@@ -44,7 +48,8 @@ function emptyDigest(observation: string): A2uiObservationDigest {
     isA2ui: false,
     text: observation,
     shouldStop: false,
-    failureKey: ''
+    failureKey: '',
+    finalText: ''
   };
 }
 
@@ -156,7 +161,8 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
         isA2ui: true,
         text: 'ObservationDigest\nerror: ' + applied.error,
         shouldStop: true,
-        failureKey: 'a2ui:error'
+        failureKey: 'a2ui:error',
+        finalText: ''
       };
     }
   }
@@ -179,10 +185,35 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
   }
   appendResults(lines, results);
 
+  let finalText = '';
+  if (toolId === 'calendar.events.search') {
+    const eventSummaries: string[] = [];
+    for (let index = 0; index < results.length; index++) {
+      let eventId = '';
+      let start = '';
+      for (let rowIndex = 0; rowIndex < results[index].rows.length; rowIndex++) {
+        const row = results[index].rows[rowIndex];
+        if (row.label.trim() === 'Event ID') {
+          eventId = compact(row.value);
+        } else if (row.label.trim() === 'Start') {
+          start = compact(row.value);
+        }
+      }
+      if (eventId.length > 0) {
+        eventSummaries.push(compact(results[index].title) + '；Event ID：' + eventId +
+          (start.length > 0 ? '；开始：' + start : ''));
+      }
+    }
+    finalText = eventSummaries.length > 0 ?
+      'Google Calendar 查询完成。已找到：' + eventSummaries.join('。') + '。系统会在后续修改或删除时使用上面的真实 Event ID，用户无需输入 Event ID。' :
+      'Google Calendar 查询完成，没有找到可修改或删除的日程。';
+  }
+
   return {
     isA2ui: true,
     text: lines.join('\n'),
     shouldStop: true,
-    failureKey: failureKeyFor(toolId, surface, connect, results)
+    failureKey: failureKeyFor(toolId, surface, connect, results),
+    finalText: finalText
   };
 }

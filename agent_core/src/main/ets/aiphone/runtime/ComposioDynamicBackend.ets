@@ -1,6 +1,7 @@
 import { ComposioConfig } from '../../composio/ComposioConfig';
 import { ComposioSessionClient, proxyToolkitAccountsFromAuthConfigs } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
+import { isUnsafeMcpTool } from './DynamicToolRegistry';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 
 interface ComposioExecuteArgs {
@@ -313,9 +314,45 @@ function ownerNameFromPrompt(prompt: string): string {
   return '';
 }
 
-function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): string {
+export function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): string {
   const keyword = promptSearchKeyword(prompt);
   const toolkit = composioToolkitFromPrompt(prompt);
+  if (fixedToolId === 'social.x.profile') {
+    return 'Get authenticated X Twitter user profile';
+  }
+  if (fixedToolId === 'social.x.dm.list') {
+    return 'List recent X Twitter direct message events';
+  }
+  if (fixedToolId === 'social.slack.message.search') {
+    return 'Search recent Slack direct messages';
+  }
+  if (fixedToolId === 'social.instagram.conversations.list') {
+    return 'List Instagram messaging conversations';
+  }
+  if (fixedToolId === 'social.instagram.profile') {
+    return 'Get authenticated Instagram user profile';
+  }
+  if (fixedToolId === 'social.instagram.messages.list') {
+    return 'List messages in an Instagram conversation';
+  }
+  if (fixedToolId === 'whatsapp.phone_numbers.list') {
+    return 'List WhatsApp Business phone numbers for the authenticated account';
+  }
+  if (fixedToolId === 'whatsapp.message.send') {
+    return 'Send a WhatsApp Business text message';
+  }
+  if (fixedToolId === 'calendar.events.search') {
+    return 'List Google Calendar events';
+  }
+  if (fixedToolId === 'calendar.event.create') {
+    return 'Create a Google Calendar event';
+  }
+  if (fixedToolId === 'calendar.event.update') {
+    return 'Patch a Google Calendar event';
+  }
+  if (fixedToolId === 'calendar.event.delete') {
+    return 'Delete a Google Calendar event by event ID';
+  }
   if (fixedToolId === 'youtube.mine.playlists') {
     return 'List my YouTube playlists for the authenticated user';
   }
@@ -405,10 +442,16 @@ function fixedToolAllowsSideEffectSlug(fixedToolId: string, slug: string): boole
     return slug === 'gmail_reply_to_thread';
   }
   if (fixedToolId === 'calendar.event.create') {
-    return slugContainsAny(slug, ['create', 'insert', 'add']);
+    return slug === 'googlecalendar_create_event';
   }
   if (fixedToolId === 'calendar.event.update') {
-    return slugContainsAny(slug, ['update', 'patch', 'edit']);
+    return slug === 'googlecalendar_patch_event';
+  }
+  if (fixedToolId === 'calendar.event.delete') {
+    return slug === 'googlecalendar_delete_event';
+  }
+  if (fixedToolId === 'whatsapp.message.send') {
+    return slug === 'whatsapp_send_message';
   }
   return false;
 }
@@ -454,10 +497,67 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
     return [
       { source: 'eventId', targets: ['eventId', 'event_id', 'id'] },
       { source: 'title', targets: ['title', 'summary', 'name'] },
-      { source: 'start', targets: ['start', 'startDateTime', 'start_time', 'startTime'] },
-      { source: 'end', targets: ['end', 'endDateTime', 'end_time', 'endTime'] },
+      { source: 'start', targets: ['start_datetime', 'start', 'startDateTime', 'start_time', 'startTime'] },
+      { source: 'end', targets: ['end_datetime', 'end', 'endDateTime', 'end_time', 'endTime'] },
       { source: 'timezone', targets: ['timezone', 'timeZone'] },
       { source: 'calendarId', targets: ['calendarId', 'calendar_id'] }
+    ];
+  }
+  if (toolId === 'calendar.event.delete') {
+    return [
+      { source: 'eventId', targets: ['event_id', 'eventId', 'id'] },
+      { source: 'calendarId', targets: ['calendar_id', 'calendarId'] },
+      { source: 'sendUpdates', targets: ['send_updates', 'sendUpdates'] }
+    ];
+  }
+  if (toolId === 'whatsapp.phone_numbers.list') {
+    return [
+      { source: 'wabaId', targets: ['waba_id'] }
+    ];
+  }
+  if (toolId === 'whatsapp.message.send') {
+    return [
+      { source: 'phoneNumberId', targets: ['phone_number_id'] },
+      { source: 'toNumber', targets: ['to_number'] },
+      { source: 'text', targets: ['text'] },
+      { source: 'previewUrl', targets: ['preview_url'] }
+    ];
+  }
+  if (toolId === 'social.x.dm.list') {
+    return [
+      { source: 'maxResults', targets: ['max_results', 'maxResults'] },
+      { source: 'expansions', targets: ['expansions'] },
+      { source: 'eventTypes', targets: ['event_types'] },
+      { source: 'userFields', targets: ['user_fields'] },
+      { source: 'dmEventFields', targets: ['dm_event_fields'] }
+    ];
+  }
+  if (toolId === 'social.x.profile') {
+    return [
+      { source: 'userFields', targets: ['user_fields'] }
+    ];
+  }
+  if (toolId === 'social.slack.message.search') {
+    return [
+      { source: 'query', targets: ['query'] },
+      { source: 'sort', targets: ['sort'] },
+      { source: 'count', targets: ['count'] }
+    ];
+  }
+  if (toolId === 'social.instagram.conversations.list') {
+    return [
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
+  if (toolId === 'social.instagram.profile') {
+    return [
+      { source: 'igUserId', targets: ['ig_user_id'] }
+    ];
+  }
+  if (toolId === 'social.instagram.messages.list') {
+    return [
+      { source: 'conversationId', targets: ['conversation_id'] },
+      { source: 'limit', targets: ['limit'] }
     ];
   }
   if (toolId === 'x.post.search') {
@@ -478,6 +578,12 @@ function fixedWritePreservedArgs(toolId: string): string[] {
   }
   if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
     return ['eventId', 'title', 'start', 'end', 'timezone', 'calendarId'];
+  }
+  if (toolId === 'calendar.event.delete') {
+    return ['eventId', 'calendarId', 'sendUpdates'];
+  }
+  if (toolId === 'whatsapp.message.send') {
+    return ['phoneNumberId', 'toNumber', 'text', 'previewUrl'];
   }
   return [];
 }
@@ -548,7 +654,35 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
     }
     return missing;
   }
+  if (fixedToolId === 'calendar.event.delete') {
+    return hasMeaningfulValue(record.eventId) ? [] : ['eventId'];
+  }
+  if (fixedToolId === 'whatsapp.message.send') {
+    const missing: string[] = [];
+    ['phoneNumberId', 'toNumber', 'text'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
+  }
   return [];
+}
+
+export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
+  if (fixedToolId === 'social.x.profile') return 'TWITTER_USER_LOOKUP_ME';
+  if (fixedToolId === 'social.x.dm.list') return 'TWITTER_GET_RECENT_DM_EVENTS';
+  if (fixedToolId === 'social.slack.message.search') return 'SLACK_SEARCH_MESSAGES';
+  if (fixedToolId === 'social.instagram.profile') return 'INSTAGRAM_GET_USER_INFO';
+  if (fixedToolId === 'social.instagram.conversations.list') return 'INSTAGRAM_LIST_ALL_CONVERSATIONS';
+  if (fixedToolId === 'social.instagram.messages.list') return 'INSTAGRAM_LIST_ALL_MESSAGES';
+  if (fixedToolId === 'whatsapp.phone_numbers.list') return 'WHATSAPP_GET_PHONE_NUMBERS';
+  if (fixedToolId === 'whatsapp.message.send') return 'WHATSAPP_SEND_MESSAGE';
+  if (fixedToolId === 'calendar.events.search') return 'GOOGLECALENDAR_EVENTS_LIST';
+  if (fixedToolId === 'calendar.event.create') return 'GOOGLECALENDAR_CREATE_EVENT';
+  if (fixedToolId === 'calendar.event.update') return 'GOOGLECALENDAR_PATCH_EVENT';
+  if (fixedToolId === 'calendar.event.delete') return 'GOOGLECALENDAR_DELETE_EVENT';
+  return '';
 }
 
 function missingFixedWriteArgsResult(
@@ -579,6 +713,24 @@ function mergeFixedArguments(
     return;
   }
   const record = argumentRecord(fixedArgs);
+  if (fixedToolId === 'calendar.events.search' && !schemaHasProperties(schema)) {
+    const names: string[][] = [
+      ['query', 'q'],
+      ['timeMin', 'timeMin'],
+      ['timeMax', 'timeMax'],
+      ['timezone', 'timeZone'],
+      ['calendarId', 'calendarId']
+    ];
+    names.forEach((pair: string[]) => {
+      const value = record[pair[0]];
+      if (hasMeaningfulValue(value)) {
+        target[pair[1]] = value as Object | string | number | boolean;
+      }
+    });
+    target.singleEvents = true;
+    target.orderBy = 'startTime';
+    return;
+  }
   fixedArgumentAliases(fixedToolId).forEach((alias: FixedArgumentAlias) => {
     const value = record[alias.source];
     const explicitEmptyQuery = alias.source === 'query' && value === '';
@@ -593,7 +745,8 @@ function mergeFixedArguments(
 export function composioPreferredToolScore(prompt: string, tool: ComposioSearchTool, fixedToolId: string = ''): number {
   const slug = textOf(tool.toolSlug).toLowerCase();
   const description = textOf(tool.description).toLowerCase();
-  if (slug.length === 0 || isUnsafeComposioExecute(slug, '{}')) {
+  if (slug.length === 0 ||
+    (isUnsafeComposioExecute(slug, '{}') && !fixedToolAllowsSideEffectSlug(fixedToolId, slug))) {
     return -10000;
   }
   let score = 0;
@@ -759,6 +912,16 @@ function bestToolForPrompt(payload: ComposioSearchObservation, prompt: string, f
   if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
     return null;
   }
+  const exactSlug = composioExactToolSlugForFixedTool(fixedToolId).toLowerCase();
+  if (exactSlug.length > 0) {
+    for (let index = 0; index < payload.tools.length; index++) {
+      const exactTool = payload.tools[index] as ComposioSearchTool;
+      if (textOf(exactTool.toolSlug).trim().toLowerCase() === exactSlug) {
+        return exactTool;
+      }
+    }
+    return null;
+  }
   let best: ComposioSearchTool | null = null;
   let bestScore = -10000;
   payload.tools.forEach((item: Object) => {
@@ -816,6 +979,11 @@ function setIfSupported(
 function isPaginationTokenName(name: string): boolean {
   const lower = name.toLowerCase();
   return lower.indexOf('token') >= 0 || lower.indexOf('cursor') >= 0;
+}
+
+function isOpaqueIdentifierName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === 'id' || lower.endsWith('_id') || lower.endsWith('id');
 }
 
 function driveQueryFor(keyword: string): string {
@@ -973,6 +1141,9 @@ export function composioArgumentsForTool(
     if (args[name] === undefined && shouldPreserveMissingFixedWriteArg(fixedToolId, name)) {
       return;
     }
+    if (args[name] === undefined && isOpaqueIdentifierName(name)) {
+      return;
+    }
     if (args[name] === undefined && properties[name] !== undefined) {
       args[name] = fallbackValueForProperty(name, properties[name], prompt);
     }
@@ -1018,7 +1189,8 @@ function nestedStringField(record: Record<string, Object | string | number | boo
 }
 
 function itemTitle(item: Object, index: number): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const title = stringField(record, ['title', 'name', 'subject', 'filename', 'file_name', 'display_name', 'event_name']);
   if (title.length > 0) {
     return title;
@@ -1035,7 +1207,8 @@ function itemTitle(item: Object, index: number): string {
 }
 
 function itemDetail(item: Object): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const parts: string[] = [];
   const number = stringField(record, ['number', 'id']);
   if (number.length > 0) {
@@ -1123,6 +1296,36 @@ function firstArrayHit(value: Object | string | number | boolean | null | undefi
     }
   }
   return { found: false, label: '', items: [] };
+}
+
+function digitsOnly(value: string): boolean {
+  if (value.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index++) {
+    const char = value.charAt(index);
+    if (char < '0' || char > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function composioPhoneNumberIdsFromObservation(observation: string): string[] {
+  try {
+    const hit = firstArrayHit(JSON.parse(observation) as Object);
+    const ids: string[] = [];
+    hit.items.forEach((item: Object) => {
+      const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+      const id = textOf(record.id).trim();
+      if (digitsOnly(id) && ids.indexOf(id) < 0) {
+        ids.push(id);
+      }
+    });
+    return ids;
+  } catch (_error) {
+    return [];
+  }
 }
 
 function topLevelMessage(payload: Record<string, Object | string | number | boolean | null | undefined>): string {
@@ -1388,14 +1591,17 @@ function executeSummary(toolSlug: string, rows: A2uiLabelValueData[]): string {
 
 export function configureComposioConfigFromRawJson(rawJson: string): void {
   composioConfig = ComposioConfig.fromRawJson(rawJson);
+  refreshComposioConnections();
+}
+
+export function refreshComposioConnections(): void {
   composioClient = null;
   scopedComposioClients.clear();
 }
 
 export function configureComposioUserId(userId: string): void {
   runtimeComposioUserId = userId.trim();
-  composioClient = null;
-  scopedComposioClients.clear();
+  refreshComposioConnections();
 }
 
 export function currentComposioUserId(): string {
@@ -1479,8 +1685,8 @@ export function proxyToolkitAccountsPreview(payload: Object, toolkitAllowlist: s
   return proxyToolkitAccountsFromAuthConfigs(payload, toolkitAllowlist);
 }
 
-export function isUnsafeComposioExecute(_toolSlug: string, _argsJson: string): boolean {
-  return false;
+export function isUnsafeComposioExecute(toolSlug: string, _argsJson: string): boolean {
+  return isUnsafeMcpTool(toolSlug, '');
 }
 
 export function composioDynamicMissingConfigResult(prompt: string): DynamicGenericToolResult {
@@ -1582,6 +1788,18 @@ async function callComposioSearchAndExecute(
   }
   const tool = bestToolForPrompt(payload, prompt, fixedToolId);
   if (tool === null) {
+    const expected = composioExactToolSlugForFixedTool(fixedToolId);
+    if (expected.length > 0) {
+      return {
+        sourceTag: 'Composio',
+        toolName: fixedToolId,
+        title: 'Composio 工具不可用',
+        status: 'error',
+        summary: 'Composio 没有返回必需工具 ' + expected + '。',
+        rows: [{ label: 'Expected Tool', value: expected }],
+        rawPreview: searchObservation.substring(0, 16000)
+      };
+    }
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   const slug = textOf(tool.toolSlug).trim();
@@ -1604,7 +1822,8 @@ export async function callComposioFixedRaw(
   }
   const tool = bestToolForPrompt(payload, prompt, fixedToolId);
   if (tool === null) {
-    throw new Error('Composio did not find a Gmail thread read tool.');
+    const expected = composioExactToolSlugForFixedTool(fixedToolId);
+    throw new Error(expected.length > 0 ? 'Composio did not find required tool ' + expected + '.' : 'Composio did not find a matching tool.');
   }
   const toolSlug = textOf(tool.toolSlug).trim();
   const toolArgs = composioArgumentsForTool(tool, prompt, fixedToolId, fixedArgs);
@@ -1647,6 +1866,24 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
   const operation = textOf(parsed.operation).trim();
   if (!shouldAttemptComposioDynamic(prompt, operation, composioConfig.isConfigured())) {
     return null;
+  }
+  if (operation === 'execute') {
+    const slug = textOf(parsed.toolSlug).trim();
+    if (isUnsafeComposioExecute(slug, JSON.stringify(parsed.arguments ?? new Object()))) {
+      const summary = 'UnsafeActionBlocked：dynamic.search 只允许读取、搜索、列出或获取操作；写操作必须使用带确认流程的固定工具。';
+      return {
+        sourceTag: 'Composio',
+        toolName: slug.length > 0 ? slug : 'dynamic.search',
+        title: 'UnsafeActionBlocked',
+        status: 'unsafe_action_blocked',
+        summary: summary,
+        rows: [
+          { label: 'Blocked action', value: slug.length > 0 ? slug : 'unknown' },
+          { label: 'Next step', value: '使用带确认流程的固定工具。' }
+        ],
+        rawPreview: JSON.stringify({ blocked: true, reason: 'unsafe_action_blocked', toolSlug: slug })
+      };
+    }
   }
   if (!composioConfig.isConfigured()) {
     return composioDynamicMissingConfigResult(prompt);

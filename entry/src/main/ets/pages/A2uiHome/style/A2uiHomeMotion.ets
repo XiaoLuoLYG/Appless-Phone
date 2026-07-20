@@ -1,7 +1,8 @@
-export const A2UI_MOTION_NORMAL_MS: number = 260;
-export const A2UI_MOTION_CURVE: Curve = Curve.EaseInOut;
+export const A2UI_MOTION_NORMAL_MS: number = 220;
+export const A2UI_MOTION_CURVE: Curve = Curve.EaseOut;
+export const A2UI_MOTION_MOVE_CURVE: Curve = Curve.EaseInOut;
 export const A2UI_THINKING_DOT_MS: number = 420;
-export const A2UI_ENTER_OFFSET_Y: number = 8;
+export const A2UI_ENTER_OFFSET_Y: number = 6;
 export const A2UI_THINKING_PULSE_MIN: number = 1;
 
 export function a2uiEnterTransition(offsetY: number = A2UI_ENTER_OFFSET_Y): TransitionEffect {

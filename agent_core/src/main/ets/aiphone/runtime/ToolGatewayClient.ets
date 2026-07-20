@@ -75,23 +75,51 @@ import {
   saveXOAuthPending,
   saveXOAuthTokenSet
 } from './XOAuthClient';
-import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient } from './GenericMcpClient';
+import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
+import { hotelDetailA2ui, hotelFailureA2ui, hotelSearchA2ui } from './HotelToolA2ui';
+import {
+  HotelDetailParseResult,
+  HotelSearchParseResult,
+  hotelDetailProviderArgs,
+  hotelSearchProviderArgs,
+  normalizeHotelDetailResult,
+  normalizeHotelSearchResult,
+  parseHotelDetailRequest,
+  parseHotelSearchRequest
+} from './HotelToolTypes';
 import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
-import { callCalendarTool } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
+import {
+  CalendarEventArgs,
+  calendarEventRequiredFields,
+  calendarDeleteTargetFromResultsForTest,
+  calendarUpdateArgsFromResultsForTest,
+  calendarUpdateNeedsInputResults,
+  calendarMissingArgsResult,
+  calendarProviderDateTime,
+  calendarResultsFromComposioObservation,
+  normalizedCalendarArgsForPrompt
+} from './CalendarApiClient';
+import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
+import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
-import { callComposioDynamic, callComposioFixedRaw, ComposioRawExecution } from './ComposioDynamicBackend';
+import {
+  callComposioDynamic,
+  callComposioFixedRaw,
+  composioDynamicResultFromObservation,
+  composioPhoneNumberIdsFromObservation,
+  ComposioRawExecution,
+  refreshComposioConnections
+} from './ComposioDynamicBackend';
 import { aggregateSearchA2ui } from './AggregateSearchA2ui';
 import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
 import {
   PaymentAccount,
   PaymentMode,
@@ -237,6 +265,8 @@ interface LocalProviderConfig {
   slackBotToken: string;
   flightMcpKey: string;
   variflightApiUrl: string;
+  hotelMcpKey: string;
+  hotelMcpUrl: string;
   amapKey: string;
   amapDefaultLocation: string;
   amapRadius: string;
@@ -314,6 +344,8 @@ interface LocalProviderRawConfig {
   FLIGHT_API_KEY?: string;
   VARIFLIGHT_API_URL?: string;
   FLIGHT_VARIFLIGHT_URL?: string;
+  ROLLINGGO_HOTEL_MCP_KEY?: string;
+  ROLLINGGO_HOTEL_MCP_URL?: string;
   AMAP_KEY?: string;
   AMAP_DEFAULT_LOCATION?: string;
   FOOD_DEFAULT_LOCATION?: string;
@@ -379,6 +411,8 @@ interface LocalProviderRawConfig {
   PAYMENT_LIVE_MAX_AMOUNT_MINOR?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
+  hotelMcpKey?: string;
+  hotelMcpUrl?: string;
   amapKey?: string;
   amapDefaultLocation?: string;
   amapRadius?: string;
@@ -1228,6 +1262,8 @@ let localProviderConfig: LocalProviderConfig = {
   slackBotToken: '',
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
+  hotelMcpKey: '',
+  hotelMcpUrl: '',
   amapKey: '',
   amapDefaultLocation: '',
   amapRadius: DEFAULT_AMAP_RADIUS,
@@ -1309,6 +1345,49 @@ interface MapsToolArgs {
   keyword?: string;
   placeId?: string;
   id?: string;
+}
+
+interface WhatsAppSendArgs {
+  toNumber?: ToolArgValue;
+  text?: ToolArgValue;
+  phoneNumberId?: ToolArgValue;
+  wabaId?: ToolArgValue;
+  previewUrl?: ToolArgValue;
+  confirmed?: ToolArgValue;
+}
+
+interface WhatsAppProviderArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  previewUrl: boolean;
+}
+
+interface WhatsAppConfirmArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  wabaId: string;
+  previewUrl: boolean;
+  confirmed: boolean;
+}
+
+interface WhatsAppPhoneNumbersArgs {
+  wabaId?: string;
+}
+
+interface CalendarComposioArgs extends CalendarEventArgs {
+  confirmed?: boolean;
+  sendUpdates?: string;
+}
+
+interface CalendarDeleteConfirmArgs {
+  eventId: string;
+  calendarId: string;
+  title: string;
+  start: string;
+  end: string;
+  confirmed: boolean;
 }
 
 type ToolArgValue = Object | string | number | boolean | null | undefined;
@@ -1603,6 +1682,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     slackBotToken: config.slackBotToken.trim(),
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
+    hotelMcpKey: config.hotelMcpKey.trim(),
+    hotelMcpUrl: config.hotelMcpUrl.trim(),
     amapKey: config.amapKey.trim(),
     amapDefaultLocation: config.amapDefaultLocation.trim(),
     amapRadius: config.amapRadius.trim().length > 0 ? config.amapRadius.trim() : DEFAULT_AMAP_RADIUS,
@@ -1672,6 +1753,8 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' slackUserTokenChars=' + localProviderConfig.slackUserToken.length.toString() +
     ' slackBotTokenChars=' + localProviderConfig.slackBotToken.length.toString() +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
+    ' hotelKeyChars=' + localProviderConfig.hotelMcpKey.length.toString() +
+    ' hotelUrlPresent=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'true' : 'false') +
     ' amapKeyChars=' + localProviderConfig.amapKey.length.toString() +
     ' tencentMapKeyChars=' + localProviderConfig.tencentMapKey.length.toString() +
     ' baiduMapAkChars=' + localProviderConfig.baiduMapAk.length.toString() +
@@ -1736,6 +1819,8 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     slackBotToken: firstText([parsed.SLACK_BOT_TOKEN, parsed.slackBotToken]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
+    hotelMcpKey: firstText([parsed.ROLLINGGO_HOTEL_MCP_KEY, parsed.hotelMcpKey]),
+    hotelMcpUrl: firstText([parsed.ROLLINGGO_HOTEL_MCP_URL, parsed.hotelMcpUrl]),
     amapKey: firstText([parsed.AMAP_KEY, parsed.amapKey]),
     amapDefaultLocation: firstText([parsed.AMAP_DEFAULT_LOCATION, parsed.FOOD_DEFAULT_LOCATION, parsed.amapDefaultLocation]),
     amapRadius: firstText([parsed.AMAP_RADIUS, parsed.amapRadius]),
@@ -1807,6 +1892,8 @@ export function localProviderConfigDebugSummary(): string {
     ', slackUserToken=' + (localProviderConfig.slackUserToken.length > 0 ? 'present(' + localProviderConfig.slackUserToken.length.toString() + ')' : 'missing') +
     ', slackBotToken=' + (localProviderConfig.slackBotToken.length > 0 ? 'present(' + localProviderConfig.slackBotToken.length.toString() + ')' : 'missing') +
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
+    ', hotelKey=' + (localProviderConfig.hotelMcpKey.length > 0 ? 'present(' + localProviderConfig.hotelMcpKey.length.toString() + ')' : 'missing') +
+    ', hotelUrl=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'present' : 'missing') +
     ', amapKey=' + (localProviderConfig.amapKey.length > 0 ? 'present(' + localProviderConfig.amapKey.length.toString() + ')' : 'missing') +
     ', tencentMapKey=' + (localProviderConfig.tencentMapKey.length > 0 ? 'present(' + localProviderConfig.tencentMapKey.length.toString() + ')' : 'missing') +
     ', baiduMapAk=' + (localProviderConfig.baiduMapAk.length > 0 ? 'present(' + localProviderConfig.baiduMapAk.length.toString() + ')' : 'missing') +
@@ -2984,12 +3071,18 @@ export function rideOrderConfirmedForTest(args: Object | null): boolean {
   return rideOrderConfirmed(rideOrderArgs(args));
 }
 
-function rideErrorResult(sourceTag: string, toolName: string, title: string, summary: string): DynamicGenericToolResult {
+function rideErrorResult(
+  sourceTag: string,
+  toolName: string,
+  title: string,
+  summary: string,
+  status: string = 'error'
+): DynamicGenericToolResult {
   return {
     sourceTag: sourceTag,
     toolName: toolName,
     title: title,
-    status: 'error',
+    status: status,
     summary: summary,
     rows: [
       { label: '状态', value: summary }
@@ -4058,7 +4151,13 @@ async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: str
   }
   const didiCity = rideDidiCityFromRouteOrAmap(route.city, amapOriginPoint, amapDestinationPoint);
   if (didiKey.length === 0) {
-    results.push(rideErrorResult('滴滴', toolId, '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。'));
+    results.push(rideErrorResult(
+      '滴滴',
+      toolId,
+      '缺少滴滴 MCP Key',
+      '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。',
+      'needs_input'
+    ));
   } else if (didiCity.length === 0) {
     results.push(rideErrorResult('滴滴', toolId, '需要补充城市', '请提供起终点所在城市，或确保高德地理编码可返回城市；滴滴 maps_textsearch 要求 city 参数，AIPhone 不会猜测城市或坐标。'));
   } else {
@@ -4348,6 +4447,9 @@ function intentForTool(toolId: string): string {
   if (toolId === 'food.search') {
     return 'food';
   }
+  if (toolId === 'hotel.search' || toolId === 'hotel.detail') {
+    return 'hotel';
+  }
   if (toolId === 'travel.search' || toolId === 'train.search' || toolId === 'flight.search') {
     return 'travel';
   }
@@ -4415,6 +4517,12 @@ function titleForTool(toolId: string): string {
   if (toolId === 'food.search') {
     return '附近餐饮查询';
   }
+  if (toolId === 'hotel.search') {
+    return '酒店搜索';
+  }
+  if (toolId === 'hotel.detail') {
+    return '实时房型与报价';
+  }
   return '工具调用';
 }
 
@@ -4451,7 +4559,8 @@ function pendingA2ui(toolId: string, prompt: string, surfaceId: string): string 
     ? '正在同时等待 12306 和飞常准返回'
     : (toolId === 'train.search'
     ? '正在等待 12306 返回'
-    : (toolId === 'flight.search' ? '正在等待飞常准返回' : (toolId === 'food.search' ? '正在等待外卖聚合来源返回' : '正在调用工具')));
+    : (toolId === 'flight.search' ? '正在等待飞常准返回' : (toolId === 'food.search' ? '正在等待外卖聚合来源返回' :
+      (toolId === 'hotel.search' || toolId === 'hotel.detail' ? '正在等待 RollingGo 返回真实酒店数据' : '正在调用工具'))));
   const components: A2uiComponent[] = [
     {
       id: 'root',
@@ -10014,80 +10123,6 @@ async function composioFixedAppResult(
   }
 }
 
-function firstUrlInText(value: string): string {
-  const parts = value.split('|').join(' ').split(' ');
-  for (let index = 0; index < parts.length; index++) {
-    let part = parts[index].trim();
-    while (part.length > 0) {
-      const last = part.charAt(part.length - 1);
-      if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
-        part = part.substring(0, part.length - 1);
-      } else {
-        break;
-      }
-    }
-    if (part.indexOf('https://') === 0 || part.indexOf('http://') === 0) {
-      return part;
-    }
-  }
-  return '';
-}
-
-function isComposioSystemLabel(label: string): boolean {
-  return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
-    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段' || label === 'Tool ID';
-}
-
-function isSlackDirectMessageRow(row: A2uiLabelValueData): boolean {
-  const text = (row.label + ' ' + row.value).toLowerCase();
-  return text.indexOf('/archives/d') >= 0;
-}
-
-function socialConnectionStatus(status: string): string {
-  if (status === 'success') {
-    return 'connected';
-  }
-  if (status === 'needs_auth' || status === 'auth_required') {
-    return 'needs_auth';
-  }
-  return 'error';
-}
-
-function composioSocialFeedResult(platform: SocialHubPlatform, displayName: string, result: DynamicGenericToolResult): SocialHubFeedResult {
-  const connections: SocialHubConnectionData[] = [{
-    platform: platform,
-    status: socialConnectionStatus(result.status),
-    displayName: displayName,
-    accountId: '',
-    message: result.summary
-  } as SocialHubConnectionData];
-  const items: SocialHubItemData[] = [];
-  result.rows.forEach((row: A2uiLabelValueData, index: number) => {
-    if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
-      return;
-    }
-    if (platform === 'slack' && !isSlackDirectMessageRow(row)) {
-      return;
-    }
-    items.push({
-      id: 'composio-' + platform + '-' + index.toString(),
-      platform: platform,
-      kind: 'message',
-      author: row.label,
-      handle: displayName,
-      text: row.value,
-      timestamp: '',
-      url: firstUrlInText(row.value),
-      mediaUrl: '',
-      channel: 'Composio',
-      channelId: '',
-      threadId: '',
-      unread: false
-    } as SocialHubItemData);
-  });
-  return { items: items, connections: connections };
-}
-
 function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
   return results.length > 0 && results[0].status === 'error';
 }
@@ -10172,6 +10207,62 @@ interface SocialHubDraftRequestArgs {
   instruction?: Object | string | number | boolean | null;
 }
 
+interface SocialHubFeedRequestArgs {
+  platforms?: Object[];
+}
+
+interface SocialXListArgs {
+  maxResults: number;
+  expansions: string[];
+  eventTypes: string[];
+  userFields: string[];
+  dmEventFields: string[];
+}
+
+interface SocialXProfileArgs {
+  userFields: string[];
+}
+
+interface SocialSlackSearchArgs {
+  query: string;
+  sort: string;
+  count: number;
+}
+
+interface SocialInstagramConversationArgs {
+  limit: number;
+}
+
+interface SocialInstagramProfileArgs {
+  igUserId: string;
+}
+
+interface SocialInstagramMessageArgs {
+  conversationId: string;
+  limit: number;
+}
+
+interface InstagramConversationPayload {
+  id?: Object | string | number | boolean | null;
+}
+
+interface InstagramConversationPage {
+  data?: Object[];
+}
+
+interface InstagramConversationEnvelope {
+  data?: InstagramConversationPage | null;
+}
+
+interface SocialProfilePayload {
+  id?: Object | string | number | boolean | null;
+  data?: Object | null;
+}
+
+interface SocialProfileEnvelope {
+  data?: Object | null;
+}
+
 function emptySocialHubDraftRequestArgs(): SocialHubDraftRequestArgs {
   return {
     itemId: '',
@@ -10211,28 +10302,211 @@ function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProvid
   };
 }
 
-function shouldUseComposioSocialAggregate(prompt: string): boolean {
-  return prompt.trim().length > 0;
+function socialHubDefaultPlatforms(): SocialHubPlatform[] {
+  return ['x', 'slack', 'wecom', 'discord', 'linkedin', 'whatsapp', 'instagram'];
 }
 
-async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
-  const query = prompt.trim().length > 0 ? prompt.trim() : '最近消息';
+function socialHubRequestedPlatforms(args: Object | null): SocialHubPlatform[] {
+  if (args === null) {
+    return socialHubDefaultPlatforms();
+  }
+  const request = args as SocialHubFeedRequestArgs;
+  if (!Array.isArray(request.platforms) || request.platforms.length === 0) {
+    return socialHubDefaultPlatforms();
+  }
+  const platforms: SocialHubPlatform[] = [];
+  request.platforms.forEach((value: Object) => {
+    const text = textOf(value).trim().toLowerCase();
+    if (text === 'all') {
+      return;
+    }
+    const platform = socialHubPlatformFromText(text);
+    if (platform !== 'unknown' && platforms.indexOf(platform) < 0) {
+      platforms.push(platform);
+    }
+  });
+  return platforms.length > 0 ? platforms : socialHubDefaultPlatforms();
+}
+
+function socialHubConnectionResult(
+  platform: SocialHubPlatform,
+  displayName: string,
+  status: string,
+  message: string
+): SocialHubFeedResult {
+  return {
+    items: [],
+    connections: [{
+      platform: platform,
+      status: status,
+      displayName: displayName,
+      accountId: '',
+      message: message
+    } as SocialHubConnectionData]
+  };
+}
+
+function socialHubAfterDate(): string {
+  return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+}
+
+async function composioXSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const profileArgs: SocialXProfileArgs = { userFields: ['id', 'name', 'username'] };
+    const args: SocialXListArgs = {
+      maxResults: 25,
+      expansions: ['sender_id'],
+      eventTypes: ['MessageCreate'],
+      userFields: ['id', 'name', 'username'],
+      dmEventFields: ['id', 'event_type', 'text', 'sender_id', 'dm_conversation_id', 'created_at']
+    };
+    const executions = await Promise.all([
+      callComposioFixedRaw('Authenticated Twitter X profile', 'social.x.profile', profileArgs),
+      callComposioFixedRaw('Twitter X recent direct messages', 'social.x.dm.list', args)
+    ]);
+    return parseComposioSocialFeed('x', executions[1].observation, '', socialProfileId(executions[0].observation));
+  } catch (error) {
+    return socialHubConnectionResult('x', 'X', 'error', describeThrown(error));
+  }
+}
+
+async function composioSlackSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const args: SocialSlackSearchArgs = {
+      query: 'after:' + socialHubAfterDate(),
+      sort: 'timestamp',
+      count: 25
+    };
+    const execution = await callComposioFixedRaw(
+      'Slack recent direct messages',
+      'social.slack.message.search',
+      args
+    );
+    return parseComposioSocialFeed('slack', execution.observation);
+  } catch (error) {
+    return socialHubConnectionResult('slack', 'Slack', 'error', describeThrown(error));
+  }
+}
+
+function instagramConversationIds(raw: string): string[] {
+  try {
+    const payload = JSON.parse(raw) as InstagramConversationEnvelope;
+    if (payload.data === undefined || payload.data === null || !Array.isArray(payload.data.data)) {
+      return [];
+    }
+    const ids: string[] = [];
+    payload.data.data.forEach((value: Object) => {
+      const conversation = value as InstagramConversationPayload;
+      const id = textOf(conversation.id).trim();
+      if (id.length > 0 && ids.indexOf(id) < 0) {
+        ids.push(id);
+      }
+    });
+    return ids.slice(0, 5);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function socialProfileId(raw: string): string {
+  try {
+    const envelope = JSON.parse(raw) as SocialProfileEnvelope;
+    if (envelope.data === undefined || envelope.data === null) {
+      return '';
+    }
+    const profile = envelope.data as SocialProfilePayload;
+    const direct = textOf(profile.id).trim();
+    if (direct.length > 0) {
+      return direct;
+    }
+    if (profile.data === undefined || profile.data === null) {
+      return '';
+    }
+    return textOf((profile.data as SocialProfilePayload).id).trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+async function composioInstagramSocialFeed(): Promise<SocialHubFeedResult> {
+  try {
+    const profileArgs: SocialInstagramProfileArgs = { igUserId: 'me' };
+    const conversationArgs: SocialInstagramConversationArgs = { limit: 5 };
+    const initial = await Promise.all([
+      callComposioFixedRaw('Authenticated Instagram profile', 'social.instagram.profile', profileArgs),
+      callComposioFixedRaw('Instagram messaging conversations', 'social.instagram.conversations.list', conversationArgs)
+    ]);
+    const ownAccountId = socialProfileId(initial[0].observation);
+    const conversations = initial[1];
+    const conversationState = parseComposioSocialFeed('instagram', conversations.observation);
+    if (conversationState.connections[0].status === 'error') {
+      return conversationState;
+    }
+    const ids = instagramConversationIds(conversations.observation);
+    if (ids.length === 0) {
+      return conversationState;
+    }
+    const executions: ComposioRawExecution[] = await Promise.all(ids.map((id: string) =>
+      {
+        const messageArgs: SocialInstagramMessageArgs = { conversationId: id, limit: 25 };
+        return callComposioFixedRaw(
+          'Instagram messages in conversation',
+          'social.instagram.messages.list',
+          messageArgs
+        );
+      }
+    ));
+    const items: SocialHubItemData[] = [];
+    let connection = conversationState.connections[0];
+    executions.forEach((execution: ComposioRawExecution, index: number) => {
+      const parsed = parseComposioSocialFeed('instagram', execution.observation, ids[index], ownAccountId);
+      parsed.items.forEach((item: SocialHubItemData) => items.push(item));
+      if (parsed.connections[0].status === 'error') {
+        connection = parsed.connections[0];
+      }
+    });
+    return { items: items, connections: [connection] };
+  } catch (error) {
+    return socialHubConnectionResult('instagram', 'Instagram', 'error', describeThrown(error));
+  }
+}
+
+async function socialHubPlatformFeed(platform: SocialHubPlatform): Promise<SocialHubFeedResult> {
+  if (platform === 'x') {
+    return composioXSocialFeed();
+  }
+  if (platform === 'slack') {
+    return composioSlackSocialFeed();
+  }
+  if (platform === 'instagram') {
+    return composioInstagramSocialFeed();
+  }
+  if (platform === 'whatsapp') {
+    return socialHubConnectionResult(
+      'whatsapp',
+      'WhatsApp',
+      'limited',
+      '当前 WhatsApp 工具只提供 Business 发送记录，不提供收件箱消息正文。'
+    );
+  }
+  if (platform === 'discord') {
+    return socialHubConnectionResult('discord', 'Discord', 'limited', '当前授权未提供 Discord 消息读取工具。');
+  }
+  if (platform === 'linkedin') {
+    return socialHubConnectionResult('linkedin', 'LinkedIn', 'limited', '当前授权未提供 LinkedIn 私信读取工具。');
+  }
+  if (platform === 'wecom') {
+    return socialHubConnectionResult('wecom', '企业微信', 'needs_auth', '企业微信尚未配置消息接口。');
+  }
+  return socialHubConnectionResult(platform, 'SocialHub', 'disabled', '当前来源不受支持。');
+}
+
+async function composioSocialAggregate(args: Object | null): Promise<SocialHubFeedResult> {
   const items: SocialHubItemData[] = [];
   const connections: SocialHubConnectionData[] = [];
-  const results: SocialHubFeedResult[] = await Promise.all([
-    composioAppResult('Twitter', query, '最近 30 天私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('x', 'X', result)),
-    composioAppResult('Slack', query, '最近 30 天 DM 私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('slack', 'Slack', result)),
-    composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('discord', 'Discord', result)),
-    composioAppResult('LinkedIn', query, '私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('linkedin', 'LinkedIn', result)),
-    composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
-    composioAppResult('Instagram', query, '私信消息').then((result: DynamicGenericToolResult) =>
-      composioSocialFeedResult('instagram', 'Instagram', result))
-  ]);
+  const results = await Promise.all(socialHubRequestedPlatforms(args).map((platform: SocialHubPlatform) =>
+    socialHubPlatformFeed(platform)
+  ));
   results.forEach((result: SocialHubFeedResult) => {
     result.items.forEach((item: SocialHubItemData) => items.push(item));
     result.connections.forEach((connection: SocialHubConnectionData) => connections.push(connection));
@@ -10258,8 +10532,8 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
-  if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
-    const result = await composioSocialAggregate(prompt);
+  if (toolId === 'social.feed.search') {
+    const result = await composioSocialAggregate(args);
     return socialHubFeedA2ui(surfaceId, result.items, result.connections);
   }
   return socialHubFeedA2ui(surfaceId, [], []);
@@ -10468,10 +10742,387 @@ function calendarAuthUnavailableMessage(toolId: string, prompt: string): string 
   return 'Google Calendar OAuth 未授权：工具 ' + toolId + ' 已注册，但当前设备没有可用的 Calendar scope；请先授权 Calendar。AIPhone 不会模拟日程或 eventId。请求：' + prompt.substring(0, 160);
 }
 
-async function callLocalCalendarTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  return genericToolResultsA2ui(surfaceId, toolId, [
-    await composioFixedAppResult(toolId, 'Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更', args)
-  ]);
+function calendarComposioArgs(toolId: string, prompt: string, args: Object | null): CalendarComposioArgs {
+  const source = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  const normalized = normalizedCalendarArgsForPrompt(toolId, prompt, source) as CalendarComposioArgs;
+  normalized.calendarId = textOf(normalized.calendarId).trim().length > 0 ? textOf(normalized.calendarId).trim() : 'primary';
+  normalized.confirmed = source.confirmed === true;
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    normalized.start = calendarProviderDateTime(textOf(normalized.start));
+    normalized.end = calendarProviderDateTime(textOf(normalized.end));
+  }
+  if (toolId === 'calendar.event.delete') {
+    normalized.sendUpdates = 'none';
+  }
+  return normalized;
+}
+
+export function calendarDeleteConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  return actionId === 'calendar.event.delete.confirm' && parsed.confirmed === true;
+}
+
+function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
+  const eventId = textOf(args.eventId).trim();
+  if (eventId.length === 0) {
+    return {
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.delete',
+      title: '需要日程 Event ID',
+      status: 'needs_input',
+      summary: '请先选择一条真实日程再删除。',
+      rows: [{ label: 'Missing', value: 'eventId' }],
+      rawPreview: 'missing=eventId'
+    };
+  }
+  const confirmArgs: CalendarDeleteConfirmArgs = {
+    eventId: eventId,
+    calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
+    title: textOf(args.title),
+    start: textOf(args.start),
+    end: textOf(args.end),
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '确认删除日程',
+    status: 'confirm_required',
+    summary: '删除后无法在本 App 内撤销，请确认。',
+    rows: [
+      { label: 'Event ID', value: eventId },
+      { label: 'Title', value: textOf(args.title) },
+      { label: 'Start', value: textOf(args.start) }
+    ],
+    rawPreview: 'confirm calendar delete eventId=' + eventId,
+    actions: [{
+      id: 'calendar.event.delete.confirm',
+      label: '确认删除',
+      prompt: '确认删除 Google Calendar 日程',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function calendarDeleteSelectorResult(): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '请选择要删除的日程',
+    status: 'needs_input',
+    summary: '请说明日期和时间段，或先从日程列表中选择一条日程。',
+    rows: [],
+    rawPreview: 'missing structured calendar delete selector'
+  };
+}
+
+function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
+  const start = Date.parse(textOf(args.timeMin));
+  const end = Date.parse(textOf(args.timeMax));
+  return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
+}
+
+async function callLocalCalendarTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
+  const normalized = calendarComposioArgs(toolId, prompt, args);
+  let updateMatches: DynamicGenericToolResult[] = [];
+  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
+    if (textOf(normalized.eventId).trim().length === 0) {
+      if (!hasCalendarLookupSelector(normalized)) {
+        return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
+      }
+      try {
+        const lookup = await callComposioFixedRaw(
+          composioProviderPrompt('Google Calendar', prompt, '待删除日程'),
+          'calendar.events.search',
+          normalized as Object
+        );
+        const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+        if (generic.status === 'error') {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+            composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+          ]);
+        }
+        const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+        const target = calendarDeleteTargetFromResultsForTest(matches);
+        if (target === null) {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+        }
+        normalized.eventId = target.eventId;
+        normalized.title = target.title;
+        normalized.start = target.start;
+        normalized.end = target.end;
+      } catch (_error) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待删除日程', normalized as Object)
+        ]);
+      }
+    }
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteConfirmationResult(normalized)]);
+  }
+  if (toolId === 'calendar.event.update' && textOf(normalized.eventId).trim().length === 0 &&
+    hasCalendarLookupSelector(normalized)) {
+    try {
+      const lookup = await callComposioFixedRaw(
+        composioProviderPrompt('Google Calendar', prompt, '待修改日程'),
+        'calendar.events.search',
+        normalized as Object
+      );
+      const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+      if (generic.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+        ]);
+      }
+      const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+      const resolved = calendarUpdateArgsFromResultsForTest(normalized, matches);
+      if (resolved === null) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+      }
+      updateMatches = matches;
+      normalized.eventId = resolved.eventId;
+      normalized.title = resolved.title;
+      normalized.start = resolved.start;
+      normalized.end = resolved.end;
+    } catch (_error) {
+      return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+        await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
+      ]);
+    }
+  }
+  const missing = calendarEventRequiredFields(toolId, normalized);
+  if (missing.length > 0) {
+    const results = toolId === 'calendar.event.update' && updateMatches.length > 0 ?
+      calendarUpdateNeedsInputResults(updateMatches, missing) : [calendarMissingArgsResult(toolId, missing)];
+    return genericToolResultsA2ui(surfaceId, toolId, results);
+  }
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更'),
+      toolId,
+      normalized as Object
+    );
+    const generic = composioDynamicResultFromObservation('execute', execution.observation, execution.toolSlug, prompt);
+    if (generic.status === 'error') {
+      return genericToolResultsA2ui(surfaceId, toolId, [composioFixedResult(toolId, 'Google Calendar', generic, normalized as Object)]);
+    }
+    return genericToolResultsA2ui(surfaceId, toolId,
+      calendarResultsFromComposioObservation(toolId, execution.observation, normalized));
+  } catch (error) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      await composioFixedAppResult(toolId, 'Google Calendar', prompt,
+        toolId === 'calendar.events.search' ? '日程' : '日程变更', normalized as Object)
+    ]);
+  }
+}
+
+function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
+  return args === null ? JSON.parse('{}') as WhatsAppSendArgs : args as WhatsAppSendArgs;
+}
+
+function whatsAppRecipientDigits(value: string): string {
+  const input = value.trim();
+  if (input.length === 0 || input.charAt(0) !== '+') {
+    return '';
+  }
+  let digits = '';
+  for (let index = 1; index < input.length; index++) {
+    const char = input.charAt(index);
+    if (char >= '0' && char <= '9') {
+      digits += char;
+    } else if (char !== ' ' && char !== '-' && char !== '(' && char !== ')') {
+      return '';
+    }
+  }
+  return digits.length >= 8 && digits.length <= 15 ? digits : '';
+}
+
+export function whatsAppSendConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = whatsAppArgs(args);
+  return actionId === 'whatsapp.message.send.confirm' && parsed.confirmed === true;
+}
+
+export function whatsAppProviderFailureSummaryForTest(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.indexOf('no active connection found') >= 0 || lower.indexOf('没有 active connected account') >= 0) {
+    return 'WhatsApp 授权刚完成，请返回 App 后重试一次。';
+  }
+  if ((lower.indexOf('code 100') >= 0 && lower.indexOf('error_subcode 33') >= 0) ||
+    lower.indexOf('object does not exist') >= 0 || lower.indexOf('unsupported get request') >= 0) {
+    return '当前 Business 账户的 WABA 配置无效或缺少管理权限，请重新授权。';
+  }
+  if (lower.indexOf('133010') >= 0 || lower.indexOf('account not registered') >= 0) {
+    return '当前 Business 发送号码尚未注册到 WhatsApp Cloud API，请先在 Meta 后台完成号码验证与 API 注册。';
+  }
+  if (lower.indexOf('not_verified') >= 0 || lower.indexOf('not verified') >= 0) {
+    return '当前 Business 发送号码尚未完成验证，请先在 Meta 后台完成验证。';
+  }
+  return 'WhatsApp Business 暂时无法发送，请刷新授权后重试。';
+}
+
+function whatsAppProviderFailureResult(raw: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: 'WhatsApp Business 发送失败',
+    status: 'error',
+    summary: whatsAppProviderFailureSummaryForTest(raw),
+    rows: [],
+    rawPreview: raw
+  };
+}
+
+function whatsAppInputResult(toNumber: string, text: string): DynamicGenericToolResult | null {
+  const missing: A2uiLabelValueData[] = [];
+  if (whatsAppRecipientDigits(toNumber).length === 0) {
+    missing.push({ label: 'Missing', value: 'toNumber (+country code)' });
+  }
+  if (text.trim().length === 0 || text.trim().length > 4096) {
+    missing.push({ label: 'Missing', value: 'text (1-4096 chars)' });
+  }
+  if (missing.length === 0) {
+    return null;
+  }
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要 WhatsApp Business 发送信息',
+    status: 'needs_input',
+    summary: '请提供带国家码的手机号和 1-4096 字符消息。',
+    rows: missing,
+    rawPreview: 'invalid whatsapp send input'
+  };
+}
+
+function whatsAppConfirmationResult(
+  toNumber: string,
+  text: string,
+  phoneNumberId: string,
+  wabaId: string,
+  previewUrl: boolean
+): DynamicGenericToolResult {
+  const confirmArgs: WhatsAppConfirmArgs = {
+    toNumber: toNumber,
+    text: text,
+    phoneNumberId: phoneNumberId,
+    wabaId: wabaId,
+    previewUrl: previewUrl,
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '确认发送 WhatsApp 消息',
+    status: 'confirm_required',
+    summary: '将通过已授权的 WhatsApp Business 账号发送。',
+    rows: [
+      { label: '收件人', value: toNumber },
+      { label: '消息', value: text }
+    ],
+    rawPreview: 'confirm whatsapp send to=' + toNumber,
+    actions: [{
+      id: 'whatsapp.message.send.confirm',
+      label: '确认发送',
+      prompt: '确认通过 WhatsApp Business 发送消息',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function whatsAppPhoneSelectionResult(count: number): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要选择 WhatsApp Business 发送号码',
+    status: 'needs_input',
+    summary: count === 0 ? '当前账号没有可用的 Business 发送号码。' : '当前账号有多个 Business 发送号码，请指定 phoneNumberId。',
+    rows: [{ label: 'Phone Number IDs', value: count.toString() }],
+    rawPreview: 'phoneNumberId count=' + count.toString()
+  };
+}
+
+async function callLocalWhatsAppTool(
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null
+): Promise<string> {
+  const parsed = whatsAppArgs(args);
+  const toNumber = textOf(parsed.toNumber).trim();
+  const message = textOf(parsed.text).trim();
+  const inputError = whatsAppInputResult(toNumber, message);
+  if (inputError !== null) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [inputError]);
+  }
+  if (!whatsAppSendConfirmedForTest(actionId, args)) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppConfirmationResult(
+        toNumber,
+        message,
+        textOf(parsed.phoneNumberId).trim(),
+        textOf(parsed.wabaId).trim(),
+        parsed.previewUrl === true
+      )
+    ]);
+  }
+  // A user may finish Composio authorization while this app process is still alive.
+  // Drop the stale Tool Router session before the confirmed send discovers its account.
+  refreshComposioConnections();
+  let phoneNumberId = textOf(parsed.phoneNumberId).trim();
+  if (phoneNumberId.length === 0) {
+    try {
+      const lookupArgs: WhatsAppPhoneNumbersArgs = {};
+      const wabaId = textOf(parsed.wabaId).trim();
+      if (wabaId.length > 0) {
+        lookupArgs.wabaId = wabaId;
+      }
+      const lookup = await callComposioFixedRaw(
+        'WhatsApp Business phone numbers',
+        'whatsapp.phone_numbers.list',
+        lookupArgs as Object
+      );
+      const lookupResult = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, 'WhatsApp Business phone numbers');
+      if (lookupResult.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+          whatsAppProviderFailureResult(lookupResult.summary + ' ' + lookupResult.rawPreview)
+        ]);
+      }
+      const ids = composioPhoneNumberIdsFromObservation(lookup.observation);
+      if (ids.length !== 1) {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [whatsAppPhoneSelectionResult(ids.length)]);
+      }
+      phoneNumberId = ids[0];
+    } catch (error) {
+      return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+        whatsAppProviderFailureResult(describeThrown(error))
+      ]);
+    }
+  }
+  const providerArgs: WhatsAppProviderArgs = {
+    toNumber: whatsAppRecipientDigits(toNumber),
+    text: message,
+    phoneNumberId: phoneNumberId,
+    previewUrl: parsed.previewUrl === true
+  };
+  const result = await composioFixedAppResult('whatsapp.message.send', 'WhatsApp Business', prompt, '消息', providerArgs as Object);
+  if (result.status === 'success') {
+    result.title = 'WhatsApp Business 消息已发送';
+    result.summary = 'Provider 已确认发送成功。';
+  } else {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppProviderFailureResult(result.summary + ' ' + result.rawPreview)
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [result]);
 }
 
 function mapsArgs(args: Object | null): MapsToolArgs {
@@ -10499,6 +11150,9 @@ function mapsPlaceId(args: MapsToolArgs): string {
 }
 
 async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'maps.route.open') {
+    return genericToolResultsA2ui(surfaceId, toolId, [mapsRouteResult(args)]);
+  }
   const parsed = mapsArgs(args);
   if (toolId === 'maps.place.details') {
     return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceDetails(mapsPlaceId(parsed), localProviderConfig.googleMapsApiKey));
@@ -11351,9 +12005,72 @@ async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: 
   return paymentValidationA2ui(surfaceId, checkout);
 }
 
+function hotelMcpRegistration(toolId: string, mcpToolName: string): DynamicToolRegistration {
+  return {
+    toolId: toolId,
+    manifestId: 'rollinggo-hotel',
+    displayName: 'RollingGo',
+    status: 'enabled',
+    transport: {
+      type: 'streamable_http',
+      url: localProviderConfig.hotelMcpUrl,
+      command: '',
+      args: [],
+      headers: {},
+      env: {}
+    },
+    mcpToolName: mcpToolName,
+    credentialRef: 'provider:rollinggo-hotel',
+    sourceUrl: '',
+    lastError: ''
+  };
+}
+
+async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
+  if (localProviderConfig.hotelMcpKey.length === 0 || localProviderConfig.hotelMcpUrl.length === 0) {
+    return hotelFailureA2ui(
+      surfaceId,
+      toolId,
+      '缺少本机 ignored 配置 ROLLINGGO_HOTEL_MCP_KEY 或 ROLLINGGO_HOTEL_MCP_URL。'
+    );
+  }
+  const rawArgs = args === null ? new Object() : args;
+  if (toolId === 'hotel.search') {
+    const parsed: HotelSearchParseResult = parseHotelSearchRequest(rawArgs);
+    if (!parsed.ok || parsed.value === null) {
+      return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+    }
+    const response: McpToolCallResult = await genericMcpClient.callToolPayload(
+      hotelMcpRegistration(toolId, 'searchHotels'),
+      localProviderConfig.hotelMcpKey,
+      hotelSearchProviderArgs(parsed.value)
+    );
+    if (!response.ok || response.result === null) {
+      return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+    }
+    return hotelSearchA2ui(surfaceId, normalizeHotelSearchResult(response.result, parsed.value));
+  }
+  const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
+  if (!parsed.ok || parsed.value === null) {
+    return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+  }
+  const response: McpToolCallResult = await genericMcpClient.callToolPayload(
+    hotelMcpRegistration(toolId, 'getHotelDetail'),
+    localProviderConfig.hotelMcpKey,
+    hotelDetailProviderArgs(parsed.value)
+  );
+  if (!response.ok || response.result === null) {
+    return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+  }
+  return hotelDetailA2ui(surfaceId, normalizeHotelDetailResult(response.result, parsed.value));
+}
+
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  if (toolId === 'whatsapp.message.send') {
+    return callLocalWhatsAppTool(prompt, surfaceId, actionId, args);
+  }
   if (isCalendarToolId(toolId)) {
-    return callLocalCalendarTool(toolId, prompt, surfaceId, args);
+    return callLocalCalendarTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isMapsToolId(toolId)) {
     return callLocalMapsTool(toolId, prompt, surfaceId, args);
@@ -11387,6 +12104,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   }
   if (isLuckinToolId(toolId)) {
     return callLocalLuckinTool(toolId, prompt, surfaceId, args);
+  }
+  if (isHotelToolId(toolId)) {
+    return callLocalHotelTool(toolId, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);

@@ -66,6 +66,47 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function hotelDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'hotel';
+  doc.title = '深圳酒店';
+  doc.subtitle = '2026-08-15 → 2026-08-17 · 2 成人 · 1 间';
+  doc.blocks = [{
+    id: 'hotel-rate-1',
+    kind: 'generic-tool-result',
+    title: '豪华大床房',
+    subtitle: '550 CNY · 不含早餐',
+    status: 'success',
+    source: 'RollingGo',
+    metrics: [
+      { label: 'source', value: 'RollingGo' },
+      { label: 'toolName', value: 'hotel.detail' }
+    ],
+    rows: [
+      { label: '酒店图片', value: 'https://images.example.com/hotel.jpg' },
+      { label: '酒店 ID', value: '47675' },
+      { label: 'Rate plan ID', value: '5nAv6vObodN-6idXNkFPe3z' },
+      { label: '入住', value: '2026-08-15 → 2026-08-17' },
+      { label: '客人', value: '2 成人 · 1 间' },
+      { label: '平均价', value: '550 CNY' },
+      { label: '床型', value: '1 大床' },
+      { label: '餐食', value: '不含早餐' },
+      { label: '取消政策', value: '免费取消截止至酒店当地时间 2026-08-12 08:00:00' },
+      { label: '税费与有效期', value: '税费拆分与报价有效期：供应商未返回' },
+      { label: '能力边界', value: 'Appless 暂不支持创建或跟踪酒店订单' }
+    ],
+    actions: [{
+      id: 'hotel.search.restore',
+      label: '返回酒店结果',
+      prompt: '返回酒店搜索结果',
+      variant: 'secondary',
+      kind: 'client'
+    }]
+  }];
+  doc.actions = [];
+  return doc;
+}
+
 function rideDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -351,6 +392,35 @@ function googleMapsDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function googleMapsRouteDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'generic';
+  doc.title = 'Google Maps 路线';
+  doc.subtitle = '深圳北站到深圳湾口岸';
+  doc.blocks = [{
+    id: 'maps-route-0',
+    kind: 'generic-tool-result',
+    title: '深圳北站 → 深圳湾口岸',
+    subtitle: '路线已准备好。',
+    status: 'success',
+    source: 'Google Maps',
+    metrics: [
+      { label: 'source', value: 'Google Maps' },
+      { label: 'toolName', value: 'maps.route.open' }
+    ],
+    rows: [
+      { label: 'Origin', value: '深圳北站' },
+      { label: 'Destination', value: '深圳湾口岸' },
+      { label: 'Maps URL', value: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b' }
+    ],
+    actions: [
+      { id: 'maps.open.web', label: '查看路线', prompt: 'https://www.google.com/maps/dir/?api=1&origin=a&destination=b', variant: 'primary', kind: 'client' }
+    ]
+  }];
+  doc.actions = [];
+  return doc;
+}
+
 function composioResultsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
   doc.kind = 'dynamic-tools';
@@ -600,6 +670,41 @@ function calendarCreateDocumentFixture(): HtmlHomeDocument {
     { label: 'End', value: '2026-07-02T17:00:00+08:00' },
     { label: 'Link', value: 'https://calendar.google.com/calendar/event?eid=event-create-1' }
   ];
+  return doc;
+}
+
+function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
+  const doc = calendarSearchDocumentFixture();
+  doc.title = '确认删除日程';
+  doc.subtitle = '删除后无法在本 App 内撤销，请确认。';
+  doc.blocks[0].title = '确认删除日程';
+  doc.blocks[0].subtitle = '删除后无法在本 App 内撤销，请确认。';
+  doc.blocks[0].status = 'confirm_required';
+  doc.blocks[0].metrics = [
+    { label: 'source', value: 'Composio Google Calendar' },
+    { label: 'toolName', value: 'calendar.event.delete' }
+  ];
+  doc.blocks[0].rows = [{ label: 'Event ID', value: 'event-delete-1' }];
+  const confirmAction: HtmlHomeAction = {
+    id: 'calendar.event.delete.confirm',
+    label: '确认删除',
+    prompt: '确认删除 Google Calendar 日程',
+    variant: 'danger',
+    kind: 'prompt',
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+  };
+  doc.blocks[0].actions = [confirmAction];
+  return doc;
+}
+
+function calendarDeleteSuccessDocumentFixture(): HtmlHomeDocument {
+  const doc = calendarDeleteConfirmationDocumentFixture();
+  doc.title = 'Google Calendar';
+  doc.subtitle = '把上一条日程改到明天下午4点30分';
+  doc.blocks[0].title = '日程已删除';
+  doc.blocks[0].subtitle = '已从真实 Google Calendar 删除日程。';
+  doc.blocks[0].status = 'success';
+  doc.blocks[0].actions = [];
   return doc;
 }
 
@@ -1011,8 +1116,26 @@ function socialHubDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function expectCalmUtilityPalette(document: HtmlHomeDocument): void {
+  const html = renderHtmlHomeDocument(document);
+  expect(html.indexOf('--paper: #f5f2ee;')).assertLarger(-1);
+  expect(html.indexOf('--ink: #211b17;')).assertLarger(-1);
+  expect(html.indexOf('--accent: #995f4c;')).assertLarger(-1);
+}
+
 export default function htmlHomeRendererTest() {
   describe('htmlHomeRenderer', () => {
+    it('uses the calm utility palette across result templates', 0, () => {
+      expectCalmUtilityPalette(documentFixture());
+      expectCalmUtilityPalette(calendarSearchDocumentFixture());
+      expectCalmUtilityPalette(aggregateSearchDocumentFixture());
+      expectCalmUtilityPalette(travelFoodCardsDocumentFixture());
+      expectCalmUtilityPalette(foodDocumentFixture());
+      expectCalmUtilityPalette(mediaAggregateDocumentFixture());
+      expectCalmUtilityPalette(rideDocumentFixture());
+      expectCalmUtilityPalette(paymentDocumentFixture());
+    });
+
     it('returns a full HTML document with document content', 0, () => {
       const html = renderHtmlHomeDocument(documentFixture());
 
@@ -1043,7 +1166,7 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(rideDocumentFixture());
 
       expect(html.indexOf('data-ride-home')).assertLarger(-1);
-      expect(html.indexOf('任务结果')).assertEqual(-1);
+      expect(html.indexOf("add(blocksHead, 'h2', '', isEnhancedScene() ? sceneSectionTitle() : '任务结果')")).assertEqual(-1);
       expect(html.indexOf('上下文')).assertEqual(-1);
       expect(html.indexOf('打车方案 · 实时叫车')).assertLarger(-1);
       expect(html.indexOf('去秋港花园')).assertLarger(-1);
@@ -1053,7 +1176,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('未查询到司机坐标前不展示地图或真实路线')).assertEqual(-1);
       expect(html.indexOf('打开滴滴/高德不会自动下单')).assertEqual(-1);
       expect(html.indexOf('images.unsplash.com')).assertEqual(-1);
-      expect(html.indexOf('resource://rawfile/ride/ride_cover_taxi_v2.png')).assertLarger(-1);
+      expect(html.indexOf("rideAssetUrl('ride_cover_taxi_v2.png')")).assertLarger(-1);
       expect(html.indexOf('ride-cover-image')).assertLarger(-1);
       expect(html.indexOf('ride-cover-title')).assertLarger(-1);
       expect(html.indexOf('ride-hero-route')).assertEqual(-1);
@@ -1174,14 +1297,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('司机点位来自 provider 返回坐标')).assertEqual(-1);
       expect(html.indexOf('预计接驾时间')).assertLarger(-1);
       expect(html.indexOf('预计 6 分钟接驾')).assertLarger(-1);
-      expect(html.indexOf('>车型</span><b>专车</b>')).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['selectedVehicleText', '车型', 'vehicle', 'productName', 'productCategory'])")).assertLarger(-1);
+      expect(html.indexOf("addRideRouteStat(stats, '车型', rideVehicleStatText(block, estimates))")).assertLarger(-1);
       expect(html.indexOf('>车型</span><b>待查询</b>')).assertEqual(-1);
       expect(html.indexOf('data-ride-eta-value')).assertLarger(-1);
       expect(html.indexOf("updateRideEtaText(etaText)")).assertLarger(-1);
       expect(html.indexOf('function logRideMapRoute')).assertLarger(-1);
       expect(html.indexOf('ride.map.route.log')).assertLarger(-1);
       expect(html.indexOf('[AIPhone][RideMapRoute]')).assertLarger(-1);
-      expect(html.indexOf('正在估算接驾时间')).assertEqual(-1);
       expect(html.indexOf('setRideMapFullscreen')).assertLarger(-1);
       expect(html.indexOf('ride-map-fullscreen')).assertLarger(-1);
       expect(html.indexOf('rideMapEta')).assertLarger(-1);
@@ -1244,9 +1367,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Codex demo')).assertLarger(-1);
       expect(html.indexOf('OpenAI Codex discussion')).assertLarger(-1);
       expect(html.indexOf('data-filter="reddit"')).assertLarger(-1);
-      expect(html.indexOf('可用来源')).assertLarger(-1);
+      expect(html.indexOf('aggregate-source-overview')).assertLarger(-1);
       expect(html.indexOf('YouTube returned 1 row')).assertLarger(-1);
-      expect(html.indexOf('需要关注')).assertLarger(-1);
+      expect(html.indexOf('状态摘要')).assertLarger(-1);
       expect(html.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
       expect(html.indexOf('异常或提示')).assertEqual(-1);
     });
@@ -1499,7 +1622,47 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('22.609878,114.029506')).assertLarger(-1);
       expect(html.indexOf('maps.open.web')).assertLarger(-1);
       expect(html.indexOf('打开 Google Maps')).assertLarger(-1);
+      expect(html.indexOf("window.open(text(action && action.prompt), '_blank')")).assertLarger(-1);
+      expect(html.indexOf('opacity: 0.18')).assertEqual(-1);
+      expect(html.indexOf('content: "Maps"')).assertEqual(-1);
       expect(html.indexOf('calendar-shell')).assertEqual(-1);
+    });
+
+    it('renders WhatsApp send confirmation as one clean card', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'dynamic-tools';
+      doc.blocks = [{
+        id: 'whatsapp-send-confirm',
+        kind: 'generic-tool-result',
+        title: '确认发送 WhatsApp 消息',
+        subtitle: '将通过已授权的 WhatsApp Business 账号发送。',
+        status: 'confirm_required',
+        source: 'Composio WhatsApp Business',
+        metrics: [
+          { label: 'source', value: 'Composio WhatsApp Business' },
+          { label: 'toolName', value: 'whatsapp.message.send' }
+        ],
+        rows: [
+          { label: '收件人', value: '+8613800138000' },
+          { label: '消息', value: 'test' }
+        ],
+        rawPreview: 'confirm whatsapp send to=+8613800138000',
+        actions: [{
+          id: 'whatsapp.message.send.confirm',
+          label: '确认发送',
+          prompt: '确认通过 WhatsApp Business 发送消息',
+          variant: 'danger',
+          kind: 'prompt'
+        }]
+      }];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('whatsapp-send-card')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card::before')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card .actions')).assertLarger(-1);
+      expect(html.indexOf('.whatsapp-send-card .action')).assertLarger(-1);
+      expect(html.indexOf('function whatsAppSendActions(block)')).assertLarger(-1);
+      expect(html.indexOf("key === 'composio-whatsapp' && isWhatsAppSendBlock(block)")).assertLarger(-1);
     });
 
     it('renders Composio results with app logos and visible preview cards', 0, () => {
@@ -1546,14 +1709,109 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarSearchDocumentFixture());
 
       expect(html.indexOf('calendar-shell')).assertLarger(-1);
+      expect(html.indexOf('<div class="calendar-status-bar')).assertEqual(-1);
+      expect(html.indexOf('Google Calendar API 查询成功。')).assertEqual(
+        html.lastIndexOf('Google Calendar API 查询成功。')
+      );
       expect(html.indexOf('calendar-view-day')).assertLarger(-1);
       expect(html.indexOf('calendar-view-week')).assertLarger(-1);
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
+      expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
+      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
       expect(html.indexOf('10:00')).assertLarger(-1);
+      expect(html.indexOf('images.unsplash.com/photo-1506784983877-45594efa4cbe')).assertLarger(-1);
+      expect(html.indexOf('min-height: 302px')).assertLarger(-1);
+      expect(html.indexOf('calendar-detail-grid')).assertEqual(-1);
+      expect(html.indexOf('data-detail-source')).assertEqual(-1);
+      expect(html.indexOf('data-detail-id')).assertEqual(-1);
       expect(html.indexOf('任务结果')).assertEqual(-1);
+    });
+
+    it('keeps other monthly events out of the selected day timeline', 0, () => {
+      const doc = calendarSearchDocumentFixture();
+      doc.blocks.push({
+        id: 'calendar-search-21',
+        kind: 'generic-tool-result',
+        title: '月中复盘',
+        subtitle: 'Google Calendar API 查询成功。',
+        status: 'success',
+        source: 'Google Calendar API',
+        metrics: [
+          { label: 'source', value: 'Google Calendar API' },
+          { label: 'toolName', value: 'calendar.events.search' }
+        ],
+        rows: [
+          { label: 'Event ID', value: 'event-21' },
+          { label: 'Start', value: '2026-07-21T11:00:00+08:00' },
+          { label: 'End', value: '2026-07-21T11:30:00+08:00' }
+        ],
+        actions: []
+      });
+      doc.blocks.push({
+        id: 'calendar-search-30',
+        kind: 'generic-tool-result',
+        title: '月底发布',
+        subtitle: 'Google Calendar API 查询成功。',
+        status: 'success',
+        source: 'Google Calendar API',
+        metrics: [
+          { label: 'source', value: 'Google Calendar API' },
+          { label: 'toolName', value: 'calendar.events.search' }
+        ],
+        rows: [
+          { label: 'Event ID', value: 'event-30' },
+          { label: 'Start', value: '2026-07-30T15:00:00+08:00' },
+          { label: 'End', value: '2026-07-30T15:30:00+08:00' }
+        ],
+        actions: []
+      });
+
+      const html = renderHtmlHomeDocument(doc);
+      const dayStart = html.indexOf('<section class="calendar-view calendar-view-day active"');
+      const weekStart = html.indexOf('<section class="calendar-view calendar-view-week"');
+      const dayHtml = html.substring(dayStart, weekStart);
+
+      expect(dayHtml.indexOf('产品同步')).assertLarger(-1);
+      expect(dayHtml.indexOf('月中复盘')).assertEqual(-1);
+      expect(dayHtml.indexOf('月底发布')).assertEqual(-1);
+      expect(html.indexOf('月中复盘')).assertLarger(-1);
+      expect(html.indexOf('月底发布')).assertLarger(-1);
+    });
+
+    it('submits a Calendar delete confirmation card without another drawer or modal', 0, () => {
+      const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
+
+      expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
+    });
+
+    it('renders a completed Calendar delete as only a success result', 0, () => {
+      const html = renderHtmlHomeDocument(calendarDeleteSuccessDocumentFixture());
+
+      expect(html.indexOf('日程已删除')).assertLarger(-1);
+      expect(html.indexOf('calendar-delete-success-card')).assertLarger(-1);
+      expect(html.indexOf('<main class="calendar-shell">')).assertEqual(-1);
+      expect(html.indexOf('<nav class="calendar-view-switch"')).assertEqual(-1);
+      expect(html.indexOf('<button class="calendar-delete-button"')).assertEqual(-1);
+      expect(html.indexOf('Composio')).assertEqual(-1);
+      expect(html.indexOf('Event ID')).assertEqual(-1);
+      expect(html.indexOf('把上一条日程改到明天下午4点30分')).assertEqual(-1);
+    });
+
+    it('renders Maps routes without debug rows or an eager map iframe', 0, () => {
+      const html = renderHtmlHomeDocument(googleMapsRouteDocumentFixture());
+
+      expect(html.indexOf("function isGoogleMapsRouteBlock(block)")).assertLarger(-1);
+      expect(html.indexOf("if (!isGoogleMapsBlock(block) || isGoogleMapsRouteBlock(block)) { return; }")).assertLarger(-1);
+      expect(html.indexOf("addActions(detailHost, mapsRouteActions(block))")).assertLarger(-1);
+      expect(html.indexOf('在 App 内查看路线')).assertEqual(-1);
     });
 
     it('uses the requested Google Calendar search window for empty results', 0, () => {
@@ -1575,6 +1833,21 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Google Calendar API · 已同步')).assertEqual(-1);
     });
 
+    it('shows the complete Google Calendar provider error without a false synced state', 0, () => {
+      const doc = calendarEmptySearchDocumentFixture();
+      doc.subtitle = 'invalid request data provided: start_datetime is required';
+      doc.blocks[0].status = 'error';
+      doc.blocks[0].subtitle = doc.subtitle;
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 同步失败')).assertLarger(-1);
+      expect(html.indexOf('calendar-status-bar')).assertEqual(-1);
+      expect(html.indexOf('invalid request data provided: start_datetime is required')).assertLarger(-1);
+      expect(html.indexOf('overflow-wrap: anywhere')).assertLarger(-1);
+      expect(html.indexOf('.calendar-undated-card h3,\n.calendar-undated-card p {\n  overflow-wrap: anywhere;\n  white-space: normal;')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已同步')).assertEqual(-1);
+    });
+
     it('renders Google Calendar create results as a write confirmation', 0, () => {
       const html = renderHtmlHomeDocument(calendarCreateDocumentFixture());
 
@@ -1583,6 +1856,33 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('16:30')).assertLarger(-1);
       expect(html.indexOf('17:00')).assertLarger(-1);
       expect(html.indexOf('已写入')).assertLarger(-1);
+    });
+
+    it('does not show a write confirmation for a failed Calendar create', 0, () => {
+      const doc = calendarCreateDocumentFixture();
+      doc.subtitle = '缺少字段：title, start, end。固定写工具不会从 prompt 补全这些参数。';
+      doc.blocks[0].status = 'error';
+      doc.blocks[0].subtitle = doc.subtitle;
+      doc.blocks[0].rows = [];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 同步失败')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-confirmation">')).assertEqual(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
+    it('shows Calendar create missing input without a false write state', 0, () => {
+      const doc = calendarCreateDocumentFixture();
+      doc.subtitle = '请补充明确的开始时间；请补充明确的结束时间或时长。';
+      doc.blocks[0].status = 'needs_input';
+      doc.blocks[0].title = '还需要补充日程信息';
+      doc.blocks[0].subtitle = doc.subtitle;
+      doc.blocks[0].rows = [];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('Google Calendar API · 待补充')).assertLarger(-1);
+      expect(html.indexOf('<aside class="calendar-confirmation">')).assertEqual(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
     });
 
     it('renders Gmail, QQ, and Outlook mail sources with app icons and separate card frames', 0, () => {
@@ -1812,11 +2112,47 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
     });
 
+    it('renders a dedicated hotel rate scene with provider-truth fields', 0, () => {
+      const html = renderHtmlHomeDocument(hotelDocumentFixture());
+
+      expect(html.indexOf('data-scene="hotel"')).assertLarger(-1);
+      expect(html.indexOf('hotel-hero-media')).assertLarger(-1);
+      expect(html.indexOf('.hotel-hero.is-detail h1')).assertLarger(-1);
+      expect(html.indexOf('photo-1742844551986-de16fd4682c3')).assertLarger(-1);
+      expect(html.indexOf('酒店 · 实时房型')).assertLarger(-1);
+      expect(html.indexOf('hotel-search-card')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-card')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-toggle')).assertLarger(-1);
+      expect(html.indexOf('hotel-room-details')).assertLarger(-1);
+      expect(html.indexOf('查看房型')).assertLarger(-1);
+      expect(html.indexOf("button.setAttribute('aria-label', '查看房型：'")).assertLarger(-1);
+      expect(html.indexOf('价格与取消规则')).assertLarger(-1);
+      expect(html.indexOf('返回酒店结果')).assertLarger(-1);
+      expect(html.indexOf('查看详情')).assertEqual(-1);
+      expect(html.indexOf('aria-expanded')).assertLarger(-1);
+      expect(html.indexOf('function setExpanded')).assertLarger(-1);
+      expect(html.indexOf('image.onerror')).assertLarger(-1);
+      expect(html.indexOf('47675')).assertLarger(-1);
+      expect(html.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
+      expect(html.indexOf('550 CNY')).assertLarger(-1);
+      expect(html.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
+      expect(html.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
+      expect(html.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(html.indexOf('min-height: 44px')).assertLarger(-1);
+      expect(html.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
+      expect(html.indexOf('LIVE HOTEL DATA')).assertEqual(-1);
+      expect(html.indexOf('hotel-scene-note')).assertEqual(-1);
+      expect(html.indexOf('add(identifiers')).assertEqual(-1);
+      expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
+      expect(html.indexOf('下单成功')).assertEqual(-1);
+      expect(html.indexOf('订单编号')).assertEqual(-1);
+    });
+
     it('does not auto-render welcome scene and source chips', 0, () => {
       const doc = documentFixture();
       doc.source = 'welcome';
       doc.kind = 'welcome';
-      doc.title = 'Appless Phone';
+      doc.title = 'Appless';
       doc.subtitle = '';
       doc.chips = [];
       doc.metrics = [];

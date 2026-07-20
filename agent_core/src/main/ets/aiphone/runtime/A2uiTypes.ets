@@ -343,7 +343,7 @@ export function emptyA2uiSurface(surfaceId: string = 'surface_main'): A2uiSurfac
   return {
     surfaceId: surfaceId,
     rootId: 'root',
-    title: 'Appless Phone',
+    title: 'Appless',
     intent: 'general',
     status: 'idle',
     components: [],

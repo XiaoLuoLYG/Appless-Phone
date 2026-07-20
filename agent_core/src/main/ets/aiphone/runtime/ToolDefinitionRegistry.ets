@@ -44,6 +44,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'hotel.search',
+    domain: 'hotel',
+    intent: 'hotel.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'hotelSearchRequest',
+    outputSchema: 'hotelSearchResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['hotel.detail']
+  },
+  {
+    toolId: 'hotel.detail',
+    domain: 'hotel',
+    intent: 'hotel.detail',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'hotelDetailRequest',
+    outputSchema: 'hotelRatePlans',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'food.search',
     domain: 'food',
     intent: 'local.food.search',
@@ -338,10 +362,22 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     riskLevel: 'confirm_required',
     backendPriority: ['oauth_api'],
     authModes: ['oauth'],
-    inputSchema: 'calendarEventUpdateRequest',
+    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,title?:string,start:string,end:string,timezone:string,calendarId?:string',
     outputSchema: 'calendarEvent',
     a2uiComponent: 'GenericToolResults',
     actions: ['calendar.authorize']
+  },
+  {
+    toolId: 'calendar.event.delete',
+    domain: 'calendar',
+    intent: 'calendar.event.delete',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['mcp_auth'],
+    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,timezone?:string,calendarId?:string,title?:string,start?:string,end?:string,confirmed?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['calendar.event.delete.confirm']
   },
   {
     toolId: 'payment.send',
@@ -390,6 +426,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'place',
     a2uiComponent: 'GenericToolResults',
     actions: []
+  },
+  {
+    toolId: 'maps.route.open',
+    domain: 'maps',
+    intent: 'maps.route.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['none'],
+    inputSchema: 'origin:string,destination:string,travelMode?:driving|walking|bicycling|transit|two-wheeler,navigate?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['maps.open.web']
+  },
+  {
+    toolId: 'whatsapp.message.send',
+    domain: 'whatsapp',
+    intent: 'whatsapp.message.send',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['mcp_auth'],
+    inputSchema: 'toNumber:string,text:string,phoneNumberId?:string,wabaId?:string,previewUrl?:boolean,confirmed?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['whatsapp.message.send.confirm']
   },
   {
     toolId: 'ride.estimate',
@@ -531,6 +591,11 @@ export function isRideToolId(toolId: string): boolean {
 export function isLuckinToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'luckin';
+}
+
+export function isHotelToolId(toolId: string): boolean {
+  const definition = toolDefinitionForToolId(toolId);
+  return definition !== null && definition.domain === 'hotel';
 }
 
 export function isLocalAdapterToolId(toolId: string): boolean {

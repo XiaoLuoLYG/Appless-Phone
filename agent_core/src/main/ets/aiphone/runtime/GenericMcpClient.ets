@@ -4,7 +4,8 @@ import {
   DynamicGenericToolResult,
   DynamicMcpTool,
   DynamicPreflightResult,
-  DynamicToolRegistration
+  DynamicToolRegistration,
+  McpToolAnnotations
 } from './DynamicToolTypes';
 import { A2uiLabelValueData } from './A2uiTypes';
 
@@ -67,6 +68,7 @@ interface McpToolRecord {
   name?: string;
   description?: string;
   inputSchema?: Object;
+  annotations?: McpToolAnnotations;
 }
 
 export interface McpToolContentItem {
@@ -86,6 +88,14 @@ export interface ParsedMcpResponse {
   errorMessage: string;
   tools: DynamicMcpTool[];
   result: McpToolResultPayload | null;
+}
+
+export interface McpToolCallResult {
+  ok: boolean;
+  httpStatus: number;
+  errorMessage: string;
+  result: McpToolResultPayload | null;
+  rawPreview: string;
 }
 
 interface HttpMcpResponse {
@@ -157,7 +167,8 @@ function toolsFromResult(result: Object | undefined): DynamicMcpTool[] {
     return {
       name: textOf(tool.name),
       description: textOf(tool.description),
-      inputSchema: tool.inputSchema === undefined || tool.inputSchema === null ? new Object() : tool.inputSchema
+      inputSchema: tool.inputSchema === undefined || tool.inputSchema === null ? new Object() : tool.inputSchema,
+      annotations: tool.annotations
     };
   }).filter((tool: DynamicMcpTool) => tool.name.length > 0);
 }
@@ -389,18 +400,16 @@ export class GenericMcpClient {
     };
   }
 
-  async callTool(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<DynamicGenericToolResult> {
+  async callToolPayload(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<McpToolCallResult> {
     const headers = headersForRegistration(registration, credentialValue);
     const init = await postMcpJson(registration.transport.url, buildInitializeRequest(1), headers, '');
     const initParsed = parseMcpJsonRpcResponse(init.text);
     if (init.status < 200 || init.status >= 300 || !initParsed.ok) {
       return {
-        sourceTag: registration.displayName,
-        toolName: registration.mcpToolName,
-        title: 'MCP 初始化失败',
-        status: 'error',
-        summary: initParsed.errorMessage.length > 0 ? initParsed.errorMessage : 'HTTP ' + init.status.toString(),
-        rows: [{ label: '状态', value: init.status.toString() }],
+        ok: false,
+        httpStatus: init.status,
+        errorMessage: initParsed.errorMessage.length > 0 ? initParsed.errorMessage : 'MCP initialize HTTP ' + init.status.toString(),
+        result: null,
         rawPreview: init.text.substring(0, 1200)
       };
     }
@@ -408,16 +417,37 @@ export class GenericMcpClient {
     const parsed = parseMcpJsonRpcResponse(response.text);
     if (response.status < 200 || response.status >= 300 || !parsed.ok || parsed.result === null) {
       return {
-        sourceTag: registration.displayName,
-        toolName: registration.mcpToolName,
-        title: 'MCP 工具调用失败',
-        status: 'error',
-        summary: parsed.errorMessage.length > 0 ? parsed.errorMessage : 'HTTP ' + response.status.toString(),
-        rows: [{ label: '状态', value: response.status.toString() }],
+        ok: false,
+        httpStatus: response.status,
+        errorMessage: parsed.errorMessage.length > 0 ? parsed.errorMessage : 'MCP tools/call HTTP ' + response.status.toString(),
+        result: null,
         rawPreview: response.text.substring(0, 1200)
       };
     }
-    const result = summarizeMcpToolResult(parsed.result);
+    return {
+      ok: true,
+      httpStatus: response.status,
+      errorMessage: '',
+      result: parsed.result,
+      rawPreview: response.text.substring(0, 1200)
+    };
+  }
+
+  async callTool(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<DynamicGenericToolResult> {
+    const payload = await this.callToolPayload(registration, credentialValue, args);
+    if (!payload.ok || payload.result === null) {
+      const initializeFailed = payload.errorMessage.startsWith('MCP initialize');
+      return {
+        sourceTag: registration.displayName,
+        toolName: registration.mcpToolName,
+        title: initializeFailed ? 'MCP 初始化失败' : 'MCP 工具调用失败',
+        status: 'error',
+        summary: payload.errorMessage,
+        rows: [{ label: '状态', value: payload.httpStatus.toString() }],
+        rawPreview: payload.rawPreview
+      };
+    }
+    const result = summarizeMcpToolResult(payload.result);
     result.sourceTag = registration.displayName;
     result.toolName = registration.mcpToolName;
     return result;

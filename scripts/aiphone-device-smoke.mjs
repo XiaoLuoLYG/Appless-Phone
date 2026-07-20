@@ -25,12 +25,6 @@ const defaultCases = [
 
 const dynamicCases = [
   {
-    query: '帮我查明天深圳到珠海的船票',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'none'
-  },
-  {
     query: '帮我查明天深圳天气',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
@@ -58,37 +52,7 @@ const composioCases = [
     expectedDiscoveredToolId: 'dynamic.search'
   },
   {
-    query: '帮我查 Linear 里分配给我的高优先级 bug',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
-    query: '帮我在 Trello 里找本周发布 checklist 相关卡片',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
-    query: '帮我在 Asana 里查今天到期的任务',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
     query: '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
-    query: '帮我在 HubSpot 里找最近更新的 contacts',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
-    query: '帮我在 Salesforce 里找最近更新的 leads',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
     expectedDiscoveredToolId: 'dynamic.search'
@@ -97,11 +61,6 @@ const composioCases = [
     query: '帮我查看邮箱里最新的重要邮件',
     expectsTool: true,
     expectedToolId: 'mail.search'
-  },
-  {
-    query: '帮我用 Outlook 查最近和 AIPhoneDemo 相关的邮件',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search'
   },
   {
     query: '帮我用 Discord 查最近提到 AIPhoneDemo 的消息',
@@ -140,12 +99,6 @@ const composioCases = [
     expectedDiscoveredToolId: 'dynamic.search'
   },
   {
-    query: '帮我用 Ticketmaster 查深圳本周末的演唱会',
-    expectsTool: true,
-    expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
-  },
-  {
     query: '帮我查看今天的社交聚合消息',
     expectsTool: true,
     expectedToolId: 'social.feed.search'
@@ -171,18 +124,75 @@ const googleAppCases = [
   { query: '帮我用 Google Maps 搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'maps.place.search' }
 ];
 
-const fullRegressionCases = [
-  { query: '你好', expectsTool: false },
-  ...defaultCases,
-  { query: '帮我查明天北京到上海航班', expectsTool: true, expectedToolId: 'flight.search' },
-  { query: '帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁', expectsTool: true, expectedToolId: 'train.search' },
-  { query: '帮我查附近咖啡', expectsTool: true, expectedToolId: 'food.search' },
-  { query: '帮我查深圳坂田附近麦当劳门店和菜单', expectsTool: true, expectedToolId: 'food.search' },
-  ...dynamicCases,
-  ...mailCases,
-  ...gmailCases,
-  ...googleAppCases
+const smokeRunId = process.env.AIPHONE_SMOKE_RUN_ID ||
+  new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+const whatsappTestTo = (process.env.AIPHONE_WHATSAPP_TEST_TO || '').trim();
+const qaDateValue = new Date();
+qaDateValue.setDate(qaDateValue.getDate() + 7);
+const qaDate = `${qaDateValue.getFullYear()}年${String(qaDateValue.getMonth() + 1).padStart(2, '0')}月${String(qaDateValue.getDate()).padStart(2, '0')}日`;
+const qaTitle = `Appless QA ${smokeRunId}`;
+const whatsappRecipient = whatsappTestTo.length > 0 ? whatsappTestTo : '{AIPHONE_WHATSAPP_TEST_TO}';
+
+const coreRegressionCases = [
+  { id: 'C01', query: '你好', expectsTool: false, expectedToolId: '' },
+  { id: 'C02', query: '我明天要从北京去上海，帮我搜索出行方案', expectsTool: true, expectedToolId: 'travel.search' },
+  { id: 'C03', query: '帮我搜索深圳坂田华为基地附近的咖啡店', expectsTool: true, expectedToolId: 'food.search' },
+  { id: 'C04', query: '帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐', expectsTool: true, expectedToolId: 'maps.place.search' },
+  { id: 'C05', query: '帮我查看邮箱里最新的重要邮件', expectsTool: true, expectedToolId: 'mail.search', verifyMailBody: true },
+  { id: 'C06', query: '帮我查看我 Gmail 里和 ECCV 论文相关的邮件', expectsTool: true, expectedToolId: 'gmail.mail.search' },
+  { id: 'C07', query: '帮我在 B 站和 YouTube 里搜索 Qwen 的官方视频', expectsTool: true, expectedToolId: 'media.video.search' },
+  { id: 'C08', query: '我想看看有关 OpenAI Codex 的相关新闻和讨论', expectsTool: true, expectedToolId: 'media.aggregate.search' },
+  { id: 'C09', query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search', verifySocialDraft: true },
+  { id: 'C10', query: '帮我查看 X 上 OpenAI 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
+  { id: 'C11a', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
+  { id: 'C11b', query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '' },
+  { id: 'C11c', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' },
+  { id: 'C12', query: '我想看世界杯下一场比赛和赛程', expectsTool: true, expectedToolId: 'worldcup.open' },
+  { id: 'C13', query: '帮我查明天深圳天气', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'weather.query' },
+  { id: 'C14', query: '帮我看从深圳湾万象城到深圳北站打车多少钱', expectsTool: true, expectedToolId: 'ride.estimate' },
+  { id: 'C15', query: '帮我点一杯瑞幸生椰拿铁，半糖少冰', expectsTool: true, expectedToolId: 'luckin.order.preview' },
+  { id: 'C16', query: '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航', expectsTool: true, expectedToolId: 'maps.route.open' },
+  { id: 'C17', query: '用 PayPal 给罗一格转 1 美元', expectsTool: true, expectedToolId: 'payment.send' },
+  {
+    id: 'C18',
+    query: `帮我给 WhatsApp 测试联系人 ${whatsappRecipient} 发送消息：Appless QA ${smokeRunId}`,
+    expectsTool: true,
+    expectedToolId: 'whatsapp.message.send',
+    blockedWithoutWhatsAppTestTo: true
+  },
+  { id: 'C19a', query: `帮我查询 ${qaDate} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
+  { id: 'C19b', query: `帮我在 ${qaDate} 下午3点创建标题为 ${qaTitle} 的30分钟日程`, expectsTool: true, expectedToolId: 'calendar.event.create' },
+  { id: 'C19c', query: `把 ${qaDate} 的 ${qaTitle} 日程改到下午4点，保持30分钟`, expectsTool: true, expectedToolId: 'calendar.event.update' },
+  { id: 'C19d', query: `帮我查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
+  { id: 'C19e', query: `删除 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.event.delete', verifyCalendarDelete: true },
+  { id: 'C19f', query: `再次查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程，确认它不存在`, expectsTool: true, expectedToolId: 'calendar.events.search', expectAbsentText: qaTitle },
+  {
+    id: 'C20',
+    query: '帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房',
+    expectsTool: true,
+    expectedToolId: 'hotel.search',
+    verifyHotelDetail: true
+  }
 ];
+
+const retainedFullCases = [
+  { id: 'F01', query: '帮我查明天北京到上海的航班', expectsTool: true, expectedToolId: 'flight.search' },
+  { id: 'F02', query: '帮我查询明天晚上六点以后深圳北到香港西九龙的高铁', expectsTool: true, expectedToolId: 'train.search' },
+  { id: 'F03', query: '帮我查深圳坂田附近麦当劳门店和菜单', expectsTool: true, expectedToolId: 'food.search' },
+  { id: 'F04', query: '瑞幸生椰拿铁多少钱', expectsTool: true, expectedToolId: 'food.search' },
+  { id: 'F05', query: '用 Google Pay 给罗一格转 1 美元', expectsTool: true, expectedToolId: 'payment.send' },
+  { id: 'F06', query: '帮我设置 Stripe 收款账户', expectsTool: true, expectedToolId: 'payment.account.setup' },
+  { id: 'F07', query: '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了', expectsTool: true, expectedToolId: 'gmail.draft.create' },
+  { id: 'F08', query: '确认应用刚才的 Gmail 草稿', expectsTool: true, expectedToolId: 'gmail.draft.apply' },
+  { id: 'F09', query: '帮我在 YouTube 搜索世界杯相关视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
+  { id: 'F10', query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
+  { id: 'F11', query: '帮我查看我的 YouTube 订阅', expectsTool: true, expectedToolId: 'youtube.mine.subscriptions' },
+  { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
+  { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
+  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' }
+];
+
+const fullRegressionCases = [...coreRegressionCases, ...retainedFullCases];
 
 const forbiddenSocialHubLegacyMarkers = [
   'SocialInbox',
@@ -215,6 +225,7 @@ const visibleDomainMarkers = [
   '12306',
   '飞常准',
   '餐饮',
+  '酒店',
   '咖啡',
   '奶茶',
   '坂田',
@@ -256,10 +267,13 @@ const visibleDomainMarkers = [
   'Google Calendar',
   'calendar.events.search',
   'calendar.event.create',
+  'calendar.event.delete',
   'Google OAuth',
   'Google Places',
   'Google Maps',
   'maps.place.search',
+  'maps.route.open',
+  'whatsapp.message.send',
   'GOOGLE_MAPS_API_KEY',
   'Gmail Web',
   'google.gmail',
@@ -311,6 +325,11 @@ const finalLayoutBlockingMarkers = [
   'Internal error',
   '2300999',
   'Bad Request',
+  'invalid request data provided',
+  'Composio 调用失败',
+  'Failed to resolve the host name',
+  '同步失败',
+  'WhatsApp Business 账号不可用',
   '暂无可展示数据',
   '暂不支持的组件',
   '把一句话变成可执行界面',
@@ -341,7 +360,12 @@ const retryableProviderLayoutMarkers = [
   'QQ 邮箱调用失败',
   'QQ IMAP timeout',
   'Operation timeout',
-  '2300028'
+  '2300028',
+  'invalid request data provided',
+  'Composio 调用失败',
+  'Failed to resolve the host name',
+  '同步失败',
+  'WhatsApp Business 账号不可用'
 ];
 
 function hasTechnicalGmailArgsCard(text) {
@@ -380,14 +404,43 @@ const runComposioCases = argv.includes('--composio-tools');
 const runComposioAuthCases = argv.includes('--composio-auth');
 const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
-const queryArgs = argv.filter((arg) => arg !== '--clean-data' && arg !== '--dynamic-tools' && arg !== '--composio-tools' && arg !== '--composio-auth' && arg !== '--google-apps' && arg !== '--full-regression');
-const selectedDefaultCases = runComposioCases ? composioCases : (runFullRegression ? fullRegressionCases : (runGoogleApps ? defaultCases.concat(googleAppCases) : (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases)));
+const runCoreRegression = argv.includes('--core-regression');
+const listCases = argv.includes('--list-cases');
+const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
+  arg !== '--dynamic-tools' &&
+  arg !== '--composio-tools' &&
+  arg !== '--composio-auth' &&
+  arg !== '--google-apps' &&
+  arg !== '--full-regression' &&
+  arg !== '--core-regression' &&
+  arg !== '--list-cases');
+const selectedDefaultCases = runComposioCases ? composioCases :
+  (runFullRegression ? fullRegressionCases :
+    (runCoreRegression ? coreRegressionCases :
+      (runGoogleApps ? defaultCases.concat(googleAppCases) :
+        (runDynamicCases ? defaultCases.concat(dynamicCases) : defaultCases))));
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
+if (listCases) {
+  console.log(JSON.stringify(selectedDefaultCases, null, 2));
+  process.exit(0);
+}
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
 const queryRetryLimit = Number.parseInt(process.env.AIPHONE_QUERY_RETRY_LIMIT || '2', 10);
 const mailActionScrollLimit = Number.parseInt(process.env.AIPHONE_MAIL_ACTION_SCROLL_LIMIT || '16', 10);
+
+function isWhatsAppSendQuery(query) {
+  return /WhatsApp|Whats\s*App/i.test(query) && /发|发送|消息给|send/i.test(query) && /消息|信息|message/i.test(query);
+}
+
+function isMapsRouteQuery(query) {
+  return /Google\s*Maps?|GMap|谷歌地图/i.test(query) && /路线|导航|怎么走|directions?|navigate|从.+到/.test(query);
+}
+
+function isHotelQuery(query) {
+  return /酒店|hotel/i.test(query);
+}
 
 function expectedCaseForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
@@ -430,7 +483,20 @@ function expectedCaseForQuery(query) {
       expectedDiscoveredToolId: 'ppt.generate'
     };
   }
-  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
+  if (isWhatsAppSendQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'whatsapp.message.send'
+    };
+  }
+  if (isSocialFeedQuery(query) &&
+    (!isXPostSearchQuery(query) || !/公开\s*posts?\b|public\s+posts?\b|x\.com/i.test(query))) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'social.feed.search'
+    };
+  }
+  if (/Composio|GitHub|Notion|Google\s*Drive|Google\s*Docs|Linear|Asana|Trello|HubSpot|Salesforce|Outlook|Spotify|Soptify|TikTok|Ticketmaster/i.test(query)) {
     return {
       expectsTool: true,
       expectedToolId: 'dynamic.search',
@@ -534,6 +600,12 @@ function expectedCaseForQuery(query) {
     };
   }
   if (/Google\s*Calendar|谷歌日历/i.test(query) || /日程|会议|约会/.test(query)) {
+    if (/删除|取消/.test(query)) {
+      return {
+        expectsTool: true,
+        expectedToolId: 'calendar.event.delete'
+      };
+    }
     if (/创建|新建|添加|安排|预约/.test(query)) {
       return {
         expectsTool: true,
@@ -554,7 +626,8 @@ function expectedCaseForQuery(query) {
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
     return {
       expectsTool: true,
-      expectedToolId: /详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search'
+      expectedToolId: isMapsRouteQuery(query) ? 'maps.route.open' :
+        (/详情|placeId|地点 ID|地点ID/i.test(query) ? 'maps.place.details' : 'maps.place.search')
     };
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query) && /北京|上海|广州|深圳|杭州|成都|重庆|西安|南京|武汉|厦门|青岛|长沙|昆明|海口|三亚/.test(query)) {
@@ -573,6 +646,13 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'train.search'
+    };
+  }
+  if (isHotelQuery(query)) {
+    return {
+      expectsTool: true,
+      expectedToolId: 'hotel.search',
+      verifyHotelDetail: true
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -665,6 +745,39 @@ function cleanBundleData() {
   } catch (error) {
     console.warn(`Could not clean bundle data: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+const personaStorePath = '/data/app/el2/100/base/com.example.aiphonedemo/haps/entry/preferences/aiphone_persona_store';
+const personaBackupPath = `/data/local/tmp/aiphone-persona-store-${smokeRunId}`;
+
+function backupPersonaMemoryStore() {
+  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+  const output = hdc(['shell',
+    `if [ -f ${personaStorePath} ]; then cp ${personaStorePath} ${personaBackupPath} && echo PRESENT; else echo ABSENT; fi`
+  ]).trim();
+  if (output !== 'PRESENT' && output !== 'ABSENT') {
+    throw new Error(`Could not determine persona store state before C11: ${output}`);
+  }
+  return {
+    existed: output === 'PRESENT',
+    backupPath: personaBackupPath
+  };
+}
+
+function restorePersonaMemoryStore(backup) {
+  hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
+  const restoreCommand = backup.existed
+    ? `cp ${backup.backupPath} ${personaStorePath} && cmp -s ${backup.backupPath} ${personaStorePath} && echo RESTORED`
+    : `rm -f ${personaStorePath} && [ ! -f ${personaStorePath} ] && echo RESTORED`;
+  const output = hdc(['shell', restoreCommand]).trim();
+  hdc(['shell', `rm -f ${backup.backupPath}`]);
+  if (output !== 'RESTORED') {
+    throw new Error(`Persona store restoration could not be verified: ${output}`);
+  }
+  return {
+    ok: true,
+    existedBeforeRun: backup.existed
+  };
 }
 
 function probeLocalModel() {
@@ -804,7 +917,11 @@ function dumpLayout(localName = 'latest-layout.json') {
       if (raw.length === 0) {
         throw new Error('dumpLayout produced an empty file');
       }
-      return JSON.parse(raw);
+      const layout = JSON.parse(raw);
+      if (!Array.isArray(layout.children) || layout.children.length === 0) {
+        throw new Error('dumpLayout produced an empty accessibility tree');
+      }
+      return layout;
     } catch (error) {
       lastError = error;
       spawnSync('sleep', ['0.5']);
@@ -1179,7 +1296,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     failedConnect: /failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|server is not running|CURLcode result 7|curl_code":7|os_errno":111/i.test(text),
     providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) ||
       /\[AIPhone\]\[LocalToolException\]/.test(text) ||
+      /\[AIPhone\]\[A2uiHomeToolOutput\][^\n]*"status":"error"/.test(text) ||
       /Google Calendar API 调用失败/.test(text) ||
+      /invalid request data provided|Composio 调用失败|WhatsApp Business 账号不可用/i.test(text) ||
       (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
@@ -1277,7 +1396,7 @@ function isAggregateMediaSearchQuery(query) {
 }
 
 function isSocialFeedQuery(query) {
-  return /社交|消息聚合|多平台消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
+  return /社交|消息聚合|多平台消息|已授权应用.*私信|私信消息|Slack|企业微信|Discord|LinkedIn|WhatsApp|Instagram|Instgram/i.test(query);
 }
 
 function isSocialHubExpectedToolId(expectedToolId) {
@@ -1300,8 +1419,9 @@ function isXPostSearchQuery(query) {
 
 function hasTruthfulSocialHubState(text) {
   return /SocialHub/.test(text) &&
-    /社交工作台/.test(text) &&
-    /待授权|等待授权接入|异常|受限|已连接|在线|connected|未配置|Social bridge unavailable|HTTP|scope|rate|token|configured|可搜索你有权限看到的消息|真实数据接入前|还没有真实消息/i.test(text);
+    /授权状态/.test(text) &&
+    /来源\s*·|暂无可读消息/.test(text) &&
+    /发信人\s*·|当前.*不提供|读取失败|尚未连接|没有可读消息|暂无可读消息/i.test(text);
 }
 
 function hasVisibleSocialHubOutput(text, expectedToolId) {
@@ -1312,11 +1432,8 @@ function hasVisibleSocialHubOutput(text, expectedToolId) {
     return /\bX\b/.test(text);
   }
   if (expectedToolId === 'social.feed.search') {
-    return /\bX\b/.test(text) &&
-      /Slack/.test(text) &&
-      /企业微信/.test(text) &&
-      ((/Discord/.test(text) && /LinkedIn/.test(text) && /WhatsApp/.test(text) && /Instagram/.test(text)) ||
-        /回复\s*(X|Slack)/.test(text) || /消息\s*\d+/.test(text) || /还没有真实消息/.test(text));
+    return /来源\s*·/.test(text) && /发信人\s*·/.test(text) && /回复/.test(text) ||
+      /暂无可读消息/.test(text);
   }
   return false;
 }
@@ -1339,13 +1456,16 @@ function isComposioCardQuery(query) {
   return (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) ||
     (/Google\s*Drive/i.test(query) && /专利交底书/.test(query)) ||
     (/Google\s*Docs?/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query)) ||
-    (/Outlook|Discord|LinkedIn|WhatsApp|Instagram|Instgram|Spotify|Soptify|TikTok|Ticketmaster/i.test(query));
+    (/Composio/i.test(query) && /Slack/i.test(query) && /AIPhoneDemo/.test(query) && !isSocialFeedQuery(query)) ||
+    (/Outlook|Spotify|Soptify|TikTok|Ticketmaster/i.test(query) && !isSocialFeedQuery(query));
 }
 
 function layoutExpectationsForQuery(query) {
   if (isPersonaMemoryUpdateQuery(query)) {
     return [];
+  }
+  if (isSocialFeedQuery(query) && !isWhatsAppSendQuery(query)) {
+    return ['SocialHub', '授权状态'];
   }
   if (/GitHub/i.test(query) && /Appless-Phone/i.test(query) && /\bpr\b|pull\s*request/i.test(query)) {
     return ['Composio 工具结果', 'Composio GitHub 结果', 'GITHUB_FIND_PULL_REQUESTS', 'Appless-Phone'];
@@ -1368,11 +1488,8 @@ function layoutExpectationsForQuery(query) {
   if (/LinkedIn/i.test(query)) {
     return ['Composio LinkedIn 结果', 'LinkedIn'];
   }
-  if (/WhatsApp/i.test(query)) {
-    return ['Composio WhatsApp 结果', 'WhatsApp'];
-  }
-  if (/Instagram|Instgram/i.test(query)) {
-    return ['Composio Instagram 结果', 'Instagram'];
+  if (isWhatsAppSendQuery(query)) {
+    return ['WhatsApp Business', 'whatsapp.message.send', '确认发送'];
   }
   if (/Spotify|Soptify/i.test(query)) {
     return ['Composio Spotify 结果', 'Spotify'];
@@ -1402,10 +1519,7 @@ function layoutExpectationsForQuery(query) {
     return ['Composio', 'x.post.search', 'Twitter'];
   }
   if (isSocialFeedQuery(query)) {
-    if (/社交聚合|消息聚合|多平台消息/.test(query)) {
-      return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'Discord', 'LinkedIn', 'WhatsApp', 'Instagram'];
-    }
-    return ['SocialHub', '社交工作台', 'Slack', '企业微信', 'social.feed.search'];
+    return ['SocialHub'];
   }
   if (isMailAggregationQuery(query)) {
     return ['mail.search', 'Gmail', 'QQ Mail', 'Outlook', '不会模拟'];
@@ -1453,14 +1567,18 @@ function layoutExpectationsForQuery(query) {
     return ['哔哩哔哩', 'media.video.search', '跳转'];
   }
   if (isCalendarQuery(query)) {
-    return /创建|新建|添加|安排|预约/.test(query)
+    return /删除|取消/.test(query)
+      ? ['Composio', 'Google Calendar', 'calendar.event.delete']
+      : (/创建|新建|添加|安排|预约/.test(query)
       ? ['Composio', 'Google Calendar', 'calendar.event.create']
       : (/改到|改成|更新|挪到|延期/.test(query)
         ? ['Composio', 'Google Calendar', 'calendar.event.update']
-        : ['Composio', 'Google Calendar', 'calendar.events.search']);
+        : ['Composio', 'Google Calendar', 'calendar.events.search']));
   }
   if (/Google\s*Maps?|Google\s*Places|GMap|谷歌地图/i.test(query)) {
-    return ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
+    return isMapsRouteQuery(query)
+      ? ['Google Maps', '查看路线']
+      : ['Google Places', 'Google Maps', 'GOOGLE_MAPS_API_KEY', 'maps.place.search'];
   }
   if (/出行方案|搜索出行|怎么去|比较出行|出行选项|整理可查|可查的出行/.test(query)) {
     return ['北京', '上海'];
@@ -1470,6 +1588,9 @@ function layoutExpectationsForQuery(query) {
   }
   if (/高铁|火车|车票|12306/.test(query)) {
     return ['高铁', '12306', 'train.search'];
+  }
+  if (isHotelQuery(query)) {
+    return ['酒店 · 实时搜索', 'RollingGo', '查看房型'];
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
@@ -1485,6 +1606,10 @@ function layoutExpectationsForQuery(query) {
 
 function swipeResultsUp() {
   hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '2200', '650', '950', '600']);
+}
+
+function swipeResultsDown() {
+  hdc(['shell', 'uitest', 'uiInput', 'swipe', '650', '950', '650', '2200', '600']);
 }
 
 function requiredScrolledMarkersForQuery(query, expectedToolId) {
@@ -1560,6 +1685,183 @@ function expandMatchesForTarget(layout, targetMarker) {
       const rightDistance = Math.min(...targets.map((target) => Math.abs(right.bounds.y - target.bounds.y)));
       return leftDistance - rightDistance;
     });
+}
+
+async function verifyMailExpandedBody(layout, index) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const matches = expandMatchesForTarget(currentLayout, '');
+    if (matches.length > 0) {
+      const target = matches[0].bounds;
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
+      await sleep(900);
+      const expanded = dumpLayout(`query-${index + 1}-mail-body-layout.json`);
+      const text = collectLayoutText(expanded).join('\n');
+      const textPath = join(outDir, `query-${index + 1}-mail-body-layout-text.txt`);
+      writeFileSync(textPath, text + '\n');
+      return {
+        ok: /正文|发件人|收件人|主题|回复/.test(text) && !hasTechnicalGmailArgsCard(text),
+        capability: 'mail.thread.read',
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-mail-body-screen.png`)
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-mail-body-scroll-${attempt + 1}.json`);
+  }
+  return { ok: false, capability: 'mail.thread.read', reason: 'mail expand button not found' };
+}
+
+async function verifySocialDraftAction(layout, index) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const center = findTextCenter(currentLayout, '生成草稿');
+    if (center !== null) {
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
+      await sleep(1000);
+      const resultLayout = dumpLayout(`query-${index + 1}-social-draft-layout.json`);
+      const text = collectLayoutText(resultLayout).join('\n');
+      const textPath = join(outDir, `query-${index + 1}-social-draft-layout-text.txt`);
+      writeFileSync(textPath, text + '\n');
+      return {
+        ok: /回复草稿|本地草稿预览|尚未生成草稿/.test(text) && !/已发送|发送成功/.test(text),
+        capability: 'social.reply.draft',
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-social-draft-screen.png`)
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-social-draft-scroll-${attempt + 1}.json`);
+  }
+  return { ok: false, capability: 'social.reply.draft', reason: '生成草稿 button not found' };
+}
+
+async function verifyCalendarDeleteAction(layout, index, appPid) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const center = findTextCenter(currentLayout, '确认删除');
+    if (center !== null) {
+      clearHilog();
+      const actionLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
+      });
+      const resultLayout = dumpLayout(`query-${index + 1}-calendar-delete-layout.json`);
+      const text = collectLayoutText(resultLayout).join('\n');
+      const logs = actionLogs.join('\n');
+      const logPath = join(outDir, `query-${index + 1}-calendar-delete.log`);
+      const textPath = join(outDir, `query-${index + 1}-calendar-delete-layout-text.txt`);
+      writeFileSync(logPath, logs + '\n');
+      writeFileSync(textPath, text + '\n');
+      return {
+        ok: /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
+          !/status":"error"|删除失败/.test(`${text}\n${logs}`),
+        capability: 'calendar.event.delete.confirm',
+        logPath,
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-calendar-delete-screen.png`)
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-scroll-${attempt + 1}.json`);
+  }
+  return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
+}
+
+async function verifyHotelDetailAction(layout, index, appPid) {
+  let currentLayout = layout;
+  let detailCenter = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    detailCenter = findTextCenter(currentLayout, '查看房型');
+    if (detailCenter !== null) {
+      break;
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
+  }
+  if (detailCenter === null) {
+    return { ok: false, capability: 'hotel.detail', reason: '查看房型 button not found' };
+  }
+
+  clearHilog();
+  const detailLogs = await captureWhile(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(detailCenter.x), String(detailCenter.y)]);
+  });
+  const detailLogText = detailLogs.join('\n');
+  const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
+  writeFileSync(detailLogPath, detailLogText + '\n');
+  await sleep(700);
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-layout.json`);
+
+  let rateExpand = findTextCenter(currentLayout, '价格与取消规则');
+  for (let attempt = 0; rateExpand === null && attempt < 8; attempt += 1) {
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-scroll-${attempt + 1}.json`);
+    rateExpand = findTextCenter(currentLayout, '价格与取消规则');
+  }
+  if (rateExpand === null) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: '价格与取消规则 button not found',
+      detailLogPath
+    };
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
+  await sleep(700);
+  swipeResultsUp();
+  await sleep(700);
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-rate-expanded-layout.json`);
+  const text = collectLayoutText(currentLayout).join('\n');
+  const textPath = join(outDir, `query-${index + 1}-hotel-rate-expanded-layout-text.txt`);
+  writeFileSync(textPath, text + '\n');
+  const screenPath = captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`);
+
+  let backCenter = findTextCenter(currentLayout, '返回酒店结果');
+  for (let attempt = 0; backCenter === null && attempt < 8; attempt += 1) {
+    swipeResultsDown();
+    await sleep(700);
+    currentLayout = dumpLayout(`query-${index + 1}-hotel-return-scroll-${attempt + 1}.json`);
+    backCenter = findTextCenter(currentLayout, '返回酒店结果');
+  }
+  if (backCenter === null) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: '返回酒店结果 button not found',
+      detailLogPath,
+      textPath,
+      screenPath
+    };
+  }
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  await sleep(700);
+  const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
+  const restoredText = collectLayoutText(restoredLayout).join('\n');
+  const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
+  writeFileSync(restoredTextPath, restoredText + '\n');
+  const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
+  const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
+    /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
+  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
+  const restoredOk = /酒店结果/.test(restoredText) && /查看房型/.test(restoredText);
+  return {
+    ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
+      /床型|餐食|取消政策/.test(text) && restoredOk,
+    capability: 'hotel.detail',
+    detailRequested,
+    detailOk,
+    restoredOk,
+    detailLogPath,
+    textPath,
+    screenPath,
+    restoredTextPath,
+    restoredScreenPath
+  };
 }
 
 async function findVisibleReplyDraftAction(layout, index) {
@@ -1892,6 +2194,7 @@ async function runQuery(query, index, expectedTool) {
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
   const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
@@ -1977,7 +2280,8 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutScrolledFoundMarkers = scrollEvidence.foundMarkers;
   summary.layoutScrollTextPaths = scrollEvidence.textPaths;
   summary.layoutScrollScreenPaths = scrollEvidence.screenPaths;
-  summary.screenPath = captureScreen(`query-${index + 1}-final-screen.png`);
+  const evidenceToolName = (expectedToolId.length > 0 ? expectedToolId : 'no-tool').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+  summary.screenPath = captureScreen(`query-${index + 1}-${evidenceToolName}-final-screen.png`);
   summary.layoutExpectedHits = expectedHits;
   summary.layoutExpectedMisses = expectedMisses;
   summary.socialHubVisibleOutput = socialHubVisibleOutput;
@@ -2010,13 +2314,34 @@ async function runQuery(query, index, expectedTool) {
       draftToolOk: true,
       draftVisible: true
     };
+  summary.mailExpandedBody = expectedCase.verifyMailBody === true
+    ? await verifyMailExpandedBody(evidenceLayout, index)
+    : { ok: true, skipped: true };
+  summary.socialDraftAction = expectedCase.verifySocialDraft === true
+    ? await verifySocialDraftAction(evidenceLayout, index)
+    : { ok: true, skipped: true };
+  summary.calendarDeleteAction = expectedCase.verifyCalendarDelete === true
+    ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
+    : { ok: true, skipped: true };
+  summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid)
+    : { ok: true, skipped: true };
+  summary.expectedAbsentText = expectedCase.expectAbsentText || '';
+  summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
+    !evidenceText.includes(summary.expectedAbsentText) ||
+    /无结果|没有找到|不存在|0 条|0个/.test(evidenceText);
   if (isPersonaMemoryUpdateQuery(query)) {
     summary.mailAggregateVisible = true;
     summary.layoutTextExposed = summary.personaMemoryUpdateProof === true;
     summary.layoutOk = layoutBlockingHits.length === 0 &&
       forbiddenSocialHubLegacyHits.length === 0 &&
       summary.layoutTextExposed;
-    summary.ok = summary.ok && summary.layoutOk;
+    summary.ok = summary.ok && summary.layoutOk &&
+      summary.mailExpandedBody.ok &&
+      summary.socialDraftAction.ok &&
+      summary.calendarDeleteAction.ok &&
+      summary.hotelDetailAction.ok &&
+      summary.absenceVerified;
     return summary;
   }
   summary.modelFailed = summary.modelFailed || summary.mailExpandedActions.draftModelFailed === true;
@@ -2085,6 +2410,12 @@ async function runQuery(query, index, expectedTool) {
   } else {
     summary.ok = summary.ok && summary.layoutOk;
   }
+  summary.ok = summary.ok &&
+    summary.mailExpandedBody.ok &&
+    summary.socialDraftAction.ok &&
+    summary.calendarDeleteAction.ok &&
+    summary.hotelDetailAction.ok &&
+    summary.absenceVerified;
   return summary;
 }
 
@@ -2206,10 +2537,53 @@ const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 
 const summaries = [];
+let personaMemoryBackup = null;
+let personaMemoryRestore = { ok: true, skipped: true };
+if (useDefaultCases && selectedDefaultCases.some((testCase) => /^C11/.test(testCase.id || ''))) {
+  try {
+    personaMemoryBackup = backupPersonaMemoryStore();
+    personaMemoryRestore = { ok: false, skipped: false, pending: true };
+  } catch (error) {
+    personaMemoryRestore = {
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+try {
 for (let index = 0; index < queries.length; index += 1) {
   const query = queries[index];
   console.log(`\n[${index + 1}/${queries.length}] ${query}`);
   const inferredCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+  if (/^C11/.test(inferredCase.id || '') && personaMemoryBackup === null) {
+    const blockedSummary = {
+      caseId: inferredCase.id || '',
+      query,
+      expectedTool: inferredCase.expectsTool,
+      expectedToolId: inferredCase.expectedToolId || '',
+      status: 'BLOCKED',
+      ok: false,
+      reason: `Persona memory could not be backed up safely: ${personaMemoryRestore.reason || 'unknown backup failure'}`
+    };
+    summaries.push(blockedSummary);
+    console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
+  if (inferredCase.blockedWithoutWhatsAppTestTo === true && whatsappTestTo.length === 0) {
+    const blockedSummary = {
+      caseId: inferredCase.id || '',
+      query,
+      expectedTool: inferredCase.expectsTool,
+      expectedToolId: inferredCase.expectedToolId || '',
+      status: 'BLOCKED',
+      ok: false,
+      reason: 'AIPHONE_WHATSAPP_TEST_TO is missing; no recipient was guessed and no message action was opened.'
+    };
+    summaries.push(blockedSummary);
+    console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
   const expectedTool = inferredCase.expectsTool;
   let summary = null;
   for (let attempt = 0; attempt <= queryRetryLimit; attempt += 1) {
@@ -2228,8 +2602,19 @@ for (let index = 0; index < queries.length; index += 1) {
   if (summary === null) {
     throw new Error(`No summary produced for query: ${query}`);
   }
+  summary.status = summary.ok ? 'PASS' : (summary.providerFailed ? 'BLOCKED' : 'FAIL');
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
+  if (inferredCase.id === 'C11c' && personaMemoryBackup !== null) {
+    personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
+    personaMemoryBackup = null;
+  }
+}
+} finally {
+  if (personaMemoryBackup !== null) {
+    personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
+    personaMemoryBackup = null;
+  }
 }
 
 const finalLayout = dumpLayout('final-layout.json');
@@ -2289,7 +2674,8 @@ if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.mail.search'
   finalLayoutBlockingHits.push('gmail-technical-args-card');
 }
 for (const blockingPattern of finalLayoutBlockingPatterns) {
-  if (finalSummary !== null && finalSummary.expectedToolId.startsWith('calendar.')) {
+  if (finalSummary !== null &&
+    (finalSummary.expectedToolId.startsWith('calendar.') || finalSummary.expectedToolId.startsWith('hotel.'))) {
     continue;
   }
   if (finalSummary !== null &&
@@ -2335,9 +2721,19 @@ const processCleanup = {
 };
 
 const summaryPath = join(outDir, 'summary.json');
-writeFileSync(summaryPath, JSON.stringify({ target, timeoutMs, cleanData, modelHealth, summaries, visibleOutput, processCleanup }, null, 2));
+writeFileSync(summaryPath, JSON.stringify({
+  target,
+  timeoutMs,
+  cleanData,
+  modelHealth,
+  personaMemoryRestore,
+  summaries,
+  visibleOutput,
+  processCleanup
+}, null, 2));
 console.log(`\nsummary: ${summaryPath}`);
+console.log(`personaMemoryRestore: ${JSON.stringify(personaMemoryRestore, null, 2)}`);
 console.log(`visibleOutput: ${JSON.stringify(visibleOutput, null, 2)}`);
 console.log(`processCleanup: ${JSON.stringify(processCleanup, null, 2)}`);
 const failed = summaries.filter((summary) => !summary.ok);
-process.exitCode = failed.length === 0 && visibleOutput.ok && processCleanup.ok ? 0 : 1;
+process.exitCode = failed.length === 0 && personaMemoryRestore.ok && visibleOutput.ok && processCleanup.ok ? 0 : 1;

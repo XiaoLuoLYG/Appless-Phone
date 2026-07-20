@@ -35,7 +35,7 @@ function eventDescription(suggestion: MailCalendarSuggestion): string {
   if (description.length > 0) {
     parts.push(description);
   }
-  parts.push('Source: Appless Phone mail');
+  parts.push('Source: Appless mail');
   parts.push('Provider: ' + textOf(suggestion.provider));
   parts.push('Thread ID: ' + textOf(suggestion.threadId));
   parts.push('Message ID: ' + textOf(suggestion.messageId));

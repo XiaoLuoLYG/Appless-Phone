@@ -2,15 +2,10 @@ import {
   A2uiAction,
   A2uiComponent,
   A2uiSurfaceState,
-  emptyA2uiSurface
-} from '@loop/agent-core';
-import {
+  emptyA2uiSurface,
   socialHubConnections,
-  socialHubDraft,
   socialHubItems,
-  socialHubSelected
-} from '@loop/agent-core';
-import {
+  socialHubSelected,
   SocialHubConnectionData,
   SocialHubItemData,
   SocialHubPlatform
@@ -27,30 +22,19 @@ import {
   COLOR_SOCIAL_CARD,
   COLOR_SOCIAL_GLOW,
   COLOR_SOCIAL_LINE,
-  COLOR_SOCIAL_SOFT,
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
-import {
-  A2UI_PANEL_CORNER_RADIUS
-} from '../style/A2uiPanelFrameStyle';
+import { A2UI_PANEL_CORNER_RADIUS } from '../style/A2uiPanelFrameStyle';
 import { A2uiPanelAccentView } from './common/A2uiPanelAccentView';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import {
+  socialHubConnectionStatusLabel,
   socialHubAuthorText,
-  socialHubCanAuthorize,
-  socialHubComposioToolkitCandidates,
-  socialHubDraftDisplayText,
-  socialHubItemMetaText,
-  socialHubKindLabel,
-  SocialHubMessageGroup,
   socialHubPlatformLabel,
   socialHubPrimaryText,
-  socialHubVisibleMessageCount,
-  socialHubRecentMessageGroups
+  socialHubRecentMessageGroups,
+  SocialHubMessageGroup
 } from './SocialHubViewData';
-
-const SOCIAL_HUB_CONNECTION_HEIGHT: number = 82;
-const SOCIAL_HUB_CONNECTION_CARD_WIDTH: string = '30%';
 
 interface SocialHubSendReplyArgs {
   text: string;
@@ -73,69 +57,32 @@ export struct SocialHubView {
     return socialHubItems(this.surface);
   }
 
-  private selected(): SocialHubItemData {
-    return socialHubSelected(this.surface);
-  }
-
   private messageGroups(): SocialHubMessageGroup[] {
     return socialHubRecentMessageGroups(this.items(), new Date().toISOString(), 5);
   }
 
-  private isSelected(item: SocialHubItemData): boolean {
-    return item.id.length > 0 && item.id === this.selected().id;
-  }
-
   private isActive(item: SocialHubItemData): boolean {
-    return this.isSelected(item) || (item.id.length > 0 && item.id === this.activeItemId);
-  }
-
-  private isPostExpanded(item: SocialHubItemData): boolean {
-    return item.kind === 'post' && this.isActive(item);
-  }
-
-  private connection(platform: SocialHubPlatform): SocialHubConnectionData {
-    const connections = socialHubConnections(this.surface);
-    for (let index = 0; index < connections.length; index++) {
-      if (connections[index].platform === platform) {
-        return connections[index];
-      }
+    if (this.activeItemId.length > 0) {
+      return item.id === this.activeItemId;
     }
-    return {
-      platform: platform,
-      status: 'disabled',
-      displayName: '',
-      accountId: '',
-      message: '未配置'
-    };
+    return item.id.length > 0 && item.id === socialHubSelected(this.surface).id;
   }
 
-  private hasReadableSource(): boolean {
-    const connections = socialHubConnections(this.surface);
-    for (let index = 0; index < connections.length; index++) {
-      if (connections[index].status === 'connected' || connections[index].status === 'limited') {
-        return true;
-      }
+  private openReply(item: SocialHubItemData): void {
+    if (this.isBusy) {
+      return;
     }
-    return false;
-  }
-
-  private draftAction(item: SocialHubItemData): A2uiAction {
-    return {
-      id: 'social_hub_draft_reply',
-      label: '生成草稿',
-      prompt: item.id,
-      variant: 'primary',
-      kind: 'client'
-    };
+    if (this.activeItemId !== item.id) {
+      this.replyText = '';
+    }
+    this.activeItemId = item.id;
   }
 
   private sendReplyAction(item: SocialHubItemData): A2uiAction {
-    const args: SocialHubSendReplyArgs = {
-      text: this.replyText
-    };
+    const args: SocialHubSendReplyArgs = { text: this.replyText };
     return {
       id: 'social_hub_send_reply',
-      label: '发送',
+      label: '回复',
       prompt: item.id,
       variant: 'primary',
       kind: 'client',
@@ -143,91 +90,27 @@ export struct SocialHubView {
     };
   }
 
-  private openSourceAction(item: SocialHubItemData): A2uiAction {
-    return {
-      id: 'social_hub_open_source',
-      label: '打开来源',
-      prompt: item.url,
-      variant: 'secondary',
-      kind: 'client'
-    };
-  }
-
-  private authorizeAction(platform: SocialHubPlatform): A2uiAction {
-    return {
-      id: 'social_hub_authorize',
-      label: '授权',
-      prompt: platform,
-      variant: 'primary',
-      kind: 'client'
-    };
-  }
-
-  private canAuthorize(connection: SocialHubConnectionData): boolean {
-    return socialHubComposioToolkitCandidates(connection.platform).length > 0 &&
-      socialHubCanAuthorize(connection.status);
-  }
-
-  private openInlineReply(item: SocialHubItemData): void {
-    if (!this.isBusy) {
-      if (this.activeItemId !== item.id) {
-        this.replyText = '';
+  private emptyStateText(): string {
+    const connections = socialHubConnections(this.surface);
+    for (let index = 0; index < connections.length; index++) {
+      const current = connections[index];
+      if (current.status === 'limited') {
+        return current.message;
       }
-      this.activeItemId = item.id;
     }
-  }
-
-  private connectionStatusText(connection: SocialHubConnectionData): string {
-    if (connection.status === 'connected') {
-      return '在线';
+    for (let index = 0; index < connections.length; index++) {
+      const current = connections[index];
+      if (current.status === 'error') {
+        return socialHubPlatformLabel(current.platform) + ' 读取失败，请稍后重试。';
+      }
     }
-    if (connection.status === 'limited') {
-      return '只读';
+    for (let index = 0; index < connections.length; index++) {
+      const current = connections[index];
+      if (current.status === 'needs_auth') {
+        return socialHubPlatformLabel(current.platform) + ' 尚未连接。';
+      }
     }
-    if (connection.status === 'needs_auth') {
-      return '授权';
-    }
-    if (connection.status === 'error') {
-      return '异常';
-    }
-    return '待配置';
-  }
-
-  private connectionStatusColor(connection: SocialHubConnectionData): string {
-    if (connection.status === 'connected') {
-      return '#2F7754';
-    }
-    if (connection.status === 'limited') {
-      return '#8A5A16';
-    }
-    if (connection.status === 'needs_auth') {
-      return '#476F9F';
-    }
-    if (connection.status === 'error') {
-      return '#B04A42';
-    }
-    return COLOR_MUTED;
-  }
-
-  private connectionStatusBackground(connection: SocialHubConnectionData): string {
-    if (connection.status === 'connected') {
-      return '#E7F3E8';
-    }
-    if (connection.status === 'limited') {
-      return '#F3E6D4';
-    }
-    if (connection.status === 'needs_auth') {
-      return '#E8EDF8';
-    }
-    if (connection.status === 'error') {
-      return '#F6E2DF';
-    }
-    return '#F5F1EB';
-  }
-
-  private isDraftForItem(item: SocialHubItemData): boolean {
-    const draft = socialHubDraft(this.surface);
-    return draft.itemId === item.id && draft.status !== 'empty';
+    return connections.length > 0 ? '已连接来源当前没有可读消息。' : '暂无可读消息。';
   }
 
   @Builder
@@ -276,291 +159,123 @@ export struct SocialHubView {
   }
 
   @Builder
-  private ConnectionCell(platform: SocialHubPlatform) {
+  private AuthorizationStatus() {
     Column() {
-      this.PlatformLogo(platform, 24)
-      Text(socialHubPlatformLabel(platform))
+      Text('授权状态')
         .fontSize(12)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(COLOR_INK)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 7 })
+        .fontColor(COLOR_MUTED)
+        .width('100%')
 
-      Text(this.connectionStatusText(this.connection(platform)))
-        .fontSize(10)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.connectionStatusColor(this.connection(platform)))
-        .textAlign(TextAlign.Center)
-        .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-        .backgroundColor(this.connectionStatusBackground(this.connection(platform)))
-        .borderRadius(7)
-        .border({ width: 1, color: this.connectionStatusColor(this.connection(platform)) })
-        .margin({ top: 6 })
-    }
-    .width(SOCIAL_HUB_CONNECTION_CARD_WIDTH)
-    .height(SOCIAL_HUB_CONNECTION_HEIGHT)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .padding({ left: 6, right: 6 })
-    .backgroundColor(COLOR_CARD_RAISED)
-    .borderRadius(16)
-    .border({ width: 1, color: COLOR_LINE })
-    .margin({ right: 6, top: 8 })
-    .onClick(() => {
-      if (this.canAuthorize(this.connection(platform))) {
-        this.onAction(this.authorizeAction(platform));
+      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
+        ForEach(socialHubConnections(this.surface), (connection: SocialHubConnectionData) => {
+          Row() {
+            this.PlatformLogo(connection.platform, 18)
+            Text(socialHubPlatformLabel(connection.platform))
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(COLOR_INK)
+              .margin({ left: 6 })
+            Text(socialHubConnectionStatusLabel(connection.status))
+              .fontSize(11)
+              .fontColor(COLOR_MUTED)
+              .margin({ left: 5 })
+          }
+          .height(32)
+          .padding({ left: 9, right: 9 })
+          .margin({ right: 6, top: 6 })
+          .backgroundColor(COLOR_CARD_RAISED)
+          .borderRadius(12)
+          .border({ width: 1, color: COLOR_LINE })
+        }, (connection: SocialHubConnectionData) => connection.platform)
       }
-    })
+      .width('100%')
+    }
+    .width('100%')
+    .margin({ top: 6 })
   }
 
   @Builder
-  private InlinePostActions(item: SocialHubItemData) {
+  private ReplyComposer(item: SocialHubItemData) {
     Row() {
+      TextInput({ text: this.replyText, placeholder: '输入回复' })
+        .layoutWeight(1)
+        .height(44)
+        .fontSize(14)
+        .fontColor(COLOR_TEXT)
+        .placeholderColor(COLOR_MUTED)
+        .backgroundColor(COLOR_CARD_RAISED)
+        .borderRadius(14)
+        .border({ width: 1, color: COLOR_LINE })
+        .padding({ left: 12, right: 12 })
+        .onChange((value: string) => {
+          this.replyText = value;
+        })
+      Blank()
+        .width(8)
       A2uiButtonView({
-        label: '生成草稿',
+        label: '回复',
         shape: 'pill',
         tone: 'primary',
-        isEnabled: !this.isBusy
+        isEnabled: !this.isBusy && this.replyText.trim().length > 0
       })
-        .width(108)
+        .width(78)
         .onClick(() => {
-          if (!this.isBusy) {
-            this.onAction(this.draftAction(item));
+          if (!this.isBusy && this.replyText.trim().length > 0) {
+            this.onAction(this.sendReplyAction(item));
           }
         })
-      if (item.url.length > 0) {
-        Blank()
-          .width(8)
-        A2uiButtonView({
-          label: '打开来源',
-          shape: 'pill',
-          tone: 'secondary',
-          isEnabled: !this.isBusy
-        })
-          .width(108)
-          .onClick(() => {
-            if (!this.isBusy) {
-              this.onAction(this.openSourceAction(item));
-            }
-          })
-      }
     }
     .width('100%')
-    .margin({ top: 12 })
-  }
-
-  @Builder
-  private InlineReply(item: SocialHubItemData) {
-    Column() {
-      if (item.platform === 'slack') {
-        Row() {
-          TextInput({ text: this.replyText, placeholder: '回复 Slack' })
-            .layoutWeight(1)
-            .height(44)
-            .fontSize(14)
-            .fontColor(COLOR_TEXT)
-            .placeholderColor(COLOR_MUTED)
-            .backgroundColor(COLOR_CARD_RAISED)
-            .borderRadius(14)
-            .border({ width: 1, color: COLOR_LINE })
-            .padding({ left: 12, right: 12 })
-            .onChange((value: string) => {
-              this.replyText = value;
-            })
-          Blank()
-            .width(8)
-          A2uiButtonView({
-            label: '发送',
-            shape: 'pill',
-            tone: 'primary',
-            isEnabled: !this.isBusy
-          })
-            .width(84)
-            .onClick(() => {
-              if (!this.isBusy) {
-                this.onAction(this.sendReplyAction(item));
-              }
-            })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-      } else {
-        TextArea({ text: this.replyText, placeholder: '回复 ' + socialHubPlatformLabel(item.platform) })
-          .width('100%')
-          .height(82)
-          .fontSize(14)
-          .fontColor(COLOR_TEXT)
-          .placeholderColor(COLOR_MUTED)
-          .backgroundColor(COLOR_CARD_RAISED)
-          .borderRadius(14)
-          .border({ width: 1, color: COLOR_LINE })
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .onChange((value: string) => {
-            this.replyText = value;
-          })
-
-        Row() {
-          A2uiButtonView({
-            label: '生成草稿',
-            shape: 'pill',
-            tone: 'primary',
-            isEnabled: !this.isBusy
-          })
-            .width(108)
-            .onClick(() => {
-              if (!this.isBusy) {
-                this.onAction(this.draftAction(item));
-              }
-            })
-          if (item.url.length > 0) {
-            Blank()
-              .width(8)
-            A2uiButtonView({
-              label: '打开来源',
-              shape: 'pill',
-              tone: 'secondary',
-              isEnabled: !this.isBusy
-            })
-              .width(108)
-              .onClick(() => {
-                if (!this.isBusy) {
-                  this.onAction(this.openSourceAction(item));
-                }
-              })
-          }
-        }
-        .width('100%')
-        .margin({ top: 10 })
-      }
-
-      if (this.isDraftForItem(item)) {
-        Text(socialHubDraftDisplayText(socialHubDraft(this.surface)))
-          .fontSize(13)
-          .fontColor(socialHubDraft(this.surface).status === 'error' ? '#B04A42' : COLOR_TEXT)
-          .lineHeight(20)
-          .width('100%')
-          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-          .backgroundColor(COLOR_SOCIAL_SOFT)
-          .borderRadius(12)
-          .border({ width: 1, color: COLOR_SOCIAL_LINE })
-          .margin({ top: 10 })
-      }
-    }
-    .width('100%')
+    .alignItems(VerticalAlign.Center)
     .margin({ top: 12 })
   }
 
   @Builder
   private MessageRow(item: SocialHubItemData) {
     Column() {
-      Column() {
-        Row() {
-          this.PlatformLogo(item.platform, 30)
-          Blank()
-            .width(10)
-          Column() {
-            Text(socialHubAuthorText(item))
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_INK)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(socialHubItemMetaText(item))
-              .fontSize(12)
-              .fontColor(COLOR_MUTED)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 2 })
-          }
-          .alignItems(HorizontalAlign.Start)
+      Row() {
+        this.PlatformLogo(item.platform, 24)
+        Text('来源 · ' + socialHubPlatformLabel(item.platform))
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_MUTED)
+          .margin({ left: 8 })
           .layoutWeight(1)
-
-          Text(socialHubKindLabel(item.kind))
-            .fontSize(11)
-            .fontColor(COLOR_MUTED)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .backgroundColor(COLOR_CARD_RAISED)
-            .borderRadius(9)
-            .border({ width: 1, color: COLOR_LINE })
-
-          if (!this.isActive(item) && item.kind !== 'post') {
-            Blank()
-              .width(8)
-            A2uiButtonView({
-              label: '回复',
-              shape: 'pill',
-              tone: 'secondary',
-              isEnabled: !this.isBusy
-            })
-              .onClick(() => {
-                this.openInlineReply(item);
-              })
-          }
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => {
-          this.openInlineReply(item);
-        })
-
-        if (this.isActive(item)) {
-          Text(socialHubPrimaryText(item))
-            .fontSize(item.kind === 'post' ? 15 : 16)
-            .fontWeight(item.kind === 'post' ? FontWeight.Regular : FontWeight.Medium)
-            .fontColor(COLOR_TEXT)
-            .lineHeight(item.kind === 'post' ? 22 : 24)
-            .width('100%')
-            .margin({ top: 12 })
+        if (!this.isActive(item)) {
+          A2uiButtonView({
+            label: '回复',
+            shape: 'pill',
+            tone: 'secondary',
+            isEnabled: !this.isBusy
+          })
+            .width(72)
             .onClick(() => {
-              this.openInlineReply(item);
+              this.openReply(item);
             })
-        } else {
-          Text(socialHubPrimaryText(item))
-            .fontSize(16)
-            .fontWeight(item.kind === 'post' ? FontWeight.Regular : FontWeight.Medium)
-            .fontColor(COLOR_TEXT)
-            .lineHeight(24)
-            .maxLines(item.kind === 'post' ? 4 : 2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-            .margin({ top: 12 })
-            .onClick(() => {
-              this.openInlineReply(item);
-            })
-        }
-
-        if (item.kind === 'post' && item.mediaUrl.length > 0) {
-          Image(item.mediaUrl)
-            .width('100%')
-            .height(this.isPostExpanded(item) ? 218 : 132)
-            .objectFit(ImageFit.Cover)
-            .borderRadius(14)
-            .backgroundColor(COLOR_CARD_RAISED)
-            .margin({ top: 10 })
-            .onClick(() => {
-              this.openInlineReply(item);
-            })
-        }
-
-        if (item.unread) {
-          Text('未读')
-            .fontSize(11)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(COLOR_SOCIAL)
-            .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-            .backgroundColor(COLOR_SOCIAL_SOFT)
-            .borderRadius(7)
-            .margin({ top: 10 })
-        }
-
-        if (item.kind === 'post' && this.isPostExpanded(item)) {
-          this.InlinePostActions(item)
-        } else if (this.isActive(item)) {
-          this.InlineReply(item)
         }
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text('发信人 · ' + socialHubAuthorText(item))
+        .fontSize(15)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(COLOR_INK)
+        .width('100%')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 12 })
+
+      Text(socialHubPrimaryText(item))
+        .fontSize(15)
+        .fontColor(COLOR_TEXT)
+        .lineHeight(22)
+        .width('100%')
+        .margin({ top: 8 })
+
+      if (this.isActive(item)) {
+        this.ReplyComposer(item)
+      }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 14, bottom: 14 })
@@ -569,73 +284,45 @@ export struct SocialHubView {
     .borderRadius(18)
     .border({ width: 1, color: this.isActive(item) ? COLOR_SOCIAL_LINE : COLOR_LINE })
     .onClick(() => {
-      this.openInlineReply(item);
+      this.openReply(item);
     })
   }
 
   @Builder
   private MessageList(groups: SocialHubMessageGroup[]) {
-    Column() {
-      Row() {
-        Text('消息')
-          .fontSize(15)
+    if (groups.length === 0) {
+      Column() {
+        Text('暂无可读消息')
+          .fontSize(16)
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
-          .layoutWeight(1)
-        Text(socialHubVisibleMessageCount(groups).toString())
-          .fontSize(12)
+        Text(this.emptyStateText())
+          .fontSize(13)
           .fontColor(COLOR_MUTED)
+          .lineHeight(20)
+          .textAlign(TextAlign.Center)
+          .margin({ top: 8 })
       }
       .width('100%')
-      .height(30)
-      .alignItems(VerticalAlign.Center)
-      .padding({ left: 12, right: 12 })
-
-      if (socialHubVisibleMessageCount(groups) === 0) {
+      .height(148)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .padding({ left: 20, right: 20 })
+    } else {
+      Scroll() {
         Column() {
-          Text(this.hasReadableSource() ? '近 30 天私信列表为空' : '来源未连通')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(COLOR_INK)
-          Text(this.hasReadableSource() ? '已连接来源当前没有收到私信。' : '请先点击应用授权后再查看私信。')
-            .fontSize(12)
-            .fontColor(COLOR_MUTED)
-            .margin({ top: 6 })
+          ForEach(groups, (group: SocialHubMessageGroup) => {
+            ForEach(group.visibleItems, (item: SocialHubItemData) => {
+              this.MessageRow(item)
+            }, (item: SocialHubItemData) => item.id)
+          }, (group: SocialHubMessageGroup) => group.platform)
         }
         .width('100%')
-        .height(168)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-        .border({ width: { top: 1 }, color: COLOR_LINE })
-      } else {
-        Scroll() {
-          Column() {
-            ForEach(groups, (group: SocialHubMessageGroup) => {
-              Text(socialHubPlatformLabel(group.platform))
-                .fontSize(13)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_MUTED)
-                .margin({ top: 12 })
-              ForEach(group.visibleItems, (item: SocialHubItemData) => {
-                this.MessageRow(item)
-              }, (item: SocialHubItemData) => item.id)
-              if (group.hiddenCount > 0) {
-                Text('已折叠 ' + group.hiddenCount.toString() + ' 条更早消息')
-                  .fontSize(12)
-                  .fontColor(COLOR_MUTED)
-                  .margin({ top: 8 })
-              }
-            }, (group: SocialHubMessageGroup) => group.platform)
-          }
-          .width('100%')
-        }
-        .width('100%')
-        .constraintSize({ maxHeight: 520 })
-        .scrollBar(BarState.Auto)
       }
+      .width('100%')
+      .constraintSize({ maxHeight: 560 })
+      .scrollBar(BarState.Auto)
     }
-    .width('100%')
-    .clip(true)
   }
 
   build() {
@@ -647,38 +334,15 @@ export struct SocialHubView {
       })
 
       Column() {
-        Row() {
-          Text('SocialHub')
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_INK)
-            .layoutWeight(1)
-          Text('社交工作台')
-            .fontSize(12)
-            .fontColor(COLOR_MUTED)
-        }
-        .width('100%')
-        .height(34)
-        .alignItems(VerticalAlign.Center)
+        Text('SocialHub')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_INK)
+          .width('100%')
 
-        Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap }) {
-          this.ConnectionCell('x')
-          this.ConnectionCell('slack')
-          this.ConnectionCell('wecom')
-          this.ConnectionCell('discord')
-          this.ConnectionCell('linkedin')
-          this.ConnectionCell('whatsapp')
-          this.ConnectionCell('instagram')
-        }
-        .width('100%')
-        .margin({ top: 8 })
+        this.AuthorizationStatus()
 
-        Column() {
-          this.MessageList(this.messageGroups())
-        }
-        .width('100%')
-        .margin({ top: 12 })
-
+        this.MessageList(this.messageGroups())
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 12, bottom: 12 })

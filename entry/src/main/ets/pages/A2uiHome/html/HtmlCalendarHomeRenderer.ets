@@ -33,17 +33,19 @@ const HOUR_END: number = 21;
 const CALENDAR_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --paper: #f7f2ea;
-  --ink: #1f1a15;
-  --muted: #746a60;
-  --line: rgba(31, 26, 21, 0.12);
-  --panel: rgba(255, 251, 244, 0.94);
-  --panel-strong: #fffaf2;
-  --accent: #2f6f78;
+  --paper: #f5f2ee;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: #ffffff;
+  --ink: #211b17;
+  --ink-soft: #493f38;
+  --muted: #7a6e64;
+  --line: rgba(33, 27, 23, 0.12);
+  --accent: #995f4c;
+  --accent-soft: rgba(153, 95, 76, 0.13);
   --accent-2: #b36b45;
   --success: #34785f;
   --danger: #b3483d;
-  --shadow: 0 18px 42px rgba(42, 31, 20, 0.13);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -60,6 +62,49 @@ body {
 button, a { font: inherit; }
 button { cursor: pointer; }
 h1, h2, h3, p { margin: 0; }
+.calendar-delete-success {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.calendar-delete-success-card {
+  width: min(100%, 520px);
+  border: 1px solid rgba(47, 111, 120, 0.18);
+  border-radius: 28px;
+  padding: 32px 24px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.calendar-delete-success-mark {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  font-size: 30px;
+  font-weight: 800;
+}
+.calendar-delete-success-source {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+}
+.calendar-delete-success-card h1 {
+  margin-top: 10px;
+  font-size: 32px;
+  line-height: 1.15;
+}
+.calendar-delete-success-card p {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
 .calendar-shell {
   width: min(100%, 840px);
   min-height: 100vh;
@@ -332,6 +377,12 @@ h1, h2, h3, p { margin: 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.calendar-undated-card h3,
+.calendar-undated-card p {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-overflow: clip;
+}
 .calendar-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(92px, 1fr));
@@ -470,31 +521,6 @@ h1, h2, h3, p { margin: 0; }
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.calendar-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
-}
-.calendar-detail-cell {
-  min-width: 0;
-  border-radius: 16px;
-  padding: 10px;
-  background: rgba(31, 26, 21, 0.05);
-}
-.calendar-detail-cell span {
-  display: block;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 780;
-}
-.calendar-detail-cell strong {
-  display: block;
-  overflow-wrap: anywhere;
-  margin-top: 5px;
-  font-size: 13px;
-  line-height: 1.25;
-}
 .calendar-open-link {
   display: inline-flex;
   margin-top: 12px;
@@ -506,6 +532,40 @@ h1, h2, h3, p { margin: 0; }
   font-weight: 820;
   text-decoration: none;
 }
+.calendar-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.calendar-detail-actions .calendar-open-link { margin-top: 0; }
+.calendar-delete-button,
+.calendar-confirm-delete,
+.calendar-cancel-delete {
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 9px 13px;
+  font-size: 12px;
+  font-weight: 820;
+}
+.calendar-delete-button {
+  border: 1px solid rgba(179, 72, 61, 0.3);
+  background: transparent;
+  color: var(--danger);
+}
+.calendar-delete-confirmation {
+  display: none;
+  margin-top: 12px;
+  border: 1px solid rgba(179, 72, 61, 0.24);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(179, 72, 61, 0.06);
+}
+.calendar-delete-confirmation.visible { display: block; }
+.calendar-delete-confirmation p { margin-top: 0; color: var(--ink); }
+.calendar-delete-confirmation div { display: flex; gap: 8px; margin-top: 10px; }
+.calendar-confirm-delete { border: 0; background: var(--danger); color: #fffaf4; }
+.calendar-cancel-delete { border: 1px solid var(--line); background: var(--panel-strong); color: var(--ink); }
 @media (min-width: 680px) {
   .calendar-hero {
     grid-template-columns: minmax(0, 1fr) minmax(260px, 0.58fr);
@@ -516,6 +576,55 @@ h1, h2, h3, p { margin: 0; }
   .calendar-confirmation { align-self: end; }
   .calendar-board { padding: 0 18px; }
   .calendar-detail-drawer { margin: 16px 18px; }
+}
+.calendar-hero {
+  min-height: 280px;
+}
+.calendar-hero h1 {
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1.04;
+}
+.calendar-delete-success-card,
+.calendar-confirmation,
+.calendar-day-stage,
+.calendar-detail-drawer {
+  border-radius: 20px;
+}
+.calendar-event-block,
+.calendar-week-day,
+.calendar-month-day,
+.calendar-undated-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.calendar-chip,
+.calendar-delete-confirmation {
+  border-radius: 12px;
+}
+.calendar-view-button,
+.calendar-chip,
+.calendar-open-link,
+.calendar-delete-button,
+.calendar-confirm-delete,
+.calendar-cancel-delete {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.calendar-view-button:active,
+.calendar-chip:active,
+.calendar-open-link:active,
+.calendar-delete-button:active,
+.calendar-confirm-delete:active,
+.calendar-cancel-delete:active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 `;
 
@@ -539,28 +648,106 @@ const CALENDAR_HOME_JS: string = `
     });
   });
   var drawer = document.querySelector('.calendar-detail-drawer');
+  var deleteButton = document.querySelector('.calendar-delete-button');
+  var deleteConfirmation = document.querySelector('.calendar-delete-confirmation');
+  var deleteConfirmationText = document.querySelector('[data-delete-confirmation-text]');
+  var confirmDelete = document.querySelector('.calendar-confirm-delete');
+  var cancelDelete = document.querySelector('.calendar-cancel-delete');
+  var selectedEventId = '';
+  var selectedTitle = '';
+  function hideDeleteConfirmation() {
+    if (deleteConfirmation) { deleteConfirmation.classList.remove('visible'); }
+  }
+  function postCalendarDelete(card) {
+    var eventId = card.getAttribute('data-event-id') || '';
+    if (eventId.length === 0) { return; }
+    try {
+      if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
+        card.disabled = true;
+        window.AIPhoneHome.postAction(JSON.stringify({
+          id: 'calendar.event.delete.confirm',
+          label: '确认删除',
+          prompt: '确认删除 Google Calendar 日程',
+          variant: 'danger',
+          kind: 'prompt',
+          args: {
+            eventId: eventId,
+            calendarId: 'primary',
+            sendUpdates: 'none',
+            confirmed: true
+          }
+        }));
+      }
+    } catch (error) {
+      card.disabled = false;
+    }
+  }
   function pick(card) {
     if (!drawer || !card) { return; }
     var title = card.getAttribute('data-title') || '日程';
     var time = card.getAttribute('data-time') || '时间待确认';
-    var source = card.getAttribute('data-source') || 'Google Calendar API';
     var eventId = card.getAttribute('data-event-id') || '';
     var link = card.getAttribute('data-link') || '';
     drawer.querySelector('[data-detail-title]').textContent = title;
     drawer.querySelector('[data-detail-time]').textContent = time;
-    drawer.querySelector('[data-detail-source]').textContent = source;
-    drawer.querySelector('[data-detail-id]').textContent = eventId.length > 0 ? eventId : '未返回';
+    selectedEventId = eventId;
+    selectedTitle = title;
+    if (deleteButton) { deleteButton.style.display = eventId.length > 0 ? 'inline-flex' : 'none'; }
+    hideDeleteConfirmation();
     var open = drawer.querySelector('[data-detail-link]');
     if (open) {
       open.style.display = link.length > 0 ? 'inline-flex' : 'none';
       open.setAttribute('href', link);
     }
   }
+  if (deleteButton) {
+    deleteButton.addEventListener('click', function () {
+      if (selectedEventId.length === 0 || !deleteConfirmation) { return; }
+      if (deleteConfirmationText) {
+        deleteConfirmationText.textContent = '确定删除“' + selectedTitle + '”吗？此操作会提交到真实 Google Calendar。';
+      }
+      deleteConfirmation.classList.add('visible');
+    });
+  }
+  if (cancelDelete) {
+    cancelDelete.addEventListener('click', hideDeleteConfirmation);
+  }
+  if (confirmDelete) {
+    confirmDelete.addEventListener('click', function () {
+      if (selectedEventId.length === 0) { return; }
+      try {
+        if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
+          confirmDelete.disabled = true;
+          window.AIPhoneHome.postAction(JSON.stringify({
+            id: 'calendar.event.delete.confirm',
+            label: '确认删除日程',
+            prompt: '删除 Google Calendar 日程 ' + selectedTitle,
+            variant: 'danger',
+            kind: 'prompt',
+            args: {
+              eventId: selectedEventId,
+              calendarId: 'primary',
+              sendUpdates: 'none',
+              confirmed: true
+            }
+          }));
+        }
+      } catch (error) {
+        confirmDelete.disabled = false;
+      }
+    });
+  }
   Array.prototype.slice.call(document.querySelectorAll('[data-calendar-event]')).forEach(function (card) {
-    card.addEventListener('click', function () { pick(card); });
+    card.addEventListener('click', function () {
+      if (card.getAttribute('data-delete-confirm') === 'true') {
+        postCalendarDelete(card);
+        return;
+      }
+      pick(card);
+    });
   });
   var first = document.querySelector('[data-calendar-event]');
-  if (first) { pick(first); }
+  if (first && first.getAttribute('data-delete-confirm') !== 'true') { pick(first); }
   setView('day');
 })();
 `;
@@ -786,9 +973,9 @@ function targetDate(events: CalendarHomeEvent[], generatedAt: string): Date {
 
 function eventDataAttrs(event: CalendarHomeEvent): string {
   return ' data-calendar-event="' + escapeAttribute(event.id) + '"' +
+    ' data-delete-confirm="' + (event.status === 'confirm_required' ? 'true' : 'false') + '"' +
     ' data-title="' + escapeAttribute(event.title) + '"' +
     ' data-time="' + escapeAttribute(event.dateLabel + ' ' + event.timeRange) + '"' +
-    ' data-source="' + escapeAttribute(event.source) + '"' +
     ' data-event-id="' + escapeAttribute(event.eventId) + '"' +
     ' data-link="' + escapeAttribute(event.link) + '"';
 }
@@ -818,16 +1005,23 @@ function hasAuthFailure(document: HtmlHomeDocument): boolean {
 
 function hasSyncFailure(document: HtmlHomeDocument): boolean {
   const text = (document.subtitle + ' ' + document.blocks.map((block) => block.title + ' ' + block.subtitle).join(' ')).toLowerCase();
-  return text.indexOf('搜索工具失败') >= 0 ||
+  return document.blocks.some((block: HtmlHomeBlock): boolean => textOf(block.status).toLowerCase() === 'error') ||
+    text.indexOf('invalid request data provided') >= 0 ||
+    text.indexOf('搜索工具失败') >= 0 ||
     text.indexOf('operation timeout') >= 0 ||
     text.indexOf('调用失败') >= 0 ||
     text.indexOf('查询失败') >= 0;
 }
 
+function hasNeedsInput(document: HtmlHomeDocument): boolean {
+  return document.blocks.some((block: HtmlHomeBlock): boolean => textOf(block.status).toLowerCase() === 'needs_input');
+}
+
 function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate: boolean, isBusy: boolean): string {
   const first = primaryEvent(events);
   const target = targetDate(events, document.generatedAt);
-  const state = isBusy ? '同步中' : (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步')));
+  const state = isBusy ? '同步中' : (hasNeedsInput(document) ? '待补充' :
+    (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步'))));
   return '<header class="calendar-hero">' +
     '<section class="calendar-hero-copy">' +
     '<span class="calendar-kicker">Google Calendar API · ' + escapeHtmlText(state) + '</span>' +
@@ -851,7 +1045,7 @@ function viewSwitch(): string {
 }
 
 function dayView(events: CalendarHomeEvent[], target: Date): string {
-  const dated = timedEvents(events);
+  const dated = eventsForDate(timedEvents(events), dateKeyOf(target));
   const hours: string[] = [];
   for (let hour = HOUR_START; hour < HOUR_END; hour++) {
     hours.push('<div class="calendar-hour">' + pad2(hour) + ':00</div>');
@@ -942,27 +1136,33 @@ function undatedList(events: CalendarHomeEvent[]): string {
 
 function detailDrawer(events: CalendarHomeEvent[]): string {
   const first = primaryEvent(events);
+  if (first !== null && first.status === 'confirm_required') {
+    return '';
+  }
   const title = first === null ? '暂无日程' : first.title;
   const time = first === null ? '等待 Google Calendar 返回' : first.dateLabel + ' ' + first.timeRange;
-  const source = first === null ? 'Google Calendar API' : first.source;
-  const eventId = first === null || first.eventId.length === 0 ? '未返回' : first.eventId;
   const link = first === null ? '' : first.link;
   return '<aside class="calendar-detail-drawer">' +
     '<h2 data-detail-title>' + escapeHtmlText(title) + '</h2>' +
     '<p data-detail-time>' + escapeHtmlText(time) + '</p>' +
-    '<div class="calendar-detail-grid">' +
-    '<div class="calendar-detail-cell"><span>来源</span><strong data-detail-source>' + escapeHtmlText(source) + '</strong></div>' +
-    '<div class="calendar-detail-cell"><span>Event ID</span><strong data-detail-id>' + escapeHtmlText(eventId) + '</strong></div>' +
-    '</div>' +
+    '<div class="calendar-detail-actions">' +
     '<a class="calendar-open-link" data-detail-link href="' + escapeAttribute(link) + '" target="_blank" rel="noreferrer"' +
     (link.length === 0 ? ' style="display:none"' : '') + '>打开 Google Calendar</a>' +
+    '<button type="button" class="calendar-delete-button"' +
+    (first === null || first.eventId.length === 0 ? ' style="display:none"' : '') + '>删除日程</button>' +
+    '</div>' +
+    '<div class="calendar-delete-confirmation" role="alertdialog" aria-label="确认删除日程">' +
+    '<p data-delete-confirmation-text>确定删除这个日程吗？此操作会提交到真实 Google Calendar。</p>' +
+    '<div><button type="button" class="calendar-cancel-delete">取消</button>' +
+    '<button type="button" class="calendar-confirm-delete">确认删除</button></div></div>' +
     '</aside>';
 }
 
 function calendarHtml(document: HtmlHomeDocument, events: CalendarHomeEvent[], isBusy: boolean): string {
   const title = document.title.length > 0 ? document.title : 'Google Calendar';
   const target = targetDate(events, document.generatedAt);
-  const createMode = isCreateDocument(events, document);
+  const createMode = isCreateDocument(events, document) && !hasNeedsInput(document) &&
+    !hasAuthFailure(document) && !hasSyncFailure(document);
   return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8" />\n' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />\n' +
     '<title>' + escapeHtmlText(title) + '</title>\n<style>' + CALENDAR_HOME_CSS + '</style>\n</head>\n<body>\n' +
@@ -982,6 +1182,36 @@ export function shouldRenderCalendarHomeDocument(document: HtmlHomeDocument): bo
   return document.blocks.some((block: HtmlHomeBlock) => isCalendarBlock(block));
 }
 
+function calendarDeleteSuccessBlock(document: HtmlHomeDocument): HtmlHomeBlock | null {
+  for (let index = 0; index < document.blocks.length; index++) {
+    const block = document.blocks[index];
+    if (isCalendarBlock(block) && calendarToolName(block) === 'calendar.event.delete' &&
+      textOf(block.status).toLowerCase() === 'success') {
+      return block;
+    }
+  }
+  return null;
+}
+
+function calendarDeleteSuccessHtml(block: HtmlHomeBlock): string {
+  const blockTitle = textOf(block.title);
+  const blockSubtitle = textOf(block.subtitle);
+  const title = blockTitle.length > 0 ? blockTitle : '日程已删除';
+  const subtitle = blockSubtitle.length > 0 ? blockSubtitle : '已从真实 Google Calendar 删除日程。';
+  return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' +
+    '<title>' + escapeHtmlText(title) + '</title><style>' + CALENDAR_HOME_CSS + '</style></head><body>' +
+    '<main class="calendar-delete-success"><section class="calendar-delete-success-card" aria-live="polite">' +
+    '<div class="calendar-delete-success-mark" aria-hidden="true">✓</div>' +
+    '<div class="calendar-delete-success-source">Google Calendar</div>' +
+    '<h1>' + escapeHtmlText(title) + '</h1><p>' + escapeHtmlText(subtitle) + '</p>' +
+    '</section></main></body></html>';
+}
+
 export function renderCalendarHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
+  const deleteSuccess = calendarDeleteSuccessBlock(document);
+  if (deleteSuccess !== null) {
+    return calendarDeleteSuccessHtml(deleteSuccess);
+  }
   return calendarHtml(document, calendarEvents(document), isBusy);
 }

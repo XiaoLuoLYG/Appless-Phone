@@ -11,18 +11,22 @@ interface HtmlTravelHomeDocumentWithBusy extends HtmlHomeDocument {
 const TRAVEL_HOME_CSS: string = `
 :root {
   color-scheme: light;
-  --void: #f8f2e8;
-  --ink: #17120d;
-  --muted: #756c62;
-  --line: rgba(23, 18, 13, 0.12);
-  --panel: rgba(255, 250, 241, 0.9);
-  --panel-strong: rgba(255, 250, 241, 0.98);
+  --paper: #f5f2ee;
+  --void: var(--paper);
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: #ffffff;
+  --ink: #211b17;
+  --ink-soft: #493f38;
+  --muted: #7a6e64;
+  --line: rgba(33, 27, 23, 0.12);
+  --accent: #995f4c;
+  --accent-soft: rgba(153, 95, 76, 0.13);
   --chrome: #8a7d70;
   --rail: #16875b;
   --air: #2f79b7;
   --signal: #d8492f;
   --other: #815f3e;
-  --shadow: 0 16px 42px rgba(37, 24, 13, 0.12);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -577,6 +581,37 @@ button:disabled { cursor: default; opacity: 0.52; }
 @keyframes travelPulse {
   0%, 100% { opacity: 0.72; }
   50% { opacity: 1; }
+}
+.route-hero {
+  min-height: 280px;
+}
+.route-hero h1 {
+  font-family: inherit;
+  font-size: 34px;
+  line-height: 1.04;
+}
+.route-map {
+  border-radius: 20px;
+}
+.journey-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.route-city,
+.route-stat,
+.journey-metric {
+  border-radius: 12px;
+}
+.travel-control,
+.journey-expand,
+.journey-action {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.travel-control:active,
+.journey-expand:active,
+.journey-action:active,
+.journey-card:active {
+  transform: scale(0.98);
 }
 `;
 

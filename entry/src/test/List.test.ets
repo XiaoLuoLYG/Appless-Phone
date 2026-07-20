@@ -1,4 +1,5 @@
 import localUnitTest from './LocalUnit.test';
+import conversationContextTest from './ConversationContext.test';
 import reActAgentRunnerTest from './ReActAgentRunner.test';
 import a2uiParserTest from './A2uiParser.test';
 import localModelClientTest from './LocalModelClient.test';
@@ -11,6 +12,8 @@ import dynamicToolRenderDataTest from './DynamicToolRenderData.test';
 import dynamicToolRegistryTest from './DynamicToolRegistry.test';
 import dynamicCredentialStoreTest from './DynamicCredentialStore.test';
 import genericMcpClientTest from './GenericMcpClient.test';
+import hotelToolTypesTest from './HotelToolTypes.test';
+import hotelToolA2uiTest from './HotelToolA2ui.test';
 import dynamicToolA2uiTest from './DynamicToolA2ui.test';
 import composioConfigTest from './ComposioConfig.test';
 import composioAuthClientTest from './ComposioAuthClient.test';
@@ -64,9 +67,12 @@ import personaPromptTest from './PersonaPrompt.test';
 import personaA2uiTest from './PersonaA2ui.test';
 import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
+import skillMarkdownParserTest from './SkillMarkdownParser.test';
+import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 
 export default function testsuite() {
   localUnitTest();
+  conversationContextTest();
   reActAgentRunnerTest();
   a2uiParserTest();
   localModelClientTest();
@@ -79,6 +85,8 @@ export default function testsuite() {
   dynamicToolRegistryTest();
   dynamicCredentialStoreTest();
   genericMcpClientTest();
+  hotelToolTypesTest();
+  hotelToolA2uiTest();
   dynamicToolA2uiTest();
   composioConfigTest();
   composioAuthClientTest();
@@ -124,6 +132,8 @@ export default function testsuite() {
   socialHubClientTest();
   voiceInputBridgeTest();
   personaMarkdownTest();
+  skillMarkdownParserTest();
+  modelScopeDirectClientTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

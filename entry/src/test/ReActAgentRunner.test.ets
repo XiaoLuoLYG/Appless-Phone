@@ -2,6 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   AgentEvent,
   AgentEventKind,
+  AgentSkill,
   AgentTool,
   aiphoneToolSurfaceCallback,
   A2uiEnvelope,
@@ -13,6 +14,7 @@ import {
   LocalModel,
   parseLoopToolInputArgs,
   ReActAgentRunner,
+  SkillSnapshot,
   summarizeA2uiObservation,
   ToolRegistry
 } from '@loop/agent-core';
@@ -175,6 +177,42 @@ export default function reActAgentRunnerTest() {
       expect(forwarded).assertEqual(1);
     });
 
+    it('emits the selected skill while preserving the normal observation', 0, async () => {
+      const skill = new AgentSkill(
+        'weather',
+        'Read real weather',
+        '',
+        '',
+        '/skills/weather/SKILL.md',
+        'Use the real weather provider.'
+      );
+      const snapshot = new SkillSnapshot([skill], '<available_skills></available_skills>');
+      const read = new FixedTool('read', '# Skill: weather\n\nUse the real weather provider.');
+      const registry = new ToolRegistry();
+      registry.register(read);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel('Thought: load skill\nAction: read(weather)'),
+        registry,
+        1,
+        undefined,
+        snapshot
+      );
+      let selectedSkill = '';
+      let observation = '';
+
+      await runner.run('weather', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.SKILL) {
+          selectedSkill = event.text;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observation = event.text;
+        }
+      });
+
+      expect(selectedSkill).assertEqual('weather');
+      expect(observation.indexOf('# Skill: weather')).assertLarger(-1);
+    });
+
     it('parses parenthesized JSON actions that contain arrays', 0, async () => {
       const tool = new CaptureTool();
       const registry = new ToolRegistry();
@@ -194,6 +232,17 @@ export default function reActAgentRunnerTest() {
       expect(tool.called).assertTrue();
       expect(tool.input).assertEqual('{"to":["a@example.com"],"body":"hi"}');
       expect(actionText).assertEqual('gmail.draft.create({"to":["a@example.com"],"body":"hi"})');
+    });
+
+    it('puts the Calendar write-routing rule before the tool list', 0, async () => {
+      const model = new SequenceModel(['Final: need a specific morning time']);
+      const runner = new ReActAgentRunner(model, new ToolRegistry(), 1);
+
+      await runner.run('把明天下午的日程移到上午', (_event: AgentEvent) => {});
+
+      expect(model.prompts[0].indexOf('Calendar write rule')).assertLarger(-1);
+      expect(model.prompts[0].indexOf('never calendar.events.search')).assertLarger(-1);
+      expect(model.prompts[0].indexOf('omit missing new start or end')).assertLarger(-1);
     });
 
     it('repairs raw line breaks inside JSON string tool args', 0, () => {
@@ -239,6 +288,32 @@ export default function reActAgentRunnerTest() {
       expect(digest.text.indexOf('Thumbnail')).assertEqual(-1);
       expect(digest.text.indexOf('thumb.jpg')).assertEqual(-1);
       expect(digest.text.indexOf('must not leak')).assertEqual(-1);
+    });
+
+    it('keeps real Calendar Event IDs in the next-turn model context', 0, () => {
+      const calendarResult: DynamicGenericToolResult = {
+        sourceTag: 'Composio Google Calendar',
+        toolName: 'calendar.events.search',
+        title: '全量QA',
+        status: 'success',
+        summary: 'Google Calendar event returned by the real API.',
+        rows: [
+          { label: 'Event ID', value: 'event-real-123' },
+          { label: 'Start', value: '2026-07-17T09:00:00+08:00' },
+          { label: 'End', value: '2026-07-17T11:00:00+08:00' }
+        ],
+        rawPreview: 'must not leak'
+      };
+      const digest = summarizeA2uiObservation(
+        genericToolResultsA2ui('surface_calendar', 'calendar.events.search', [calendarResult])
+      );
+
+      expect(digest.text.indexOf('Event ID: event-real-123')).assertLarger(-1);
+      expect(digest.finalText.indexOf('event-real-123')).assertLarger(-1);
+      expect(digest.finalText.indexOf('全量QA')).assertLarger(-1);
+      expect(digest.finalText.indexOf('用户无需输入 Event ID')).assertLarger(-1);
+      expect(digest.finalText.indexOf('必须使用')).assertEqual(-1);
+      expect(digest.finalText.indexOf('must not leak')).assertEqual(-1);
     });
 
     it('marks terminal A2UI statuses and failure keys', 0, () => {
@@ -432,6 +507,26 @@ export default function reActAgentRunnerTest() {
       expect(youtube.calls.length).assertEqual(1);
       expect(model.prompts.length).assertEqual(1);
       expect(finalText.indexOf('工具执行失败')).assertLarger(-1);
+    });
+
+    it('adds ModelScope guidance only when the registry contains the tool', 0, async () => {
+      const withoutModelScope = new SequenceModel(['Final: done']);
+      const withoutRegistry = new ToolRegistry();
+      await new ReActAgentRunner(withoutModelScope, withoutRegistry, 1).run(
+        'plain task',
+        (_event: AgentEvent): void => {}
+      );
+
+      const withModelScope = new SequenceModel(['Final: done']);
+      const withRegistry = new ToolRegistry();
+      withRegistry.register(new FixedTool('modelscope', 'unavailable'));
+      await new ReActAgentRunner(withModelScope, withRegistry, 1).run(
+        'provider task',
+        (_event: AgentEvent): void => {}
+      );
+
+      expect(withoutModelScope.prompts[0].indexOf('Call modelscope only')).assertEqual(-1);
+      expect(withModelScope.prompts[0].indexOf('Call modelscope only')).assertLarger(-1);
     });
   });
 }

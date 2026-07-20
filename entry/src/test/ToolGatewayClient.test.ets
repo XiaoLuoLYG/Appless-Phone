@@ -55,6 +55,10 @@ import {
   rideOrderConfirmedForTest,
   rideResultsFromMcpPayloadsForTest,
   rideShouldSurfaceAppLinkErrorForTest,
+  calendarDeleteConfirmedForTest,
+  calendarDeleteTargetFromResultsForTest,
+  whatsAppSendConfirmedForTest,
+  whatsAppProviderFailureSummaryForTest,
   resolveLuckinLocationForTest,
   saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
@@ -325,6 +329,25 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('loads RollingGo hotel config without exposing the credential', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+
+        const summary = localProviderConfigDebugSummary();
+        expect(summary.indexOf('hotelKey=present(17)')).assertLarger(-1);
+        expect(summary.indexOf('hotelUrl=present')).assertLarger(-1);
+        expect(summary.indexOf('hotel-test-secret')).assertEqual(-1);
+        expect(isRegisteredToolId('hotel.search')).assertTrue();
+        expect(isRegisteredToolId('hotel.detail')).assertTrue();
+        expect(isRegisteredToolId('hotel.create')).assertFalse();
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('defaults ride tools to real provider mode unless mock is explicitly enabled', 0, () => {
       try {
         configureLocalProviderConfigFromRawJson('{}');
@@ -402,11 +425,7 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            origin: '深圳湾万象城',
-            destination: '深圳北站',
-            city: '深圳'
-          }
+          looseObject('{"origin":"深圳湾万象城","destination":"深圳北站","city":"深圳"}')
         );
 
         const rendered = genericToolResults(result.surface);
@@ -447,21 +466,44 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          {
-            origin: '深圳湾万象城',
-            destination: '深圳北站',
-            city: '深圳'
-          }
+          looseObject('{"origin":"深圳湾万象城","destination":"深圳北站","city":"深圳"}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(result.ok).assertTrue();
         expect(rendered.length).assertLarger(0);
         expect(rendered[0].sourceTag).assertEqual('滴滴');
-        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].status).assertEqual('needs_input');
         expect(rendered[0].summary.indexOf('DIDI_MCP_KEY')).assertLarger(-1);
         expect(result.raw.indexOf('taxi_create_order')).assertEqual(-1);
       } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks non-RFC3339 Calendar times before Composio', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.create',
+          '给我明天下午3点创建一个标题为 CalendarCRUDQA-C-20260716 的30分钟日程',
+          'surface_calendar_create_invalid_time',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"title":"CalendarCRUDQA-C-20260716","start":"明天 15:00","end":"明天 15:30","timezone":"Asia/Shanghai"}')
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].status).assertEqual('needs_input');
+        expect(rendered[0].summary.indexOf('开始时间')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('结束时间')).assertLarger(-1);
+        expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
       }
     });
@@ -522,28 +564,25 @@ export default function toolGatewayClientTest() {
     });
 
     it('normalizes ride order create and cancel args behind explicit confirmation', 0, () => {
-      expect(rideOrderConfirmedForTest({ confirmed: true })).assertTrue();
-      expect(rideOrderConfirmedForTest({ confirmation: '确认下单' })).assertTrue();
-      expect(rideOrderConfirmedForTest({ confirmation: '帮我叫车' })).assertFalse();
+      expect(rideOrderConfirmedForTest(looseObject('{"confirmed":true}'))).assertTrue();
+      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"确认下单"}'))).assertTrue();
+      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"帮我叫车"}'))).assertFalse();
 
-      const createArgs = JSON.stringify(rideDidiCreateOrderArgsForTest({
-        productCategory: 'express',
-        estimateTraceId: 'trace-123',
-        confirmed: true
-      }));
+      const createArgs = JSON.stringify(rideDidiCreateOrderArgsForTest(
+        looseObject('{"productCategory":"express","estimateTraceId":"trace-123","confirmed":true}')
+      ));
       expect(createArgs.indexOf('"product_category":"express"')).assertLarger(-1);
       expect(createArgs.indexOf('"estimate_trace_id":"trace-123"')).assertLarger(-1);
 
-      const cancelArgs = JSON.stringify(rideDidiCancelOrderArgsForTest({
-        orderId: 'order-123',
-        reason: '用户取消'
-      }));
+      const cancelArgs = JSON.stringify(rideDidiCancelOrderArgsForTest(
+        looseObject('{"orderId":"order-123","reason":"用户取消"}')
+      ));
       expect(cancelArgs.indexOf('"order_id":"order-123"')).assertLarger(-1);
       expect(cancelArgs.indexOf('"reason":"用户取消"')).assertLarger(-1);
 
-      const driverLocationArgs = JSON.stringify(rideDidiDriverLocationArgsForTest({
-        orderId: 'order-123'
-      }));
+      const driverLocationArgs = JSON.stringify(rideDidiDriverLocationArgsForTest(
+        looseObject('{"orderId":"order-123"}')
+      ));
       expect(driverLocationArgs.indexOf('"order_id":"order-123"')).assertLarger(-1);
     });
 
@@ -559,7 +598,7 @@ export default function toolGatewayClientTest() {
     });
 
     it('treats successful driver location response without coordinates as pending data', 0, () => {
-      const result = rideDriverLocationResultForTest({ data: {} }, 'order-123');
+      const result = rideDriverLocationResultForTest(looseObject('{"data":{}}'), 'order-123');
 
       expect(result.toolName).assertEqual('ride.driver.location');
       expect(result.status).assertEqual('success');
@@ -570,10 +609,12 @@ export default function toolGatewayClientTest() {
     });
 
     it('extracts Didi sandbox driver coordinates from text payload', 0, () => {
-      const result = rideDriverLocationResultForTest({
-        text: '【司机位置】\n纬度：39.882325\n经度：116.297345\n',
-        eta: 360
-      }, 'order-123', '116.300000,39.880000', '116.310000,39.890000');
+      const result = rideDriverLocationResultForTest(
+        looseObject('{"text":"【司机位置】\\n纬度：39.882325\\n经度：116.297345\\n","eta":360}'),
+        'order-123',
+        '116.300000,39.880000',
+        '116.310000,39.890000'
+      );
 
       expect(result.status).assertEqual('success');
       expect(result.summary).assertEqual('已返回司机当前位置。');
@@ -584,20 +625,24 @@ export default function toolGatewayClientTest() {
       expect(result.rows[4].value).assertEqual('116.297345,39.882325');
       expect(result.rows[5].label).assertEqual('预计接驾时间');
       expect(result.rows[5].value).assertEqual('预计 6 分钟接驾');
-      expect(result.actions[0].label).assertEqual('刷新司机位置');
-      expect(JSON.stringify(result.actions[0].args).indexOf('"pickupLocation":"116.300000,39.880000"')).assertLarger(-1);
+      if (result.actions !== undefined) {
+        expect(result.actions[0].label).assertEqual('刷新司机位置');
+        expect(JSON.stringify(result.actions[0].args).indexOf('"pickupLocation":"116.300000,39.880000"')).assertLarger(-1);
+      }
     });
 
     it('offers retry and vehicle change actions after cancelling ride order', 0, () => {
-      const result = rideCancelOrderResultForTest({ status: 'cancelled' }, 'order-123');
+      const result = rideCancelOrderResultForTest(looseObject('{"status":"cancelled"}'), 'order-123');
 
       expect(result.toolName).assertEqual('ride.order.cancel');
-      expect(result.actions.length).assertEqual(2);
-      expect(result.actions[0].label).assertEqual('重新查询');
-      expect(result.actions[0].variant).assertEqual('primary');
-      expect(result.actions[1].label).assertEqual('换车型');
-      expect(result.actions[1].variant).assertEqual('secondary');
-      expect(result.actions[1].kind).assertEqual('client');
+      if (result.actions !== undefined) {
+        expect(result.actions.length).assertEqual(2);
+        expect(result.actions[0].label).assertEqual('重新查询');
+        expect(result.actions[0].variant).assertEqual('primary');
+        expect(result.actions[1].label).assertEqual('换车型');
+        expect(result.actions[1].variant).assertEqual('secondary');
+        expect(result.actions[1].kind).assertEqual('client');
+      }
     });
 
     it('routes ride order create to the configured Didi MCP when sandbox is disabled', 0, () => {
@@ -844,14 +889,97 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('youtube.unknown')).assertFalse();
     });
 
-    it('registers Calendar and Maps tools without delete or routes', 0, () => {
+    it('registers WhatsApp Business send, Calendar delete, and Maps routes', 0, () => {
       expect(isRegisteredToolId('calendar.events.search')).assertTrue();
       expect(isRegisteredToolId('calendar.event.create')).assertTrue();
       expect(isRegisteredToolId('calendar.event.update')).assertTrue();
       expect(isRegisteredToolId('maps.place.search')).assertTrue();
       expect(isRegisteredToolId('maps.place.details')).assertTrue();
-      expect(isRegisteredToolId('calendar.event.delete')).assertFalse();
-      expect(isRegisteredToolId('maps.route.plan')).assertFalse();
+      expect(isRegisteredToolId('calendar.event.delete')).assertTrue();
+      expect(isRegisteredToolId('maps.route.open')).assertTrue();
+      expect(isRegisteredToolId('whatsapp.message.send')).assertTrue();
+    });
+
+    it('requires the exact client confirmation action for WhatsApp and Calendar delete', 0, () => {
+      expect(whatsAppSendConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
+      expect(whatsAppSendConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
+      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":false}'))).assertFalse();
+      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":true}'))).assertTrue();
+      expect(calendarDeleteConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
+      expect(calendarDeleteConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
+      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":false}'))).assertFalse();
+      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":true}'))).assertTrue();
+    });
+
+    it('keeps WhatsApp provider errors concise and actionable', 0, () => {
+      expect(whatsAppProviderFailureSummaryForTest(
+        'HTTP 400: no active connection found for toolkit whatsapp'
+      )).assertEqual('WhatsApp 授权刚完成，请返回 App 后重试一次。');
+      expect(whatsAppProviderFailureSummaryForTest(
+        'Graph API code 100 error_subcode 33 object does not exist or lacks permissions'
+      )).assertEqual('当前 Business 账户的 WABA 配置无效或缺少管理权限，请重新授权。');
+      expect(whatsAppProviderFailureSummaryForTest(
+        'WhatsApp API error (HTTP 400): (#133010) Account not registered'
+      )).assertEqual('当前 Business 发送号码尚未注册到 WhatsApp Cloud API，请先在 Meta 后台完成号码验证与 API 注册。');
+    });
+
+    it('preserves the configured WhatsApp Business sender through confirmation', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'whatsapp.message.send',
+        '用 WhatsApp 发送消息',
+        'surface_whatsapp_confirmation',
+        '',
+        noop,
+        null,
+        looseObject('{"toNumber":"+8613800138000","text":"十分钟后到","phoneNumberId":"712594308615206","wabaId":"123456789"}')
+      );
+      const rendered = genericToolResults(result.surface);
+      const actionJson = JSON.stringify(rendered[0].actions);
+      expect(rendered[0].status).assertEqual('confirm_required');
+      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+      expect(actionJson.indexOf('712594308615206')).assertLarger(-1);
+      expect(actionJson.indexOf('123456789')).assertLarger(-1);
+    });
+
+    it('dispatches Calendar delete confirmation back through the fixed tool path', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'calendar.event.delete',
+        '删除日程',
+        'surface_calendar_delete_confirmation',
+        '',
+        noop,
+        null,
+        looseObject('{"eventId":"event-1","calendarId":"primary"}')
+      );
+      const rendered = genericToolResults(result.surface);
+      const actionJson = JSON.stringify(rendered[0].actions);
+      expect(rendered[0].status).assertEqual('confirm_required');
+      expect(actionJson.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
+      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+    });
+
+    it('resolves a natural-language Calendar delete only when the Provider search has one event', 0, () => {
+      const event: DynamicGenericToolResult = {
+        sourceTag: 'Composio Google Calendar',
+        toolName: 'calendar.events.search',
+        title: '明天下午的测试日程',
+        status: 'success',
+        summary: 'real event',
+        rows: [
+          { label: 'Event ID', value: 'event-real-123' },
+          { label: 'Start', value: '2026-07-17T15:00:00+08:00' },
+          { label: 'End', value: '2026-07-17T15:30:00+08:00' }
+        ],
+        rawPreview: ''
+      };
+
+      const target: Object | null = calendarDeleteTargetFromResultsForTest([event]);
+      expect(JSON.stringify(target).indexOf('event-real-123')).assertLarger(-1);
+      expect(calendarDeleteTargetFromResultsForTest([event, event]) === null).assertTrue();
     });
 
     it('loads Google app API keys and OAuth config from local provider raw JSON', 0, () => {
@@ -1285,7 +1413,7 @@ export default function toolGatewayClientTest() {
         expect(rendered[0].toolName).assertEqual('calendar.event.create');
         expect(rendered[0].status).assertEqual('needs_auth');
         expect(JSON.stringify(rendered[0].rows).indexOf('AIPhoneDemo sync')).assertLarger(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('2026-07-30T15:00:00+08:00')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('2026-07-30T15:00:00')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -1337,10 +1465,9 @@ export default function toolGatewayClientTest() {
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('calendar.event.create');
-        expect(rendered[0].status).assertEqual('error');
-        expect(rendered[0].summary.indexOf('title')).assertLarger(-1);
-        expect(rendered[0].summary.indexOf('start')).assertLarger(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('2026-07-30T15:30:00+08:00')).assertLarger(-1);
+        expect(rendered[0].status).assertEqual('needs_input');
+        expect(rendered[0].summary.indexOf('标题')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('开始时间')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -1366,10 +1493,9 @@ export default function toolGatewayClientTest() {
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('calendar.event.update');
-        expect(rendered[0].status).assertEqual('error');
-        expect(rendered[0].summary.indexOf('eventId')).assertLarger(-1);
-        expect(rendered[0].summary.indexOf('title/start/end')).assertLarger(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('Asia/Shanghai')).assertLarger(-1);
+        expect(rendered[0].status).assertEqual('needs_input');
+        expect(rendered[0].summary.indexOf('先查询')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('标题')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');

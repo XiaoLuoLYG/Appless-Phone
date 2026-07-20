@@ -64,17 +64,17 @@ const PAYMENT_HOME_CSS: string = `
 :root {
   color-scheme: light;
   --paper: #f5f2ee;
-  --panel: #fffaf4;
+  --panel: rgba(255, 255, 255, 0.88);
   --panel-strong: #ffffff;
   --ink: #211b17;
   --ink-soft: #493f38;
-  --muted: #786e66;
+  --muted: #7a6e64;
   --line: rgba(33, 27, 23, 0.12);
   --accent: #995f4c;
-  --accent-soft: rgba(153, 95, 76, 0.12);
+  --accent-soft: rgba(153, 95, 76, 0.13);
   --good: #397a55;
   --bad: #b04a42;
-  --shadow: 0 16px 42px rgba(44, 34, 26, 0.09);
+  --shadow: 0 10px 28px rgba(44, 34, 26, 0.08);
 }
 * { box-sizing: border-box; }
 body {
@@ -485,6 +485,40 @@ h1 {
   .payee-card { padding: 14px; }
   .payee-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 12px; }
   .field input { height: 38px; border-radius: 12px; }
+}
+.pay-hero {
+  border-radius: 20px;
+}
+h1 {
+  font-size: 30px;
+}
+.payment-card,
+.payee-card {
+  border-radius: 16px;
+  box-shadow: none;
+}
+.pay-party,
+.pay-stat,
+.field input {
+  border-radius: 12px;
+}
+.action,
+.google-pay-placeholder,
+.payee-card summary {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+.action:active:not(:disabled),
+.google-pay-placeholder:active:not(:disabled),
+.payee-card summary:active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 `;
 

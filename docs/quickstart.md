@@ -1,8 +1,8 @@
-# Appless Phone 快速开始
+# Appless 快速开始
 
 这份教程帮你跑起一个真实边界的 HarmonyOS agent phone demo。
 
-Appless Phone 的默认原则很简单：缺少本地模型、provider key、设备权限或真实执行器时，界面显示真实失败，不返回假车次、假航班、假餐厅、假邮件或假消息。
+Appless 的默认原则很简单：缺少本地模型、provider key、设备权限或真实执行器时，界面显示真实失败，不返回假车次、假航班、假餐厅、假邮件或假消息。
 
 ## 1. 打开工程
 
@@ -56,6 +56,8 @@ cp .env.example .env.local
 ```bash
 FLIGHT_MCP_KEY=
 VARIFLIGHT_API_KEY=
+ROLLINGGO_HOTEL_MCP_KEY=
+ROLLINGGO_HOTEL_MCP_URL=
 AMAP_KEY=
 AMAP_DEFAULT_LOCATION=116.397428,39.90923
 TENCENT_MAP_KEY=
