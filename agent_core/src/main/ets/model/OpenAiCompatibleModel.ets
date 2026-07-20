@@ -3,7 +3,8 @@ import util from '@ohos.util';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
 import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
 import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
-import { LocalModel } from './LocalModel';
+import { ChatCompletionSseParser } from './ChatCompletionSseParser';
+import { LocalModel, ModelContentListener } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
 
 const MODEL_CONNECT_TIMEOUT_MS = 20000;
@@ -26,11 +27,13 @@ interface ChatResponse {
 }
 
 interface ChatDelta {
-  content?: string;
+  content?: string | null;
 }
 
 interface ChatStreamChoice {
+  index?: number;
   delta?: ChatDelta;
+  finish_reason?: string | null;
 }
 
 interface ChatStreamResponse {
@@ -46,18 +49,29 @@ export class OpenAiCompatibleModel implements LocalModel {
     this.skillSnapshot = skillSnapshot ?? null;
   }
 
-  async complete(prompt: string, conversation?: ConversationContext): Promise<string> {
+  async complete(
+    prompt: string,
+    conversation?: ConversationContext,
+    onContent?: ModelContentListener
+  ): Promise<string> {
     if (!this.provider.isConfigured()) {
       throw new Error('LLM provider is not configured.');
     }
 
     let lastMessage = '';
+    let semanticOutputSeen = false;
+    const trackedContent = (delta: string): void => {
+      if (delta.length > 0) {
+        semanticOutputSeen = true;
+      }
+      onContent?.(delta);
+    };
     for (let attempt = 0; attempt < MODEL_MAX_ATTEMPTS; attempt++) {
       try {
-        return await this.completeOnce(prompt, conversation);
+        return await this.completeOnce(prompt, conversation, trackedContent);
       } catch (error) {
         lastMessage = this.describeThrown(error);
-        if (attempt + 1 >= MODEL_MAX_ATTEMPTS || !this.isRetryableTransportError(lastMessage)) {
+        if (semanticOutputSeen || attempt + 1 >= MODEL_MAX_ATTEMPTS || !this.isRetryableTransportError(lastMessage)) {
           throw new Error(`LLM request failed: ${lastMessage}`);
         }
       }
@@ -65,12 +79,20 @@ export class OpenAiCompatibleModel implements LocalModel {
     throw new Error(`LLM request failed: ${lastMessage}`);
   }
 
-  private async completeOnce(prompt: string, conversation?: ConversationContext): Promise<string> {
+  private async completeOnce(
+    prompt: string,
+    conversation: ConversationContext | undefined,
+    onContent: ModelContentListener
+  ): Promise<string> {
     const httpRequest = http.createHttp();
     const decoder = util.TextDecoder.create('utf-8');
+    const sseParser = new ChatCompletionSseParser();
     const requestStartMs = Date.now();
-    let rawResponse = '';
+    const rawChunks: string[] = [];
+    const contentParts: string[] = [];
     let chunkSequence = 0;
+    let sseEventSequence = 0;
+    let streamParseError: Error | null = null;
     let streamEndResolve: () => void = () => {};
     const streamEnd = new Promise<void>((resolve: () => void) => {
       streamEndResolve = resolve;
@@ -78,7 +100,7 @@ export class OpenAiCompatibleModel implements LocalModel {
     httpRequest.on('dataReceive', (data: ArrayBuffer) => {
       chunkSequence++;
       const chunk = decoder.decodeToString(new Uint8Array(data), { stream: true });
-      rawResponse += chunk;
+      rawChunks.push(chunk);
       const preview = chunk.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
       aiLogInfo(
         '[AIPhone][ModelResponseChunk] seq=' + chunkSequence.toString() +
@@ -87,16 +109,25 @@ export class OpenAiCompatibleModel implements LocalModel {
         ' elapsedMs=' + (Date.now() - requestStartMs).toString() +
         ' data=' + preview
       );
+      if (streamParseError === null) {
+        try {
+          sseEventSequence += this.consumeSsePayloads(sseParser.feed(chunk), contentParts, onContent);
+        } catch (error) {
+          streamParseError = new Error(this.describeThrown(error));
+        }
+      }
     });
     httpRequest.on('dataEnd', () => {
       streamEndResolve();
     });
     try {
       const endpoint = this.provider.chatCompletionsUrl();
+      const requestJson = this.buildRequestJson(prompt, conversation);
       aiLogInfo(
         '[AIPhone][ModelRequestStart] model=' + this.provider.model +
         ' endpoint=' + endpoint +
-        ' stream=true'
+        ' stream=true' +
+        ' promptHasXmlToolRule=' + (prompt.indexOf('<appless_tool>') >= 0).toString()
       );
       const statusCode = await httpRequest.requestInStream(endpoint, {
         method: http.RequestMethod.POST,
@@ -105,24 +136,77 @@ export class OpenAiCompatibleModel implements LocalModel {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'text/event-stream'
         },
-        extraData: this.buildRequestJson(prompt, conversation),
+        extraData: requestJson,
         connectTimeout: MODEL_CONNECT_TIMEOUT_MS,
         readTimeout: MODEL_READ_TIMEOUT_MS
       });
       streamEndResolve();
       await streamEnd;
-      rawResponse += decoder.decodeToString(new Uint8Array(0), { stream: false });
+      const decoderTail = decoder.decodeToString(new Uint8Array(0), { stream: false });
+      if (decoderTail.length > 0) {
+        rawChunks.push(decoderTail);
+      }
+      if (streamParseError === null) {
+        try {
+          sseEventSequence += this.consumeSsePayloads(sseParser.feed(decoderTail), contentParts, onContent);
+          sseEventSequence += this.consumeSsePayloads(sseParser.finish(), contentParts, onContent);
+        } catch (error) {
+          streamParseError = new Error(this.describeThrown(error));
+        }
+      }
+      const rawResponse = rawChunks.join('');
 
       if (statusCode < 200 || statusCode >= 300) {
         throw new Error(`LLM request failed with HTTP ${statusCode}: ${rawResponse}`);
       }
+      if (streamParseError !== null) {
+        throw streamParseError;
+      }
 
-      return this.parseContent(rawResponse);
+      let content = contentParts.join('').trim();
+      if (content.length === 0) {
+        content = this.parseContent(rawResponse);
+        onContent(content);
+      }
+      aiLogInfo(
+        '[AIPhone][ModelStreamComplete] chunks=' + chunkSequence.toString() +
+        ' sseEvents=' + sseEventSequence.toString() +
+        ' contentChars=' + content.length.toString() +
+        ' elapsedMs=' + (Date.now() - requestStartMs).toString()
+      );
+      return content;
     } catch (error) {
       throw new Error(this.describeThrown(error));
     } finally {
       httpRequest.destroy();
     }
+  }
+
+  private consumeSsePayloads(
+    payloads: string[],
+    contentParts: string[],
+    onContent: ModelContentListener
+  ): number {
+    let consumed = 0;
+    for (let index = 0; index < payloads.length; index++) {
+      const payload = payloads[index];
+      consumed++;
+      if (payload.length === 0 || payload === '[DONE]') {
+        continue;
+      }
+
+      const event = JSON.parse(payload) as ChatStreamResponse;
+      const choices = event.choices;
+      if (choices === undefined || choices.length === 0 || choices[0].delta === undefined) {
+        continue;
+      }
+      const deltaContent = choices[0].delta?.content;
+      if (typeof deltaContent === 'string' && deltaContent.length > 0) {
+        contentParts.push(deltaContent);
+        onContent(deltaContent);
+      }
+    }
+    return consumed;
   }
 
   private describeThrown(error: Error | Object | string | number | boolean | null | undefined): string {
@@ -184,7 +268,10 @@ export class OpenAiCompatibleModel implements LocalModel {
   }
 
   private systemPrompt(): string {
-    let content = 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool(JSON object) or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.';
+    let content = 'You are Loop, a concise ReAct agent on HarmonyOS. Every response must use exactly one of these two forms:\n' +
+      'Thought: brief reasoning\n<appless_tool>tool.name({"key":"value"})</appless_tool>\n' +
+      'or:\nThought: brief reasoning\nFinal: answer\n' +
+      'A response that ends after Thought is invalid. If Thought says a tool will be used, the very next line must be <appless_tool>...</appless_tool>. Never merely describe or announce a tool call. After </appless_tool>, you may continue with ordinary status text, but never emit another tool call in the same response. Use only listed tools and follow the tool-routing rules in the prompt exactly.';
     const skills = buildSkillsSection(this.skillSnapshot);
     if (skills.length > 0) {
       content += `\n\n${skills}`;
@@ -239,7 +326,7 @@ export class OpenAiCompatibleModel implements LocalModel {
         continue;
       }
       const deltaContent = choices[0].delta?.content;
-      if (deltaContent !== undefined) {
+      if (typeof deltaContent === 'string') {
         content += deltaContent;
       }
     }

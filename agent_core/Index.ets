@@ -10,7 +10,9 @@ export {
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
 export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
-export { LocalModel } from './src/main/ets/model/LocalModel';
+export { StreamingToolCallParser, ToolCall, parseToolCallText } from './src/main/ets/agent/StreamingToolCallParser';
+export { ChatCompletionSseParser } from './src/main/ets/model/ChatCompletionSseParser';
+export { LocalModel, ModelContentListener } from './src/main/ets/model/LocalModel';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
 export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
 export { ScriptedA2uiModel, buildTaskCardComponents } from './src/main/ets/a2ui/ScriptedA2uiModel';

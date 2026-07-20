@@ -3,8 +3,10 @@ import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
+import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
 import { skillLogInfo, skillLogWarn } from '../skill/SkillLog';
 import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
+import { parseToolCallText, StreamingToolCallParser, ToolCall } from './StreamingToolCallParser';
 
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
@@ -26,14 +28,21 @@ function currentLocalDateTime(now: Date = new Date()): string {
     sign + padDatePart(Math.floor(absoluteOffset / 60)) + ':' + padDatePart(absoluteOffset % 60);
 }
 
-class ToolCall {
-  name: string;
-  input: string;
+class ToolRunOutcome {
+  observation: string;
+  error: string;
 
-  constructor(name: string, input: string) {
-    this.name = name;
-    this.input = input;
+  constructor(observation: string, error: string) {
+    this.observation = observation;
+    this.error = error;
   }
+}
+
+class StreamingStepState {
+  call: ToolCall | null = null;
+  tool: Promise<ToolRunOutcome> | null = null;
+  thoughtEmitted: boolean = false;
+  contentReceived: boolean = false;
 }
 
 export class ReActAgentRunner {
@@ -65,29 +74,47 @@ export class ReActAgentRunner {
 
     for (let step = 0; step < this.maxSteps; step++) {
       let response: string;
+      const streamParser = new StreamingToolCallParser();
+      const streamState = new StreamingStepState();
       try {
-        response = await this.model.complete(this.buildPrompt(task, scratchpad, conversation), conversation);
+        response = await this.model.complete(
+          this.buildPrompt(task, scratchpad, conversation),
+          conversation,
+          (delta: string): void => {
+            this.handleModelContent(delta, streamParser, streamState, listener);
+          }
+        );
+        if (!streamState.contentReceived) {
+          this.handleModelContent(response, streamParser, streamState, listener);
+        }
+        streamParser.finish();
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
         listener(new AgentEvent(AgentEventKind.ERROR, message));
         return;
       }
 
-      this.emitResponse(response, listener);
-
-      const finalAnswer = this.readLineValue(response, 'Final:');
-      if (finalAnswer !== null) {
-        listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
-        return;
+      if (!streamState.thoughtEmitted) {
+        this.emitResponse(response, listener);
       }
 
-      const call = this.parseAction(response);
+      if (streamState.call === null) {
+        const finalAnswer = this.readLineValue(response, 'Final:');
+        if (finalAnswer !== null) {
+          listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
+          return;
+        }
+      }
+
+      const call = streamState.call ?? this.parseAction(response);
       if (call === null) {
         listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
         return;
       }
 
-      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      if (streamState.call === null) {
+        listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      }
 
       let observation: string;
       try {
@@ -98,10 +125,18 @@ export class ReActAgentRunner {
           }
           observation = await this.runUiTool(call.input, listener);
         } else {
-          if (call.name === READ_TOOL_NAME) {
+          if (call.name === READ_TOOL_NAME && streamState.tool === null) {
             skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
           }
-          observation = await this.tools.run(call.name, call.input);
+          if (streamState.tool !== null) {
+            const outcome = await streamState.tool;
+            if (outcome.error.length > 0) {
+              throw new Error(outcome.error);
+            }
+            observation = outcome.observation;
+          } else {
+            observation = await this.tools.run(call.name, call.input);
+          }
           if (call.name === READ_TOOL_NAME) {
             this.emitSkillRead(call.input, observation, listener);
           }
@@ -132,6 +167,45 @@ export class ReActAgentRunner {
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private startTool(call: ToolCall): Promise<ToolRunOutcome> {
+    return this.tools.run(call.name, call.input).then(
+      (observation: string): ToolRunOutcome => new ToolRunOutcome(observation, ''),
+      (error: Error | Object | string | number | boolean | null | undefined): ToolRunOutcome => {
+        const message = error instanceof Error ? error.message : `${error}`;
+        return new ToolRunOutcome('', message);
+      }
+    );
+  }
+
+  private handleModelContent(
+    delta: string,
+    parser: StreamingToolCallParser,
+    state: StreamingStepState,
+    listener: AgentListener
+  ): void {
+    if (delta.length === 0) {
+      return;
+    }
+    state.contentReceived = true;
+    const call = parser.feed(delta);
+    if (call === null || state.call !== null) {
+      return;
+    }
+
+    state.call = call;
+    this.emitResponse(parser.leadingText(), listener);
+    state.thoughtEmitted = true;
+    listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+    aiLogInfo('[AIPhone][ModelToolCallReady] toolId=' + call.name +
+      ' inputChars=' + call.input.length.toString());
+    if (call.name !== UI_TOOL_NAME) {
+      if (call.name === READ_TOOL_NAME) {
+        skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+      }
+      state.tool = this.startTool(call);
+    }
   }
 
   private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
@@ -170,8 +244,9 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
-    prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
+    prompt += 'Use Thought, tool calls, Observation, and Final. Never end a response after Thought alone.\n';
+    prompt += 'When calling a tool, output exactly one <appless_tool>tool.name({"query":"value"})</appless_tool> on the line immediately after Thought. For example: Thought: I need nearby restaurants.\n<appless_tool>food.search({"query":"restaurants near Hongqiao Railway Station"})</appless_tool>\n';
+    prompt += 'Do not merely say that you will use a tool: emit the XML tool call. Use a JSON object in parentheses, use normal JSON arrays like ["a@example.com"], and do not pass bare keywords. After </appless_tool>, you may continue with ordinary status text, but never emit another tool call in the same response.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -207,6 +282,9 @@ export class ReActAgentRunner {
     for (const item of scratchpad) {
       prompt += `${item}\n`;
     }
+    prompt += '\nOutput contract for the next step:\n';
+    prompt += 'If a tool is needed, do not stop after Thought or merely announce the tool. Emit exactly one <appless_tool>tool.name({"key":"value"})</appless_tool>. Ordinary status text may follow its closing tag.\n';
+    prompt += 'If no tool is needed, emit Thought followed by Final.\n';
     return prompt;
   }
 
@@ -272,29 +350,6 @@ export class ReActAgentRunner {
     if (action === null) {
       return null;
     }
-
-    const parenCall = this.parseDelimitedAction(action, '(', ')');
-    if (parenCall !== null) {
-      return parenCall;
-    }
-
-    const bracketCall = this.parseDelimitedAction(action, '[', ']');
-    if (bracketCall !== null) {
-      return bracketCall;
-    }
-
-    return null;
-  }
-
-  private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {
-    const open = action.indexOf(openToken);
-    const close = action.lastIndexOf(closeToken);
-    if (open <= 0 || close < open) {
-      return null;
-    }
-
-    const name = action.substring(0, open).trim();
-    const input = action.substring(open + 1, close).trim();
-    return new ToolCall(name, input);
+    return parseToolCallText(action);
   }
 }

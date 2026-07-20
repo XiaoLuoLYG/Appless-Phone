@@ -1,25 +1,40 @@
 import { ConversationContext } from '../agent/ConversationContext';
-import { LocalModel } from './LocalModel';
+import { LocalModel, ModelContentListener } from './LocalModel';
 
 export class ScriptedLocalModel implements LocalModel {
-  async complete(prompt: string, _conversation?: ConversationContext): Promise<string> {
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    onContent?: ModelContentListener
+  ): Promise<string> {
     if (!prompt.toLowerCase().includes('observation:')) {
       const task = this.extractTask(prompt);
       const lower = task.toLowerCase();
       if (lower.includes('time') || lower.includes('date')) {
-        return 'Thought: I should inspect the device clock.\nAction: time[]';
+        return this.emit('Thought: I should inspect the device clock.\nAction: time[]', onContent);
       }
       if (this.wantsUi(lower)) {
-        return `Thought: The user wants a visual UI on screen.\nAction: ui[${task}]`;
+        return this.emit(`Thought: The user wants a visual UI on screen.\nAction: ui[${task}]`, onContent);
       }
-      return `Thought: I should preserve the user's request as local context.\nAction: note[${task}]`;
+      return this.emit(`Thought: I should preserve the user's request as local context.\nAction: note[${task}]`, onContent);
     }
 
     if (prompt.toLowerCase().includes('rendered on-screen ui')) {
-      return 'Thought: The UI is on screen; I can summarize.\nFinal: I rendered an on-screen card for your request. Check the panel above the chat.';
+      return this.emit(
+        'Thought: The UI is on screen; I can summarize.\nFinal: I rendered an on-screen card for your request. Check the panel above the chat.',
+        onContent
+      );
     }
 
-    return 'Thought: I have enough local context to answer.\nFinal: I ran the local ReAct loop and used the available device tool result.';
+    return this.emit(
+      'Thought: I have enough local context to answer.\nFinal: I ran the local ReAct loop and used the available device tool result.',
+      onContent
+    );
+  }
+
+  private emit(value: string, onContent?: ModelContentListener): string {
+    onContent?.(value);
+    return value;
   }
 
   private wantsUi(task: string): boolean {

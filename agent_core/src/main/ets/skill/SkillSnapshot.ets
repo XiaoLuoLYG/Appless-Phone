@@ -39,7 +39,7 @@ export function buildSkillsSection(snapshot: SkillSnapshot | null): string {
 
   let section = '## Skills\n';
   section += 'Before replying: scan <available_skills> descriptions in this message.\n';
-  section += '- If exactly one skill clearly applies: Action: read[skill_name], then follow the loaded instructions.\n';
+  section += '- If exactly one skill clearly applies: <appless_tool>read[skill_name]</appless_tool>, then follow the loaded instructions.\n';
   section += '- If multiple could apply: choose the most specific one, then read it.\n';
   section += '- If none clearly apply: do not read any skill; use other tools or Final.\n';
   section += '- Read at most one skill up front per task.\n\n';
@@ -65,8 +65,8 @@ export function buildLoopSystemPrompt(snapshot: SkillSnapshot | null): string {
 
 export function buildReActFormatRules(): string {
   return ' Every reply MUST include Thought: on its own line, then exactly one of:\n'
-    + '- Action: tool_name[input]  (e.g. Action: time[], Action: read[weather])\n'
+    + '- <appless_tool>tool_name[input]</appless_tool>  (e.g. <appless_tool>time[]</appless_tool>, <appless_tool>read[weather]</appless_tool>)\n'
     + '- Final: answer\n'
-    + 'Do not use markdown bold, bullets, or code blocks on Action/Final lines. '
+    + 'Output at most one tool call. After </appless_tool>, ordinary status text is allowed, but do not emit another tool call. Do not use markdown bold, bullets, or code blocks around tool calls or Final lines. '
     + 'Use only listed tools.';
 }

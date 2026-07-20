@@ -7,14 +7,17 @@ import {
   aiphoneToolSurfaceCallback,
   A2uiEnvelope,
   A2uiSurfaceState,
+  ChatCompletionSseParser,
   ConversationContext,
   DynamicGenericToolResult,
   genericToolResultsA2ui,
   isExplicitLuckinOrderPrompt,
   LocalModel,
+  ModelContentListener,
   parseLoopToolInputArgs,
   ReActAgentRunner,
   SkillSnapshot,
+  StreamingToolCallParser,
   summarizeA2uiObservation,
   ToolRegistry
 } from '@loop/agent-core';
@@ -26,7 +29,11 @@ class SingleActionModel implements LocalModel {
     this.response = response;
   }
 
-  async complete(_prompt: string, _conversation?: ConversationContext): Promise<string> {
+  async complete(
+    _prompt: string,
+    _conversation?: ConversationContext,
+    _onContent?: ModelContentListener
+  ): Promise<string> {
     return this.response;
   }
 }
@@ -58,7 +65,11 @@ class SequenceModel implements LocalModel {
     this.responses = responses;
   }
 
-  async complete(prompt: string, _conversation?: ConversationContext): Promise<string> {
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    _onContent?: ModelContentListener
+  ): Promise<string> {
     this.prompts.push(prompt);
     const index = this.prompts.length - 1;
     return index < this.responses.length ? this.responses[index] : 'Final: no more responses';
@@ -86,6 +97,34 @@ class FixedTool implements AgentTool {
   async run(input: string): Promise<string> {
     this.calls.push(input);
     return this.output;
+  }
+}
+
+class StreamingXmlModel implements LocalModel {
+  private tool: FixedTool;
+  startedBeforeComplete: boolean = false;
+
+  constructor(tool: FixedTool) {
+    this.tool = tool;
+  }
+
+  async complete(
+    _prompt: string,
+    _conversation?: ConversationContext,
+    onContent?: ModelContentListener
+  ): Promise<string> {
+    const chunks: string[] = [
+      'Thought: search now\n<appless_',
+      'tool>train.search({"departure":"北京",',
+      '"arrival":"上海"})</appless_',
+      'tool>',
+      '\nStatus: searching while the tool is already running.'
+    ];
+    for (let index = 0; index < chunks.length; index++) {
+      onContent?.(chunks[index]);
+    }
+    this.startedBeforeComplete = this.tool.calls.length === 1;
+    return chunks.join('');
   }
 }
 
@@ -154,6 +193,51 @@ function longText(prefix: string): string {
 
 export default function reActAgentRunnerTest() {
   describe('reActAgentRunner', () => {
+    it('reassembles SSE payloads split across network chunks', 0, () => {
+      const parser = new ChatCompletionSseParser();
+      let payloads: string[] = [];
+      payloads = payloads.concat(parser.feed('data: first\r\n\r\ndata: sec'));
+      payloads = payloads.concat(parser.feed('ond\n\ndata: [DONE]\n\n'));
+
+      expect(payloads.length).assertEqual(3);
+      expect(payloads[0]).assertEqual('first');
+      expect(payloads[1]).assertEqual('second');
+      expect(payloads[2]).assertEqual('[DONE]');
+    });
+
+    it('emits one tool call only after a split closing XML tag is complete', 0, () => {
+      const parser = new StreamingToolCallParser();
+
+      expect(parser.feed('Thought: search now\n<appless_') === null).assertTrue();
+      expect(parser.feed('tool>train.search({"departure":"北京"})</appless_') === null).assertTrue();
+      const call = parser.feed('tool>');
+
+      expect(call !== null).assertTrue();
+      expect(call?.name).assertEqual('train.search');
+      expect(call?.input).assertEqual('{"departure":"北京"}');
+      expect(parser.leadingText()).assertEqual('Thought: search now\n');
+    });
+
+    it('starts a streamed XML tool before model completion and emits one action', 0, async () => {
+      const tool = new FixedTool('train.search', 'captured');
+      const model = new StreamingXmlModel(tool);
+      const registry = new ToolRegistry();
+      registry.register(tool);
+      const runner = new ReActAgentRunner(model, registry, 1);
+      let actionCount = 0;
+
+      await runner.run('search trains', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actionCount++;
+        }
+      });
+
+      expect(model.startedBeforeComplete).assertTrue();
+      expect(tool.calls.length).assertEqual(1);
+      expect(tool.calls[0]).assertEqual('{"departure":"北京","arrival":"上海"}');
+      expect(actionCount).assertEqual(1);
+    });
+
     it('forwards or ignores tool surfaces according to the runtime switch', 0, () => {
       let forwarded = 0;
       const onSurface = (_surface: A2uiSurfaceState, _raw: string): void => {

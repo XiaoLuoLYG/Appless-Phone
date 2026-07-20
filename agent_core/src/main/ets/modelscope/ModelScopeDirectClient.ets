@@ -243,7 +243,7 @@ export class ModelScopeDirectClient implements ModelScopeClient {
       mode: 'direct',
       useCase: query,
       tools: candidates,
-      instruction: 'Choose exactly one returned qualifiedName. Arguments must match inputSchema. Execute only tools whose risk is read. Output Action: modelscope({"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{}}).'
+      instruction: 'Choose exactly one returned qualifiedName. Arguments must match inputSchema. Execute only tools whose risk is read. Output <appless_tool>modelscope({"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{}})</appless_tool>. Ordinary status text may follow the closing tag, but do not emit another tool call.'
     };
     const emptyObservation = JSON.stringify(observation);
     if (emptyObservation.length > MAX_OBSERVATION_CHARS) {
