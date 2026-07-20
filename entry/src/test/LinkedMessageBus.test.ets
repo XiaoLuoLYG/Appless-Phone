@@ -68,6 +68,29 @@ class SerialTestAgent extends MessageDrivenAgent {
   }
 }
 
+class RestartTestAgent extends MessageDrivenAgent {
+  readonly taskIds: string[] = [];
+
+  constructor(bus: LinkedMessageBus) {
+    super(bus);
+  }
+
+  protected accepts(received: AgentMessage): boolean {
+    return received.type === AgentMessageType.TASK_CREATE_DATA;
+  }
+
+  protected async process(received: AgentMessage): Promise<void> {
+    this.taskIds.push(received.taskId);
+  }
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 export default function linkedMessageBusTest() {
   describe('linkedMessageBus', () => {
     it('broadcasts one published message to every existing reader', 0, async () => {
@@ -144,6 +167,24 @@ export default function linkedMessageBusTest() {
       agent.releaseFirstHandler();
       await agent.secondStarted.promise;
       expect(agent.startedTaskIds.join(',')).assertEqual('accepted-1,accepted-2');
+      agent.stop();
+    });
+
+    it('reopens at the current tail after stop without replay or duplicate pumps', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const agent = new RestartTestAgent(bus);
+
+      agent.start();
+      bus.publish(message('before-stop'));
+      await settle();
+      agent.stop();
+      bus.publish(message('while-stopped'));
+      agent.start();
+      agent.start();
+      bus.publish(message('after-restart'));
+      await settle();
+
+      expect(agent.taskIds.join(',')).assertEqual('before-stop,after-restart');
       agent.stop();
     });
   });

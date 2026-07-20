@@ -63,7 +63,6 @@ export interface ActionResultPayload {
 }
 
 export interface ActionFollowUp {
-  turnId: string;
   uiTask: CreateUiTaskPayload;
   dataTask: CreateDataTaskPayload;
 }
@@ -107,4 +106,5 @@ export interface PausedActionRun {
   outputs: ActionPlanStepOutput[];
   plan: ActionPlan;
   context: ActionPlanRunContext;
+  followUpPublished: boolean;
 }

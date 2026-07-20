@@ -27,6 +27,7 @@ import {
 const TERMINATED_TURN_LIMIT: number = 128;
 // Retain only a tiny pre-UI window, keyed by exact Data task ownership.
 const PENDING_DATA_LIMIT: number = 5;
+const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 
 interface PendingDataEntry {
   data?: DataResult;
@@ -39,6 +40,7 @@ interface PendingPlanCorrelation {
   runId: string;
   surfaceId: string;
   taskId: string;
+  label: string;
 }
 
 interface UiTurnContext {
@@ -293,6 +295,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
+    this.rejectEarlyWorkflowAffordance(rendered);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -359,8 +362,9 @@ export class UiAgent extends MessageDrivenAgent {
         return;
       }
     }
+    const statusPayload: Object = ready === null ? message.payload : ready;
     const rendered: UiRenderResult =
-      await this.renderer.actionStatus(message.payload, context.surfaceId);
+      await this.renderer.actionStatus(statusPayload, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
@@ -645,7 +649,8 @@ export class UiAgent extends MessageDrivenAgent {
         planId: plan.planId,
         runId,
         surfaceId: context.surfaceId,
-        taskId
+        taskId,
+        label: plan.label
       };
       context.pendingPlans.set(runId, correlation);
       const payload: ActionPlanCreatePayload = {
@@ -671,14 +676,17 @@ export class UiAgent extends MessageDrivenAgent {
       return null;
     }
     const ready = message.payload as ActionPlanReadyPayload;
+    if (Object.keys(message.payload).sort().join(',') !==
+      'actionId,args,label,planId,runId,surfaceId') {
+      return null;
+    }
     const correlation = context.pendingPlans.get(ready.runId);
     if (correlation === undefined ||
       message.taskId !== correlation.taskId ||
       ready.planId !== correlation.planId ||
       ready.surfaceId !== correlation.surfaceId ||
       ready.actionId !== 'workflow.run' ||
-      typeof ready.label !== 'string' ||
-      ready.label.trim().length === 0) {
+      ready.label !== correlation.label) {
       return null;
     }
     const args = ready.args as WorkflowRunArgs;
@@ -690,6 +698,27 @@ export class UiAgent extends MessageDrivenAgent {
       args.runId !== ready.runId) {
       return null;
     }
-    return ready;
+    const safeArgs: WorkflowRunArgs = {
+      planId: args.planId,
+      runId: args.runId
+    };
+    return {
+      surfaceId: ready.surfaceId,
+      planId: ready.planId,
+      runId: ready.runId,
+      label: ready.label,
+      actionId: 'workflow.run',
+      args: safeArgs
+    };
+  }
+
+  private rejectEarlyWorkflowAffordance(rendered: UiRenderResult): void {
+    if (!Array.isArray(rendered.proposals)) {
+      throw new Error('UI renderer action proposals are malformed');
+    }
+    if (typeof rendered.jsonl === 'string' &&
+      rendered.jsonl.indexOf(WORKFLOW_RUN_ACTION_ID) >= 0) {
+      throw new Error('UI renderer exposed workflow.run before Action Plan READY');
+    }
   }
 }

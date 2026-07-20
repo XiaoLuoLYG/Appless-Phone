@@ -9,6 +9,7 @@ import {
   ActionPlan,
   ActionPlanCreatePayload,
   ActionPlanReadyPayload,
+  ActionPlanStepOutput,
   ActionProgressPayload,
   ActionResultPayload,
   ActionRunPayload,
@@ -86,10 +87,13 @@ class ExactActionSurface implements SurfaceActionAuthorizer {
     actionId: string,
     args: Object
   ): boolean {
-    if (!this.allowed ||
-      conversationId !== 'conversation-1' ||
-      turnId !== 'turn-1' ||
-      surfaceId !== 'surface-1') {
+    const primary = conversationId === 'conversation-1' &&
+      turnId === 'turn-1' &&
+      surfaceId === 'surface-1';
+    const secondary = conversationId === 'conversation-2' &&
+      turnId === 'turn-2' &&
+      surfaceId === 'surface-2';
+    if (!this.allowed || (!primary && !secondary)) {
       return false;
     }
     if (actionId === 'hotel.detail') {
@@ -155,6 +159,7 @@ class RecordingRegisteredExecutor implements RegisteredActionExecutor {
   readonly contexts: string[] = [];
   results: ActionExecutionResult[] = [];
   gate: TestGate | null = null;
+  gateActionId: string = '';
 
   async execute(
     actionId: string,
@@ -168,7 +173,8 @@ class RecordingRegisteredExecutor implements RegisteredActionExecutor {
         `${context.planId}|${context.runId}|${context.stepId}`
     );
     const gate = this.gate;
-    if (gate !== null) {
+    if (gate !== null &&
+      (this.gateActionId.length === 0 || this.gateActionId === actionId)) {
       await gate.promise;
     }
     const result = this.results[this.actionIds.length - 1];
@@ -201,13 +207,27 @@ function catalog(
   return new ActionCatalog(lookup, surface, new NoClientAction(), validator);
 }
 
-function compositePlan(planId: string = 'plan-1'): ActionPlan {
+function compositePlan(
+  planId: string = 'plan-1',
+  turnId: string = 'turn-1',
+  surfaceId: string = 'surface-1'
+): ActionPlan {
   return JSON.parse(
-    `{"planId":"${planId}","turnId":"turn-1","surfaceId":"surface-1",` +
+    `{"planId":"${planId}","turnId":"${turnId}","surfaceId":"${surfaceId}",` +
       '"label":"Open detail then navigate","steps":[' +
       '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
       '{"stepId":"navigate","actionId":"hotel.navigate",' +
       '"args":{"hotelId":101,"latitude":22.5,"longitude":114}}]}'
+  ) as ActionPlan;
+}
+
+function followUpThenConfirmPlan(planId: string): ActionPlan {
+  return JSON.parse(
+    `{"planId":"${planId}","turnId":"turn-1","surfaceId":"surface-1",` +
+      '"label":"Open detail then confirm call","steps":[' +
+      '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
+      '{"stepId":"call","actionId":"hotel.call",' +
+      '"args":{"hotelId":101,"phone":"+8675588888888"}}]}'
   ) as ActionPlan;
 }
 
@@ -223,11 +243,12 @@ function message(
   type: AgentMessageType,
   payload: Object,
   turnId: string = 'turn-1',
-  taskId: string = 'action-task-1'
+  taskId: string = 'action-task-1',
+  conversationId: string = 'conversation-1'
 ): AgentMessage {
   return {
     type,
-    conversationId: 'conversation-1',
+    conversationId,
     turnId,
     taskId,
     payload
@@ -276,10 +297,11 @@ function readyIdentity(
 function directRun(
   runId: string,
   actionId: string,
-  args: Object
+  args: Object,
+  surfaceId: string = 'surface-1'
 ): ActionRunPayload {
   return {
-    surfaceId: 'surface-1',
+    surfaceId,
     runId,
     sourceToolId: 'hotel.search',
     actionId,
@@ -310,6 +332,28 @@ async function receiveType(
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function receiveUntilResult(reader: AgentMessageReader): Promise<AgentMessage[]> {
+  const messages: AgentMessage[] = [];
+  while (true) {
+    const next = await receive(reader);
+    messages.push(next);
+    if (next.type === AgentMessageType.ACTION_RESULT) {
+      return messages;
+    }
+  }
+}
+
+function messagesOfType(
+  messages: AgentMessage[],
+  type: AgentMessageType
+): AgentMessage[] {
+  return messages.filter(
+    (current: AgentMessage): boolean => current.type === type
+  );
 }
 
 export default function actionAgentTest() {
@@ -429,14 +473,19 @@ export default function actionAgentTest() {
       ));
       const pausedMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
       const pausedResult = pausedMessage.payload as ActionResultPayload;
-      const paused: PausedActionRun | null = agent.inspectPausedRun('run-confirm');
+      const paused: PausedActionRun | null = agent.inspectPausedRun(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'run-confirm'
+      );
 
       expect(pausedResult.status).assertEqual('paused');
       expect(pausedResult.stepId).assertEqual('step-1');
       expect(executor.actionIds.length).assertEqual(0);
       expect(paused === null).assertFalse();
       expect(Object.keys(paused as PausedActionRun).sort().join(',')).assertEqual(
-        'context,nextStepIndex,outputs,plan,planId,runId,stepId'
+        'context,followUpPublished,nextStepIndex,outputs,plan,planId,runId,stepId'
       );
 
       const resumeReady = readyIdentity(pausedResult.planId, 'run-confirm');
@@ -620,7 +669,12 @@ export default function actionAgentTest() {
       expect(pausedCanceled.status).assertEqual('canceled');
       expect(activeCanceled.status).assertEqual('canceled');
       expect(thirdCanceled.status).assertEqual('canceled');
-      expect(agent.inspectPausedRun('run-paused-cancel') === null).assertTrue();
+      expect(agent.inspectPausedRun(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'run-paused-cancel'
+      ) === null).assertTrue();
       executor.gate.open();
       await settle();
       bus.publish(message(
@@ -668,7 +722,6 @@ export default function actionAgentTest() {
         args: JSON.parse('{"hotelId":101}') as Object
       };
       const followUp: ActionFollowUp = {
-        turnId: 'turn-follow',
         uiTask,
         dataTask
       };
@@ -727,12 +780,595 @@ export default function actionAgentTest() {
       expect(terminalCount).assertEqual(1);
       expect(uiIndex >= 0).assertTrue();
       expect(dataIndex).assertEqual(uiIndex + 1);
-      expect(observed[uiIndex].turnId).assertEqual('turn-follow');
-      expect(observed[dataIndex].turnId).assertEqual('turn-follow');
+      expect(observed[uiIndex].turnId === 'turn-1').assertFalse();
+      expect(observed[dataIndex].turnId).assertEqual(observed[uiIndex].turnId);
+      expect(observed[uiIndex].turnId.indexOf('conversation-1') >= 0).assertTrue();
       expect(observed[uiIndex].taskId).assertEqual('ui-follow');
       expect(observed[dataIndex].taskId).assertEqual('data-follow');
       expect(executor.actionIds.join(',')).assertEqual('hotel.detail,hotel.navigate');
       expect(executor.contexts[1].indexOf('|run-follow|navigate') > 0).assertTrue();
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('keeps one follow-up across pause and resume and allocates a fresh correlated turn', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const lookup = new ActionLookup();
+      lookup.confirmCall = true;
+      const executor = new RecordingRegisteredExecutor();
+      const firstArgs = JSON.parse('{"hotelId":101,"marker":"original"}') as Object;
+      const firstFollowUp = JSON.parse(
+        '{"uiTask":{"taskId":"ui-first","dataTaskId":"data-first",' +
+          '"intent":"Show detail","expectedOutputSchema":"hotelDetail"},' +
+          '"dataTask":{"taskId":"data-first","toolId":"hotel.detail",' +
+          '"outputSchema":"hotelDetail","args":{"hotelId":101,"marker":"original"}}}'
+      ) as ActionFollowUp;
+      firstFollowUp.dataTask.args = firstArgs;
+      const secondFollowUp = JSON.parse(
+        '{"uiTask":{"taskId":"ui-second","dataTaskId":"data-second",' +
+          '"intent":"Must not publish","expectedOutputSchema":"hotelDetail"},' +
+          '"dataTask":{"taskId":"data-second","toolId":"hotel.detail",' +
+          '"outputSchema":"hotelDetail","args":{"hotelId":202}}}'
+      ) as ActionFollowUp;
+      executor.results = [
+        success('{"hotelId":101}', firstFollowUp),
+        success('{"called":true}', secondFollowUp)
+      ];
+      const agent = new ActionAgent(bus, catalog(lookup), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('run-follow-confirm', followUpThenConfirmPlan('plan-follow-confirm'))
+      ));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(ready)));
+      const beforeResume = await receiveUntilResult(observer);
+      const paused = beforeResume[beforeResume.length - 1].payload as ActionResultPayload;
+      const saved = agent.inspectPausedRun(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'run-follow-confirm'
+      ) as PausedActionRun;
+      (firstArgs as JsonRecord)['marker'] = 'mutated';
+
+      expect(paused.status).assertEqual('paused');
+      expect(saved.followUpPublished).assertTrue();
+      expect(messagesOfType(beforeResume, AgentMessageType.TASK_CREATE_UI).length).assertEqual(1);
+      expect(messagesOfType(beforeResume, AgentMessageType.TASK_CREATE_DATA).length).assertEqual(1);
+      const firstUi = messagesOfType(beforeResume, AgentMessageType.TASK_CREATE_UI)[0];
+      const firstData = messagesOfType(beforeResume, AgentMessageType.TASK_CREATE_DATA)[0];
+      expect(firstUi.turnId === 'turn-1').assertFalse();
+      expect(firstData.turnId).assertEqual(firstUi.turnId);
+      expect(firstUi.turnId.indexOf('conversation-1') >= 0).assertTrue();
+      expect(((firstData.payload as CreateDataTaskPayload).args as JsonRecord)['marker'] as string)
+        .assertEqual('original');
+
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(readyIdentity(paused.planId, paused.runId), paused.stepId),
+        'turn-1',
+        'resume-follow-confirm'
+      ));
+      const afterResume = await receiveUntilResult(observer);
+      const completed = afterResume[afterResume.length - 1].payload as ActionResultPayload;
+
+      expect(completed.status).assertEqual('success');
+      expect(messagesOfType(afterResume, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
+      expect(messagesOfType(afterResume, AgentMessageType.TASK_CREATE_DATA).length).assertEqual(0);
+      expect(executor.actionIds.join(',')).assertEqual('hotel.detail,hotel.call');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects executor-selected turns and unknown follow-up descriptor fields', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const topLevelExtra = JSON.parse(
+        '{"turnId":"turn-1","extra":"route-me",' +
+          '"uiTask":{"taskId":"ui-bad-1","dataTaskId":"data-bad-1",' +
+          '"intent":"bad","expectedOutputSchema":"hotelDetail"},' +
+          '"dataTask":{"taskId":"data-bad-1","toolId":"hotel.detail",' +
+          '"outputSchema":"hotelDetail","args":{"hotelId":101}}}'
+      ) as ActionFollowUp;
+      const descriptorExtra = JSON.parse(
+        '{"uiTask":{"taskId":"ui-bad-2","dataTaskId":"data-bad-2",' +
+          '"intent":"bad","expectedOutputSchema":"hotelDetail","component":"script"},' +
+          '"dataTask":{"taskId":"data-bad-2","toolId":"hotel.detail",' +
+          '"outputSchema":"hotelDetail","args":{"hotelId":101},"extra":true}}'
+      ) as ActionFollowUp;
+      executor.results = [
+        success('{"hotelId":101}', topLevelExtra),
+        success('{"hotelId":101}', descriptorExtra)
+      ];
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun('run-bad-follow-1', 'hotel.detail', JSON.parse('{"hotelId":101}') as Object)
+      ));
+      const first = await receiveUntilResult(observer);
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun('run-bad-follow-2', 'hotel.detail', JSON.parse('{"hotelId":101}') as Object)
+      ));
+      const second = await receiveUntilResult(observer);
+
+      expect((first[first.length - 1].payload as ActionResultPayload).status).assertEqual('error');
+      expect((second[second.length - 1].payload as ActionResultPayload).status).assertEqual('error');
+      expect(messagesOfType(first, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
+      expect(messagesOfType(first, AgentMessageType.TASK_CREATE_DATA).length).assertEqual(0);
+      expect(messagesOfType(second, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
+      expect(messagesOfType(second, AgentMessageType.TASK_CREATE_DATA).length).assertEqual(0);
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('isolates identical run ids by exact conversation turn and surface key', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('shared-run', compositePlan('plan-a'))
+      ));
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate(
+          'shared-run',
+          compositePlan('plan-b', 'turn-2', 'surface-2')
+        ),
+        'turn-2',
+        'create-b',
+        'conversation-2'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"marker"}') as Object,
+        'marker-turn',
+        'marker'
+      ));
+      const readyMessages: AgentMessage[] = [];
+      let observed = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.ACTION_PLAN_READY) {
+          readyMessages.push(observed);
+        }
+        observed = await receive(observer);
+      }
+      expect(readyMessages.length).assertEqual(2);
+      const readyA = readyMessages.find(
+        (current: AgentMessage): boolean => current.conversationId === 'conversation-1'
+      )?.payload as ActionPlanReadyPayload;
+      const readyB = readyMessages.find(
+        (current: AgentMessage): boolean => current.conversationId === 'conversation-2'
+      )?.payload as ActionPlanReadyPayload;
+
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(readyA),
+        'turn-2',
+        'cross-collision',
+        'conversation-2'
+      ));
+      const cross = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(cross.status).assertEqual('error');
+
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(readyA)));
+      await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(readyB),
+        'turn-2',
+        'run-b',
+        'conversation-2'
+      ));
+      await receiveType(observer, AgentMessageType.ACTION_RESULT);
+
+      expect(executor.actionIds.join(',')).assertEqual(
+        'hotel.detail,hotel.navigate,hotel.detail,hotel.navigate'
+      );
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('bounds live state, clears it on cancellation, and never runs an evicted workflow tombstone', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 128; index++) {
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_CREATE,
+          planCreate(`capacity-run-${index}`, compositePlan(`capacity-plan-${index}`)),
+          'turn-1',
+          `capacity-task-${index}`
+        ));
+        await receiveType(observer, AgentMessageType.ACTION_PLAN_READY);
+      }
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('capacity-overflow', compositePlan('capacity-overflow-plan')),
+        'turn-1',
+        'capacity-overflow-task'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"capacity-marker"}') as Object,
+        'marker-turn',
+        'capacity-marker'
+      ));
+      let overflow: ActionResultPayload | null = null;
+      let next = await receive(observer);
+      while (next.type !== AgentMessageType.INPUT_USER) {
+        if (next.type === AgentMessageType.ACTION_RESULT) {
+          overflow = next.payload as ActionResultPayload;
+        }
+        next = await receive(observer);
+      }
+      expect((overflow as ActionResultPayload).errorCode).assertEqual('ACTION_STATE_CAPACITY');
+
+      bus.publish(message(
+        AgentMessageType.TURN_CANCEL,
+        new Object(),
+        'turn-1',
+        'capacity-cancel'
+      ));
+      for (let index = 0; index < 128; index++) {
+        const canceled = (await receiveType(
+          observer,
+          AgentMessageType.ACTION_RESULT
+        )).payload as ActionResultPayload;
+        expect(canceled.status).assertEqual('canceled');
+      }
+      agent.stop();
+      agent.start();
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('after-capacity', compositePlan('after-capacity-plan')),
+        'turn-1',
+        'after-capacity-task'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"restart-marker"}') as Object,
+        'marker-turn',
+        'restart-marker'
+      ));
+      let readyAfterRestart = 0;
+      next = await receive(observer);
+      while (next.type !== AgentMessageType.INPUT_USER) {
+        if (next.type === AgentMessageType.ACTION_PLAN_READY) {
+          readyAfterRestart++;
+        }
+        next = await receive(observer);
+      }
+      expect(readyAfterRestart).assertEqual(1);
+      agent.stop();
+      observer.close();
+
+      const tombstoneBus = new LinkedMessageBus();
+      const tombstoneExecutor = new RecordingRegisteredExecutor();
+      const tombstoneAgent = new ActionAgent(
+        tombstoneBus,
+        catalog(new ActionLookup()),
+        tombstoneExecutor
+      );
+      const tombstoneObserver = tombstoneBus.openReader();
+      tombstoneAgent.start();
+      for (let index = 0; index < 129; index++) {
+        tombstoneBus.publish(message(
+          AgentMessageType.ACTION_RUN,
+          directRun(
+            `terminal-${index}`,
+            'hotel.detail',
+            JSON.parse('{"hotelId":101}') as Object
+          ),
+          'turn-1',
+          `terminal-task-${index}`
+        ));
+        await receiveType(tombstoneObserver, AgentMessageType.ACTION_RESULT);
+      }
+      tombstoneBus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(readyIdentity('direct:terminal-0', 'terminal-0')),
+        'turn-1',
+        'terminal-replay'
+      ));
+      const replay = (await receiveType(
+        tombstoneObserver,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(replay.status).assertEqual('error');
+      expect(tombstoneExecutor.actionIds.length).assertEqual(129);
+      tombstoneAgent.stop();
+      tombstoneObserver.close();
+    });
+
+    it('reports cloned completed outputs when canceling paused and later active steps', 0, async () => {
+      const pausedBus = new LinkedMessageBus();
+      const pausedLookup = new ActionLookup();
+      pausedLookup.confirmCall = true;
+      const pausedExecutor = new RecordingRegisteredExecutor();
+      pausedExecutor.results = [success('{"hotelId":101,"detail":"kept"}')];
+      const pausedAgent = new ActionAgent(
+        pausedBus,
+        catalog(pausedLookup),
+        pausedExecutor
+      );
+      const pausedObserver = pausedBus.openReader();
+      pausedAgent.start();
+      pausedBus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('cancel-paused-output', followUpThenConfirmPlan('cancel-paused-plan'))
+      ));
+      const pausedReady = (await receiveType(
+        pausedObserver,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      pausedBus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(pausedReady)));
+      await receiveType(pausedObserver, AgentMessageType.ACTION_RESULT);
+      pausedBus.publish(message(AgentMessageType.TURN_CANCEL, new Object()));
+      const pausedCanceled = (await receiveType(
+        pausedObserver,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(pausedCanceled.completedStepIds.join(',')).assertEqual('detail');
+      expect((pausedCanceled.outputs as ActionPlanStepOutput[]).length).assertEqual(1);
+      expect(((pausedCanceled.outputs as ActionPlanStepOutput[])[0].output as JsonRecord)['detail'] as string)
+        .assertEqual('kept');
+      pausedAgent.stop();
+      pausedObserver.close();
+
+      const activeBus = new LinkedMessageBus();
+      const activeExecutor = new RecordingRegisteredExecutor();
+      activeExecutor.results = [
+        success('{"hotelId":101,"detail":"active-kept"}'),
+        success('{"opened":true}')
+      ];
+      activeExecutor.gate = new TestGate();
+      activeExecutor.gateActionId = 'hotel.navigate';
+      const activeAgent = new ActionAgent(
+        activeBus,
+        catalog(new ActionLookup()),
+        activeExecutor
+      );
+      const activeObserver = activeBus.openReader();
+      activeAgent.start();
+      activeBus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('cancel-active-output', compositePlan('cancel-active-plan'))
+      ));
+      const activeReady = (await receiveType(
+        activeObserver,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      activeBus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(activeReady)));
+      let runningNavigate = false;
+      while (!runningNavigate) {
+        const current = await receive(activeObserver);
+        if (current.type === AgentMessageType.ACTION_PROGRESS) {
+          const progress = current.payload as ActionProgressPayload;
+          runningNavigate = progress.stepId === 'navigate' && progress.status === 'running';
+        }
+      }
+      activeBus.publish(message(AgentMessageType.TURN_CANCEL, new Object()));
+      const activeCanceled = (await receiveType(
+        activeObserver,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(activeCanceled.completedStepIds.join(',')).assertEqual('detail');
+      expect((activeCanceled.outputs as ActionPlanStepOutput[]).length).assertEqual(1);
+      expect(((activeCanceled.outputs as ActionPlanStepOutput[])[0].output as JsonRecord)['detail'] as string)
+        .assertEqual('active-kept');
+      activeExecutor.gate.open();
+      activeAgent.stop();
+      activeObserver.close();
+    });
+
+    it('restarts after stop without publishing a pending old completion', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      executor.gate = new TestGate();
+      executor.gateActionId = 'hotel.navigate';
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'old-pending',
+          'hotel.navigate',
+          JSON.parse('{"hotelId":101,"latitude":22.5,"longitude":114}') as Object
+        )
+      ));
+      await receiveType(observer, AgentMessageType.ACTION_PROGRESS);
+
+      agent.stop();
+      agent.start();
+      executor.gate.open();
+      executor.gate = null;
+      await settle();
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun('new-after-restart', 'hotel.detail', JSON.parse('{"hotelId":101}') as Object),
+        'turn-1',
+        'new-after-restart-task'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"restart-marker"}') as Object,
+        'marker-turn',
+        'restart-marker'
+      ));
+      const results: ActionResultPayload[] = [];
+      let next = await receive(observer);
+      while (next.type !== AgentMessageType.INPUT_USER) {
+        if (next.type === AgentMessageType.ACTION_RESULT) {
+          results.push(next.payload as ActionResultPayload);
+        }
+        next = await receive(observer);
+      }
+
+      expect(results.length).assertEqual(1);
+      expect(results[0].runId).assertEqual('new-after-restart');
+      expect(executor.actionIds.join(',')).assertEqual('hotel.navigate,hotel.detail');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('survives malformed payloads, rejects duplicates, and ignores its own result messages', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        JSON.parse('null') as Object,
+        'turn-1',
+        'malformed-plan'
+      ));
+      const malformedPlan = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        JSON.parse('null') as Object,
+        'turn-1',
+        'malformed-run'
+      ));
+      const malformedRun = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(typeof malformedPlan.planId).assertEqual('string');
+      expect(typeof malformedPlan.runId).assertEqual('string');
+      expect(typeof malformedPlan.surfaceId).assertEqual('string');
+      expect(typeof malformedRun.planId).assertEqual('string');
+      expect(typeof malformedRun.runId).assertEqual('string');
+      expect(typeof malformedRun.surfaceId).assertEqual('string');
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_READY,
+        JSON.parse('{"runId":"self"}') as Object
+      ));
+      bus.publish(message(
+        AgentMessageType.ACTION_PROGRESS,
+        JSON.parse('{"runId":"self"}') as Object
+      ));
+      bus.publish(message(
+        AgentMessageType.ACTION_RESULT,
+        JSON.parse('{"runId":"self"}') as Object
+      ));
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"self-marker"}') as Object,
+        'marker-turn',
+        'self-marker'
+      ));
+      let ownMessage = await receive(observer);
+      while (ownMessage.type !== AgentMessageType.INPUT_USER) {
+        ownMessage = await receive(observer);
+      }
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('duplicate-run', compositePlan('duplicate-plan'))
+      ));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('duplicate-run', compositePlan('duplicate-plan'))
+      ));
+      const duplicate = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(duplicate.errorCode).assertEqual('ACTION_RUN_DUPLICATE');
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(ready)));
+      const completed = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(completed.status).assertEqual('success');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('reauthorizes the whole surface entry before resuming a later confirmed step', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const lookup = new ActionLookup();
+      lookup.confirmCall = true;
+      const surface = new ExactActionSurface();
+      const validator = new ExactArgs();
+      const executor = new RecordingRegisteredExecutor();
+      executor.results = [success('{"hotelId":101}')];
+      const agent = new ActionAgent(bus, catalog(lookup, surface, validator), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        planCreate('later-confirm', followUpThenConfirmPlan('later-confirm-plan'))
+      ));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(ready)));
+      const paused = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      surface.allowed = false;
+      validator.reject = true;
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(readyIdentity(paused.planId, paused.runId), paused.stepId)
+      ));
+      const rejected = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(rejected.status).assertEqual('error');
+      expect(
+        rejected.errorCode === 'ACTION_SURFACE_DENIED' ||
+          rejected.errorCode === 'ACTION_ARGS_REJECTED'
+      ).assertTrue();
+      expect(executor.actionIds.join(',')).assertEqual('hotel.detail');
 
       agent.stop();
       observer.close();

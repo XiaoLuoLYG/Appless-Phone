@@ -93,6 +93,8 @@ class RecordingRenderer implements UiTaskRenderer {
 
 class ProposalRenderer extends RecordingRenderer {
   proposalSurfaceId: string = '';
+  readyKeys: string = '';
+  readyLabel: string = '';
 
   async result(
     task: CreateUiTaskPayload,
@@ -116,10 +118,25 @@ class ProposalRenderer extends RecordingRenderer {
 
   async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
     const ready = payload as ActionPlanReadyPayload;
+    this.readyKeys = Object.keys(payload).sort().join(',');
+    this.readyLabel = ready.label;
     this.calls.push(`ready:${ready.runId}:${surfaceId}`);
     return render(
       `workflow:${ready.actionId}:${JSON.stringify(ready.args)}`
     );
+  }
+}
+
+class EarlyWorkflowRenderer extends ProposalRenderer {
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const proposed = await super.result(task, data, surfaceId);
+    proposed.jsonl =
+      '{"surfaceUpdate":{"actions":[{"name":"workflow.run","args":{"planId":"early"}}]}}';
+    return proposed;
   }
 }
 
@@ -799,6 +816,32 @@ export default function uiAgentTest() {
         createMessage.taskId,
         wrongSurface
       ));
+      const wrongLabel: ActionPlanReadyPayload = {
+        surfaceId: ready.surfaceId,
+        planId: ready.planId,
+        runId: ready.runId,
+        label: 'Tampered workflow label',
+        actionId: ready.actionId,
+        args: ready.args
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-1',
+        createMessage.taskId,
+        wrongLabel
+      ));
+      const extraReady = JSON.parse(JSON.stringify(ready)) as Object;
+      const extraRecord =
+        extraReady as Record<string, Object | string | number | boolean | null | undefined>;
+      extraRecord['extra'] = 'must be rejected';
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-1',
+        createMessage.taskId,
+        extraReady
+      ));
       await settle();
       expect(writer.writes.length).assertEqual(2);
 
@@ -816,6 +859,34 @@ export default function uiAgentTest() {
         `workflow:workflow.run:{"planId":"plan-ui-1","runId":"${create.runId}"}`
       );
       expect(Object.keys(ready.args).sort().join(',')).assertEqual('planId,runId');
+      expect(renderer.readyKeys).assertEqual(
+        'actionId,args,label,planId,runId,surfaceId'
+      );
+      expect(renderer.readyLabel).assertEqual('Open detail and navigate');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('fails closed before writing a renderer-proposed early workflow affordance', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new EarlyWorkflowRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      const failed = await receiveType(observer, AgentMessageType.TASK_ERROR);
+      await settle();
+
+      expect((failed.payload as TaskErrorPayload).code).assertEqual('UI_RENDER_FAILED');
+      expect(writer.writes.length).assertEqual(1);
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('ready:')
+      ).length).assertEqual(0);
 
       agent.stop();
       observer.close();
