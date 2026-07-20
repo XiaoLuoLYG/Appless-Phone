@@ -58,7 +58,7 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   protected async process(message: AgentMessage): Promise<void> {
     if (message.type === AgentMessageType.INPUT_USER) {
-      await this.handleInput(message);
+      this.handleInput(message);
       return;
     }
     if (!this.hasCorrelation(message)) {
@@ -98,7 +98,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
   }
 
-  private async handleInput(message: AgentMessage): Promise<void> {
+  private handleInput(message: AgentMessage): void {
     if (!this.hasCorrelation(message)) {
       return;
     }
@@ -132,31 +132,53 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.timerId = setTimeout(() => {
       this.timeoutTurn(key);
     }, this.timeoutMs);
+    this.startPlanning(message, input, state, timeoutSignal);
+  }
+
+  private startPlanning(
+    message: AgentMessage,
+    input: InputUserPayload,
+    state: LeaderTurnState,
+    timeoutSignal: Promise<void>
+  ): void {
     try {
-      const outcome: LeaderPlan | void = await Promise.race([this.planner.plan(message, input), timeoutSignal]);
-      state.releasePlanning = null;
-      if (state.terminal) {
-        return;
-      }
-      const plan: LeaderPlan = outcome as LeaderPlan;
-      if (!this.validPlan(plan)) {
-        this.finishTurn(state);
-        this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader plan task fields must be non-empty and unique');
-        return;
-      }
-      state.uiTaskId = plan.ui.taskId;
-      state.dataTaskId = plan.data.taskId;
-      this.publishUiTask(message, plan.ui);
-      this.publishDataTask(message, plan.data);
+      Promise.race([this.planner.plan(message, input), timeoutSignal])
+        .then((outcome: LeaderPlan | void) => {
+          this.completePlanning(message, state, outcome);
+        })
+        .catch((error: Object) => {
+          this.failPlanning(message, state, error);
+        });
     } catch (error) {
-      state.releasePlanning = null;
-      if (state.terminal) {
-        return;
-      }
-      this.finishTurn(state);
-      const detail: string = error instanceof Error ? error.message : `${error}`;
-      this.publishError(message, 'LEADER_PLAN_FAILED', detail);
+      this.failPlanning(message, state, error);
     }
+  }
+
+  private completePlanning(message: AgentMessage, state: LeaderTurnState, outcome: LeaderPlan | void): void {
+    state.releasePlanning = null;
+    if (state.terminal) {
+      return;
+    }
+    const plan: LeaderPlan = outcome as LeaderPlan;
+    if (!this.validPlan(plan)) {
+      this.finishTurn(state);
+      this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader plan task fields must be non-empty and unique');
+      return;
+    }
+    state.uiTaskId = plan.ui.taskId;
+    state.dataTaskId = plan.data.taskId;
+    this.publishUiTask(message, plan.ui);
+    this.publishDataTask(message, plan.data);
+  }
+
+  private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {
+    state.releasePlanning = null;
+    if (state.terminal) {
+      return;
+    }
+    this.finishTurn(state);
+    const detail: string = error instanceof Error ? error.message : `${error}`;
+    this.publishError(message, 'LEADER_PLAN_FAILED', detail);
   }
 
   private hasCorrelation(message: AgentMessage): boolean {

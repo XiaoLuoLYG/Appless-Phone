@@ -58,6 +58,55 @@ class FirstCallHangingPlanner implements LeaderPlanner {
   }
 }
 
+class TestGate {
+  readonly promise: Promise<void>;
+  private resolvePromise: (() => void) | null = null;
+
+  constructor() {
+    this.promise = new Promise<void>((resolve: () => void) => {
+      this.resolvePromise = resolve;
+    });
+  }
+
+  open(): void {
+    const resolve: (() => void) | null = this.resolvePromise;
+    this.resolvePromise = null;
+    if (resolve !== null) {
+      resolve();
+    }
+  }
+}
+
+class ControlledFirstPlanner implements LeaderPlanner {
+  calls: number = 0;
+  readonly firstStarted: TestGate = new TestGate();
+  private readonly nextPlan: LeaderPlan;
+  private resolveFirst: ((plan: LeaderPlan) => void) | null = null;
+
+  constructor(nextPlan: LeaderPlan) {
+    this.nextPlan = nextPlan;
+  }
+
+  async plan(_message: AgentMessage, _input: InputUserPayload): Promise<LeaderPlan> {
+    this.calls++;
+    if (this.calls === 1) {
+      return new Promise<LeaderPlan>((resolve: (plan: LeaderPlan) => void) => {
+        this.resolveFirst = resolve;
+        this.firstStarted.open();
+      });
+    }
+    return this.nextPlan;
+  }
+
+  finishFirst(plan: LeaderPlan): void {
+    const resolve: ((plan: LeaderPlan) => void) | null = this.resolveFirst;
+    this.resolveFirst = null;
+    if (resolve !== null) {
+      resolve(plan);
+    }
+  }
+}
+
 function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): LeaderPlan {
   const ui: LeaderUiTask = {
     taskId: uiTaskId,
@@ -261,6 +310,44 @@ export default function leaderAgentTest() {
 
       leader.stop();
       observer.close();
+    });
+
+    it('cancels an in-flight planner before timeout and keeps the pump available', 1000, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const planner: ControlledFirstPlanner = new ControlledFirstPlanner(hotelPlan('ui-2', 'data-2'));
+      const leader: LeaderAgent = new LeaderAgent(bus, planner, 200);
+      const observer: AgentMessageReader = bus.openReader();
+      leader.start();
+
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        await planner.firstStarted.promise;
+        bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-1'));
+        bus.publish(inputMessage('conversation-hotel', 'turn-2', 'input-2'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+        const nextUi: AgentMessage = await receive(observer);
+        const nextData: AgentMessage = await receive(observer);
+        expect(nextUi.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+        expect(nextData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect(nextUi.turnId).assertEqual('turn-2');
+        expect(nextData.turnId).assertEqual('turn-2');
+
+        bus.publish(terminalMessage(AgentMessageType.TASK_RESULT_UI, 'ui-2', 'turn-2'));
+        bus.publish(terminalMessage(AgentMessageType.TASK_RESULT_DATA, 'data-2', 'turn-2'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+        planner.finishFirst(hotelPlan('ui-late', 'data-late'));
+        setTimeout(() => {
+          bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'observer-marker'));
+        }, 250);
+        expect((await receive(observer)).taskId).assertEqual('observer-marker');
+        expect(planner.calls).assertEqual(2);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
     });
 
     it('times out once and ignores late UI and Data results', 1000, async () => {
