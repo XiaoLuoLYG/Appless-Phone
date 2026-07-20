@@ -21,9 +21,9 @@ interface LeaderTurnState {
   dataTaskId: string;
   uiDone: boolean;
   dataDone: boolean;
-  actionDone: boolean;
   terminal: boolean;
   timerId: number;
+  releasePlanning: (() => void) | null;
 }
 
 export class LeaderAgent extends MessageDrivenAgent {
@@ -41,7 +41,7 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   stop(): void {
     this.turns.forEach((state: LeaderTurnState) => {
-      this.clearTurnTimer(state);
+      this.finishTurn(state);
     });
     this.turns.clear();
     super.stop();
@@ -72,12 +72,13 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.finishTurn(state);
       return;
     }
+    if (message.type === AgentMessageType.ACTION_RESULT) {
+      return;
+    }
     if (message.type === AgentMessageType.TASK_RESULT_UI && message.taskId === state.uiTaskId) {
       state.uiDone = true;
     } else if (message.type === AgentMessageType.TASK_RESULT_DATA && message.taskId === state.dataTaskId) {
       state.dataDone = true;
-    } else if (message.type === AgentMessageType.ACTION_RESULT && message.taskId === state.inputTaskId) {
-      state.actionDone = true;
     } else if (message.type === AgentMessageType.TASK_ERROR) {
       if (message.taskId === state.uiTaskId) {
         state.uiDone = true;
@@ -101,49 +102,71 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (!this.hasCorrelation(message)) {
       return;
     }
-    const input: InputUserPayload = message.payload as InputUserPayload;
-    if (input.text.trim().length === 0) {
+    const inputRecord = message.payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const inputText: Object | string | number | boolean | null | undefined = inputRecord['text'];
+    if (typeof inputText !== 'string' || inputText.trim().length === 0) {
       this.publishError(message, 'LEADER_INPUT_INVALID', 'User input text must not be empty');
       return;
     }
+    const input: InputUserPayload = { text: inputText };
     const key: string = this.turnKey(message);
     if (this.turns.has(key)) {
       return;
     }
+    const state: LeaderTurnState = {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      inputTaskId: message.taskId,
+      uiTaskId: '',
+      dataTaskId: '',
+      uiDone: false,
+      dataDone: false,
+      terminal: false,
+      timerId: -1,
+      releasePlanning: null
+    };
+    const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
+      state.releasePlanning = resolve;
+    });
+    this.turns.set(key, state);
+    state.timerId = setTimeout(() => {
+      this.timeoutTurn(key);
+    }, this.timeoutMs);
     try {
-      const plan: LeaderPlan = await this.planner.plan(message, input);
+      const outcome: LeaderPlan | void = await Promise.race([this.planner.plan(message, input), timeoutSignal]);
+      state.releasePlanning = null;
+      if (state.terminal) {
+        return;
+      }
+      const plan: LeaderPlan = outcome as LeaderPlan;
       if (!this.validPlan(plan)) {
+        this.finishTurn(state);
         this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader plan task fields must be non-empty and unique');
         return;
       }
+      state.uiTaskId = plan.ui.taskId;
+      state.dataTaskId = plan.data.taskId;
       this.publishUiTask(message, plan.ui);
       this.publishDataTask(message, plan.data);
-      const state: LeaderTurnState = {
-        conversationId: message.conversationId,
-        turnId: message.turnId,
-        inputTaskId: message.taskId,
-        uiTaskId: plan.ui.taskId,
-        dataTaskId: plan.data.taskId,
-        uiDone: false,
-        dataDone: false,
-        actionDone: false,
-        terminal: false,
-        timerId: -1
-      };
-      this.turns.set(key, state);
-      state.timerId = setTimeout(() => {
-        this.timeoutTurn(key);
-      }, this.timeoutMs);
     } catch (error) {
+      state.releasePlanning = null;
+      if (state.terminal) {
+        return;
+      }
+      this.finishTurn(state);
       const detail: string = error instanceof Error ? error.message : `${error}`;
       this.publishError(message, 'LEADER_PLAN_FAILED', detail);
     }
   }
 
   private hasCorrelation(message: AgentMessage): boolean {
-    return message.conversationId.trim().length > 0 &&
-      message.turnId.trim().length > 0 &&
-      message.taskId.trim().length > 0;
+    return this.nonEmptyString(message.conversationId) &&
+      this.nonEmptyString(message.turnId) &&
+      this.nonEmptyString(message.taskId);
+  }
+
+  private nonEmptyString(value: string): boolean {
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   private validPlan(plan: LeaderPlan): boolean {
@@ -161,22 +184,33 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private publishUiTask(input: AgentMessage, task: LeaderUiTask): void {
+    const payload: LeaderUiTask = {
+      taskId: task.taskId,
+      intent: task.intent,
+      expectedOutputSchema: task.expectedOutputSchema
+    };
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
       turnId: input.turnId,
       taskId: task.taskId,
-      payload: task
+      payload
     });
   }
 
   private publishDataTask(input: AgentMessage, task: LeaderDataTask): void {
+    const payload: LeaderDataTask = {
+      taskId: task.taskId,
+      toolId: task.toolId,
+      outputSchema: task.outputSchema,
+      args: task.args
+    };
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_DATA,
       conversationId: input.conversationId,
       turnId: input.turnId,
       taskId: task.taskId,
-      payload: task
+      payload
     });
   }
 
@@ -212,17 +246,27 @@ export class LeaderAgent extends MessageDrivenAgent {
       taskId: state.inputTaskId,
       payload
     });
+    this.releasePlanning(state);
   }
 
   private finishTurn(state: LeaderTurnState): void {
     state.terminal = true;
     this.clearTurnTimer(state);
+    this.releasePlanning(state);
   }
 
   private clearTurnTimer(state: LeaderTurnState): void {
     if (state.timerId >= 0) {
       clearTimeout(state.timerId);
       state.timerId = -1;
+    }
+  }
+
+  private releasePlanning(state: LeaderTurnState): void {
+    const release: (() => void) | null = state.releasePlanning;
+    state.releasePlanning = null;
+    if (release !== null) {
+      release();
     }
   }
 }
