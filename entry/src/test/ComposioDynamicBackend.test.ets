@@ -196,6 +196,7 @@ export default function composioDynamicBackendTest() {
       expect(composioExactToolSlugForFixedTool('social.x.profile')).assertEqual('TWITTER_USER_LOOKUP_ME');
       expect(composioExactToolSlugForFixedTool('social.x.dm.list')).assertEqual('TWITTER_GET_RECENT_DM_EVENTS');
       expect(composioExactToolSlugForFixedTool('social.slack.message.search')).assertEqual('SLACK_SEARCH_MESSAGES');
+      expect(composioExactToolSlugForFixedTool('social.slack.message.send')).assertEqual('SLACK_CHAT_POST_MESSAGE');
       expect(composioExactToolSlugForFixedTool('social.instagram.profile')).assertEqual('INSTAGRAM_GET_USER_INFO');
       expect(composioExactToolSlugForFixedTool('social.instagram.conversations.list')).assertEqual('INSTAGRAM_LIST_ALL_CONVERSATIONS');
       expect(composioExactToolSlugForFixedTool('social.instagram.messages.list')).assertEqual('INSTAGRAM_LIST_ALL_MESSAGES');
@@ -220,6 +221,12 @@ export default function composioDynamicBackendTest() {
       expect(sendArgs.to_number).assertEqual('8613800138000');
       expect(sendArgs.text).assertEqual('十分钟后到');
       expect(sendArgs.preview_url).assertFalse();
+
+      const slackSendTool = composioTool('{"toolSlug":"SLACK_CHAT_POST_MESSAGE","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"channel\\",\\"text\\"],\\"properties\\":{\\"channel\\":{\\"type\\":\\"string\\"},\\"text\\":{\\"type\\":\\"string\\"},\\"thread_ts\\":{\\"type\\":\\"string\\"}}}"}');
+      const slackSendArgs = composioArgumentsForTool(slackSendTool, '回复 Slack 消息', 'social.slack.message.send', looseObject('{"channel":"D123","text":"已确认","threadTs":"1784250000.000100"}')) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(slackSendArgs.channel).assertEqual('D123');
+      expect(slackSendArgs.text).assertEqual('已确认');
+      expect(slackSendArgs.thread_ts).assertEqual('1784250000.000100');
 
       const createTool = composioTool('{"toolSlug":"GOOGLECALENDAR_CREATE_EVENT","inputSchema":"{\\"type\\":\\"object\\",\\"required\\":[\\"start_datetime\\"],\\"properties\\":{\\"summary\\":{\\"type\\":\\"string\\"},\\"start_datetime\\":{\\"type\\":\\"string\\"},\\"end_datetime\\":{\\"type\\":\\"string\\"},\\"timezone\\":{\\"type\\":\\"string\\"},\\"calendar_id\\":{\\"type\\":\\"string\\"}}}"}');
       const createArgs = composioArgumentsForTool(createTool, '创建日程', 'calendar.event.create', looseObject('{"title":"AIPhoneDemo","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}')) as Record<string, Object | string | number | boolean | null | undefined>;

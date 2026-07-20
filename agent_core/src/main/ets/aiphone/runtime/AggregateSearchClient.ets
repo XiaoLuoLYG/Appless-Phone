@@ -3,8 +3,6 @@ import util from '@ohos.util';
 import { callComposioDynamic } from './ComposioDynamicBackend';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 import { callMediaVideoSearch } from './MediaVideoClient';
-import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
-import { SocialHubItemData } from './SocialHubTypes';
 import {
   AggregateSearchPost,
   AggregateSearchResult,
@@ -24,6 +22,16 @@ type DynamicPostRecord = Record<string, DynamicPostValue>;
 interface AggregateMediaSearchArgs {
   query: string;
   sources: string[];
+}
+
+interface AggregateComposioFixedRequest {
+  fixedToolId: string;
+  fixedArgs: Object;
+}
+
+interface AggregateXSearchArgs {
+  query: string;
+  pageSize: number;
 }
 
 export interface AggregateZhihuConfig {
@@ -251,30 +259,6 @@ function videoFromDynamic(source: AggregateSearchSource, result: DynamicGenericT
     duration: rowValue(result, 'Duration'),
     status: result.status === 'success' ? 'success' : 'error',
     rows: result.rows.slice()
-  };
-}
-
-function postFromSocial(item: SocialHubItemData, index: number): AggregateSearchPost {
-  return {
-    id: item.id.length > 0 ? item.id : 'x-' + index.toString(),
-    source: 'x',
-    provider: 'X',
-    title: item.author.length > 0 ? item.author : item.handle,
-    author: item.author,
-    handle: item.handle,
-    text: item.text,
-    url: item.url,
-    publishedAt: item.timestamp,
-    score: '',
-    commentCount: '',
-    status: 'success',
-    rows: [
-      { label: 'author', value: item.author },
-      { label: 'handle', value: item.handle },
-      { label: 'text', value: item.text },
-      { label: 'url', value: item.url },
-      { label: 'mediaUrl', value: item.mediaUrl }
-    ]
   };
 }
 
@@ -641,6 +625,10 @@ export function redditPostsFromComposioResult(result: DynamicGenericToolResult):
   return postsFromDynamicResult('reddit', 'Reddit', result);
 }
 
+export function xPostsFromComposioResult(result: DynamicGenericToolResult): AggregateSearchPost[] {
+  return postsFromDynamicResult('x', 'X', result);
+}
+
 function mediaMessage(source: AggregateSearchSource, count: number, results: DynamicGenericToolResult[]): string {
   if (count > 0) {
     return aggregateSourceLabel(source) + ' returned ' + count.toString() + ' rows.';
@@ -665,10 +653,20 @@ async function appendComposioPosts(
   provider: string,
   prompt: string,
   posts: AggregateSearchPost[],
-  statuses: AggregateSearchSourceStatus[]
+  statuses: AggregateSearchSourceStatus[],
+  fixedToolId: string = '',
+  fixedArgs: Object | null = null
 ): Promise<void> {
   try {
-    const result = await callComposioDynamic(prompt, null);
+    let request: Object | null = null;
+    if (fixedToolId.length > 0 && fixedArgs !== null) {
+      const fixedRequest: AggregateComposioFixedRequest = {
+        fixedToolId: fixedToolId,
+        fixedArgs: fixedArgs
+      };
+      request = fixedRequest as Object;
+    }
+    const result = await callComposioDynamic(prompt, request);
     if (result === null) {
       statuses.push(statusFor(source, 'error', 'Composio ' + provider + ' did not run.', 0));
       return;
@@ -850,8 +848,6 @@ export async function callAggregateSearch(
   prompt: string,
   args: Object | null,
   youtubeApiKey: string,
-  socialHubClient: SocialHubClient,
-  socialProviderConfig: SocialHubProviderConfig,
   zhihuConfig: AggregateZhihuConfig = emptyZhihuConfig()
 ): Promise<AggregateSearchResult> {
   const query = aggregateSearchQueryFromArgs(prompt, args);
@@ -897,14 +893,19 @@ export async function callAggregateSearch(
   }
 
   if (sources.indexOf('x') >= 0) {
-    const xResult: SocialHubFeedResult = await socialHubClient.xPostSearch(aggregateXPostSearchPrompt(query), '', socialProviderConfig);
-    xResult.items.forEach((item: SocialHubItemData, index: number) => posts.push(postFromSocial(item, index)));
-    const xConnection = xResult.connections.length > 0 ? xResult.connections[0] : null;
-    const xStatus = xResult.items.length > 0 ? 'success' : (xConnection === null ? 'empty' : xConnection.status);
-    const xMessage = xConnection === null
-      ? 'X returned ' + xResult.items.length.toString() + ' rows.'
-      : xConnection.message;
-    statuses.push(statusFor('x', xStatus, xMessage, xResult.items.length));
+    const xArgs: AggregateXSearchArgs = {
+      query: query,
+      pageSize: 5
+    };
+    await appendComposioPosts(
+      'x',
+      'X',
+      '帮我用 Composio X 搜索 ' + query + ' 的公开 post',
+      posts,
+      statuses,
+      'x.post.search',
+      xArgs as Object
+    );
   }
 
   if (sources.indexOf('hackernews') >= 0) {

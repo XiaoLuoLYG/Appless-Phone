@@ -1050,7 +1050,7 @@ function findHeaderSettingsCenter(layout) {
     }
   });
   candidates.sort((left, right) => right.x - left.x);
-  return candidates.length >= 2 ? { x: candidates[1].x, y: candidates[1].y } : null;
+  return candidates.length > 0 ? { x: candidates[0].x, y: candidates[0].y } : null;
 }
 
 async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) {
@@ -1061,6 +1061,32 @@ async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) 
     const found = findTextCenter(layout, marker);
     if (found !== null) {
       return found;
+    }
+    swipeResultsUp();
+    await sleep(800);
+  }
+  return null;
+}
+
+async function findExternalAuthActionWithScroll(appName, localNamePrefix, maxSwipes = 5) {
+  for (let attempt = 0; attempt <= maxSwipes; attempt += 1) {
+    const layout = dumpLayout(`${localNamePrefix}-${attempt + 1}.json`);
+    const text = collectLayoutText(layout).join('\n');
+    writeFileSync(join(outDir, `${localNamePrefix}-${attempt + 1}-text.txt`), text + '\n');
+    const app = findTextMatches(layout, appName).find((item) =>
+      item.text.split('|').some((value) => value.trim() === appName));
+    const actions = findTextMatches(layout, '授权').filter((item) =>
+      item.text.split('|').some((value) => value.trim() === '授权'));
+    if (app !== undefined) {
+      const action = actions
+        .filter((item) => item.bounds.y > app.bounds.y &&
+          item.bounds.y - app.bounds.y < 280 &&
+          item.bounds.x > app.bounds.x)
+        .sort((left, right) =>
+          Math.abs(left.bounds.y - app.bounds.y) - Math.abs(right.bounds.y - app.bounds.y))[0];
+      if (action !== undefined) {
+        return { x: action.bounds.x, y: action.bounds.y };
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -2813,7 +2839,7 @@ async function runQuery(query, index, expectedTool) {
 }
 
 async function waitForComposioAuthEvidence() {
-  const requiredMarkers = ['Composio 授权', '当前用户'];
+  const requiredMarkers = ['应用授权', '当前用户'];
   const authActionLabels = ['授权', '重新授权'];
   const authStatusLabels = [
     '待授权',
@@ -2830,6 +2856,31 @@ async function waitForComposioAuthEvidence() {
     'OAuth',
     'Composio ·'
   ];
+  const appNames = [
+    'Gmail',
+    'GitHub',
+    'Google Calendar',
+    'Google Drive',
+    'Google Docs',
+    'Slack',
+    'Notion',
+    'Linear',
+    'Asana',
+    'Trello',
+    'Outlook',
+    'Discord',
+    'LinkedIn',
+    'WhatsApp',
+    'Instagram',
+    'YouTube',
+    'X',
+    'Spotify',
+    'TikTok',
+    'Ticketmaster',
+    'HubSpot',
+    'Salesforce',
+    'Reddit'
+  ];
   let last = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const layout = dumpLayout(`composio-auth-page-${attempt + 1}.json`);
@@ -2845,11 +2896,15 @@ async function waitForComposioAuthEvidence() {
       markerHits: requiredMarkers.filter((marker) => text.includes(marker)),
       authActionHits: authActionLabels.filter((marker) => layoutTextValues.includes(marker)),
       authStatusHits: authStatusLabels.filter((marker) => layoutTextValues.includes(marker)),
-      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker))
+      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker)),
+      appNameHits: appNames.filter((marker) => layoutTextValues.includes(marker)),
+      authConfigNameLeaks: layoutTextValues.filter((value) => /^auth_config_/i.test(value))
     };
     if (last.markerHits.length === requiredMarkers.length &&
       last.authActionHits.length > 0 &&
-      last.authStatusHits.length > 0) {
+      last.authStatusHits.length > 0 &&
+      last.appNameHits.length > 0 &&
+      last.authConfigNameLeaks.length === 0) {
       return last;
     }
     await sleep(1000);
@@ -2875,11 +2930,15 @@ async function runComposioAuthSmoke() {
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(settings.x), String(settings.y)]);
   await sleep(1200);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    swipeResultsDown();
+    await sleep(300);
+  }
 
   const configLayout = dumpLayout('composio-auth-config-collapsed.json');
   const configText = collectLayoutText(configLayout).join('\n');
   writeFileSync(join(outDir, 'composio-auth-config-collapsed-text.txt'), configText + '\n');
-  if (!configText.includes('Composio 授权')) {
+  if (!configText.includes('管理授权')) {
     const expandAuth = findTextCenter(configLayout, '展开');
     if (expandAuth !== null) {
       hdc(['shell', 'uitest', 'uiInput', 'click', String(expandAuth.x), String(expandAuth.y)]);
@@ -2887,9 +2946,12 @@ async function runComposioAuthSmoke() {
     }
   }
 
-  const authButton = await findTextCenterWithScroll('Composio 授权', 'composio-auth-config-layout');
+  let authButton = findTextCenter(configLayout, '管理授权');
   if (authButton === null) {
-    throw new Error('Could not locate the Config page Composio 授权 button.');
+    authButton = await findTextCenterWithScroll('管理授权', 'composio-auth-config-layout');
+  }
+  if (authButton === null) {
+    throw new Error('Could not locate the Config page 管理授权 button.');
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(authButton.x), String(authButton.y)]);
 
@@ -2897,15 +2959,83 @@ async function runComposioAuthSmoke() {
   if (evidence === null) {
     throw new Error('Could not capture Composio auth page layout evidence.');
   }
+  const externalAuthAppHits = [];
+  const externalAuthJumps = [];
+  const externalApps = [
+    {
+      name: 'QQ 邮箱',
+      url: 'https://wx.mail.qq.com/list/readtemplate?name=app_intro.html#/agreement/authorizationCode'
+    },
+    {
+      name: '瑞幸咖啡',
+      url: 'https://open01.luckincoffeecdn.com/'
+    },
+    {
+      name: '滴滴出行',
+      url: 'https://mcp.didichuxing.com'
+    }
+  ];
+  for (let index = 0; index < externalApps.length; index += 1) {
+    const app = externalApps[index];
+    const actionCenter = await findExternalAuthActionWithScroll(app.name, `external-auth-${index + 1}`, 10);
+    if (actionCenter !== null) {
+      externalAuthAppHits.push(app.name);
+      clearHilog();
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(actionCenter.x), String(actionCenter.y)]);
+      await sleep(1500);
+      const logs = hdc(['shell', 'hilog', '-d']);
+      const windowDump = hdc(['shell', 'hidumper', '-s', 'WindowManagerService', '-a', '-a']);
+      const focusMatch = /Focus window:\s*(\d+)/.exec(windowDump);
+      const focusWindowId = focusMatch === null ? '' : focusMatch[1];
+      const focusWindowLine = focusWindowId.length === 0 ? '' :
+        (windowDump.split('\n').find((line) => line.includes(` ${focusWindowId} `)) || '');
+      const intentLogSeen = logs.includes(`[AIPhone][A2uiHomeOpenUrl] ok=true url=${app.url}`);
+      const browserFocused = /browser|quark/i.test(focusWindowLine);
+      const opened = intentLogSeen || browserFocused;
+      const logPath = join(outDir, `external-auth-${index + 1}-open.log`);
+      writeFileSync(logPath,
+        logs.split('\n').filter((line) => line.includes('[AIPhone][A2uiHomeOpenUrl]')).join('\n') +
+        `\nfocusWindow=${focusWindowLine}\n`);
+      externalAuthJumps.push({
+        app: app.name,
+        url: app.url,
+        opened,
+        intentLogSeen,
+        browserFocused,
+        logPath
+      });
+      hdc(['shell', 'aa', 'force-stop', 'com.huawei.hmos.browser']);
+      hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
+      await sleep(1200);
+    } else {
+      externalAuthJumps.push({
+        app: app.name,
+        url: app.url,
+        opened: false,
+        reason: 'authorization action not found'
+      });
+    }
+  }
   const screenPath = captureScreen('composio-auth-page-screen.png');
   const summary = {
     mode: 'composio-auth',
-    ok: evidence.markerHits.length === 2 && evidence.authActionHits.length > 0 && evidence.authStatusHits.length > 0,
-    requiredMarkers: ['Composio 授权', '当前用户'],
+    ok: evidence.markerHits.length === 2 &&
+      evidence.authActionHits.length > 0 &&
+      evidence.authStatusHits.length > 0 &&
+      evidence.appNameHits.length > 0 &&
+      externalAuthAppHits.length === 3 &&
+      externalAuthJumps.length === 3 &&
+      externalAuthJumps.every((jump) => jump.opened === true) &&
+      evidence.authConfigNameLeaks.length === 0,
+    requiredMarkers: ['应用授权', '当前用户'],
     markerHits: evidence.markerHits,
     authActionHits: evidence.authActionHits,
     authStatusHits: evidence.authStatusHits,
     toolkitHits: evidence.toolkitHits,
+    appNameHits: evidence.appNameHits,
+    externalAuthAppHits,
+    externalAuthJumps,
+    authConfigNameLeaks: evidence.authConfigNameLeaks,
     layoutPath: evidence.layoutPath,
     textPath: evidence.textPath,
     screenPath

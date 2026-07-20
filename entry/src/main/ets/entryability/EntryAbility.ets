@@ -11,10 +11,8 @@ import {
   configureLocalProviderConfigFromRawJson,
   gmailOAuthConfigFromProvider,
   handleGmailOAuthRedirect,
-  handleXOAuthRedirect,
   localModelSettingsDebugSummary,
-  localProviderConfigDebugSummary,
-  xOAuthConfigFromProvider
+  localProviderConfigDebugSummary
 } from '@loop/agent-core';
 import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
 
@@ -47,11 +45,6 @@ const GMAIL_OAUTH_URI_HINTS: string[] = [
   'aiphone://oauth/google',
   GMAIL_REVERSED_CLIENT_SCHEME
 ];
-const X_OAUTH_URI_HINTS: string[] = [
-  'aiphone://oauth/x',
-  'com.example.aiphonedemo:/oauth/x',
-  'com.example.aiphonedemo://oauth/x'
-];
 const COMPOSIO_CALLBACK_URI_HINTS: string[] = [
   'aiphone://composio/callback'
 ];
@@ -67,10 +60,6 @@ function hasUriHint(uri: string, hints: string[]): boolean {
 
 function isGmailOAuthRedirectUri(uri: string): boolean {
   return hasUriHint(uri, GMAIL_OAUTH_URI_HINTS);
-}
-
-function isXOAuthRedirectUri(uri: string): boolean {
-  return hasUriHint(uri, X_OAUTH_URI_HINTS);
 }
 
 function isComposioCallbackUri(uri: string): boolean {
@@ -91,7 +80,7 @@ function describeError(error: Error | Object | string | number | boolean | null 
 }
 
 function allOAuthUriHints(): string[] {
-  return GMAIL_OAUTH_URI_HINTS.concat(X_OAUTH_URI_HINTS).concat(COMPOSIO_CALLBACK_URI_HINTS);
+  return GMAIL_OAUTH_URI_HINTS.concat(COMPOSIO_CALLBACK_URI_HINTS);
 }
 
 function shouldInspectPotentialOAuthText(value: string): boolean {
@@ -189,7 +178,7 @@ function oauthUriFromWant(want: Want): string {
   }
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index];
-    if (isGmailOAuthRedirectUri(candidate) || isXOAuthRedirectUri(candidate) || isComposioCallbackUri(candidate)) {
+    if (isGmailOAuthRedirectUri(candidate) || isComposioCallbackUri(candidate)) {
       return candidate;
     }
   }
@@ -298,10 +287,6 @@ export default class EntryAbility extends UIAbility {
       aiLogInfo('[AIPhone][ComposioCallbackWantReceived] uriChars=' + uri.length.toString());
       return;
     }
-    if (isXOAuthRedirectUri(uri)) {
-      this.handleXOAuthUri(uri);
-      return;
-    }
     if (!isGmailOAuthRedirectUri(uri)) {
       const parameterKeys = gmailOAuthWantParameterKeys(want);
       if (directUri.indexOf('oauth') >= 0 || directUri.indexOf('google') >= 0 || parameterKeys.length > 0) {
@@ -330,26 +315,6 @@ export default class EntryAbility extends UIAbility {
         const message = describeError(err);
         aiLogError('[AIPhone][GmailOAuthWantFailed] ' + message);
         hilog.error(DOMAIN, 'testTag', 'Gmail OAuth callback failed. Cause: %{public}s', message);
-      });
-  }
-
-  private handleXOAuthUri(uri: string): void {
-    const config = xOAuthConfigFromProvider();
-    aiLogInfo('[AIPhone][XOAuthWantReceived] uriChars=' + uri.length.toString() +
-      ' hasCode=' + (uri.indexOf('code=') >= 0 ? 'true' : 'false') +
-      ' hasState=' + (uri.indexOf('state=') >= 0 ? 'true' : 'false') +
-      ' hasError=' + (uri.indexOf('error=') >= 0 ? 'true' : 'false') +
-      ' clientConfigured=' + (config.clientId.length > 0 ? 'true' : 'false') +
-      ' redirectChars=' + config.redirectUri.length.toString());
-    handleXOAuthRedirect(new AssetCredentialStore(), config, uri)
-      .then(() => {
-        aiLogInfo('[AIPhone][XOAuthWantSaved] ok=true');
-        hilog.info(DOMAIN, 'testTag', '%{public}s', 'X OAuth authorization saved.');
-      })
-      .catch((err: Error | Object | string | number | boolean | null | undefined) => {
-        const message = describeError(err);
-        aiLogError('[AIPhone][XOAuthWantFailed] ' + message);
-        hilog.error(DOMAIN, 'testTag', 'X OAuth callback failed. Cause: %{public}s', message);
       });
   }
 

@@ -791,30 +791,14 @@ function socialConnection(platform, configured, displayName, accountId, configur
   };
 }
 
-function socialConnectionError(platform, message) {
-  return {
-    platform,
-    status: 'error',
-    displayName: platform === 'x' ? 'X' : 'Slack',
-    accountId: '',
-    message
-  };
-}
-
 function socialConnections(source = '') {
-  const xConfigured = hasEnv('X_BEARER_TOKEN') || hasEnv('X_ACCESS_TOKEN') || hasEnv('X_OAUTH_TOKEN');
-  const slackConfigured = hasEnv('SLACK_BOT_TOKEN') || hasEnv('SLACK_USER_TOKEN');
   const wecomConfigured = ['WECOM_CORP_ID', 'WECOM_AGENT_ID', 'WECOM_SECRET', 'WECOM_CALLBACK_TOKEN', 'WECOM_ENCODING_AES_KEY'].every(hasEnv);
   const connections = [
-    socialConnection('x', xConfigured, 'X', textOf(process.env.X_ACCOUNT_ID || process.env.X_USER_ID), 'X token configured.', 'Set X_BEARER_TOKEN or an OAuth-backed X access token.'),
-    socialConnection('slack', slackConfigured, 'Slack', textOf(process.env.SLACK_TEAM_ID || process.env.SLACK_ACCOUNT_ID), 'Slack token configured.', 'Set SLACK_USER_TOKEN or SLACK_BOT_TOKEN with read scopes.'),
+    socialConnection('x', false, 'X', '', '', 'X 已统一到当前用户的 Composio connected account，请通过手机产品入口读取。'),
+    socialConnection('slack', false, 'Slack', '', '', 'Slack 已统一到当前用户的 Composio connected account，请通过手机产品入口读取。'),
     socialConnection('wecom', wecomConfigured, '企业微信', textOf(process.env.WECOM_CORP_ID), 'WeCom app and callback secrets configured.', 'Set WECOM_CORP_ID, WECOM_AGENT_ID, WECOM_SECRET, WECOM_CALLBACK_TOKEN, and WECOM_ENCODING_AES_KEY.')
   ];
   return source === 'x' ? connections.filter(connection => connection.platform === 'x') : connections;
-}
-
-function replaceSocialConnection(connections, replacement) {
-  return connections.map(connection => connection.platform === replacement.platform ? replacement : connection);
 }
 
 function socialItemMatchesQuery(item, query) {
@@ -825,21 +809,6 @@ function socialItemMatchesQuery(item, query) {
   return [item.author, item.handle, item.text, item.channel, item.threadId]
     .map(textOf)
     .some(value => value.toLowerCase().includes(needle));
-}
-
-function upsertSocialItems(items) {
-  items.forEach(item => {
-    const id = textOf(item?.id).trim();
-    if (id.length === 0) {
-      return;
-    }
-    const index = socialCache.items.findIndex(cached => cached.id === id);
-    if (index >= 0) {
-      socialCache.items[index] = item;
-      return;
-    }
-    socialCache.items.push(item);
-  });
 }
 
 function uniqueSocialItems(items) {
@@ -854,134 +823,15 @@ function uniqueSocialItems(items) {
   });
 }
 
-async function fetchXRecentSearch(query) {
-  const token = textOf(process.env.X_BEARER_TOKEN || process.env.X_ACCESS_TOKEN || process.env.X_OAUTH_TOKEN).trim();
-  if (token.length === 0 || textOf(query).trim().length === 0) {
-    return { items: [], connection: null };
-  }
-  const params = new URLSearchParams({
-    query: textOf(query).trim(),
-    max_results: '10',
-    'tweet.fields': 'created_at,author_id,conversation_id',
-    expansions: 'author_id',
-    'user.fields': 'username,name'
-  });
-  const response = await fetch(`https://api.x.com/2/tweets/search/recent?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
-    }
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`X recent search failed: HTTP ${response.status} ${text.slice(0, 240)}`);
-  }
-  const payload = JSON.parse(text);
-  const users = new Map((Array.isArray(payload.includes?.users) ? payload.includes.users : [])
-    .map(user => [textOf(user.id), user]));
-  const items = (Array.isArray(payload.data) ? payload.data : []).map(tweet => {
-    const user = users.get(textOf(tweet.author_id)) || {};
-    const username = textOf(user.username);
-    return {
-      id: `x-${textOf(tweet.id)}`,
-      platform: 'x',
-      kind: 'post',
-      author: textOf(user.name || username),
-      handle: username.length > 0 ? `@${username}` : '',
-      text: textOf(tweet.text),
-      timestamp: textOf(tweet.created_at),
-      url: username.length > 0 && textOf(tweet.id).length > 0 ? `https://x.com/${username}/status/${tweet.id}` : '',
-      channel: '',
-      threadId: textOf(tweet.conversation_id || tweet.id),
-      unread: false
-    };
-  });
-  return { items, connection: null };
-}
-
-async function fetchSlackSearch(query) {
-  const token = textOf(process.env.SLACK_USER_TOKEN || process.env.SLACK_BOT_TOKEN).trim();
-  const searchQuery = slackSearchQuery(query);
-  if (token.length === 0 || searchQuery.length === 0) {
-    return { items: [], connection: null };
-  }
-  const params = new URLSearchParams({
-    query: searchQuery,
-    count: '10'
-  });
-  const response = await fetch(`https://slack.com/api/search.messages?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
-    }
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Slack search.messages failed: HTTP ${response.status} ${text.slice(0, 240)}`);
-  }
-  const payload = JSON.parse(text);
-  if (payload.ok === false) {
-    throw new Error(`Slack search.messages failed: ${textOf(payload.error || 'ok:false')}`);
-  }
-  const matches = Array.isArray(payload.messages?.matches) ? payload.messages.matches : [];
-  const items = matches.map(match => {
-    const ts = textOf(match.ts || match.iid);
-    return {
-      id: `slack-${textOf(match.channel?.id || match.channel_name)}-${ts}`.replaceAll(/\s+/g, '_'),
-      platform: 'slack',
-      kind: 'message',
-      author: textOf(match.user_name || match.username || match.user),
-      handle: textOf(match.user_name || match.username || match.user),
-      text: textOf(match.text),
-      timestamp: ts,
-      url: textOf(match.permalink),
-      channel: textOf(match.channel?.name || match.channel_name),
-      threadId: textOf(match.thread_ts || match.previous?.ts || ts),
-      unread: false
-    };
-  });
-  return { items, connection: null };
-}
-
-function slackSearchQuery(query) {
-  const prompt = textOf(query).trim();
-  const operator = /\b(?:from|after|before|in):[^\s,，]+/i.exec(prompt);
-  if (operator !== null) {
-    return operator[0];
-  }
-  const match = /(?:Slack|slack)\s*(?:搜索|查找|查看|search)?\s*[:：]?\s*(.+)$/i.exec(prompt) ||
-    /(?:搜索|查找|查看)\s*(?:Slack|slack)\s*(?:消息)?\s*[:：]?\s*(.+)$/i.exec(prompt);
-  return match === null ? prompt : textOf(match[1]).trim();
-}
-
 async function socialFeedResponse(url) {
   const source = textOf(url.searchParams.get('source')).trim().toLowerCase();
   const query = url.searchParams.get('q') || '';
-  let connections = socialConnections(source);
-  const fetchedItems = [];
-  if (query.trim().length > 0) {
-    if (source === '' || source === 'x') {
-      try {
-        const items = (await fetchXRecentSearch(query)).items;
-        upsertSocialItems(items);
-        fetchedItems.push(...items);
-      } catch (error) {
-        connections = replaceSocialConnection(connections, socialConnectionError('x', describeError(error)));
-      }
-    }
-    if (source === '') {
-      try {
-        const items = (await fetchSlackSearch(query)).items;
-        upsertSocialItems(items);
-        fetchedItems.push(...items);
-      } catch (error) {
-        connections = replaceSocialConnection(connections, socialConnectionError('slack', describeError(error)));
-      }
-    }
-  }
-  let items = uniqueSocialItems(socialCache.items.filter(item => socialItemMatchesQuery(item, query)).concat(fetchedItems));
+  const connections = socialConnections(source);
+  let items = uniqueSocialItems(socialCache.items
+    .filter(item => item.platform === 'wecom')
+    .filter(item => socialItemMatchesQuery(item, query)));
   if (source === 'x') {
-    items = items.filter(item => item.platform === 'x' && item.kind === 'post');
+    items = [];
   }
   return {
     items,

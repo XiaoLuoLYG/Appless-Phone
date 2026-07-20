@@ -119,22 +119,8 @@
               },
               {
                 "scheme": "aiphone",
-                "host": "oauth",
-                "pathStartWith": "x"
-              },
-              {
-                "scheme": "aiphone",
                 "host": "composio",
                 "pathStartWith": "callback"
-              },
-              {
-                "scheme": "com.example.aiphonedemo",
-                "host": "oauth",
-                "pathStartWith": "x"
-              },
-              {
-                "scheme": "com.example.aiphonedemo",
-                "pathStartWith": "oauth/x"
               },
               {
                 "scheme": "com.googleusercontent.apps.358078200829-covuu6l8dgvs7kaejua7mrkke7e8833b"

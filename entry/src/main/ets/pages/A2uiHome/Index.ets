@@ -63,7 +63,6 @@ import {
   normalizeComposioUserId,
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
-  prepareXOAuthAuthorizationUrl,
   sendLocalSocialHubReply,
   shortComposioUserId
 } from '@loop/agent-core';
@@ -1790,7 +1789,6 @@ struct Index {
         action.id === 'social_hub_draft_reply' ||
         action.id === 'social_hub_send_reply' ||
         action.id === 'social_hub_open_source' ||
-        action.id === 'x.authorize' ||
         action.id === 'social_hub_authorize');
   }
 
@@ -3544,10 +3542,6 @@ struct Index {
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL);
       return;
     }
-    if (action.id === 'x.authorize') {
-      await this.openExternalUrl(await prepareXOAuthAuthorizationUrl());
-      return;
-    }
     if (action.id === 'calendar.authorize') {
       const authorizeUrl = await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL);
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL);
@@ -4078,6 +4072,9 @@ struct Index {
         },
         onAuthorize: (item: ComposioAuthConfigItem) => {
           this.openComposioAuthLink(item);
+        },
+        onOpenExternalAuth: (url: string) => {
+          this.openExternalUrl(url);
         }
       })
     } else if (this.showConfigPage) {

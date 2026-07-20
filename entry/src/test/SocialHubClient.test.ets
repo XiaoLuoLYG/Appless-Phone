@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { parseComposioSocialFeed, parseSocialHubDraftPayload, parseSocialHubFeedPayload, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
+import { parseComposioSocialFeed, parseSocialHubDraftPayload, parseSocialHubFeedPayload, SocialHubClient, SocialHubProviderConfig, socialHubBridgeDraftError, socialHubBridgeHeaders, socialHubBridgeUnavailableFeed, socialHubPrivateItems, socialHubXPostResult, xSearchQuery } from '@loop/agent-core';
 
 export default function socialHubClientTest() {
   describe('socialHubClient', () => {
@@ -105,6 +105,40 @@ export default function socialHubClientTest() {
       expect(failed.items.length).assertEqual(0);
       expect(failed.connections[0].status).assertEqual('error');
       expect(failed.connections[0].message).assertEqual('Account not registered');
+    });
+
+    it('does not send X replies through the legacy direct OAuth path', 0, async () => {
+      const feed = parseSocialHubFeedPayload('{"items":[{"id":"x-dm","platform":"x","kind":"message","text":"hello","channel":"私信","channelId":"dm-1","threadId":"dm-1"}],"connections":[]}');
+      const draft = await new SocialHubClient().sendReply(feed.items[0], '收到');
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.error.indexOf('Composio')).assertLarger(-1);
+      expect(draft.error.indexOf('X OAuth')).assertEqual(-1);
+      expect(draft.sent).assertFalse();
+    });
+
+    it('fails closed on every legacy direct X and Slack entry point', 0, async () => {
+      const client = new SocialHubClient();
+      const legacyConfig: SocialHubProviderConfig = {
+        xBearerToken: 'legacy-x-bearer',
+        xUsername: 'legacy-user',
+        xUserAccessToken: 'legacy-x-user',
+        slackUserToken: 'legacy-slack-user',
+        slackBotToken: 'legacy-slack-bot'
+      };
+      const feed = await client.feed('查看 X 和 Slack 消息', '', legacyConfig);
+      const xPosts = await client.xPostSearch('X 公开 post 搜索关键词: codex', '', legacyConfig);
+      const slackItem = parseSocialHubFeedPayload('{"items":[{"id":"slack-1","platform":"slack","kind":"message","text":"hello","channel":"general","channelId":"C123","threadId":"123.456"}],"connections":[]}').items[0];
+      const reply = await client.sendReply(slackItem, '收到', '', legacyConfig);
+
+      expect(feed.items.length).assertEqual(0);
+      expect(feed.connections[0].message.indexOf('Composio')).assertLarger(-1);
+      expect(feed.connections[1].message.indexOf('Composio')).assertLarger(-1);
+      expect(xPosts.items.length).assertEqual(0);
+      expect(xPosts.connections[0].message.indexOf('Composio')).assertLarger(-1);
+      expect(reply.status).assertEqual('error');
+      expect(reply.error.indexOf('Composio')).assertLarger(-1);
+      expect(reply.sent).assertFalse();
     });
   });
 }

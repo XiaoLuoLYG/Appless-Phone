@@ -6,6 +6,8 @@
 
 当前 agent 工具箱：42 个静态注册工具 + `memory.update` + `dynamic.search`，运行时最多 44 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/excluded 标记为准。
 
+授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
+
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 出行 | `travel.search` | `我明天要从北京去上海，帮我搜索出行方案` | 综合高铁/航班候选；不造假，缺 provider 显示真实失败 | `read` | 无；航班源可能要 `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于 12306/飞常准网络 | 否 | 默认 smoke |
@@ -21,6 +23,7 @@
 | 瑞幸 | `luckin.order.status` | 使用真实订单号查询 | 仅查询真实已创建订单；无订单时不执行 | `read` | `LUCKIN_MCP_TOKEN` + 真实订单号 | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 社交 | `social.feed.search` | `帮我查看我今天 X 和 Slack 上的消息` / `帮我查看今天的社交聚合消息` | SocialHub 只展示各 app 私信/提及和连接状态；公开 post 不进入 SocialHub | `read` | Composio connected account；企业微信仍为本地回调/缓存 | X/Slack/Discord/LinkedIn/WhatsApp/Instagram 通常需要外网/VPN | 是 | 默认 smoke；`--composio-tools` 社交聚合 |
 | 社交 | `social.reply.draft` | `帮我给这条 Slack 消息起草回复` | 对已选真实 SocialHub item 生成本地草稿，不发送 | `draft` | 需要已有真实 item 上下文 | 起草本身不需要；来源读取按平台 | 否 | 单元/动作链路 |
+| 社交 | SocialHub Slack 回复动作 | 在真实 Slack 消息草稿上点击发送 | 使用原消息的 channel/thread ID，经当前用户 Composio 执行 `SLACK_CHAT_POST_MESSAGE`；provider 未确认时不显示成功 | `write` | Composio Slack connected account + 可写 scope | 通常需要外网/VPN | 是 | 参数映射单测；真实发送 manual-only |
 | X | `x.post.search` | `帮我查看 X 上 openai 最近的公开 post` | X 公开 post 结果或真实 Composio/provider 错误；不进入 SocialHub | `read` | Composio X/Twitter connected account | 通常需要外网/VPN | 是 | 默认 smoke |
 | 邮箱 | `mail.search` | `帮我查看邮箱里最新的重要邮件` | 聚合 Gmail、QQ Mail、Outlook；不模拟邮件 | `read` | Gmail、QQ Mail、Outlook 对应账号能力；Outlook 可经 Composio extra | Gmail/Outlook 通常需要；QQ 通常不需要 | Outlook extra 可走 Composio；普通聚合不替换成 Composio | 默认 smoke；`--composio-tools` 对照 |
 | 邮箱 | `mail.thread.read` | `打开第一封邮件详情` | 读取已选聚合邮箱线程 | `read` | 需要 provider + messageId/threadId | 按邮件 provider | Outlook 线程若来自 Composio extra 取决于后续支持；固定工具本身否 | 单元/动作链路 |
@@ -32,7 +35,7 @@
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
 | Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
-| 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`X_BEARER_TOKEN`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID`；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
+| 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID` + X/HN connected account；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | X/HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
 | 世界杯 | `worldcup.open` | `我想看世界杯下一场比赛和赛程` | 打开 App 内世界杯专页；不把静态页冒充实时比赛结果 | `read` | 无 | 页面本身不需要 | 否 | core C12 |
 | YouTube | `youtube.video.search` | `帮我在 YouTube 搜索 世界杯相关视频` | YouTube-only 公开视频搜索；可用 API 热门排序 | `read` | `YOUTUBE_API_KEY` | 通常需要 VPN | 否 | `--google-apps` |
 | YouTube | `youtube.mine.playlists` | `帮我查看我的 YouTube 播放列表` | 用户播放列表或真实 Composio 授权/失败卡 | `read` | Composio YouTube connected account | 通常需要外网/VPN | 是 | `--google-apps` |

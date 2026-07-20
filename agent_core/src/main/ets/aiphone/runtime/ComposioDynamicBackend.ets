@@ -326,6 +326,9 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
   if (fixedToolId === 'social.slack.message.search') {
     return 'Search recent Slack direct messages';
   }
+  if (fixedToolId === 'social.slack.message.send') {
+    return 'Reply to a Slack message in its thread';
+  }
   if (fixedToolId === 'social.instagram.conversations.list') {
     return 'List Instagram messaging conversations';
   }
@@ -453,6 +456,9 @@ function fixedToolAllowsSideEffectSlug(fixedToolId: string, slug: string): boole
   if (fixedToolId === 'whatsapp.message.send') {
     return slug === 'whatsapp_send_message';
   }
+  if (fixedToolId === 'social.slack.message.send') {
+    return slug === 'slack_chat_post_message';
+  }
   return false;
 }
 
@@ -544,6 +550,13 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
       { source: 'count', targets: ['count'] }
     ];
   }
+  if (toolId === 'social.slack.message.send') {
+    return [
+      { source: 'channel', targets: ['channel'] },
+      { source: 'text', targets: ['text'] },
+      { source: 'threadTs', targets: ['thread_ts'] }
+    ];
+  }
   if (toolId === 'social.instagram.conversations.list') {
     return [
       { source: 'limit', targets: ['limit'] }
@@ -584,6 +597,9 @@ function fixedWritePreservedArgs(toolId: string): string[] {
   }
   if (toolId === 'whatsapp.message.send') {
     return ['phoneNumberId', 'toNumber', 'text', 'previewUrl'];
+  }
+  if (toolId === 'social.slack.message.send') {
+    return ['channel', 'text', 'threadTs'];
   }
   return [];
 }
@@ -666,6 +682,15 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
     });
     return missing;
   }
+  if (fixedToolId === 'social.slack.message.send') {
+    const missing: string[] = [];
+    ['channel', 'text'].forEach((name: string) => {
+      if (!hasMeaningfulValue(record[name])) {
+        missing.push(name);
+      }
+    });
+    return missing;
+  }
   return [];
 }
 
@@ -673,6 +698,7 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'social.x.profile') return 'TWITTER_USER_LOOKUP_ME';
   if (fixedToolId === 'social.x.dm.list') return 'TWITTER_GET_RECENT_DM_EVENTS';
   if (fixedToolId === 'social.slack.message.search') return 'SLACK_SEARCH_MESSAGES';
+  if (fixedToolId === 'social.slack.message.send') return 'SLACK_CHAT_POST_MESSAGE';
   if (fixedToolId === 'social.instagram.profile') return 'INSTAGRAM_GET_USER_INFO';
   if (fixedToolId === 'social.instagram.conversations.list') return 'INSTAGRAM_LIST_ALL_CONVERSATIONS';
   if (fixedToolId === 'social.instagram.messages.list') return 'INSTAGRAM_LIST_ALL_MESSAGES';
