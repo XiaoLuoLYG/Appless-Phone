@@ -14,11 +14,11 @@ function trimForLog(message: string): string {
 export function aiLogInfo(message: string): void {
   const safe = trimForLog(message);
   hilog.info(DOMAIN, TAG, '%{public}s', safe);
-  console.info(safe);
+  // console.info(safe);
 }
 
 export function aiLogError(message: string): void {
   const safe = trimForLog(message);
   hilog.error(DOMAIN, TAG, '%{public}s', safe);
-  console.error(safe);
+  // console.error(safe);
 }
