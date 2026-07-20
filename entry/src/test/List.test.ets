@@ -71,6 +71,7 @@ import skillMarkdownParserTest from './SkillMarkdownParser.test';
 import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 import agentMessageTest from './AgentMessage.test';
 import linkedMessageBusTest from './LinkedMessageBus.test';
+import leaderAgentTest from './LeaderAgent.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -138,6 +139,7 @@ export default function testsuite() {
   modelScopeDirectClientTest();
   agentMessageTest();
   linkedMessageBusTest();
+  leaderAgentTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
