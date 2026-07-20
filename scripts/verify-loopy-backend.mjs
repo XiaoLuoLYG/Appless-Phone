@@ -170,6 +170,36 @@ function hasRegisteredActionExecutorDependency(source) {
   return false;
 }
 
+function toolDefinitionBody(source, toolId) {
+  const toolIdStart = source.indexOf(`toolId: '${toolId}'`);
+  return blockBody(source, toolIdStart < 0 ? -1 : source.lastIndexOf('{', toolIdStart));
+}
+
+function hasSystemIntentDefinition(source, toolId) {
+  const body = toolDefinitionBody(source, toolId);
+  return body.length > 0 && /backendPriority:\s*\[\s*'system_intent'\s*\]/.test(body);
+}
+
+function fieldMaskValue(source, name) {
+  const match = source.match(new RegExp(`${escapeRegex(name)}\\s*:\\s*string\\s*=\\s*'([^']+)'`));
+  return match === null ? '' : match[1];
+}
+
+function hotelPhoneFieldsOnlyInDetailMask(source) {
+  const phoneFields = ['nationalPhoneNumber', 'internationalPhoneNumber'];
+  const detailMask = fieldMaskValue(source, 'HOTEL_CONTACT_DETAIL_FIELD_MASK');
+  if (!phoneFields.every((field) => detailMask.split(',').indexOf(field) >= 0)) {
+    return false;
+  }
+  for (const match of source.matchAll(/(?:export\s+)?const\s+([A-Z_]*FIELD_MASK)\s*:\s*string\s*=\s*'([^']+)'/g)) {
+    if (match[1] !== 'HOTEL_CONTACT_DETAIL_FIELD_MASK' &&
+      phoneFields.some((field) => match[2].split(',').indexOf(field) >= 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function verifyArchitectureVerifier() {
   const fixtureIndex = parseIndexExports(stripComments(`
     export { AgentMessage } from './message/AgentMessage';
@@ -328,6 +358,10 @@ function verifySourceContracts() {
   const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const hotelA2ui = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelToolA2ui.ets'));
+  const hotelActions = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelActions.ets'));
+  const hotelRuntime = stripComments(read('entry/src/main/ets/pages/A2uiHome/agent/HotelAgentRuntime.ets'));
+  const mapsApiClient = stripComments(read('agent_core/src/main/ets/aiphone/runtime/MapsApiClient.ets'));
   const composioConfig = read('agent_core/src/main/ets/composio/ComposioConfig.ets');
   const composioClient = read('agent_core/src/main/ets/composio/ComposioSessionClient.ets');
   const composioDynamic = read('agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets');
@@ -430,6 +464,45 @@ function verifySourceContracts() {
       runtimeOnlyToolIds.length === 0,
     'public and runtime tool registries align exactly',
     `public=${ids.length}; runtime=${runtimeIds.length}; public-only=[${publicOnlyToolIds.join(', ')}]; runtime-only=[${runtimeOnlyToolIds.join(', ')}]`
+  );
+
+  const hotelSearch = toolDefinitionBody(runtimeDefinitions, 'hotel.search');
+  const forbiddenHotelTools = ['hotel.book', 'hotel.create', 'hotel.status', 'hotel.cancel'];
+  const hotelRuntimeConstructor = declarationBody(hotelRuntime, 'constructor(options: HotelAgentRuntimeOptions)');
+  const legacyHotelGateway = declarationBody(runtimeGateway, 'async function callLocalHotelTool');
+  assertContains(runtimeGateway, 'export async function callStructuredHotelTool', 'structured hotel gateway export exists');
+  assert(
+    /actions:\s*\[\s*'hotel.detail'\s*,\s*'hotel.navigate'\s*,\s*'hotel.call'\s*\]/.test(hotelSearch),
+    'hotel search declares detail navigation and conditional call actions'
+  );
+  assert(hasSystemIntentDefinition(runtimeDefinitions, 'hotel.navigate'), 'hotel navigation is a system intent');
+  assert(hasSystemIntentDefinition(runtimeDefinitions, 'hotel.call'), 'hotel call is a system intent');
+  assert(
+    forbiddenHotelTools.every((toolId) => !uniqueIds.has(toolId) && !runtimeUniqueIds.has(toolId)),
+    'hotel transaction tools are absent from both registries'
+  );
+  assert(
+    ['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent'].every((role) =>
+      new RegExp(`new\\s+${role}\\s*\\(\\s*this\\.bus\\b`).test(hotelRuntimeConstructor)),
+    'HotelAgentRuntime constructs all four roles on one broadcast bus'
+  );
+  assert(
+    hotelA2ui.includes('actions: hotelActionsFor(hotel, request, canPlace)') &&
+      /hasValidHotelCoordinates\(hotel\)/.test(hotelActions) &&
+      /hotel\.contact\s*!==\s*undefined/.test(hotelActions) &&
+      /validHotelCallArgs\(call\.args as HotelCallArgs\)\.ok/.test(hotelActions),
+    'HotelToolA2ui derives buttons only from structured coordinates and verified contact fields'
+  );
+  assert(hotelPhoneFieldsOnlyInDetailMask(mapsApiClient), 'Google Places phone fields appear only in the hotel details field mask');
+  assert(
+    legacyHotelGateway.includes("if (toolId !== 'hotel.search' && toolId !== 'hotel.detail')") &&
+      legacyHotelGateway.includes("return hotelFailureA2ui(surfaceId, toolId, 'Unsupported hotel tool: ' + toolId + '.');"),
+    'legacy hotel gateway rejects unknown hotel actions'
+  );
+  assert(
+    runtimeGateway.includes("if (toolId === 'travel.search')") &&
+      runtimeGateway.includes('return callLocalTravelSearch(prompt, surfaceId);'),
+    'pre-existing non-hotel travel route remains present'
   );
 
   const runtimeFiles = readdirSync(runtimeDir).filter((name) => name.endsWith('.ets'));
