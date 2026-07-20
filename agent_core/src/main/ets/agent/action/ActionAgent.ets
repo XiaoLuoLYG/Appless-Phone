@@ -128,8 +128,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     new Map<string, PausedActionRun>();
   private readonly activeRuns: Map<string, ActiveActionRun> =
     new Map<string, ActiveActionRun>();
-  // Payload-free idempotency identities live for this ActionAgent session.
-  // stop() clears them; replay protection never evicts an earlier exact key.
+  // Compact identities intentionally live for this ActionAgent session. Evicting
+  // them would allow an old write or confirmed workflow to execute twice.
   private readonly terminalRuns: Set<string> = new Set<string>();
   private readonly canceledTurns: Set<string> = new Set<string>();
   private generation: number = 0;
@@ -465,9 +465,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       payload.surfaceId,
       payload.runId
     );
+    if (this.runExists(key)) {
+      this.publishInputError(
+        message,
+        `direct:${payload.runId}`,
+        payload.runId,
+        payload.surfaceId,
+        'ACTION_RUN_DUPLICATE',
+        'Action run identity already exists.'
+      );
+      return;
+    }
     if (!nonempty(payload.sourceToolId) ||
-      payload.confirmedStepId !== undefined ||
-      this.runExists(key)) {
+      payload.confirmedStepId !== undefined) {
       this.publishInputError(
         message,
         `direct:${payload.runId}`,
@@ -540,6 +550,17 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       payload.surfaceId,
       identity.runId
     );
+    if (this.terminalRuns.has(key)) {
+      this.publishInputError(
+        message,
+        identity.planId,
+        identity.runId,
+        payload.surfaceId,
+        'ACTION_RUN_DUPLICATE',
+        'Action run identity already exists.'
+      );
+      return;
+    }
     const paused = this.pausedRuns.get(key);
     const ready = this.readyRuns.get(key);
     if (paused !== undefined) {

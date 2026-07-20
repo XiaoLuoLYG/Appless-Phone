@@ -585,6 +585,7 @@ function runHarBuild() {
 }
 
 function verifySourceContracts() {
+  const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
@@ -645,6 +646,7 @@ function verifySourceContracts() {
     'SocialCapabilityProbe.ets',
     'SocialNotificationArchive.ets'
   ].map((name) => resolve(runtimeDir, name));
+  const externalUrlOpener = liveDeclarationBody(a2uiHome, 'private async openExternalUrl');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
   assertContains(llmProvider, "endsWith('/v1/chat/completions')", 'model base URL can be full chat completions URL');
@@ -660,6 +662,34 @@ function verifySourceContracts() {
   );
   assertContains(aiphoneA2ui, 'export function aiphoneInfoJsonl', 'AIPhone final answer helper exists');
   assertContains(aiphoneA2ui, "component: 'InfoRows'", 'final answer helper renders InfoRows');
+  assert(
+    externalUrlOpener.includes("const schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(url);") &&
+      externalUrlOpener.includes("allowedSchemes.indexOf(scheme) < 0") &&
+      externalUrlOpener.indexOf("allowedSchemes.indexOf(scheme) < 0") <
+        externalUrlOpener.indexOf('await context.startAbility') &&
+      externalUrlOpener.includes('code=SCHEME_NOT_ALLOWED') &&
+      externalUrlOpener.includes("const urlMeta = ' scheme=' + scheme + ' chars=' + url.length.toString();") &&
+      externalUrlOpener.includes("aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true' + urlMeta);") &&
+      externalUrlOpener.includes("aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false' + urlMeta") &&
+      !externalUrlOpener.includes("url=' + url") &&
+      !externalUrlOpener.includes("message=' + businessError.message"),
+    'external URL opener rejects unapproved schemes and redacts the URI payload'
+  );
+  assertContains(
+    a2uiHome,
+    "allowedSchemes: string[] = ['https']",
+    'external URL opener defaults ordinary web and OAuth links to HTTPS'
+  );
+  assertContains(
+    a2uiHome,
+    "this.openExternalUrl(uri, ['tel', 'petalmaps'])",
+    'hotel opener only authorizes dialer and Petal Maps schemes'
+  );
+  assert(
+    !a2uiHome.includes("aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl)") &&
+      a2uiHome.includes("aiLogInfo('[AIPhone][LuckinWechatPayOpen] chars=' + payUrl.length.toString())"),
+    'payment handoff logs redact the URL payload'
+  );
 
   const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);

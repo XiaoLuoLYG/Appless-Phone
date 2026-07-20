@@ -179,6 +179,13 @@ async function receive(reader: AgentMessageReader): Promise<AgentMessage> {
   return message;
 }
 
+async function settle(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 export default function leaderAgentTest() {
   describe('leaderAgent', () => {
     it('publishes sanitized correlated UI then Data tasks and no fourth output', 0, async () => {
@@ -502,6 +509,45 @@ export default function leaderAgentTest() {
       }, 30);
       expect((await receive(observer)).taskId).assertEqual('observer-marker');
 
+      leader.stop();
+      observer.close();
+    });
+
+    it('retains exact terminal turn identities during a long conversation', 1000, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const planner: ScriptedLeaderPlanner = new ScriptedLeaderPlanner(hotelPlan());
+      const leader: LeaderAgent = new LeaderAgent(bus, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      leader.start();
+
+      for (let index = 0; index < 129; index++) {
+        const turnId: string = `capacity-turn-${index}`;
+        bus.publish(inputMessage('conversation-hotel', turnId, `input-${index}`));
+        await receive(observer);
+        await receive(observer);
+        await receive(observer);
+        bus.publish(terminalMessage(AgentMessageType.TASK_RESULT_UI, 'ui-1', turnId));
+        bus.publish(terminalMessage(AgentMessageType.TASK_RESULT_DATA, 'data-1', turnId));
+        await receive(observer);
+        await receive(observer);
+      }
+
+      bus.publish(inputMessage('conversation-hotel', 'capacity-turn-0', 'input-0'));
+      await receive(observer);
+      await settle();
+      bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'capacity-marker', 'marker-turn'));
+      let createdTasks: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.taskId !== 'capacity-marker') {
+        if (observed.type === AgentMessageType.TASK_CREATE_UI ||
+          observed.type === AgentMessageType.TASK_CREATE_DATA) {
+          createdTasks++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(planner.calls).assertEqual(129);
+      expect(createdTasks).assertEqual(0);
       leader.stop();
       observer.close();
     });

@@ -128,6 +128,38 @@ export default function linkedMessageBusTest() {
       readerB.close();
     });
 
+    it('reclaims acknowledged history during a long reader session', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const reader: AgentMessageReader = bus.openReader();
+
+      for (let index = 0; index < 512; index++) {
+        bus.publish(message(`message-${index}`));
+        expect(taskIdOf(await reader.receive())).assertEqual(`message-${index}`);
+      }
+
+      expect(bus.retainedNodeCount()).assertEqual(1);
+      reader.close();
+    });
+
+    it('retains history for a slow reader until it acknowledges every message', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const fast: AgentMessageReader = bus.openReader();
+      const slow: AgentMessageReader = bus.openReader();
+
+      for (let index = 0; index < 64; index++) {
+        bus.publish(message(`message-${index}`));
+        expect(taskIdOf(await fast.receive())).assertEqual(`message-${index}`);
+      }
+      expect(bus.retainedNodeCount()).assertEqual(65);
+
+      for (let index = 0; index < 64; index++) {
+        expect(taskIdOf(await slow.receive())).assertEqual(`message-${index}`);
+      }
+      expect(bus.retainedNodeCount()).assertEqual(1);
+      fast.close();
+      slow.close();
+    });
+
     it('starts new readers at the current tail', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       bus.publish(message('message-1'));

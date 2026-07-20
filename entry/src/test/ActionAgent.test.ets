@@ -990,7 +990,7 @@ export default function actionAgentTest() {
       observer.close();
     });
 
-    it('bounds live payload state and rejects an exact direct replay after 129 terminals', 0, async () => {
+    it('bounds live payload state and retains old terminal identities', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
       const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
@@ -1106,13 +1106,14 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RESULT
       )).payload as ActionResultPayload;
       expect(replay.status).assertEqual('error');
+      expect(replay.errorCode).assertEqual('ACTION_RUN_DUPLICATE');
       expect(replay.runId).assertEqual('terminal-0');
       expect(tombstoneExecutor.actionIds.length).assertEqual(129);
       tombstoneAgent.stop();
       tombstoneObserver.close();
     });
 
-    it('keeps canceled turn identities for the Action Agent session', 0, async () => {
+    it('retains canceled turn identities for the Action Agent session', 1000, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
       const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
@@ -1137,13 +1138,14 @@ export default function actionAgentTest() {
         'turn-1',
         'canceled-replay-task'
       ));
-      await settle();
-      bus.publish(message(
-        AgentMessageType.INPUT_USER,
-        JSON.parse('{"text":"canceled-marker"}') as Object,
-        'marker-turn',
-        'canceled-marker'
-      ));
+      setTimeout(() => {
+        bus.publish(message(
+          AgentMessageType.INPUT_USER,
+          JSON.parse('{"text":"canceled-marker"}') as Object,
+          'marker-turn',
+          'canceled-marker'
+        ));
+      }, 30);
 
       let actionMessages = 0;
       let observed = await receive(observer);
@@ -1161,7 +1163,7 @@ export default function actionAgentTest() {
       observer.close();
     });
 
-    it('rejects original plan create and workflow replay after many terminals', 0, async () => {
+    it('retains an old workflow identity after many terminals', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
       const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
@@ -1220,7 +1222,9 @@ export default function actionAgentTest() {
         observed = await receive(observer);
       }
       expect(replayReadyCount).assertEqual(0);
-      expect((replayCreateError as ActionResultPayload).status).assertEqual('error');
+      expect(replayCreateError === null).assertFalse();
+      expect((replayCreateError as ActionResultPayload).errorCode)
+        .assertEqual('ACTION_RUN_DUPLICATE');
 
       bus.publish(message(
         AgentMessageType.ACTION_RUN,
@@ -1233,6 +1237,7 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RESULT
       )).payload as ActionResultPayload;
       expect(workflowReplay.status).assertEqual('error');
+      expect(workflowReplay.errorCode).assertEqual('ACTION_RUN_DUPLICATE');
       expect(executor.actionIds.length).assertEqual(executorCount);
 
       agent.stop();

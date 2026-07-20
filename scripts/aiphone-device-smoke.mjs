@@ -4,7 +4,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  evaluateHotelSystemActionEvidence,
+  foregroundBundleFromAbilityDump,
   hotelDetailClickLocator,
+  isExpectedHotelSystemBundle,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -935,13 +938,31 @@ function dumpLayout(localName = 'latest-layout.json') {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function captureScreen(localName = 'latest-screen.png') {
-  moveAppWindowIntoScreenshot();
+function captureCurrentScreen(localName = 'latest-screen.png') {
   const remote = '/data/local/tmp/aiphone-smoke-screen.png';
   const local = join(outDir, localName);
   hdc(['shell', 'uitest', 'screenCap', '-p', remote]);
   hdc(['file', 'recv', remote, local]);
   return local;
+}
+
+function captureScreen(localName = 'latest-screen.png') {
+  moveAppWindowIntoScreenshot();
+  return captureCurrentScreen(localName);
+}
+
+function captureForegroundAbility(localName) {
+  const output = hdc(['shell', 'aa', 'dump', '-l']);
+  const path = join(outDir, localName);
+  writeFileSync(path, output);
+  return {
+    bundleName: foregroundBundleFromAbilityDump(output),
+    path
+  };
+}
+
+function sanitizeExternalUrlLogs(logText) {
+  return String(logText || '').replace(/\burl=\S+/g, 'url=<redacted>');
 }
 
 function collectLayoutText(layout) {
@@ -1312,7 +1333,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
       (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
-    gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
+    gmailWebOpened:
+      /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=gmail\.open\.web/.test(text) &&
+      /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true scheme=https chars=\d+/.test(text),
     worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
@@ -1804,19 +1827,205 @@ function hotelActionEvidenceFromLogs(logText) {
   return latest || { surfaceId: '', actions: [] };
 }
 
+async function locateHotelSystemAction(layout, label, index, actionName) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    swipeResultsDown();
+    await sleep(250);
+  }
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-${actionName}-top-layout.json`);
+  for (let attempt = 0; attempt <= 8; attempt += 1) {
+    const center = findExactTextCenter(currentLayout, label);
+    if (center !== null) {
+      return {
+        center,
+        layout: currentLayout
+      };
+    }
+    if (attempt < 8) {
+      swipeResultsUp();
+      await sleep(500);
+      currentLayout = dumpLayout(
+        `query-${index + 1}-hotel-${actionName}-scan-${attempt + 1}-layout.json`
+      );
+    }
+  }
+  return {
+    center: null,
+    layout: currentLayout
+  };
+}
+
+async function exerciseHotelSystemAction(layout, index, actionId, label, actionName, expectedScheme) {
+  const located = await locateHotelSystemAction(layout, label, index, actionName);
+  const runtime = {
+    buttonVisible: located.center !== null,
+    systemSurfaceOpened: false,
+    evidenceCaptured: false,
+    returnedToApp: false
+  };
+  if (actionId === 'hotel.call') {
+    runtime.finalDialTriggered = false;
+  }
+  if (located.center === null) {
+    return {
+      runtime,
+      reason: `exact ${actionId} action button not found`,
+      restoredLayout: located.layout
+    };
+  }
+
+  clearHilog();
+  hdc([
+    'shell',
+    'uitest',
+    'uiInput',
+    'click',
+    String(located.center.x),
+    String(located.center.y)
+  ]);
+  await sleep(1800);
+  const rawActionLogs = hdc(['shell', 'hilog', '-x']);
+  const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
+  const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
+  writeFileSync(logPath, actionLogs);
+  const schemeOpened = new RegExp(
+    `\\[AIPhone\\]\\[A2uiHomeOpenUrl\\] ok=true scheme=${expectedScheme} chars=\\d+`
+  ).test(actionLogs);
+  const externalForeground = captureForegroundAbility(
+    `query-${index + 1}-hotel-${actionName}-external-ability.txt`
+  );
+  const systemSurfaceRecognized = isExpectedHotelSystemBundle(actionId, externalForeground.bundleName);
+  const screenPath = captureCurrentScreen(
+    `query-${index + 1}-hotel-${actionName}-system-screen.png`
+  );
+  runtime.systemSurfaceOpened = schemeOpened && systemSurfaceRecognized;
+  runtime.evidenceCaptured = screenPath.length > 0;
+
+  // Safety boundary: after a tel: intent, the smoke performs no dialer tap.
+  // The only injected event on the external surface is Back.
+  hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+  await sleep(1400);
+  const restoredForeground = captureForegroundAbility(
+    `query-${index + 1}-hotel-${actionName}-restored-ability.txt`
+  );
+  runtime.returnedToApp = restoredForeground.bundleName === 'com.example.aiphonedemo';
+  let restoredLayout = located.layout;
+  let restoredLayoutPath = '';
+  let restoredScreenPath = '';
+  if (runtime.returnedToApp) {
+    restoredLayoutPath = join(
+      outDir,
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredLayout = dumpLayout(
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredScreenPath = captureScreen(
+      `query-${index + 1}-hotel-${actionName}-restored-screen.png`
+    );
+  }
+  return {
+    runtime,
+    schemeOpened,
+    systemSurfaceRecognized,
+    foregroundBundle: externalForeground.bundleName,
+    restoredBundle: restoredForeground.bundleName,
+    interactionPolicy: actionId === 'hotel.call'
+      ? 'prefill screenshot then Back; no final dial tap'
+      : 'system map screenshot then Back',
+    logPath,
+    abilityPath: externalForeground.path,
+    screenPath,
+    restoredAbilityPath: restoredForeground.path,
+    restoredLayoutPath,
+    restoredScreenPath,
+    restoredLayout
+  };
+}
+
+async function verifyHotelSystemActions(layout, index, actionEvidence) {
+  const validated = validateHotelSearchActionEvidence(actionEvidence);
+  let currentLayout = layout;
+  const runtime = {};
+  let navigationEvidence = {
+    skipped: true,
+    reason: `hotel.navigate action is ${validated.navigation.status}`
+  };
+  if (validated.navigation.status === 'visible') {
+    navigationEvidence = await exerciseHotelSystemAction(
+      currentLayout,
+      index,
+      'hotel.navigate',
+      '导航到酒店',
+      'navigate',
+      'petalmaps'
+    );
+    runtime.navigation = navigationEvidence.runtime;
+    currentLayout = navigationEvidence.restoredLayout;
+  }
+
+  let callEvidence = {
+    skipped: true,
+    reason: `hotel.call action is ${validated.call.status}`
+  };
+  if (validated.call.status === 'visible') {
+    callEvidence = await exerciseHotelSystemAction(
+      currentLayout,
+      index,
+      'hotel.call',
+      '联系酒店',
+      'call',
+      'tel'
+    );
+    runtime.call = callEvidence.runtime;
+    currentLayout = callEvidence.restoredLayout;
+  } else if (validated.call.status === 'hidden') {
+    const located = await locateHotelSystemAction(
+      currentLayout,
+      '联系酒店',
+      index,
+      'call-hidden'
+    );
+    runtime.call = {
+      buttonVisible: located.center !== null,
+      finalDialTriggered: false
+    };
+    currentLayout = located.layout;
+    callEvidence = {
+      skipped: true,
+      hiddenButtonVerified: located.center === null,
+      reason: located.center === null
+        ? 'verified phone unavailable and call button is hidden'
+        : 'call button is visible despite missing verified-phone action evidence'
+    };
+  }
+
+  return {
+    ...evaluateHotelSystemActionEvidence(actionEvidence, runtime),
+    navigationEvidence,
+    callEvidence
+  };
+}
+
 async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   let currentLayout = layout;
   let detailCenter = null;
   let detailLabel = '';
   const rawSearchActionEvidence = hotelActionEvidenceFromLogs(queryLogs.join('\n'));
   const searchActionEvidence = validateHotelSearchActionEvidence(rawSearchActionEvidence);
+  const unverifiedSystemActions = evaluateHotelSystemActionEvidence(
+    rawSearchActionEvidence,
+    {}
+  );
   const detailClickLocator = hotelDetailClickLocator(rawSearchActionEvidence);
   if (!detailClickLocator.ok) {
     return {
       ok: false,
       capability: 'hotel.detail',
       reason: 'current hotel surface has no exact valid hotel.detail click locator',
-      actionEvidence: searchActionEvidence
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
     };
   }
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -1839,7 +2048,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
       ok: false,
       capability: 'hotel.detail',
       reason: 'exact hotel.detail action click label not found in current layout',
-      actionEvidence: searchActionEvidence
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
     };
   }
 
@@ -1866,7 +2076,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
       ok: false,
       capability: 'hotel.detail',
       reason: '价格与取消规则 button not found',
-      detailLogPath
+      detailLogPath,
+      systemActions: unverifiedSystemActions
     };
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
@@ -1893,7 +2104,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
       reason: '返回酒店结果 button not found',
       detailLogPath,
       textPath,
-      screenPath
+      screenPath,
+      systemActions: unverifiedSystemActions
     };
   }
   clearHilog();
@@ -1913,23 +2125,29 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
   const restoredOk = /酒店结果/.test(restoredText);
   const detailActionEvidence = hotelActionEvidenceFromLogs(detailLogText);
-  const restoredActionEvidence = validateHotelSearchActionEvidence(
-    hotelActionEvidenceFromLogs(restoreLogText)
-  );
+  const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
+  const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
   const surfaceIdentity = validateHotelSurfaceIdentity(
     searchActionEvidence.surfaceId,
     typeof detailActionEvidence.surfaceId === 'string' ? detailActionEvidence.surfaceId : '',
     restoredActionEvidence.surfaceId
   );
+  const systemActions = await verifyHotelSystemActions(
+    restoredLayout,
+    index,
+    rawRestoredActionEvidence
+  );
   return {
     ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
       /床型|餐食|取消政策/.test(text) && restoredOk &&
-      searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok,
+      searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
+      systemActions.ok,
     capability: 'hotel.detail',
     detailLabel,
     actionEvidence: searchActionEvidence,
     navigation: searchActionEvidence.navigation,
     call: searchActionEvidence.call,
+    systemActions,
     surfaceIdentity,
     searchSurfaceId: surfaceIdentity.searchSurfaceId,
     detailSurfaceId: surfaceIdentity.detailSurfaceId,

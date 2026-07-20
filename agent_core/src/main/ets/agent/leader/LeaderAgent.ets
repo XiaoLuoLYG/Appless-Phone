@@ -32,6 +32,9 @@ export class LeaderAgent extends MessageDrivenAgent {
   private readonly planner: LeaderPlanner;
   private readonly timeoutMs: number;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
+  // Terminal state is reduced to exact identities so active turn payloads and
+  // timers are released without permitting an old input to be dispatched twice.
+  private readonly terminalTurns: Set<string> = new Set<string>();
 
   constructor(bus: LinkedMessageBus, planner: LeaderPlanner, timeoutMs: number = 30000) {
     super(bus);
@@ -45,6 +48,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.finishTurn(state);
     });
     this.turns.clear();
+    this.terminalTurns.clear();
     super.stop();
   }
 
@@ -111,7 +115,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const input: InputUserPayload = { text: inputText };
     const key: string = this.turnKey(message);
-    if (this.turns.has(key)) {
+    if (this.turns.has(key) || this.terminalTurns.has(key)) {
       return;
     }
     const state: LeaderTurnState = {
@@ -204,7 +208,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private turnKey(message: AgentMessage): string {
-    return `${message.conversationId.length}:${message.conversationId}${message.turnId}`;
+    return this.turnKeyFor(message.conversationId, message.turnId);
   }
 
   private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
@@ -258,8 +262,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state === undefined || state.terminal) {
       return;
     }
-    state.terminal = true;
-    state.timerId = -1;
+    this.finishTurn(state);
     const payload: TaskErrorPayload = {
       code: 'LEADER_TURN_TIMEOUT',
       message: 'Leader turn timed out'
@@ -271,13 +274,20 @@ export class LeaderAgent extends MessageDrivenAgent {
       taskId: state.inputTaskId,
       payload
     });
-    this.releasePlanning(state);
   }
 
   private finishTurn(state: LeaderTurnState): void {
+    if (state.terminal) {
+      return;
+    }
     state.terminal = true;
     this.clearTurnTimer(state);
     this.releasePlanning(state);
+    const key: string = this.turnKeyFor(state.conversationId, state.turnId);
+    if (this.turns.get(key) === state) {
+      this.turns.delete(key);
+    }
+    this.rememberTerminalTurn(key);
   }
 
   private clearTurnTimer(state: LeaderTurnState): void {
@@ -293,5 +303,16 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (release !== null) {
       release();
     }
+  }
+
+  private rememberTerminalTurn(key: string): void {
+    if (this.terminalTurns.has(key)) {
+      return;
+    }
+    this.terminalTurns.add(key);
+  }
+
+  private turnKeyFor(conversationId: string, turnId: string): string {
+    return `${conversationId.length}:${conversationId}${turnId}`;
   }
 }

@@ -384,6 +384,40 @@ export default function dataAgentTest() {
       observer.close();
     });
 
+    it('retains canceled turn identities during a long session', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
+      const agent: DataAgent = new DataAgent(bus, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.TURN_CANCEL,
+          'conversation-capacity',
+          `turn-${index}`,
+          `cancel-${index}`
+        ));
+        await settle();
+      }
+      bus.publish(dataTaskMessage('conversation-capacity', 'turn-0', 'data-reused'));
+      await settle();
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+      let dataResults: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.type !== AgentMessageType.ACTION_RUN) {
+        if (observed.type === AgentMessageType.TASK_RESULT_DATA) {
+          dataResults++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(executor.calls).assertEqual(0);
+      expect(dataResults).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
     it('suppresses a detached executor completion after stop', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();

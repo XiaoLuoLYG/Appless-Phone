@@ -1207,7 +1207,7 @@ struct Index {
     );
     const model = new OpenAiCompatibleModel(provider);
     const opener = new PageHotelUriOpener((uri: string): Promise<boolean> => {
-      return this.openExternalUrl(uri);
+      return this.openExternalUrl(uri, ['tel', 'petalmaps']);
     });
     const options: HotelAgentRuntimeOptions = {
       model: model,
@@ -1849,8 +1849,27 @@ struct Index {
     return model.dynamicToolConnect;
   }
 
-  private async openExternalUrl(url: string): Promise<boolean> {
+  private async openExternalUrl(
+    url: string,
+    allowedSchemes: string[] = ['https']
+  ): Promise<boolean> {
     if (url.length === 0) {
+      return false;
+    }
+    const schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(url);
+    const scheme = schemeMatch === null ? 'unknown' : schemeMatch[1].toLowerCase();
+    const urlMeta = ' scheme=' + scheme + ' chars=' + url.length.toString();
+    if (allowedSchemes.indexOf(scheme) < 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '无法打开不受信任的外部页面。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: 'external URL scheme is not allowed'
+      }));
+      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false' + urlMeta +
+        ' code=SCHEME_NOT_ALLOWED');
       return false;
     }
     try {
@@ -1859,7 +1878,7 @@ struct Index {
         action: 'ohos.want.action.viewData',
         uri: url
       });
-      aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true url=' + url);
+      aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true' + urlMeta);
       return true;
     } catch (error) {
       const businessError = error as BusinessError;
@@ -1872,7 +1891,7 @@ struct Index {
         assistantDebug: this.lastModelOutput,
         error: message
       }));
-      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false url=' + url + ' message=' + businessError.message);
+      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false' + urlMeta + ' code=' + businessError.code.toString());
       return false;
     }
   }
@@ -3489,14 +3508,14 @@ struct Index {
         this.logHtmlHomeActionError(action, 'invalid_luckin_pay_url');
         return;
       }
-      aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl);
-      await this.openExternalUrl(payUrl);
+      aiLogInfo('[AIPhone][LuckinWechatPayOpen] chars=' + payUrl.length.toString());
+      await this.openExternalUrl(payUrl, ['https', 'weixin']);
       return;
     }
     if (action.id === 'luckin.demo.alipay.open') {
       const url = action.prompt.trim().length > 0 ? action.prompt.trim() : 'alipays://';
       aiLogInfo('[AIPhone][LuckinDemoAlipayOpen] chars=' + url.length.toString());
-      await this.openExternalUrl(url);
+      await this.openExternalUrl(url, ['alipays']);
       return;
     }
     if (action.id === 'luckin.demo.googlepay.open') {
@@ -3555,7 +3574,10 @@ struct Index {
         this.logHtmlHomeActionError(action, 'missing_ride_app_link');
         return;
       }
-      await this.openExternalUrl(action.prompt);
+      await this.openExternalUrl(
+        action.prompt,
+        action.id === 'ride.open.didi' ? ['diditaxi'] : ['amapuri']
+      );
       return;
     }
     if (action.id === 'media.open.web') {

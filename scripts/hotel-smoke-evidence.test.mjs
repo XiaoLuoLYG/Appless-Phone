@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  evaluateHotelSystemActionEvidence,
+  foregroundBundleFromAbilityDump,
   hotelDetailClickLocator,
   hotelSearchActionEvidence,
+  isExpectedHotelSystemBundle,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -126,6 +129,126 @@ test('derives the live detail click locator only from an exact valid action', ()
   invalidArgs[0].args.hotelId = 0;
   assert.equal(
     hotelDetailClickLocator(hotelSearchActionEvidence('hotel-search-1', invalidArgs)).ok,
+    false
+  );
+});
+
+test('requires captured system surfaces and a verified return for visible hotel actions', () => {
+  const evidence = hotelSearchActionEvidence('hotel-search-1', validActions);
+  const missingRuntime = evaluateHotelSystemActionEvidence(evidence, {});
+
+  assert.equal(missingRuntime.ok, false);
+  assert.equal(missingRuntime.navigation.e2e.status, 'BLOCKED');
+  assert.equal(missingRuntime.call.button.status, 'PASS');
+  assert.equal(missingRuntime.call.e2e.status, 'BLOCKED');
+
+  const complete = evaluateHotelSystemActionEvidence(evidence, {
+    navigation: {
+      systemSurfaceOpened: true,
+      evidenceCaptured: true,
+      returnedToApp: true
+    },
+    call: {
+      buttonVisible: true,
+      systemSurfaceOpened: true,
+      evidenceCaptured: true,
+      returnedToApp: true,
+      finalDialTriggered: false
+    }
+  });
+  assert.equal(complete.ok, true);
+  assert.equal(complete.navigation.e2e.status, 'PASS');
+  assert.equal(complete.call.e2e.status, 'PASS');
+});
+
+test('passes a hidden missing-phone button but leaves dialer E2E explicitly not run', () => {
+  const evidence = hotelSearchActionEvidence('hotel-search-1', validActions.slice(0, 2));
+  const result = evaluateHotelSystemActionEvidence(evidence, {
+    navigation: {
+      systemSurfaceOpened: true,
+      evidenceCaptured: true,
+      returnedToApp: true
+    },
+    call: {
+      buttonVisible: false
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.call.button.status, 'PASS');
+  assert.equal(result.call.button.reason, 'verified phone unavailable; call action correctly hidden');
+  assert.equal(result.call.e2e.status, 'NOT_RUN');
+  assert.notEqual(result.call.e2e.status, result.call.button.status);
+
+  const unverifiedHidden = evaluateHotelSystemActionEvidence(evidence, {
+    navigation: {
+      systemSurfaceOpened: true,
+      evidenceCaptured: true,
+      returnedToApp: true
+    }
+  });
+  assert.equal(unverifiedHidden.ok, false);
+  assert.equal(unverifiedHidden.call.button.status, 'BLOCKED');
+});
+
+test('fails closed when a call action is invalid or any final dial is triggered', () => {
+  const invalidCall = structuredClone(validActions);
+  invalidCall[2].args.providerPlaceId = '';
+  const invalid = evaluateHotelSystemActionEvidence(
+    hotelSearchActionEvidence('hotel-search-1', invalidCall),
+    {}
+  );
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.call.button.status, 'FAIL');
+  assert.equal(invalid.call.e2e.status, 'BLOCKED');
+
+  const dialed = evaluateHotelSystemActionEvidence(
+    hotelSearchActionEvidence('hotel-search-1', validActions),
+    {
+      navigation: {
+        systemSurfaceOpened: true,
+        evidenceCaptured: true,
+        returnedToApp: true
+      },
+      call: {
+        buttonVisible: true,
+        systemSurfaceOpened: true,
+        evidenceCaptured: true,
+        returnedToApp: true,
+        finalDialTriggered: true
+      }
+    }
+  );
+  assert.equal(dialed.ok, false);
+  assert.equal(dialed.call.e2e.status, 'FAIL');
+  assert.match(dialed.call.e2e.reason, /final dial/i);
+});
+
+test('recognizes only the foreground system map or dialer bundle', () => {
+  const dump = `
+    Mission ID #1
+      bundle name [com.example.aiphonedemo]
+      state #BACKGROUND
+    Mission ID #2
+      bundle name [com.huawei.hmos.maps.app]
+      state #FOREGROUND
+      app state #FOREGROUND
+  `;
+  assert.equal(foregroundBundleFromAbilityDump(dump), 'com.huawei.hmos.maps.app');
+  assert.equal(
+    isExpectedHotelSystemBundle('hotel.navigate', 'com.huawei.hmos.maps.app'),
+    true
+  );
+  assert.equal(
+    isExpectedHotelSystemBundle('hotel.call', 'com.ohos.contacts'),
+    true
+  );
+  assert.equal(
+    isExpectedHotelSystemBundle('hotel.call', 'com.ohos.telephony'),
+    false
+  );
+  assert.equal(
+    isExpectedHotelSystemBundle('hotel.call', 'com.example.aiphonedemo'),
     false
   );
 });

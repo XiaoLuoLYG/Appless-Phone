@@ -14,6 +14,32 @@ function positiveHotelId(args) {
   return Number.isInteger(args.hotelId) && args.hotelId > 0;
 }
 
+export function foregroundBundleFromAbilityDump(output) {
+  const missions = String(output || '').split(/(?=\s*Mission ID #)/);
+  const foreground = missions.find((mission) =>
+    /\bstate #FOREGROUND\b/.test(mission) || /\bapp state #FOREGROUND\b/.test(mission));
+  if (foreground === undefined) {
+    return '';
+  }
+  const match = /\bbundle name \[([^\]]+)\]/.exec(foreground);
+  return match === null ? '' : match[1].trim();
+}
+
+export function isExpectedHotelSystemBundle(actionId, bundleName) {
+  if (typeof bundleName !== 'string' ||
+    bundleName.length === 0 ||
+    bundleName === 'com.example.aiphonedemo') {
+    return false;
+  }
+  if (actionId === 'hotel.navigate') {
+    return /(?:^|[._-])maps?(?:[._-]|$)/i.test(bundleName);
+  }
+  if (actionId === 'hotel.call') {
+    return /(?:contacts?|dialer)/i.test(bundleName);
+  }
+  return false;
+}
+
 function sanitizeAction(action) {
   const actionId = typeof action?.id === 'string' ? action.id : '';
   const args = objectArgs(action?.args) ? action.args : {};
@@ -150,6 +176,97 @@ export function hotelDetailClickLocator(evidence) {
   return {
     ok: validated.ok && labels.length > 0,
     labels
+  };
+}
+
+function systemActionE2e(action, runtime, options = {}) {
+  if (options.finalDial === true && runtime?.finalDialTriggered === true) {
+    return {
+      status: 'FAIL',
+      reason: 'safety boundary violated: final dial was triggered'
+    };
+  }
+  if (action.status === 'invalid') {
+    return {
+      status: 'BLOCKED',
+      reason: 'action arguments are invalid; system surface was not opened'
+    };
+  }
+  if (action.status === 'hidden') {
+    return {
+      status: 'NOT_RUN',
+      reason: options.hiddenReason
+    };
+  }
+  const missing = [];
+  if (runtime?.systemSurfaceOpened !== true) {
+    missing.push('system surface not verified');
+  }
+  if (runtime?.evidenceCaptured !== true) {
+    missing.push('system surface screenshot not captured');
+  }
+  if (runtime?.returnedToApp !== true) {
+    missing.push('return to AIPhone not verified');
+  }
+  if (missing.length > 0) {
+    return {
+      status: 'BLOCKED',
+      reason: missing.join('; ')
+    };
+  }
+  return {
+    status: 'PASS',
+    reason: options.passReason
+  };
+}
+
+export function evaluateHotelSystemActionEvidence(evidence, runtime = {}) {
+  const validated = validateHotelSearchActionEvidence(evidence);
+  const navigationE2e = systemActionE2e(validated.navigation, runtime.navigation, {
+    hiddenReason: 'valid hotel coordinates unavailable; navigation E2E not run',
+    passReason: 'system map opened, evidence captured, and AIPhone restored'
+  });
+  const callButton = validated.call.status === 'visible'
+    ? {
+      status: 'PASS',
+      reason: 'verified phone action is visible'
+    }
+    : validated.call.status === 'hidden'
+      ? runtime.call?.buttonVisible === false
+        ? {
+          status: 'PASS',
+          reason: 'verified phone unavailable; call action correctly hidden'
+        }
+        : {
+          status: 'BLOCKED',
+          reason: 'verified phone unavailable; hidden call button was not verified in the UI'
+        }
+      : {
+        status: 'FAIL',
+        reason: 'call action is visible with invalid verification arguments'
+      };
+  const callE2e = systemActionE2e(validated.call, runtime.call, {
+    finalDial: true,
+    hiddenReason: 'verified phone unavailable; dialer E2E not run',
+    passReason: 'dialer opened with a prefilled number, evidence captured, and AIPhone restored'
+  });
+  const acceptableE2e = (result) => result.status === 'PASS' || result.status === 'NOT_RUN';
+  return {
+    ok: validated.ok &&
+      acceptableE2e(navigationE2e) &&
+      callButton.status === 'PASS' &&
+      acceptableE2e(callE2e),
+    navigation: {
+      actionStatus: validated.navigation.status,
+      count: validated.navigation.count,
+      e2e: navigationE2e
+    },
+    call: {
+      actionStatus: validated.call.status,
+      count: validated.call.count,
+      button: callButton,
+      e2e: callE2e
+    }
   };
 }
 
