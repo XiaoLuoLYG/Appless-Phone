@@ -444,6 +444,9 @@ export default function toolGatewayClientTest() {
         expect(summary.indexOf('hotel-test-secret')).assertEqual(-1);
         expect(isRegisteredToolId('hotel.search')).assertTrue();
         expect(isRegisteredToolId('hotel.detail')).assertTrue();
+        expect(isRegisteredToolId('hotel.navigate')).assertTrue();
+        expect(isRegisteredToolId('hotel.call')).assertTrue();
+        expect(isRegisteredToolId('hotel.book')).assertFalse();
         expect(isRegisteredToolId('hotel.create')).assertFalse();
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
@@ -712,6 +715,44 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('places only registry-approved truthful actions on the legacy hotel surface', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => verifiedContactResult(hotel));
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'hotel.search',
+          '深圳酒店',
+          'surface_hotel_actions',
+          'model_tool_request',
+          noop,
+          null,
+          searchArgsForGateway()
+        );
+
+        expect(result.raw.indexOf('"id":"hotel.detail"')).assertLarger(-1);
+        expect(result.raw.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+        expect(result.raw.indexOf('"id":"hotel.call"')).assertLarger(-1);
+        expect(result.raw.indexOf('"providerPlaceId":"place-47001"')).assertLarger(-1);
+        expect(result.raw.indexOf('hotel.book')).assertEqual(-1);
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('never starts Places lookup after RollingGo inner or transport failure', 0, async () => {
       let lookupCalls = 0;
       try {
@@ -875,7 +916,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('rejects unknown hotel-prefixed tools without falling through to detail', 0, async () => {
+    it('rejects surface-derived and unknown hotel tools without provider calls', 0, async () => {
       const client = new ScriptedHotelMcpClient({
         ok: true,
         httpStatus: 200,
@@ -890,10 +931,29 @@ export default function toolGatewayClientTest() {
         }));
         configureHotelMcpClientForTests(client);
 
-        const result = await callStructuredHotelTool('hotel.cancel', detailArgsForGateway());
+        const navigate = await callStructuredHotelTool('hotel.navigate', detailArgsForGateway());
+        const call = await callStructuredHotelTool('hotel.call', detailArgsForGateway());
+        const unknown = await callStructuredHotelTool('hotel.cancel', detailArgsForGateway());
 
-        expect(result.status).assertEqual('error');
-        expect(result.error?.code).assertEqual('HOTEL_TOOL_UNSUPPORTED');
+        expect(navigate.status).assertEqual('error');
+        expect(navigate.error?.code).assertEqual('HOTEL_TOOL_UNSUPPORTED');
+        expect(call.status).assertEqual('error');
+        expect(call.error?.code).assertEqual('HOTEL_TOOL_UNSUPPORTED');
+        expect(unknown.status).assertEqual('error');
+        expect(unknown.error?.code).assertEqual('HOTEL_TOOL_UNSUPPORTED');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const legacyNavigate = await callToolGateway(
+          defaultToolGatewayUrl(), 'hotel.navigate', '', 'hotel_nav_bypass', '', noop, null, detailArgsForGateway()
+        );
+        const legacyCall = await callToolGateway(
+          defaultToolGatewayUrl(), 'hotel.call', '', 'hotel_call_bypass', '', noop, null, detailArgsForGateway()
+        );
+        const legacyUnknown = await callToolGateway(
+          defaultToolGatewayUrl(), 'hotel.cancel', '', 'hotel_unknown_bypass', '', noop, null, detailArgsForGateway()
+        );
+        expect(legacyNavigate.raw.indexOf('Unsupported hotel tool: hotel.navigate.')).assertLarger(-1);
+        expect(legacyCall.raw.indexOf('Unsupported hotel tool: hotel.call.')).assertLarger(-1);
+        expect(legacyUnknown.raw.indexOf('Unsupported hotel tool: hotel.cancel.')).assertLarger(-1);
         expect(client.callCount).assertEqual(0);
       } finally {
         configureHotelMcpClientForTests(null);

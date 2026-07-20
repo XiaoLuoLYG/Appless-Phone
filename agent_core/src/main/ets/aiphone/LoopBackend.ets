@@ -181,6 +181,9 @@ function calendarToolDescription(definition: ToolDefinition): string {
 }
 
 export function aiphoneToolDescriptionForModel(toolId: string): string {
+  if (isSurfaceDerivedHotelActionId(toolId)) {
+    return '';
+  }
   const definitions = allToolDefinitions();
   for (let index = 0; index < definitions.length; index++) {
     if (definitions[index].toolId === toolId) {
@@ -188,6 +191,10 @@ export function aiphoneToolDescriptionForModel(toolId: string): string {
     }
   }
   return '';
+}
+
+export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
+  return toolId === 'hotel.navigate' || toolId === 'hotel.call';
 }
 
 export class LoopBackend {
@@ -283,6 +290,9 @@ export class LoopBackend {
     const currentPrompt = request.userPrompt === undefined || request.userPrompt.trim().length === 0 ?
       request.prompt : request.userPrompt;
     for (const definition of allToolDefinitions()) {
+      if (isSurfaceDerivedHotelActionId(definition.toolId)) {
+        continue;
+      }
       if (definition.toolId === 'luckin.order.preview' && !isExplicitLuckinOrderPrompt(currentPrompt)) {
         continue;
       }

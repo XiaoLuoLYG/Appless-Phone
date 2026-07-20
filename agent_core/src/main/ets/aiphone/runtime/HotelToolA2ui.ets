@@ -1,8 +1,8 @@
 import { A2uiAction, A2uiLabelValueData } from './A2uiTypes';
 import { genericToolResultsA2ui } from './DynamicToolA2ui';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
+import { hotelActionsFor } from './HotelActions';
 import {
-  HotelDetailRequest,
   HotelDetailResult,
   HotelRatePlan,
   HotelSearchItem,
@@ -81,28 +81,6 @@ function detailErrorResult(result: HotelDetailResult): DynamicGenericToolResult 
   };
 }
 
-function detailAction(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiAction {
-  const args: HotelDetailRequest = {
-    hotelId: hotel.hotelId,
-    checkInDate: request.checkInDate,
-    checkOutDate: request.checkOutDate,
-    countryCode: request.countryCode,
-    currency: hotel.price.currency.length > 0 ? hotel.price.currency : request.currency,
-    adultCount: request.adultCount,
-    childCount: request.childCount,
-    childAgeDetails: request.childAgeDetails.slice(),
-    roomCount: request.roomCount
-  };
-  return {
-    id: 'hotel.detail',
-    label: '查看实时房型',
-    prompt: '查看 ' + hotel.name + ' 的实时房型与取消政策',
-    kind: 'prompt',
-    variant: 'primary',
-    args: args
-  };
-}
-
 function restoreSearchAction(): A2uiAction {
   return {
     id: 'hotel.search.restore',
@@ -114,8 +92,11 @@ function restoreSearchAction(): A2uiAction {
 }
 
 function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLabelValueData[] {
-  const rows: A2uiLabelValueData[] = [
-    row('酒店 ID', hotel.hotelId.toString()),
+  const rows: A2uiLabelValueData[] = [];
+  if (Number.isInteger(hotel.hotelId) && hotel.hotelId > 0) {
+    rows.push(row('酒店 ID', hotel.hotelId.toString()));
+  }
+  rows.push(
     row('Destination ID', hotel.destinationId),
     row('入住', request.checkInDate + ' → ' + request.checkOutDate),
     row('客人', occupancyText(request.adultCount, request.childCount, request.roomCount)),
@@ -127,7 +108,7 @@ function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLa
     row('设施', hotel.hotelAmenities.join(' · ')),
     row('标签', hotel.tags.join(' · ')),
     row('能力边界', HOTEL_LIMITATION)
-  ];
+  );
   if (hotel.bookingUrl.length > 0) {
     rows.push(row('第三方预订（离开 Appless）', hotel.bookingUrl));
   }
@@ -137,7 +118,11 @@ function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLa
   return rows;
 }
 
-function searchResultFor(hotel: HotelSearchItem, request: HotelSearchRequest): DynamicGenericToolResult {
+function searchResultFor(
+  hotel: HotelSearchItem,
+  request: HotelSearchRequest,
+  canPlace: (action: A2uiAction) => boolean
+): DynamicGenericToolResult {
   const price = hotel.price.hasPrice ? numberText(hotel.price.lowestPrice) + ' ' + hotel.price.currency : '暂无价格';
   const summaryParts: string[] = [price];
   if (hotel.address.length > 0) {
@@ -151,7 +136,7 @@ function searchResultFor(hotel: HotelSearchItem, request: HotelSearchRequest): D
     summary: summaryParts.join(' · '),
     rows: searchRows(hotel, request),
     rawPreview: '',
-    actions: [detailAction(hotel, request)]
+    actions: hotelActionsFor(hotel, request, canPlace)
   };
 }
 
@@ -193,12 +178,16 @@ function rateResultFor(result: HotelDetailResult, rate: HotelRatePlan): DynamicG
   };
 }
 
-export function hotelSearchA2ui(surfaceId: string, result: HotelSearchResult): string {
+export function hotelSearchA2ui(
+  surfaceId: string,
+  result: HotelSearchResult,
+  canPlace: (action: A2uiAction) => boolean
+): string {
   const items: DynamicGenericToolResult[] = [];
   if (!result.ok) {
     items.push(searchErrorResult(result));
   } else {
-    result.hotels.forEach((hotel: HotelSearchItem) => items.push(searchResultFor(hotel, result.query)));
+    result.hotels.forEach((hotel: HotelSearchItem) => items.push(searchResultFor(hotel, result.query, canPlace)));
     if (items.length === 0) {
       items.push({
         sourceTag: HOTEL_SOURCE,

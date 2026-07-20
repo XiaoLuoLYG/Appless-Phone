@@ -77,8 +77,17 @@ import {
 } from './XOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
+import { ActionCatalog } from '../../agent/action/ActionCatalog';
+import {
+  ActionArgsValidator,
+  ActionValidationResult,
+  ClientActionAuthorizer,
+  SurfaceActionAuthorizer,
+  ToolDefinitionLookup
+} from '../../agent/action/ActionCatalogTypes';
 import { hotelDetailDataResult, hotelSearchDataResult } from './HotelDataResult';
 import { HotelContactLookupResult } from './HotelContactLookup';
+import { validateHotelActionArgs } from './HotelActions';
 import { hotelDetailA2ui, hotelFailureA2ui, hotelSearchA2ui } from './HotelToolA2ui';
 import {
   HotelDetailResult,
@@ -125,7 +134,8 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
+import { ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
   PaymentMode,
@@ -12321,13 +12331,58 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
   }
 }
 
+class CurrentHotelToolLookup implements ToolDefinitionLookup {
+  find(toolId: string): ToolDefinition | null {
+    return toolDefinitionForToolId(toolId);
+  }
+}
+
+class RejectHotelSurfaceAction implements SurfaceActionAuthorizer {
+  allows(
+    _conversationId: string,
+    _turnId: string,
+    _surfaceId: string,
+    _actionId: string,
+    _args: Object
+  ): boolean {
+    return false;
+  }
+}
+
+class RejectHotelClientAction implements ClientActionAuthorizer {
+  allows(_actionId: string, _args: Object): boolean {
+    return false;
+  }
+}
+
+class CurrentHotelArgsValidator implements ActionArgsValidator {
+  validate(actionId: string, args: Object): ActionValidationResult {
+    return validateHotelActionArgs(actionId, args);
+  }
+}
+
+const LEGACY_HOTEL_ACTION_CATALOG: ActionCatalog = new ActionCatalog(
+  new CurrentHotelToolLookup(),
+  new RejectHotelSurfaceAction(),
+  new RejectHotelClientAction(),
+  new CurrentHotelArgsValidator()
+);
+
+function canPlaceLegacyHotelAction(action: A2uiAction): boolean {
+  return action.args !== undefined &&
+    LEGACY_HOTEL_ACTION_CATALOG.validatePlacement('hotel.search', action.id, action.args).ok;
+}
+
 async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
+  if (toolId !== 'hotel.search' && toolId !== 'hotel.detail') {
+    return hotelFailureA2ui(surfaceId, toolId, 'Unsupported hotel tool: ' + toolId + '.');
+  }
   const result = await callStructuredHotelTool(toolId, args);
   if (result.error?.code === 'HOTEL_TRANSPORT_EXCEPTION') {
     throw new Error(result.error.message);
   }
   if (toolId === 'hotel.search' && result.status !== 'error') {
-    return hotelSearchA2ui(surfaceId, result.data as HotelSearchResult);
+    return hotelSearchA2ui(surfaceId, result.data as HotelSearchResult, canPlaceLegacyHotelAction);
   }
   if (toolId === 'hotel.detail' && result.status !== 'error') {
     return hotelDetailA2ui(surfaceId, result.data as HotelDetailResult);
@@ -12375,7 +12430,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   if (isLuckinToolId(toolId)) {
     return callLocalLuckinTool(toolId, prompt, surfaceId, args);
   }
-  if (isHotelToolId(toolId)) {
+  if (isHotelToolId(toolId) || toolId.startsWith('hotel.')) {
     return callLocalHotelTool(toolId, surfaceId, args);
   }
   if (toolId === 'travel.search') {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  A2uiAction,
+  HotelSearchResult,
   hotelDetailA2ui,
   hotelSearchA2ui,
   normalizeHotelDetailResult,
@@ -40,51 +42,127 @@ function structured(json: string): Object {
   return JSON.parse(json) as Object;
 }
 
+function hotelSearchResultFixture(): HotelSearchResult {
+  const args: HotelSearchArgsFixture = {
+    originQuery: '深圳酒店',
+    place: '深圳',
+    placeType: 'CITY',
+    countryCode: 'CN',
+    checkInDate: '2026-08-15',
+    stayNights: 2,
+    adultCount: 2,
+    childCount: 0,
+    childAgeDetails: [],
+    roomCount: 1,
+    currency: 'CNY',
+    size: 10
+  };
+  const request = parseHotelSearchRequest(args);
+  if (request.value === null) {
+    throw new Error('hotel search fixture is invalid');
+  }
+  const payload: McpToolResultPayload = {
+    isError: false,
+    structuredContent: structured(
+      '{"success":true,"message":"酒店搜索成功","hotelInformationList":[{"hotelId":47675,' +
+      '"bookingUrl":"https://hotel.example/47675","name":"深圳测试酒店","nameEn":"Shenzhen Test Hotel",' +
+      '"brand":null,"address":"深圳市南山区","destinationId":"6046792","latitude":22.5,"longitude":114.0,' +
+      '"distanceInMeters":null,"starRating":5,"price":{"message":"2 晚参考价","hasPrice":true,' +
+      '"currency":"USD","lowestPrice":1100},"areaCode":"NANSHAN","description":"provider description",' +
+      '"imageUrl":"https://img.example/hotel.jpg","hotelAmenities":["Wi-Fi"],"tags":["商务"]}]}'
+    )
+  };
+  const result = normalizeHotelSearchResult(payload, request.value);
+  result.hotels[0].contact = {
+    displayPhone: '+86 755 1234 5678',
+    dialPhone: '+8675512345678',
+    provider: 'Google Places',
+    providerPlaceId: 'places/ChIJ-real-hotel'
+  };
+  return result;
+}
+
+function allowAll(_action: A2uiAction): boolean {
+  return true;
+}
+
 export default function hotelToolA2uiTest() {
   describe('hotelToolA2ui', () => {
-    it('creates a hotel search surface with exact detail action args', 0, () => {
-      const args: HotelSearchArgsFixture = {
-        originQuery: '深圳酒店',
-        place: '深圳',
-        placeType: 'CITY',
-        countryCode: 'CN',
-        checkInDate: '2026-08-15',
-        stayNights: 2,
-        adultCount: 2,
-        childCount: 0,
-        childAgeDetails: [],
-        roomCount: 1,
-        currency: 'CNY',
-        size: 10
-      };
-      const request = parseHotelSearchRequest(args);
-      if (request.value === null) {
-        return;
-      }
-      const payload: McpToolResultPayload = {
-        isError: false,
-        structuredContent: structured(
-          '{"success":true,"message":"酒店搜索成功","hotelInformationList":[{"hotelId":47675,' +
-          '"bookingUrl":"https://hotel.example/47675","name":"深圳测试酒店","nameEn":"Shenzhen Test Hotel",' +
-          '"brand":null,"address":"深圳市南山区","destinationId":"6046792","latitude":22.5,"longitude":114.0,' +
-          '"distanceInMeters":null,"starRating":5,"price":{"message":"2 晚参考价","hasPrice":true,' +
-          '"currency":"CNY","lowestPrice":1100},"areaCode":"NANSHAN","description":"provider description",' +
-          '"imageUrl":"https://img.example/hotel.jpg","hotelAmenities":["Wi-Fi"],"tags":["商务"]}]}'
-        )
-      };
-      const jsonl = hotelSearchA2ui('hotel_search', normalizeHotelSearchResult(payload, request.value));
+    it('creates a hotel search surface with exact truthful action args', 0, () => {
+      const jsonl = hotelSearchA2ui('hotel_search', hotelSearchResultFixture(), allowAll);
 
       expect(jsonl.indexOf('"intent":"hotel"')).assertLarger(-1);
       expect(jsonl.indexOf('"toolName":"hotel.search"')).assertLarger(-1);
       expect(jsonl.indexOf('"id":"hotel.detail"')).assertLarger(-1);
-      expect(jsonl.indexOf('"hotelId":47675')).assertLarger(-1);
-      expect(jsonl.indexOf('"checkInDate":"2026-08-15"')).assertLarger(-1);
-      expect(jsonl.indexOf('"checkOutDate":"2026-08-17"')).assertLarger(-1);
-      expect(jsonl.indexOf('"adultCount":2')).assertLarger(-1);
-      expect(jsonl.indexOf('"roomCount":1')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"hotel.call"')).assertLarger(-1);
+      expect(jsonl.indexOf('"args":{"hotelId":47675,"checkInDate":"2026-08-15",' +
+        '"checkOutDate":"2026-08-17","countryCode":"CN","currency":"CNY","adultCount":2,' +
+        '"childCount":0,"childAgeDetails":[],"roomCount":1}')).assertLarger(-1);
+      expect(jsonl.indexOf('"args":{"hotelId":47675,"name":"深圳测试酒店",' +
+        '"address":"深圳市南山区","latitude":22.5,"longitude":114}')).assertLarger(-1);
+      expect(jsonl.indexOf('"args":{"hotelId":47675,"name":"深圳测试酒店",' +
+        '"displayPhone":"+86 755 1234 5678","dialPhone":"+8675512345678",' +
+        '"provider":"Google Places","providerPlaceId":"places/ChIJ-real-hotel"}')).assertLarger(-1);
       expect(jsonl.indexOf('搜索阶段仅传成人数')).assertLarger(-1);
       expect(jsonl.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(jsonl.indexOf('hotel.book')).assertEqual(-1);
+      expect(jsonl.indexOf('预订成功')).assertEqual(-1);
       expect(jsonl.indexOf('orderId')).assertEqual(-1);
+    });
+
+    it('omits actions whose real fields are absent or invalid', 0, () => {
+      const missingCoordinates = hotelSearchResultFixture();
+      missingCoordinates.hotels[0].latitude = null;
+      missingCoordinates.hotels[0].longitude = null;
+      const noNavigate = hotelSearchA2ui('hotel_no_nav', missingCoordinates, allowAll);
+      expect(noNavigate.indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(noNavigate.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
+      expect(noNavigate.indexOf('"id":"hotel.call"')).assertLarger(-1);
+
+      const missingContact = hotelSearchResultFixture();
+      missingContact.hotels[0].contact = undefined;
+      const noCall = hotelSearchA2ui('hotel_no_call', missingContact, allowAll);
+      expect(noCall.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+      expect(noCall.indexOf('"id":"hotel.call"')).assertEqual(-1);
+
+      const unsafeContact = hotelSearchResultFixture();
+      if (unsafeContact.hotels[0].contact !== undefined) {
+        unsafeContact.hotels[0].contact.dialPhone = '+86;75512345678';
+      }
+      const noUnsafeCall = hotelSearchA2ui('hotel_unsafe_call', unsafeContact, allowAll);
+      expect(noUnsafeCall.indexOf('"id":"hotel.call"')).assertEqual(-1);
+
+      const invalidCoordinates = hotelSearchResultFixture();
+      invalidCoordinates.hotels[0].latitude = 91;
+      const noInvalidNavigate = hotelSearchA2ui('hotel_invalid_nav', invalidCoordinates, allowAll);
+      expect(noInvalidNavigate.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
+
+      const zeroCoordinates = hotelSearchResultFixture();
+      zeroCoordinates.hotels[0].latitude = 0;
+      zeroCoordinates.hotels[0].longitude = 0;
+      const zeroNavigate = hotelSearchA2ui('hotel_zero_nav', zeroCoordinates, allowAll);
+      expect(zeroNavigate.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+
+      const invalidId = hotelSearchResultFixture();
+      invalidId.hotels[0].hotelId = 0;
+      const noActions = hotelSearchA2ui('hotel_no_actions', invalidId, allowAll);
+      expect(noActions.indexOf('"id":"hotel.detail"')).assertEqual(-1);
+      expect(noActions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
+      expect(noActions.indexOf('"id":"hotel.call"')).assertEqual(-1);
+      expect(noActions.indexOf('"label":"酒店 ID"')).assertEqual(-1);
+    });
+
+    it('omits a valid candidate when placement authority denies it', 0, () => {
+      const jsonl = hotelSearchA2ui(
+        'hotel_catalog_denial',
+        hotelSearchResultFixture(),
+        (action: A2uiAction): boolean => action.id !== 'hotel.call'
+      );
+
+      expect(jsonl.indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"hotel.call"')).assertEqual(-1);
     });
 
     it('renders exact provider rate and cancellation fields without order success', 0, () => {
