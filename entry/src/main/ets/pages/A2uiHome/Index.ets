@@ -162,7 +162,8 @@ export function shouldRouteToHotelAgent(prompt: string): boolean {
   if (value.length === 0 ||
     /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
     /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email|meeting rooms?|classrooms?|newsrooms?)\b/.test(value) ||
-    /\brooms?\s+(to improve|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value)) {
+    /\brooms?\s+(to improve|to maneuver|to manoeuvre|for growth|for improvement|for maneuver|for manoeuvre|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value) ||
+    /\brooms?\s+in\s+(this|the)\s+(paragraph|document|email)\b/.test(value)) {
     return false;
   }
   const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
@@ -179,11 +180,18 @@ export function shouldRouteToHotelAgent(prompt: string): boolean {
     /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
     return true;
   }
-  const hasExplicitRoomRequest =
-    /\b(book|find|reserve)\s+(a|an|one|some)?\s*rooms?\b/.test(value) ||
-    /\b(search|look|looking)\s+for\s+(a|an|one|some)?\s*rooms?\b/.test(value) ||
-    /\brooms?\s+(in|near|at)\s+[a-z0-9]/.test(value);
-  if (hasExplicitRoomRequest) {
+  const hasRoomTerm = /\b(guest\s+)?rooms?\b/.test(value);
+  const hasRoomBooking =
+    /\b(book|reserve)\s+(a|an|one|some)?\s*(guest\s+)?rooms?\b/.test(value);
+  const hasRoomLocation =
+    /\b(guest\s+)?rooms?\s+(in|near|at)\s+(?!this\b)(?!the\s+(paragraph|document|email)\b)[a-z0-9]/.test(value);
+  const hasRoomSearch = /\b(find|search|look|looking)\b/.test(value);
+  const hasLodgingContext =
+    /\b(tonight|tomorrow|nights?|guests?|check-?in|check-?out|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(value) ||
+    /\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b/.test(value);
+  if (hasRoomBooking ||
+    hasRoomLocation ||
+    (hasRoomTerm && hasRoomSearch && hasLodgingContext)) {
     return true;
   }
   if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||

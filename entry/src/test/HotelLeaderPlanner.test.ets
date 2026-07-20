@@ -170,6 +170,9 @@ export default function hotelLeaderPlannerTest() {
       expect(shouldRouteToHotelAgent('rooms near Shanghai airport')).assertTrue();
       expect(shouldRouteToHotelAgent('find a room in Shanghai')).assertTrue();
       expect(shouldRouteToHotelAgent('book a room near the airport')).assertTrue();
+      expect(shouldRouteToHotelAgent('reserve a room for August 15')).assertTrue();
+      expect(shouldRouteToHotelAgent('search for a room for two nights')).assertTrue();
+      expect(shouldRouteToHotelAgent('find a guest room for 2 guests tonight')).assertTrue();
       expect(shouldRouteToHotelAgent('帮我订明天的高铁票')).assertFalse();
       expect(shouldRouteToHotelAgent('打开 Gmail')).assertFalse();
       expect(shouldRouteToHotelAgent('预订')).assertFalse();
@@ -184,6 +187,12 @@ export default function hotelLeaderPlannerTest() {
       expect(shouldRouteToHotelAgent('find a meeting room in Shanghai')).assertFalse();
       expect(shouldRouteToHotelAgent('need room to improve performance')).assertFalse();
       expect(shouldRouteToHotelAgent('I need room for growth')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a room for growth')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a room for improvement')).assertFalse();
+      expect(shouldRouteToHotelAgent('search for room to maneuver')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a room in this paragraph')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a room in this document')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a room in this email')).assertFalse();
       expect(shouldRouteToHotelAgent('room layout ideas')).assertFalse();
       expect(shouldRouteToHotelAgent('search classroom layout')).assertFalse();
       expect(shouldRouteToHotelAgent('send a newsroom email')).assertFalse();

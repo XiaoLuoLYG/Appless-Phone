@@ -59,6 +59,13 @@ interface FakeActionSuccessOutput {
   status: string;
 }
 
+interface FakeSystemIntentSuccessOutput {
+  actionId: string;
+  status: string;
+  uri: string;
+  message: string;
+}
+
 class FixedHotelModel implements LocalModel {
   async complete(_prompt: string): Promise<string> {
     return SEARCH_JSON;
@@ -733,11 +740,65 @@ export default function hotelAgentRuntimeTest() {
         completedStepIds: ['step-1'],
         outputs: wrongActionOutputs
       };
+      const wrongPetalOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.navigate',
+          status: 'opened',
+          uri: opener.uris[0] + '&spoofed=1',
+          message: 'Petal Maps opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const wrongPetal: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: wrongPetalOutputs
+      };
+      const swappedSchemeOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.navigate',
+          status: 'opened',
+          uri: 'tel:+8675512345678',
+          message: 'Petal Maps opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const swappedScheme: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: swappedSchemeOutputs
+      };
+      const forgedMessageOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.navigate',
+          status: 'opened',
+          uri: opener.uris[0],
+          message: 'Maps opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const forgedMessage: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: forgedMessageOutputs
+      };
       const invalid: ActionResultPayload[] = [
         exactBase,
         duplicateStep,
         foreignOutput,
-        wrongAction
+        wrongAction,
+        wrongPetal,
+        swappedScheme,
+        forgedMessage
       ];
       invalid.forEach((payload: ActionResultPayload) => {
         bus.publish({
@@ -752,6 +813,336 @@ export default function hotelAgentRuntimeTest() {
       expect(settled).assertFalse();
       opener.release.open();
       expect(await running).assertTrue();
+      runtime.dispose();
+    });
+
+    it('rejects wrong dial URI swapped scheme and forged call message with exact IDs', 0, async () => {
+      const bus = new TrackingBus();
+      const opener = new DeferredFirstOpener();
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        opener
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const running = runtime.runAction(hotelCallAction(searchHotel()));
+      let settled = false;
+      running.then((_ok: boolean): void => {
+        settled = true;
+      });
+      await opener.started.promise;
+      const actionRun = messagesOf(bus, AgentMessageType.ACTION_RUN)[0];
+      const run = actionRun.payload as ActionRunPayload;
+      const context = runtime.currentActionContext();
+      const exactBase: ActionResultPayload = {
+        surfaceId: context === null ? '' : context.surfaceId,
+        planId: 'direct:' + run.runId,
+        runId: run.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: []
+      };
+      const wrongDialOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.call',
+          status: 'opened',
+          uri: 'tel:+8613800138000',
+          message: 'System dialer opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const swappedSchemeOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.call',
+          status: 'opened',
+          uri: 'petalmaps://navigation?daddr=114.0579,22.5431',
+          message: 'System dialer opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const forgedMessageOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.call',
+          status: 'opened',
+          uri: opener.uris[0],
+          message: 'Phone opened.'
+        } as FakeSystemIntentSuccessOutput
+      }];
+      const invalidOutputs: ActionPlanStepOutput[][] = [
+        wrongDialOutputs,
+        swappedSchemeOutputs,
+        forgedMessageOutputs
+      ];
+      invalidOutputs.forEach((outputs: ActionPlanStepOutput[]) => {
+        const payload: ActionResultPayload = {
+          surfaceId: exactBase.surfaceId,
+          planId: exactBase.planId,
+          runId: exactBase.runId,
+          status: 'success',
+          completedStepIds: ['step-1'],
+          outputs: outputs
+        };
+        bus.publish({
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: actionRun.conversationId,
+          turnId: actionRun.turnId,
+          taskId: actionRun.taskId,
+          payload: payload
+        });
+      });
+      await flush();
+      const ignoredAll = !settled;
+      opener.release.open();
+      const realOutcome = await running;
+      expect(ignoredAll).assertTrue();
+      expect(realOutcome).assertTrue();
+      runtime.dispose();
+    });
+
+    it('settles actual canceled and error Action Agent result shapes without timeout', 0, async () => {
+      const canceledBus = new TrackingBus();
+      const canceledOpener = new DeferredFirstOpener();
+      const canceledRuntime = new HotelAgentRuntime(options(
+        canceledBus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        canceledOpener
+      ));
+      expect((await canceledRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const canceledRun = canceledRuntime.runAction(hotelNavigateAction(searchHotel()));
+      let canceledSettled = false;
+      let canceledOutcome = true;
+      canceledRun.then((ok: boolean): void => {
+        canceledSettled = true;
+        canceledOutcome = ok;
+      });
+      await canceledOpener.started.promise;
+      const canceledMessage = messagesOf(canceledBus, AgentMessageType.ACTION_RUN)[0];
+      const canceledPayload = canceledMessage.payload as ActionRunPayload;
+      const canceledContext = canceledRuntime.currentActionContext();
+      const actualCanceled: ActionResultPayload = {
+        surfaceId: canceledContext === null ? '' : canceledContext.surfaceId,
+        planId: 'direct:' + canceledPayload.runId,
+        runId: canceledPayload.runId,
+        status: 'canceled',
+        completedStepIds: [],
+        errorCode: 'TURN_CANCELED',
+        message: 'Action run canceled.'
+      };
+      canceledBus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: canceledMessage.conversationId,
+        turnId: canceledMessage.turnId,
+        taskId: canceledMessage.taskId,
+        payload: actualCanceled
+      });
+      await flush();
+      const canceledSettledBeforeRelease = canceledSettled;
+      canceledOpener.release.open();
+      await canceledRun;
+      expect(canceledSettledBeforeRelease).assertTrue();
+      expect(canceledOutcome).assertFalse();
+      canceledRuntime.dispose();
+
+      const outcomeErrorBus = new TrackingBus();
+      const outcomeErrorOpener = new DeferredFirstOpener();
+      const outcomeErrorRuntime = new HotelAgentRuntime(options(
+        outcomeErrorBus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        outcomeErrorOpener
+      ));
+      expect((await outcomeErrorRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const outcomeErrorRun = outcomeErrorRuntime.runAction(hotelNavigateAction(searchHotel()));
+      let outcomeErrorSettled = false;
+      let outcomeErrorValue = true;
+      outcomeErrorRun.then((ok: boolean): void => {
+        outcomeErrorSettled = true;
+        outcomeErrorValue = ok;
+      });
+      await outcomeErrorOpener.started.promise;
+      const outcomeErrorMessage = messagesOf(outcomeErrorBus, AgentMessageType.ACTION_RUN)[0];
+      const outcomeErrorPayload = outcomeErrorMessage.payload as ActionRunPayload;
+      const outcomeErrorContext = outcomeErrorRuntime.currentActionContext();
+      const actualOutcomeError: ActionResultPayload = {
+        surfaceId: outcomeErrorContext === null ? '' : outcomeErrorContext.surfaceId,
+        planId: 'direct:' + outcomeErrorPayload.runId,
+        runId: outcomeErrorPayload.runId,
+        status: 'error',
+        completedStepIds: [],
+        stepId: '',
+        errorCode: 'ACTION_EXECUTION_FAILED',
+        message: 'Action failed.'
+      };
+      outcomeErrorBus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: outcomeErrorMessage.conversationId,
+        turnId: outcomeErrorMessage.turnId,
+        taskId: outcomeErrorMessage.taskId,
+        payload: actualOutcomeError
+      });
+      await flush();
+      const outcomeErrorSettledBeforeRelease = outcomeErrorSettled;
+      outcomeErrorOpener.release.open();
+      await outcomeErrorRun;
+      expect(outcomeErrorSettledBeforeRelease).assertTrue();
+      expect(outcomeErrorValue).assertFalse();
+      outcomeErrorRuntime.dispose();
+
+      const inputErrorBus = new TrackingBus();
+      const inputErrorOpener = new DeferredFirstOpener();
+      const inputErrorRuntime = new HotelAgentRuntime(options(
+        inputErrorBus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        inputErrorOpener
+      ));
+      expect((await inputErrorRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const inputErrorRun = inputErrorRuntime.runAction(hotelNavigateAction(searchHotel()));
+      let inputErrorSettled = false;
+      let inputErrorValue = true;
+      inputErrorRun.then((ok: boolean): void => {
+        inputErrorSettled = true;
+        inputErrorValue = ok;
+      });
+      await inputErrorOpener.started.promise;
+      const inputErrorMessage = messagesOf(inputErrorBus, AgentMessageType.ACTION_RUN)[0];
+      const inputErrorPayload = inputErrorMessage.payload as ActionRunPayload;
+      const inputErrorContext = inputErrorRuntime.currentActionContext();
+      const actualInputError: ActionResultPayload = {
+        surfaceId: inputErrorContext === null ? '' : inputErrorContext.surfaceId,
+        planId: 'direct:' + inputErrorPayload.runId,
+        runId: inputErrorPayload.runId,
+        status: 'error',
+        completedStepIds: [],
+        errorCode: 'ACTION_RUN_IDENTITY_MISMATCH',
+        message: 'Action run does not match a ready plan.'
+      };
+      inputErrorBus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: inputErrorMessage.conversationId,
+        turnId: inputErrorMessage.turnId,
+        taskId: inputErrorMessage.taskId,
+        payload: actualInputError
+      });
+      await flush();
+      const inputErrorSettledBeforeRelease = inputErrorSettled;
+      inputErrorOpener.release.open();
+      await inputErrorRun;
+      expect(inputErrorSettledBeforeRelease).assertTrue();
+      expect(inputErrorValue).assertFalse();
+      inputErrorRuntime.dispose();
+    });
+
+    it('ignores malformed canceled and error Action Agent terminal variants', 0, async () => {
+      const canceledBus = new TrackingBus();
+      const canceledOpener = new DeferredFirstOpener();
+      const canceledRuntime = new HotelAgentRuntime(options(
+        canceledBus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        canceledOpener
+      ));
+      expect((await canceledRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const canceledRun = canceledRuntime.runAction(hotelNavigateAction(searchHotel()));
+      let canceledSettled = false;
+      canceledRun.then((_ok: boolean): void => {
+        canceledSettled = true;
+      });
+      await canceledOpener.started.promise;
+      const canceledMessage = messagesOf(canceledBus, AgentMessageType.ACTION_RUN)[0];
+      const canceledPayload = canceledMessage.payload as ActionRunPayload;
+      const canceledContext = canceledRuntime.currentActionContext();
+      const malformedCanceled: ActionResultPayload = {
+        surfaceId: canceledContext === null ? '' : canceledContext.surfaceId,
+        planId: 'direct:' + canceledPayload.runId,
+        runId: canceledPayload.runId,
+        status: 'canceled',
+        completedStepIds: [],
+        stepId: 'step-1',
+        errorCode: 'TURN_CANCELED',
+        message: 'Action run canceled.'
+      };
+      canceledBus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: canceledMessage.conversationId,
+        turnId: canceledMessage.turnId,
+        taskId: canceledMessage.taskId,
+        payload: malformedCanceled
+      });
+      await flush();
+      const canceledIgnored = !canceledSettled;
+      canceledOpener.release.open();
+      const canceledRealOutcome = await canceledRun;
+      expect(canceledIgnored).assertTrue();
+      expect(canceledRealOutcome).assertTrue();
+      canceledRuntime.dispose();
+
+      const errorBus = new TrackingBus();
+      const errorOpener = new DeferredFirstOpener();
+      const errorRuntime = new HotelAgentRuntime(options(
+        errorBus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        errorOpener
+      ));
+      expect((await errorRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const errorRun = errorRuntime.runAction(hotelNavigateAction(searchHotel()));
+      let errorSettled = false;
+      errorRun.then((_ok: boolean): void => {
+        errorSettled = true;
+      });
+      await errorOpener.started.promise;
+      const errorMessage = messagesOf(errorBus, AgentMessageType.ACTION_RUN)[0];
+      const errorPayload = errorMessage.payload as ActionRunPayload;
+      const errorContext = errorRuntime.currentActionContext();
+      const malformedError: ActionResultPayload = {
+        surfaceId: errorContext === null ? '' : errorContext.surfaceId,
+        planId: 'direct:' + errorPayload.runId,
+        runId: errorPayload.runId,
+        status: 'error',
+        completedStepIds: [],
+        outputs: [],
+        errorCode: 'ACTION_EXECUTION_FAILED',
+        message: 'Action failed.'
+      };
+      errorBus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: errorMessage.conversationId,
+        turnId: errorMessage.turnId,
+        taskId: errorMessage.taskId,
+        payload: malformedError
+      });
+      await flush();
+      const errorIgnored = !errorSettled;
+      errorOpener.release.open();
+      const errorRealOutcome = await errorRun;
+      expect(errorIgnored).assertTrue();
+      expect(errorRealOutcome).assertTrue();
+      errorRuntime.dispose();
+    });
+
+    it('does not publish a system action run when its authorized URI is empty', 0, async () => {
+      const bus = new TrackingBus();
+      const opener = new RecordingOpener();
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        opener
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const invalidCall = hotelCallAction(searchHotel());
+      const invalidArgs = invalidCall.args as Record<
+        string,
+        Object | string | number | boolean | null | undefined
+      >;
+      invalidArgs.dialPhone = '';
+      expect(await runtime.runAction(invalidCall)).assertFalse();
+      expect(messagesOf(bus, AgentMessageType.ACTION_RUN).length).assertEqual(0);
+      expect(opener.uris.length).assertEqual(0);
       runtime.dispose();
     });
 

@@ -22,7 +22,9 @@ import {
   DataAgent,
   DataResult,
   DataTaskExecutor,
+  HotelCallArgs,
   HotelDetailResult,
+  HotelNavigateArgs,
   HotelRatePlan,
   HotelSearchItem,
   HotelSearchResult,
@@ -41,8 +43,10 @@ import {
   UiTaskRenderer,
   UserInputPayload,
   callStructuredHotelTool,
+  hotelDialUri,
   hotelDetailA2ui,
   hotelFailureA2ui,
+  hotelNavigationUri,
   hotelPendingA2ui,
   hotelSearchA2ui,
   parseA2uiJsonl,
@@ -139,6 +143,8 @@ interface PendingAction {
   planId: string;
   actionId: string;
   stepId: string;
+  expectedOutputUri: string;
+  expectedOutputMessage: string;
   generation: number;
   expectedFollowUpUiTaskId: string;
   expectedFollowUpDataTaskId: string;
@@ -242,6 +248,34 @@ function isStringArray(value: HotelValue): boolean {
   const values = value as HotelValue[];
   for (let index = 0; index < values.length; index++) {
     if (typeof values[index] !== 'string') {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isActionOutputs(value: HotelValue): boolean {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  const outputs = value as HotelValue[];
+  for (let index = 0; index < outputs.length; index++) {
+    const entry = recordOf(outputs[index]);
+    if (entry === null ||
+      !hasOnlyKeys(entry, 'output,stepId') ||
+      !nonempty(entry['stepId']) ||
+      entry['output'] === undefined) {
+      return false;
+    }
+    const output = entry['output'];
+    if (output !== null &&
+      typeof output !== 'object' &&
+      typeof output !== 'string' &&
+      typeof output !== 'number' &&
+      typeof output !== 'boolean') {
+      return false;
+    }
+    if (typeof output === 'number' && !Number.isFinite(output)) {
       return false;
     }
   }
@@ -509,24 +543,38 @@ function actionResultPayload(message: AgentMessage): ActionResultPayload | null 
   const keys = Object.keys(payload).sort().join(',');
   if (status === 'success') {
     if (keys !== 'completedStepIds,outputs,planId,runId,status,surfaceId' ||
-      !Array.isArray(payload['outputs'])) {
+      !isActionOutputs(payload['outputs'])) {
       return null;
     }
   } else if (status === 'paused') {
     if (keys !==
       'completedStepIds,errorCode,message,outputs,planId,runId,status,stepId,surfaceId' ||
-      !Array.isArray(payload['outputs']) ||
+      !isActionOutputs(payload['outputs']) ||
       !nonempty(payload['stepId']) ||
       !nonempty(payload['errorCode']) ||
       !nonempty(payload['message'])) {
       return null;
     }
-  } else if (keys !==
-    'completedStepIds,errorCode,message,planId,runId,status,stepId,surfaceId' ||
-    !nonempty(payload['stepId']) ||
-    !nonempty(payload['errorCode']) ||
-    !nonempty(payload['message'])) {
-    return null;
+  } else if (status === 'canceled') {
+    const canceledKeys = 'completedStepIds,errorCode,message,planId,runId,status,surfaceId';
+    const canceledOutputKeys =
+      'completedStepIds,errorCode,message,outputs,planId,runId,status,surfaceId';
+    if ((keys !== canceledKeys && keys !== canceledOutputKeys) ||
+      !nonempty(payload['errorCode']) ||
+      !nonempty(payload['message']) ||
+      (keys === canceledOutputKeys && !isActionOutputs(payload['outputs']))) {
+      return null;
+    }
+  } else {
+    const errorKeys = 'completedStepIds,errorCode,message,planId,runId,status,surfaceId';
+    const errorStepKeys =
+      'completedStepIds,errorCode,message,planId,runId,status,stepId,surfaceId';
+    if ((keys !== errorKeys && keys !== errorStepKeys) ||
+      !nonempty(payload['errorCode']) ||
+      !nonempty(payload['message']) ||
+      (keys === errorStepKeys && typeof payload['stepId'] !== 'string')) {
+      return null;
+    }
   }
   return message.payload as ActionResultPayload;
 }
@@ -558,8 +606,9 @@ function expectedActionSuccess(
   }
   return hasOnlyKeys(output, 'actionId,message,status,uri') &&
     output['status'] === 'opened' &&
-    nonempty(output['uri']) &&
-    nonempty(output['message']);
+    pending.expectedOutputUri.length > 0 &&
+    output['uri'] === pending.expectedOutputUri &&
+    output['message'] === pending.expectedOutputMessage;
 }
 
 function actionProgressPayload(message: AgentMessage): ActionProgressPayload | null {
@@ -1359,6 +1408,19 @@ export class HotelAgentRuntime {
     if (!current.ok) {
       return Promise.resolve(false);
     }
+    let expectedOutputUri = '';
+    let expectedOutputMessage = '';
+    if (action.id === 'hotel.navigate') {
+      expectedOutputUri = hotelNavigationUri(action.args as HotelNavigateArgs);
+      expectedOutputMessage = 'Petal Maps opened.';
+    } else if (action.id === 'hotel.call') {
+      expectedOutputUri = hotelDialUri((action.args as HotelCallArgs).dialPhone);
+      expectedOutputMessage = 'System dialer opened.';
+    }
+    if ((action.id === 'hotel.navigate' || action.id === 'hotel.call') &&
+      expectedOutputUri.length === 0) {
+      return Promise.resolve(false);
+    }
     const runId = this.ids.nextId('hotel-action-run');
     const taskId = this.ids.nextId('hotel-action-task');
     const planId = 'direct:' + runId;
@@ -1389,6 +1451,8 @@ export class HotelAgentRuntime {
         planId: planId,
         actionId: action.id,
         stepId: 'step-1',
+        expectedOutputUri: expectedOutputUri,
+        expectedOutputMessage: expectedOutputMessage,
         generation: activeTurn.generation,
         expectedFollowUpUiTaskId: followUpUiTaskId,
         expectedFollowUpDataTaskId: followUpDataTaskId,
