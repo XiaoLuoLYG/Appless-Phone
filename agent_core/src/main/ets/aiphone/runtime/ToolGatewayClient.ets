@@ -105,7 +105,7 @@ import {
   calendarResultsFromComposioObservation,
   normalizedCalendarArgsForPrompt
 } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
+import { callHotelContactLookup, callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
@@ -12074,6 +12074,22 @@ function hotelDataSource(operation: string): DataSource {
   };
 }
 
+function hotelPlacesDataSource(): DataSource {
+  return {
+    provider: 'Google Places',
+    backend: 'local_adapter',
+    operation: 'hotelContactLookup',
+    fetchedAt: hotelTimestampProvider()
+  };
+}
+
+function addHotelWarning(warnings: string[], warning: string): void {
+  if (warning.length === 0 || warnings.length >= 3 || warnings.indexOf(warning) >= 0) {
+    return;
+  }
+  warnings.push(warning);
+}
+
 function sanitizedHotelTransportMessage(message: string): string {
   let sanitized = message.length > 0 ? message : 'RollingGo transport exception.';
   if (localProviderConfig.hotelMcpKey.length > 0) {
@@ -12114,7 +12130,25 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
       if (!response.ok || response.result === null) {
         return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
       }
-      return hotelSearchDataResult(normalizeHotelSearchResult(response.result, parsed.value), [source]);
+      const result = normalizeHotelSearchResult(response.result, parsed.value);
+      if (!result.ok) {
+        return hotelSearchDataResult(result, [source]);
+      }
+      const warnings: string[] = [];
+      let placesResponseReceived = false;
+      for (let index = 0; index < result.hotels.length; index++) {
+        const lookup = await callHotelContactLookup(result.hotels[index], localProviderConfig.googleMapsApiKey);
+        placesResponseReceived = placesResponseReceived || lookup.sourceReceived;
+        addHotelWarning(warnings, lookup.warning);
+        if (lookup.contact !== null) {
+          result.hotels[index].contact = lookup.contact;
+        }
+      }
+      const sources: DataSource[] = [source];
+      if (placesResponseReceived) {
+        sources.push(hotelPlacesDataSource());
+      }
+      return hotelSearchDataResult(result, sources, warnings);
     } catch (error) {
       const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
       return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);

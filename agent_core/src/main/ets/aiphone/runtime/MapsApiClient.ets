@@ -3,11 +3,23 @@ import util from '@ohos.util';
 import { A2uiFoodData, A2uiLabelValueData } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
+import {
+  HotelContactCandidate,
+  HotelContactDetails,
+  HotelContactLookupResult,
+  hotelContactFromDetails,
+  selectHotelContactCandidate
+} from './HotelContactLookup';
+import { HotelSearchItem } from './HotelToolTypes';
 
 const PLACES_SEARCH_URL: string = 'https://places.googleapis.com/v1/places:searchText';
 const PLACES_BASE_URL: string = 'https://places.googleapis.com/v1/places/';
 const PLACES_FIELD_MASK: string = 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.googleMapsUri,places.currentOpeningHours.openNow';
 const PLACE_DETAIL_FIELD_MASK: string = 'id,displayName,formattedAddress,location,rating,googleMapsUri,currentOpeningHours.openNow';
+export const HOTEL_CONTACT_SEARCH_FIELD_MASK: string =
+  'places.id,places.displayName,places.formattedAddress,places.location';
+export const HOTEL_CONTACT_DETAIL_FIELD_MASK: string =
+  'id,displayName,formattedAddress,location,nationalPhoneNumber,internationalPhoneNumber';
 
 interface MapsTextSearchPayload {
   places?: MapsPlacePayload[];
@@ -27,6 +39,8 @@ interface MapsPlacePayload {
   currentOpeningHours?: MapsOpeningHours;
   displayName?: MapsDisplayName;
   location?: MapsLocation;
+  nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
 }
 
 interface MapsDisplayName {
@@ -56,6 +70,10 @@ interface GoogleApiError {
 
 interface GoogleApiErrorPayload {
   error?: GoogleApiError;
+}
+
+interface PlacesResponseMarker {
+  received: boolean;
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -297,7 +315,62 @@ export function mapsTextSearchResultsFromPayload(rawJson: string, query: string)
   return results;
 }
 
-async function requestJson(method: http.RequestMethod, url: string, apiKey: string, fieldMask: string, body: Object | null): Promise<Object> {
+function optionalCoordinate(value: number | undefined): number | null {
+  return value === undefined || !Number.isFinite(value) ? null : value;
+}
+
+function hotelContactCandidate(place: MapsPlacePayload): HotelContactCandidate {
+  const location = place.location;
+  return {
+    providerPlaceId: textOf(place.id).trim(),
+    displayName: place.displayName === undefined ? '' : textOf(place.displayName.text).trim(),
+    formattedAddress: textOf(place.formattedAddress).trim(),
+    latitude: location === undefined ? null : optionalCoordinate(location.latitude),
+    longitude: location === undefined ? null : optionalCoordinate(location.longitude)
+  };
+}
+
+export function hotelContactCandidatesFromPayload(rawJson: string): HotelContactCandidate[] {
+  const payload = JSON.parse(rawJson) as MapsTextSearchPayload;
+  const places = Array.isArray(payload.places) ? payload.places : [];
+  const candidates: HotelContactCandidate[] = [];
+  for (let index = 0; index < places.length; index++) {
+    candidates.push(hotelContactCandidate(places[index]));
+  }
+  return candidates;
+}
+
+export function hotelContactDetailsFromPayload(rawJson: string): HotelContactDetails {
+  const place = JSON.parse(rawJson) as MapsPlacePayload;
+  const candidate = hotelContactCandidate(place);
+  return {
+    providerPlaceId: candidate.providerPlaceId,
+    displayName: candidate.displayName,
+    formattedAddress: candidate.formattedAddress,
+    latitude: candidate.latitude,
+    longitude: candidate.longitude,
+    nationalPhoneNumber: textOf(place.nationalPhoneNumber).trim(),
+    internationalPhoneNumber: textOf(place.internationalPhoneNumber).trim()
+  };
+}
+
+function boundedHotelContactWarning(message: string): string {
+  return message.substring(0, 240);
+}
+
+function hotelContactSearchQuery(hotel: HotelSearchItem): string {
+  const name = hotel.name.trim().length > 0 ? hotel.name.trim() : hotel.nameEn.trim();
+  return hotel.address.trim().length > 0 ? name + ' ' + hotel.address.trim() : name;
+}
+
+async function requestJson(
+  method: http.RequestMethod,
+  url: string,
+  apiKey: string,
+  fieldMask: string,
+  body: Object | null,
+  responseMarker?: PlacesResponseMarker
+): Promise<Object> {
   const request = http.createHttp();
   try {
     const headers: Record<string, string> = {
@@ -318,6 +391,9 @@ async function requestJson(method: http.RequestMethod, url: string, apiKey: stri
     }
     aiLogInfo('[AIPhone][MapsApiHttpStart] url=' + url.substring(0, 180));
     const response = await request.request(url, options);
+    if (responseMarker !== undefined) {
+      responseMarker.received = true;
+    }
     const text = responseText(response.result);
     const payload = text.length > 0 ? JSON.parse(text) as Object : new Object();
     if (response.responseCode < 200 || response.responseCode >= 300) {
@@ -333,6 +409,65 @@ async function requestJson(method: http.RequestMethod, url: string, apiKey: stri
     throw new Error(message);
   } finally {
     request.destroy();
+  }
+}
+
+export async function callHotelContactLookup(
+  hotel: HotelSearchItem,
+  apiKey: string
+): Promise<HotelContactLookupResult> {
+  const key = apiKey.trim();
+  if (key.length === 0) {
+    return {
+      contact: null,
+      warning: 'Google Places contact lookup skipped: GOOGLE_MAPS_API_KEY is missing.',
+      sourceReceived: false
+    };
+  }
+  const responseMarker: PlacesResponseMarker = { received: false };
+  try {
+    const searchPayload = await requestJson(
+      http.RequestMethod.POST,
+      PLACES_SEARCH_URL,
+      key,
+      HOTEL_CONTACT_SEARCH_FIELD_MASK,
+      mapsTextSearchBody(hotelContactSearchQuery(hotel)),
+      responseMarker
+    );
+    const match = selectHotelContactCandidate(
+      hotel,
+      hotelContactCandidatesFromPayload(JSON.stringify(searchPayload))
+    );
+    if (match.candidate === null) {
+      return { contact: null, warning: boundedHotelContactWarning(match.warning), sourceReceived: true };
+    }
+    const detailPayload = await requestJson(
+      http.RequestMethod.GET,
+      PLACES_BASE_URL + encodeParam(match.candidate.providerPlaceId),
+      key,
+      HOTEL_CONTACT_DETAIL_FIELD_MASK,
+      null,
+      responseMarker
+    );
+    const contact = hotelContactFromDetails(
+      hotelContactDetailsFromPayload(JSON.stringify(detailPayload)),
+      match.candidate.providerPlaceId
+    );
+    if (contact === null) {
+      return {
+        contact: null,
+        warning: 'Google Places returned no verified hotel phone.',
+        sourceReceived: true
+      };
+    }
+    return { contact: contact, warning: '', sourceReceived: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    return {
+      contact: null,
+      warning: boundedHotelContactWarning('Google Places contact lookup failed: ' + message),
+      sourceReceived: responseMarker.received
+    };
   }
 }
 

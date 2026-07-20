@@ -174,6 +174,13 @@ export interface HotelPrice {
   lowestPrice: number;
 }
 
+export interface HotelContact {
+  displayPhone: string;
+  dialPhone: string;
+  provider: string;
+  providerPlaceId: string;
+}
+
 export interface HotelSearchItem {
   hotelId: number;
   bookingUrl: string;
@@ -182,8 +189,8 @@ export interface HotelSearchItem {
   brand: string;
   address: string;
   destinationId: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   distanceInMeters: number;
   starRating: number;
   price: HotelPrice;
@@ -192,6 +199,7 @@ export interface HotelSearchItem {
   imageUrl: string;
   hotelAmenities: string[];
   tags: string[];
+  contact?: HotelContact;
 }
 
 export interface HotelSearchResult {
@@ -528,8 +536,8 @@ function normalizeHotelItem(item: RollingGoHotelSearchItemRecord): HotelSearchIt
     brand: textOf(item.brand),
     address: textOf(item.address),
     destinationId: textOf(item.destinationId),
-    latitude: numberOf(item.latitude),
-    longitude: numberOf(item.longitude),
+    latitude: optionalNumberOf(item.latitude),
+    longitude: optionalNumberOf(item.longitude),
     distanceInMeters: numberOf(item.distanceInMeters),
     starRating: numberOf(item.starRating),
     price: isRecordValue(item.price) ? normalizeHotelPrice(item.price as RollingGoHotelPriceRecord) :

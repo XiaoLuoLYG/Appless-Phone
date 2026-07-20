@@ -141,6 +141,49 @@ export default function hotelDataResultTest() {
       expect(result.error === undefined).assertTrue();
     });
 
+    it('keeps RollingGo success and IDs while surfacing Places degradation as partial', 0, () => {
+      const payload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelInformationList":[{"hotelId":47675,"name":"深圳测试酒店"}]}'
+        )
+      };
+      const normalized = searchResult(payload);
+      const result = hotelSearchDataResult(
+        normalized,
+        [source('searchHotels')],
+        ['Google Places contact lookup failed.']
+      );
+      const data = result.data as HotelSearchResult;
+
+      expect(normalized.ok).assertTrue();
+      expect(result.status).assertEqual('partial');
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('RollingGo');
+      expect(data.hotels[0].hotelId).assertEqual(47675);
+      expect(data.hotels[0].contact === undefined).assertTrue();
+    });
+
+    it('includes Google Places only when an explicit real response source is present', 0, () => {
+      const payload: McpToolResultPayload = {
+        isError: false,
+        structuredContent: structured(
+          '{"success":true,"hotelInformationList":[{"hotelId":47675,"name":"深圳测试酒店"}]}'
+        )
+      };
+      const places: DataSource = {
+        provider: 'Google Places',
+        backend: 'local_adapter',
+        operation: 'hotelContactLookup',
+        fetchedAt: '2026-07-20T02:00:01.000Z'
+      };
+      const result = hotelSearchDataResult(searchResult(payload), [source('searchHotels'), places], ['No verified phone.']);
+
+      expect(result.status).assertEqual('partial');
+      expect(result.sources.length).assertEqual(2);
+      expect(result.sources[1].provider).assertEqual('Google Places');
+    });
+
     it('preserves the real provider hotelId and ratePlanId in detail data', 0, () => {
       const payload: McpToolResultPayload = {
         isError: false,
