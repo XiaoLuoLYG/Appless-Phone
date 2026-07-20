@@ -74,6 +74,7 @@ import linkedMessageBusTest from './LinkedMessageBus.test';
 import leaderAgentTest from './LeaderAgent.test';
 import dataAgentTest from './DataAgent.test';
 import uiAgentTest from './UiAgent.test';
+import actionCatalogTest from './ActionCatalog.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -144,6 +145,7 @@ export default function testsuite() {
   leaderAgentTest();
   dataAgentTest();
   uiAgentTest();
+  actionCatalogTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

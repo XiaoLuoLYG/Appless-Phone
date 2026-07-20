@@ -9,6 +9,8 @@ export { DataAgent } from './src/main/ets/agent/data/DataAgent';
 export * from './src/main/ets/agent/data/DataAgentTypes';
 export { UiAgent } from './src/main/ets/agent/ui/UiAgent';
 export * from './src/main/ets/agent/ui/UiAgentTypes';
+export { ActionCatalog } from './src/main/ets/agent/action/ActionCatalog';
+export * from './src/main/ets/agent/action/ActionCatalogTypes';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
