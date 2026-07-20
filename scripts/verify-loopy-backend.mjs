@@ -85,20 +85,24 @@ function parseIndexExports(index) {
   return exports;
 }
 
+function indexExportMatches(indexExports, modulePath, expectedNames) {
+  const actualNames = indexExports.get(modulePath) ?? [];
+  return expectedNames.every((expected) => actualNames.indexOf(expected) >= 0) &&
+    actualNames.every((actual) => expectedNames.indexOf(actual) >= 0);
+}
+
 function assertIndexExport(indexExports, modulePath, expectedNames, name) {
   const actualNames = indexExports.get(modulePath) ?? [];
   const missing = expectedNames.filter((expected) => actualNames.indexOf(expected) < 0);
   const extra = actualNames.filter((actual) => expectedNames.indexOf(actual) < 0);
   assert(
-    missing.length === 0 && extra.length === 0,
+    indexExportMatches(indexExports, modulePath, expectedNames),
     name,
     `${modulePath}: missing=[${missing.join(', ')}] extra=[${extra.join(', ')}]`
   );
 }
 
-function declarationBody(source, declaration) {
-  const declarationStart = source.indexOf(declaration);
-  const bodyStart = declarationStart < 0 ? -1 : source.indexOf('{', declarationStart);
+function blockBody(source, bodyStart) {
   if (bodyStart < 0) {
     return '';
   }
@@ -116,8 +120,142 @@ function declarationBody(source, declaration) {
   return '';
 }
 
+function declarationBody(source, declaration) {
+  const declarationStart = source.indexOf(declaration);
+  return blockBody(source, declarationStart < 0 ? -1 : source.indexOf('{', declarationStart));
+}
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasEnumMember(body, member, value) {
+  return new RegExp(`\\b${member}\\s*=\\s*'${escapeRegex(value)}'\\s*,?`).test(body);
+}
+
+function hasInterfaceField(body, field, type) {
+  return new RegExp(`\\b${field}\\s*:\\s*${type}\\s*;`).test(body);
+}
+
+function hasNamedPlanStepCap(source) {
+  return /const\s+MAX_ACTION_PLAN_STEPS\s*:\s*number\s*=\s*5\s*;/.test(source) &&
+    /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(source);
+}
+
+function hasLiveToken(source, token) {
+  return source.includes(token);
+}
+
+function hasLiveClass(source, name) {
+  return new RegExp(`\\bclass\\s+${name}\\b`).test(source);
+}
+
+function hasRegisteredActionExecutorDependency(source) {
+  const field = source.match(
+    /private\s+readonly\s+([A-Za-z_$][\w$]*)\s*:\s*RegisteredActionExecutor\s*;/
+  );
+  if (field === null) {
+    return false;
+  }
+  for (const constructor of source.matchAll(/constructor\s*\(([\s\S]*?)\)\s*\{/g)) {
+    const parameter = constructor[1].match(
+      /\b([A-Za-z_$][\w$]*)\s*:\s*RegisteredActionExecutor\b/
+    );
+    const body = blockBody(source, (constructor.index ?? 0) + constructor[0].length - 1);
+    if (parameter !== null &&
+      new RegExp(`\\bthis\\.${escapeRegex(field[1])}\\s*=\\s*${escapeRegex(parameter[1])}\\s*;`).test(body)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function verifyArchitectureVerifier() {
+  const fixtureIndex = parseIndexExports(stripComments(`
+    export { AgentMessage } from './message/AgentMessage';
+    // export { DataResult } from './message/DataResult';
+  `));
+  assert(
+    indexExportMatches(fixtureIndex, './message/AgentMessage', ['AgentMessage']),
+    'verifier accepts a live exact Index export'
+  );
+  assert(
+    !indexExportMatches(fixtureIndex, './message/DataResult', ['DataResult']),
+    'verifier ignores a commented Index export'
+  );
+  assert(
+    !indexExportMatches(fixtureIndex, './message/AgentMessage', ['AgentMessage', 'DataResult']),
+    'verifier rejects a removed exact Index export'
+  );
+
+  const fixtureMessage = stripComments(`
+    export enum AgentMessageType {
+      INPUT_USER = 'INPUT.USER',
+      // TASK_ERROR = 'TASK.ERROR'
+    }
+    export interface AgentMessage {
+      conversationId: string;
+      // taskId: string;
+    }
+  `);
+  assert(
+    hasEnumMember(declarationBody(fixtureMessage, 'export enum AgentMessageType'), 'INPUT_USER', 'INPUT.USER'),
+    'verifier accepts a live message enum member'
+  );
+  assert(
+    !hasEnumMember(declarationBody(fixtureMessage, 'export enum AgentMessageType'), 'TASK_ERROR', 'TASK.ERROR'),
+    'verifier ignores a commented message enum member'
+  );
+  assert(
+    !hasInterfaceField(declarationBody(fixtureMessage, 'export interface AgentMessage'), 'taskId', 'string'),
+    'verifier rejects a missing or commented message envelope field'
+  );
+
+  assert(
+    hasNamedPlanStepCap('const MAX_ACTION_PLAN_STEPS: number = 5; plan.steps.length > MAX_ACTION_PLAN_STEPS'),
+    'verifier accepts an active named action-plan cap'
+  );
+  assert(
+    !hasNamedPlanStepCap('const MAX_ACTION_PLAN_STEPS: number = 5; plan.steps.length > 5'),
+    'verifier rejects an unused action-plan cap'
+  );
+
+  const commentedRuntime = stripComments('// BATCH_PENDING\n/* class Coordinator {} */');
+  const liveRuntime = stripComments('const BATCH_PENDING = 1; class Coordinator {}');
+  assert(
+    !hasLiveToken(commentedRuntime, 'BATCH_PENDING') && !hasLiveClass(commentedRuntime, 'Coordinator'),
+    'verifier ignores commented forbidden runtime state'
+  );
+  assert(
+    hasLiveToken(liveRuntime, 'BATCH_PENDING') && hasLiveClass(liveRuntime, 'Coordinator'),
+    'verifier detects live forbidden runtime state'
+  );
+
+  const reorderedExecutor = stripComments(`
+    class ActionAgent {
+      private readonly dispatcher: RegisteredActionExecutor;
+      constructor(label: string, handler: RegisteredActionExecutor, bus: Object) {
+        this.dispatcher = handler;
+      }
+    }
+  `);
+  const unusedExecutorImport = stripComments(`
+    import { RegisteredActionExecutor } from './ActionAgentTypes';
+    class ActionAgent {
+      private readonly dispatcher: Object;
+      constructor(handler: Object) {
+        this.dispatcher = handler;
+      }
+    }
+  `);
+  assert(
+    hasRegisteredActionExecutorDependency(reorderedExecutor),
+    'verifier accepts renamed and reordered executor injection'
+  );
+  assert(
+    !hasRegisteredActionExecutorDependency(unusedExecutorImport),
+    'verifier rejects an unused executor import without typed injection'
+  );
 }
 
 function runHarBuild() {
@@ -185,7 +323,7 @@ function verifySourceContracts() {
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
-  const index = read('agent_core/Index.ets');
+  const index = stripComments(read('agent_core/Index.ets'));
   const indexExports = parseIndexExports(index);
   const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
@@ -194,15 +332,15 @@ function verifySourceContracts() {
   const composioClient = read('agent_core/src/main/ets/composio/ComposioSessionClient.ets');
   const composioDynamic = read('agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets');
   const conversationContext = read('agent_core/src/main/ets/agent/ConversationContext.ets');
-  const agentMessage = read('agent_core/src/main/ets/agent/message/AgentMessage.ets');
-  const messageBus = read('agent_core/src/main/ets/agent/message/LinkedMessageBus.ets');
-  const leaderAgent = read('agent_core/src/main/ets/agent/leader/LeaderAgent.ets');
-  const dataAgent = read('agent_core/src/main/ets/agent/data/DataAgent.ets');
-  const uiAgent = read('agent_core/src/main/ets/agent/ui/UiAgent.ets');
-  const actionCatalog = read('agent_core/src/main/ets/agent/action/ActionCatalog.ets');
-  const actionPlanRunner = read('agent_core/src/main/ets/agent/action/ActionPlanRunner.ets');
-  const jsonPointer = read('agent_core/src/main/ets/agent/action/JsonPointer.ets');
-  const actionAgent = read('agent_core/src/main/ets/agent/action/ActionAgent.ets');
+  const agentMessage = stripComments(read('agent_core/src/main/ets/agent/message/AgentMessage.ets'));
+  const messageBus = stripComments(read('agent_core/src/main/ets/agent/message/LinkedMessageBus.ets'));
+  const leaderAgent = stripComments(read('agent_core/src/main/ets/agent/leader/LeaderAgent.ets'));
+  const dataAgent = stripComments(read('agent_core/src/main/ets/agent/data/DataAgent.ets'));
+  const uiAgent = stripComments(read('agent_core/src/main/ets/agent/ui/UiAgent.ets'));
+  const actionCatalog = stripComments(read('agent_core/src/main/ets/agent/action/ActionCatalog.ets'));
+  const actionPlanRunner = stripComments(read('agent_core/src/main/ets/agent/action/ActionPlanRunner.ets'));
+  const jsonPointer = stripComments(read('agent_core/src/main/ets/agent/action/JsonPointer.ets'));
+  const actionAgent = stripComments(read('agent_core/src/main/ets/agent/action/ActionAgent.ets'));
   const conversationStore = read('agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
@@ -404,7 +542,7 @@ function verifySourceContracts() {
     ['TURN_CANCEL', 'TURN.CANCEL']
   ]) {
     assert(
-      new RegExp(`\\b${member}\\s*=\\s*'${escapeRegex(value)}'\\s*,?`).test(agentMessageEnum),
+      hasEnumMember(agentMessageEnum, member, value),
       `agent message enum includes ${value}`
     );
   }
@@ -416,29 +554,22 @@ function verifySourceContracts() {
     ['payload', 'Object']
   ]) {
     assert(
-      new RegExp(`\\b${field}\\s*:\\s*${type}\\s*;`).test(agentEnvelope),
+      hasInterfaceField(agentEnvelope, field, type),
       `agent message envelope has ${field}`
     );
   }
   assert(/export\s+function\s+resolveJsonPointer\s*\(/.test(jsonPointer), 'JSON Pointer resolver is declared');
   assert(/export\s+function\s+setJsonPointer\s*\(/.test(jsonPointer), 'JSON Pointer setter is declared');
   assert(
-    /const\s+MAX_ACTION_PLAN_STEPS\s*:\s*number\s*=\s*5\s*;/.test(actionPlanRunner) &&
-      /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(actionPlanRunner),
+    hasNamedPlanStepCap(actionPlanRunner),
     'action plans use the named five-step cap'
   );
-  const actionAgentSource = stripComments(actionAgent);
-  const actionAgentConstructor = actionAgentSource.match(
-    /constructor\s*\(\s*bus\s*:\s*LinkedMessageBus\s*,\s*catalog\s*:\s*ActionCatalog\s*,\s*executor\s*:\s*RegisteredActionExecutor\s*\)\s*\{([\s\S]*?)\n\s*\}/
-  );
   assert(
-    /private\s+readonly\s+registeredExecutor\s*:\s*RegisteredActionExecutor\s*;/.test(actionAgentSource) &&
-      actionAgentConstructor !== null &&
-      /this\.registeredExecutor\s*=\s*executor\s*;/.test(actionAgentConstructor[1]),
+    hasRegisteredActionExecutorDependency(actionAgent),
     'Action Agent injects and stores RegisteredActionExecutor'
   );
-  assert(!agentRuntimeSources.includes('BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
-  assert(!/\bclass\s+Coordinator\b/.test(agentRuntimeSources), 'agent runtime has no Coordinator class');
+  assert(!hasLiveToken(agentRuntimeSources, 'BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
+  assert(!hasLiveClass(agentRuntimeSources, 'Coordinator'), 'agent runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
   assertContains(conversationStore, 'JSON.parse(raw)', 'conversation store parses persisted JSON defensively');
   assertContains(conversationStore, 'role !== ConversationRole.USER && role !== ConversationRole.ASSISTANT', 'conversation store ignores unknown roles');
@@ -482,6 +613,7 @@ function verifySourceContracts() {
   assert(!legacySocialPaths.some((path) => existsSync(path)), 'obsolete social bridge files are absent');
 }
 
+verifyArchitectureVerifier();
 runHarBuild();
 verifySourceContracts();
 
