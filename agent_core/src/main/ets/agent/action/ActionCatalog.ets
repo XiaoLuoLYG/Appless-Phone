@@ -27,6 +27,18 @@ function allowed(definition: ToolDefinition | null): ActionCatalogResult {
   };
 }
 
+function hasObjectArgs(args: Object): boolean {
+  return args !== null && typeof args === 'object' && !Array.isArray(args);
+}
+
+function malformedArgs(): ActionCatalogResult {
+  return denied('ACTION_ARGS_MALFORMED', 'Action args must be a non-array object.');
+}
+
+function authorityFailed(): ActionCatalogResult {
+  return denied('ACTION_AUTHORITY_FAILED', 'Action authority failed.');
+}
+
 export class ActionCatalog {
   private lookup: ToolDefinitionLookup;
   private surfaceAuthorizer: SurfaceActionAuthorizer;
@@ -46,14 +58,21 @@ export class ActionCatalog {
   }
 
   validatePlacement(sourceToolId: string, actionId: string, args: Object): ActionCatalogResult {
-    const source = this.lookup.find(sourceToolId);
-    if (source === null) {
-      return denied('ACTION_SOURCE_NOT_REGISTERED', 'Source tool is not registered.');
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
     }
-    if (source.actions.indexOf(actionId) < 0) {
-      return denied('ACTION_NOT_DECLARED', 'Action is not declared by the source tool.');
+    try {
+      const source = this.lookup.find(sourceToolId);
+      if (source === null) {
+        return denied('ACTION_SOURCE_NOT_REGISTERED', 'Source tool is not registered.');
+      }
+      if (source.actions.indexOf(actionId) < 0) {
+        return denied('ACTION_NOT_DECLARED', 'Action is not declared by the source tool.');
+      }
+      return this.validateEntryTarget(actionId, args);
+    } catch (_error) {
+      return authorityFailed();
     }
-    return this.validateEntryTarget(actionId, args);
   }
 
   validateSurfaceExecution(
@@ -64,25 +83,39 @@ export class ActionCatalog {
     actionId: string,
     args: Object
   ): ActionCatalogResult {
-    const placement = this.validatePlacement(sourceToolId, actionId, args);
-    if (!placement.ok) {
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
+    }
+    try {
+      const placement = this.validatePlacement(sourceToolId, actionId, args);
+      if (!placement.ok) {
+        return placement;
+      }
+      if (!this.surfaceAuthorizer.allows(conversationId, turnId, surfaceId, actionId, args)) {
+        return denied('ACTION_SURFACE_DENIED', 'Action does not match the current surface.');
+      }
       return placement;
+    } catch (_error) {
+      return authorityFailed();
     }
-    if (!this.surfaceAuthorizer.allows(conversationId, turnId, surfaceId, actionId, args)) {
-      return denied('ACTION_SURFACE_DENIED', 'Action does not match the current surface.');
-    }
-    return placement;
   }
 
   validateRegisteredStep(actionId: string, args: Object): ActionCatalogResult {
-    if (actionId === WORKFLOW_ENTRY_ACTION_ID) {
-      return denied('ACTION_WORKFLOW_ENTRY_ONLY', 'workflow.run is only a surface workflow entry.');
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
     }
-    const definition = this.lookup.find(actionId);
-    if (definition === null) {
-      return denied('ACTION_NOT_REGISTERED', 'Action is not a registered executable step.');
+    try {
+      if (actionId === WORKFLOW_ENTRY_ACTION_ID) {
+        return denied('ACTION_WORKFLOW_ENTRY_ONLY', 'workflow.run is only a surface workflow entry.');
+      }
+      const definition = this.lookup.find(actionId);
+      if (definition === null) {
+        return denied('ACTION_NOT_REGISTERED', 'Action is not a registered executable step.');
+      }
+      return this.validateRegisteredDefinition(definition, args);
+    } catch (_error) {
+      return authorityFailed();
     }
-    return this.validateRegisteredDefinition(definition, args);
   }
 
   private validateEntryTarget(actionId: string, args: Object): ActionCatalogResult {

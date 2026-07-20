@@ -39,12 +39,14 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
   targetRisk: ToolRiskLevel = 'read';
   targetBackend: ToolBackendType = 'local_adapter';
   targetHasBackend: boolean = true;
+  calls: number = 0;
 
   constructor(sourceActions: string[]) {
     this.sourceActions = sourceActions;
   }
 
   find(toolId: string): ToolDefinition | null {
+    this.calls += 1;
     if (toolId === 'hotel.search') {
       return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
     }
@@ -112,8 +114,41 @@ class ExactClientAuthorizer implements ClientActionAuthorizer {
 }
 
 class RejectClientAuthorizer implements ClientActionAuthorizer {
+  calls: number = 0;
+
   allows(_actionId: string, _args: Object): boolean {
+    this.calls += 1;
     return false;
+  }
+}
+
+class ThrowingToolDefinitionLookup implements ToolDefinitionLookup {
+  find(_toolId: string): ToolDefinition | null {
+    throw new Error('lookup failed');
+  }
+}
+
+class ThrowingSurfaceAuthorizer implements SurfaceActionAuthorizer {
+  allows(
+    _conversationId: string,
+    _turnId: string,
+    _surfaceId: string,
+    _actionId: string,
+    _args: Object
+  ): boolean {
+    throw new Error('surface policy failed');
+  }
+}
+
+class ThrowingClientAuthorizer implements ClientActionAuthorizer {
+  allows(_actionId: string, _args: Object): boolean {
+    throw new Error('client policy failed');
+  }
+}
+
+class ThrowingArgsValidator implements ActionArgsValidator {
+  validate(_actionId: string, _args: Object): ActionValidationResult {
+    throw new Error('args validator failed');
   }
 }
 
@@ -248,11 +283,11 @@ export default function actionCatalogTest() {
       expect(actionCatalog.validatePlacement('hotel.search', 'workflow.start', workflowArgs).ok).assertFalse();
     });
 
-    it('rejects exact surface tampering of phone hotel identity coordinates and turn', 0, () => {
+    it('rejects exact surface identity action and argument tampering', 0, () => {
       const exactArgs = args(
         '{"hotelId":47675,"phone":"+8675588888888","latitude":22.5,"longitude":114}'
       );
-      const lookup = new FakeToolDefinitionLookup(['hotel.navigate']);
+      const lookup = new FakeToolDefinitionLookup(['hotel.navigate', 'hotel.call']);
       const surface = new ExactSurfaceAuthorizer(
         'conversation-1',
         'turn-1',
@@ -281,6 +316,30 @@ export default function actionCatalogTest() {
         'surface-1',
         'hotel.search',
         'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-2',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-2',
+        'hotel.search',
+        'hotel.navigate',
+        exactArgs
+      ).ok).assertFalse();
+      expect(actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.call',
         exactArgs
       ).ok).assertFalse();
       expect(actionCatalog.validateSurfaceExecution(
@@ -383,6 +442,112 @@ export default function actionCatalogTest() {
       lookup.targetRisk = 'read';
       lookup.targetHasBackend = false;
       expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ACTION_BACKEND_MISSING');
+    });
+
+    it('rejects malformed args before consulting any injected authority', 0, () => {
+      const validArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.detail',
+        validArgs
+      );
+      const client = new RejectClientAuthorizer();
+      const validator = new ControlledArgsValidator();
+      const actionCatalog = catalog(lookup, surface, client, validator);
+
+      const nullResult = actionCatalog.validatePlacement(
+        'hotel.search',
+        'hotel.detail',
+        args('null')
+      );
+      const arrayResult = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'surface-1',
+        'hotel.search',
+        'hotel.detail',
+        args('[]')
+      );
+      const primitiveResult = actionCatalog.validateRegisteredStep('hotel.detail', args('42'));
+
+      expect(nullResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(arrayResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(primitiveResult.code).assertEqual('ACTION_ARGS_MALFORMED');
+      expect(lookup.calls).assertEqual(0);
+      expect(surface.calls).assertEqual(0);
+      expect(client.calls).assertEqual(0);
+      expect(validator.calls).assertEqual(0);
+    });
+
+    it('contains failures from every injected authority as catalog rejections', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      let lookupResult: ActionCatalogResult = {
+        ok: true,
+        code: 'THREW',
+        message: '',
+        definition: null
+      };
+      let surfaceResult: ActionCatalogResult = lookupResult;
+      let clientResult: ActionCatalogResult = lookupResult;
+      let validatorResult: ActionCatalogResult = lookupResult;
+
+      try {
+        lookupResult = catalog(
+          new ThrowingToolDefinitionLookup(),
+          new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs),
+          new RejectClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validatePlacement('hotel.search', 'hotel.detail', detailArgs);
+      } catch (_error) {
+      }
+      try {
+        surfaceResult = catalog(
+          new FakeToolDefinitionLookup(['hotel.detail']),
+          new ThrowingSurfaceAuthorizer(),
+          new RejectClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validateSurfaceExecution(
+          'conversation-1',
+          'turn-1',
+          'surface-1',
+          'hotel.search',
+          'hotel.detail',
+          detailArgs
+        );
+      } catch (_error) {
+      }
+      try {
+        clientResult = catalog(
+          new FakeToolDefinitionLookup(['hotel.search.restore']),
+          new ExactSurfaceAuthorizer(
+            'conversation-1',
+            'turn-1',
+            'surface-1',
+            'hotel.search.restore',
+            detailArgs
+          ),
+          new ThrowingClientAuthorizer(),
+          new ControlledArgsValidator()
+        ).validatePlacement('hotel.search', 'hotel.search.restore', detailArgs);
+      } catch (_error) {
+      }
+      try {
+        validatorResult = catalog(
+          new FakeToolDefinitionLookup([]),
+          new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', detailArgs),
+          new RejectClientAuthorizer(),
+          new ThrowingArgsValidator()
+        ).validateRegisteredStep('hotel.detail', detailArgs);
+      } catch (_error) {
+      }
+
+      expect(lookupResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(surfaceResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(clientResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
+      expect(validatorResult.code).assertEqual('ACTION_AUTHORITY_FAILED');
     });
   });
 }
