@@ -56,6 +56,10 @@ function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
 }
 
+function stripStrings(source) {
+  return source.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, "''");
+}
+
 function readAgentRuntimeSources() {
   const sources = [];
   function visit(directory) {
@@ -227,11 +231,34 @@ function hotelButtonGuards(a2uiSource, actionSource) {
 }
 
 function hasConditionalHotelButtons(a2uiSource, actionSource) {
+  const resultBody = liveDeclarationBody(a2uiSource, 'function searchResultFor');
   const actionsBody = liveDeclarationBody(actionSource, 'export function hotelActionsFor');
-  const navigationPushes = actionsBody.match(/\bactions\.push\(navigate\);/g) ?? [];
-  const callPushes = actionsBody.match(/\bactions\.push\(call\);/g) ?? [];
-  return hotelButtonGuards(a2uiSource, actionSource) &&
-    navigationPushes.length === 1 && callPushes.length === 1;
+  return /actions:\s*hotelActionsFor\(hotel,\s*request,\s*canPlace\)/.test(resultBody) &&
+    hasSingleConditionalHotelAction(
+      actionsBody,
+      'hasValidHotelCoordinates\\(hotel\\)',
+      'hotelNavigateAction',
+      'validHotelNavigateArgs'
+    ) && hasSingleConditionalHotelAction(
+      actionsBody,
+      'hotel\\.contact\\s*!==\\s*undefined',
+      'hotelCallAction',
+      'validHotelCallArgs'
+    );
+}
+
+function hasSingleConditionalHotelAction(body, guard, actionFactory, validator) {
+  const created = [...body.matchAll(new RegExp(`const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${actionFactory}\\(hotel\\);`, 'g'))];
+  if (created.length !== 1) {
+    return false;
+  }
+  const variable = created[0][1];
+  const pushes = body.match(new RegExp(`\\bactions\\.push\\(${escapeRegex(variable)}\\);`, 'g')) ?? [];
+  const placement = new RegExp(
+    `if\\s*\\(\\s*${guard}\\s*\\)\\s*\\{\\s*const\\s+${escapeRegex(variable)}\\s*=\\s*${actionFactory}\\(hotel\\);\\s*` +
+    `if\\s*\\(\\s*${validator}\\(${escapeRegex(variable)}\\.args as Hotel(?:Navigate|Call)Args\\)\\.ok\\s*&&\\s*canPlace\\(${escapeRegex(variable)}\\)\\s*\\)\\s*\\{\\s*actions\\.push\\(${escapeRegex(variable)}\\);`
+  );
+  return pushes.length === 1 && placement.test(body);
 }
 
 function hasHotelContactLookupMasks(source) {
@@ -253,7 +280,7 @@ function hasTravelRoute(source) {
 }
 
 function hasHotelRolesOnBus(source) {
-  const body = liveDeclarationBody(source, 'constructor(options: HotelAgentRuntimeOptions)');
+  const body = stripStrings(liveDeclarationBody(source, 'constructor(options: HotelAgentRuntimeOptions)'));
   return [
     ['leader', 'LeaderAgent'],
     ['data', 'DataAgent'],
@@ -422,6 +449,32 @@ function verifyArchitectureVerifier() {
   assert(hotelButtonGuards(duplicateButtonPushes, duplicateButtonPushes), 'fixture reproduces former guarded-button predicate');
   assert(!hasConditionalHotelButtons(duplicateButtonPushes, duplicateButtonPushes), 'verifier rejects buttons pushed before guarded placement');
 
+  const aliasButtonPushes = `
+    function searchResultFor() {
+      return { actions: hotelActionsFor(hotel, request, canPlace) };
+    }
+    export function hotelActionsFor() {
+      const unsafeNavigate = hotelNavigateAction(hotel);
+      actions.push(unsafeNavigate);
+      if (hasValidHotelCoordinates(hotel)) {
+        const navigate = hotelNavigateAction(hotel);
+        if (validHotelNavigateArgs(navigate.args as HotelNavigateArgs).ok && canPlace(navigate)) {
+          actions.push(navigate);
+        }
+      }
+      const unsafeCall = hotelCallAction(hotel);
+      actions.push(unsafeCall);
+      if (hotel.contact !== undefined) {
+        const call = hotelCallAction(hotel);
+        if (validHotelCallArgs(call.args as HotelCallArgs).ok && canPlace(call)) {
+          actions.push(call);
+        }
+      }
+    }
+  `;
+  assert(hotelButtonGuards(aliasButtonPushes, aliasButtonPushes), 'fixture reproduces former canonical-name action predicate');
+  assert(!hasConditionalHotelButtons(aliasButtonPushes, aliasButtonPushes), 'verifier rejects alias action pushes before guarded placement');
+
   const swappedHotelMasks = `
     export const HOTEL_CONTACT_SEARCH_FIELD_MASK: string = 'places.id,nationalPhoneNumber,internationalPhoneNumber';
     export const HOTEL_CONTACT_DETAIL_FIELD_MASK: string = 'id,displayName';
@@ -462,7 +515,7 @@ function verifyArchitectureVerifier() {
   const decoyBusRuntime = `
     export class HotelAgentRuntime {
       constructor(options: HotelAgentRuntimeOptions) {
-        const decoy = 'new LeaderAgent(this.bus) new DataAgent(this.bus) new UiAgent(this.bus) new ActionAgent(this.bus)';
+        const decoy = 'this.leader = new LeaderAgent(this.bus, planner); this.data = new DataAgent(this.bus, executor); this.ui = new UiAgent(this.bus, renderer, writer); this.action = new ActionAgent(this.bus, catalog, registered);';
         this.leader = new LeaderAgent(otherBus, planner);
         this.data = new DataAgent(otherBus, executor);
         this.ui = new UiAgent(otherBus, renderer, writer);
