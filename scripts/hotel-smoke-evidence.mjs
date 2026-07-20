@@ -47,6 +47,7 @@ function sanitizeAction(action) {
     displayCompact = '';
     dialCompact = '';
   } else if (actionId === 'hotel.detail') {
+    evidence.clickLabel = typeof action?.label === 'string' ? action.label.trim() : '';
     evidence.argsValid = hotelIdPositive;
   }
   return evidence;
@@ -107,6 +108,7 @@ function sanitizeCollectedAction(action) {
       sanitized.phoneMatchesDisplay &&
       sanitized.maskedSuffix.length > 0;
   } else if (actionId === 'hotel.detail') {
+    sanitized.clickLabel = typeof action?.clickLabel === 'string' ? action.clickLabel.trim() : '';
     sanitized.argsValid = action?.argsValid === true &&
       sanitized.argsObject &&
       sanitized.hotelIdPositive;
@@ -137,6 +139,17 @@ export function validateHotelSearchActionEvidence(evidence) {
     call,
     bookingCount,
     actions
+  };
+}
+
+export function hotelDetailClickLocator(evidence) {
+  const validated = validateHotelSearchActionEvidence(evidence);
+  const labels = validated.actions
+    .filter((action) => action.actionId === 'hotel.detail' && action.argsValid && action.clickLabel.length > 0)
+    .map((action) => action.clickLabel);
+  return {
+    ok: validated.ok && labels.length > 0,
+    labels
   };
 }
 

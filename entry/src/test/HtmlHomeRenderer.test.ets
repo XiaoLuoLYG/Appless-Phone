@@ -2252,6 +2252,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("actionFor(block, 'hotel.call')")).assertLarger(-1);
       expect(html.indexOf('postAction(JSON.stringify(action))')).assertLarger(-1);
       expect(html.indexOf('collectHotelSmokeEvidence')).assertLarger(-1);
+      expect(html.indexOf('clickLabel')).assertLarger(-1);
       expect(html.indexOf('maskedSuffix')).assertLarger(-1);
       expect(html.indexOf('coordinatesValid')).assertLarger(-1);
       expect(html.indexOf('"surfaceId":"hotel-search-task-6"')).assertLarger(-1);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  hotelDetailClickLocator,
   hotelSearchActionEvidence,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
@@ -47,7 +48,9 @@ test('sanitizes exact action IDs independently of supplied labels', () => {
   assert.equal(evidence.actions[2].maskedSuffix, '***8000');
   assert.equal(serialized.includes('+8675512348000'), false);
   assert.equal(serialized.includes('+86 755 1234 8000'), false);
-  assert.equal(serialized.includes('arbitrary detail label'), false);
+  assert.equal(evidence.actions[0].clickLabel, 'arbitrary detail label');
+  assert.equal(Object.hasOwn(evidence.actions[1], 'clickLabel'), false);
+  assert.equal(Object.hasOwn(evidence.actions[2], 'clickLabel'), false);
 });
 
 test('treats missing optional actions as hidden and invalid present actions as failures', () => {
@@ -103,4 +106,26 @@ test('requires exact search detail and restored surface identity', () => {
   assert.equal(validateHotelSurfaceIdentity('   ', 'hotel-detail-2', '   ').ok, false);
   assert.equal(validateHotelSurfaceIdentity('same', 'same', 'same').ok, false);
   assert.equal(validateHotelSurfaceIdentity('hotel-search-1', 'hotel-detail-2', 'other').ok, false);
+});
+
+test('derives the live detail click locator only from an exact valid action', () => {
+  const arbitraryLabelEvidence = hotelSearchActionEvidence('hotel-search-1', validActions);
+  assert.deepEqual(hotelDetailClickLocator(arbitraryLabelEvidence), {
+    ok: true,
+    labels: ['arbitrary detail label']
+  });
+
+  const wrongActionId = structuredClone(validActions);
+  wrongActionId[0].id = 'hotel.details';
+  assert.equal(
+    hotelDetailClickLocator(hotelSearchActionEvidence('hotel-search-1', wrongActionId)).ok,
+    false
+  );
+
+  const invalidArgs = structuredClone(validActions);
+  invalidArgs[0].args.hotelId = 0;
+  assert.equal(
+    hotelDetailClickLocator(hotelSearchActionEvidence('hotel-search-1', invalidArgs)).ok,
+    false
+  );
 });

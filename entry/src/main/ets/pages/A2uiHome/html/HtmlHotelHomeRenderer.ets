@@ -542,6 +542,7 @@ const HOTEL_HOME_JS: string = `
       args = {};
       action = null;
     } else if (actionId === 'hotel.detail') {
+      evidence.clickLabel = typeof action.label === 'string' ? action.label.trim() : '';
       evidence.argsValid = hotelIdPositive;
     }
     return evidence;

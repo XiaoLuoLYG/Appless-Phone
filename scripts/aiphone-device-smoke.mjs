@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  hotelDetailClickLocator,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -1599,7 +1600,7 @@ function layoutExpectationsForQuery(query) {
     return ['高铁', '12306', 'train.search'];
   }
   if (isHotelQuery(query)) {
-    return ['酒店 · 实时搜索', 'RollingGo', '查看房型'];
+    return ['酒店 · 实时搜索', 'RollingGo'];
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
@@ -1807,10 +1808,20 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   let currentLayout = layout;
   let detailCenter = null;
   let detailLabel = '';
-  const detailLabels = ['查看实时房型', '查看房型'];
+  const rawSearchActionEvidence = hotelActionEvidenceFromLogs(queryLogs.join('\n'));
+  const searchActionEvidence = validateHotelSearchActionEvidence(rawSearchActionEvidence);
+  const detailClickLocator = hotelDetailClickLocator(rawSearchActionEvidence);
+  if (!detailClickLocator.ok) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'current hotel surface has no exact valid hotel.detail click locator',
+      actionEvidence: searchActionEvidence
+    };
+  }
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    for (const label of detailLabels) {
-      detailCenter = findTextCenter(currentLayout, label);
+    for (const label of detailClickLocator.labels) {
+      detailCenter = findExactTextCenter(currentLayout, label);
       if (detailCenter !== null) {
         detailLabel = label;
         break;
@@ -1824,11 +1835,13 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
   }
   if (detailCenter === null) {
-    return { ok: false, capability: 'hotel.detail', reason: 'hotel.detail button label not found' };
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'exact hotel.detail action click label not found in current layout',
+      actionEvidence: searchActionEvidence
+    };
   }
-  const searchActionEvidence = validateHotelSearchActionEvidence(
-    hotelActionEvidenceFromLogs(queryLogs.join('\n'))
-  );
 
   clearHilog();
   const detailLogs = await captureWhile(appPid, async () => {
@@ -1898,7 +1911,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
   const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
-  const restoredOk = /酒店结果/.test(restoredText) && /查看(?:实时)?房型/.test(restoredText);
+  const restoredOk = /酒店结果/.test(restoredText);
   const detailActionEvidence = hotelActionEvidenceFromLogs(detailLogText);
   const restoredActionEvidence = validateHotelSearchActionEvidence(
     hotelActionEvidenceFromLogs(restoreLogText)
