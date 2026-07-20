@@ -60,6 +60,7 @@ const FORBIDDEN_FIELDS: string[] = [
   'eval',
   'function'
 ];
+const MAX_ACTION_PLAN_STEPS: number = 5;
 
 function validationFailure(
   failedStepId: string,
@@ -317,7 +318,7 @@ export class ActionPlanRunner {
         plan.surfaceId !== context.surfaceId) {
         return validationFailure('', 'ACTION_PLAN_MALFORMED', 'Action plan metadata is malformed.');
       }
-      if (!Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 5) {
+      if (!Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > MAX_ACTION_PLAN_STEPS) {
         return validationFailure(
           '',
           'ACTION_PLAN_STEP_COUNT',

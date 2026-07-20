@@ -124,6 +124,15 @@ function verifySourceContracts() {
   const composioClient = read('agent_core/src/main/ets/composio/ComposioSessionClient.ets');
   const composioDynamic = read('agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets');
   const conversationContext = read('agent_core/src/main/ets/agent/ConversationContext.ets');
+  const agentMessage = read('agent_core/src/main/ets/agent/message/AgentMessage.ets');
+  const messageBus = read('agent_core/src/main/ets/agent/message/LinkedMessageBus.ets');
+  const leaderAgent = read('agent_core/src/main/ets/agent/leader/LeaderAgent.ets');
+  const dataAgent = read('agent_core/src/main/ets/agent/data/DataAgent.ets');
+  const uiAgent = read('agent_core/src/main/ets/agent/ui/UiAgent.ets');
+  const actionCatalog = read('agent_core/src/main/ets/agent/action/ActionCatalog.ets');
+  const actionPlanRunner = read('agent_core/src/main/ets/agent/action/ActionPlanRunner.ets');
+  const jsonPointer = read('agent_core/src/main/ets/agent/action/JsonPointer.ets');
+  const actionAgent = read('agent_core/src/main/ets/agent/action/ActionAgent.ets');
   const conversationStore = read('agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
@@ -256,6 +265,45 @@ function verifySourceContracts() {
   assertContains(composioDynamic, 'isComposioDynamicPrompt', 'Composio dynamic backend gates unsupported app queries');
   assertContains(composioDynamic, 'unsafe_action_blocked', 'Composio dynamic backend blocks unsafe execute');
   assertContains(conversationContext, 'static fromMessages', 'conversation context can restore messages');
+  for (const role of ['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent']) {
+    assertContains(
+      role === 'LeaderAgent' ? leaderAgent :
+        role === 'DataAgent' ? dataAgent :
+          role === 'UiAgent' ? uiAgent : actionAgent,
+      `export class ${role}`,
+      `four-role runtime includes ${role}`
+    );
+    assertContains(index, role, `public API exports ${role}`);
+  }
+  for (const messageType of [
+    'INPUT.USER',
+    'TASK.CREATE.UI',
+    'TASK.CREATE.DATA',
+    'TASK.RESULT.UI',
+    'TASK.RESULT.DATA',
+    'TASK.ERROR',
+    'ACTION.PLAN.CREATE',
+    'ACTION.PLAN.READY',
+    'ACTION.RUN',
+    'ACTION.PROGRESS',
+    'ACTION.RESULT',
+    'TURN.CANCEL'
+  ]) {
+    assertContains(agentMessage, messageType, `agent message contract includes ${messageType}`);
+  }
+  assertContains(agentMessage, 'conversationId: string;', 'agent messages carry conversation correlation');
+  assertContains(agentMessage, 'turnId: string;', 'agent messages carry turn correlation');
+  assertContains(agentMessage, 'taskId: string;', 'agent messages carry task correlation');
+  assertContains(messageBus, 'export class LinkedMessageBus', 'linked message bus is public');
+  assertContains(messageBus, 'export class AgentMessageReader', 'message bus reader is public');
+  assertContains(actionCatalog, 'export class ActionCatalog', 'action catalog is public');
+  assertContains(actionPlanRunner, 'const MAX_ACTION_PLAN_STEPS: number = 5;', 'action plans have a named five-step cap');
+  assertContains(jsonPointer, 'export function resolveJsonPointer', 'JSON Pointer resolver is public');
+  assertContains(actionAgent, 'RegisteredActionExecutor', 'Action Agent depends on registered execution');
+  assert(!agentMessage.includes('BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
+  assert(!/export\s+class\s+Coordinator\b/.test(
+    `${leaderAgent}\n${dataAgent}\n${uiAgent}\n${actionAgent}`
+  ), 'four-role runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
   assertContains(conversationStore, 'JSON.parse(raw)', 'conversation store parses persisted JSON defensively');
   assertContains(conversationStore, 'role !== ConversationRole.USER && role !== ConversationRole.ASSISTANT', 'conversation store ignores unknown roles');
