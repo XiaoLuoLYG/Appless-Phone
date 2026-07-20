@@ -16,6 +16,8 @@ import hotelToolTypesTest from './HotelToolTypes.test';
 import hotelToolA2uiTest from './HotelToolA2ui.test';
 import hotelDataResultTest from './HotelDataResult.test';
 import hotelContactLookupTest from './HotelContactLookup.test';
+import hotelSystemIntentTest from './HotelSystemIntent.test';
+import hotelRegisteredActionExecutorTest from './HotelRegisteredActionExecutor.test';
 import dynamicToolA2uiTest from './DynamicToolA2ui.test';
 import composioConfigTest from './ComposioConfig.test';
 import composioAuthClientTest from './ComposioAuthClient.test';
@@ -99,6 +101,8 @@ export default function testsuite() {
   hotelToolA2uiTest();
   hotelDataResultTest();
   hotelContactLookupTest();
+  hotelSystemIntentTest();
+  hotelRegisteredActionExecutorTest();
   dynamicToolA2uiTest();
   composioConfigTest();
   composioAuthClientTest();
