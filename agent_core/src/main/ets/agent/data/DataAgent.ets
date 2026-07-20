@@ -19,6 +19,11 @@ export class DataAgent extends MessageDrivenAgent {
     this.executor = executor;
   }
 
+  stop(): void {
+    super.stop();
+    this.canceled.clear();
+  }
+
   protected accepts(message: AgentMessage): boolean {
     return message.type === AgentMessageType.TASK_CREATE_DATA ||
       message.type === AgentMessageType.TURN_CANCEL;
@@ -40,19 +45,16 @@ export class DataAgent extends MessageDrivenAgent {
           if (!this.canceled.has(key)) {
             this.publishResult(message, result);
           }
-          this.canceled.delete(key);
         })
         .catch((error: Object) => {
           if (!this.canceled.has(key)) {
             this.publishError(message, error);
           }
-          this.canceled.delete(key);
         });
     } catch (error) {
       if (!this.canceled.has(key)) {
         this.publishError(message, error as Object);
       }
-      this.canceled.delete(key);
     }
   }
 

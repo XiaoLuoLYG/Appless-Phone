@@ -15,6 +15,9 @@ import {
   UiTaskRenderer
 } from './UiAgentTypes';
 
+// Retain only recent terminal turn identities; older provider payloads are never retained.
+const TERMINATED_TURN_LIMIT: number = 128;
+
 interface UiTurnContext {
   conversationId: string;
   turnId: string;
@@ -23,9 +26,15 @@ interface UiTurnContext {
   uiTask?: CreateUiTaskPayload;
   pendingData?: DataResult;
   pendingDataTaskId: string;
+  pendingInvalidDataTaskId: string;
+  pendingInvalidDataCode: string;
+  pendingInvalidDataMessage: string;
+  pendingDataErrorMessage: string;
+  dataErrorPending: boolean;
   canceled: boolean;
   skeletonWritten: boolean;
   resultWritten: boolean;
+  terminalRenderStarted: boolean;
 }
 
 export class UiAgent extends MessageDrivenAgent {
@@ -34,6 +43,7 @@ export class UiAgent extends MessageDrivenAgent {
   private readonly writer: UiSurfaceWriter;
   private readonly contexts: Map<string, UiTurnContext> = new Map<string, UiTurnContext>();
   private readonly terminated: Set<string> = new Set<string>();
+  private readonly terminatedOrder: string[] = [];
   private surfaceSuffix: number = 0;
 
   constructor(bus: LinkedMessageBus, renderer: UiTaskRenderer, writer: UiSurfaceWriter) {
@@ -43,13 +53,21 @@ export class UiAgent extends MessageDrivenAgent {
     this.writer = writer;
   }
 
+  stop(): void {
+    super.stop();
+    this.contexts.clear();
+    this.terminated.clear();
+    this.terminatedOrder.splice(0, this.terminatedOrder.length);
+  }
+
   surfaceReplaced(conversationId: string, turnId: string, surfaceId: string): void {
     const key: string = this.turnKey(conversationId, turnId);
     const context: UiTurnContext | undefined = this.contexts.get(key);
     if (context === undefined || context.surfaceId !== surfaceId) {
       return;
     }
-    this.terminated.add(key);
+    context.canceled = true;
+    this.terminate(key);
     this.contexts.delete(key);
   }
 
@@ -69,89 +87,237 @@ export class UiAgent extends MessageDrivenAgent {
       if (context !== undefined) {
         context.canceled = true;
       }
-      this.terminated.add(key);
+      this.terminate(key);
       this.contexts.delete(key);
       return;
     }
     if (this.terminated.has(key)) {
       return;
     }
-    try {
-      if (message.type === AgentMessageType.TASK_CREATE_UI) {
-        await this.handleUiTask(message, key);
-      } else if (message.type === AgentMessageType.TASK_RESULT_DATA) {
-        await this.handleDataResult(message, key);
-      } else if (message.type === AgentMessageType.TASK_ERROR) {
-        await this.handleTaskError(message, key);
-      } else {
-        await this.handleActionStatus(message, key);
+    if (message.type === AgentMessageType.TASK_CREATE_UI) {
+      const task: CreateUiTaskPayload | null = this.uiTask(message.payload, message.taskId);
+      if (task === null) {
+        this.publishInputError(message, 'UI_TASK_INVALID', 'UI task payload is malformed');
+        return;
       }
-    } catch (error) {
-      this.failRender(message, key, error as Object);
+      const context: UiTurnContext = this.contextFor(message, key);
+      this.launch(this.handleUiTask(message, task, key, context), message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+      const current: UiTurnContext | undefined = this.contexts.get(key);
+      const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
+      this.launch(this.handleDataResult(message, key, context), message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_ERROR) {
+      const context: UiTurnContext | undefined = this.contexts.get(key);
+      if (context !== undefined) {
+        this.launch(this.handleTaskError(message, key, context), message, key, context);
+      }
+      return;
+    }
+    const context: UiTurnContext | undefined = this.contexts.get(key);
+    if (context !== undefined) {
+      this.launch(this.handleActionStatus(message, key, context), message, key, context);
     }
   }
 
-  private async handleUiTask(message: AgentMessage, key: string): Promise<void> {
-    const context: UiTurnContext = this.contextFor(message, key);
+  private launch(
+    operation: Promise<void>,
+    message: AgentMessage,
+    key: string,
+    context: UiTurnContext
+  ): void {
+    operation.catch((error: Object) => {
+      this.failRender(message, key, context, error);
+    });
+  }
+
+  private async handleUiTask(
+    message: AgentMessage,
+    task: CreateUiTaskPayload,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
     if (context.canceled || context.skeletonWritten || context.uiTask !== undefined) {
       return;
     }
-    const task: CreateUiTaskPayload = message.payload as CreateUiTaskPayload;
     context.uiTask = task;
     context.uiTaskId = message.taskId;
     const jsonl: string = await this.renderer.skeleton(task, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     context.skeletonWritten = true;
     this.publishUiResult(context, 'skeleton');
-    await this.renderPendingData(context);
+    this.discardUnownedPendingData(context);
+    if (context.pendingDataErrorMessage.length > 0) {
+      const message: string = context.pendingDataErrorMessage;
+      context.pendingDataErrorMessage = '';
+      await this.renderDataError(context, key, message);
+    } else {
+      await this.renderPendingData(context, key);
+    }
   }
 
-  private async handleDataResult(message: AgentMessage, key: string): Promise<void> {
-    const context: UiTurnContext = this.contextFor(message, key);
-    if (context.canceled || context.resultWritten || context.pendingDataTaskId === message.taskId) {
+  private async handleDataResult(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskId) {
       return;
     }
-    context.pendingData = message.payload as DataResult;
+    if (context.canceled || context.resultWritten || context.terminalRenderStarted ||
+      context.dataErrorPending || context.pendingDataTaskId === message.taskId) {
+      return;
+    }
+    const data: DataResult | null = this.dataResult(message.payload);
+    if (data === null) {
+      this.rememberInvalidData(context, message.taskId, 'UI_DATA_INVALID', 'Data result payload is malformed');
+      this.publishPendingDataErrorIfOwned(context);
+      return;
+    }
+    context.pendingData = data;
     context.pendingDataTaskId = message.taskId;
-    await this.renderPendingData(context);
+    if (context.uiTask !== undefined && data.outputSchema !== context.uiTask.expectedOutputSchema) {
+      context.pendingData = undefined;
+      context.pendingDataTaskId = '';
+      this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
+      return;
+    }
+    await this.renderPendingData(context, key);
   }
 
-  private async renderPendingData(context: UiTurnContext): Promise<void> {
+  private async renderPendingData(context: UiTurnContext, key: string): Promise<void> {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
     const data: DataResult | undefined = context.pendingData;
-    if (task === undefined || data === undefined || !context.skeletonWritten || context.resultWritten) {
+    if (task === undefined || data === undefined || !context.skeletonWritten || context.resultWritten ||
+      context.terminalRenderStarted || context.pendingDataTaskId !== task.dataTaskId) {
       return;
     }
+    if (data.outputSchema !== task.expectedOutputSchema) {
+      context.pendingData = undefined;
+      context.pendingDataTaskId = '';
+      this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
+      return;
+    }
+    context.terminalRenderStarted = true;
     const jsonl: string = await this.renderer.result(task, data, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     context.resultWritten = true;
     this.publishUiResult(context, 'result');
-    context.uiTask = undefined;
-    context.pendingData = undefined;
+    this.clearPendingPayloads(context);
   }
 
-  private async handleTaskError(message: AgentMessage, key: string): Promise<void> {
-    const context: UiTurnContext | undefined = this.contexts.get(key);
-    if (context === undefined || context.canceled || context.resultWritten || context.uiTask === undefined) {
+  private async handleTaskError(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.canceled || context.resultWritten ||
+      context.terminalRenderStarted || context.uiTask === undefined ||
+      message.taskId !== context.uiTask.dataTaskId) {
       return;
     }
-    const error: TaskErrorPayload = message.payload as TaskErrorPayload;
-    const jsonl: string = await this.renderer.error(context.uiTask, error.message, context.surfaceId);
-    await this.writer.write(context.turnId, context.surfaceId, jsonl);
-    context.resultWritten = true;
-    this.publishUiResult(context, 'error');
-    context.uiTask = undefined;
-    context.pendingData = undefined;
+    const errorMessage: string | null = this.taskErrorMessage(message.payload);
+    if (errorMessage === null) {
+      this.publishOwnedDataError(context, 'UI_DATA_ERROR_INVALID', 'Data error payload is malformed');
+      return;
+    }
+    context.dataErrorPending = false;
+    if (!context.skeletonWritten) {
+      context.pendingDataErrorMessage = errorMessage;
+      return;
+    }
+    await this.renderDataError(context, key, errorMessage);
   }
 
-  private async handleActionStatus(message: AgentMessage, key: string): Promise<void> {
-    const context: UiTurnContext | undefined = this.contexts.get(key);
-    if (context === undefined || context.canceled || this.payloadSurfaceId(message.payload) !== context.surfaceId) {
+  private async renderDataError(context: UiTurnContext, key: string, message: string): Promise<void> {
+    if (context.uiTask === undefined || context.resultWritten || context.terminalRenderStarted) {
+      return;
+    }
+    context.terminalRenderStarted = true;
+    const jsonl: string = await this.renderer.error(context.uiTask, message, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    context.resultWritten = true;
+    this.publishUiResult(context, 'error');
+    this.clearPendingPayloads(context);
+  }
+
+  private async handleActionStatus(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
+    if (context.canceled || !context.skeletonWritten ||
+      this.payloadSurfaceId(message.payload) !== context.surfaceId) {
       return;
     }
     const jsonl: string = await this.renderer.actionStatus(message.payload, context.surfaceId);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    if (!this.isActive(key, context)) {
+      return;
+    }
     this.publishUiResult(context, 'action');
+  }
+
+  private discardUnownedPendingData(context: UiTurnContext): void {
+    const task: CreateUiTaskPayload | undefined = context.uiTask;
+    if (task === undefined) {
+      return;
+    }
+    if (context.pendingDataTaskId.length > 0 && context.pendingDataTaskId !== task.dataTaskId) {
+      context.pendingData = undefined;
+      context.pendingDataTaskId = '';
+    }
+    if (context.pendingInvalidDataTaskId.length > 0 && context.pendingInvalidDataTaskId !== task.dataTaskId) {
+      this.clearPendingInvalidData(context);
+    }
+    this.publishPendingDataErrorIfOwned(context);
+  }
+
+  private rememberInvalidData(context: UiTurnContext, taskId: string, code: string, message: string): void {
+    context.pendingData = undefined;
+    context.pendingDataTaskId = '';
+    context.pendingInvalidDataTaskId = taskId;
+    context.pendingInvalidDataCode = code;
+    context.pendingInvalidDataMessage = message;
+  }
+
+  private publishPendingDataErrorIfOwned(context: UiTurnContext): void {
+    const task: CreateUiTaskPayload | undefined = context.uiTask;
+    if (task === undefined || context.pendingInvalidDataTaskId !== task.dataTaskId) {
+      return;
+    }
+    const code: string = context.pendingInvalidDataCode;
+    const message: string = context.pendingInvalidDataMessage;
+    this.clearPendingInvalidData(context);
+    this.publishOwnedDataError(context, code, message);
+  }
+
+  private publishOwnedDataError(context: UiTurnContext, code: string, message: string): void {
+    const task: CreateUiTaskPayload | undefined = context.uiTask;
+    if (task === undefined || context.dataErrorPending) {
+      return;
+    }
+    context.dataErrorPending = true;
+    const payload: TaskErrorPayload = { code, message };
+    this.bus.publish({
+      type: AgentMessageType.TASK_ERROR,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId: task.dataTaskId,
+      payload
+    });
   }
 
   private contextFor(message: AgentMessage, key: string): UiTurnContext {
@@ -165,12 +331,36 @@ export class UiAgent extends MessageDrivenAgent {
       surfaceId: this.uniqueSurfaceId(),
       uiTaskId: '',
       pendingDataTaskId: '',
+      pendingInvalidDataTaskId: '',
+      pendingInvalidDataCode: '',
+      pendingInvalidDataMessage: '',
+      pendingDataErrorMessage: '',
+      dataErrorPending: false,
       canceled: false,
       skeletonWritten: false,
-      resultWritten: false
+      resultWritten: false,
+      terminalRenderStarted: false
     };
     this.contexts.set(key, created);
     return created;
+  }
+
+  private isActive(key: string, context: UiTurnContext): boolean {
+    return !context.canceled && !this.terminated.has(key) && this.contexts.get(key) === context;
+  }
+
+  private terminate(key: string): void {
+    if (this.terminated.has(key)) {
+      return;
+    }
+    this.terminated.add(key);
+    this.terminatedOrder.push(key);
+    if (this.terminatedOrder.length > TERMINATED_TURN_LIMIT) {
+      const oldest: string | undefined = this.terminatedOrder.shift();
+      if (oldest !== undefined) {
+        this.terminated.delete(oldest);
+      }
+    }
   }
 
   private uniqueSurfaceId(): string {
@@ -193,7 +383,59 @@ export class UiAgent extends MessageDrivenAgent {
     return found;
   }
 
+  private uiTask(payload: Object, taskId: string): CreateUiTaskPayload | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const payloadTaskId = values['taskId'];
+    const dataTaskId = values['dataTaskId'];
+    const intent = values['intent'];
+    const expectedOutputSchema = values['expectedOutputSchema'];
+    if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
+      typeof dataTaskId !== 'string' || dataTaskId.trim().length === 0 || dataTaskId === taskId ||
+      typeof intent !== 'string' || intent.trim().length === 0 ||
+      typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {
+      return null;
+    }
+    return payload as CreateUiTaskPayload;
+  }
+
+  private dataResult(payload: Object): DataResult | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const toolId = values['toolId'];
+    const outputSchema = values['outputSchema'];
+    const status = values['status'];
+    const sources = values['sources'];
+    const data = values['data'];
+    const warnings = values['warnings'];
+    const validStatus: boolean = status === 'success' || status === 'partial' ||
+      status === 'empty' || status === 'error';
+    if (typeof toolId !== 'string' || toolId.trim().length === 0 ||
+      typeof outputSchema !== 'string' || outputSchema.trim().length === 0 ||
+      !validStatus || !Array.isArray(sources) || data === null || typeof data !== 'object' ||
+      !Array.isArray(warnings)) {
+      return null;
+    }
+    return payload as DataResult;
+  }
+
+  private taskErrorMessage(payload: Object): string | null {
+    if (payload === null || typeof payload !== 'object') {
+      return null;
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const message = values['message'];
+    return typeof message === 'string' && message.trim().length > 0 ? message : null;
+  }
+
   private payloadSurfaceId(payload: Object): string {
+    if (payload === null || typeof payload !== 'object') {
+      return '';
+    }
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const surfaceId: Object | string | number | boolean | null | undefined = values['surfaceId'];
     return typeof surfaceId === 'string' ? surfaceId : '';
@@ -213,21 +455,52 @@ export class UiAgent extends MessageDrivenAgent {
     });
   }
 
-  private failRender(message: AgentMessage, key: string, error: Object): void {
-    const context: UiTurnContext | undefined = this.contexts.get(key);
-    this.terminated.add(key);
-    this.contexts.delete(key);
+  private publishInputError(message: AgentMessage, code: string, detail: string): void {
     const payload: TaskErrorPayload = {
-      code: 'UI_RENDER_FAILED',
-      message: error instanceof Error ? error.message : `${error}`
+      code,
+      message: detail
     };
     this.bus.publish({
       type: AgentMessageType.TASK_ERROR,
       conversationId: message.conversationId,
       turnId: message.turnId,
-      taskId: context === undefined || context.uiTaskId.length === 0 ? message.taskId : context.uiTaskId,
+      taskId: message.taskId,
       payload
     });
+  }
+
+  private failRender(message: AgentMessage, key: string, context: UiTurnContext, error: Object): void {
+    if (!this.isActive(key, context)) {
+      return;
+    }
+    context.canceled = true;
+    this.terminate(key);
+    this.contexts.delete(key);
+    this.publishInputError(
+      {
+        type: message.type,
+        conversationId: message.conversationId,
+        turnId: message.turnId,
+        taskId: context.uiTaskId.length === 0 ? message.taskId : context.uiTaskId,
+        payload: message.payload
+      },
+      'UI_RENDER_FAILED',
+      error instanceof Error ? error.message : `${error}`
+    );
+  }
+
+  private clearPendingPayloads(context: UiTurnContext): void {
+    context.uiTask = undefined;
+    context.pendingData = undefined;
+    context.pendingDataTaskId = '';
+    context.pendingDataErrorMessage = '';
+    this.clearPendingInvalidData(context);
+  }
+
+  private clearPendingInvalidData(context: UiTurnContext): void {
+    context.pendingInvalidDataTaskId = '';
+    context.pendingInvalidDataCode = '';
+    context.pendingInvalidDataMessage = '';
   }
 
   private turnKey(conversationId: string, turnId: string): string {

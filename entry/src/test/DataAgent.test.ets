@@ -69,37 +69,52 @@ class ThrowingDataExecutor implements DataTaskExecutor {
   }
 }
 
-class ControlledDataExecutor implements DataTaskExecutor {
-  readonly started: TestGate = new TestGate();
-  private resolveResult: ((result: DataResult) => void) | null = null;
-  private rejectResult: ((error: Error) => void) | null = null;
+class TwoControlledDataExecutor implements DataTaskExecutor {
+  readonly bothStarted: TestGate = new TestGate();
+  private calls: number = 0;
+  private firstResolve: ((result: DataResult) => void) | null = null;
+  private firstReject: ((error: Error) => void) | null = null;
+  private secondResolve: ((result: DataResult) => void) | null = null;
 
   async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls++;
     return new Promise<DataResult>((
       resolve: (result: DataResult) => void,
       reject: (error: Error) => void
     ) => {
-      this.resolveResult = resolve;
-      this.rejectResult = reject;
-      this.started.open();
+      if (this.calls === 1) {
+        this.firstResolve = resolve;
+        this.firstReject = reject;
+      } else {
+        this.secondResolve = resolve;
+        this.bothStarted.open();
+      }
     });
   }
 
-  complete(result: DataResult): void {
-    const resolve: ((result: DataResult) => void) | null = this.resolveResult;
-    this.resolveResult = null;
-    this.rejectResult = null;
+  completeFirst(result: DataResult): void {
+    const resolve: ((result: DataResult) => void) | null = this.firstResolve;
+    this.firstResolve = null;
+    this.firstReject = null;
     if (resolve !== null) {
       resolve(result);
     }
   }
 
-  fail(error: Error): void {
-    const reject: ((error: Error) => void) | null = this.rejectResult;
-    this.resolveResult = null;
-    this.rejectResult = null;
+  rejectFirst(error: Error): void {
+    const reject: ((error: Error) => void) | null = this.firstReject;
+    this.firstResolve = null;
+    this.firstReject = null;
     if (reject !== null) {
       reject(error);
+    }
+  }
+
+  completeSecond(result: DataResult): void {
+    const resolve: ((result: DataResult) => void) | null = this.secondResolve;
+    this.secondResolve = null;
+    if (resolve !== null) {
+      resolve(result);
     }
   }
 }
@@ -241,20 +256,21 @@ export default function dataAgentTest() {
       observer.close();
     });
 
-    it('suppresses a result that completes after matching turn cancellation', 0, async () => {
+    it('keeps cancellation terminal across two later successful completions', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const executor: ControlledDataExecutor = new ControlledDataExecutor();
+      const executor: TwoControlledDataExecutor = new TwoControlledDataExecutor();
       const agent: DataAgent = new DataAgent(bus, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataTaskMessage());
-      await executor.started.promise;
-      bus.publish(message(AgentMessageType.TURN_CANCEL, 'conversation-other', 'turn-1', 'cancel-other'));
+      bus.publish(dataTaskMessage('conversation-hotel', 'turn-1', 'data-1'));
+      bus.publish(dataTaskMessage('conversation-hotel', 'turn-1', 'data-2'));
+      await executor.bothStarted.promise;
       bus.publish(message(AgentMessageType.TURN_CANCEL, 'conversation-hotel', 'turn-1', 'cancel-1'));
-      expect((await receiveType(observer, AgentMessageType.TURN_CANCEL)).conversationId).assertEqual('conversation-other');
       expect((await receiveType(observer, AgentMessageType.TURN_CANCEL)).conversationId).assertEqual('conversation-hotel');
-      executor.complete(hotelDataResult('success'));
+      executor.completeFirst(hotelDataResult('success'));
+      await settle();
+      executor.completeSecond(hotelDataResult('success'));
       await settle();
       bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
 
@@ -263,18 +279,21 @@ export default function dataAgentTest() {
       observer.close();
     });
 
-    it('suppresses an executor error that arrives after cancellation', 0, async () => {
+    it('keeps cancellation terminal when rejection precedes another completion', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const executor: ControlledDataExecutor = new ControlledDataExecutor();
+      const executor: TwoControlledDataExecutor = new TwoControlledDataExecutor();
       const agent: DataAgent = new DataAgent(bus, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataTaskMessage());
-      await executor.started.promise;
+      bus.publish(dataTaskMessage('conversation-hotel', 'turn-1', 'data-1'));
+      bus.publish(dataTaskMessage('conversation-hotel', 'turn-1', 'data-2'));
+      await executor.bothStarted.promise;
       bus.publish(message(AgentMessageType.TURN_CANCEL, 'conversation-hotel', 'turn-1', 'cancel-1'));
       await receiveType(observer, AgentMessageType.TURN_CANCEL);
-      executor.fail(new Error('late provider error'));
+      executor.rejectFirst(new Error('late provider error'));
+      await settle();
+      executor.completeSecond(hotelDataResult('success'));
       await settle();
       bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
 

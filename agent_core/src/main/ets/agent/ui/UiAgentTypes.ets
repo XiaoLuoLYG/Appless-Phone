@@ -2,6 +2,7 @@ import { DataResult } from '../message/DataResult';
 
 export interface CreateUiTaskPayload {
   taskId: string;
+  dataTaskId: string;
   intent: string;
   expectedOutputSchema: string;
 }

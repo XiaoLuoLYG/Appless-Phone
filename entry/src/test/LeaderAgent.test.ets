@@ -3,6 +3,7 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  CreateUiTaskPayload,
   InputUserPayload,
   LeaderAgent,
   LeaderDataTask,
@@ -111,7 +112,7 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
   const ui: LeaderUiTask = {
     taskId: uiTaskId,
     intent: 'Show a hotel search surface',
-    expectedOutputSchema: 'hotelSearchSurface'
+    expectedOutputSchema: 'hotelSearchResults'
   };
   const args: HotelSearchArgs = {
     city: 'Shenzhen',
@@ -130,7 +131,7 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
 
 function hotelPlanWithUnexpectedFields(): LeaderPlan {
   const uiObject: Object = JSON.parse(
-    '{"taskId":"ui-1","intent":"Show a hotel search surface","expectedOutputSchema":"hotelSearchSurface",' +
+    '{"taskId":"ui-1","intent":"Show a hotel search surface","expectedOutputSchema":"hotelSearchResults",' +
       '"providerOutput":{"secret":"must-not-leak"},"jsonl":"{\\"createSurface\\":true}"}'
   ) as Object;
   const dataObject: Object = JSON.parse(
@@ -190,7 +191,7 @@ export default function leaderAgentTest() {
       await receive(observer);
       const uiMessage: AgentMessage = await receive(observer);
       const dataMessage: AgentMessage = await receive(observer);
-      const ui: LeaderUiTask = uiMessage.payload as LeaderUiTask;
+      const ui: CreateUiTaskPayload = uiMessage.payload as CreateUiTaskPayload;
       const data: LeaderDataTask = dataMessage.payload as LeaderDataTask;
       const args: HotelSearchArgs = data.args as HotelSearchArgs;
 
@@ -204,12 +205,13 @@ export default function leaderAgentTest() {
       expect(dataMessage.taskId.length > 0).assertTrue();
       expect(uiMessage.taskId === dataMessage.taskId).assertFalse();
       expect(ui.taskId).assertEqual(uiMessage.taskId);
+      expect(ui.dataTaskId).assertEqual(dataMessage.taskId);
       expect(data.taskId).assertEqual(dataMessage.taskId);
       expect(data.toolId).assertEqual('hotel.search');
       expect(data.outputSchema).assertEqual('hotelSearchResults');
       expect(args.city).assertEqual('Shenzhen');
       expect(args.guests).assertEqual(2);
-      expect(Object.keys(ui).sort().join(',')).assertEqual('expectedOutputSchema,intent,taskId');
+      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskId,expectedOutputSchema,intent,taskId');
       expect(Object.keys(data).sort().join(',')).assertEqual('args,outputSchema,taskId,toolId');
       expect(JSON.stringify(ui).indexOf('provider')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('jsonl')).assertEqual(-1);
@@ -219,6 +221,24 @@ export default function leaderAgentTest() {
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-1'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a plan whose UI expected schema does not match its Data output schema', 0, async () => {
+      const plan: LeaderPlan = hotelPlan();
+      plan.ui.expectedOutputSchema = 'differentSchema';
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan));
+      const observer: AgentMessageReader = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const errorMessage: AgentMessage = await receive(observer);
+
+      expect(errorMessage.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((errorMessage.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
       leader.stop();
       observer.close();
     });

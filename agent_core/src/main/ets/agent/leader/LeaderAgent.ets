@@ -12,6 +12,7 @@ import {
   LeaderPlanner,
   LeaderUiTask
 } from './LeaderTypes';
+import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -167,7 +168,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     state.uiTaskId = plan.ui.taskId;
     state.dataTaskId = plan.data.taskId;
-    this.publishUiTask(message, plan.ui);
+    this.publishUiTask(message, plan.ui, plan.data.taskId);
     this.publishDataTask(message, plan.data);
   }
 
@@ -197,6 +198,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       plan.ui.taskId !== plan.data.taskId &&
       plan.ui.intent.trim().length > 0 &&
       plan.ui.expectedOutputSchema.trim().length > 0 &&
+      plan.ui.expectedOutputSchema === plan.data.outputSchema &&
       plan.data.toolId.trim().length > 0 &&
       plan.data.outputSchema.trim().length > 0;
   }
@@ -205,9 +207,10 @@ export class LeaderAgent extends MessageDrivenAgent {
     return `${message.conversationId.length}:${message.conversationId}${message.turnId}`;
   }
 
-  private publishUiTask(input: AgentMessage, task: LeaderUiTask): void {
-    const payload: LeaderUiTask = {
+  private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
+    const payload: CreateUiTaskPayload = {
       taskId: task.taskId,
+      dataTaskId,
       intent: task.intent,
       expectedOutputSchema: task.expectedOutputSchema
     };
