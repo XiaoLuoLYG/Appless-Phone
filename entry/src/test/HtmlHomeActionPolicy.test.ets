@@ -58,6 +58,35 @@ interface LuckinArgsFixture {
   orderId?: string;
 }
 
+interface HotelNavigateArgsFixture {
+  hotelId: number;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface HotelCallArgsFixture {
+  hotelId: number;
+  name: string;
+  displayPhone: string;
+  dialPhone: string;
+  provider: string;
+  providerPlaceId: string;
+}
+
+interface HotelDetailArgsFixture {
+  hotelId: number;
+  checkInDate: string;
+  checkOutDate: string;
+  countryCode: string;
+  currency: string;
+  adultCount: number;
+  childCount: number;
+  childAgeDetails: number[];
+  roomCount: number;
+}
+
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -113,6 +142,54 @@ function documentFixture(): HtmlHomeDocument {
     rawSurfaceRoot: null,
     generatedAt: '2026-06-26T00:00:00.000Z'
   };
+}
+
+function hotelActionDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.kind = 'hotel';
+  const detail: HotelDetailArgsFixture = {
+    hotelId: 47675,
+    checkInDate: '2026-08-15',
+    checkOutDate: '2026-08-17',
+    countryCode: 'CN',
+    currency: 'CNY',
+    adultCount: 2,
+    childCount: 0,
+    childAgeDetails: [],
+    roomCount: 1
+  };
+  const navigate: HotelNavigateArgsFixture = {
+    hotelId: 47675,
+    name: '深圳测试酒店',
+    address: '深圳市南山区科技南路 88 号',
+    latitude: 22.5431,
+    longitude: 114.0579
+  };
+  const call: HotelCallArgsFixture = {
+    hotelId: 47675,
+    name: '深圳测试酒店',
+    displayPhone: '+86 755 1234 5678',
+    dialPhone: '+8675512345678',
+    provider: 'Google Places',
+    providerPlaceId: 'places/ChIJ-real-hotel'
+  };
+  doc.blocks = [{
+    id: 'hotel-47675',
+    kind: 'generic-tool-result',
+    title: '深圳测试酒店',
+    status: 'success',
+    source: 'RollingGo',
+    metrics: [{ label: 'toolName', value: 'hotel.search' }],
+    rows: [{ label: '酒店 ID', value: '47675' }],
+    actions: [
+      { id: 'hotel.detail', label: '查看实时房型', prompt: '查看实时房型', variant: 'primary', kind: 'prompt', args: detail },
+      { id: 'hotel.navigate', label: '导航到酒店', prompt: '导航到酒店', variant: 'secondary', kind: 'prompt', args: navigate },
+      { id: 'hotel.call', label: '联系酒店', prompt: '联系酒店', variant: 'secondary', kind: 'prompt', args: call },
+      { id: 'hotel.book', label: '预订酒店', prompt: '预订酒店', variant: 'primary', kind: 'prompt', args: detail }
+    ]
+  }];
+  doc.actions = doc.blocks[0].actions.slice();
+  return doc;
 }
 
 export default function htmlHomeActionPolicyTest() {
@@ -192,6 +269,68 @@ export default function htmlHomeActionPolicyTest() {
 
       expect(isHtmlHomeActionAllowed(doc, action('gmail.ai.reply.draft', 'reply', 'prompt', expectedArgs))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('gmail.ai.reply.draft', 'reply', 'prompt', blockedArgs))).assertFalse();
+    });
+
+    it('allows only exact visible read-only hotel actions', 0, () => {
+      const doc = hotelActionDocumentFixture();
+      const detail = doc.blocks[0].actions[0] as A2uiAction;
+      const navigate = doc.blocks[0].actions[1] as A2uiAction;
+      const call = doc.blocks[0].actions[2] as A2uiAction;
+      const changedNavigate = JSON.parse(JSON.stringify(navigate)) as A2uiAction;
+      const changedCall = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      const changedDetail = JSON.parse(JSON.stringify(detail)) as A2uiAction;
+      (changedNavigate.args as HotelNavigateArgsFixture).latitude = 23.1;
+      (changedCall.args as HotelCallArgsFixture).providerPlaceId = 'places/other';
+      (changedDetail.args as HotelDetailArgsFixture).hotelId = 99999;
+
+      expect(isHtmlHomeActionAllowed(doc, detail)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, navigate)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, call)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, changedNavigate)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedCall)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedDetail)).assertFalse();
+
+      const changedPhone = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      const changedDisplay = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      const changedProvider = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      const changedCallName = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      const changedCallHotel = JSON.parse(JSON.stringify(call)) as A2uiAction;
+      (changedPhone.args as HotelCallArgsFixture).dialPhone = '+8675599999999';
+      (changedDisplay.args as HotelCallArgsFixture).displayPhone = '+86 755 9999 9999';
+      (changedProvider.args as HotelCallArgsFixture).provider = 'Other Places';
+      (changedCallName.args as HotelCallArgsFixture).name = '其他酒店';
+      (changedCallHotel.args as HotelCallArgsFixture).hotelId = 99999;
+      expect(isHtmlHomeActionAllowed(doc, changedPhone)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedDisplay)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedProvider)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedCallName)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedCallHotel)).assertFalse();
+
+      const changedAddress = JSON.parse(JSON.stringify(navigate)) as A2uiAction;
+      const changedLongitude = JSON.parse(JSON.stringify(navigate)) as A2uiAction;
+      const changedNavigateName = JSON.parse(JSON.stringify(navigate)) as A2uiAction;
+      const changedNavigateHotel = JSON.parse(JSON.stringify(navigate)) as A2uiAction;
+      (changedAddress.args as HotelNavigateArgsFixture).address = '其他地址';
+      (changedLongitude.args as HotelNavigateArgsFixture).longitude = 113.1;
+      (changedNavigateName.args as HotelNavigateArgsFixture).name = '其他酒店';
+      (changedNavigateHotel.args as HotelNavigateArgsFixture).hotelId = 99999;
+      expect(isHtmlHomeActionAllowed(doc, changedAddress)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedLongitude)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedNavigateName)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedNavigateHotel)).assertFalse();
+
+      const changedDate = JSON.parse(JSON.stringify(detail)) as A2uiAction;
+      const changedGuests = JSON.parse(JSON.stringify(detail)) as A2uiAction;
+      (changedDate.args as HotelDetailArgsFixture).checkInDate = '2026-08-16';
+      (changedGuests.args as HotelDetailArgsFixture).adultCount = 3;
+      expect(isHtmlHomeActionAllowed(doc, changedDate)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, changedGuests)).assertFalse();
+
+      const current = hotelActionDocumentFixture();
+      current.blocks[0].actions.splice(2, 1);
+      current.actions = current.blocks[0].actions.slice();
+      expect(isHtmlHomeActionAllowed(current, call)).assertFalse();
+      expect(isHtmlHomeActionAllowed(current, doc.blocks[0].actions[3] as A2uiAction)).assertFalse();
     });
 
     it('allows mail reply submissions only for the matching visible mail card', 0, () => {

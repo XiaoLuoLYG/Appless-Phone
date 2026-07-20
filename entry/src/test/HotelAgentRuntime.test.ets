@@ -36,6 +36,8 @@ import {
   HotelTurnOutcome
 } from '../main/ets/pages/A2uiHome/agent/HotelAgentRuntime';
 import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/HotelRegisteredActionExecutor';
+import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
+import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
 const SEARCH_QUERY: string = '8月15日深圳住两晚的酒店';
 const SEARCH_JSON: string = '{' +
@@ -1265,6 +1267,66 @@ export default function hotelAgentRuntimeTest() {
       expect(await runtime.runAction(original, oldContext)).assertFalse();
       expect(opener.uris.length).assertEqual(0);
       runtime.stop();
+    });
+
+    it('requires the exact active context and current HTML document for page actions', 0, async () => {
+      const surfaces: A2uiSurfaceState[] = [];
+      const opener = new RecordingOpener();
+      const runtime = new HotelAgentRuntime(options(
+        new TrackingBus(),
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        opener,
+        (surface: A2uiSurfaceState): void => {
+          surfaces.push(surface);
+        }
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const context = runtime.currentActionContext();
+      const current: HtmlHomeDocument = createHtmlHomeDocument({
+        surface: surfaces[surfaces.length - 1],
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const absent: HtmlHomeDocument = createHtmlHomeDocument({
+        surface: surfaces[surfaces.length - 1],
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      absent.blocks.forEach((block) => {
+        block.actions = block.actions.filter((candidate) => {
+          return candidate.id !== 'hotel.navigate';
+        });
+      });
+      absent.actions = absent.actions.filter((candidate) => {
+        return candidate.id !== 'hotel.navigate';
+      });
+      if (context === null) {
+        runtime.dispose();
+        return;
+      }
+
+      const changedTurn: HotelActionContext = {
+        conversationId: context.conversationId,
+        turnId: context.turnId + '-old',
+        surfaceId: context.surfaceId,
+        sourceToolId: context.sourceToolId
+      };
+      const changedSurface: HotelActionContext = {
+        conversationId: context.conversationId,
+        turnId: context.turnId,
+        surfaceId: context.surfaceId + '-old',
+        sourceToolId: context.sourceToolId
+      };
+      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), changedTurn, current)).assertFalse();
+      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), changedSurface, current)).assertFalse();
+      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), context, absent)).assertFalse();
+      expect(opener.uris.length).assertEqual(0);
+      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), context, current)).assertTrue();
+      expect(opener.uris.length).assertEqual(1);
+      runtime.dispose();
     });
 
     it('renders provider business errors without casting error data as hotel results', 0, async () => {

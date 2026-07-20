@@ -252,10 +252,16 @@ button:active { transform: scale(0.98); }
 .hotel-search-footer {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: auto;
   padding-top: 12px;
+}
+.hotel-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
 }
 .hotel-price { min-width: 0; }
 .hotel-price-value {
@@ -284,6 +290,11 @@ button:active { transform: scale(0.98); }
   font-size: 11px;
   font-weight: 760;
   transition: transform 140ms var(--ease-out), background-color 180ms ease;
+}
+.hotel-card-cta-secondary {
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
 }
 .hotel-room-card {
   border-radius: 17px;
@@ -474,14 +485,7 @@ const HOTEL_HOME_JS: string = `
     if (isBusy || !action) { return; }
     try {
       if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
-        window.AIPhoneHome.postAction(JSON.stringify({
-          id: text(action.id),
-          label: text(action.label || action.id),
-          prompt: text(action.prompt),
-          variant: text(action.variant),
-          kind: text(action.kind),
-          args: action.args && typeof action.args === 'object' ? action.args : null
-        }));
+        window.AIPhoneHome.postAction(JSON.stringify(action));
       }
     } catch (error) {}
   }
@@ -518,6 +522,9 @@ const HOTEL_HOME_JS: string = `
     return host;
   }
   function renderSearchCard(parent, block) {
+    var detailAction = actionFor(block, 'hotel.detail');
+    var navigateAction = actionFor(block, 'hotel.navigate');
+    var callAction = actionFor(block, 'hotel.call');
     var card = add(parent, 'article', 'hotel-search-card');
     var imageUrl = safeImageUrl(rowValue(block, ['酒店图片']));
     if (imageUrl.length > 0) {
@@ -543,14 +550,27 @@ const HOTEL_HOME_JS: string = `
     if (tags.childNodes.length === 0) { tags.remove(); }
     var footer = add(body, 'div', 'hotel-search-footer');
     addPrice(footer, rowValue(block, ['参考价']), rowValue(block, ['价格说明']) || '参考价');
-    var detailAction = actionFor(block, 'hotel.detail');
+    var actionRow = add(body, 'div', 'hotel-action-row');
     if (detailAction) {
-      var button = add(footer, 'button', 'hotel-card-cta', '查看房型 →');
+      var button = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-primary', detailAction.label);
       button.type = 'button';
       button.disabled = isBusy;
-      button.setAttribute('aria-label', '查看房型：' + text(block && block.title));
+      button.setAttribute('aria-label', text(detailAction.label) + '：' + text(block && block.title));
       button.addEventListener('click', function () { postAction(detailAction); });
     }
+    if (navigateAction) {
+      var navigateButton = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-secondary', navigateAction.label);
+      navigateButton.type = 'button';
+      navigateButton.disabled = isBusy;
+      navigateButton.addEventListener('click', function () { postAction(navigateAction); });
+    }
+    if (callAction) {
+      var callButton = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-secondary', callAction.label);
+      callButton.type = 'button';
+      callButton.disabled = isBusy;
+      callButton.addEventListener('click', function () { postAction(callAction); });
+    }
+    if (actionRow.childNodes.length === 0) { actionRow.remove(); }
   }
   function addFact(parent, label, value) {
     if (text(value).length === 0) { return; }

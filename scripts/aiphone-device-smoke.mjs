@@ -1770,11 +1770,24 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
   return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
 }
 
-async function verifyHotelDetailAction(layout, index, appPid) {
+function hotelSurfaceIds(logText) {
+  return [...logText.matchAll(/\[AIPhone\]\[A2uiHomeSurface(?:Update|ForceUpdate|SilentUpdate)\][^\n]*surfaceId=([^ \n]+)/g)]
+    .map((match) => match[1]);
+}
+
+async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   let currentLayout = layout;
   let detailCenter = null;
+  let detailLabel = '';
+  const detailLabels = ['查看实时房型', '查看房型'];
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    detailCenter = findTextCenter(currentLayout, '查看房型');
+    for (const label of detailLabels) {
+      detailCenter = findTextCenter(currentLayout, label);
+      if (detailCenter !== null) {
+        detailLabel = label;
+        break;
+      }
+    }
     if (detailCenter !== null) {
       break;
     }
@@ -1783,7 +1796,19 @@ async function verifyHotelDetailAction(layout, index, appPid) {
     currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
   }
   if (detailCenter === null) {
-    return { ok: false, capability: 'hotel.detail', reason: '查看房型 button not found' };
+    return { ok: false, capability: 'hotel.detail', reason: 'hotel.detail button label not found' };
+  }
+  const searchText = collectLayoutText(currentLayout).join('\n');
+  const navigateVisible = searchText.includes('导航到酒店');
+  const callVisible = searchText.includes('联系酒店');
+  const searchSurfaceIds = hotelSurfaceIds(queryLogs.join('\n'));
+  const searchSurfaceId = searchSurfaceIds[searchSurfaceIds.length - 1] || '';
+  const visibleActionIds = ['hotel.detail'];
+  if (navigateVisible) {
+    visibleActionIds.push('hotel.navigate');
+  }
+  if (callVisible) {
+    visibleActionIds.push('hotel.call');
   }
 
   clearHilog();
@@ -1838,7 +1863,11 @@ async function verifyHotelDetailAction(layout, index, appPid) {
       screenPath
     };
   }
-  hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  clearHilog();
+  const restoreLogs = await captureWhile(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  });
+  const restoreLogText = restoreLogs.join('\n');
   await sleep(700);
   const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
   const restoredText = collectLayoutText(restoredLayout).join('\n');
@@ -1848,11 +1877,27 @@ async function verifyHotelDetailAction(layout, index, appPid) {
   const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
   const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
-  const restoredOk = /酒店结果/.test(restoredText) && /查看房型/.test(restoredText);
+  const restoredOk = /酒店结果/.test(restoredText) && /查看(?:实时)?房型/.test(restoredText);
+  const detailSurfaceIds = hotelSurfaceIds(detailLogText);
+  const restoreSurfaceIds = hotelSurfaceIds(restoreLogText);
+  const detailSurfaceId = detailSurfaceIds[detailSurfaceIds.length - 1] || '';
+  const restoredSurfaceId = restoreSurfaceIds[restoreSurfaceIds.length - 1] || '';
   return {
     ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
-      /床型|餐食|取消政策/.test(text) && restoredOk,
+      /床型|餐食|取消政策/.test(text) && restoredOk &&
+      searchSurfaceId.length > 0 && detailSurfaceId.length > 0 && restoredSurfaceId.length > 0,
     capability: 'hotel.detail',
+    detailLabel,
+    visibleActionIds,
+    navigation: navigateVisible
+      ? { status: 'visible', eligibility: 'provider_validated_coordinates' }
+      : { status: 'hidden', eligibility: 'no_valid_coordinates_action' },
+    call: callVisible
+      ? { status: 'visible', contact: 'verified_number_hidden' }
+      : { status: 'hidden', contact: 'missing_or_unverified_pass' },
+    searchSurfaceId,
+    detailSurfaceId,
+    restoredSurfaceId,
     detailRequested,
     detailOk,
     restoredOk,
@@ -2324,7 +2369,7 @@ async function runQuery(query, index, expectedTool) {
     ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
     : { ok: true, skipped: true };
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
-    ? await verifyHotelDetailAction(evidenceLayout, index, appPid)
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, logs)
     : { ok: true, skipped: true };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||

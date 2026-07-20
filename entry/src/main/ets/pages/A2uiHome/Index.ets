@@ -3754,9 +3754,16 @@ struct Index {
     }
     if (this.hotelAgentRuntime !== null &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.call')) {
+      const runtime = this.hotelAgentRuntime;
+      const context = runtime.currentActionContext();
+      const document = this.currentHtmlHomeDocument();
+      if (context === null || !isHtmlHomeActionAllowed(document, action)) {
+        this.logHtmlHomeActionError(action, 'hotel_context_not_current');
+        return;
+      }
       this.isBusy = true;
       try {
-        const ok = await this.hotelAgentRuntime.runAction(action);
+        const ok = await runtime.runAction(action, context, document);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: ok,
           status: ok ? 'ready' : 'error',
@@ -3794,16 +3801,6 @@ struct Index {
       await this.callToolById(
         action.id,
         action.prompt.length > 0 ? action.prompt : action.label,
-        action.id,
-        action.args === undefined ? null : action.args
-      );
-      return;
-    }
-    if (action.id === 'hotel.detail') {
-      this.rememberHotelReturnSurface();
-      await this.callToolById(
-        'hotel.detail',
-        action.prompt,
         action.id,
         action.args === undefined ? null : action.args
       );

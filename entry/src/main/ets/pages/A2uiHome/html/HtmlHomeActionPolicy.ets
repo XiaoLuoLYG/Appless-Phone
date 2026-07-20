@@ -76,7 +76,7 @@ interface LuckinPaymentArgs {
 }
 
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (action.id.length === 0) {
+  if (action.id.length === 0 || action.id === 'hotel.book') {
     return false;
   }
   if (action.id === 'flight_retry_date') {

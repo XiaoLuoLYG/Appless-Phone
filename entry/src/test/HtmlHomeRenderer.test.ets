@@ -1,5 +1,14 @@
 import { describe, it, expect } from '@ohos/hypium';
+import {
+  A2uiAction,
+  A2uiSurfaceStore,
+  HotelSearchResult,
+  hotelSearchA2ui,
+  parseA2uiJsonl,
+  parseHotelSearchRequest
+} from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
+import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
@@ -105,6 +114,72 @@ function hotelDocumentFixture(): HtmlHomeDocument {
   }];
   doc.actions = [];
   return doc;
+}
+
+function allowHotelAction(_action: A2uiAction): boolean {
+  return true;
+}
+
+function hotelSearchDocumentFixture(withCoordinates: boolean = true, withContact: boolean = true): HtmlHomeDocument {
+  const parsed = parseHotelSearchRequest(JSON.parse('{' +
+    '"originQuery":"深圳酒店","place":"深圳","placeType":"CITY","countryCode":"CN",' +
+    '"checkInDate":"2026-08-15","stayNights":2,"adultCount":2,"childCount":0,' +
+    '"childAgeDetails":[],"roomCount":1,"currency":"CNY","size":10}') as Object);
+  if (parsed.value === null) {
+    throw new Error('hotel search renderer fixture is invalid');
+  }
+  const result: HotelSearchResult = {
+    ok: true,
+    error: '',
+    message: '酒店搜索成功',
+    query: parsed.value,
+    hotels: [{
+      hotelId: 47675,
+      bookingUrl: '',
+      name: '深圳测试酒店',
+      nameEn: 'Shenzhen Test Hotel',
+      brand: '',
+      address: '深圳市南山区科技南路 88 号',
+      destinationId: '6046792',
+      latitude: withCoordinates ? 22.5431 : null,
+      longitude: withCoordinates ? 114.0579 : null,
+      distanceInMeters: 0,
+      starRating: 5,
+      price: {
+        message: '2 晚参考价',
+        hasPrice: true,
+        currency: 'CNY',
+        lowestPrice: 1100
+      },
+      areaCode: 'NANSHAN',
+      description: '',
+      imageUrl: '',
+      hotelAmenities: ['Wi-Fi'],
+      tags: ['商务']
+    }]
+  };
+  if (withContact) {
+    result.hotels[0].contact = {
+      displayPhone: '+86 755 1234 5678',
+      dialPhone: '+8675512345678',
+      provider: 'Google Places',
+      providerPlaceId: 'places/ChIJ-real-hotel'
+    };
+  }
+  const parsedJsonl = parseA2uiJsonl(hotelSearchA2ui('hotel-search-task-6', result, allowHotelAction));
+  if (parsedJsonl.error.length > 0) {
+    throw new Error(parsedJsonl.error);
+  }
+  const store = new A2uiSurfaceStore();
+  parsedJsonl.envelopes.forEach((envelope) => {
+    store.apply(envelope);
+  });
+  return createHtmlHomeDocument({
+    surface: store.getSurface(),
+    messages: [],
+    isBusy: false,
+    isAwaitingFirstSurface: false
+  });
 }
 
 function rideDocumentFixture(): HtmlHomeDocument {
@@ -2124,8 +2199,8 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('hotel-room-card')).assertLarger(-1);
       expect(html.indexOf('hotel-room-toggle')).assertLarger(-1);
       expect(html.indexOf('hotel-room-details')).assertLarger(-1);
-      expect(html.indexOf('查看房型')).assertLarger(-1);
-      expect(html.indexOf("button.setAttribute('aria-label', '查看房型：'")).assertLarger(-1);
+      expect(html.indexOf('detailAction.label')).assertLarger(-1);
+      expect(html.indexOf("button.setAttribute('aria-label', text(detailAction.label)")).assertLarger(-1);
       expect(html.indexOf('价格与取消规则')).assertLarger(-1);
       expect(html.indexOf('返回酒店结果')).assertLarger(-1);
       expect(html.indexOf('查看详情')).assertEqual(-1);
@@ -2146,6 +2221,50 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('第三方预订（离开 Appless）：')).assertEqual(-1);
       expect(html.indexOf('下单成功')).assertEqual(-1);
       expect(html.indexOf('订单编号')).assertEqual(-1);
+    });
+
+    it('renders exact conditional hotel actions from the A2UI snapshot', 0, () => {
+      const doc = hotelSearchDocumentFixture();
+      const actions = doc.blocks[0].actions;
+      actions.forEach((item: HtmlHomeAction) => {
+        if (item.id === 'hotel.detail') {
+          item.label = '房型详情';
+        } else if (item.id === 'hotel.navigate') {
+          item.label = '去这里';
+        } else if (item.id === 'hotel.call') {
+          item.label = '致电前台';
+        }
+      });
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(doc.rawSurfaceRoot === null).assertFalse();
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.navigate"')).assertLarger(-1);
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.call"')).assertLarger(-1);
+      expect(html.indexOf('房型详情')).assertLarger(-1);
+      expect(html.indexOf('去这里')).assertLarger(-1);
+      expect(html.indexOf('致电前台')).assertLarger(-1);
+      expect(html.indexOf('hotel-action-row')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-cta-primary')).assertLarger(-1);
+      expect(html.indexOf('hotel-card-cta-secondary')).assertLarger(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.navigate')")).assertLarger(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.call')")).assertLarger(-1);
+      expect(html.indexOf('postAction(JSON.stringify(action))')).assertLarger(-1);
+      expect(html.indexOf('id: text(action.id)')).assertEqual(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.book')")).assertEqual(-1);
+    });
+
+    it('keeps unavailable hotel navigation and call controls hidden', 0, () => {
+      const doc = hotelSearchDocumentFixture(false, false);
+      const html = renderHtmlHomeDocument(doc);
+      const actions = JSON.stringify(doc.blocks[0].actions);
+
+      expect(actions.indexOf('"id":"hotel.detail"')).assertLarger(-1);
+      expect(actions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
+      expect(actions.indexOf('"id":"hotel.call"')).assertEqual(-1);
+      expect(html.indexOf('导航到酒店')).assertEqual(-1);
+      expect(html.indexOf('联系酒店')).assertEqual(-1);
+      expect(html.indexOf('hotel.book')).assertEqual(-1);
     });
 
     it('does not auto-render welcome scene and source chips', 0, () => {

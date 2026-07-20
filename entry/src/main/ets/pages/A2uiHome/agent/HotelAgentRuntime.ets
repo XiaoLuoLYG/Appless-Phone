@@ -1385,8 +1385,15 @@ export class HotelAgentRuntime {
     return this.authority.context();
   }
 
-  runAction(action: A2uiAction, suppliedContext?: HotelActionContext): Promise<boolean> {
+  runAction(
+    action: A2uiAction,
+    suppliedContext?: HotelActionContext,
+    suppliedDocument?: HtmlHomeDocument
+  ): Promise<boolean> {
     if (!this.active || action.args === undefined || this.pendingActions.size > 0) {
+      return Promise.resolve(false);
+    }
+    if (suppliedDocument !== undefined && !isHtmlHomeActionAllowed(suppliedDocument, action)) {
       return Promise.resolve(false);
     }
     const context = suppliedContext === undefined ? this.authority.context() : suppliedContext;
