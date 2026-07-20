@@ -2255,6 +2255,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('clickLabel')).assertLarger(-1);
       expect(html.indexOf('maskedSuffix')).assertLarger(-1);
       expect(html.indexOf('coordinatesValid')).assertLarger(-1);
+      expect(html.indexOf('var byActionId = {};')).assertLarger(-1);
+      expect(html.indexOf('current.argsValid && !sanitized.argsValid')).assertLarger(-1);
+      expect(html.indexOf("['hotel.detail', 'hotel.navigate', 'hotel.call', 'hotel.book']")).assertLarger(-1);
+      expect(html.indexOf('evidence.push(sanitizeHotelAction(action))')).assertEqual(-1);
       expect(html.indexOf('"surfaceId":"hotel-search-task-6"')).assertLarger(-1);
       expect(html.indexOf('id: text(action.id)')).assertEqual(-1);
       expect(html.indexOf("actionFor(block, 'hotel.book')")).assertEqual(-1);
@@ -2268,9 +2272,9 @@ export default function htmlHomeRendererTest() {
       expect(actions.indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(actions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
       expect(actions.indexOf('"id":"hotel.call"')).assertEqual(-1);
+      expect(actions.indexOf('"id":"hotel.book"')).assertEqual(-1);
       expect(html.indexOf('导航到酒店')).assertEqual(-1);
       expect(html.indexOf('联系酒店')).assertEqual(-1);
-      expect(html.indexOf('hotel.book')).assertEqual(-1);
     });
 
     it('does not auto-render welcome scene and source chips', 0, () => {

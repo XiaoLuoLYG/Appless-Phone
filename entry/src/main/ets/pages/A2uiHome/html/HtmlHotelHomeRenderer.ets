@@ -548,14 +548,22 @@ const HOTEL_HOME_JS: string = `
     return evidence;
   }
   window.collectHotelSmokeEvidence = function () {
-    var evidence = [];
+    var byActionId = {};
     list(data.blocks).forEach(function (block) {
       list(block && block.actions).forEach(function (action) {
-        if (/^hotel\\.(detail|navigate|call|book)$/.test(text(action && action.id))) {
-          evidence.push(sanitizeHotelAction(action));
+        var actionId = text(action && action.id);
+        if (/^hotel\\.(detail|navigate|call|book)$/.test(actionId)) {
+          var sanitized = sanitizeHotelAction(action);
+          var current = byActionId[actionId];
+          if (!current || (current.argsValid && !sanitized.argsValid)) {
+            byActionId[actionId] = sanitized;
+          }
         }
       });
     });
+    var evidence = ['hotel.detail', 'hotel.navigate', 'hotel.call', 'hotel.book']
+      .map(function (actionId) { return byActionId[actionId]; })
+      .filter(function (action) { return !!action; });
     return JSON.stringify({
       surfaceId: text(data.surfaceId),
       actions: evidence
