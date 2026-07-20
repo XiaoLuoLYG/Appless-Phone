@@ -3,6 +3,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  validateHotelSearchActionEvidence,
+  validateHotelSurfaceIdentity
+} from './hotel-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const outDir = join(rootDir, 'tool-gateway', '.smoke');
@@ -1150,14 +1154,19 @@ async function captureWhile(appPid, runAction) {
     while (Date.now() - started < timeoutMs) {
       await sleep(500);
       const text = logs.join('\n');
-      const done = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
+      const hasHotelActionEvidence = /\[AIPhone\]\[HotelHomeActionEvidence\] evidence=/.test(text);
+      const done = hasHotelActionEvidence ||
+        /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
+      const hotelActionRequested =
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      if (done && (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
+      if (done && (!hotelActionRequested || hasHotelActionEvidence) &&
+        (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
       const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
@@ -1770,9 +1779,28 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
   return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
 }
 
-function hotelSurfaceIds(logText) {
-  return [...logText.matchAll(/\[AIPhone\]\[A2uiHomeSurface(?:Update|ForceUpdate|SilentUpdate)\][^\n]*surfaceId=([^ \n]+)/g)]
-    .map((match) => match[1]);
+function hotelActionEvidenceFromLogs(logText) {
+  let latest = null;
+  for (const line of logText.split('\n')) {
+    const marker = '[AIPhone][HotelHomeActionEvidence] evidence=';
+    const markerIndex = line.indexOf(marker);
+    if (markerIndex < 0) {
+      continue;
+    }
+    let decoded = line.slice(markerIndex + marker.length).trim();
+    try {
+      decoded = JSON.parse(decoded);
+      if (typeof decoded === 'string') {
+        decoded = JSON.parse(decoded);
+      }
+      if (decoded !== null && typeof decoded === 'object' && !Array.isArray(decoded)) {
+        latest = decoded;
+      }
+    } catch (_error) {
+      latest = null;
+    }
+  }
+  return latest || { surfaceId: '', actions: [] };
 }
 
 async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
@@ -1798,22 +1826,14 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   if (detailCenter === null) {
     return { ok: false, capability: 'hotel.detail', reason: 'hotel.detail button label not found' };
   }
-  const searchText = collectLayoutText(currentLayout).join('\n');
-  const navigateVisible = searchText.includes('导航到酒店');
-  const callVisible = searchText.includes('联系酒店');
-  const searchSurfaceIds = hotelSurfaceIds(queryLogs.join('\n'));
-  const searchSurfaceId = searchSurfaceIds[searchSurfaceIds.length - 1] || '';
-  const visibleActionIds = ['hotel.detail'];
-  if (navigateVisible) {
-    visibleActionIds.push('hotel.navigate');
-  }
-  if (callVisible) {
-    visibleActionIds.push('hotel.call');
-  }
+  const searchActionEvidence = validateHotelSearchActionEvidence(
+    hotelActionEvidenceFromLogs(queryLogs.join('\n'))
+  );
 
   clearHilog();
   const detailLogs = await captureWhile(appPid, async () => {
     hdc(['shell', 'uitest', 'uiInput', 'click', String(detailCenter.x), String(detailCenter.y)]);
+    await sleep(1200);
   });
   const detailLogText = detailLogs.join('\n');
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
@@ -1866,6 +1886,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   clearHilog();
   const restoreLogs = await captureWhile(appPid, async () => {
     hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+    await sleep(1200);
   });
   const restoreLogText = restoreLogs.join('\n');
   await sleep(700);
@@ -1878,26 +1899,28 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
   const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
   const restoredOk = /酒店结果/.test(restoredText) && /查看(?:实时)?房型/.test(restoredText);
-  const detailSurfaceIds = hotelSurfaceIds(detailLogText);
-  const restoreSurfaceIds = hotelSurfaceIds(restoreLogText);
-  const detailSurfaceId = detailSurfaceIds[detailSurfaceIds.length - 1] || '';
-  const restoredSurfaceId = restoreSurfaceIds[restoreSurfaceIds.length - 1] || '';
+  const detailActionEvidence = hotelActionEvidenceFromLogs(detailLogText);
+  const restoredActionEvidence = validateHotelSearchActionEvidence(
+    hotelActionEvidenceFromLogs(restoreLogText)
+  );
+  const surfaceIdentity = validateHotelSurfaceIdentity(
+    searchActionEvidence.surfaceId,
+    typeof detailActionEvidence.surfaceId === 'string' ? detailActionEvidence.surfaceId : '',
+    restoredActionEvidence.surfaceId
+  );
   return {
     ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
       /床型|餐食|取消政策/.test(text) && restoredOk &&
-      searchSurfaceId.length > 0 && detailSurfaceId.length > 0 && restoredSurfaceId.length > 0,
+      searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok,
     capability: 'hotel.detail',
     detailLabel,
-    visibleActionIds,
-    navigation: navigateVisible
-      ? { status: 'visible', eligibility: 'provider_validated_coordinates' }
-      : { status: 'hidden', eligibility: 'no_valid_coordinates_action' },
-    call: callVisible
-      ? { status: 'visible', contact: 'verified_number_hidden' }
-      : { status: 'hidden', contact: 'missing_or_unverified_pass' },
-    searchSurfaceId,
-    detailSurfaceId,
-    restoredSurfaceId,
+    actionEvidence: searchActionEvidence,
+    navigation: searchActionEvidence.navigation,
+    call: searchActionEvidence.call,
+    surfaceIdentity,
+    searchSurfaceId: surfaceIdentity.searchSurfaceId,
+    detailSurfaceId: surfaceIdentity.detailSurfaceId,
+    restoredSurfaceId: surfaceIdentity.restoredSurfaceId,
     detailRequested,
     detailOk,
     restoredOk,

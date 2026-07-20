@@ -166,6 +166,7 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     : firstText(aggregate.query, aggregate.summary, firstText(surface.error, prompt));
   const baseDocument: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
+    surfaceId: surface.surfaceId,
     source: sourceOf(kind, surface, params.isBusy),
     kind: kind,
     title: kind === 'aggregate-search' ? firstText(aggregateTitle, aggregateBaseTitle) : aggregateBaseTitle,

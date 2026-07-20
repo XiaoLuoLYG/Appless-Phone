@@ -2238,6 +2238,7 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(doc);
 
       expect(doc.rawSurfaceRoot === null).assertFalse();
+      expect(doc.surfaceId).assertEqual('hotel-search-task-6');
       expect(JSON.stringify(actions).indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(JSON.stringify(actions).indexOf('"id":"hotel.navigate"')).assertLarger(-1);
       expect(JSON.stringify(actions).indexOf('"id":"hotel.call"')).assertLarger(-1);
@@ -2250,6 +2251,10 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("actionFor(block, 'hotel.navigate')")).assertLarger(-1);
       expect(html.indexOf("actionFor(block, 'hotel.call')")).assertLarger(-1);
       expect(html.indexOf('postAction(JSON.stringify(action))')).assertLarger(-1);
+      expect(html.indexOf('collectHotelSmokeEvidence')).assertLarger(-1);
+      expect(html.indexOf('maskedSuffix')).assertLarger(-1);
+      expect(html.indexOf('coordinatesValid')).assertLarger(-1);
+      expect(html.indexOf('"surfaceId":"hotel-search-task-6"')).assertLarger(-1);
       expect(html.indexOf('id: text(action.id)')).assertEqual(-1);
       expect(html.indexOf("actionFor(block, 'hotel.book')")).assertEqual(-1);
     });

@@ -496,6 +496,70 @@ const HOTEL_HOME_JS: string = `
     }
     return null;
   }
+  function objectArgs(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+  function positiveHotelId(args) {
+    return Number.isInteger(args.hotelId) && args.hotelId > 0;
+  }
+  function compactPhone(value) {
+    if (typeof value !== 'string') { return ''; }
+    var compact = value.replace(/[ ()-]/g, '');
+    return /^\\+?[0-9]{5,20}$/.test(compact) ? compact : '';
+  }
+  function sanitizeHotelAction(action) {
+    var actionId = text(action && action.id);
+    var argsObject = objectArgs(action && action.args);
+    var args = argsObject ? action.args : {};
+    var hotelIdPositive = argsObject && positiveHotelId(args);
+    var evidence = {
+      actionId: actionId,
+      argsObject: argsObject,
+      hotelIdPositive: hotelIdPositive,
+      argsValid: false
+    };
+    if (actionId === 'hotel.navigate') {
+      evidence.latitudeValid = Number.isFinite(args.latitude) && args.latitude >= -90 && args.latitude <= 90;
+      evidence.longitudeValid = Number.isFinite(args.longitude) && args.longitude >= -180 && args.longitude <= 180;
+      evidence.coordinatesValid = evidence.latitudeValid && evidence.longitudeValid;
+      evidence.argsValid = hotelIdPositive && evidence.coordinatesValid;
+    } else if (actionId === 'hotel.call') {
+      evidence.providerPresent = typeof args.provider === 'string' && args.provider.trim().length > 0;
+      evidence.providerPlaceIdPresent =
+        typeof args.providerPlaceId === 'string' && args.providerPlaceId.trim().length > 0;
+      var displayCompact = compactPhone(args.displayPhone);
+      var dialCompact = compactPhone(args.dialPhone);
+      evidence.phoneShapeValid = dialCompact.length > 0;
+      evidence.phoneMatchesDisplay = displayCompact.length > 0 && displayCompact === dialCompact;
+      evidence.maskedSuffix = evidence.phoneShapeValid ? '***' + dialCompact.slice(-4) : '';
+      evidence.argsValid = hotelIdPositive &&
+        evidence.providerPresent &&
+        evidence.providerPlaceIdPresent &&
+        evidence.phoneShapeValid &&
+        evidence.phoneMatchesDisplay;
+      displayCompact = '';
+      dialCompact = '';
+      args = {};
+      action = null;
+    } else if (actionId === 'hotel.detail') {
+      evidence.argsValid = hotelIdPositive;
+    }
+    return evidence;
+  }
+  window.collectHotelSmokeEvidence = function () {
+    var evidence = [];
+    list(data.blocks).forEach(function (block) {
+      list(block && block.actions).forEach(function (action) {
+        if (/^hotel\\.(detail|navigate|call|book)$/.test(text(action && action.id))) {
+          evidence.push(sanitizeHotelAction(action));
+        }
+      });
+    });
+    return JSON.stringify({
+      surfaceId: text(data.surfaceId),
+      actions: evidence
+    });
+  };
   function addTag(parent, value) {
     var label = text(value).trim();
     if (label.length > 0) { add(parent, 'span', 'hotel-tag', label); }
@@ -676,6 +740,7 @@ export function shouldRenderHotelHomeDocument(document: HtmlHomeDocument): boole
 export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
   const renderDocument: HtmlHotelHomeDocumentWithBusy = {
     version: document.version,
+    surfaceId: document.surfaceId === undefined ? '' : document.surfaceId,
     source: document.source,
     kind: document.kind,
     title: document.title,

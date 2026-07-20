@@ -183,6 +183,19 @@ export struct HtmlHomeSurfaceView {
     }
   }
 
+  private async collectHotelSmokeEvidence(): Promise<void> {
+    try {
+      const evidence = await this.controller.runJavaScript(
+        "try{typeof window.collectHotelSmokeEvidence==='function'?window.collectHotelSmokeEvidence():''}catch(e){''}"
+      );
+      if (evidence.length > 0) {
+        aiLogInfo('[AIPhone][HotelHomeActionEvidence] evidence=' + evidence);
+      }
+    } catch (error) {
+      aiLogError('[AIPhone][HotelHomeActionEvidenceError] ' + JSON.stringify(error));
+    }
+  }
+
   build() {
     Stack({ alignContent: Alignment.Top }) {
       Web({ src: 'data:text/html;charset=utf-8,<body style="margin:0;background:%23F5F2EE"></body>', controller: this.controller })
@@ -206,6 +219,7 @@ export struct HtmlHomeSurfaceView {
           this.pushMailDetailEventIfNeeded();
           this.pushMailReplyEventIfNeeded();
           this.pushMailCalendarEventIfNeeded();
+          this.collectHotelSmokeEvidence();
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           this.popupTitle = popupTitleFromUrl(event.targetUrl);
