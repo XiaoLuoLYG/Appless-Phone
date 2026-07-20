@@ -6,6 +6,7 @@ import {
   ActionPlan,
   ActionPlanCreatePayload,
   ActionPlanReadyPayload,
+  ActionResultPayload,
   CreateUiTaskPayload,
   DataResult,
   DataSource,
@@ -121,9 +122,11 @@ class ProposalRenderer extends RecordingRenderer {
     this.readyKeys = Object.keys(payload).sort().join(',');
     this.readyLabel = ready.label;
     this.calls.push(`ready:${ready.runId}:${surfaceId}`);
-    return render(
-      `workflow:${ready.actionId}:${JSON.stringify(ready.args)}`
-    );
+    return {
+      jsonl: `{"workflow":{"name":"${ready.actionId}",` +
+        `"args":${JSON.stringify(ready.args)}}}`,
+      proposals: []
+    };
   }
 }
 
@@ -137,6 +140,76 @@ class EarlyWorkflowRenderer extends ProposalRenderer {
     proposed.jsonl =
       '{"surfaceUpdate":{"actions":[{"name":"workflow.run","args":{"planId":"early"}}]}}';
     return proposed;
+  }
+}
+
+class JsonlProbeRenderer extends RecordingRenderer {
+  skeletonJsonl: string = JSON.stringify('safe-skeleton');
+  resultJsonl: string = JSON.stringify('safe-result');
+  errorJsonl: string = JSON.stringify('safe-error');
+  actionJsonl: string = JSON.stringify('safe-action');
+
+  async skeleton(
+    task: CreateUiTaskPayload,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const rendered = await super.skeleton(task, surfaceId);
+    rendered.jsonl = this.skeletonJsonl;
+    return rendered;
+  }
+
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const rendered = await super.result(task, data, surfaceId);
+    rendered.jsonl = this.resultJsonl;
+    return rendered;
+  }
+
+  async error(
+    task: CreateUiTaskPayload,
+    message: string,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const rendered = await super.error(task, message, surfaceId);
+    rendered.jsonl = this.errorJsonl;
+    return rendered;
+  }
+
+  async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
+    const rendered = await super.actionStatus(payload, surfaceId);
+    rendered.jsonl = this.actionJsonl;
+    return rendered;
+  }
+}
+
+class ManyProposalRenderer extends RecordingRenderer {
+  private readonly proposalCount: number;
+
+  constructor(proposalCount: number) {
+    super();
+    this.proposalCount = proposalCount;
+  }
+
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const rendered = await super.result(task, data, surfaceId);
+    const proposals: ActionPlan[] = [];
+    for (let index = 0; index < this.proposalCount; index++) {
+      proposals.push(JSON.parse(
+        `{"planId":"plan-cap-${index}","turnId":"turn-1",` +
+          `"surfaceId":"${surfaceId}","label":"Proposal ${index}",` +
+          '"steps":[{"stepId":"detail","actionId":"hotel.detail",' +
+          '"args":{"hotelId":101}}]}'
+      ) as ActionPlan);
+    }
+    rendered.proposals = proposals;
+    return rendered;
   }
 }
 
@@ -340,7 +413,7 @@ function actionPayload(surfaceId: string, runId: string, status: string): Action
 
 function render(jsonl: string): UiRenderResult {
   return {
-    jsonl,
+    jsonl: JSON.stringify(jsonl),
     proposals: []
   };
 }
@@ -372,6 +445,19 @@ async function receiveType(reader: AgentMessageReader, type: AgentMessageType): 
   }
 }
 
+async function receiveTaskErrorCode(
+  reader: AgentMessageReader,
+  code: string
+): Promise<AgentMessage> {
+  while (true) {
+    const received = await receive(reader);
+    if (received.type === AgentMessageType.TASK_ERROR &&
+      (received.payload as TaskErrorPayload).code === code) {
+      return received;
+    }
+  }
+}
+
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -395,8 +481,8 @@ export default function uiAgentTest() {
       const result: UiRenderResultPayload = resultMessage.payload as UiRenderResultPayload;
 
       expect(writer.writes.length).assertEqual(2);
-      expect(writer.writes[0].jsonl).assertEqual('skeleton:ui-1');
-      expect(writer.writes[1].jsonl).assertEqual('result:101');
+      expect(writer.writes[0].jsonl).assertEqual(JSON.stringify('skeleton:ui-1'));
+      expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:101'));
       expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
       expect(skeleton.surfaceId).assertEqual(result.surfaceId);
       expect(skeletonMessage.taskId).assertEqual('ui-1');
@@ -429,8 +515,8 @@ export default function uiAgentTest() {
       await receiveUiState(observer, 'action');
 
       expect(writer.writes.length).assertEqual(3);
-      expect(writer.writes[0].jsonl).assertEqual('skeleton:ui-1');
-      expect(writer.writes[1].jsonl).assertEqual('result:202');
+      expect(writer.writes[0].jsonl).assertEqual(JSON.stringify('skeleton:ui-1'));
+      expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:202'));
       expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
       expect(renderer.resultHotelIds.join(',')).assertEqual('202');
 
@@ -680,7 +766,10 @@ export default function uiAgentTest() {
       await receiveUiState(observer, 'error');
 
       expect(writer.writes.map((write: SurfaceWrite): string => write.jsonl).join(','))
-        .assertEqual('deferred-skeleton,error:provider unavailable');
+        .assertEqual(
+          `${JSON.stringify('deferred-skeleton')},` +
+            `${JSON.stringify('error:provider unavailable')}`
+        );
       agent.stop();
       observer.close();
     });
@@ -778,7 +867,7 @@ export default function uiAgentTest() {
       const create = createMessage.payload as ActionPlanCreatePayload;
 
       expect(writer.writes.length).assertEqual(2);
-      expect(writer.writes[1].jsonl).assertEqual('result:101');
+      expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:101'));
       expect(create.sourceToolId).assertEqual('hotel.search');
       expect(create.plan.planId).assertEqual('plan-ui-1');
       expect(create.plan.surfaceId).assertEqual(renderer.proposalSurfaceId);
@@ -856,7 +945,8 @@ export default function uiAgentTest() {
 
       expect(writer.writes.length).assertEqual(3);
       expect(writer.writes[2].jsonl).assertEqual(
-        `workflow:workflow.run:{"planId":"plan-ui-1","runId":"${create.runId}"}`
+        `{"workflow":{"name":"workflow.run","args":` +
+          `{"planId":"plan-ui-1","runId":"${create.runId}"}}}`
       );
       expect(Object.keys(ready.args).sort().join(',')).assertEqual('planId,runId');
       expect(renderer.readyKeys).assertEqual(
@@ -888,6 +978,245 @@ export default function uiAgentTest() {
         (call: string): boolean => call.startsWith('ready:')
       ).length).assertEqual(0);
 
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects a nested Unicode-escaped workflow action in skeleton JSONL', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new JsonlProbeRenderer();
+      renderer.skeletonJsonl =
+        '{"nested":[{"action":"workflow.\\u0072un"}]}';
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveTaskErrorCode(observer, 'UI_RENDER_FAILED');
+
+      expect(writer.writes.length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects a malformed nonempty result JSONL line before writing', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new JsonlProbeRenderer();
+      renderer.resultJsonl = '{"valid":true}\n\n{"broken":';
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      await receiveTaskErrorCode(observer, 'UI_RENDER_FAILED');
+
+      expect(writer.writes.length).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects nested workflow JSONL from error and progress render paths', 0, async () => {
+      const errorBus = new LinkedMessageBus();
+      const errorRenderer = new JsonlProbeRenderer();
+      errorRenderer.errorJsonl =
+        '["safe",{"deep":{"action":"workflow.\\u0072un"}}]';
+      const errorWriter = new RecordingSurfaceWriter();
+      const errorAgent = new UiAgent(errorBus, errorRenderer, errorWriter);
+      const errorObserver = errorBus.openReader();
+      errorAgent.start();
+      const providerError: TaskErrorPayload = {
+        code: 'DATA_TASK_FAILED',
+        message: 'provider unavailable'
+      };
+
+      errorBus.publish(uiTaskMessage());
+      await receiveUiState(errorObserver, 'skeleton');
+      errorBus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-1',
+        'data-1',
+        providerError
+      ));
+      await receiveTaskErrorCode(errorObserver, 'UI_RENDER_FAILED');
+      expect(errorWriter.writes.length).assertEqual(1);
+      errorAgent.stop();
+      errorObserver.close();
+
+      const progressBus = new LinkedMessageBus();
+      const progressRenderer = new JsonlProbeRenderer();
+      progressRenderer.actionJsonl =
+        '{"deep":[{"action":"workflow.\\u0072un"}]}';
+      const progressWriter = new RecordingSurfaceWriter();
+      const progressAgent = new UiAgent(
+        progressBus,
+        progressRenderer,
+        progressWriter
+      );
+      const progressObserver = progressBus.openReader();
+      progressAgent.start();
+      progressBus.publish(uiTaskMessage());
+      await receiveUiState(progressObserver, 'skeleton');
+      progressBus.publish(turnMessage(
+        AgentMessageType.ACTION_PROGRESS,
+        'conversation-a',
+        'turn-1',
+        'progress-jsonl',
+        actionPayload(
+          progressWriter.writes[0].surfaceId,
+          'progress-jsonl-run',
+          'running'
+        )
+      ));
+      await receiveTaskErrorCode(progressObserver, 'UI_RENDER_FAILED');
+      expect(progressWriter.writes.length).assertEqual(1);
+      progressAgent.stop();
+      progressObserver.close();
+    });
+
+    it('rejects more than five proposals before result write or publication', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new ManyProposalRenderer(6);
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      let createCount = 0;
+      let resultCount = 0;
+      while (true) {
+        const current = await receive(observer);
+        if (current.type === AgentMessageType.ACTION_PLAN_CREATE) {
+          createCount++;
+        }
+        if (current.type === AgentMessageType.TASK_RESULT_UI &&
+          (current.payload as UiRenderResultPayload).state === 'result') {
+          resultCount++;
+        }
+        if (current.type === AgentMessageType.TASK_ERROR &&
+          (current.payload as TaskErrorPayload).code === 'UI_RENDER_FAILED') {
+          break;
+        }
+      }
+      await settle();
+      bus.publish(turnMessage(
+        AgentMessageType.INPUT_USER,
+        'marker',
+        'marker',
+        'proposal-cap-marker'
+      ));
+      let observed = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.ACTION_PLAN_CREATE) {
+          createCount++;
+        }
+        if (observed.type === AgentMessageType.TASK_RESULT_UI &&
+          (observed.payload as UiRenderResultPayload).state === 'result') {
+          resultCount++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(createCount).assertEqual(0);
+      expect(resultCount).assertEqual(0);
+      expect(writer.writes.length).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('clears exact proposal correlations on invalid and capacity results', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new ManyProposalRenderer(2);
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      const firstCreateMessage = await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_CREATE
+      );
+      const secondCreateMessage = await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_CREATE
+      );
+      const firstCreate = firstCreateMessage.payload as ActionPlanCreatePayload;
+      const secondCreate = secondCreateMessage.payload as ActionPlanCreatePayload;
+      const firstFailure: ActionResultPayload = {
+        surfaceId: firstCreate.plan.surfaceId,
+        planId: firstCreate.plan.planId,
+        runId: firstCreate.runId,
+        status: 'error',
+        completedStepIds: [],
+        errorCode: 'ACTION_PLAN_CREATE_INVALID',
+        message: 'Invalid proposal.'
+      };
+      const secondFailure: ActionResultPayload = {
+        surfaceId: secondCreate.plan.surfaceId,
+        planId: secondCreate.plan.planId,
+        runId: secondCreate.runId,
+        status: 'error',
+        completedStepIds: [],
+        errorCode: 'ACTION_STATE_CAPACITY',
+        message: 'Capacity exhausted.'
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_RESULT,
+        'conversation-a',
+        'turn-1',
+        firstCreateMessage.taskId,
+        firstFailure
+      ));
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_RESULT,
+        'conversation-a',
+        'turn-1',
+        secondCreateMessage.taskId,
+        secondFailure
+      ));
+      await receiveUiState(observer, 'action');
+      await receiveUiState(observer, 'action');
+      const writesBeforeReady = writer.writes.length;
+      const replayReady: ActionPlanReadyPayload = {
+        surfaceId: firstCreate.plan.surfaceId,
+        planId: firstCreate.plan.planId,
+        runId: firstCreate.runId,
+        label: firstCreate.plan.label,
+        actionId: 'workflow.run',
+        args: {
+          planId: firstCreate.plan.planId,
+          runId: firstCreate.runId
+        }
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PLAN_READY,
+        'conversation-a',
+        'turn-1',
+        firstCreateMessage.taskId,
+        replayReady
+      ));
+      bus.publish(turnMessage(
+        AgentMessageType.INPUT_USER,
+        'marker',
+        'marker',
+        'proposal-clear-marker'
+      ));
+      let observed = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        observed = await receive(observer);
+      }
+
+      expect(writer.writes.length).assertEqual(writesBeforeReady);
       agent.stop();
       observer.close();
     });
@@ -925,7 +1254,11 @@ export default function uiAgentTest() {
       await receiveUiState(observer, 'action');
 
       expect(writer.writes.map((write: SurfaceWrite): string => write.jsonl).join(','))
-        .assertEqual('skeleton:ui-1,action:running,action:success');
+        .assertEqual(
+          `${JSON.stringify('skeleton:ui-1')},` +
+            `${JSON.stringify('action:running')},` +
+            `${JSON.stringify('action:success')}`
+        );
       agent.stop();
       observer.close();
     });
@@ -1007,7 +1340,9 @@ export default function uiAgentTest() {
       await receiveUiState(observer, 'error');
 
       expect(writer.writes.length).assertEqual(2);
-      expect(writer.writes[1].jsonl).assertEqual('error:provider unavailable');
+      expect(writer.writes[1].jsonl).assertEqual(
+        JSON.stringify('error:provider unavailable')
+      );
       expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
 
       agent.stop();

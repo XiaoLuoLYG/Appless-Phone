@@ -990,7 +990,7 @@ export default function actionAgentTest() {
       observer.close();
     });
 
-    it('bounds live state, clears it on cancellation, and never runs an evicted workflow tombstone', 0, async () => {
+    it('bounds live payload state and rejects an exact direct replay after 129 terminals', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
       const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
@@ -1093,7 +1093,11 @@ export default function actionAgentTest() {
       }
       tombstoneBus.publish(message(
         AgentMessageType.ACTION_RUN,
-        workflowRun(readyIdentity('direct:terminal-0', 'terminal-0')),
+        directRun(
+          'terminal-0',
+          'hotel.detail',
+          JSON.parse('{"hotelId":101}') as Object
+        ),
         'turn-1',
         'terminal-replay'
       ));
@@ -1102,9 +1106,137 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RESULT
       )).payload as ActionResultPayload;
       expect(replay.status).assertEqual('error');
+      expect(replay.runId).assertEqual('terminal-0');
       expect(tombstoneExecutor.actionIds.length).assertEqual(129);
       tombstoneAgent.stop();
       tombstoneObserver.close();
+    });
+
+    it('keeps canceled turn identities for the Action Agent session', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.TURN_CANCEL,
+          new Object(),
+          index === 0 ? 'turn-1' : `canceled-turn-${index}`,
+          `cancel-${index}`
+        ));
+      }
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'canceled-replay',
+          'hotel.detail',
+          JSON.parse('{"hotelId":101}') as Object
+        ),
+        'turn-1',
+        'canceled-replay-task'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"canceled-marker"}') as Object,
+        'marker-turn',
+        'canceled-marker'
+      ));
+
+      let actionMessages = 0;
+      let observed = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.ACTION_PROGRESS ||
+          observed.type === AgentMessageType.ACTION_RESULT) {
+          actionMessages++;
+        }
+        observed = await receive(observer);
+      }
+      expect(actionMessages).assertEqual(0);
+      expect(executor.actionIds.length).assertEqual(0);
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects original plan create and workflow replay after many terminals', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      const originalCreate = planCreate(
+        'original-workflow-run',
+        compositePlan('original-workflow-plan')
+      );
+      bus.publish(message(AgentMessageType.ACTION_PLAN_CREATE, originalCreate));
+      const originalReady = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(originalReady)));
+      await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.ACTION_RUN,
+          directRun(
+            `later-terminal-${index}`,
+            'hotel.detail',
+            JSON.parse('{"hotelId":101}') as Object
+          ),
+          'turn-1',
+          `later-terminal-task-${index}`
+        ));
+        await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      }
+      const executorCount = executor.actionIds.length;
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_CREATE,
+        originalCreate,
+        'turn-1',
+        'original-plan-replay'
+      ));
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"plan-replay-marker"}') as Object,
+        'marker-turn',
+        'plan-replay-marker'
+      ));
+      let replayReadyCount = 0;
+      let replayCreateError: ActionResultPayload | null = null;
+      let observed = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.ACTION_PLAN_READY) {
+          replayReadyCount++;
+        }
+        if (observed.type === AgentMessageType.ACTION_RESULT) {
+          replayCreateError = observed.payload as ActionResultPayload;
+        }
+        observed = await receive(observer);
+      }
+      expect(replayReadyCount).assertEqual(0);
+      expect((replayCreateError as ActionResultPayload).status).assertEqual('error');
+
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(originalReady),
+        'turn-1',
+        'original-workflow-replay'
+      ));
+      const workflowReplay = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(workflowReplay.status).assertEqual('error');
+      expect(executor.actionIds.length).assertEqual(executorCount);
+
+      agent.stop();
+      observer.close();
     });
 
     it('reports cloned completed outputs when canceling paused and later active steps', 0, async () => {

@@ -33,7 +33,6 @@ import { cloneJsonValue } from './JsonPointer';
 
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 const LIVE_RUN_LIMIT: number = 128;
-const TERMINAL_RUN_LIMIT: number = 128;
 let followUpTurnSequence: number = 0;
 
 interface StoredActionRun {
@@ -129,10 +128,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     new Map<string, PausedActionRun>();
   private readonly activeRuns: Map<string, ActiveActionRun> =
     new Map<string, ActiveActionRun>();
+  // Payload-free idempotency identities live for this ActionAgent session.
+  // stop() clears them; replay protection never evicts an earlier exact key.
   private readonly terminalRuns: Set<string> = new Set<string>();
-  private readonly terminalOrder: string[] = [];
   private readonly canceledTurns: Set<string> = new Set<string>();
-  private readonly canceledTurnOrder: string[] = [];
   private generation: number = 0;
   private active: boolean = false;
 
@@ -165,9 +164,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.pausedRuns.clear();
     this.activeRuns.clear();
     this.terminalRuns.clear();
-    this.terminalOrder.splice(0, this.terminalOrder.length);
     this.canceledTurns.clear();
-    this.canceledTurnOrder.splice(0, this.canceledTurnOrder.length);
   }
 
   inspectPausedRun(
@@ -1165,13 +1162,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.terminalRuns.add(key);
-    this.terminalOrder.push(key);
-    if (this.terminalOrder.length > TERMINAL_RUN_LIMIT) {
-      const oldest = this.terminalOrder.shift();
-      if (oldest !== undefined) {
-        this.terminalRuns.delete(oldest);
-      }
-    }
   }
 
   private rememberCanceledTurn(conversationId: string, turnId: string): void {
@@ -1180,13 +1170,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.canceledTurns.add(key);
-    this.canceledTurnOrder.push(key);
-    if (this.canceledTurnOrder.length > TERMINAL_RUN_LIMIT) {
-      const oldest = this.canceledTurnOrder.shift();
-      if (oldest !== undefined) {
-        this.canceledTurns.delete(oldest);
-      }
-    }
   }
 
   private turnKey(conversationId: string, turnId: string): string {

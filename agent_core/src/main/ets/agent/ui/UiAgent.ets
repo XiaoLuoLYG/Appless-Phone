@@ -4,7 +4,7 @@ import {
   ActionPlanReadyPayload,
   WorkflowRunArgs
 } from '../action/ActionAgentTypes';
-import { ActionPlan } from '../action/ActionPlanTypes';
+import { ActionPlan, JsonValue } from '../action/ActionPlanTypes';
 import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
@@ -27,7 +27,35 @@ import {
 const TERMINATED_TURN_LIMIT: number = 128;
 // Retain only a tiny pre-UI window, keyed by exact Data task ownership.
 const PENDING_DATA_LIMIT: number = 5;
+const PENDING_PLAN_LIMIT: number = 5;
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
+
+function containsWorkflowRun(value: JsonValue): boolean {
+  if (typeof value === 'string') {
+    return value === WORKFLOW_RUN_ACTION_ID;
+  }
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const items = value as JsonValue[];
+    for (let index = 0; index < items.length; index++) {
+      if (containsWorkflowRun(items[index])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as Record<string, JsonValue | undefined>;
+  const keys = Object.keys(value);
+  for (let index = 0; index < keys.length; index++) {
+    const nested = record[keys[index]];
+    if (nested !== undefined && containsWorkflowRun(nested)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 interface PendingDataEntry {
   data?: DataResult;
@@ -224,6 +252,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
+    this.validateRenderedJsonl(rendered, false);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -295,7 +324,8 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    this.rejectEarlyWorkflowAffordance(rendered);
+    this.validateRenderedJsonl(rendered, false);
+    this.validateProposalCapacity(context, rendered.proposals);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -336,6 +366,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
+    this.validateRenderedJsonl(rendered, false);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -361,6 +392,8 @@ export class UiAgent extends MessageDrivenAgent {
       if (ready === null) {
         return;
       }
+    } else if (message.type === AgentMessageType.ACTION_RESULT) {
+      this.clearTerminalPlanCorrelation(message, context);
     }
     const statusPayload: Object = ready === null ? message.payload : ready;
     const rendered: UiRenderResult =
@@ -368,6 +401,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
+    this.validateRenderedJsonl(rendered, ready !== null);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -637,9 +671,7 @@ export class UiAgent extends MessageDrivenAgent {
     sourceToolId: string,
     proposals: ActionPlan[]
   ): void {
-    if (!Array.isArray(proposals)) {
-      throw new Error('UI renderer action proposals are malformed');
-    }
+    this.validateProposalCapacity(context, proposals);
     for (let index = 0; index < proposals.length; index++) {
       const plan = proposals[index];
       this.actionRunSuffix++;
@@ -712,13 +744,74 @@ export class UiAgent extends MessageDrivenAgent {
     };
   }
 
-  private rejectEarlyWorkflowAffordance(rendered: UiRenderResult): void {
+  private validateRenderedJsonl(
+    rendered: UiRenderResult,
+    allowWorkflowRun: boolean
+  ): void {
     if (!Array.isArray(rendered.proposals)) {
       throw new Error('UI renderer action proposals are malformed');
     }
-    if (typeof rendered.jsonl === 'string' &&
-      rendered.jsonl.indexOf(WORKFLOW_RUN_ACTION_ID) >= 0) {
-      throw new Error('UI renderer exposed workflow.run before Action Plan READY');
+    if (typeof rendered.jsonl !== 'string') {
+      throw new Error('UI renderer JSONL is malformed');
+    }
+    const lines = rendered.jsonl.split('\n');
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index].trim();
+      if (line.length === 0) {
+        continue;
+      }
+      let parsed: JsonValue;
+      try {
+        parsed = JSON.parse(line) as JsonValue;
+      } catch (_error) {
+        throw new Error('UI renderer JSONL contains a malformed line');
+      }
+      if (!allowWorkflowRun && containsWorkflowRun(parsed)) {
+        throw new Error('UI renderer exposed workflow.run before Action Plan READY');
+      }
+    }
+  }
+
+  private validateProposalCapacity(
+    context: UiTurnContext,
+    proposals: ActionPlan[]
+  ): void {
+    if (!Array.isArray(proposals)) {
+      throw new Error('UI renderer action proposals are malformed');
+    }
+    if (proposals.length > PENDING_PLAN_LIMIT ||
+      context.pendingPlans.size + proposals.length > PENDING_PLAN_LIMIT) {
+      throw new Error('UI renderer action proposal capacity is exhausted');
+    }
+  }
+
+  private clearTerminalPlanCorrelation(
+    message: AgentMessage,
+    context: UiTurnContext
+  ): void {
+    if (message.payload === null ||
+      typeof message.payload !== 'object' ||
+      Array.isArray(message.payload)) {
+      return;
+    }
+    const values =
+      message.payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const runId = values['runId'];
+    const planId = values['planId'];
+    const surfaceId = values['surfaceId'];
+    const status = values['status'];
+    if (typeof runId !== 'string' ||
+      typeof planId !== 'string' ||
+      surfaceId !== context.surfaceId ||
+      (status !== 'success' && status !== 'canceled' && status !== 'error')) {
+      return;
+    }
+    const correlation = context.pendingPlans.get(runId);
+    if (correlation !== undefined &&
+      correlation.planId === planId &&
+      correlation.surfaceId === surfaceId &&
+      correlation.taskId === message.taskId) {
+      context.pendingPlans.delete(runId);
     }
   }
 }
