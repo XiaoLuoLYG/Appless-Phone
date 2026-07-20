@@ -1,5 +1,14 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiCallResult, A2uiFoodData, A2uiLabelValueData, A2uiSurfaceState, A2uiTravelOptionData } from '@loop/agent-core';
+import {
+  A2uiCallResult,
+  A2uiFoodData,
+  A2uiLabelValueData,
+  A2uiSurfaceState,
+  A2uiTravelOptionData,
+  HotelContactLookupResult,
+  HotelSearchItem,
+  HotelSearchResult
+} from '@loop/agent-core';
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
@@ -16,6 +25,8 @@ import {
   configureDidiMcpSandboxForRuntime,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
+  configureHotelContactEnrichmentDeadlineForTests,
+  configureHotelContactLookupForTests,
   configureHotelMcpClientForTests,
   configureHotelTimestampProviderForTests,
   configureLocalPaymentAccountBookJson,
@@ -150,6 +161,46 @@ function detailArgsForGateway(): Object {
     '{"hotelId":47675,"checkInDate":"2026-08-15","checkOutDate":"2026-08-17","countryCode":"CN",' +
     '"currency":"CNY","adultCount":2,"childCount":0,"childAgeDetails":[],"roomCount":1}'
   );
+}
+
+function hotelSearchResponse(count: number, firstWithoutName: boolean = false): McpToolCallResult {
+  const hotels: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const hotelId = 47001 + index;
+    const name = firstWithoutName && index === 0 ? '' : '深圳测试酒店' + hotelId.toString();
+    const nameEn = firstWithoutName && index === 0 ? '' : 'Shenzhen Test Hotel ' + hotelId.toString();
+    hotels.push(
+      '{"hotelId":' + hotelId.toString() + ',"name":' + JSON.stringify(name) +
+      ',"nameEn":' + JSON.stringify(nameEn) + ',' +
+      '"address":"深圳市南山区科技南路' + hotelId.toString() + '号",' +
+      '"latitude":22.5,"longitude":114.0}'
+    );
+  }
+  return {
+    ok: true,
+    httpStatus: 200,
+    errorMessage: '',
+    result: {
+      isError: false,
+      structuredContent: looseObject(
+        '{"success":true,"message":"酒店搜索成功","hotelInformationList":[' + hotels.join(',') + ']}'
+      )
+    },
+    rawPreview: ''
+  };
+}
+
+function verifiedContactResult(hotel: HotelSearchItem): HotelContactLookupResult {
+  return {
+    contact: {
+      displayPhone: '+86 755 1000 ' + hotel.hotelId.toString(),
+      dialPhone: '+867551000' + hotel.hotelId.toString(),
+      provider: 'Google Places',
+      providerPlaceId: 'place-' + hotel.hotelId.toString()
+    },
+    warning: '',
+    sourceReceived: true
+  };
 }
 
 interface McDonaldsStoreFixture {
@@ -407,6 +458,306 @@ export default function toolGatewayClientTest() {
       expect(result.status).assertEqual('error');
       expect(result.error?.code).assertEqual('HOTEL_CONFIG_MISSING');
       expect(result.sources.length).assertEqual(0);
+    });
+
+    it('skips Places lookup entirely when the Google key is missing', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(2));
+      let lookupCalls = 0;
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          lookupCalls += 1;
+          return verifiedContactResult(hotel);
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+        const data = result.data as HotelSearchResult;
+
+        expect(lookupCalls).assertEqual(0);
+        expect(result.status).assertEqual('partial');
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('RollingGo');
+        expect(result.warnings.length <= 3).assertTrue();
+        expect(data.hotels.length).assertEqual(2);
+        expect(data.hotels[0].contact === undefined).assertTrue();
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('bounds enrichment to five eligible hotels and three concurrent lookups', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(8, true));
+      let lookupCalls = 0;
+      let active = 0;
+      let maxActive = 0;
+      const calledIds: number[] = [];
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          lookupCalls += 1;
+          active += 1;
+          calledIds.push(hotel.hotelId);
+          if (active > maxActive) {
+            maxActive = active;
+          }
+          await new Promise<void>((resolve: () => void) => {
+            setTimeout(resolve, 5);
+          });
+          active -= 1;
+          return verifiedContactResult(hotel);
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+        const data = result.data as HotelSearchResult;
+
+        expect(lookupCalls).assertEqual(5);
+        expect(maxActive).assertEqual(3);
+        expect(JSON.stringify(calledIds)).assertEqual('[47002,47003,47004,47005,47006]');
+        expect(data.hotels.length).assertEqual(8);
+        expect(data.hotels[0].contact === undefined).assertTrue();
+        expect(data.hotels[1].contact?.providerPlaceId).assertEqual('place-47002');
+        expect(data.hotels[5].contact?.providerPlaceId).assertEqual('place-47006');
+        expect(data.hotels[6].contact === undefined).assertTrue();
+        expect(result.status).assertEqual('partial');
+        expect(result.warnings.length <= 3).assertTrue();
+        expect(result.warnings.join('|').indexOf('limit')).assertLarger(-1);
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('returns on the enrichment deadline and ignores every late contact result', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(8));
+      const resolvers: Array<(result: HotelContactLookupResult) => void> = [];
+      const startedHotels: HotelSearchItem[] = [];
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactEnrichmentDeadlineForTests(5);
+        configureHotelContactLookupForTests((
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          startedHotels.push(hotel);
+          return new Promise<HotelContactLookupResult>(
+            (resolve: (result: HotelContactLookupResult) => void) => {
+              resolvers.push(resolve);
+            }
+          );
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+        const data = result.data as HotelSearchResult;
+        const returnedJson = JSON.stringify(data);
+
+        expect(startedHotels.length).assertEqual(3);
+        expect(data.hotels.length).assertEqual(8);
+        expect(result.status).assertEqual('partial');
+        expect(result.warnings.join('|').indexOf('deadline')).assertLarger(-1);
+        for (let index = 0; index < resolvers.length; index++) {
+          resolvers[index](verifiedContactResult(startedHotels[index]));
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(JSON.stringify(data)).assertEqual(returnedJson);
+        expect(data.hotels[0].hotelId).assertEqual(47001);
+        expect(data.hotels[0].contact === undefined).assertTrue();
+      } finally {
+        configureHotelContactEnrichmentDeadlineForTests(null);
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('preserves every ID and successful contact across mixed Places outcomes', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(5));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          if (hotel.hotelId === 47001 || hotel.hotelId === 47004) {
+            return verifiedContactResult(hotel);
+          }
+          return {
+            contact: null,
+            warning: hotel.hotelId === 47003
+              ? 'Google Places provider issue B.'
+              : 'Google Places provider issue A.',
+            sourceReceived: true
+          };
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+        const data = result.data as HotelSearchResult;
+        const ids: number[] = [];
+        for (let index = 0; index < data.hotels.length; index++) {
+          ids.push(data.hotels[index].hotelId);
+        }
+
+        expect(JSON.stringify(ids)).assertEqual('[47001,47002,47003,47004,47005]');
+        expect(data.hotels[0].contact?.providerPlaceId).assertEqual('place-47001');
+        expect(data.hotels[1].contact === undefined).assertTrue();
+        expect(data.hotels[3].contact?.providerPlaceId).assertEqual('place-47004');
+        expect(result.status).assertEqual('partial');
+        expect(result.sources.length).assertEqual(2);
+        expect(result.sources[1].provider).assertEqual('Google Places');
+        expect(result.warnings.length).assertEqual(2);
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('caps and deduplicates Places warnings at three', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(5));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          const issue = hotel.hotelId === 47002 ? 47001 : hotel.hotelId;
+          return {
+            contact: null,
+            warning: 'Google Places provider issue ' + issue.toString() + '.',
+            sourceReceived: true
+          };
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        expect(result.status).assertEqual('partial');
+        expect(result.warnings.length).assertEqual(3);
+        expect(result.warnings[0]).assertEqual('Google Places provider issue 47001.');
+        expect(result.warnings[1]).assertEqual('Google Places provider issue 47003.');
+        expect(result.warnings[2]).assertEqual('Google Places provider issue 47004.');
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('returns a verified contact and real source from the structured gateway', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      let lookupCalls = 0;
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelMcpClientForTests(client);
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          lookupCalls += 1;
+          return verifiedContactResult(hotel);
+        });
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+        const data = result.data as HotelSearchResult;
+
+        expect(lookupCalls).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(result.sources.length).assertEqual(2);
+        expect(result.sources[1].provider).assertEqual('Google Places');
+        expect(data.hotels[0].hotelId).assertEqual(47001);
+        expect(data.hotels[0].contact?.dialPhone).assertEqual('+86755100047001');
+        expect(data.hotels[0].contact?.providerPlaceId).assertEqual('place-47001');
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('never starts Places lookup after RollingGo inner or transport failure', 0, async () => {
+      let lookupCalls = 0;
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp',
+          GOOGLE_MAPS_API_KEY: 'google-test-key'
+        }));
+        configureHotelContactLookupForTests(async (
+          hotel: HotelSearchItem,
+          _apiKey: string
+        ): Promise<HotelContactLookupResult> => {
+          lookupCalls += 1;
+          return verifiedContactResult(hotel);
+        });
+        configureHotelMcpClientForTests(new ScriptedHotelMcpClient({
+          ok: true,
+          httpStatus: 200,
+          errorMessage: '',
+          result: {
+            isError: false,
+            structuredContent: looseObject(
+              '{"success":false,"message":"provider rejected search","hotelInformationList":[]}'
+            )
+          },
+          rawPreview: ''
+        }));
+        const inner = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        configureHotelMcpClientForTests(new ScriptedHotelMcpClient({
+          ok: false,
+          httpStatus: 503,
+          errorMessage: 'provider unavailable',
+          result: null,
+          rawPreview: ''
+        }));
+        const transport = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        expect(inner.status).assertEqual('error');
+        expect(transport.status).assertEqual('error');
+        expect(lookupCalls).assertEqual(0);
+      } finally {
+        configureHotelContactLookupForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('timestamps a returned transport error after the exact provider operation completes', 0, async () => {

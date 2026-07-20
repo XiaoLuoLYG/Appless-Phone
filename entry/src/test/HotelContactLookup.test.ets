@@ -124,14 +124,12 @@ export default function hotelContactLookupTest() {
     });
 
     it('skips missing Google configuration with a bounded warning and no source claim', 0, async () => {
-      const originalId = hotel().hotelId;
       const result = await callHotelContactLookup(hotel(), '');
 
       expect(result.contact === null).assertTrue();
       expect(result.warning.length).assertLarger(0);
       expect(result.warning.length <= 240).assertTrue();
       expect(result.sourceReceived).assertFalse();
-      expect(hotel().hotelId).assertEqual(originalId);
     });
   });
 }
