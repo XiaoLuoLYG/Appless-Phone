@@ -78,9 +78,8 @@ export class HotelLeaderPlanner implements LeaderPlanner {
     }
     const raw = parsedObject as HotelSearchModelArgs;
     if (raw.originQuery !== query ||
-      raw.countryCode.trim().length === 0 ||
-      raw.currency.trim().length === 0) {
-      throw new Error('Hotel planner output changed the query or omitted locale fields.');
+      raw.countryCode.trim().length === 0) {
+      throw new Error('Hotel planner output changed the query or omitted countryCode.');
     }
     const parsed: HotelSearchParseResult = parseHotelSearchRequest(parsedObject);
     if (!parsed.ok || parsed.value === null) {
@@ -115,6 +114,7 @@ export class HotelLeaderPlanner implements LeaderPlanner {
       'Current local date: ' + this.currentLocalDate() + '. Resolve relative dates from this date.\n' +
       'Return exactly one JSON object containing only originQuery, place, placeType, countryCode, ' +
       'checkInDate, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and size.\n' +
+      'Use currency "" when the user does not specify it; local code applies the bounded CNY default.\n' +
       'Use size 0 when the user does not specify a positive result limit; bounded local code applies the default.\n' +
       'Do not return a tool ID, action ID, markdown explanation, or multiple objects.\n' +
       'Do not invent missing destination, date, guest, child-age, or room values.\n' +

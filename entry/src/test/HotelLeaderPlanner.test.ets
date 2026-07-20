@@ -142,12 +142,15 @@ export default function hotelLeaderPlannerTest() {
       expect(JSON.stringify(english).indexOf('hotel.book')).assertEqual(-1);
     });
 
-    it('uses the bounded local result limit when the model leaves size empty', 0, async () => {
-      const withoutModelDefault = SEARCH_JSON.replace('"size":10', '"size":""');
-      const plan = await planFor('8月15日深圳住两晚的酒店', withoutModelDefault);
+    it('uses bounded local locale and result defaults when the model leaves them empty', 0, async () => {
+      const withoutModelDefaults = SEARCH_JSON
+        .replace('"currency":"CNY"', '"currency":""')
+        .replace('"size":10', '"size":0');
+      const plan = await planFor('8月15日深圳住两晚的酒店', withoutModelDefaults);
       const args = plan.data.args as Record<string, Object | string | number | boolean | null | undefined>;
 
       expect(args.originQuery).assertEqual('8月15日深圳住两晚的酒店');
+      expect(args.currency).assertEqual('CNY');
       expect(args.size).assertEqual(10);
     });
 
