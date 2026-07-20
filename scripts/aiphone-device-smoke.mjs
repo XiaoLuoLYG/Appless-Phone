@@ -2083,6 +2083,9 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   let currentLayout = layout;
   let detailCenter = null;
   let detailLabel = '';
+  const searchLayoutText = collectLayoutText(layout).join('\n');
+  const pendingSearchCardAbsent =
+    !/正在查询 RollingGo|正在等待 RollingGo/.test(searchLayoutText);
   const rawSearchActionEvidence = hotelActionEvidenceFromLogs(queryLogs.join('\n'));
   const searchActionEvidence = validateHotelSearchActionEvidence(rawSearchActionEvidence);
   const unverifiedSystemActions = evaluateHotelSystemActionEvidence(
@@ -2213,7 +2216,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     appPid
   );
   return {
-    ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
+    ok: pendingSearchCardAbsent &&
+      detailRequested && detailOk && /房型与价格规则/.test(text) &&
       /床型|餐食|取消政策/.test(text) && restoredOk &&
       searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
       systemActions.ok,
@@ -2227,6 +2231,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     searchSurfaceId: surfaceIdentity.searchSurfaceId,
     detailSurfaceId: surfaceIdentity.detailSurfaceId,
     restoredSurfaceId: surfaceIdentity.restoredSurfaceId,
+    pendingSearchCardAbsent,
     detailRequested,
     detailOk,
     detailLifecycle,
