@@ -161,7 +161,8 @@ export function shouldRouteToHotelAgent(prompt: string): boolean {
   const value = prompt.trim().toLowerCase();
   if (value.length === 0 ||
     /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
-    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email)\b/.test(value)) {
+    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email|meeting rooms?|classrooms?|newsrooms?)\b/.test(value) ||
+    /\brooms?\s+(to improve|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value)) {
     return false;
   }
   const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
@@ -173,15 +174,21 @@ export function shouldRouteToHotelAgent(prompt: string): boolean {
     return true;
   }
   const hasEnglishHotel =
-    /(^|[^a-z])(hotel|hotels|lodging|accommodation|room|rooms)([^a-z]|$)/.test(value);
+    /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
   if (hasEnglishHotel &&
     /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
     return true;
   }
+  const hasExplicitRoomRequest =
+    /\b(book|find|reserve)\s+(a|an|one|some)?\s*rooms?\b/.test(value) ||
+    /\b(search|look|looking)\s+for\s+(a|an|one|some)?\s*rooms?\b/.test(value) ||
+    /\brooms?\s+(in|near|at)\s+[a-z0-9]/.test(value);
+  if (hasExplicitRoomRequest) {
+    return true;
+  }
   if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||
     /^(hotel|hotels|lodging|accommodation)\s+(in|near|at)\s+[a-z]/.test(value) ||
-    /\bstay\s+(in|near|at)\s+[a-z]/.test(value) ||
-    /\brooms?\s+(in|near|at)\s+[a-z]/.test(value)) {
+    /\bstay\s+(in|near|at)\s+[a-z]/.test(value)) {
     return true;
   }
   return false;
@@ -191,12 +198,24 @@ function fingerprintPart(value: string): string {
   return value.length.toString() + ':' + value;
 }
 
+function opaqueSettingsDigest(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ (code + index), 0x5bd1e995);
+  }
+  return (first >>> 0).toString(16) + '-' + (second >>> 0).toString(16);
+}
+
 export function hotelModelSettingsFingerprint(settings: LocalModelSettings): string {
-  return fingerprintPart(settings.provider) + '|' +
+  const material = fingerprintPart(settings.provider) + '|' +
     fingerprintPart(settings.baseUrl) + '|' +
     fingerprintPart(settings.apiKey) + '|' +
     fingerprintPart(settings.model) + '|' +
     fingerprintPart(settings.customParametersJson);
+  return 'hotel-settings-v1:' + opaqueSettingsDigest(material);
 }
 
 export function hotelTurnReadyMessage(status: HotelTurnStatus, title: string): string {

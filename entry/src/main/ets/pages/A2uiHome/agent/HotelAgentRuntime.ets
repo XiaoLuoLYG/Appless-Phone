@@ -2,6 +2,7 @@ import {
   ActionAgent,
   ActionArgsValidator,
   ActionCatalog,
+  ActionPlanStepOutput,
   ActionProgressPayload,
   ActionResultPayload,
   ActionRunPayload,
@@ -137,6 +138,7 @@ interface PendingAction {
   runId: string;
   planId: string;
   actionId: string;
+  stepId: string;
   generation: number;
   expectedFollowUpUiTaskId: string;
   expectedFollowUpDataTaskId: string;
@@ -144,6 +146,10 @@ interface PendingAction {
   followUpUiSeen: boolean;
   followUpDataSeen: boolean;
   followUpPromoted: boolean;
+  directResultSeen: boolean;
+  directResultSucceeded: boolean;
+  followUpTerminalSeen: boolean;
+  followUpTerminalSucceeded: boolean;
   resolve: (ok: boolean) => void;
   timerId: number;
 }
@@ -494,19 +500,66 @@ function actionResultPayload(message: AgentMessage): ActionResultPayload | null 
     !nonempty(payload['surfaceId']) ||
     !nonempty(payload['planId']) ||
     !nonempty(payload['runId']) ||
-    !Array.isArray(payload['completedStepIds']) ||
+    !isStringArray(payload['completedStepIds']) ||
     (payload['status'] !== 'success' && payload['status'] !== 'paused' &&
       payload['status'] !== 'canceled' && payload['status'] !== 'error')) {
     return null;
   }
-  if (payload['status'] === 'success' && !Array.isArray(payload['outputs'])) {
-    return null;
-  }
-  if (payload['status'] !== 'success' &&
-    (!nonempty(payload['errorCode']) || !nonempty(payload['message']))) {
+  const status = payload['status'];
+  const keys = Object.keys(payload).sort().join(',');
+  if (status === 'success') {
+    if (keys !== 'completedStepIds,outputs,planId,runId,status,surfaceId' ||
+      !Array.isArray(payload['outputs'])) {
+      return null;
+    }
+  } else if (status === 'paused') {
+    if (keys !==
+      'completedStepIds,errorCode,message,outputs,planId,runId,status,stepId,surfaceId' ||
+      !Array.isArray(payload['outputs']) ||
+      !nonempty(payload['stepId']) ||
+      !nonempty(payload['errorCode']) ||
+      !nonempty(payload['message'])) {
+      return null;
+    }
+  } else if (keys !==
+    'completedStepIds,errorCode,message,planId,runId,status,stepId,surfaceId' ||
+    !nonempty(payload['stepId']) ||
+    !nonempty(payload['errorCode']) ||
+    !nonempty(payload['message'])) {
     return null;
   }
   return message.payload as ActionResultPayload;
+}
+
+function expectedActionSuccess(
+  pending: PendingAction,
+  result: ActionResultPayload
+): boolean {
+  if (result.status !== 'success' ||
+    result.completedStepIds.length !== 1 ||
+    result.completedStepIds[0] !== pending.stepId ||
+    result.outputs === undefined ||
+    result.outputs.length !== 1) {
+    return false;
+  }
+  const step = recordOf(result.outputs[0] as ActionPlanStepOutput);
+  if (step === null ||
+    !hasOnlyKeys(step, 'output,stepId') ||
+    step['stepId'] !== pending.stepId) {
+    return false;
+  }
+  const output = recordOf(step['output']);
+  if (output === null || output['actionId'] !== pending.actionId) {
+    return false;
+  }
+  if (pending.actionId === 'hotel.detail') {
+    return hasOnlyKeys(output, 'actionId,status') &&
+      output['status'] === 'follow_up_created';
+  }
+  return hasOnlyKeys(output, 'actionId,message,status,uri') &&
+    output['status'] === 'opened' &&
+    nonempty(output['uri']) &&
+    nonempty(output['message']);
 }
 
 function actionProgressPayload(message: AgentMessage): ActionProgressPayload | null {
@@ -915,6 +968,7 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       };
       this.records.set(surfaceId, record);
       this.recordOrder.push(surfaceId);
+      this.prune();
     } else if (record.turnId !== turnId) {
       throw new Error('Hotel surface identity changed turns.');
     }
@@ -1046,6 +1100,11 @@ class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
 
   clearSearchReference(): void {
     this.searchRecord = null;
+    this.prune();
+  }
+
+  pruneRetained(): void {
+    this.prune();
   }
 
   dispose(): void {
@@ -1245,6 +1304,9 @@ export class HotelAgentRuntime {
     if (this.activeTurn !== null) {
       rememberTurn(this.activeTurn.turnId);
     }
+    if (this.searchTurn !== null) {
+      rememberTurn(this.searchTurn.turnId);
+    }
     this.pendingTurns.forEach((pending: PendingTurn) => {
       rememberTurn(pending.turnId);
     });
@@ -1267,6 +1329,7 @@ export class HotelAgentRuntime {
     canceledTurnIds.forEach((turnId: string) => {
       this.cancelTurnMessage(turnId, reason);
     });
+    this.surfaceWriter.pruneRetained();
   }
 
   currentActionContext(): HotelActionContext | null {
@@ -1325,6 +1388,7 @@ export class HotelAgentRuntime {
         runId: runId,
         planId: planId,
         actionId: action.id,
+        stepId: 'step-1',
         generation: activeTurn.generation,
         expectedFollowUpUiTaskId: followUpUiTaskId,
         expectedFollowUpDataTaskId: followUpDataTaskId,
@@ -1332,6 +1396,10 @@ export class HotelAgentRuntime {
         followUpUiSeen: false,
         followUpDataSeen: false,
         followUpPromoted: false,
+        directResultSeen: false,
+        directResultSucceeded: false,
+        followUpTerminalSeen: false,
+        followUpTerminalSucceeded: false,
         resolve: resolve,
         timerId: -1
       };
@@ -1350,12 +1418,21 @@ export class HotelAgentRuntime {
   }
 
   restoreSearchSurface(): boolean {
-    if (!this.active || this.searchTurn === null) {
+    if (!this.active || this.searchTurn === null || this.pendingActions.size > 0) {
       return false;
+    }
+    const abandonedTurnId = this.activeTurn === null ||
+      this.activeTurn.turnId === this.searchTurn.turnId ?
+      '' : this.activeTurn.turnId;
+    if (abandonedTurnId.length > 0) {
+      this.cancelTurnMessage(abandonedTurnId, 'restore_search');
     }
     this.generation += 1;
     const restored = copyTurn(this.searchTurn, this.generation);
     if (!this.surfaceWriter.restoreSearchSurface(restored.turnId, restored.generation)) {
+      if (abandonedTurnId.length > 0) {
+        this.activeTurn = null;
+      }
       return false;
     }
     restored.surfaceId = this.surfaceWriter.activeSurfaceId();
@@ -1380,6 +1457,7 @@ export class HotelAgentRuntime {
     if (!this.active) {
       return;
     }
+    this.cancelActiveTurn('disposed');
     this.active = false;
     this.reader.close();
     this.leader.stop();
@@ -1578,6 +1656,11 @@ export class HotelAgentRuntime {
     this.visibility.expect(turn.turnId, turn.generation);
     this.activeTurn = turn;
     action.followUpPromoted = this.surfaceWriter.activateTurn(turn.turnId, turn.generation);
+    if (!action.followUpPromoted) {
+      action.followUpTerminalSeen = true;
+      action.followUpTerminalSucceeded = false;
+      this.trySettleDetailAction(action);
+    }
   }
 
   private observeDataResult(message: AgentMessage): void {
@@ -1617,6 +1700,20 @@ export class HotelAgentRuntime {
       return;
     }
     turn.surfaceId = result.surfaceId;
+    if (turn.toolId === 'hotel.detail') {
+      const action = this.actionForFollowUp(turn.turnId);
+      if (action === null || message.taskId !== action.expectedFollowUpUiTaskId) {
+        return;
+      }
+      const assessment = turn.dataAssessment;
+      action.followUpTerminalSeen = true;
+      action.followUpTerminalSucceeded =
+        result.state === 'result' &&
+        assessment !== null &&
+        assessment.ok;
+      this.trySettleDetailAction(action);
+      return;
+    }
     const pending = this.pendingTurns.get(turn.turnId);
     if (pending === undefined) {
       return;
@@ -1666,6 +1763,14 @@ export class HotelAgentRuntime {
         outcome('error', error.message, pending.surfaceId),
         true
       );
+      return;
+    }
+    const action = this.actionForFollowUp(message.turnId);
+    if (action !== null &&
+      message.taskId === action.expectedFollowUpUiTaskId) {
+      action.followUpTerminalSeen = true;
+      action.followUpTerminalSucceeded = false;
+      this.trySettleDetailAction(action);
     }
   }
 
@@ -1685,9 +1790,45 @@ export class HotelAgentRuntime {
       !this.matchesActionMessage(pending, message, result.surfaceId, result.planId, result.runId)) {
       return;
     }
-    const success = result.status === 'success' &&
-      (pending.actionId !== 'hotel.detail' || pending.followUpPromoted);
-    this.settleAction(pending, success);
+    if (result.status === 'success' && !expectedActionSuccess(pending, result)) {
+      return;
+    }
+    if (pending.actionId !== 'hotel.detail') {
+      this.settleAction(pending, result.status === 'success');
+      return;
+    }
+    pending.directResultSeen = true;
+    pending.directResultSucceeded = result.status === 'success';
+    if (!pending.followUpPromoted && result.status !== 'success') {
+      this.settleAction(pending, false);
+      return;
+    }
+    this.trySettleDetailAction(pending);
+  }
+
+  private actionForFollowUp(turnId: string): PendingAction | null {
+    let found: PendingAction | null = null;
+    this.pendingActions.forEach((pending: PendingAction) => {
+      if (found === null &&
+        pending.actionId === 'hotel.detail' &&
+        pending.followUpPromoted &&
+        pending.followUpTurnId === turnId) {
+        found = pending;
+      }
+    });
+    return found;
+  }
+
+  private trySettleDetailAction(pending: PendingAction): void {
+    if (this.pendingActions.get(pending.taskId) !== pending ||
+      !pending.followUpTerminalSeen ||
+      !pending.directResultSeen) {
+      return;
+    }
+    this.settleAction(
+      pending,
+      pending.followUpTerminalSucceeded && pending.directResultSucceeded
+    );
   }
 
   private matchesActionMessage(
@@ -1734,6 +1875,7 @@ export class HotelAgentRuntime {
         this.visibility.clear();
         this.authority.clear();
       }
+      this.surfaceWriter.pruneRetained();
     }
     pending.resolve(result);
   }
@@ -1769,9 +1911,13 @@ export class HotelAgentRuntime {
       return;
     }
     this.settleAction(pending, false);
-    this.cancelTurnMessage(pending.turnId, 'action_timeout', pending.runId);
-    if (pending.followUpTurnId.length > 0 &&
-      pending.followUpTurnId !== pending.turnId) {
+    const hasPromotedDetail = pending.actionId === 'hotel.detail' &&
+      pending.followUpTurnId.length > 0 &&
+      pending.followUpTurnId !== pending.turnId;
+    if (!hasPromotedDetail) {
+      this.cancelTurnMessage(pending.turnId, 'action_timeout', pending.runId);
+    }
+    if (hasPromotedDetail) {
       this.cancelTurnMessage(
         pending.followUpTurnId,
         'action_timeout',
@@ -1785,6 +1931,7 @@ export class HotelAgentRuntime {
       this.visibility.clear();
       this.authority.clear();
     }
+    this.surfaceWriter.pruneRetained();
   }
 
   private cancelTurnMessage(turnId: string, reason: string, runId: string = ''): void {

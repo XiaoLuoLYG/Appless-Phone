@@ -168,6 +168,8 @@ export default function hotelLeaderPlannerTest() {
       expect(shouldRouteToHotelAgent('Shanghai hotel')).assertTrue();
       expect(shouldRouteToHotelAgent('stay in Beijing for two nights')).assertTrue();
       expect(shouldRouteToHotelAgent('rooms near Shanghai airport')).assertTrue();
+      expect(shouldRouteToHotelAgent('find a room in Shanghai')).assertTrue();
+      expect(shouldRouteToHotelAgent('book a room near the airport')).assertTrue();
       expect(shouldRouteToHotelAgent('帮我订明天的高铁票')).assertFalse();
       expect(shouldRouteToHotelAgent('打开 Gmail')).assertFalse();
       expect(shouldRouteToHotelAgent('预订')).assertFalse();
@@ -179,6 +181,12 @@ export default function hotelLeaderPlannerTest() {
       expect(shouldRouteToHotelAgent('translate hotel into Chinese')).assertFalse();
       expect(shouldRouteToHotelAgent('workplace accommodation policy')).assertFalse();
       expect(shouldRouteToHotelAgent('send an accommodation email')).assertFalse();
+      expect(shouldRouteToHotelAgent('find a meeting room in Shanghai')).assertFalse();
+      expect(shouldRouteToHotelAgent('need room to improve performance')).assertFalse();
+      expect(shouldRouteToHotelAgent('I need room for growth')).assertFalse();
+      expect(shouldRouteToHotelAgent('room layout ideas')).assertFalse();
+      expect(shouldRouteToHotelAgent('search classroom layout')).assertFalse();
+      expect(shouldRouteToHotelAgent('send a newsroom email')).assertFalse();
     });
 
     it('fingerprints every live model setting without exposing it in a status message', 0, () => {
@@ -228,6 +236,9 @@ export default function hotelLeaderPlannerTest() {
       expect(baseline === hotelModelSettingsFingerprint(changedKey)).assertFalse();
       expect(baseline === hotelModelSettingsFingerprint(changedModel)).assertFalse();
       expect(baseline === hotelModelSettingsFingerprint(changedParameters)).assertFalse();
+      expect(baseline.indexOf('secret-a')).assertEqual(-1);
+      expect(baseline.indexOf('temperature')).assertEqual(-1);
+      expect(baseline.indexOf(settings.customParametersJson)).assertEqual(-1);
       expect(hotelTurnReadyMessage('error', '酒店查询')).assertEqual('');
       expect(hotelTurnReadyMessage('empty', '酒店查询').indexOf('真实酒店结果')).assertEqual(-1);
       expect(hotelTurnReadyMessage('partial', '酒店查询').indexOf('部分')).assertLarger(-1);

@@ -3,7 +3,9 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  ActionPlanStepOutput,
   ActionResultPayload,
+  ActionRunPayload,
   A2uiAction,
   A2uiSurfaceState,
   CreateDataTaskPayload,
@@ -50,6 +52,11 @@ interface SurfaceWrite {
 
 interface EmptyHotelData {
   marker?: string;
+}
+
+interface FakeActionSuccessOutput {
+  actionId: string;
+  status: string;
 }
 
 class FixedHotelModel implements LocalModel {
@@ -180,6 +187,29 @@ class FirstCallDelayedProvider implements DataTaskExecutor {
   }
 }
 
+class DeferredDetailProvider implements DataTaskExecutor {
+  readonly calls: string[] = [];
+  readonly detailStarted: TestGate = new TestGate();
+  readonly detailRelease: TestGate = new TestGate();
+  readonly failDetail: boolean;
+
+  constructor(failDetail: boolean = false) {
+    this.failDetail = failDetail;
+  }
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls.push(task.toolId);
+    if (task.toolId === 'hotel.search') {
+      const query = task.args as HotelSearchRequest;
+      return hotelSearchDataResult(searchResult(query), []);
+    }
+    this.detailStarted.open();
+    await this.detailRelease.promise;
+    const request = task.args as HotelDetailRequest;
+    return this.failDetail ? detailProviderErrorResult() : detailSuccessResult(request);
+  }
+}
+
 class RecordingWriter implements UiSurfaceWriter {
   readonly writes: SurfaceWrite[] = [];
 
@@ -195,6 +225,21 @@ class RecordingWriter implements UiSurfaceWriter {
   }
 }
 
+class NeverSettlingWriter implements UiSurfaceWriter {
+  writesStarted: number = 0;
+
+  write(
+    _turnId: string,
+    _surfaceId: string,
+    _jsonl: string,
+    _lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    this.writesStarted += 1;
+    return new Promise<void>((_resolve: () => void) => {
+    });
+  }
+}
+
 class ThrowingWriter implements UiSurfaceWriter {
   async write(
     _turnId: string,
@@ -203,6 +248,20 @@ class ThrowingWriter implements UiSurfaceWriter {
     _lease: UiSurfaceWriteLease
   ): Promise<void> {
     throw new Error('writer failed');
+  }
+}
+
+class ThrowingDetailResultWriter extends RecordingWriter {
+  async write(
+    turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    if (jsonl.indexOf('rate-real-1') >= 0) {
+      throw new Error('detail result writer failed');
+    }
+    await super.write(turnId, surfaceId, jsonl, lease);
   }
 }
 
@@ -295,6 +354,61 @@ function searchResult(query: HotelSearchRequest): HotelSearchResult {
   };
 }
 
+function detailSuccessResult(query: HotelDetailRequest): DataResult {
+  const rate: HotelRatePlan = {
+    roomName: 'Deluxe',
+    roomNameCn: '豪华大床房',
+    ratePlanId: 'rate-real-1',
+    ratePlanName: '不含早餐',
+    averagePrice: 550,
+    bedTypeDescription: '1 大床',
+    currency: 'CNY',
+    mealAmount: 0,
+    mealTypeStr: '不含早餐',
+    isOnRequest: false,
+    cancelPolicy: '免费取消截止至 2026-08-12'
+  };
+  const detail: HotelDetailResult = {
+    ok: true,
+    error: '',
+    message: '实时房型',
+    query: query,
+    hotelId: query.hotelId,
+    bookingUrl: '',
+    name: '深圳测试酒店',
+    nameEn: 'Shenzhen Test Hotel',
+    checkIn: query.checkInDate,
+    checkOut: query.checkOutDate,
+    rates: [rate]
+  };
+  return {
+    toolId: 'hotel.detail',
+    outputSchema: 'hotelRatePlans',
+    status: 'success',
+    sources: [],
+    data: detail,
+    warnings: []
+  };
+}
+
+function detailProviderErrorResult(): DataResult {
+  const data: EmptyHotelData = {};
+  const error: DataResultError = {
+    code: 'HOTEL_DETAIL_PROVIDER_ERROR',
+    message: 'RollingGo detail failed',
+    retryable: true
+  };
+  return {
+    toolId: 'hotel.detail',
+    outputSchema: 'hotelRatePlans',
+    status: 'error',
+    sources: [],
+    data: data,
+    warnings: [],
+    error: error
+  };
+}
+
 function options(
   bus: TrackingBus,
   provider: DataTaskExecutor,
@@ -335,6 +449,20 @@ function messagesOf(bus: TrackingBus, type: AgentMessageType): AgentMessage[] {
     }
   });
   return result;
+}
+
+function messageCountForTurn(
+  bus: TrackingBus,
+  type: AgentMessageType,
+  turnId: string
+): number {
+  let count = 0;
+  bus.messages.forEach((message: AgentMessage) => {
+    if (message.type === type && message.turnId === turnId) {
+      count += 1;
+    }
+  });
+  return count;
 }
 
 function searchRequest(): HotelSearchRequest {
@@ -505,6 +633,219 @@ export default function hotelAgentRuntimeTest() {
       });
       expect(sawDetailRate).assertTrue();
       runtime.stop();
+    });
+
+    it('settles navigation and call directly when the system opener rejects them', 0, async () => {
+      const bus = new TrackingBus();
+      const opener = new RecordingOpener();
+      opener.opened = false;
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        opener
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const hotel = searchHotel();
+      expect(await runtime.runAction(hotelNavigateAction(hotel))).assertFalse();
+      expect(await runtime.runAction(hotelCallAction(hotel))).assertFalse();
+      const results = messagesOf(bus, AgentMessageType.ACTION_RESULT);
+      expect(results.length).assertEqual(2);
+      results.forEach((message: AgentMessage) => {
+        const result = message.payload as ActionResultPayload;
+        expect(result.status).assertEqual('error');
+        expect(result.completedStepIds.length).assertEqual(0);
+        expect(result.stepId).assertEqual('step-1');
+      });
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      runtime.dispose();
+    });
+
+    it('rejects exact-identity action success until the expected step output is complete', 0, async () => {
+      const bus = new TrackingBus();
+      const opener = new DeferredFirstOpener();
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        opener
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const running = runtime.runAction(hotelNavigateAction(searchHotel()));
+      let settled = false;
+      running.then((_ok: boolean): void => {
+        settled = true;
+      });
+      await opener.started.promise;
+      const actionRun = messagesOf(bus, AgentMessageType.ACTION_RUN)[0];
+      const run = actionRun.payload as ActionRunPayload;
+      const context = runtime.currentActionContext();
+      const exactBase: ActionResultPayload = {
+        surfaceId: context === null ? '' : context.surfaceId,
+        planId: 'direct:' + run.runId,
+        runId: run.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: []
+      };
+      const duplicateOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.navigate',
+          status: 'opened'
+        } as FakeActionSuccessOutput
+      }];
+      const duplicateStep: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1', 'step-1'],
+        outputs: duplicateOutputs
+      };
+      const foreignOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'foreign-step',
+        output: {
+          actionId: 'hotel.navigate',
+          status: 'opened'
+        } as FakeActionSuccessOutput
+      }];
+      const foreignOutput: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: foreignOutputs
+      };
+      const wrongActionOutputs: ActionPlanStepOutput[] = [{
+        stepId: 'step-1',
+        output: {
+          actionId: 'hotel.call',
+          status: 'opened'
+        } as FakeActionSuccessOutput
+      }];
+      const wrongAction: ActionResultPayload = {
+        surfaceId: exactBase.surfaceId,
+        planId: exactBase.planId,
+        runId: exactBase.runId,
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: wrongActionOutputs
+      };
+      const invalid: ActionResultPayload[] = [
+        exactBase,
+        duplicateStep,
+        foreignOutput,
+        wrongAction
+      ];
+      invalid.forEach((payload: ActionResultPayload) => {
+        bus.publish({
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: actionRun.conversationId,
+          turnId: actionRun.turnId,
+          taskId: actionRun.taskId,
+          payload: payload
+        });
+      });
+      await flush();
+      expect(settled).assertFalse();
+      opener.release.open();
+      expect(await running).assertTrue();
+      runtime.dispose();
+    });
+
+    it('keeps a detail action pending until its promoted provider and UI result finish', 0, async () => {
+      const provider = new DeferredDetailProvider();
+      const runtime = new HotelAgentRuntime(options(
+        new TrackingBus(),
+        provider,
+        new RecordingWriter(),
+        new RecordingOpener()
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const running = runtime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      );
+      let settled = false;
+      running.then((_ok: boolean): void => {
+        settled = true;
+      });
+      await provider.detailStarted.promise;
+      await flush();
+      expect(settled).assertFalse();
+      provider.detailRelease.open();
+      expect(await running).assertTrue();
+      runtime.dispose();
+    });
+
+    it('returns false when promoted detail provider or UI completion fails', 0, async () => {
+      const providerFailure = new DeferredDetailProvider(true);
+      const providerRuntime = new HotelAgentRuntime(options(
+        new TrackingBus(),
+        providerFailure,
+        new RecordingWriter(),
+        new RecordingOpener()
+      ));
+      expect((await providerRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const providerRun = providerRuntime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      );
+      await providerFailure.detailStarted.promise;
+      providerFailure.detailRelease.open();
+      expect(await providerRun).assertFalse();
+      providerRuntime.dispose();
+
+      const uiProvider = new DeferredDetailProvider();
+      const uiRuntime = new HotelAgentRuntime(options(
+        new TrackingBus(),
+        uiProvider,
+        new ThrowingDetailResultWriter(),
+        new RecordingOpener()
+      ));
+      expect((await uiRuntime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const uiRun = uiRuntime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      );
+      await uiProvider.detailStarted.promise;
+      uiProvider.detailRelease.open();
+      expect(await uiRun).assertFalse();
+      uiRuntime.dispose();
+    });
+
+    it('times out a hanging promoted detail and cancels its follow-up turn', 0, async () => {
+      const bus = new TrackingBus();
+      const provider = new DeferredDetailProvider();
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        provider,
+        new RecordingWriter(),
+        new RecordingOpener(),
+        undefined,
+        1000,
+        20
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const searchContext = runtime.currentActionContext();
+      const running = runtime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      );
+      await provider.detailStarted.promise;
+      const detailTasks = messagesOf(bus, AgentMessageType.TASK_CREATE_DATA);
+      const promotedTurnId = detailTasks[detailTasks.length - 1].turnId;
+      expect(await running).assertFalse();
+      expect(
+        messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, promotedTurnId)
+      ).assertEqual(1);
+      if (searchContext !== null) {
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, searchContext.turnId)
+        ).assertEqual(0);
+      }
+      expect(runtime.restoreSearchSurface()).assertTrue();
+      provider.detailRelease.open();
+      await flush(20);
+      runtime.dispose();
     });
 
     it('rejects modified args and an action replayed after a newer turn', 0, async () => {
@@ -692,6 +1033,71 @@ export default function hotelAgentRuntimeTest() {
       runtime.dispose();
     });
 
+    it('cancels promoted detail and saved search exactly once on non-hotel cancellation', 0, async () => {
+      const bus = new TrackingBus();
+      const provider = new DeferredDetailProvider();
+      const visible: string[] = [];
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        provider,
+        new RecordingWriter(),
+        new RecordingOpener(),
+        (surface: A2uiSurfaceState): void => {
+          visible.push(surface.surfaceId);
+        }
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const searchContext = runtime.currentActionContext();
+      const running = runtime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      );
+      await provider.detailStarted.promise;
+      const detailContext = runtime.currentActionContext();
+      runtime.cancelActiveTurn('non_hotel_prompt');
+      expect(await running).assertFalse();
+      if (searchContext !== null && detailContext !== null) {
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, searchContext.turnId)
+        ).assertEqual(1);
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, detailContext.turnId)
+        ).assertEqual(1);
+      }
+      const visibleAtCancel = visible.length;
+      provider.detailRelease.open();
+      await flush(20);
+      expect(visible.length).assertEqual(visibleAtCancel);
+      runtime.dispose();
+    });
+
+    it('cancels both active detail and saved search exactly once during dispose', 0, async () => {
+      const bus = new TrackingBus();
+      const runtime = new HotelAgentRuntime(options(
+        bus,
+        new FakeHotelProvider(),
+        new RecordingWriter(),
+        new RecordingOpener()
+      ));
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      const searchContext = runtime.currentActionContext();
+      expect(await runtime.runAction(
+        hotelDetailAction(searchHotel(), searchRequest())
+      )).assertTrue();
+      await flush(20);
+      const detailContext = runtime.currentActionContext();
+      expect(searchContext === null).assertFalse();
+      expect(detailContext === null).assertFalse();
+      runtime.dispose();
+      if (searchContext !== null && detailContext !== null) {
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, searchContext.turnId)
+        ).assertEqual(1);
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, detailContext.turnId)
+        ).assertEqual(1);
+      }
+    });
+
     it('ignores spoofed UI terminal messages that do not match the exact surface identity', 0, async () => {
       const bus = new TrackingBus();
       const gate = new TestGate();
@@ -768,9 +1174,10 @@ export default function hotelAgentRuntimeTest() {
     });
 
     it('restores the search document and authority before accepting hotel actions again', 0, async () => {
+      const bus = new TrackingBus();
       const surfaces: A2uiSurfaceState[] = [];
       const runtime = new HotelAgentRuntime(options(
-        new TrackingBus(),
+        bus,
         new FakeHotelProvider(),
         new RecordingWriter(),
         new RecordingOpener(),
@@ -786,6 +1193,11 @@ export default function hotelAgentRuntimeTest() {
       const detailContext = runtime.currentActionContext();
       expect(detailContext?.sourceToolId).assertEqual('hotel.detail');
       expect(runtime.restoreSearchSurface()).assertTrue();
+      if (detailContext !== null) {
+        expect(
+          messageCountForTurn(bus, AgentMessageType.TURN_CANCEL, detailContext.turnId)
+        ).assertEqual(1);
+      }
       const restored = runtime.currentActionContext();
       expect(restored?.sourceToolId).assertEqual('hotel.search');
       const restoredSurface = surfaces[surfaces.length - 1];
@@ -916,6 +1328,27 @@ export default function hotelAgentRuntimeTest() {
       const afterDispose = await runtime.submit(SEARCH_QUERY);
       expect(afterDispose.ok).assertFalse();
       expect(afterDispose.status).assertEqual('canceled');
+    });
+
+    it('bounds retained records while every surface writer remains unresolved', 0, async () => {
+      const writer = new NeverSettlingWriter();
+      const runtime = new HotelAgentRuntime(options(
+        new TrackingBus(),
+        new FakeHotelProvider(),
+        writer,
+        new RecordingOpener(),
+        undefined,
+        10,
+        1000
+      ));
+      for (let index = 0; index < 24; index++) {
+        const timedOut = await runtime.submit(SEARCH_QUERY);
+        expect(timedOut.status).assertEqual('timeout');
+        expect(runtime.retainedSurfaceCount() <= 20).assertTrue();
+      }
+      expect(writer.writesStarted >= 24).assertTrue();
+      runtime.dispose();
+      expect(runtime.retainedSurfaceCount()).assertEqual(0);
     });
   });
 }
