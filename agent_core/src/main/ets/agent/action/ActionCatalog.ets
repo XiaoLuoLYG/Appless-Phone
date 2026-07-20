@@ -105,6 +105,22 @@ export class ActionCatalog {
       return malformedArgs();
     }
     try {
+      const current = this.validateRegisteredAction(actionId);
+      if (!current.ok) {
+        return current;
+      }
+      const validation = this.argsValidator.validate(actionId, args);
+      if (!validation.ok) {
+        return denied(validation.code, validation.message);
+      }
+      return current;
+    } catch (_error) {
+      return authorityFailed();
+    }
+  }
+
+  validateRegisteredAction(actionId: string): ActionCatalogResult {
+    try {
       if (actionId === WORKFLOW_ENTRY_ACTION_ID) {
         return denied('ACTION_WORKFLOW_ENTRY_ONLY', 'workflow.run is only a surface workflow entry.');
       }
@@ -112,7 +128,7 @@ export class ActionCatalog {
       if (definition === null) {
         return denied('ACTION_NOT_REGISTERED', 'Action is not a registered executable step.');
       }
-      return this.validateRegisteredDefinition(definition, args);
+      return this.validateRegisteredAvailability(definition);
     } catch (_error) {
       return authorityFailed();
     }
@@ -133,15 +149,23 @@ export class ActionCatalog {
   }
 
   private validateRegisteredDefinition(definition: ToolDefinition, args: Object): ActionCatalogResult {
+    const current = this.validateRegisteredAvailability(definition);
+    if (!current.ok) {
+      return current;
+    }
+    const validation = this.argsValidator.validate(definition.toolId, args);
+    if (!validation.ok) {
+      return denied(validation.code, validation.message);
+    }
+    return current;
+  }
+
+  private validateRegisteredAvailability(definition: ToolDefinition): ActionCatalogResult {
     if (definition.riskLevel === 'blocked') {
       return denied('ACTION_BLOCKED', 'Action is blocked by its current risk metadata.');
     }
     if (definition.backendPriority.length === 0) {
       return denied('ACTION_BACKEND_MISSING', 'Action has no current execution backend.');
-    }
-    const validation = this.argsValidator.validate(definition.toolId, args);
-    if (!validation.ok) {
-      return denied(validation.code, validation.message);
     }
     return allowed(definition);
   }

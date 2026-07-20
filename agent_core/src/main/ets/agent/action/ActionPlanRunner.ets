@@ -34,6 +34,13 @@ interface ForbiddenFieldResult {
   field: string;
 }
 
+interface ContextSnapshotResult {
+  ok: boolean;
+  value: ActionPlanRunContext | null;
+  errorCode: string;
+  message: string;
+}
+
 const FORBIDDEN_FIELDS: string[] = [
   'script',
   'expression',
@@ -85,7 +92,8 @@ function errorOutcome(
 
 function stepArgs(step: ActionPlanStep): Object {
   if (step.args === undefined) {
-    return JSON.parse('{}') as Object;
+    const empty: Record<string, JsonValue | undefined> = {};
+    return empty;
   }
   return step.args;
 }
@@ -97,8 +105,57 @@ function isArgsObject(value: JsonValue | undefined): boolean {
     !Array.isArray(value);
 }
 
-function isNonemptyString(value: string): boolean {
+function isNonemptyString(value: JsonValue | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
+  if (context === null || typeof context !== 'object') {
+    return {
+      ok: false,
+      value: null,
+      errorCode: 'ACTION_PLAN_CONTEXT_INVALID',
+      message: 'Action plan execution identity is malformed.'
+    };
+  }
+  const keys = Object.keys(context);
+  const required = ['conversationId', 'turnId', 'surfaceId', 'sourceToolId', 'planId'];
+  for (let index = 0; index < required.length; index++) {
+    if (keys.indexOf(required[index]) < 0) {
+      return {
+        ok: false,
+        value: null,
+        errorCode: 'ACTION_PLAN_CONTEXT_INVALID',
+        message: 'Action plan execution identity is malformed.'
+      };
+    }
+  }
+  const record =
+    context as Object as Record<string, JsonValue | undefined>;
+  if (!isNonemptyString(record['conversationId']) ||
+    !isNonemptyString(record['turnId']) ||
+    !isNonemptyString(record['surfaceId']) ||
+    !isNonemptyString(record['sourceToolId']) ||
+    !isNonemptyString(record['planId'])) {
+    return {
+      ok: false,
+      value: null,
+      errorCode: 'ACTION_PLAN_CONTEXT_INVALID',
+      message: 'Action plan execution identity is malformed.'
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      conversationId: record['conversationId'] as string,
+      turnId: record['turnId'] as string,
+      surfaceId: record['surfaceId'] as string,
+      sourceToolId: record['sourceToolId'] as string,
+      planId: record['planId'] as string
+    },
+    errorCode: '',
+    message: ''
+  };
 }
 
 function inspectForbiddenFields(
@@ -166,16 +223,15 @@ function completedOutput(completed: CompletedStep[], stepId: string): JsonValue 
 }
 
 function executionContext(
-  plan: ActionPlan,
   context: ActionPlanRunContext,
   stepId: string
 ): ActionExecutionContext {
   return {
     conversationId: context.conversationId,
-    turnId: plan.turnId,
-    surfaceId: plan.surfaceId,
+    turnId: context.turnId,
+    surfaceId: context.surfaceId,
     sourceToolId: context.sourceToolId,
-    planId: plan.planId,
+    planId: context.planId,
     stepId: stepId
   };
 }
@@ -190,6 +246,17 @@ export class ActionPlanRunner {
   }
 
   validate(plan: ActionPlan, context: ActionPlanRunContext): ActionPlanValidationResult {
+    const contextResult = snapshotContext(context);
+    if (!contextResult.ok || contextResult.value === null) {
+      return validationFailure('', contextResult.errorCode, contextResult.message);
+    }
+    return this.validateSnapshot(plan, contextResult.value);
+  }
+
+  private validateSnapshot(
+    plan: ActionPlan,
+    context: ActionPlanRunContext
+  ): ActionPlanValidationResult {
     try {
       const inspection = inspectJsonValue(plan as Object);
       if (!inspection.ok) {
@@ -209,10 +276,9 @@ export class ActionPlanRunner {
         !isNonemptyString(plan.turnId) ||
         !isNonemptyString(plan.surfaceId) ||
         !isNonemptyString(plan.label) ||
-        context === null ||
-        typeof context !== 'object' ||
-        !isNonemptyString(context.conversationId) ||
-        !isNonemptyString(context.sourceToolId)) {
+        plan.planId !== context.planId ||
+        plan.turnId !== context.turnId ||
+        plan.surfaceId !== context.surfaceId) {
         return validationFailure('', 'ACTION_PLAN_MALFORMED', 'Action plan metadata is malformed.');
       }
       if (!Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 5) {
@@ -292,7 +358,7 @@ export class ActionPlanRunner {
             );
           }
         }
-        const catalogResult = this.validateCurrentAction(plan, context, index, args);
+        const catalogResult = this.validatePreflightAction(plan, context, index, args);
         if (!catalogResult.ok) {
           return validationFailure(step.stepId, catalogResult.code, catalogResult.message);
         }
@@ -310,6 +376,11 @@ export class ActionPlanRunner {
   async run(plan: ActionPlan, context: ActionPlanRunContext): Promise<ActionPlanOutcome> {
     const completed: CompletedStep[] = [];
     try {
+      const contextResult = snapshotContext(context);
+      if (!contextResult.ok || contextResult.value === null) {
+        return errorOutcome('', contextResult.errorCode, contextResult.message, []);
+      }
+      const contextSnapshot = contextResult.value;
       const snapshotResult = cloneJsonValue(plan as Object);
       if (!snapshotResult.ok || !isArgsObject(snapshotResult.value)) {
         return errorOutcome(
@@ -322,7 +393,7 @@ export class ActionPlanRunner {
         );
       }
       const snapshot = snapshotResult.value as ActionPlan;
-      const preflight = this.validate(snapshot, context);
+      const preflight = this.validateSnapshot(snapshot, contextSnapshot);
       if (!preflight.ok) {
         return errorOutcome(
           preflight.failedStepId,
@@ -343,9 +414,9 @@ export class ActionPlanRunner {
           );
         }
         const boundArgs = bound.value as Object;
-        const currentValidation = this.validateCurrentAction(
+        const currentValidation = this.validateExecutionAction(
           snapshot,
-          context,
+          contextSnapshot,
           index,
           boundArgs
         );
@@ -362,7 +433,7 @@ export class ActionPlanRunner {
           rawResult = await this.executor.execute(
             step.actionId,
             boundArgs,
-            executionContext(snapshot, context, step.stepId)
+            executionContext(contextSnapshot, step.stepId)
           );
         } catch (_error) {
           return errorOutcome(
@@ -445,7 +516,7 @@ export class ActionPlanRunner {
     }
   }
 
-  private validateCurrentAction(
+  private validatePreflightAction(
     plan: ActionPlan,
     context: ActionPlanRunContext,
     index: number,
@@ -455,8 +526,28 @@ export class ActionPlanRunner {
     if (index === 0) {
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
-        plan.turnId,
-        plan.surfaceId,
+        context.turnId,
+        context.surfaceId,
+        context.sourceToolId,
+        step.actionId,
+        args
+      );
+    }
+    return this.catalog.validateRegisteredAction(step.actionId);
+  }
+
+  private validateExecutionAction(
+    plan: ActionPlan,
+    context: ActionPlanRunContext,
+    index: number,
+    args: Object
+  ): ActionCatalogResult {
+    const step = plan.steps[index];
+    if (index === 0) {
+      return this.catalog.validateSurfaceExecution(
+        context.conversationId,
+        context.turnId,
+        context.surfaceId,
         context.sourceToolId,
         step.actionId,
         args

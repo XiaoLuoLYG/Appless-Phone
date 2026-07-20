@@ -145,56 +145,86 @@ function canonicalArrayIndex(token: string): number {
   return value;
 }
 
-function inspectJson(value: JsonValue | undefined, active: Set<Object>): JsonInspectionResult {
+function invalidJson(message: string): JsonPointerResult {
+  return pointerFailure('JSON_VALUE_INVALID', message);
+}
+
+function cloneJson(value: JsonValue | undefined, active: Set<Object>): JsonPointerResult {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return {
       ok: true,
+      value: value,
       errorCode: '',
       message: ''
     };
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
-      return {
-        ok: false,
-        errorCode: 'JSON_VALUE_INVALID',
-        message: 'JSON numbers must be finite.'
-      };
+      return invalidJson('JSON numbers must be finite.');
     }
     return {
       ok: true,
+      value: value,
       errorCode: '',
       message: ''
     };
   }
   if (value === undefined || typeof value !== 'object') {
-    return {
-      ok: false,
-      errorCode: 'JSON_VALUE_INVALID',
-      message: 'Value is not JSON-compatible.'
-    };
+    return invalidJson('Value is not JSON-compatible.');
   }
   const objectValue = value as Object;
   if (active.has(objectValue)) {
-    return {
-      ok: false,
-      errorCode: 'JSON_VALUE_INVALID',
-      message: 'Cyclic JSON values are not allowed.'
-    };
+    return invalidJson('Cyclic JSON values are not allowed.');
   }
   active.add(objectValue);
+  if (Array.isArray(value)) {
+    const keys = Object.keys(value);
+    if (keys.length !== value.length) {
+      active.delete(objectValue);
+      return invalidJson('JSON arrays cannot contain holes or named properties.');
+    }
+    const arrayClone: JsonValue[] = [];
+    for (let index = 0; index < value.length; index++) {
+      const key = index.toString();
+      if (keys.indexOf(key) < 0) {
+        active.delete(objectValue);
+        return invalidJson('JSON arrays cannot contain holes.');
+      }
+      const nested = cloneJson(value[index] as JsonValue | undefined, active);
+      if (!nested.ok) {
+        active.delete(objectValue);
+        return nested;
+      }
+      arrayClone.push(nested.value as JsonValue);
+    }
+    active.delete(objectValue);
+    return {
+      ok: true,
+      value: arrayClone,
+      errorCode: '',
+      message: ''
+    };
+  }
   const keys = Object.keys(objectValue);
   const record = objectValue as JsonRecord;
+  const objectClone: JsonRecord = {};
   for (let index = 0; index < keys.length; index++) {
-    const nested = inspectJson(record[keys[index]], active);
+    const key = keys[index];
+    if (isPrototypeSegment(key)) {
+      active.delete(objectValue);
+      return invalidJson('JSON prototype member names are forbidden.');
+    }
+    const nested = cloneJson(record[key], active);
     if (!nested.ok) {
       active.delete(objectValue);
       return nested;
     }
+    objectClone[key] = nested.value;
   }
   active.delete(objectValue);
   return {
     ok: true,
+    value: objectClone,
     errorCode: '',
     message: ''
   };
@@ -202,7 +232,12 @@ function inspectJson(value: JsonValue | undefined, active: Set<Object>): JsonIns
 
 export function inspectJsonValue(value: JsonValue | undefined): JsonInspectionResult {
   try {
-    return inspectJson(value, new Set<Object>());
+    const cloned = cloneJson(value, new Set<Object>());
+    return {
+      ok: cloned.ok,
+      errorCode: cloned.errorCode,
+      message: cloned.message
+    };
   } catch (_error) {
     return {
       ok: false,
@@ -213,17 +248,8 @@ export function inspectJsonValue(value: JsonValue | undefined): JsonInspectionRe
 }
 
 export function cloneJsonValue(value: JsonValue): JsonPointerResult {
-  const inspection = inspectJsonValue(value);
-  if (!inspection.ok) {
-    return pointerFailure(inspection.errorCode, inspection.message);
-  }
   try {
-    return {
-      ok: true,
-      value: JSON.parse(JSON.stringify(value)) as JsonValue,
-      errorCode: '',
-      message: ''
-    };
+    return cloneJson(value, new Set<Object>());
   } catch (_error) {
     return pointerFailure('JSON_VALUE_INVALID', 'JSON value cloning failed.');
   }

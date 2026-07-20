@@ -23,7 +23,10 @@ export interface ActionPlan {
 
 export interface ActionPlanRunContext {
   conversationId: string;
+  turnId: string;
+  surfaceId: string;
   sourceToolId: string;
+  planId: string;
 }
 
 export interface ActionExecutionContext {

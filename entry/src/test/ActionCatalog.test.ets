@@ -444,6 +444,30 @@ export default function actionCatalogTest() {
       expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ACTION_BACKEND_MISSING');
     });
 
+    it('preflights registered later steps without validating incomplete args', 0, () => {
+      const detailArgs = args('{}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const validator = new ControlledArgsValidator();
+      validator.allowed = false;
+      const actionCatalog = catalog(
+        lookup,
+        new ExactSurfaceAuthorizer(
+          'conversation-1',
+          'turn-1',
+          'surface-1',
+          'hotel.detail',
+          detailArgs
+        ),
+        new RejectClientAuthorizer(),
+        validator
+      );
+
+      expect(actionCatalog.validateRegisteredAction('hotel.detail').ok).assertTrue();
+      expect(validator.calls).assertEqual(0);
+      expect(actionCatalog.validateRegisteredStep('hotel.detail', detailArgs).code).assertEqual('ARGS_INVALID');
+      expect(validator.calls).assertEqual(1);
+    });
+
     it('rejects malformed args before consulting any injected authority', 0, () => {
       const validArgs = args('{"hotelId":47675}');
       const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
