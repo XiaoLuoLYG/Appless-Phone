@@ -1,4 +1,5 @@
 import { AgentEvent } from '../agent/AgentEvent';
+import { A2uiSurfaceState } from './runtime/A2uiTypes';
 
 export interface LoopModelSettings {
   provider: string;
@@ -22,12 +23,14 @@ export interface LoopBackendRequest {
   actionId: string;
   args?: Object;
   persona?: Object;
+  ignoreToolSurfaceUpdates?: boolean;
   maxSteps: number;
 }
 
 export interface LoopBackendCallbacks {
   onEvent?: (event: AgentEvent) => void;
   onA2uiJsonl?: (line: string) => void;
+  onA2uiSurface?: (surface: A2uiSurfaceState, raw: string) => void;
 }
 
 export interface LoopToolTrace {

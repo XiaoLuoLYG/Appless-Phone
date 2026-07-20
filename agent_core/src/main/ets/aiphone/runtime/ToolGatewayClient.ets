@@ -1576,6 +1576,10 @@ export function configureLocalToolDebugConfig(config: LocalToolDebugConfig): voi
     foodProviderDelayMs: delayMs,
     foodPartialThrottleMs: throttleMs
   };
+  aiLogInfo('[AIPhone][LocalToolDebugConfig] foodProviderDelayEnabled=' +
+    (config.foodProviderDelayEnabled ? 'true' : 'false') +
+    ' foodProviderDelayMs=' + delayMs.toString() +
+    ' foodPartialThrottleMs=' + throttleMs.toString());
 }
 
 function firstText(values: Array<Object | string | number | boolean | null | undefined>): string {

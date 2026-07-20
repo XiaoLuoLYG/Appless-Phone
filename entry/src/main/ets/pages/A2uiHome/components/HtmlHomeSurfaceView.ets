@@ -39,7 +39,7 @@ export struct HtmlHomeSurfaceView {
   @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
   @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
   @Prop @Watch('onHtmlOrBusyChange') isBusy: boolean = false;
-  @Prop renderTick: number = 0;
+  @Prop @Watch('onHtmlOrBusyChange') renderTick: number = 0;
   @Prop luckinInlinePatchJson: string = '';
   @Prop @Watch('onLuckinPatchTickChange') luckinInlinePatchTick: number = 0;
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
@@ -48,7 +48,6 @@ export struct HtmlHomeSurfaceView {
   private bridge: HtmlHomeActionBridge = new HtmlHomeActionBridge();
   private loadedKey: string = '';
   private webReady: boolean = false;
-  private busyFrameLoaded: boolean = false;
   private lastMailDetailEventJson: string = '';
   private lastMailReplyEventJson: string = '';
   private lastMailCalendarEventJson: string = '';
@@ -74,9 +73,6 @@ export struct HtmlHomeSurfaceView {
     if (this.html.length === 0 || this.html === this.loadedKey) {
       return;
     }
-    if (this.isBusy && this.busyFrameLoaded) {
-      return;
-    }
     try {
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
@@ -84,20 +80,15 @@ export struct HtmlHomeSurfaceView {
       this.lastMailReplyEventJson = '';
       this.lastMailCalendarEventJson = '';
       this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
-      if (this.isBusy) {
-        this.busyFrameLoaded = true;
-      }
       aiLogInfo('[AIPhone][HtmlHomeSurfaceLoad] chars=' + this.html.length.toString() +
-        ' renderTick=' + this.renderTick.toString());
+        ' renderTick=' + this.renderTick.toString() +
+        ' busy=' + (this.isBusy ? 'true' : 'false'));
     } catch (error) {
       aiLogError('[AIPhone][HtmlHomeSurfaceLoadError] ' + JSON.stringify(error));
     }
   }
 
   onHtmlOrBusyChange(): void {
-    if (!this.isBusy) {
-      this.busyFrameLoaded = false;
-    }
     this.loadHtmlIfNeeded();
   }
 

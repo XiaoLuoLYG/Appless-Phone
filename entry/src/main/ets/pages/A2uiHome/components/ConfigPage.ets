@@ -66,6 +66,7 @@ export struct ConfigPage {
   @Link foodProviderDelayEnabled: boolean;
   @Link foodProviderDelayMs: string;
   @Link foodPartialThrottleMs: string;
+  @Link ignoreToolSurfaceUpdates: boolean;
   @Link htmlHomeDebugExportEnabled: boolean;
   @Prop htmlHomeDebugExportPath: string = '';
   @Link didiMcpSandboxEnabled: boolean;
@@ -966,6 +967,33 @@ export struct ConfigPage {
               .onChange((value: string) => {
                 this.foodPartialThrottleMs = value;
               })
+
+            Divider()
+              .color(COLOR_LINE)
+              .margin({ top: 16, bottom: 12 })
+
+            Row() {
+              Column() {
+                Text('忽略工具流式 Surface')
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(COLOR_INK)
+                Text('开启后丢弃工具 partial，只在工具完成后回放完整结果')
+                  .fontSize(12)
+                  .fontColor(COLOR_MUTED)
+                  .margin({ top: 4 })
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+
+              Toggle({ type: ToggleType.Switch, isOn: this.ignoreToolSurfaceUpdates })
+                .selectedColor(COLOR_ACCENT)
+                .onChange((isOn: boolean) => {
+                  this.ignoreToolSurfaceUpdates = isOn;
+                })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
 
             Divider()
               .color(COLOR_LINE)

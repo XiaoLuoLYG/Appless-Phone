@@ -48,7 +48,9 @@ class AiphoneTool implements AgentTool {
       promptForTool,
       this.request.surfaceId,
       this.request.actionId,
-      this.mergeArgs(this.request.args, parsedArgs)
+      this.mergeArgs(this.request.args, parsedArgs),
+      this.request.ignoreToolSurfaceUpdates === true,
+      this.callbacks.onA2uiSurface === undefined ? null : this.callbacks.onA2uiSurface
     );
     for (const line of splitJsonl(jsonl)) {
       this.callbacks.onA2uiJsonl?.(line);
@@ -161,6 +163,7 @@ export class LoopBackend {
     let a2uiLineCount = 0;
     const a2uiCallbacks: LoopBackendCallbacks = {
       onEvent: callbacks.onEvent,
+      onA2uiSurface: callbacks.onA2uiSurface,
       onA2uiJsonl: (line: string): void => {
         a2uiLineCount++;
         callbacks.onA2uiJsonl?.(line);

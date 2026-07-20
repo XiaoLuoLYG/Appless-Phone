@@ -23,7 +23,7 @@ export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiMode
 export { LoopBackend, isExplicitLuckinOrderPrompt, parseLoopToolInputArgs } from './src/main/ets/aiphone/LoopBackend';
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
 export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
-export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
+export { AiphoneToolSurfaceCallback, aiphoneToolSurfaceCallback, ignoreSurface, runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { aiphoneToolDefinitionCount, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel } from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export { GMAIL_TOOL_IDS, allToolDefinitions, backendLabel, isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';

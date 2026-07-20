@@ -2,14 +2,25 @@ import { aiphoneErrorJsonl } from './AiphoneA2ui';
 import { A2uiSurfaceState } from './runtime/A2uiTypes';
 import { callToolGateway, defaultToolGatewayUrl, isRegisteredToolId } from './runtime/ToolGatewayClient';
 
-const ignoreSurface = (_surface: A2uiSurfaceState, _raw: string): void => {};
+export type AiphoneToolSurfaceCallback = (surface: A2uiSurfaceState, raw: string) => void;
+
+export const ignoreSurface: AiphoneToolSurfaceCallback = (_surface: A2uiSurfaceState, _raw: string): void => {};
+
+export function aiphoneToolSurfaceCallback(
+  ignoreSurfaceUpdates: boolean,
+  onSurface: AiphoneToolSurfaceCallback | null
+): AiphoneToolSurfaceCallback {
+  return ignoreSurfaceUpdates || onSurface === null ? ignoreSurface : onSurface;
+}
 
 export async function runAiphoneTool(
   toolId: string,
   prompt: string,
   surfaceId: string,
   actionId: string,
-  args: Object | null = null
+  args: Object | null = null,
+  ignoreSurfaceUpdates: boolean = true,
+  onSurface: AiphoneToolSurfaceCallback | null = null
 ): Promise<string> {
   if (!isRegisteredToolId(toolId)) {
     return aiphoneErrorJsonl(surfaceId, '未知 AIPhone 工具', '未注册 AIPhone 工具：' + toolId);
@@ -21,7 +32,7 @@ export async function runAiphoneTool(
     prompt,
     surfaceId,
     actionId,
-    ignoreSurface,
+    aiphoneToolSurfaceCallback(ignoreSurfaceUpdates, onSurface),
     null,
     args
   );

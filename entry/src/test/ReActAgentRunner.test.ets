@@ -3,7 +3,9 @@ import {
   AgentEvent,
   AgentEventKind,
   AgentTool,
+  aiphoneToolSurfaceCallback,
   A2uiEnvelope,
+  A2uiSurfaceState,
   ConversationContext,
   DynamicGenericToolResult,
   genericToolResultsA2ui,
@@ -150,6 +152,29 @@ function longText(prefix: string): string {
 
 export default function reActAgentRunnerTest() {
   describe('reActAgentRunner', () => {
+    it('forwards or ignores tool surfaces according to the runtime switch', 0, () => {
+      let forwarded = 0;
+      const onSurface = (_surface: A2uiSurfaceState, _raw: string): void => {
+        forwarded++;
+      };
+      const surface: A2uiSurfaceState = {
+        surfaceId: 'surface_food',
+        rootId: 'root',
+        title: 'Food',
+        intent: 'food',
+        status: 'calling_tool',
+        components: [],
+        dataModelJson: '{}',
+        error: '',
+        sequence: 1
+      };
+
+      aiphoneToolSurfaceCallback(false, onSurface)(surface, 'partial');
+      aiphoneToolSurfaceCallback(true, onSurface)(surface, 'ignored');
+
+      expect(forwarded).assertEqual(1);
+    });
+
     it('parses parenthesized JSON actions that contain arrays', 0, async () => {
       const tool = new CaptureTool();
       const registry = new ToolRegistry();

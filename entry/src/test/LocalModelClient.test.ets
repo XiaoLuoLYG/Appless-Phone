@@ -29,6 +29,7 @@ export default function localModelClientTest() {
       expect(settings.model).assertEqual('qwen-max');
       expect(settings.apiKey).assertEqual('test-key');
       expect(settings.customParametersJson).assertEqual('{"enable_thinking":false}');
+      expect(settings.ignoreToolSurfaceUpdates).assertFalse();
       configureLocalModelSettingsFromRawJson('{}');
     });
   });

@@ -4,6 +4,7 @@ export interface LocalModelSettings {
   model: string;
   apiKey: string;
   customParametersJson: string;
+  ignoreToolSurfaceUpdates: boolean;
 }
 
 interface LocalModelRawConfig {
@@ -47,6 +48,7 @@ export function defaultLocalModelSettings(): LocalModelSettings {
     baseUrl: DEFAULT_BASE_URL,
     model: DEFAULT_MODEL,
     apiKey: dashScopeApiKey,
-    customParametersJson: DEFAULT_CUSTOM_PARAMETERS_JSON
+    customParametersJson: DEFAULT_CUSTOM_PARAMETERS_JSON,
+    ignoreToolSurfaceUpdates: false
   };
 }

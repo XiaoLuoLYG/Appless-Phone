@@ -174,6 +174,7 @@ function requestDebug(settings: LocalModelSettings, prompt: string, history: A2u
     provider: settings.provider,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates,
     promptChars: prompt.length,
     historyTurns: history.length
   });
@@ -223,6 +224,7 @@ export async function callLocalModel(
   let raw = '';
   let error = '';
   let loopDebug = '';
+  let receivedLiveToolSurface = false;
   const preparedPersona = preparePersonaPrompt(prompt);
   const runtimePersona = a2uiPersonaData(preparedPersona.runtime);
   const runtimePersonaMemory = a2uiPersonaMemoryData(preparedPersona.memoryRuntime);
@@ -231,6 +233,8 @@ export async function callLocalModel(
   };
   const debug = requestDebug(settings, prompt, history);
   const backend = new LoopBackend();
+  aiLogInfo('[AIPhone][ToolSurfaceMode] ignore=' +
+    (settings.ignoreToolSurfaceUpdates ? 'true' : 'false'));
   const request: LoopBackendRequest = {
     prompt: preparedPersona.modelPrompt,
     userPrompt: preparedPersona.userPrompt,
@@ -246,6 +250,7 @@ export async function callLocalModel(
     actionId: 'model_tool_request',
     args: mergeToolArgs(preparedPersona.toolArgs, toolArgs),
     persona: preparedPersona.runtime as Object,
+    ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates,
     maxSteps: 6
   };
 
@@ -254,6 +259,10 @@ export async function callLocalModel(
       onEvent: (event: AgentEvent): void => {
         loopDebug += event.kind + ': ' + event.text + '\n';
         aiLogInfo('[AIPhone][LoopyEvent] kind=' + event.kind + ' text=' + event.text.substring(0, 240));
+      },
+      onA2uiSurface: (surface: A2uiSurfaceState, toolRaw: string): void => {
+        receivedLiveToolSurface = true;
+        onSurface(surfaceWithPersona(surface), toolRaw, { thinkClosed: true });
       },
       onA2uiJsonl: (line: string): void => {
         raw += line + '\n';
@@ -269,7 +278,9 @@ export async function callLocalModel(
           aiLogError('[AIPhone][LoopyA2uiApplyError] ' + applyError);
           return;
         }
-        onSurface(surfaceWithPersona(store.getSurface()), raw, { thinkClosed: true });
+        if (!receivedLiveToolSurface) {
+          onSurface(surfaceWithPersona(store.getSurface()), raw, { thinkClosed: true });
+        }
       }
     });
     if (result.ok) {
