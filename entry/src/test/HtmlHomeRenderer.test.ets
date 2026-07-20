@@ -2199,6 +2199,11 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('hotel-room-card')).assertLarger(-1);
       expect(html.indexOf('hotel-room-toggle')).assertLarger(-1);
       expect(html.indexOf('hotel-room-details')).assertLarger(-1);
+      expect(html.indexOf('var allBlocks = list(data.blocks);')).assertLarger(-1);
+      expect(html.indexOf("metricValue(block, ['toolName']) === 'hotel.detail'")).assertLarger(-1);
+      expect(html.indexOf('var isDetail = detailBlocks.length > 0;')).assertLarger(-1);
+      expect(html.indexOf('var blocks = isDetail ? detailBlocks : allBlocks;')).assertLarger(-1);
+      expect(html.indexOf("metricValue(blocks[0], ['toolName'])")).assertEqual(-1);
       expect(html.indexOf('detailAction.label')).assertLarger(-1);
       expect(html.indexOf("button.setAttribute('aria-label', text(detailAction.label)")).assertLarger(-1);
       expect(html.indexOf('价格与取消规则')).assertLarger(-1);

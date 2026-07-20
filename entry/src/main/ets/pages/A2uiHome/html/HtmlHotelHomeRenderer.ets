@@ -699,9 +699,12 @@ const HOTEL_HOME_JS: string = `
     setExpanded(card, details, toggle, false);
   }
 
-  var blocks = list(data.blocks);
-  var firstTool = blocks.length > 0 ? metricValue(blocks[0], ['toolName']) : '';
-  var isDetail = firstTool === 'hotel.detail';
+  var allBlocks = list(data.blocks);
+  var detailBlocks = allBlocks.filter(function (block) {
+    return metricValue(block, ['toolName']) === 'hotel.detail';
+  });
+  var isDetail = detailBlocks.length > 0;
+  var blocks = isDetail ? detailBlocks : allBlocks;
   var shell = add(app, 'main', 'hotel-shell');
   var hero = add(shell, 'header', isDetail ? 'hotel-hero is-detail' : 'hotel-hero');
   add(hero, 'div', 'hotel-hero-media');
