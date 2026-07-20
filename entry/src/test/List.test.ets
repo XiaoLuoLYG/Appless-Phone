@@ -72,6 +72,8 @@ import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 import agentMessageTest from './AgentMessage.test';
 import linkedMessageBusTest from './LinkedMessageBus.test';
 import leaderAgentTest from './LeaderAgent.test';
+import dataAgentTest from './DataAgent.test';
+import uiAgentTest from './UiAgent.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -140,6 +142,8 @@ export default function testsuite() {
   agentMessageTest();
   linkedMessageBusTest();
   leaderAgentTest();
+  dataAgentTest();
+  uiAgentTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
