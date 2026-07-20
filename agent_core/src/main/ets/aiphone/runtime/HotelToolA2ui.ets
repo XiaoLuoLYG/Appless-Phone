@@ -1,4 +1,12 @@
-import { A2uiAction, A2uiLabelValueData } from './A2uiTypes';
+import {
+  A2UI_COMPONENT_SURFACE_ROOT,
+  A2UI_COMPONENT_TEXT,
+  A2UI_VERSION,
+  A2uiAction,
+  A2uiComponent,
+  A2uiEnvelope,
+  A2uiLabelValueData
+} from './A2uiTypes';
 import { genericToolResultsA2ui } from './DynamicToolA2ui';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 import { hotelActionsFor } from './HotelActions';
@@ -14,6 +22,44 @@ const HOTEL_SOURCE: string = 'RollingGo';
 const HOTEL_LIMITATION: string = 'Appless 暂不支持创建或跟踪酒店订单';
 const HOTEL_PRICE_LIMITATION: string = '税费拆分与报价有效期：供应商未返回';
 const HOTEL_SEARCH_PRICE_SCOPE: string = '搜索阶段仅传成人数；完整客人与房间数在实时房型中查询';
+
+export function hotelPendingA2ui(surfaceId: string, prompt: string): string {
+  const root: A2uiComponent = {
+    id: 'root',
+    component: A2UI_COMPONENT_SURFACE_ROOT,
+    child: 'pending',
+    title: '酒店搜索',
+    status: 'calling_tool',
+    actions: []
+  };
+  const pending: A2uiComponent = {
+    id: 'pending',
+    component: A2UI_COMPONENT_TEXT,
+    title: '正在查询 RollingGo',
+    text: prompt.length > 0 ? prompt : '正在等待 RollingGo 返回真实酒店与报价。',
+    status: 'calling_tool',
+    actions: []
+  };
+  const create: A2uiEnvelope = {
+    version: A2UI_VERSION,
+    createSurface: {
+      surfaceId: surfaceId,
+      root: 'root',
+      title: '酒店搜索',
+      intent: 'hotel',
+      status: 'calling_tool',
+      sendDataModel: true
+    }
+  };
+  const update: A2uiEnvelope = {
+    version: A2UI_VERSION,
+    updateComponents: {
+      surfaceId: surfaceId,
+      components: [root, pending]
+    }
+  };
+  return JSON.stringify(create) + '\n' + JSON.stringify(update);
+}
 
 function row(label: string, value: string): A2uiLabelValueData {
   return {

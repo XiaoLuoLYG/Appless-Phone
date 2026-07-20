@@ -1,4 +1,11 @@
-import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
+import {
+  LlmProvider,
+  LocalModelSettings,
+  OpenAiCompatibleModel,
+  PaymentAccount,
+  StripeReceivingAccountCardData,
+  defaultLocalModelSettings
+} from '@loop/agent-core';
 import router from '@ohos.router';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -93,6 +100,11 @@ import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
+import {
+  HotelAgentRuntime,
+  HotelAgentRuntimeOptions
+} from './agent/HotelAgentRuntime';
+import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
@@ -142,6 +154,27 @@ const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
+
+export function shouldRouteToHotelAgent(prompt: string): boolean {
+  const value = prompt.trim().toLowerCase();
+  if (value.indexOf('酒店') >= 0 || value.indexOf('住宿') >= 0 ||
+    value.indexOf('旅馆') >= 0 || value.indexOf('宾馆') >= 0) {
+    return true;
+  }
+  return /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
+}
+
+class PageHotelUriOpener implements SystemUriOpener {
+  private readonly callback: (uri: string) => Promise<boolean>;
+
+  constructor(callback: (uri: string) => Promise<boolean>) {
+    this.callback = callback;
+  }
+
+  open(uri: string): Promise<boolean> {
+    return this.callback(uri);
+  }
+}
 
 type RideActionArgValue = Object | string | number | boolean | null | undefined;
 
@@ -478,6 +511,7 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
+  private hotelAgentRuntime: HotelAgentRuntime | null = null;
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -1069,6 +1103,42 @@ struct Index {
     };
   }
 
+  private currentLocalDate(): string {
+    const now = new Date();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    return now.getFullYear().toString() + '-' + month + '-' + day;
+  }
+
+  private hotelRuntime(): HotelAgentRuntime {
+    if (this.hotelAgentRuntime !== null) {
+      return this.hotelAgentRuntime;
+    }
+    const settings = this.getSettings();
+    const provider = new LlmProvider(
+      settings.provider,
+      settings.apiKey,
+      settings.baseUrl,
+      settings.model,
+      settings.customParametersJson
+    );
+    const model = new OpenAiCompatibleModel(provider);
+    const opener = new PageHotelUriOpener((uri: string): Promise<boolean> => {
+      return this.openExternalUrl(uri);
+    });
+    const options: HotelAgentRuntimeOptions = {
+      model: model,
+      currentLocalDate: (): string => this.currentLocalDate(),
+      opener: opener,
+      onSurface: (surface: A2uiSurfaceState): void => {
+        this.isAwaitingFirstSurface = false;
+        this.applySurface(surface);
+      }
+    };
+    this.hotelAgentRuntime = new HotelAgentRuntime(options);
+    return this.hotelAgentRuntime;
+  }
+
   private currentPanelState(): ConnectionPanelState {
     return {
       connectionStatus: this.connectionStatus,
@@ -1637,6 +1707,10 @@ struct Index {
   }
 
   private resetCurrentSession(): void {
+    if (this.hotelAgentRuntime !== null) {
+      this.hotelAgentRuntime.stop();
+      this.hotelAgentRuntime = null;
+    }
     this.showHistory = false;
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
@@ -1686,9 +1760,9 @@ struct Index {
     return model.dynamicToolConnect;
   }
 
-  private async openExternalUrl(url: string): Promise<void> {
+  private async openExternalUrl(url: string): Promise<boolean> {
     if (url.length === 0) {
-      return;
+      return false;
     }
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -1697,6 +1771,7 @@ struct Index {
         uri: url
       });
       aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true url=' + url);
+      return true;
     } catch (error) {
       const businessError = error as BusinessError;
       const message = '外部页面打开失败：' + businessError.message;
@@ -1709,6 +1784,7 @@ struct Index {
         error: message
       }));
       aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false url=' + url + ' message=' + businessError.message);
+      return false;
     }
   }
 
@@ -1754,6 +1830,23 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
+      if (actionId.length === 0 && shouldRouteToHotelAgent(trimmed)) {
+        const ok = await this.hotelRuntime().submit(trimmed);
+        if (!ok) {
+          throw new Error('酒店四 Agent 运行时未能完成当前查询。');
+        }
+        this.isAwaitingFirstSurface = false;
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: true,
+          status: 'ready',
+          message: this.currentSurface.title + ' 已返回真实酒店结果。',
+          requestDebug: 'hotel-agent-runtime',
+          assistantDebug: this.currentSurface.title,
+          error: ''
+        }));
+        this.appendMessage('assistant', this.currentSurface.title + ' 已返回 A2UI 结果。');
+        return;
+      }
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
         modelPrompt,
@@ -3545,6 +3638,27 @@ struct Index {
     }
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
+    }
+    if (this.hotelAgentRuntime !== null &&
+      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.call')) {
+      if (action.id === 'hotel.detail') {
+        this.rememberHotelReturnSurface();
+      }
+      this.isBusy = true;
+      try {
+        const ok = await this.hotelAgentRuntime.runAction(action);
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: ok,
+          status: ok ? 'ready' : 'error',
+          message: ok ? '酒店操作已处理。' : '酒店操作已被当前页面权限拒绝。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: ok ? '' : '酒店 action 与当前 surface/document 不匹配'
+        }));
+      } finally {
+        this.isBusy = false;
+      }
+      return;
     }
     const directPaymentToolId = directPaymentToolIdForActionId(action.id);
     if (directPaymentToolId.length > 0) {
