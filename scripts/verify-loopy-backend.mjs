@@ -52,6 +52,74 @@ function assertContains(text, needle, name) {
   assert(text.includes(needle), name, `missing ${needle}`);
 }
 
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
+}
+
+function readAgentRuntimeSources() {
+  const sources = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.ets')) {
+        sources.push(readFileSync(entryPath, 'utf8'));
+      }
+    }
+  }
+  visit(resolve(repoRoot, 'agent_core/src/main/ets/agent'));
+  return stripComments(sources.join('\n'));
+}
+
+function parseIndexExports(index) {
+  const exports = new Map();
+  for (const match of index.matchAll(/export\s+(\*|\{[\s\S]*?\})\s+from\s+'([^']+)';/g)) {
+    const names = match[1] === '*' ? ['*'] : match[1]
+      .slice(1, -1)
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+    exports.set(match[2], names);
+  }
+  return exports;
+}
+
+function assertIndexExport(indexExports, modulePath, expectedNames, name) {
+  const actualNames = indexExports.get(modulePath) ?? [];
+  const missing = expectedNames.filter((expected) => actualNames.indexOf(expected) < 0);
+  const extra = actualNames.filter((actual) => expectedNames.indexOf(actual) < 0);
+  assert(
+    missing.length === 0 && extra.length === 0,
+    name,
+    `${modulePath}: missing=[${missing.join(', ')}] extra=[${extra.join(', ')}]`
+  );
+}
+
+function declarationBody(source, declaration) {
+  const declarationStart = source.indexOf(declaration);
+  const bodyStart = declarationStart < 0 ? -1 : source.indexOf('{', declarationStart);
+  if (bodyStart < 0) {
+    return '';
+  }
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index++) {
+    if (source.charAt(index) === '{') {
+      depth++;
+    } else if (source.charAt(index) === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(bodyStart + 1, index);
+      }
+    }
+  }
+  return '';
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function runHarBuild() {
   assert(existsSync(hvigor), 'DevEco hvigor is installed', hvigor);
   assert(existsSync(sdkHome), 'DevEco SDK home exists', sdkHome);
@@ -118,6 +186,8 @@ function verifySourceContracts() {
   const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const index = read('agent_core/Index.ets');
+  const indexExports = parseIndexExports(index);
+  const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
   const composioConfig = read('agent_core/src/main/ets/composio/ComposioConfig.ets');
@@ -183,6 +253,8 @@ function verifySourceContracts() {
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const uniqueIds = new Set(ids);
   const runtimeUniqueIds = new Set(runtimeIds);
+  const publicOnlyToolIds = ids.filter((id) => !runtimeUniqueIds.has(id));
+  const runtimeOnlyToolIds = runtimeIds.filter((id) => !uniqueIds.has(id));
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
   assert(ids.length >= 22, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
@@ -212,8 +284,15 @@ function verifySourceContracts() {
     assert(runtimeUniqueIds.has(id), `runtime registered ${id}`);
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
+  assertContains(runtimeGateway, "if (toolId === 'dynamic.search')", 'runtime registry explicitly handles dynamic.search');
   assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
-  assert(ids.every((id) => runtimeUniqueIds.has(id)), 'public and runtime tool registries align');
+  assert(
+    ids.length === runtimeIds.length &&
+      publicOnlyToolIds.length === 0 &&
+      runtimeOnlyToolIds.length === 0,
+    'public and runtime tool registries align exactly',
+    `public=${ids.length}; runtime=${runtimeIds.length}; public-only=[${publicOnlyToolIds.join(', ')}]; runtime-only=[${runtimeOnlyToolIds.join(', ')}]`
+  );
 
   const runtimeFiles = readdirSync(runtimeDir).filter((name) => name.endsWith('.ets'));
   assert(runtimeFiles.length >= 30, 'AIPhone runtime files are vendored into agent_core', `found ${runtimeFiles.length}`);
@@ -265,45 +344,101 @@ function verifySourceContracts() {
   assertContains(composioDynamic, 'isComposioDynamicPrompt', 'Composio dynamic backend gates unsupported app queries');
   assertContains(composioDynamic, 'unsafe_action_blocked', 'Composio dynamic backend blocks unsafe execute');
   assertContains(conversationContext, 'static fromMessages', 'conversation context can restore messages');
-  for (const role of ['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent']) {
-    assertContains(
-      role === 'LeaderAgent' ? leaderAgent :
-        role === 'DataAgent' ? dataAgent :
-          role === 'UiAgent' ? uiAgent : actionAgent,
-      `export class ${role}`,
-      `four-role runtime includes ${role}`
-    );
-    assertContains(index, role, `public API exports ${role}`);
+  const requiredIndexExports = [
+    ['./src/main/ets/agent/message/AgentMessage', ['*'], 'message contract exports'],
+    ['./src/main/ets/agent/message/DataResult', ['*'], 'data result exports'],
+    ['./src/main/ets/agent/message/LinkedMessageBus', ['AgentMessageReader', 'LinkedMessageBus'], 'message bus exports'],
+    ['./src/main/ets/agent/MessageDrivenAgent', ['MessageDrivenAgent'], 'message-driven base exports'],
+    ['./src/main/ets/agent/leader/LeaderAgent', ['LeaderAgent'], 'Leader Agent exports'],
+    ['./src/main/ets/agent/leader/LeaderTypes', ['*'], 'Leader Agent types export'],
+    ['./src/main/ets/agent/data/DataAgent', ['DataAgent'], 'Data Agent exports'],
+    ['./src/main/ets/agent/data/DataAgentTypes', ['*'], 'Data Agent types export'],
+    ['./src/main/ets/agent/ui/UiAgent', ['UiAgent'], 'UI Agent exports'],
+    ['./src/main/ets/agent/ui/UiAgentTypes', ['*'], 'UI Agent types export'],
+    ['./src/main/ets/agent/action/ActionCatalog', ['ActionCatalog'], 'Action catalog exports'],
+    ['./src/main/ets/agent/action/ActionCatalogTypes', ['*'], 'Action catalog types export'],
+    ['./src/main/ets/agent/action/ActionPlanTypes', ['*'], 'Action plan types export'],
+    ['./src/main/ets/agent/action/JsonPointer', [
+      'JsonPointerResult',
+      'JsonPointerSetResult',
+      'resolveJsonPointer',
+      'setJsonPointer'
+    ], 'JSON Pointer exports'],
+    ['./src/main/ets/agent/action/ActionPlanRunner', ['ActionPlanRunner'], 'Action plan runner exports'],
+    ['./src/main/ets/agent/action/ActionAgent', ['ActionAgent'], 'Action Agent exports'],
+    ['./src/main/ets/agent/action/ActionAgentTypes', ['*'], 'Action Agent types export']
+  ];
+  for (const [modulePath, names, name] of requiredIndexExports) {
+    assertIndexExport(indexExports, modulePath, names, name);
   }
-  for (const messageType of [
-    'INPUT.USER',
-    'TASK.CREATE.UI',
-    'TASK.CREATE.DATA',
-    'TASK.RESULT.UI',
-    'TASK.RESULT.DATA',
-    'TASK.ERROR',
-    'ACTION.PLAN.CREATE',
-    'ACTION.PLAN.READY',
-    'ACTION.RUN',
-    'ACTION.PROGRESS',
-    'ACTION.RESULT',
-    'TURN.CANCEL'
+  assert(
+    !/\b(?:MessageNode|LeaderTurnState|UiTurnContext|PendingDataEntry|PendingPlanCorrelation|ContextSurfaceWriteLease|StoredActionRun|ActiveActionRun)\b/.test(index),
+    'public API omits linked nodes and mutable role contexts'
+  );
+  for (const [role, source] of [
+    ['LeaderAgent', leaderAgent],
+    ['DataAgent', dataAgent],
+    ['UiAgent', uiAgent],
+    ['ActionAgent', actionAgent]
   ]) {
-    assertContains(agentMessage, messageType, `agent message contract includes ${messageType}`);
+    assert(new RegExp(`export\\s+class\\s+${role}\\b`).test(source), `four-role runtime includes ${role}`);
   }
-  assertContains(agentMessage, 'conversationId: string;', 'agent messages carry conversation correlation');
-  assertContains(agentMessage, 'turnId: string;', 'agent messages carry turn correlation');
-  assertContains(agentMessage, 'taskId: string;', 'agent messages carry task correlation');
-  assertContains(messageBus, 'export class LinkedMessageBus', 'linked message bus is public');
-  assertContains(messageBus, 'export class AgentMessageReader', 'message bus reader is public');
-  assertContains(actionCatalog, 'export class ActionCatalog', 'action catalog is public');
-  assertContains(actionPlanRunner, 'const MAX_ACTION_PLAN_STEPS: number = 5;', 'action plans have a named five-step cap');
-  assertContains(jsonPointer, 'export function resolveJsonPointer', 'JSON Pointer resolver is public');
-  assertContains(actionAgent, 'RegisteredActionExecutor', 'Action Agent depends on registered execution');
-  assert(!agentMessage.includes('BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
-  assert(!/export\s+class\s+Coordinator\b/.test(
-    `${leaderAgent}\n${dataAgent}\n${uiAgent}\n${actionAgent}`
-  ), 'four-role runtime has no Coordinator class');
+  assert(/export\s+class\s+AgentMessageReader\b/.test(messageBus), 'message bus reader is public');
+  assert(/export\s+class\s+LinkedMessageBus\b/.test(messageBus), 'linked message bus is public');
+  assert(/export\s+class\s+ActionCatalog\b/.test(actionCatalog), 'action catalog is public');
+
+  const agentMessageEnum = declarationBody(agentMessage, 'export enum AgentMessageType');
+  const agentEnvelope = declarationBody(agentMessage, 'export interface AgentMessage');
+  for (const [member, value] of [
+    ['INPUT_USER', 'INPUT.USER'],
+    ['TASK_CREATE_UI', 'TASK.CREATE.UI'],
+    ['TASK_CREATE_DATA', 'TASK.CREATE.DATA'],
+    ['TASK_RESULT_UI', 'TASK.RESULT.UI'],
+    ['TASK_RESULT_DATA', 'TASK.RESULT.DATA'],
+    ['TASK_ERROR', 'TASK.ERROR'],
+    ['ACTION_PLAN_CREATE', 'ACTION.PLAN.CREATE'],
+    ['ACTION_PLAN_READY', 'ACTION.PLAN.READY'],
+    ['ACTION_RUN', 'ACTION.RUN'],
+    ['ACTION_PROGRESS', 'ACTION.PROGRESS'],
+    ['ACTION_RESULT', 'ACTION.RESULT'],
+    ['TURN_CANCEL', 'TURN.CANCEL']
+  ]) {
+    assert(
+      new RegExp(`\\b${member}\\s*=\\s*'${escapeRegex(value)}'\\s*,?`).test(agentMessageEnum),
+      `agent message enum includes ${value}`
+    );
+  }
+  for (const [field, type] of [
+    ['type', 'AgentMessageType'],
+    ['conversationId', 'string'],
+    ['turnId', 'string'],
+    ['taskId', 'string'],
+    ['payload', 'Object']
+  ]) {
+    assert(
+      new RegExp(`\\b${field}\\s*:\\s*${type}\\s*;`).test(agentEnvelope),
+      `agent message envelope has ${field}`
+    );
+  }
+  assert(/export\s+function\s+resolveJsonPointer\s*\(/.test(jsonPointer), 'JSON Pointer resolver is declared');
+  assert(/export\s+function\s+setJsonPointer\s*\(/.test(jsonPointer), 'JSON Pointer setter is declared');
+  assert(
+    /const\s+MAX_ACTION_PLAN_STEPS\s*:\s*number\s*=\s*5\s*;/.test(actionPlanRunner) &&
+      /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(actionPlanRunner),
+    'action plans use the named five-step cap'
+  );
+  const actionAgentSource = stripComments(actionAgent);
+  const actionAgentConstructor = actionAgentSource.match(
+    /constructor\s*\(\s*bus\s*:\s*LinkedMessageBus\s*,\s*catalog\s*:\s*ActionCatalog\s*,\s*executor\s*:\s*RegisteredActionExecutor\s*\)\s*\{([\s\S]*?)\n\s*\}/
+  );
+  assert(
+    /private\s+readonly\s+registeredExecutor\s*:\s*RegisteredActionExecutor\s*;/.test(actionAgentSource) &&
+      actionAgentConstructor !== null &&
+      /this\.registeredExecutor\s*=\s*executor\s*;/.test(actionAgentConstructor[1]),
+    'Action Agent injects and stores RegisteredActionExecutor'
+  );
+  assert(!agentRuntimeSources.includes('BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
+  assert(!/\bclass\s+Coordinator\b/.test(agentRuntimeSources), 'agent runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
   assertContains(conversationStore, 'JSON.parse(raw)', 'conversation store parses persisted JSON defensively');
   assertContains(conversationStore, 'role !== ConversationRole.USER && role !== ConversationRole.ASSISTANT', 'conversation store ignores unknown roles');
