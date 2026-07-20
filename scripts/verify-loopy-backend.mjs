@@ -72,7 +72,10 @@ function readAgentRuntimeSources() {
       }
     }
   }
-  visit(resolve(repoRoot, 'agent_core/src/main/ets/agent'));
+  sources.push(read('agent_core/src/main/ets/agent/StructuredMessageDrivenAgent.ets'));
+  for (const name of ['action', 'data', 'leader', 'message', 'ui']) {
+    visit(resolve(repoRoot, 'agent_core/src/main/ets/agent', name));
+  }
   return stripComments(sources.join('\n'));
 }
 
@@ -806,7 +809,10 @@ function verifySourceContracts() {
     ['./src/main/ets/agent/message/AgentMessage', ['*'], 'message contract exports'],
     ['./src/main/ets/agent/message/DataResult', ['*'], 'data result exports'],
     ['./src/main/ets/agent/message/LinkedMessageBus', ['AgentMessageReader', 'LinkedMessageBus'], 'message bus exports'],
-    ['./src/main/ets/agent/MessageDrivenAgent', ['MessageDrivenAgent'], 'message-driven base exports'],
+    ['./src/main/ets/agent/StructuredMessageDrivenAgent', [
+      'StructuredMessageDrivenAgent',
+      'StructuredMessageDrivenAgent as MessageDrivenAgent'
+    ], 'structured message-driven base exports'],
     ['./src/main/ets/agent/leader/LeaderAgent', ['LeaderAgent'], 'Leader Agent exports'],
     ['./src/main/ets/agent/leader/LeaderTypes', ['*'], 'Leader Agent types export'],
     ['./src/main/ets/agent/data/DataAgent', ['DataAgent'], 'Data Agent exports'],
@@ -844,6 +850,9 @@ function verifySourceContracts() {
   assert(/export\s+class\s+AgentMessageReader\b/.test(messageBus), 'message bus reader is public');
   assert(/export\s+class\s+LinkedMessageBus\b/.test(messageBus), 'linked message bus is public');
   assert(/export\s+class\s+ActionCatalog\b/.test(actionCatalog), 'action catalog is public');
+  assertContains(index, 'ReactLinkedMessageBus', 'public API keeps the Loopy ReAct bus under an explicit alias');
+  assertContains(index, 'ReactLeaderAgent', 'public API keeps the Loopy ReAct leader under an explicit alias');
+  assertContains(index, 'ReActRunOptions', 'public API exposes role-specific ReAct options');
 
   const agentMessageEnum = declarationBody(agentMessage, 'export enum AgentMessageType');
   const agentEnvelope = declarationBody(agentMessage, 'export interface AgentMessage');

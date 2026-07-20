@@ -9,6 +9,10 @@ import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
 
+export interface ReActRunOptions {
+  readonly identityPrompt?: string;
+}
+
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
@@ -60,13 +64,22 @@ export class ReActAgentRunner {
     this.uiHandler = uiHandler ?? null;
   }
 
-  async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
+  async run(
+    task: string,
+    listener: AgentListener,
+    conversation?: ConversationContext,
+    options?: ReActRunOptions
+  ): Promise<void> {
     const scratchpad: string[] = [];
 
     for (let step = 0; step < this.maxSteps; step++) {
       let response: string;
       try {
-        response = await this.model.complete(this.buildPrompt(task, scratchpad, conversation), conversation);
+        response = await this.model.complete(
+          this.buildPrompt(task, scratchpad),
+          conversation,
+          this.buildSystemPrompt(options)
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
         listener(new AgentEvent(AgentEventKind.ERROR, message));
@@ -83,7 +96,11 @@ export class ReActAgentRunner {
 
       const call = this.parseAction(response);
       if (call === null) {
-        listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
+        const responseText = response.length > 0 ? response : '(empty response)';
+        listener(new AgentEvent(
+          AgentEventKind.ERROR,
+          `Model did not return an Action or Final answer.\n\nLLM response:\n${responseText}`
+        ));
         return;
       }
 
@@ -91,10 +108,9 @@ export class ReActAgentRunner {
 
       let observation: string;
       try {
-        if (call.name === UI_TOOL_NAME) {
+        if (call.name === UI_TOOL_NAME && this.tools.has(UI_TOOL_NAME)) {
           if (this.uiHandler === null) {
-            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
-            return;
+            throw new Error('UI rendering is not available for this agent.');
           }
           observation = await this.runUiTool(call.input, listener);
         } else {
@@ -150,7 +166,7 @@ export class ReActAgentRunner {
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
     if (this.uiHandler === null) {
-      return 'UI rendering is not available in this session.';
+      throw new Error('UI rendering is not available for this agent.');
     }
 
     const prompt = description.trim().length > 0 ? description : 'Simple information card';
@@ -167,11 +183,48 @@ export class ReActAgentRunner {
     }
   }
 
-  private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
-    let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
-    prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
-    prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
+  private buildSystemPrompt(options?: ReActRunOptions): string {
+    const configuredIdentity = options?.identityPrompt?.trim() ?? '';
+    let prompt = configuredIdentity.length > 0
+      ? configuredIdentity
+      : 'You are Loop, a HarmonyOS ReAct agent with tools.';
+    prompt += '\n\nSTRICT REACT OUTPUT CONTRACT\n';
+    prompt += 'Every assistant response must use exactly one of the following two forms.\n\n';
+    prompt += 'Form 1 - finish or answer without a tool:\n';
+    prompt += 'Thought: <one brief sentence explaining the next decision>\n';
+    prompt += 'Final: <the answer or execution report>\n\n';
+    prompt += 'Form 2 - call exactly one tool:\n';
+    prompt += 'Thought: <one brief sentence explaining why the tool is needed>\n';
+    prompt += 'Action: <exact_tool_name>[<tool_input>]\n\n';
+    prompt += 'Rules:\n';
+    prompt += '- Start the response with Thought: and then output exactly one Action: or one Final:.\n';
+    prompt += '- Never return ordinary prose without the required labels, even for greetings or very simple questions.\n';
+    prompt += '- Do not output both Action: and Final: in the same response.\n';
+    prompt += '- Do not output more than one Action: in the same response.\n';
+    prompt += '- Do not output Observation:. The runtime supplies tool observations in the next prompt.\n';
+    prompt += '- Action must use a tool name exactly as listed under Tools in the current user prompt.\n';
+    prompt += '- When a tool requires structured parameters, put a valid JSON object inside the brackets.\n';
+    prompt += '- Do not wrap the response in Markdown or code fences and do not add text before Thought:.\n';
+    prompt += '- The angle-bracket text in the forms above is explanatory placeholder text; never copy it literally.\n\n';
+    prompt += 'Direct-answer example:\n';
+    prompt += 'Thought: This greeting does not require a tool.\n';
+    prompt += 'Final: 你好！有什么可以帮你的？\n\n';
+    prompt += 'Tool-call example:\n';
+    prompt += 'Thought: I need the listed time tool to answer accurately.\n';
+    prompt += 'Action: time[]';
+
+    if (this.skillsInSystemPrompt) {
+      const skillsSection = buildSkillsSection(this.skillSnapshot);
+      if (skillsSection.length > 0) {
+        prompt += `\n\n${skillsSection}`;
+      }
+    }
+    return prompt.trim();
+  }
+
+  private buildPrompt(task: string, scratchpad: string[]): string {
+    let prompt = 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
+    prompt += 'When a tool needs parameters, follow its description and pass structured values as valid JSON inside Action brackets; use normal JSON arrays like ["a@example.com"], and do not pass bare keywords when a schema is required.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -186,10 +239,6 @@ export class ReActAgentRunner {
     }
     prompt += 'Calendar write rule: when the requested end state creates, updates, moves, or deletes a Google Calendar event, use the matching calendar.event.* write tool, never calendar.events.search. For an update or move with an incomplete destination time, call calendar.event.update with the existing-event query/timeMin/timeMax selector and omit missing new start or end; the client will keep real matches visible and ask for the missing time without writing. Never ask the user for an Event ID.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
-
-    if (conversation !== undefined && !conversation.isEmpty()) {
-      prompt += conversation.formatPriorConversation();
-    }
 
     if (!this.skillsInSystemPrompt) {
       const skillsSection = buildSkillsSection(this.skillSnapshot);

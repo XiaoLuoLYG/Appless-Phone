@@ -1,4 +1,4 @@
-import { MessageDrivenAgent } from '../MessageDrivenAgent';
+import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
@@ -8,7 +8,7 @@ import { DataResult } from '../message/DataResult';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import { CreateDataTaskPayload, DataTaskExecutor } from './DataAgentTypes';
 
-export class DataAgent extends MessageDrivenAgent {
+export class DataAgent extends StructuredMessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly executor: DataTaskExecutor;
   private readonly canceled: Set<string> = new Set<string>();

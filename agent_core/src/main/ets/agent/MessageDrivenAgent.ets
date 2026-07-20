@@ -1,76 +1,235 @@
-import { AgentMessage } from './message/AgentMessage';
-import { AgentMessageReader, LinkedMessageBus } from './message/LinkedMessageBus';
+import { AgentMessage, BusReader, MessageBus } from './MessageBus';
+import { AgentEvent, AgentEventKind } from './AgentEvent';
+import { ConversationContext } from './ConversationContext';
+import { ReActAgent } from './ReActAgent';
+import { UiRenderHandler } from './ReActAgentRunner';
+import { ToolRegistry } from './ToolRegistry';
+import { LocalModel } from '../model/LocalModel';
 
-export abstract class MessageDrivenAgent {
-  private readonly messageBus: LinkedMessageBus;
-  private messageReader: AgentMessageReader | null;
-  private messagePumpRunning: boolean = false;
-  private messagePumpGeneration: number = 0;
-  private messagePumpTail: Promise<void> = Promise.resolve();
+export enum MessageProcessingMode {
+  ONE_BY_ONE = 'ONE_BY_ONE',
+  BATCH_PENDING = 'BATCH_PENDING'
+}
 
-  constructor(bus: LinkedMessageBus) {
-    this.messageBus = bus;
-    this.messageReader = bus.openReader();
+export enum AgentRunOutcomeKind {
+  FINAL = 'final',
+  ERROR = 'error'
+}
+
+export interface AgentRunOutcome {
+  readonly kind: AgentRunOutcomeKind;
+  readonly text: string;
+}
+
+export abstract class MessageDrivenAgent extends ReActAgent {
+  protected readonly bus: MessageBus;
+
+  private readonly reader: BusReader;
+  private readonly processingMode: MessageProcessingMode;
+  private listening: boolean = false;
+  private stopped: boolean = false;
+  private listenPromise: Promise<void> | null = null;
+  private pendingMessages: AgentMessage[] = [];
+  private currentRun: Promise<void> | null = null;
+
+  constructor(
+    name: string,
+    identityPrompt: string,
+    model: LocalModel,
+    maxSteps: number,
+    bus: MessageBus,
+    processingMode: MessageProcessingMode,
+    tools: ToolRegistry,
+    uiHandler?: UiRenderHandler,
+    initialContext?: ConversationContext
+  ) {
+    super(name, identityPrompt, model, maxSteps, tools, uiHandler, initialContext);
+    this.bus = bus;
+    this.processingMode = processingMode;
+    this.reader = bus.getReader();
   }
 
-  start(): void {
-    if (this.messagePumpRunning) {
+  startListening(): void {
+    if (this.listening) {
       return;
     }
-    this.messagePumpRunning = true;
-    this.messagePumpGeneration++;
-    const generation = this.messagePumpGeneration;
-    const reader = this.messageReader === null ?
-      this.messageBus.openReader() : this.messageReader;
-    this.messageReader = reader;
-    this.messagePumpTail = this.launchAfter(
-      this.messagePumpTail,
-      reader,
-      generation
-    );
+    if (this.stopped) {
+      throw new Error('A stopped MessageDrivenAgent cannot restart listening.');
+    }
+
+    this.listening = true;
+    const listening = this.listenLoop();
+    this.listenPromise = listening;
+    listening.catch((error: Error | Object | string | number | boolean | null | undefined): void => {
+      this.listening = false;
+      this.stopped = true;
+      this.listenPromise = null;
+      this.reader.close();
+      const normalized = error instanceof Error ? error : new Error(`${error}`);
+      this.onListeningError(normalized);
+    });
   }
 
-  stop(): void {
-    this.messagePumpRunning = false;
-    this.messagePumpGeneration++;
-    const reader = this.messageReader;
-    this.messageReader = null;
-    if (reader !== null) {
-      reader.close();
+  async stopListening(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+
+    this.stopped = true;
+    this.listening = false;
+    this.reader.close();
+    const listening = this.listenPromise;
+    this.listenPromise = null;
+    if (listening !== null) {
+      try {
+        await listening;
+      } catch (_error) {
+      }
     }
   }
 
-  protected abstract accepts(message: AgentMessage): boolean;
+  async close(): Promise<void> {
+    await this.stopListening();
+    const running = this.currentRun;
+    if (running !== null) {
+      try {
+        await running;
+      } catch (_error) {
+      }
+    }
+    await super.close();
+  }
 
-  protected abstract process(message: AgentMessage): Promise<void>;
+  protected abstract handle(message: AgentMessage): void;
 
-  private async launchAfter(
-    previous: Promise<void>,
-    reader: AgentMessageReader,
-    generation: number
-  ): Promise<void> {
+  protected enqueueMessage(message: AgentMessage): void {
+    if (this.stopped) {
+      return;
+    }
+    this.pendingMessages.push({
+      type: message.type,
+      content: message.content
+    });
+    this.tryStartNextRun();
+  }
+
+  protected isRunning(): boolean {
+    return this.currentRun !== null;
+  }
+
+  protected onAgentEvent(_event: AgentEvent): void {
+  }
+
+  protected onRunError(_error: Error): void {
+  }
+
+  protected onMessageError(_message: AgentMessage, _error: Error): void {
+  }
+
+  protected onListeningError(_error: Error): void {
+  }
+
+  protected onRunFinished(_messages: AgentMessage[], _outcome: AgentRunOutcome): void {
+  }
+
+  private tryStartNextRun(): void {
+    if (this.stopped || this.currentRun !== null || this.pendingMessages.length === 0) {
+      return;
+    }
+
+    const messages = this.takePendingMessages();
+    this.currentRun = this.executeRun(messages);
+  }
+
+  private takePendingMessages(): AgentMessage[] {
+    if (this.processingMode === MessageProcessingMode.ONE_BY_ONE) {
+      const message = this.pendingMessages.shift();
+      return message === undefined ? [] : [message];
+    }
+
+    const messages = this.pendingMessages.slice();
+    this.pendingMessages = [];
+    return messages;
+  }
+
+  private buildTask(messages: AgentMessage[]): string {
+    let task = 'Process the following messages in arrival order:\n\n';
+    for (const message of messages) {
+      task += `[${message.type}]\n`;
+      task += message.content;
+      task += '\n\n';
+    }
+    return task.trim();
+  }
+
+  private async executeRun(messages: AgentMessage[]): Promise<void> {
+    let outcome: AgentRunOutcome | null = null;
     try {
-      await previous;
-    } catch (_error) {
+      await this.executeTask(this.buildTask(messages), (event: AgentEvent): void => {
+        if (outcome === null && event.kind === AgentEventKind.FINAL) {
+          outcome = {
+            kind: AgentRunOutcomeKind.FINAL,
+            text: event.text
+          };
+        } else if (outcome === null && event.kind === AgentEventKind.ERROR) {
+          outcome = {
+            kind: AgentRunOutcomeKind.ERROR,
+            text: event.text
+          };
+        }
+        try {
+          this.onAgentEvent(event);
+        } catch (error) {
+          const normalized = error instanceof Error ? error : new Error(`${error}`);
+          try {
+            this.onRunError(normalized);
+          } catch (_hookError) {
+          }
+        }
+      });
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(`${error}`);
+      outcome = {
+        kind: AgentRunOutcomeKind.ERROR,
+        text: normalized.message
+      };
+      try {
+        this.onRunError(normalized);
+      } catch (_hookError) {
+      }
+    } finally {
+      if (outcome === null) {
+        outcome = {
+          kind: AgentRunOutcomeKind.ERROR,
+          text: 'Agent loop ended without a Final or Error result.'
+        };
+      }
+      try {
+        this.onRunFinished(messages, outcome);
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(`${error}`);
+        try {
+          this.onRunError(normalized);
+        } catch (_hookError) {
+        }
+      }
+      this.currentRun = null;
+      this.tryStartNextRun();
     }
-    await this.pump(reader, generation);
   }
 
-  private async pump(reader: AgentMessageReader, generation: number): Promise<void> {
-    while (this.messagePumpRunning &&
-      this.messagePumpGeneration === generation &&
-      this.messageReader === reader) {
-      const message: AgentMessage | null = await reader.receive();
+  private async listenLoop(): Promise<void> {
+    while (this.listening) {
+      const message = await this.reader.receive();
       if (message === null) {
         return;
       }
-      if (!this.messagePumpRunning ||
-        this.messagePumpGeneration !== generation ||
-        this.messageReader !== reader) {
-        return;
-      }
-      if (this.accepts(message)) {
-        await this.process(message);
+
+      try {
+        this.handle(message);
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(`${error}`);
+        this.onMessageError(message, normalized);
       }
     }
   }

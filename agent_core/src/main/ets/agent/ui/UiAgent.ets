@@ -5,7 +5,7 @@ import {
   WorkflowRunArgs
 } from '../action/ActionAgentTypes';
 import { ActionPlan, JsonValue } from '../action/ActionPlanTypes';
-import { MessageDrivenAgent } from '../MessageDrivenAgent';
+import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
@@ -105,7 +105,7 @@ class ContextSurfaceWriteLease implements UiSurfaceWriteLease {
   }
 }
 
-export class UiAgent extends MessageDrivenAgent {
+export class UiAgent extends StructuredMessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly renderer: UiTaskRenderer;
   private readonly writer: UiSurfaceWriter;
