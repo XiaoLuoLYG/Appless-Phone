@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
+  hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   hotelSearchActionEvidence,
@@ -63,6 +64,16 @@ test('does not treat empty welcome evidence as completed hotel action evidence',
   );
   assert.equal(welcome.surfaceId, '');
   assert.deepEqual(welcome.actions, []);
+  assert.equal(hasPopulatedHotelActionEvidence(welcome), false);
+
+  const pending = hotelActionEvidenceFromLogs(
+    '[AIPhone][HotelHomeActionEvidence] evidence=' +
+      JSON.stringify(JSON.stringify({
+        surfaceId: 'hotel-pending-1',
+        actions: []
+      }))
+  );
+  assert.equal(hasPopulatedHotelActionEvidence(pending), false);
 
   const complete = hotelActionEvidenceFromLogs(
     '[AIPhone][HotelHomeActionEvidence] evidence=' +
@@ -73,6 +84,7 @@ test('does not treat empty welcome evidence as completed hotel action evidence',
   );
   assert.equal(complete.surfaceId, 'hotel-search-1');
   assert.equal(complete.actions.length, 1);
+  assert.equal(hasPopulatedHotelActionEvidence(complete), true);
 
   const followedByEmpty = hotelActionEvidenceFromLogs(
     '[AIPhone][HotelHomeActionEvidence] evidence=' +

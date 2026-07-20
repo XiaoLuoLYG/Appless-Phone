@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
+  hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   isExpectedHotelSystemBundle,
@@ -1181,17 +1182,22 @@ async function captureWhile(appPid, runAction) {
       const hasHotelActionEvidence =
         typeof hotelActionEvidence.surfaceId === 'string' &&
         hotelActionEvidence.surfaceId.length > 0;
-      const done = hasHotelActionEvidence ||
+      const hotelActionEvidencePopulated =
+        hasPopulatedHotelActionEvidence(hotelActionEvidence);
+      const hasTerminalOutcome =
         /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
+      const done = hotelActionEvidencePopulated || hasTerminalOutcome;
       const hotelActionRequested =
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      if (done && (!hotelActionRequested || hasHotelActionEvidence) &&
+      const hotelUiReady = hotelActionEvidencePopulated ||
+        (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
+      if (done && (!hotelActionRequested || hotelUiReady) &&
         (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }

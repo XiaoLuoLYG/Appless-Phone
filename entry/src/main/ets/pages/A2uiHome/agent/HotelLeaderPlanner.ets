@@ -37,7 +37,7 @@ interface HotelSearchModelArgs {
   childAgeDetails: number[];
   roomCount: number;
   currency: string;
-  size: number;
+  size: number | string;
 }
 
 export interface HotelPlannerIdFactory {
@@ -79,9 +79,8 @@ export class HotelLeaderPlanner implements LeaderPlanner {
     const raw = parsedObject as HotelSearchModelArgs;
     if (raw.originQuery !== query ||
       raw.countryCode.trim().length === 0 ||
-      raw.currency.trim().length === 0 ||
-      !Number.isInteger(raw.size) || raw.size <= 0) {
-      throw new Error('Hotel planner output changed the query or defaulted required fields.');
+      raw.currency.trim().length === 0) {
+      throw new Error('Hotel planner output changed the query or omitted locale fields.');
     }
     const parsed: HotelSearchParseResult = parseHotelSearchRequest(parsedObject);
     if (!parsed.ok || parsed.value === null) {
@@ -116,6 +115,7 @@ export class HotelLeaderPlanner implements LeaderPlanner {
       'Current local date: ' + this.currentLocalDate() + '. Resolve relative dates from this date.\n' +
       'Return exactly one JSON object containing only originQuery, place, placeType, countryCode, ' +
       'checkInDate, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and size.\n' +
+      'Use size 0 when the user does not specify a positive result limit; bounded local code applies the default.\n' +
       'Do not return a tool ID, action ID, markdown explanation, or multiple objects.\n' +
       'Do not invent missing destination, date, guest, child-age, or room values.\n' +
       'Chinese 预订酒店 and English book hotel wording mean search real RollingGo inventory and rates only. ' +

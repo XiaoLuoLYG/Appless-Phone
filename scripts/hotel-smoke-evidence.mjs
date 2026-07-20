@@ -36,6 +36,13 @@ export function hotelActionEvidenceFromLogs(logText) {
   return latest || { surfaceId: '', actions: [] };
 }
 
+export function hasPopulatedHotelActionEvidence(evidence) {
+  return typeof evidence?.surfaceId === 'string' &&
+    evidence.surfaceId.length > 0 &&
+    Array.isArray(evidence.actions) &&
+    evidence.actions.length > 0;
+}
+
 export function foregroundBundleFromAbilityDump(output) {
   const missions = String(output || '').split(/(?=\s*Mission ID #)/);
   const foreground = missions.find((mission) =>
