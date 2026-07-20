@@ -17,6 +17,7 @@ import {
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureHotelMcpClientForTests,
+  configureHotelTimestampProviderForTests,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
@@ -97,6 +98,22 @@ class ScriptedHotelMcpClient extends GenericMcpClient {
     this.callCount += 1;
     this.lastOperation = registration.mcpToolName;
     return this.response;
+  }
+}
+
+let hotelClockValue: string = '2026-07-20T02:00:00.000Z';
+
+class ClockedHotelMcpClient extends ScriptedHotelMcpClient {
+  async callToolPayload(registration: DynamicToolRegistration, credentialValue: string, args: Object): Promise<McpToolCallResult> {
+    const response = await super.callToolPayload(registration, credentialValue, args);
+    hotelClockValue = '2026-07-20T02:00:01.000Z';
+    return response;
+  }
+}
+
+class ThrowingHotelMcpClient extends GenericMcpClient {
+  async callToolPayload(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<McpToolCallResult> {
+    throw new Error('Failed to resolve hotel.example for hotel-test-secret');
   }
 }
 
@@ -392,8 +409,8 @@ export default function toolGatewayClientTest() {
       expect(result.sources.length).assertEqual(0);
     });
 
-    it('returns a structured hotel transport error', 0, async () => {
-      const client = new ScriptedHotelMcpClient({
+    it('timestamps a returned transport error after the exact provider operation completes', 0, async () => {
+      const client = new ClockedHotelMcpClient({
         ok: false,
         httpStatus: 503,
         errorMessage: 'provider unavailable',
@@ -406,6 +423,8 @@ export default function toolGatewayClientTest() {
           ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
         }));
         configureHotelMcpClientForTests(client);
+        hotelClockValue = '2026-07-20T02:00:00.000Z';
+        configureHotelTimestampProviderForTests((): string => hotelClockValue);
 
         const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
 
@@ -413,7 +432,49 @@ export default function toolGatewayClientTest() {
         expect(result.error?.code).assertEqual('HOTEL_PROVIDER_TRANSPORT_ERROR');
         expect(result.error?.message).assertEqual('provider unavailable');
         expect(result.sources[0].operation).assertEqual('searchHotels');
+        expect(result.sources[0].fetchedAt).assertEqual('2026-07-20T02:00:01.000Z');
         expect(client.lastOperation).assertEqual('searchHotels');
+      } finally {
+        configureHotelTimestampProviderForTests(null);
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps thrown transport exceptions structured while preserving the legacy outer error surface', 0, async () => {
+      const client = new ThrowingHotelMcpClient();
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const structuredResult = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        expect(structuredResult.status).assertEqual('error');
+        expect(structuredResult.error?.code).assertEqual('HOTEL_TRANSPORT_EXCEPTION');
+        expect(structuredResult.error?.retryable).assertTrue();
+        expect(structuredResult.error?.message).assertEqual('Failed to resolve hotel.example for [REDACTED]');
+        expect(structuredResult.sources.length).assertEqual(0);
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const legacyResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'hotel.search',
+          '深圳酒店',
+          'surface_hotel_transport_exception',
+          'model_tool_request',
+          noop,
+          null,
+          searchArgsForGateway()
+        );
+
+        expect(legacyResult.raw.indexOf('工具供应商调用异常')).assertLarger(-1);
+        expect(legacyResult.raw.indexOf('Failed to resolve hotel.example for [REDACTED]')).assertLarger(-1);
+        expect(legacyResult.raw.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+        expect(legacyResult.raw.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+        expect(legacyResult.raw.indexOf('重新查询')).assertLarger(-1);
       } finally {
         configureHotelMcpClientForTests(null);
         configureLocalProviderConfigFromRawJson('{}');
@@ -443,6 +504,20 @@ export default function toolGatewayClientTest() {
         expect(result.status).assertEqual('error');
         expect(result.error?.code).assertEqual('HOTEL_PROVIDER_ERROR');
         expect(result.error?.message).assertEqual('provider rejected search');
+
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const legacyResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'hotel.search',
+          '深圳酒店',
+          'surface_hotel_inner_error',
+          'model_tool_request',
+          noop,
+          null,
+          searchArgsForGateway()
+        );
+        expect(legacyResult.raw.indexOf('酒店供应商调用失败')).assertLarger(-1);
+        expect(legacyResult.raw.indexOf('工具供应商调用异常')).assertEqual(-1);
       } finally {
         configureHotelMcpClientForTests(null);
         configureLocalProviderConfigFromRawJson('{}');

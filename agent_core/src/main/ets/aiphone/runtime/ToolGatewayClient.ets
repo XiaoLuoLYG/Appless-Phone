@@ -8903,6 +8903,9 @@ const X_OAUTH_SETUP_URL: string = 'https://developer.x.com/en/portal/dashboard';
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
+export type HotelTimestampProvider = () => string;
+const defaultHotelTimestampProvider: HotelTimestampProvider = (): string => new Date().toISOString();
+let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvider;
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
@@ -8910,6 +8913,10 @@ export function configureGmailMcpClientForTests(client: GenericMcpClient | null)
 
 export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
   hotelMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureHotelTimestampProviderForTests(provider: HotelTimestampProvider | null): void {
+  hotelTimestampProvider = provider === null ? defaultHotelTimestampProvider : provider;
 }
 
 export function configureGmailCredentialStoreForTests(store: CredentialStore | null): void {
@@ -12063,8 +12070,19 @@ function hotelDataSource(operation: string): DataSource {
     provider: 'RollingGo',
     backend: 'local_adapter',
     operation: operation,
-    fetchedAt: new Date().toISOString()
+    fetchedAt: hotelTimestampProvider()
   };
+}
+
+function sanitizedHotelTransportMessage(message: string): string {
+  let sanitized = message.length > 0 ? message : 'RollingGo transport exception.';
+  if (localProviderConfig.hotelMcpKey.length > 0) {
+    sanitized = sanitized.split(localProviderConfig.hotelMcpKey).join('[REDACTED]');
+  }
+  if (localProviderConfig.hotelMcpUrl.length > 0) {
+    sanitized = sanitized.split(localProviderConfig.hotelMcpUrl).join('[REDACTED]');
+  }
+  return sanitized.substring(0, 1200);
 }
 
 export async function callStructuredHotelTool(toolId: string, args: Object | null): Promise<DataResult> {
@@ -12085,49 +12103,54 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     if (!parsed.ok || parsed.value === null) {
       return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_INVALID_ARGUMENTS', parsed.error);
     }
-    const source = hotelDataSource('searchHotels');
+    const operation = 'searchHotels';
     try {
       const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
-        hotelMcpRegistration(toolId, source.operation),
+        hotelMcpRegistration(toolId, operation),
         localProviderConfig.hotelMcpKey,
         hotelSearchProviderArgs(parsed.value)
       );
+      const source = hotelDataSource(operation);
       if (!response.ok || response.result === null) {
         return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
       }
       return hotelSearchDataResult(normalizeHotelSearchResult(response.result, parsed.value), [source]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : JSON.stringify(error);
-      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', message, [source], true);
+      const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
+      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
     }
   }
   const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
   if (!parsed.ok || parsed.value === null) {
     return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_INVALID_ARGUMENTS', parsed.error);
   }
-  const source = hotelDataSource('getHotelDetail');
+  const operation = 'getHotelDetail';
   try {
     const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
-      hotelMcpRegistration(toolId, source.operation),
+      hotelMcpRegistration(toolId, operation),
       localProviderConfig.hotelMcpKey,
       hotelDetailProviderArgs(parsed.value)
     );
+    const source = hotelDataSource(operation);
     if (!response.ok || response.result === null) {
       return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
     }
     return hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
   } catch (error) {
-    const message = error instanceof Error ? error.message : JSON.stringify(error);
-    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', message, [source], true);
+    const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
+    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
   }
 }
 
 async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
   const result = await callStructuredHotelTool(toolId, args);
-  if (toolId === 'hotel.search' && (result.status !== 'error' || result.error?.code === 'HOTEL_PROVIDER_ERROR')) {
+  if (result.error?.code === 'HOTEL_TRANSPORT_EXCEPTION') {
+    throw new Error(result.error.message);
+  }
+  if (toolId === 'hotel.search' && result.status !== 'error') {
     return hotelSearchA2ui(surfaceId, result.data as HotelSearchResult);
   }
-  if (toolId === 'hotel.detail' && (result.status !== 'error' || result.error?.code === 'HOTEL_PROVIDER_ERROR')) {
+  if (toolId === 'hotel.detail' && result.status !== 'error') {
     return hotelDetailA2ui(surfaceId, result.data as HotelDetailResult);
   }
   return hotelFailureA2ui(surfaceId, toolId, result.error?.message === undefined ? '酒店供应商调用失败。' : result.error.message);
