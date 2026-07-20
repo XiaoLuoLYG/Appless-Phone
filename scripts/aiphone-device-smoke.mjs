@@ -10,6 +10,7 @@ import {
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   isExpectedHotelSystemBundle,
+  matchesHotelDetailAccessibleLabel,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -995,6 +996,13 @@ function findTextCenter(layout, marker) {
 function findExactTextCenter(layout, marker) {
   const match = findTextMatches(layout, marker).find((item) =>
     item.text.split('|').some((value) => value.trim() === marker));
+  return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
+}
+
+function findHotelDetailTextCenter(layout, marker) {
+  const match = findTextMatches(layout, marker).find((item) =>
+    item.text.split('|').some((value) =>
+      matchesHotelDetailAccessibleLabel(value, marker)));
   return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
 }
 
@@ -2016,7 +2024,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   }
   for (let attempt = 0; attempt < 8; attempt += 1) {
     for (const label of detailClickLocator.labels) {
-      detailCenter = findExactTextCenter(currentLayout, label);
+      detailCenter = findHotelDetailTextCenter(currentLayout, label);
       if (detailCenter !== null) {
         detailLabel = label;
         break;

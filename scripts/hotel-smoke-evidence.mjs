@@ -208,6 +208,23 @@ export function hotelDetailClickLocator(evidence) {
   };
 }
 
+export function matchesHotelDetailAccessibleLabel(candidate, actionLabel) {
+  if (typeof candidate !== 'string' || typeof actionLabel !== 'string') {
+    return false;
+  }
+  const expected = actionLabel.trim();
+  const actual = candidate.trim();
+  if (expected.length === 0) {
+    return false;
+  }
+  if (actual === expected) {
+    return true;
+  }
+  const contextualPrefix = `${expected}：`;
+  return actual.startsWith(contextualPrefix) &&
+    actual.slice(contextualPrefix.length).trim().length > 0;
+}
+
 function systemActionE2e(action, runtime, options = {}) {
   if (options.finalDial === true && runtime?.finalDialTriggered === true) {
     return {

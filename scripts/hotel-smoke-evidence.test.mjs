@@ -8,6 +8,7 @@ import {
   hotelDetailClickLocator,
   hotelSearchActionEvidence,
   isExpectedHotelSystemBundle,
+  matchesHotelDetailAccessibleLabel,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -172,6 +173,18 @@ test('derives the live detail click locator only from an exact valid action', ()
     hotelDetailClickLocator(hotelSearchActionEvidence('hotel-search-1', invalidArgs)).ok,
     false
   );
+});
+
+test('matches only the exact detail action label or its contextual accessible name', () => {
+  assert.equal(matchesHotelDetailAccessibleLabel('查看实时房型', '查看实时房型'), true);
+  assert.equal(
+    matchesHotelDetailAccessibleLabel('查看实时房型：麗枫酒店(深圳大学城地铁站店)', '查看实时房型'),
+    true
+  );
+  assert.equal(matchesHotelDetailAccessibleLabel('查看实时房型：', '查看实时房型'), false);
+  assert.equal(matchesHotelDetailAccessibleLabel('查看实时房型: forged', '查看实时房型'), false);
+  assert.equal(matchesHotelDetailAccessibleLabel('立即查看实时房型：测试酒店', '查看实时房型'), false);
+  assert.equal(matchesHotelDetailAccessibleLabel('查看实时房型：测试酒店', ''), false);
 });
 
 test('requires captured system surfaces and a verified return for visible hotel actions', () => {
