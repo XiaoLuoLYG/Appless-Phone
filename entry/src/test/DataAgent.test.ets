@@ -119,6 +119,26 @@ class TwoControlledDataExecutor implements DataTaskExecutor {
   }
 }
 
+class SingleControlledDataExecutor implements DataTaskExecutor {
+  readonly started: TestGate = new TestGate();
+  private resolveResult: ((result: DataResult) => void) | null = null;
+
+  async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
+    return new Promise<DataResult>((resolve: (result: DataResult) => void) => {
+      this.resolveResult = resolve;
+      this.started.open();
+    });
+  }
+
+  complete(result: DataResult): void {
+    const resolve: ((result: DataResult) => void) | null = this.resolveResult;
+    this.resolveResult = null;
+    if (resolve !== null) {
+      resolve(result);
+    }
+  }
+}
+
 function hotelDataResult(status: 'success' | 'partial' = 'partial'): DataResult {
   const source: DataSource = {
     provider: 'rollinggo',
@@ -298,6 +318,74 @@ export default function dataAgentTest() {
       bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
 
       expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RUN);
+      agent.stop();
+      observer.close();
+    });
+
+    it('suppresses a detached executor completion after stop', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
+      const agent: DataAgent = new DataAgent(bus, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(dataTaskMessage('conversation-stop', 'turn-stop', 'data-stop'));
+      await executor.started.promise;
+      agent.stop();
+      executor.complete(hotelDataResult('success'));
+      await settle();
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+
+      expect((await receiveType(observer, AgentMessageType.ACTION_RUN)).taskId).assertEqual('marker');
+      observer.close();
+    });
+
+    it('does not let an old stopped agent publish into a restarted bus lifecycle', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const oldExecutor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
+      const oldAgent: DataAgent = new DataAgent(bus, oldExecutor);
+      const observer: AgentMessageReader = bus.openReader();
+      oldAgent.start();
+
+      bus.publish(dataTaskMessage('conversation-old', 'turn-old', 'data-old'));
+      await oldExecutor.started.promise;
+      oldAgent.stop();
+      const newAgent: DataAgent = new DataAgent(bus, new ScriptedDataExecutor(hotelDataResult('success')));
+      newAgent.start();
+      bus.publish(dataTaskMessage('conversation-new', 'turn-new', 'data-new'));
+      const currentResult: AgentMessage = await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
+      expect(currentResult.taskId).assertEqual('data-new');
+      oldExecutor.complete(hotelDataResult('success'));
+      await settle();
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RUN);
+      newAgent.stop();
+      observer.close();
+    });
+
+    it('rejects malformed Data tasks and keeps the pump available', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
+      const agent: DataAgent = new DataAgent(bus, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish({
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'conversation-invalid',
+        turnId: 'turn-invalid',
+        taskId: 'data-invalid',
+        payload: JSON.parse('null') as Object
+      });
+      const invalid: AgentMessage = await receiveType(observer, AgentMessageType.TASK_ERROR);
+      expect(invalid.taskId).assertEqual('data-invalid');
+      expect((invalid.payload as TaskErrorPayload).code).assertEqual('DATA_TASK_INVALID');
+      bus.publish(dataTaskMessage('conversation-valid', 'turn-valid', 'data-valid'));
+      const valid: AgentMessage = await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
+
+      expect(valid.taskId).assertEqual('data-valid');
+      expect(executor.calls).assertEqual(1);
       agent.stop();
       observer.close();
     });

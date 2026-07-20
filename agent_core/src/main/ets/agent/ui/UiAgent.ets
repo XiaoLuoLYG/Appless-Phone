@@ -11,12 +11,21 @@ import {
   CreateUiTaskPayload,
   UiRenderResultPayload,
   UiRenderState,
+  UiSurfaceWriteLease,
   UiSurfaceWriter,
   UiTaskRenderer
 } from './UiAgentTypes';
 
 // Retain only recent terminal turn identities; older provider payloads are never retained.
 const TERMINATED_TURN_LIMIT: number = 128;
+// Retain only a tiny pre-UI window, keyed by exact Data task ownership.
+const PENDING_DATA_LIMIT: number = 5;
+
+interface PendingDataEntry {
+  data?: DataResult;
+  invalidCode: string;
+  invalidMessage: string;
+}
 
 interface UiTurnContext {
   conversationId: string;
@@ -24,17 +33,32 @@ interface UiTurnContext {
   surfaceId: string;
   uiTaskId: string;
   uiTask?: CreateUiTaskPayload;
-  pendingData?: DataResult;
-  pendingDataTaskId: string;
-  pendingInvalidDataTaskId: string;
-  pendingInvalidDataCode: string;
-  pendingInvalidDataMessage: string;
+  pendingDataByTaskId: Map<string, PendingDataEntry>;
+  pendingDataOrder: string[];
   pendingDataErrorMessage: string;
   dataErrorPending: boolean;
   canceled: boolean;
+  generation: number;
   skeletonWritten: boolean;
   resultWritten: boolean;
   terminalRenderStarted: boolean;
+  operationChain: Promise<void>;
+  queuedMessages: Map<number, AgentMessage>;
+  nextOperationId: number;
+}
+
+class ContextSurfaceWriteLease implements UiSurfaceWriteLease {
+  private readonly context: UiTurnContext;
+  private readonly generation: number;
+
+  constructor(context: UiTurnContext) {
+    this.context = context;
+    this.generation = context.generation;
+  }
+
+  isActive(): boolean {
+    return !this.context.canceled && this.context.generation === this.generation;
+  }
 }
 
 export class UiAgent extends MessageDrivenAgent {
@@ -55,6 +79,9 @@ export class UiAgent extends MessageDrivenAgent {
 
   stop(): void {
     super.stop();
+    this.contexts.forEach((context: UiTurnContext) => {
+      this.invalidateContext(context);
+    });
     this.contexts.clear();
     this.terminated.clear();
     this.terminatedOrder.splice(0, this.terminatedOrder.length);
@@ -66,7 +93,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (context === undefined || context.surfaceId !== surfaceId) {
       return;
     }
-    context.canceled = true;
+    this.invalidateContext(context);
     this.terminate(key);
     this.contexts.delete(key);
   }
@@ -85,7 +112,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (message.type === AgentMessageType.TURN_CANCEL) {
       const context: UiTurnContext | undefined = this.contexts.get(key);
       if (context !== undefined) {
-        context.canceled = true;
+        this.invalidateContext(context);
       }
       this.terminate(key);
       this.contexts.delete(key);
@@ -101,37 +128,67 @@ export class UiAgent extends MessageDrivenAgent {
         return;
       }
       const context: UiTurnContext = this.contextFor(message, key);
-      this.launch(this.handleUiTask(message, task, key, context), message, key, context);
+      this.enqueue(message, key, context);
       return;
     }
     if (message.type === AgentMessageType.TASK_RESULT_DATA) {
       const current: UiTurnContext | undefined = this.contexts.get(key);
       const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
-      this.launch(this.handleDataResult(message, key, context), message, key, context);
+      this.enqueue(message, key, context);
       return;
     }
     if (message.type === AgentMessageType.TASK_ERROR) {
       const context: UiTurnContext | undefined = this.contexts.get(key);
       if (context !== undefined) {
-        this.launch(this.handleTaskError(message, key, context), message, key, context);
+        this.enqueue(message, key, context);
       }
       return;
     }
     const context: UiTurnContext | undefined = this.contexts.get(key);
     if (context !== undefined) {
-      this.launch(this.handleActionStatus(message, key, context), message, key, context);
+      this.enqueue(message, key, context);
     }
   }
 
-  private launch(
-    operation: Promise<void>,
+  private enqueue(message: AgentMessage, key: string, context: UiTurnContext): void {
+    const operationId: number = context.nextOperationId;
+    context.nextOperationId++;
+    context.queuedMessages.set(operationId, message);
+    context.operationChain = context.operationChain.then(async () => {
+      const queued: AgentMessage | undefined = context.queuedMessages.get(operationId);
+      context.queuedMessages.delete(operationId);
+      if (queued === undefined || !this.isActive(key, context)) {
+        return;
+      }
+      try {
+        await this.runOperation(queued, key, context);
+      } catch (error) {
+        this.failRender(queued, key, context, error as Object);
+      }
+    });
+  }
+
+  private async runOperation(
     message: AgentMessage,
     key: string,
     context: UiTurnContext
-  ): void {
-    operation.catch((error: Object) => {
-      this.failRender(message, key, context, error);
-    });
+  ): Promise<void> {
+    if (message.type === AgentMessageType.TASK_CREATE_UI) {
+      const task: CreateUiTaskPayload | null = this.uiTask(message.payload, message.taskId);
+      if (task !== null) {
+        await this.handleUiTask(message, task, key, context);
+      }
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+      await this.handleDataResult(message, key, context);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_ERROR) {
+      await this.handleTaskError(message, key, context);
+      return;
+    }
+    await this.handleActionStatus(message, key, context);
   }
 
   private async handleUiTask(
@@ -149,19 +206,29 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
     if (!this.isActive(key, context)) {
       return;
     }
     context.skeletonWritten = true;
     this.publishUiResult(context, 'skeleton');
-    this.discardUnownedPendingData(context);
+    const pending: PendingDataEntry | undefined = context.pendingDataByTaskId.get(task.dataTaskId);
+    this.clearPendingData(context);
+    if (pending !== undefined && pending.invalidCode.length > 0) {
+      this.publishOwnedDataError(context, pending.invalidCode, pending.invalidMessage);
+      return;
+    }
     if (context.pendingDataErrorMessage.length > 0) {
       const message: string = context.pendingDataErrorMessage;
       context.pendingDataErrorMessage = '';
       await this.renderDataError(context, key, message);
-    } else {
-      await this.renderPendingData(context, key);
+    } else if (pending !== undefined && pending.data !== undefined) {
+      await this.renderData(context, key, pending.data);
     }
   }
 
@@ -170,36 +237,41 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     if (context.canceled || context.resultWritten || context.terminalRenderStarted ||
-      context.dataErrorPending || context.pendingDataTaskId === message.taskId) {
+      context.dataErrorPending) {
       return;
     }
     const data: DataResult | null = this.dataResult(message.payload);
-    if (data === null) {
-      this.rememberInvalidData(context, message.taskId, 'UI_DATA_INVALID', 'Data result payload is malformed');
-      this.publishPendingDataErrorIfOwned(context);
+    if (context.uiTask === undefined) {
+      if (data === null) {
+        this.rememberPendingInvalidData(
+          context,
+          message.taskId,
+          'UI_DATA_INVALID',
+          'Data result payload is malformed'
+        );
+      } else {
+        this.rememberPendingData(context, message.taskId, data);
+      }
       return;
     }
-    context.pendingData = data;
-    context.pendingDataTaskId = message.taskId;
-    if (context.uiTask !== undefined && data.outputSchema !== context.uiTask.expectedOutputSchema) {
-      context.pendingData = undefined;
-      context.pendingDataTaskId = '';
+    if (data === null) {
+      this.publishOwnedDataError(context, 'UI_DATA_INVALID', 'Data result payload is malformed');
+      return;
+    }
+    if (data.outputSchema !== context.uiTask.expectedOutputSchema) {
       this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
       return;
     }
-    await this.renderPendingData(context, key);
+    await this.renderData(context, key, data);
   }
 
-  private async renderPendingData(context: UiTurnContext, key: string): Promise<void> {
+  private async renderData(context: UiTurnContext, key: string, data: DataResult): Promise<void> {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
-    const data: DataResult | undefined = context.pendingData;
-    if (task === undefined || data === undefined || !context.skeletonWritten || context.resultWritten ||
-      context.terminalRenderStarted || context.pendingDataTaskId !== task.dataTaskId) {
+    if (task === undefined || !context.skeletonWritten || context.resultWritten ||
+      context.terminalRenderStarted) {
       return;
     }
     if (data.outputSchema !== task.expectedOutputSchema) {
-      context.pendingData = undefined;
-      context.pendingDataTaskId = '';
       this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
       return;
     }
@@ -208,7 +280,12 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
     if (!this.isActive(key, context)) {
       return;
     }
@@ -245,7 +322,12 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
     if (!this.isActive(key, context)) {
       return;
     }
@@ -263,45 +345,55 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    await this.writer.write(context.turnId, context.surfaceId, jsonl);
+    await this.writer.write(
+      context.turnId,
+      context.surfaceId,
+      jsonl,
+      new ContextSurfaceWriteLease(context)
+    );
     if (!this.isActive(key, context)) {
       return;
     }
     this.publishUiResult(context, 'action');
   }
 
-  private discardUnownedPendingData(context: UiTurnContext): void {
-    const task: CreateUiTaskPayload | undefined = context.uiTask;
-    if (task === undefined) {
-      return;
-    }
-    if (context.pendingDataTaskId.length > 0 && context.pendingDataTaskId !== task.dataTaskId) {
-      context.pendingData = undefined;
-      context.pendingDataTaskId = '';
-    }
-    if (context.pendingInvalidDataTaskId.length > 0 && context.pendingInvalidDataTaskId !== task.dataTaskId) {
-      this.clearPendingInvalidData(context);
-    }
-    this.publishPendingDataErrorIfOwned(context);
+  private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
+    const entry: PendingDataEntry = {
+      data,
+      invalidCode: '',
+      invalidMessage: ''
+    };
+    this.rememberPendingEntry(context, taskId, entry);
   }
 
-  private rememberInvalidData(context: UiTurnContext, taskId: string, code: string, message: string): void {
-    context.pendingData = undefined;
-    context.pendingDataTaskId = '';
-    context.pendingInvalidDataTaskId = taskId;
-    context.pendingInvalidDataCode = code;
-    context.pendingInvalidDataMessage = message;
-  }
-
-  private publishPendingDataErrorIfOwned(context: UiTurnContext): void {
-    const task: CreateUiTaskPayload | undefined = context.uiTask;
-    if (task === undefined || context.pendingInvalidDataTaskId !== task.dataTaskId) {
+  private rememberPendingInvalidData(
+    context: UiTurnContext,
+    taskId: string,
+    code: string,
+    message: string
+  ): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined && current.data !== undefined) {
       return;
     }
-    const code: string = context.pendingInvalidDataCode;
-    const message: string = context.pendingInvalidDataMessage;
-    this.clearPendingInvalidData(context);
-    this.publishOwnedDataError(context, code, message);
+    const entry: PendingDataEntry = {
+      invalidCode: code,
+      invalidMessage: message
+    };
+    this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingEntry(context: UiTurnContext, taskId: string, entry: PendingDataEntry): void {
+    if (!context.pendingDataByTaskId.has(taskId)) {
+      context.pendingDataOrder.push(taskId);
+    }
+    context.pendingDataByTaskId.set(taskId, entry);
+    while (context.pendingDataOrder.length > PENDING_DATA_LIMIT) {
+      const oldest: string | undefined = context.pendingDataOrder.shift();
+      if (oldest !== undefined) {
+        context.pendingDataByTaskId.delete(oldest);
+      }
+    }
   }
 
   private publishOwnedDataError(context: UiTurnContext, code: string, message: string): void {
@@ -330,16 +422,18 @@ export class UiAgent extends MessageDrivenAgent {
       turnId: message.turnId,
       surfaceId: this.uniqueSurfaceId(),
       uiTaskId: '',
-      pendingDataTaskId: '',
-      pendingInvalidDataTaskId: '',
-      pendingInvalidDataCode: '',
-      pendingInvalidDataMessage: '',
+      pendingDataByTaskId: new Map<string, PendingDataEntry>(),
+      pendingDataOrder: [],
       pendingDataErrorMessage: '',
       dataErrorPending: false,
       canceled: false,
+      generation: 0,
       skeletonWritten: false,
       resultWritten: false,
-      terminalRenderStarted: false
+      terminalRenderStarted: false,
+      operationChain: Promise.resolve(),
+      queuedMessages: new Map<number, AgentMessage>(),
+      nextOperationId: 0
     };
     this.contexts.set(key, created);
     return created;
@@ -473,7 +567,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    context.canceled = true;
+    this.invalidateContext(context);
     this.terminate(key);
     this.contexts.delete(key);
     this.publishInputError(
@@ -491,16 +585,22 @@ export class UiAgent extends MessageDrivenAgent {
 
   private clearPendingPayloads(context: UiTurnContext): void {
     context.uiTask = undefined;
-    context.pendingData = undefined;
-    context.pendingDataTaskId = '';
     context.pendingDataErrorMessage = '';
-    this.clearPendingInvalidData(context);
+    this.clearPendingData(context);
   }
 
-  private clearPendingInvalidData(context: UiTurnContext): void {
-    context.pendingInvalidDataTaskId = '';
-    context.pendingInvalidDataCode = '';
-    context.pendingInvalidDataMessage = '';
+  private clearPendingData(context: UiTurnContext): void {
+    context.pendingDataByTaskId.clear();
+    context.pendingDataOrder.splice(0, context.pendingDataOrder.length);
+  }
+
+  private invalidateContext(context: UiTurnContext): void {
+    context.canceled = true;
+    context.generation++;
+    context.uiTask = undefined;
+    context.pendingDataErrorMessage = '';
+    this.clearPendingData(context);
+    context.queuedMessages.clear();
   }
 
   private turnKey(conversationId: string, turnId: string): string {

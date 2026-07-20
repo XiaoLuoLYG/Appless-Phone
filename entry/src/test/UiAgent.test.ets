@@ -10,6 +10,7 @@ import {
   TaskErrorPayload,
   UiAgent,
   UiRenderResultPayload,
+  UiSurfaceWriteLease,
   UiSurfaceWriter,
   UiTaskRenderer
 } from '@loop/agent-core';
@@ -81,8 +82,42 @@ class RecordingRenderer implements UiTaskRenderer {
 class RecordingSurfaceWriter implements UiSurfaceWriter {
   readonly writes: SurfaceWrite[] = [];
 
-  async write(turnId: string, surfaceId: string, jsonl: string): Promise<void> {
-    this.writes.push({ turnId, surfaceId, jsonl });
+  async write(
+    turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    if (lease.isActive()) {
+      this.writes.push({ turnId, surfaceId, jsonl });
+    }
+  }
+}
+
+class DeferredSurfaceWriter implements UiSurfaceWriter {
+  readonly writes: SurfaceWrite[] = [];
+  readonly started: TestGate = new TestGate();
+  turnId: string = '';
+  surfaceId: string = '';
+  private releaseWrite: TestGate = new TestGate();
+
+  async write(
+    turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    this.turnId = turnId;
+    this.surfaceId = surfaceId;
+    this.started.open();
+    await this.releaseWrite.promise;
+    if (lease.isActive()) {
+      this.writes.push({ turnId, surfaceId, jsonl });
+    }
+  }
+
+  release(): void {
+    this.releaseWrite.open();
   }
 }
 
@@ -129,6 +164,25 @@ class RejectOnceRenderer extends RecordingRenderer {
       throw new Error('renderer rejected');
     }
     return super.skeleton(task, surfaceId);
+  }
+}
+
+class SlowProgressRenderer extends RecordingRenderer {
+  readonly progressStarted: TestGate = new TestGate();
+  private releaseProgress: TestGate = new TestGate();
+
+  async actionStatus(payload: Object, surfaceId: string): Promise<string> {
+    const status: ActionStatusPayload = payload as ActionStatusPayload;
+    this.calls.push(`action:${status.runId}:${surfaceId}`);
+    if (status.status === 'running') {
+      this.progressStarted.open();
+      await this.releaseProgress.promise;
+    }
+    return `action:${status.status}`;
+  }
+
+  finishProgress(): void {
+    this.releaseProgress.open();
   }
 }
 
@@ -354,7 +408,7 @@ export default function uiAgentTest() {
       observer.close();
     });
 
-    it('discards a wrong Data-first task when the owning UI task arrives', 0, async () => {
+    it('selects owned Data when wrong-first and owned-later both arrive before UI', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const renderer: RecordingRenderer = new RecordingRenderer();
       const writer: RecordingSurfaceWriter = new RecordingSurfaceWriter();
@@ -363,12 +417,37 @@ export default function uiAgentTest() {
       agent.start();
 
       bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-wrong', 911));
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 912));
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 912));
       await receiveUiState(observer, 'result');
 
       expect(renderer.resultHotelIds.join(',')).assertEqual('912');
+      agent.stop();
+      observer.close();
+    });
+
+    it('preserves owned Data when a later wrong malformed result arrives before UI', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const renderer: RecordingRenderer = new RecordingRenderer();
+      const writer: RecordingSurfaceWriter = new RecordingSurfaceWriter();
+      const agent: UiAgent = new UiAgent(bus, renderer, writer);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 913));
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_RESULT_DATA,
+        'conversation-a',
+        'turn-1',
+        'data-wrong',
+        JSON.parse('null') as Object
+      ));
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      await receiveUiState(observer, 'result');
+
+      expect(renderer.resultHotelIds.join(',')).assertEqual('913');
       agent.stop();
       observer.close();
     });
@@ -602,6 +681,103 @@ export default function uiAgentTest() {
       expect(renderer.calls.filter((call: string): boolean => call.startsWith('action:')).length).assertEqual(1);
       expect(actionResult.surfaceId).assertEqual(surfaceB);
 
+      agent.stop();
+      observer.close();
+    });
+
+    it('serializes slow Action progress before a fast Action result', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const renderer: SlowProgressRenderer = new SlowProgressRenderer();
+      const writer: RecordingSurfaceWriter = new RecordingSurfaceWriter();
+      const agent: UiAgent = new UiAgent(bus, renderer, writer);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await receiveUiState(observer, 'skeleton');
+      const surfaceId: string = writer.writes[0].surfaceId;
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PROGRESS,
+        'conversation-a',
+        'turn-1',
+        'action-progress',
+        actionPayload(surfaceId, 'run-1', 'running')
+      ));
+      await renderer.progressStarted.promise;
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_RESULT,
+        'conversation-a',
+        'turn-1',
+        'action-result',
+        actionPayload(surfaceId, 'run-1', 'success')
+      ));
+      await settle();
+      expect(writer.writes.length).assertEqual(1);
+      renderer.finishProgress();
+      await receiveUiState(observer, 'action');
+      await receiveUiState(observer, 'action');
+
+      expect(writer.writes.map((write: SurfaceWrite): string => write.jsonl).join(','))
+        .assertEqual('skeleton:ui-1,action:running,action:success');
+      agent.stop();
+      observer.close();
+    });
+
+    it('writer lease blocks mutation when turn is canceled during an internal write await', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const renderer: RecordingRenderer = new RecordingRenderer();
+      const writer: DeferredSurfaceWriter = new DeferredSurfaceWriter();
+      const agent: UiAgent = new UiAgent(bus, renderer, writer);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await writer.started.promise;
+      bus.publish(turnMessage(AgentMessageType.TURN_CANCEL, 'conversation-a', 'turn-1', 'cancel-1'));
+      await settle();
+      writer.release();
+      await settle();
+      bus.publish(turnMessage(AgentMessageType.INPUT_USER, 'marker', 'marker', 'marker'));
+      let uiResults: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.TASK_RESULT_UI) {
+          uiResults++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(writer.writes.length).assertEqual(0);
+      expect(uiResults).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('writer lease blocks mutation when surface is replaced during an internal write await', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const renderer: RecordingRenderer = new RecordingRenderer();
+      const writer: DeferredSurfaceWriter = new DeferredSurfaceWriter();
+      const agent: UiAgent = new UiAgent(bus, renderer, writer);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(uiTaskMessage());
+      await writer.started.promise;
+      agent.surfaceReplaced('conversation-a', 'turn-1', writer.surfaceId);
+      writer.release();
+      await settle();
+      bus.publish(turnMessage(AgentMessageType.INPUT_USER, 'marker', 'marker', 'marker'));
+      let uiResults: number = 0;
+      let observed: AgentMessage = await receive(observer);
+      while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.TASK_RESULT_UI) {
+          uiResults++;
+        }
+        observed = await receive(observer);
+      }
+
+      expect(writer.writes.length).assertEqual(0);
+      expect(uiResults).assertEqual(0);
       agent.stop();
       observer.close();
     });

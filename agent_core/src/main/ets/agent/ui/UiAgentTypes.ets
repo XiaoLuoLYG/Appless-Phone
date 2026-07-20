@@ -21,6 +21,17 @@ export interface UiTaskRenderer {
   actionStatus(payload: Object, surfaceId: string): Promise<string>;
 }
 
+export interface UiSurfaceWriteLease {
+  isActive(): boolean;
+}
+
 export interface UiSurfaceWriter {
-  write(turnId: string, surfaceId: string, jsonl: string): Promise<void>;
+  // Implementations must check the lease immediately before mutating the surface,
+  // after completing any internal asynchronous work.
+  write(
+    turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void>;
 }
