@@ -4,17 +4,19 @@ import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
-import { DynamicToolRegistration, GenericMcpClient, MemoryCredentialStore } from '@loop/agent-core';
+import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
 import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
   callToolGateway,
+  callStructuredHotelTool,
   configureComposioConfigFromRawJson,
   configureDidiMcpSandboxForRuntime,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
+  configureHotelMcpClientForTests,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
@@ -81,6 +83,23 @@ class SuccessfulGmailMcpClient extends GenericMcpClient {
   }
 }
 
+class ScriptedHotelMcpClient extends GenericMcpClient {
+  private readonly response: McpToolCallResult;
+  callCount: number = 0;
+  lastOperation: string = '';
+
+  constructor(response: McpToolCallResult) {
+    super();
+    this.response = response;
+  }
+
+  async callToolPayload(registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<McpToolCallResult> {
+    this.callCount += 1;
+    this.lastOperation = registration.mcpToolName;
+    return this.response;
+  }
+}
+
 interface YouTubeSearchArgsFixture {
   query: string;
 }
@@ -99,6 +118,21 @@ interface PaymentTestArgs {
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
+}
+
+function searchArgsForGateway(): Object {
+  return looseObject(
+    '{"originQuery":"深圳 8 月 15 日住两晚，2 位成人","place":"深圳","placeType":"CITY","countryCode":"CN",' +
+    '"checkInDate":"2026-08-15","stayNights":2,"adultCount":2,"childCount":0,' +
+    '"childAgeDetails":[],"roomCount":1,"currency":"CNY","size":10}'
+  );
+}
+
+function detailArgsForGateway(): Object {
+  return looseObject(
+    '{"hotelId":47675,"checkInDate":"2026-08-15","checkOutDate":"2026-08-17","countryCode":"CN",' +
+    '"currency":"CNY","adultCount":2,"childCount":0,"childAgeDetails":[],"roomCount":1}'
+  );
 }
 
 interface McDonaldsStoreFixture {
@@ -344,6 +378,99 @@ export default function toolGatewayClientTest() {
         expect(isRegisteredToolId('hotel.detail')).assertTrue();
         expect(isRegisteredToolId('hotel.create')).assertFalse();
       } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('returns a structured missing-config hotel error', 0, async () => {
+      configureLocalProviderConfigFromRawJson('{}');
+
+      const result = await callStructuredHotelTool('hotel.search', new Object());
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('HOTEL_CONFIG_MISSING');
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('returns a structured hotel transport error', 0, async () => {
+      const client = new ScriptedHotelMcpClient({
+        ok: false,
+        httpStatus: 503,
+        errorMessage: 'provider unavailable',
+        result: null,
+        rawPreview: ''
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('HOTEL_PROVIDER_TRANSPORT_ERROR');
+        expect(result.error?.message).assertEqual('provider unavailable');
+        expect(result.sources[0].operation).assertEqual('searchHotels');
+        expect(client.lastOperation).assertEqual('searchHotels');
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('returns a structured hotel inner provider error', 0, async () => {
+      const client = new ScriptedHotelMcpClient({
+        ok: true,
+        httpStatus: 200,
+        errorMessage: '',
+        result: {
+          isError: false,
+          structuredContent: looseObject('{"success":false,"message":"provider rejected search","hotelInformationList":[]}')
+        },
+        rawPreview: ''
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const result = await callStructuredHotelTool('hotel.search', searchArgsForGateway());
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('HOTEL_PROVIDER_ERROR');
+        expect(result.error?.message).assertEqual('provider rejected search');
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects unknown hotel-prefixed tools without falling through to detail', 0, async () => {
+      const client = new ScriptedHotelMcpClient({
+        ok: true,
+        httpStatus: 200,
+        errorMessage: '',
+        result: { isError: false, structuredContent: new Object() },
+        rawPreview: ''
+      });
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const result = await callStructuredHotelTool('hotel.cancel', detailArgsForGateway());
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('HOTEL_TOOL_UNSUPPORTED');
+        expect(client.callCount).assertEqual(0);
+      } finally {
+        configureHotelMcpClientForTests(null);
         configureLocalProviderConfigFromRawJson('{}');
       }
     });
