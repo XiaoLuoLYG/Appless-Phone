@@ -224,10 +224,27 @@ function rateResultFor(result: HotelDetailResult, rate: HotelRatePlan): DynamicG
   };
 }
 
+function appendWarnings(items: DynamicGenericToolResult[], warnings: string[]): void {
+  if (items.length === 0 || warnings.length === 0) {
+    return;
+  }
+  const visible: string[] = [];
+  warnings.forEach((warning: string) => {
+    const value = warning.trim();
+    if (value.length > 0 && visible.indexOf(value) < 0) {
+      visible.push(value);
+    }
+  });
+  if (visible.length > 0) {
+    items[0].rows.push(row('部分结果提醒', visible.join(' · ')));
+  }
+}
+
 export function hotelSearchA2ui(
   surfaceId: string,
   result: HotelSearchResult,
-  canPlace: (action: A2uiAction) => boolean
+  canPlace: (action: A2uiAction) => boolean,
+  warnings: string[] = []
 ): string {
   const items: DynamicGenericToolResult[] = [];
   if (!result.ok) {
@@ -251,10 +268,15 @@ export function hotelSearchA2ui(
       });
     }
   }
+  appendWarnings(items, warnings);
   return genericToolResultsA2ui(surfaceId, 'hotel.search', items, 'hotel', '酒店搜索');
 }
 
-export function hotelDetailA2ui(surfaceId: string, result: HotelDetailResult): string {
+export function hotelDetailA2ui(
+  surfaceId: string,
+  result: HotelDetailResult,
+  warnings: string[] = []
+): string {
   const items: DynamicGenericToolResult[] = [];
   if (!result.ok) {
     items.push(detailErrorResult(result));
@@ -280,6 +302,7 @@ export function hotelDetailA2ui(surfaceId: string, result: HotelDetailResult): s
   if (items.length > 0) {
     items[0].actions = [restoreSearchAction()];
   }
+  appendWarnings(items, warnings);
   return genericToolResultsA2ui(surfaceId, 'hotel.detail', items, 'hotel', result.name.length > 0 ? result.name : '实时房型与报价');
 }
 

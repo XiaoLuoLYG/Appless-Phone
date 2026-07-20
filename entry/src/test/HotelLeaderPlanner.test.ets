@@ -3,6 +3,7 @@ import {
   AgentMessage,
   AgentMessageType,
   LeaderPlan,
+  LocalModelSettings,
   LocalModel,
   UserInputPayload
 } from '@loop/agent-core';
@@ -10,7 +11,11 @@ import {
   HotelLeaderPlanner,
   HotelPlannerIdFactory
 } from '../main/ets/pages/A2uiHome/agent/HotelLeaderPlanner';
-import { shouldRouteToHotelAgent } from '../main/ets/pages/A2uiHome/Index';
+import {
+  hotelModelSettingsFingerprint,
+  hotelTurnReadyMessage,
+  shouldRouteToHotelAgent
+} from '../main/ets/pages/A2uiHome/Index';
 
 const SEARCH_JSON: string = '{' +
   '"originQuery":"8月15日深圳住两晚的酒店",' +
@@ -159,9 +164,74 @@ export default function hotelLeaderPlannerTest() {
       expect(shouldRouteToHotelAgent('找一个杭州住宿')).assertTrue();
       expect(shouldRouteToHotelAgent('Book a hotel in Shanghai')).assertTrue();
       expect(shouldRouteToHotelAgent('find lodging near the airport')).assertTrue();
+      expect(shouldRouteToHotelAgent('深圳酒店')).assertTrue();
+      expect(shouldRouteToHotelAgent('Shanghai hotel')).assertTrue();
+      expect(shouldRouteToHotelAgent('stay in Beijing for two nights')).assertTrue();
+      expect(shouldRouteToHotelAgent('rooms near Shanghai airport')).assertTrue();
       expect(shouldRouteToHotelAgent('帮我订明天的高铁票')).assertFalse();
       expect(shouldRouteToHotelAgent('打开 Gmail')).assertFalse();
       expect(shouldRouteToHotelAgent('预订')).assertFalse();
+      expect(shouldRouteToHotelAgent('酒店行业新闻')).assertFalse();
+      expect(shouldRouteToHotelAgent('酒店股票走势')).assertFalse();
+      expect(shouldRouteToHotelAgent('翻译 hotel')).assertFalse();
+      expect(shouldRouteToHotelAgent('hotel industry news')).assertFalse();
+      expect(shouldRouteToHotelAgent('hotel stock analysis')).assertFalse();
+      expect(shouldRouteToHotelAgent('translate hotel into Chinese')).assertFalse();
+      expect(shouldRouteToHotelAgent('workplace accommodation policy')).assertFalse();
+      expect(shouldRouteToHotelAgent('send an accommodation email')).assertFalse();
+    });
+
+    it('fingerprints every live model setting without exposing it in a status message', 0, () => {
+      const settings: LocalModelSettings = {
+        provider: 'provider-a',
+        baseUrl: 'https://model.example/v1',
+        model: 'hotel-model',
+        apiKey: 'secret-a',
+        customParametersJson: '{"temperature":0}',
+        ignoreToolSurfaceUpdates: false
+      };
+      const baseline: string = hotelModelSettingsFingerprint(settings);
+      const changedEndpoint: LocalModelSettings = {
+        provider: settings.provider,
+        baseUrl: 'https://other.example/v1',
+        model: settings.model,
+        apiKey: settings.apiKey,
+        customParametersJson: settings.customParametersJson,
+        ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates
+      };
+      const changedKey: LocalModelSettings = {
+        provider: settings.provider,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        apiKey: 'secret-b',
+        customParametersJson: settings.customParametersJson,
+        ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates
+      };
+      const changedModel: LocalModelSettings = {
+        provider: settings.provider,
+        baseUrl: settings.baseUrl,
+        model: 'hotel-model-2',
+        apiKey: settings.apiKey,
+        customParametersJson: settings.customParametersJson,
+        ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates
+      };
+      const changedParameters: LocalModelSettings = {
+        provider: settings.provider,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        apiKey: settings.apiKey,
+        customParametersJson: '{"temperature":1}',
+        ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates
+      };
+
+      expect(baseline === hotelModelSettingsFingerprint(changedEndpoint)).assertFalse();
+      expect(baseline === hotelModelSettingsFingerprint(changedKey)).assertFalse();
+      expect(baseline === hotelModelSettingsFingerprint(changedModel)).assertFalse();
+      expect(baseline === hotelModelSettingsFingerprint(changedParameters)).assertFalse();
+      expect(hotelTurnReadyMessage('error', '酒店查询')).assertEqual('');
+      expect(hotelTurnReadyMessage('empty', '酒店查询').indexOf('真实酒店结果')).assertEqual(-1);
+      expect(hotelTurnReadyMessage('partial', '酒店查询').indexOf('部分')).assertLarger(-1);
+      expect(hotelTurnReadyMessage('success', '酒店查询').indexOf('真实酒店结果')).assertLarger(-1);
     });
   });
 }

@@ -102,7 +102,9 @@ import { HomePage } from './components/HomePage';
 import { ConfigPage } from './components/ConfigPage';
 import {
   HotelAgentRuntime,
-  HotelAgentRuntimeOptions
+  HotelAgentRuntimeOptions,
+  HotelTurnOutcome,
+  HotelTurnStatus
 } from './agent/HotelAgentRuntime';
 import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
@@ -157,11 +159,57 @@ const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
 
 export function shouldRouteToHotelAgent(prompt: string): boolean {
   const value = prompt.trim().toLowerCase();
-  if (value.indexOf('酒店') >= 0 || value.indexOf('住宿') >= 0 ||
-    value.indexOf('旅馆') >= 0 || value.indexOf('宾馆') >= 0) {
+  if (value.length === 0 ||
+    /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
+    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email)\b/.test(value)) {
+    return false;
+  }
+  const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
+  if (hasChineseHotel &&
+    /(找|查|搜|订|预订|入住|想住|要住|推荐|附近|今晚|明晚|明天|后天|一晚|两晚|几晚)/.test(value)) {
     return true;
   }
-  return /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
+  if (/^[\u4e00-\u9fffA-Za-z0-9·]{1,12}(酒店|住宿|旅馆|宾馆|客房)$/.test(value)) {
+    return true;
+  }
+  const hasEnglishHotel =
+    /(^|[^a-z])(hotel|hotels|lodging|accommodation|room|rooms)([^a-z]|$)/.test(value);
+  if (hasEnglishHotel &&
+    /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
+    return true;
+  }
+  if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||
+    /^(hotel|hotels|lodging|accommodation)\s+(in|near|at)\s+[a-z]/.test(value) ||
+    /\bstay\s+(in|near|at)\s+[a-z]/.test(value) ||
+    /\brooms?\s+(in|near|at)\s+[a-z]/.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+function fingerprintPart(value: string): string {
+  return value.length.toString() + ':' + value;
+}
+
+export function hotelModelSettingsFingerprint(settings: LocalModelSettings): string {
+  return fingerprintPart(settings.provider) + '|' +
+    fingerprintPart(settings.baseUrl) + '|' +
+    fingerprintPart(settings.apiKey) + '|' +
+    fingerprintPart(settings.model) + '|' +
+    fingerprintPart(settings.customParametersJson);
+}
+
+export function hotelTurnReadyMessage(status: HotelTurnStatus, title: string): string {
+  if (status === 'success') {
+    return title + ' 已返回真实酒店结果。';
+  }
+  if (status === 'partial') {
+    return title + ' 已返回部分酒店结果，请查看提示。';
+  }
+  if (status === 'empty') {
+    return title + ' 查询完成，未找到符合条件的酒店。';
+  }
+  return '';
 }
 
 class PageHotelUriOpener implements SystemUriOpener {
@@ -512,6 +560,7 @@ struct Index {
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
   private hotelAgentRuntime: HotelAgentRuntime | null = null;
+  private hotelAgentRuntimeFingerprint: string = '';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -602,6 +651,10 @@ struct Index {
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
     void this.requestLocationPermissionOnLaunch();
+  }
+
+  aboutToDisappear(): void {
+    this.disposeHotelRuntime();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -1111,10 +1164,13 @@ struct Index {
   }
 
   private hotelRuntime(): HotelAgentRuntime {
-    if (this.hotelAgentRuntime !== null) {
+    const settings = this.getSettings();
+    const fingerprint = hotelModelSettingsFingerprint(settings);
+    if (this.hotelAgentRuntime !== null &&
+      this.hotelAgentRuntimeFingerprint === fingerprint) {
       return this.hotelAgentRuntime;
     }
-    const settings = this.getSettings();
+    this.disposeHotelRuntime();
     const provider = new LlmProvider(
       settings.provider,
       settings.apiKey,
@@ -1136,7 +1192,16 @@ struct Index {
       }
     };
     this.hotelAgentRuntime = new HotelAgentRuntime(options);
+    this.hotelAgentRuntimeFingerprint = fingerprint;
     return this.hotelAgentRuntime;
+  }
+
+  private disposeHotelRuntime(): void {
+    if (this.hotelAgentRuntime !== null) {
+      this.hotelAgentRuntime.dispose();
+      this.hotelAgentRuntime = null;
+    }
+    this.hotelAgentRuntimeFingerprint = '';
   }
 
   private currentPanelState(): ConnectionPanelState {
@@ -1707,10 +1772,7 @@ struct Index {
   }
 
   private resetCurrentSession(): void {
-    if (this.hotelAgentRuntime !== null) {
-      this.hotelAgentRuntime.stop();
-      this.hotelAgentRuntime = null;
-    }
+    this.disposeHotelRuntime();
     this.showHistory = false;
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
@@ -1830,21 +1892,30 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
-      if (actionId.length === 0 && shouldRouteToHotelAgent(trimmed)) {
-        const ok = await this.hotelRuntime().submit(trimmed);
-        if (!ok) {
-          throw new Error('酒店四 Agent 运行时未能完成当前查询。');
+      const routeToHotel = actionId.length === 0 && shouldRouteToHotelAgent(trimmed);
+      if (!routeToHotel && this.hotelAgentRuntime !== null) {
+        this.hotelAgentRuntime.cancelActiveTurn('non_hotel_prompt');
+      }
+      if (routeToHotel) {
+        const hotelOutcome: HotelTurnOutcome = await this.hotelRuntime().submit(trimmed);
+        if (!hotelOutcome.ok) {
+          throw new Error(hotelOutcome.message.length > 0 ?
+            hotelOutcome.message : '酒店四 Agent 运行时未能完成当前查询。');
         }
         this.isAwaitingFirstSurface = false;
+        const readyMessage = hotelTurnReadyMessage(
+          hotelOutcome.status,
+          this.currentSurface.title
+        );
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'ready',
-          message: this.currentSurface.title + ' 已返回真实酒店结果。',
+          message: readyMessage,
           requestDebug: 'hotel-agent-runtime',
           assistantDebug: this.currentSurface.title,
           error: ''
         }));
-        this.appendMessage('assistant', this.currentSurface.title + ' 已返回 A2UI 结果。');
+        this.appendMessage('assistant', readyMessage);
         return;
       }
       const result: A2uiCallResult = await callLocalModel(
@@ -3308,6 +3379,21 @@ struct Index {
       return;
     }
     if (action.id === 'hotel.search.restore') {
+      if (this.hotelAgentRuntime !== null) {
+        const restored = this.hotelAgentRuntime.restoreSearchSurface();
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: restored,
+          status: restored ? 'ready' : 'error',
+          message: restored ? '已返回酒店搜索结果。' : '酒店搜索结果已失效。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: restored ? '' : 'hotel search surface restore rejected'
+        }));
+        if (restored) {
+          this.hotelReturnSurface = null;
+        }
+        return;
+      }
       this.restoreHotelReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
       return;
     }
@@ -3641,9 +3727,6 @@ struct Index {
     }
     if (this.hotelAgentRuntime !== null &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.call')) {
-      if (action.id === 'hotel.detail') {
-        this.rememberHotelReturnSurface();
-      }
       this.isBusy = true;
       try {
         const ok = await this.hotelAgentRuntime.runAction(action);
