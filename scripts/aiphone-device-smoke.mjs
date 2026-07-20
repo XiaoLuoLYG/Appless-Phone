@@ -11,6 +11,7 @@ import {
   hotelDetailClickLocator,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
+  shouldRetryHotelReturnToApp,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -1897,12 +1898,20 @@ async function exerciseHotelSystemAction(layout, index, actionId, label, actionN
   runtime.evidenceCaptured = screenPath.length > 0;
 
   // Safety boundary: after a tel: intent, the smoke performs no dialer tap.
-  // The only injected event on the external surface is Back.
-  hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
-  await sleep(1400);
-  const restoredForeground = captureForegroundAbility(
-    `query-${index + 1}-hotel-${actionName}-restored-ability.txt`
-  );
+  // The only injected events on the external surface are bounded Back presses.
+  let backPressCount = 0;
+  let restoredForeground = {
+    bundleName: externalForeground.bundleName,
+    path: externalForeground.path
+  };
+  do {
+    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+    backPressCount += 1;
+    await sleep(1400);
+    restoredForeground = captureForegroundAbility(
+      `query-${index + 1}-hotel-${actionName}-restored-ability-${backPressCount}.txt`
+    );
+  } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
   runtime.returnedToApp = restoredForeground.bundleName === 'com.example.aiphonedemo';
   let restoredLayout = located.layout;
   let restoredLayoutPath = '';
@@ -1925,6 +1934,7 @@ async function exerciseHotelSystemAction(layout, index, actionId, label, actionN
     systemSurfaceRecognized,
     foregroundBundle: externalForeground.bundleName,
     restoredBundle: restoredForeground.bundleName,
+    backPressCount,
     interactionPolicy: actionId === 'hotel.call'
       ? 'prefill screenshot then Back; no final dial tap'
       : 'system map screenshot then Back',

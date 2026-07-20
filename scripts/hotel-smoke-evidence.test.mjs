@@ -9,6 +9,7 @@ import {
   hotelSearchActionEvidence,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
+  shouldRetryHotelReturnToApp,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -305,4 +306,13 @@ test('recognizes only the foreground system map or dialer bundle', () => {
     isExpectedHotelSystemBundle('hotel.call', 'com.example.aiphonedemo'),
     false
   );
+});
+
+test('retries only bounded Back navigation until AIPhone is foreground', () => {
+  assert.equal(shouldRetryHotelReturnToApp('com.huawei.hmos.maps.app', 1), true);
+  assert.equal(shouldRetryHotelReturnToApp('com.huawei.hmos.maps.app', 2), true);
+  assert.equal(shouldRetryHotelReturnToApp('com.huawei.hmos.maps.app', 3), false);
+  assert.equal(shouldRetryHotelReturnToApp('com.example.aiphonedemo', 1), false);
+  assert.equal(shouldRetryHotelReturnToApp('', 1), true);
+  assert.equal(shouldRetryHotelReturnToApp('com.ohos.contacts', -1), false);
 });

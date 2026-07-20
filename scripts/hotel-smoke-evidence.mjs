@@ -69,6 +69,15 @@ export function isExpectedHotelSystemBundle(actionId, bundleName) {
   return false;
 }
 
+export function shouldRetryHotelReturnToApp(bundleName, backPressCount, maxBackPresses = 3) {
+  return bundleName !== 'com.example.aiphonedemo' &&
+    Number.isInteger(backPressCount) &&
+    Number.isInteger(maxBackPresses) &&
+    backPressCount >= 0 &&
+    maxBackPresses > 0 &&
+    backPressCount < maxBackPresses;
+}
+
 function sanitizeAction(action) {
   const actionId = typeof action?.id === 'string' ? action.id : '';
   const args = objectArgs(action?.args) ? action.args : {};
