@@ -349,8 +349,8 @@ export function hotelContactDetailsFromPayload(rawJson: string): HotelContactDet
     formattedAddress: candidate.formattedAddress,
     latitude: candidate.latitude,
     longitude: candidate.longitude,
-    nationalPhoneNumber: textOf(place.nationalPhoneNumber).trim(),
-    internationalPhoneNumber: textOf(place.internationalPhoneNumber).trim()
+    nationalPhoneNumber: textOf(place.nationalPhoneNumber),
+    internationalPhoneNumber: textOf(place.internationalPhoneNumber)
   };
 }
 

@@ -5,11 +5,19 @@ import {
   googleMapsDirectionsUrl,
   hotelContactCandidatesFromPayload,
   hotelContactDetailsFromPayload,
+  hotelContactFromDetails,
   mapsFoodRecordFromResult,
   mapsRouteResult,
   mapsTextSearchBody,
   mapsTextSearchResultsFromPayload
 } from '@loop/agent-core';
+import { unsafeHotelPhoneValues } from './HotelPhoneSafetyVectors';
+
+interface HotelPhonePayload {
+  id: string;
+  nationalPhoneNumber: string;
+  internationalPhoneNumber: string;
+}
 
 export default function mapsApiClientTest() {
   describe('mapsApiClient', () => {
@@ -49,6 +57,35 @@ export default function mapsApiClientTest() {
       expect(candidates[0].longitude === null).assertTrue();
       expect(details.internationalPhoneNumber).assertEqual('');
       expect(details.nationalPhoneNumber).assertEqual('010-12345678');
+      expect(hotelContactFromDetails(details, 'place-123')?.displayPhone)
+        .assertEqual('010-12345678');
+      expect(hotelContactFromDetails(details, 'place-123')?.dialPhone)
+        .assertEqual('01012345678');
+    });
+
+    it('preserves unsafe provider phone characters through parsing for rejection', 0, () => {
+      const rejected = unsafeHotelPhoneValues();
+      for (let index = 0; index < rejected.length; index++) {
+        const internationalPayload: HotelPhonePayload = {
+          id: 'place-unsafe',
+          nationalPhoneNumber: '',
+          internationalPhoneNumber: rejected[index]
+        };
+        const nationalPayload: HotelPhonePayload = {
+          id: 'place-unsafe',
+          nationalPhoneNumber: rejected[index],
+          internationalPhoneNumber: ''
+        };
+        const internationalDetails =
+          hotelContactDetailsFromPayload(JSON.stringify(internationalPayload));
+        const nationalDetails =
+          hotelContactDetailsFromPayload(JSON.stringify(nationalPayload));
+
+        expect(internationalDetails.internationalPhoneNumber).assertEqual(rejected[index]);
+        expect(nationalDetails.nationalPhoneNumber).assertEqual(rejected[index]);
+        expect(hotelContactFromDetails(internationalDetails, 'place-unsafe') === null).assertTrue();
+        expect(hotelContactFromDetails(nationalDetails, 'place-unsafe') === null).assertTrue();
+      }
     });
 
     it('maps Google Places results into food records with food coordinate order', 0, () => {
