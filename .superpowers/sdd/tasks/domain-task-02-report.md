@@ -77,7 +77,7 @@ The former A2UI-snapshot extraction path is absent. The final gate explicitly co
 - Food providers distinguish preflight/config failures from attempted provider failures.
 - Missing food configuration is `FOOD_CONFIG_MISSING` and is not retryable.
 - Attempted food provider failures are `FOOD_PROVIDER_ERROR`, retain warnings and source identities, and are retryable.
-- Travel errors are retryable only when at least one child provider produced real source evidence.
+- Travel errors are retryable only when at least one child error explicitly reports `retryable === true`; source evidence alone never changes retryability.
 - Non-empty results with source warnings are `partial`; empty train results remain `empty`; provider/config failures remain `error`.
 
 ### Legacy UI compatibility
