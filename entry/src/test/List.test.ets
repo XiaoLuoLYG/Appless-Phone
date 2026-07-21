@@ -84,6 +84,7 @@ import actionPlanRunnerTest from './ActionPlanRunner.test';
 import actionAgentTest from './ActionAgent.test';
 import a2uiLayoutMergerTest from './A2uiLayoutMerger.test';
 import checkoutWebOverlayTest from './CheckoutWebOverlay.test';
+import trainPresaleProviderTest from './TrainPresaleProvider.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -164,6 +165,7 @@ export default function testsuite() {
   actionAgentTest();
   a2uiLayoutMergerTest();
   checkoutWebOverlayTest();
+  trainPresaleProviderTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

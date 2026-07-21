@@ -258,6 +258,73 @@ interface StationCache {
   names: string[];
 }
 
+export interface PresaleRange {
+  today: string;
+  lastSaleDate: string;
+}
+
+export interface FutureTrainMetadata {
+  trainCode: string;
+  trainNo: string;
+  from: string;
+  to: string;
+  fromStopNo: string;
+  toStopNo: string;
+  depart: string;
+  arrive: string;
+}
+
+interface PresaleResponseData {
+  today?: string;
+  hlwlptysq?: string;
+}
+
+interface PresaleResponsePayload {
+  status?: boolean;
+  data?: PresaleResponseData;
+}
+
+interface FutureTrainSearchItem {
+  station_train_code?: string;
+  train_no?: string;
+  from_station?: string;
+  to_station?: string;
+}
+
+interface FutureTrainStop {
+  station_name?: string;
+  station_train_code?: string;
+  station_no?: string;
+  start_time?: string;
+  arrive_time?: string;
+}
+
+interface FutureTrainStopData {
+  data?: FutureTrainStop[];
+}
+
+interface FutureTrainPayload {
+  status?: boolean;
+  data?: FutureTrainSearchItem[] | FutureTrainStopData;
+}
+
+interface StationSaleTimeItem {
+  name?: string;
+  value?: string;
+}
+
+interface StationSaleTimePayload {
+  status?: boolean;
+  data?: StationSaleTimeItem[];
+}
+
+interface TrainPriceData {}
+
+interface TrainPricePayload {
+  status?: boolean;
+  data?: TrainPriceData;
+}
+
 interface StationDefault {
   city: string;
   station: string;
@@ -4200,6 +4267,171 @@ export function build12306BookingUrl(
     '&flag=N,N,Y';
 }
 
+function normalizeOfficialDate(value: string, fallbackYear: string = ''): string {
+  const compact = /^(20\d{2})(\d{2})(\d{2})$/.exec(value.trim());
+  if (compact !== null) {
+    return compact[1] + '-' + compact[2] + '-' + compact[3];
+  }
+  const iso = /^(20\d{2})[-年](\d{1,2})[-月](\d{1,2})日?$/.exec(value.trim());
+  if (iso !== null) {
+    return iso[1] + '-' + pad2(Number(iso[2])) + '-' + pad2(Number(iso[3]));
+  }
+  const monthDay = /^(\d{1,2})月(\d{1,2})日$/.exec(value.trim());
+  if (monthDay !== null && /^20\d{2}$/.test(fallbackYear)) {
+    return fallbackYear + '-' + pad2(Number(monthDay[1])) + '-' + pad2(Number(monthDay[2]));
+  }
+  return '';
+}
+
+export function parsePresaleRange(payload: string): PresaleRange | undefined {
+  try {
+    const parsed = JSON.parse(payload) as PresaleResponsePayload;
+    if (parsed.status !== true || parsed.data === undefined) {
+      return undefined;
+    }
+    const today = normalizeOfficialDate(parsed.data.today === undefined ? '' : parsed.data.today);
+    const lastSaleDate = normalizeOfficialDate(parsed.data.hlwlptysq === undefined ? '' : parsed.data.hlwlptysq, today.substring(0, 4));
+    return today.length > 0 && lastSaleDate.length > 0 ? { today: today, lastSaleDate: lastSaleDate } : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+export function extractExactTrainCode(text: string): string {
+  const match = /(?:^|[^A-Z0-9])([GDCZTKYLSP]\d{1,5})(?:次|$|[^A-Z0-9])/i.exec(text);
+  return match === null ? '' : match[1].toUpperCase();
+}
+
+function emptyFutureTrainMetadata(trainCode: string): FutureTrainMetadata {
+  return {
+    trainCode: trainCode,
+    trainNo: '',
+    from: '',
+    to: '',
+    fromStopNo: '',
+    toStopNo: '',
+    depart: '',
+    arrive: ''
+  };
+}
+
+export function parseFutureTrainMetadata(payload: string, trainCode: string): FutureTrainMetadata | undefined {
+  const exactCode = trainCode.trim().toUpperCase();
+  if (exactCode.length === 0) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(payload) as FutureTrainPayload;
+    if (parsed.status === false || parsed.data === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(parsed.data)) {
+      for (let index = 0; index < parsed.data.length; index++) {
+        const item = parsed.data[index];
+        if ((item.station_train_code === undefined ? '' : item.station_train_code.toUpperCase()) !== exactCode) {
+          continue;
+        }
+        const trainNo = item.train_no === undefined ? '' : item.train_no.trim();
+        const from = item.from_station === undefined ? '' : item.from_station.trim();
+        const to = item.to_station === undefined ? '' : item.to_station.trim();
+        if (trainNo.length > 0 && from.length > 0 && to.length > 0) {
+          const metadata = emptyFutureTrainMetadata(exactCode);
+          metadata.trainNo = trainNo;
+          metadata.from = from;
+          metadata.to = to;
+          return metadata;
+        }
+      }
+      return undefined;
+    }
+    const stops = parsed.data.data === undefined ? [] : parsed.data.data;
+    if (stops.length < 2 || (stops[0].station_train_code === undefined ? '' : stops[0].station_train_code.toUpperCase()) !== exactCode) {
+      return undefined;
+    }
+    const origin = stops[0];
+    const destination = stops[stops.length - 1];
+    const from = origin.station_name === undefined ? '' : origin.station_name.trim();
+    const to = destination.station_name === undefined ? '' : destination.station_name.trim();
+    const fromStopNo = origin.station_no === undefined ? '' : origin.station_no.trim();
+    const toStopNo = destination.station_no === undefined ? '' : destination.station_no.trim();
+    const depart = origin.start_time === undefined ? '' : origin.start_time.trim();
+    const arrive = destination.arrive_time === undefined ? '' : destination.arrive_time.trim();
+    if (from.length === 0 || to.length === 0 || fromStopNo.length === 0 || toStopNo.length === 0 ||
+      !/^\d{2}:\d{2}$/.test(depart) || !/^\d{2}:\d{2}$/.test(arrive)) {
+      return undefined;
+    }
+    const metadata = emptyFutureTrainMetadata(exactCode);
+    metadata.from = from;
+    metadata.to = to;
+    metadata.fromStopNo = fromStopNo;
+    metadata.toStopNo = toStopNo;
+    metadata.depart = depart;
+    metadata.arrive = arrive;
+    return metadata;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+export function parseStationSaleTime(payload: string, stationName: string): string {
+  try {
+    const parsed = JSON.parse(payload) as StationSaleTimePayload;
+    if (parsed.status !== true || parsed.data === undefined) {
+      return '';
+    }
+    for (let index = 0; index < parsed.data.length; index++) {
+      const item = parsed.data[index];
+      if (item.name !== stationName || item.value === undefined || !/^\d{2}:\d{2}$/.test(item.value.trim())) {
+        continue;
+      }
+      return item.value.trim();
+    }
+  } catch (_error) {
+    return '';
+  }
+  return '';
+}
+
+export function parseLowestTrainPrice(payload: string): number | undefined {
+  try {
+    const parsed = JSON.parse(payload) as TrainPricePayload;
+    if (parsed.status !== true || parsed.data === undefined) {
+      return undefined;
+    }
+    let lowest: number | undefined = undefined;
+    const matcher = /"[A-Z0-9]+"\s*:\s*"?(\d+(?:\.\d{1,2})?)"?/g;
+    const dataText = JSON.stringify(parsed.data);
+    let match: RegExpExecArray | null = matcher.exec(dataText);
+    while (match !== null) {
+      const price = Number(match[1]);
+      if (price > 0 && (lowest === undefined || price < lowest)) {
+        lowest = price;
+      }
+      match = matcher.exec(dataText);
+    }
+    return lowest;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function build12306FutureTrainSearchUrl(date: string, trainCode: string): string {
+  return 'https://search.12306.cn/search/v1/train/search?keyword=' + encodeURIComponent(trainCode) +
+    '&date=' + encodeURIComponent(date.replace(/-/g, '')) + '&_=' + Date.now().toString();
+}
+
+function build12306TrainStopsUrl(trainNo: string, fromCode: string, toCode: string, date: string): string {
+  return 'https://kyfw.12306.cn/otn/czxx/queryByTrainNo?train_no=' + encodeURIComponent(trainNo) +
+    '&from_station_telecode=' + encodeURIComponent(fromCode) +
+    '&to_station_telecode=' + encodeURIComponent(toCode) + '&depart_date=' + encodeURIComponent(date);
+}
+
+function build12306TrainPriceUrl(metadata: FutureTrainMetadata, date: string): string {
+  return 'https://kyfw.12306.cn/otn/leftTicket/queryTicketPrice?train_no=' + encodeURIComponent(metadata.trainNo) +
+    '&from_station_no=' + encodeURIComponent(metadata.fromStopNo) + '&to_station_no=' + encodeURIComponent(metadata.toStopNo) +
+    '&seat_types=OM9&train_date=' + encodeURIComponent(date);
+}
+
 function redirected12306Url(text: string, date: string, fromCode: string, toCode: string): string {
   const match = /"c_url"\s*:\s*"([^"]+)"/.exec(text);
   if (match === null || match[1].length === 0) {
@@ -4290,6 +4522,78 @@ async function request12306LeftTicket(date: string, fromCode: string, toCode: st
     }
   }
   return lastResponse;
+}
+
+async function resolveFuturePresaleTrain(
+  date: string,
+  source: string,
+  fromName: string,
+  fromCode: string,
+  toName: string,
+  toCode: string,
+  cookieHeader: string
+): Promise<A2uiTrainData | undefined> {
+  const trainCode = extractExactTrainCode(source);
+  if (trainCode.length === 0) {
+    return undefined;
+  }
+  const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
+  const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ? parsePresaleRange(presaleResponse.text) : undefined;
+  if (range === undefined || date <= range.lastSaleDate) {
+    return undefined;
+  }
+  const trainResponse = await requestText(build12306FutureTrainSearchUrl(date, trainCode), userAgentHeaders());
+  const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainMetadata(trainResponse.text, trainCode) : undefined;
+  if (searched === undefined || searched.from !== fromName || searched.to !== toName) {
+    return undefined;
+  }
+  const stopsResponse = await requestText(build12306TrainStopsUrl(searched.trainNo, fromCode, toCode, date), leftTicketHeaders(cookieHeader));
+  const stops = stopsResponse.code >= 200 && stopsResponse.code < 300 ? parseFutureTrainMetadata(stopsResponse.text, trainCode) : undefined;
+  if (stops === undefined || stops.from !== fromName || stops.to !== toName) {
+    return undefined;
+  }
+  const saleResponse = await requestText('https://mobile.12306.cn/weixin/wxcore/queryQssj?stationName=' + encodeURIComponent(fromName), userAgentHeaders());
+  const saleTime = saleResponse.code >= 200 && saleResponse.code < 300 ? parseStationSaleTime(saleResponse.text, fromName) : '';
+  if (saleTime.length === 0) {
+    return undefined;
+  }
+  const priceResponse = await requestText(build12306TrainPriceUrl({
+    trainCode: trainCode,
+    trainNo: searched.trainNo,
+    from: fromName,
+    to: toName,
+    fromStopNo: stops.fromStopNo,
+    toStopNo: stops.toStopNo,
+    depart: stops.depart,
+    arrive: stops.arrive
+  }, date), leftTicketHeaders(cookieHeader));
+  const price = priceResponse.code >= 200 && priceResponse.code < 300 ? parseLowestTrainPrice(priceResponse.text) : undefined;
+  if (price === undefined) {
+    return undefined;
+  }
+  return {
+    trainCode: trainCode,
+    from: fromName,
+    to: toName,
+    depart: stops.depart,
+    arrive: stops.arrive,
+    duration: '',
+    seats: '',
+    status: '待开售',
+    business: '',
+    first: '',
+    second: '',
+    noSeat: '',
+    hardSeat: '',
+    sleeperSoft: '',
+    price: price.toString(),
+    bookingUrl: build12306BookingUrl(date, fromName, fromCode, toName, toCode),
+    travelDate: date,
+    saleState: 'presale',
+    saleAt: date + 'T' + saleTime + ':00+08:00',
+    fromCode: fromCode,
+    toCode: toCode
+  };
 }
 
 async function load12306Stations(): Promise<StationCache> {
@@ -4466,7 +4770,12 @@ function normalizeTrainRecord(item: A2uiTrainData, bookingUrl: string = ''): A2u
     hardSeat: item.hardSeat,
     sleeperSoft: item.sleeperSoft,
     price: item.price === undefined ? '' : item.price,
-    bookingUrl: bookingUrl
+    bookingUrl: bookingUrl,
+    travelDate: item.travelDate,
+    saleState: item.saleState,
+    saleAt: item.saleAt,
+    fromCode: item.fromCode,
+    toCode: item.toCode
   };
 }
 
@@ -8894,6 +9203,16 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
   const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
   aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
+  const presaleTrain = await resolveFuturePresaleTrain(date, source, fromName, fromCode, toName, toCode, cookieHeader);
+  if (presaleTrain !== undefined) {
+    return trainResultA2ui(
+      surfaceId,
+      '12306 预售车次',
+      '以下车次尚未开售；起售时间和票价均来自 12306 官方响应。',
+      '已解析 ' + date + ' ' + presaleTrain.trainCode + ' 的预售提醒信息。',
+      [presaleTrain]
+    );
+  }
   const response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
   if (response.code < 200 || response.code >= 300) {
     return errorA2ui(
