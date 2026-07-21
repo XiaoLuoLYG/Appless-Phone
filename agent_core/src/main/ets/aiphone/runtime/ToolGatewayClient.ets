@@ -34,7 +34,6 @@ import {
   GOOGLE_OAUTH_SETUP_URL,
   calendarAuthRequiredA2ui,
   gmailAuthRequiredA2ui,
-  gmailBlockedSendA2ui,
   gmailDraftPreviewA2ui,
   gmailOpenWebA2ui,
   gmailSearchStructuredDataA2ui,
@@ -10792,6 +10791,36 @@ function mailDraftArgs(args: Object | null): MailDraftArgs {
   };
 }
 
+function mailReplyCommandFromArgs(args: Object | null): MailReplyCommand {
+  const record = mailArgs(args);
+  const draft = mailDraftArgs(args);
+  return {
+    requestKey: textOf(record.requestKey),
+    provider: draft.provider,
+    accountLabel: draft.accountLabel,
+    threadId: draft.threadId,
+    messageId: draft.messageId,
+    internetMessageId: draft.internetMessageId,
+    to: draft.to,
+    subject: draft.subject,
+    body: draft.body,
+    replyMode: draft.replyMode,
+    contextSummary: draft.contextSummary
+  };
+}
+
+function validGmailReplyCommand(command: MailReplyCommand): boolean {
+  return command.provider.trim().toLowerCase() === 'gmail' &&
+    command.threadId.trim().length > 0 &&
+    command.messageId.trim().length > 0 &&
+    command.requestKey.trim() === 'gmail:' + command.threadId.trim() &&
+    command.to.length > 0 &&
+    command.to.every((recipient: string): boolean => recipient.trim().length > 0) &&
+    command.subject.trim().length > 0 &&
+    command.body.trim().length > 0 &&
+    command.replyMode.trim() === 'reply';
+}
+
 interface GmailDraftComposioArgs {
   to: string[];
   recipientEmail: string;
@@ -12093,9 +12122,47 @@ function mailDetailDynamicResult(toolId: string, data: MailThreadStructuredData)
   };
 }
 
-async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalGmailTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'gmail.message.send') {
-    return gmailBlockedSendA2ui(surfaceId, toolId);
+    if (actionId !== 'html_mail_reply_send') {
+      return genericToolResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 回复未发送', status: 'error',
+        summary: 'Gmail 回复只能由当前邮件回复卡片的发送按钮触发。',
+        rows: [{ label: 'Action ID', value: actionId }], rawPreview: ''
+      }]);
+    }
+    const command = mailReplyCommandFromArgs(args);
+    if (!validGmailReplyCommand(command)) {
+      return genericToolResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 回复未发送', status: 'error',
+        summary: 'Gmail reply requires the exact current thread, message, recipient, and body.',
+        rows: [{ label: 'Error', value: 'GMAIL_REPLY_ARGS_INVALID' }], rawPreview: ''
+      }]);
+    }
+    try {
+      const operation = await sendConfiguredMailReply(command);
+      return genericToolResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 回复已发送', status: operation.status,
+        summary: operation.message,
+        rows: [
+          { label: 'Request Key', value: operation.requestKey },
+          { label: 'Provider', value: operation.provider },
+          { label: 'Operation', value: operation.operation }
+        ], rawPreview: ''
+      }]);
+    } catch (error) {
+      const message = describeThrown(error);
+      return genericToolResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 回复发送失败', status: 'error',
+        summary: message, rows: [{ label: 'Error', value: message }], rawPreview: ''
+      }]);
+    }
   }
   if (toolId === 'gmail.open.web') {
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
@@ -12151,7 +12218,7 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
   if (toolId === 'mail.draft.create') {
     const parsed = mailDraftArgs(args);
     if (parsed.provider === 'gmail') {
-      return callLocalGmailTool('gmail.draft.create', prompt, surfaceId, args);
+      return callLocalGmailTool('gmail.draft.create', prompt, surfaceId, '', args);
     }
     if (parsed.provider === 'qq') {
       try {
@@ -13842,7 +13909,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalMailTool(toolId, prompt, surfaceId, args);
   }
   if (isGmailToolId(toolId)) {
-    return callLocalGmailTool(toolId, prompt, surfaceId, args);
+    return callLocalGmailTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isMediaToolId(toolId)) {
     return callLocalMediaTool(toolId, prompt, surfaceId, args);

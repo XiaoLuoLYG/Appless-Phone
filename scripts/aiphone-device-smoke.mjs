@@ -300,9 +300,7 @@ const visibleDomainMarkers = [
   'gmail.message.send',
   'Composio Gmail',
   '授权 Gmail',
-  'UnsafeActionBlocked',
   '不会模拟 Gmail 邮件',
-  '不会自动发送 Gmail',
   'AMAP_MAPS_API_KEY',
   'Authorization',
   'API_KEY',
@@ -565,7 +563,7 @@ function expectedCaseForQuery(query) {
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
     return {
       expectsTool: true,
-      expectedToolId: 'gmail.message.send'
+      expectedToolId: 'gmail.draft.create'
     };
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
@@ -1670,7 +1668,7 @@ function layoutExpectationsForQuery(query) {
     return ['Gmail Web', 'gmail.open.web', 'https://mail.google.com'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /直接发送|立刻发送|马上发送|不确认直接发/.test(query)) {
-    return ['UnsafeActionBlocked', '不会自动发送 Gmail', 'gmail.message.send'];
+    return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', '不会模拟 Gmail 邮件'];
   }
   if (/Gmail|谷歌邮箱|谷歌邮件/i.test(query) && /写一封|写邮件|起草|草稿|回复|撰写/.test(query)) {
     return ['gmail.draft.create', 'Composio Gmail', '授权 Gmail', 'Draft saved', 'Saved in Gmail', 'ready_to_apply', '不会模拟 Gmail 邮件'];
@@ -2721,7 +2719,7 @@ async function runQuery(query, index, expectedTool) {
   if (expectedToolId === 'gmail.mail.search' && hasTechnicalGmailArgsCard(evidenceText)) {
     layoutBlockingHits.push('gmail-technical-args-card');
   }
-  if (expectedToolId === 'gmail.message.send') {
+  if (expectedToolId === 'gmail.draft.create') {
     for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
       if (blockingPattern.pattern.test(evidenceText)) {
         layoutBlockingHits.push(blockingPattern.name);
@@ -3263,7 +3261,7 @@ for (const blockingPattern of finalLayoutBlockingPatterns) {
     finalLayoutBlockingHits.push(blockingPattern.name);
   }
 }
-if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.message.send') {
+if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.draft.create') {
   for (const blockingPattern of forbiddenGmailSendSuccessPatterns) {
     if (blockingPattern.pattern.test(finalLayoutText)) {
       finalLayoutBlockingHits.push(blockingPattern.name);

@@ -428,35 +428,6 @@ export function gmailDraftPreviewA2ui(surfaceId: string, result: DynamicGenericT
   );
 }
 
-export function gmailBlockedSendA2ui(surfaceId: string, toolId: string): string {
-  const blockedSummary = 'UnsafeActionBlocked：不会自动发送 Gmail。请先查看草稿内容，确认收件人和正文后，创建或打开 Gmail 草稿由用户手动发送。';
-  const result: A2uiGenericToolResultData = {
-    sourceTag: 'Safety policy',
-    toolName: toolId,
-    title: 'UnsafeActionBlocked',
-    status: 'blocked',
-    summary: blockedSummary,
-    rows: [
-      { label: 'Blocked action', value: toolId },
-      { label: 'Next step', value: '创建或打开 Gmail 草稿，用户确认后手动发送。' }
-    ],
-    rawPreview: JSON.stringify({
-      blocked: true,
-      reason: 'unsafe_action_blocked',
-      toolId: toolId
-    })
-  };
-
-  return genericResultsA2ui(
-    surfaceId,
-    'UnsafeActionBlocked',
-    'blocked',
-    'blocked',
-    [result],
-    summary(blockedSummary, toolId, 1)
-  );
-}
-
 export function gmailOpenWebA2ui(surfaceId: string, url: string): string {
   const openSummary = '已打开 Gmail 网页版，可使用当前浏览器会话继续处理邮件。';
   const result: A2uiGenericToolResultData = {

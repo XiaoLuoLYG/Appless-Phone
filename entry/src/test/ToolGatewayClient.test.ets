@@ -2466,33 +2466,73 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps Gmail blocked-send and open-web A2UI on the local gateway', 0, async () => {
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const blockedResult: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.message.send',
-        '帮我 Gmail 直接发送这封邮件',
-        'surface_gmail_blocked',
-        'client_intent_fallback',
-        noop
-      );
-      const webResult: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.open.web',
-        '打开 Gmail 网页版',
-        'surface_gmail_web',
-        'client_intent_fallback',
-        noop
-      );
+    it('routes Gmail reply send fallback to the provider and keeps open-web local', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const providerResult: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.message.send',
+          '发送当前 Gmail 回复',
+          'surface_gmail_send',
+          'html_mail_reply_send',
+          noop,
+          null,
+          looseObject('{"requestKey":"gmail:thread-1","provider":"gmail",' +
+            '"accountLabel":"work@example.com","threadId":"thread-1","messageId":"message-1",' +
+            '"to":["alice@example.com"],"subject":"Re: Demo","body":"Confirmed.",' +
+            '"replyMode":"reply","contextSummary":"Demo"}')
+        );
+        const webResult: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.open.web',
+          '打开 Gmail 网页版',
+          'surface_gmail_web',
+          'client_intent_fallback',
+          noop
+        );
 
-      expect(blockedResult.ok).assertTrue();
-      expect(genericToolResults(blockedResult.surface)[0].status).assertEqual('blocked');
-      expect(genericToolResults(blockedResult.surface)[0].summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
+        expect(providerResult.ok).assertTrue();
+        expect(genericToolResults(providerResult.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(providerResult.surface)[0].summary.indexOf('Composio 未配置')).assertLarger(-1);
+        expect(providerResult.raw.indexOf('UnsafeActionBlocked')).assertEqual(-1);
+        expect(providerResult.raw.indexOf('Gmail 回复已发送')).assertEqual(-1);
 
-      expect(webResult.ok).assertTrue();
-      expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
-      expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
-      expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+        expect(webResult.ok).assertTrue();
+        expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
+        expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
+        expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects incomplete Gmail reply fallback identity before provider execution', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.message.send',
+          '发送当前 Gmail 回复',
+          'surface_gmail_send_invalid',
+          'html_mail_reply_send',
+          noop,
+          null,
+          looseObject('{"requestKey":"gmail:wrong-thread","provider":"gmail",' +
+            '"accountLabel":"work@example.com","threadId":"thread-1","messageId":"message-1",' +
+            '"to":["alice@example.com"],"subject":"Re: Demo","body":"Confirmed.",' +
+            '"replyMode":"reply","contextSummary":"Demo"}')
+        );
+        const rendered = genericToolResults(result.surface)[0];
+
+        expect(result.ok).assertTrue();
+        expect(rendered.status).assertEqual('error');
+        expect(rendered.summary.indexOf('exact current thread')).assertLarger(-1);
+        expect(rendered.summary.indexOf('Composio 未配置')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
     });
 
     it('uses Composio auth state for Gmail fixed tools when no Composio config exists', 0, async () => {

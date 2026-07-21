@@ -183,6 +183,38 @@ function toolDefinitionBody(source, toolId) {
   return blockBody(liveSource, toolIdStart < 0 ? -1 : liveSource.lastIndexOf('{', toolIdStart));
 }
 
+function toolDefinitionStringField(source, toolId, field) {
+  const body = toolDefinitionBody(source, toolId);
+  const match = body.match(new RegExp(`\\b${escapeRegex(field)}\\s*:\\s*'([^']*)'`));
+  return match === null ? '' : match[1];
+}
+
+function toolDefinitionStringArrayField(source, toolId, field) {
+  const body = toolDefinitionBody(source, toolId);
+  const match = body.match(new RegExp(`\\b${escapeRegex(field)}\\s*:\\s*\\[([\\s\\S]*?)\\]`));
+  return match === null ? [] : [...match[1].matchAll(/'([^']*)'/g)].map((item) => item[1]);
+}
+
+function toolDefinitionContract(source, toolId) {
+  return {
+    toolId: toolDefinitionStringField(source, toolId, 'toolId'),
+    domain: toolDefinitionStringField(source, toolId, 'domain'),
+    intent: toolDefinitionStringField(source, toolId, 'intent'),
+    riskLevel: toolDefinitionStringField(source, toolId, 'riskLevel'),
+    backendPriority: toolDefinitionStringArrayField(source, toolId, 'backendPriority'),
+    authModes: toolDefinitionStringArrayField(source, toolId, 'authModes'),
+    inputSchema: toolDefinitionStringField(source, toolId, 'inputSchema'),
+    outputSchema: toolDefinitionStringField(source, toolId, 'outputSchema'),
+    a2uiComponent: toolDefinitionStringField(source, toolId, 'a2uiComponent'),
+    actions: toolDefinitionStringArrayField(source, toolId, 'actions')
+  };
+}
+
+function toolDefinitionContractsMatch(left, right, toolId) {
+  return JSON.stringify(toolDefinitionContract(left, toolId)) ===
+    JSON.stringify(toolDefinitionContract(right, toolId));
+}
+
 function hasSystemIntentDefinition(source, toolId) {
   const body = toolDefinitionBody(source, toolId);
   return body.length > 0 && /backendPriority:\s*\[\s*'system_intent'\s*\]/.test(body);
@@ -378,6 +410,22 @@ function verifyArchitectureVerifier() {
   const decoyConstructor = liveDeclarationBody(decoyBusRuntime, 'constructor(options: HotelAgentRuntimeOptions)');
   assert(['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent'].every((role) => new RegExp(`new\\s+${role}\\s*\\(\\s*this\\.bus\\b`).test(decoyConstructor)), 'fixture reproduces former bus-token predicate');
   assert(!hasHotelRolesOnBus(decoyBusRuntime), 'verifier rejects constructor string bus decoys');
+
+  const registryContract = `{
+    toolId: 'gmail.message.send', domain: 'gmail', intent: 'gmail.message.send',
+    riskLevel: 'confirm_required', backendPriority: ['oauth_api'], authModes: ['oauth'],
+    inputSchema: 'mailReplyCommand', outputSchema: 'mailReplyOperationResult',
+    a2uiComponent: 'GenericToolResults', actions: []
+  }`;
+  const driftedRegistryContract = registryContract.replace("riskLevel: 'confirm_required'", "riskLevel: 'blocked'");
+  assert(
+    toolDefinitionContractsMatch(registryContract, registryContract, 'gmail.message.send'),
+    'verifier accepts semantically equal tool definitions'
+  );
+  assert(
+    !toolDefinitionContractsMatch(registryContract, driftedRegistryContract, 'gmail.message.send'),
+    'verifier rejects tool-definition field drift'
+  );
 }
 
 function runHarBuild() {
@@ -558,6 +606,8 @@ function verifySourceContracts() {
   const runtimeUniqueIds = new Set(runtimeIds);
   const publicOnlyToolIds = ids.filter((id) => !runtimeUniqueIds.has(id));
   const runtimeOnlyToolIds = runtimeIds.filter((id) => !uniqueIds.has(id));
+  const semanticDriftToolIds = ids.filter((id) =>
+    runtimeUniqueIds.has(id) && !toolDefinitionContractsMatch(definitions, runtimeDefinitions, id));
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
   assert(ids.length >= 22, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
@@ -595,6 +645,11 @@ function verifySourceContracts() {
       runtimeOnlyToolIds.length === 0,
     'public and runtime tool registries align exactly',
     `public=${ids.length}; runtime=${runtimeIds.length}; public-only=[${publicOnlyToolIds.join(', ')}]; runtime-only=[${runtimeOnlyToolIds.join(', ')}]`
+  );
+  assert(
+    semanticDriftToolIds.length === 0,
+    'public and runtime tool registries align semantically',
+    `drift=[${semanticDriftToolIds.join(', ')}]`
   );
 
   const forbiddenHotelTools = ['hotel.book', 'hotel.create', 'hotel.status', 'hotel.cancel'];
@@ -646,7 +701,9 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalSocialHubTool', 'runtime includes SocialHub execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
   assertContains(runtimeGateway, 'callComposioDynamic', 'dynamic.search tries Composio fallback');
-  assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
+  assertContains(runtimeGateway, "actionId !== 'html_mail_reply_send'", 'runtime limits Gmail reply send fallback to the exact reply button');
+  assertContains(runtimeGateway, 'await sendConfiguredMailReply(command)', 'runtime Gmail reply fallback uses the configured provider path');
+  assertContains(composioDynamic, "if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';", 'Gmail reply send pins the exact Composio write tool');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
 

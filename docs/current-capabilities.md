@@ -1,6 +1,6 @@
 # 当前工具能力总表
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
@@ -33,7 +33,7 @@
 | Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送；缺少结构化 `to`/`body` 时直接报错，不会从 prompt 补正文 | `draft` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | Gmail cases |
 | Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿；缺少结构化 `threadId`/`to`/`subject`/`replyMode`/`body` 时直接报错 | `confirm_required` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | 单元/动作链路 |
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
-| Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
+| Gmail | `gmail.message.send` | 当前 Gmail 回复卡片点击“发送回复” | 仅复用当前可见回复卡片的一次确认，固定执行 `GMAIL_REPLY_TO_THREAD`；provider 未返回明确成功证据时显示真实错误，不声称已发送 | `confirm_required` | Composio Gmail connected account + 当前 thread/message/requestKey/recipient/body | 通常需要外网/VPN | 是 | 参数/身份/重放/失败单测；真实发送 manual-only |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
 | 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID` + X/HN connected account；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | X/HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
 | 世界杯 | `worldcup.open` | `我想看世界杯下一场比赛和赛程` | 打开 App 内世界杯专页；不把静态页冒充实时比赛结果 | `read` | 无 | 页面本身不需要 | 否 | core C12 |

@@ -5,7 +5,6 @@ import { A2uiGenericToolResultData } from '@loop/agent-core';
 import { componentById, dynamicToolConnect, genericToolResults } from '@loop/agent-core';
 import {
   gmailAuthRequiredA2ui,
-  gmailBlockedSendA2ui,
   gmailDraftPreviewA2ui,
   gmailOpenDraftAction,
   gmailOpenWebA2ui,
@@ -249,18 +248,12 @@ export default function gmailToolA2uiTest() {
       expect(store.getSurface().dataModelJson.indexOf('Composio Gmail 结果')).assertEqual(-1);
     });
 
-    it('renders drafts and blocked send without claiming send success', 0, () => {
+    it('renders drafts without claiming send success', 0, () => {
       const draftStore = surfaceFromJsonl(gmailDraftPreviewA2ui('gmail_draft', draftResult()));
       const draft = genericToolResults(draftStore.getSurface())[0];
       expect(draft.status).assertEqual('draft');
       expect(draft.summary.indexOf('has not been sent')).assertLarger(-1);
       expect(rowValue(draft, 'Status')).assertEqual('ready_to_apply');
-
-      const blockedStore = surfaceFromJsonl(gmailBlockedSendA2ui('gmail_blocked', 'gmail.message.send'));
-      const blocked = genericToolResults(blockedStore.getSurface())[0];
-      expect(blocked.title).assertEqual('UnsafeActionBlocked');
-      expect(blocked.status).assertEqual('blocked');
-      expect(blocked.summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
     });
 
     it('renders Gmail Web as a needs-user system intent row', 0, () => {

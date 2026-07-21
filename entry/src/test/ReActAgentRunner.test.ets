@@ -441,23 +441,23 @@ export default function reActAgentRunnerTest() {
       expect(finalText).assertEqual('工具结果已更新到主页。');
     });
 
-    it('stops after blocked A2UI observations without asking the model for another step', 0, async () => {
+    it('stops after blocked dynamic A2UI observations without asking the model for another step', 0, async () => {
       const model = new SequenceModel([
-        'Thought: send directly\nAction: gmail.message.send({"to":["xxx@example.com"],"body":"hi"})',
+        'Thought: create page directly\nAction: dynamic.search({"toolSlug":"NOTION_CREATE_PAGE"})',
         'Thought: should not run\nFinal: bad'
       ]);
       const blocked: DynamicGenericToolResult = {
-        sourceTag: 'Gmail API',
-        toolName: 'gmail.message.send',
+        sourceTag: 'Composio',
+        toolName: 'NOTION_CREATE_PAGE',
         title: 'UnsafeActionBlocked',
         status: 'blocked',
-        summary: '不会自动发送 Gmail',
-        rows: [{ label: 'Error', value: '不会自动发送 Gmail' }],
+        summary: 'Dynamic write action requires a registered confirmation flow.',
+        rows: [{ label: 'Error', value: 'Unsafe dynamic write action' }],
         rawPreview: 'blocked'
       };
       const sendTool = new FixedTool(
-        'gmail.message.send',
-        genericToolResultsA2ui('surface_blocked_send', 'gmail.message.send', [blocked])
+        'dynamic.search',
+        genericToolResultsA2ui('surface_blocked_dynamic', 'dynamic.search', [blocked])
       );
       const registry = new ToolRegistry();
       registry.register(sendTool);

@@ -293,6 +293,11 @@ export default function toolDefinitionRegistryTest() {
         .assertLarger(-1);
     });
 
+    it('keeps every public and runtime tool contract semantically aligned', 0, () => {
+      expect(JSON.stringify(allAiphoneToolDefinitions()))
+        .assertEqual(JSON.stringify(allToolDefinitions()));
+    });
+
     it('registers aggregate mail tools without enabling send', 0, () => {
       expect(isKnownDomainToolId('mail.search')).assertTrue();
       expect(isKnownDomainToolId('mail.thread.read')).assertTrue();

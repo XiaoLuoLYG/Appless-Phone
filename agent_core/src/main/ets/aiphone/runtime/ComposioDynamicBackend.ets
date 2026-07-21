@@ -733,6 +733,7 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'calendar.event.create') return 'GOOGLECALENDAR_CREATE_EVENT';
   if (fixedToolId === 'calendar.event.update') return 'GOOGLECALENDAR_PATCH_EVENT';
   if (fixedToolId === 'calendar.event.delete') return 'GOOGLECALENDAR_DELETE_EVENT';
+  if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';
   return '';
 }
 
@@ -1427,18 +1428,62 @@ function successfulGmailDraftPayload(payload: Object, toolSlug: string): boolean
   return valueLooksLikeGmailDraft(record.data) || valueLooksLikeGmailDraft(record.error) || valueLooksLikeGmailDraft(record);
 }
 
+function executionStatusValue(
+  record: Record<string, Object | string | number | boolean | null | undefined>,
+  expected: boolean
+): boolean {
+  if (record.successful === expected || record.success === expected) {
+    return true;
+  }
+  const data = record.data;
+  if (data === undefined || data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return false;
+  }
+  const dataRecord = data as Record<string, Object | string | number | boolean | null | undefined>;
+  return dataRecord.successful === expected || dataRecord.success === expected;
+}
+
+function nestedExecutionError(
+  record: Record<string, Object | string | number | boolean | null | undefined>
+): string {
+  const data = record.data;
+  if (data === undefined || data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return '';
+  }
+  return stringField(
+    data as Record<string, Object | string | number | boolean | null | undefined>,
+    ['error']
+  );
+}
+
 function executionErrorMessage(payload: Object, toolSlug: string = ''): string {
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  if (executionStatusValue(record, false)) {
+    const explicitError = stringField(record, ['error']);
+    const nestedError = nestedExecutionError(record);
+    return explicitError.length > 0 ? explicitError :
+      (nestedError.length > 0 ? nestedError : 'Provider returned an unsuccessful execution status.');
+  }
   if (successfulGmailDraftPayload(payload, toolSlug)) {
     return '';
   }
-  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
   const direct = stringField(record, ['error']);
   if (direct.length > 0) {
     return direct;
   }
+  const nestedError = nestedExecutionError(record);
+  if (nestedError.length > 0) {
+    return nestedError;
+  }
+  if (executionStatusValue(record, true)) {
+    return '';
+  }
+  if (isUnsafeComposioExecute(toolSlug, '{}')) {
+    return 'Provider did not return positive execution evidence.';
+  }
   const data = record.data;
   if (data !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)) {
-    return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['error', 'message']);
+    return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['message']);
   }
   return '';
 }
@@ -1988,7 +2033,8 @@ export function composioDynamicResultFromObservation(
       providerPhase: 'discovery'
     };
   } catch (_error) {
-    const failed = observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 ||
+    const unparseableWrite = phase === 'execute' && isUnsafeComposioExecute(toolSlug, '{}');
+    const failed = unparseableWrite || observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 ||
       observation.indexOf('未配置') >= 0 || observation.indexOf('没有') >= 0;
     const rows: A2uiLabelValueData[] = [{ label: '阶段', value: phase }];
     if (prompt.length > 0) {
@@ -1997,10 +2043,10 @@ export function composioDynamicResultFromObservation(
     appendRow(rows, '结果摘要', observation);
     return {
       sourceTag: 'Composio',
-      toolName: 'dynamic.search',
+      toolName: toolSlug.length > 0 ? toolSlug : 'dynamic.search',
       title: prompt.length > 0 ? resultTitleForPrompt(prompt) : (failed ? 'Composio 调用失败' : 'Composio 返回'),
       status: failed ? 'error' : 'success',
-      summary: observation.substring(0, 240),
+      summary: unparseableWrite ? 'Composio 写工具返回了无法验证的非 JSON 结果。' : observation.substring(0, 240),
       rows: rows,
       rawPreview: observation.substring(0, 16000),
       providerPhase: phase === 'execute' ? 'execution' : 'discovery'
@@ -2075,6 +2121,19 @@ export async function callComposioSearchAndExecute(
   requestArgs: Object | null
 ): Promise<DynamicGenericToolResult> {
   return callComposioSearchAndExecuteParsed(current, prompt, parsedExecuteArgs(requestArgs), false);
+}
+
+export async function callComposioFixedSearchAndExecuteForTest(
+  current: ComposioSearchExecuteClient,
+  prompt: string,
+  fixedToolId: string,
+  fixedArgs: Object
+): Promise<DynamicGenericToolResult> {
+  const parsed: ComposioExecuteArgs = {
+    fixedToolId: fixedToolId,
+    fixedArgs: fixedArgs
+  };
+  return callComposioSearchAndExecuteParsed(current, prompt, parsed, true);
 }
 
 export async function callComposioFixedRaw(
