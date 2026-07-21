@@ -3,7 +3,13 @@ import { resolveData } from '@loop/agent-core';
 import { parseA2uiJsonl } from '@loop/agent-core';
 import { A2uiSurfaceStore } from '@loop/agent-core';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
-import { socialHubDraftA2ui, socialHubFeedA2ui } from '@loop/agent-core';
+import {
+  SocialHubStructuredData,
+  socialHubDraftA2ui,
+  socialHubFeedA2ui,
+  socialHubStructuredDataA2ui,
+  socialHubStructuredDataResult
+} from '@loop/agent-core';
 
 function applyJsonl(jsonl: string): A2uiSurfaceStore {
   const parsed = parseA2uiJsonl(jsonl);
@@ -92,6 +98,43 @@ export default function socialHubA2uiTest() {
       expect(parsedDraft.text).assertEqual('Thanks for sharing.');
       expect(parsedDraft.localOnly).assertTrue();
       expect(parsedDraft.sent).assertFalse();
+    });
+
+    it('keeps typed SocialHub items and connections in structured data and renderer actions', 0, () => {
+      const items: SocialHubItemData[] = [{
+        id: 'slack-message-1', platform: 'slack', kind: 'message', author: 'Alice', handle: 'alice',
+        text: 'Please review', timestamp: '2026-07-22T01:00:00.000Z', url: '', mediaUrl: '',
+        channel: 'agents', channelId: 'C123', threadId: '1780000000.001', unread: true
+      }];
+      const connections: SocialHubConnectionData[] = [
+        { platform: 'slack', status: 'connected', displayName: 'Slack', accountId: 'acct-1', message: 'Connected' },
+        { platform: 'x', status: 'error', displayName: 'X', accountId: '', message: 'X provider failed' }
+      ];
+      const result = socialHubStructuredDataResult({ items: items, connections: connections });
+      const data = result.data as SocialHubStructuredData;
+      const jsonl = socialHubStructuredDataA2ui('surface_social_structured', data);
+
+      expect(result.status).assertEqual('partial');
+      expect(data.items[0].id).assertEqual('slack-message-1');
+      expect(data.connections[0].accountId).assertEqual('acct-1');
+      expect(jsonl.indexOf('slack-message-1')).assertLarger(-1);
+      expect(jsonl.indexOf('1780000000.001')).assertLarger(-1);
+      expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('distinguishes successful empty SocialHub feeds from all-provider errors', 0, () => {
+      const empty = socialHubStructuredDataResult({
+        items: [],
+        connections: [{ platform: 'slack', status: 'connected', displayName: 'Slack', accountId: 'acct-1', message: '0 messages' }]
+      });
+      const failed = socialHubStructuredDataResult({
+        items: [],
+        connections: [{ platform: 'slack', status: 'error', displayName: 'Slack', accountId: '', message: 'provider unavailable' }]
+      });
+
+      expect(empty.status).assertEqual('empty');
+      expect(failed.status).assertEqual('error');
+      expect(failed.error?.code).assertEqual('SOCIAL_PROVIDERS_FAILED');
     });
   });
 }

@@ -15,6 +15,11 @@ import {
 } from './SocialHubTypes';
 import { socialHubPrivateItems } from './SocialHubClient';
 
+export interface SocialHubStructuredData {
+  items: SocialHubItemData[];
+  connections: SocialHubConnectionData[];
+}
+
 function jsonLine(envelope: A2uiEnvelope): string {
   return JSON.stringify(envelope);
 }
@@ -78,6 +83,10 @@ export function socialHubFeedA2ui(surfaceId: string, items: SocialHubItemData[],
     dataLine(surfaceId, '/socialHub/draft', emptySocialHubDraft()),
     dataLine(surfaceId, '/socialHub/connections', connections)
   ]).join('\n') + '\n';
+}
+
+export function socialHubStructuredDataA2ui(surfaceId: string, data: SocialHubStructuredData): string {
+  return socialHubFeedA2ui(surfaceId, data.items, data.connections);
 }
 
 export function socialHubDraftA2ui(surfaceId: string, draft: SocialHubDraftData): string {

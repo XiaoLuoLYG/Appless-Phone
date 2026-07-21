@@ -100,6 +100,7 @@ import {
 import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
+import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
 import {
   CalendarEventArgs,
   calendarEventRequiredFields,
@@ -111,9 +112,23 @@ import {
   calendarResultsFromComposioObservation,
   normalizedCalendarArgsForPrompt
 } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
+import {
+  callMapsPlaceDetailsProvider,
+  callMapsPlaceSearch,
+  callMapsPlaceSearchProvider,
+  mapsFoodRecordFromResult,
+  mapsPlaceProviderResultsForA2ui,
+  mapsRouteResult,
+  MapsPlaceProviderResult,
+  MapsStructuredData
+} from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
-import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
+import {
+  socialHubDraftA2ui,
+  socialHubFeedA2ui,
+  socialHubStructuredDataA2ui,
+  SocialHubStructuredData
+} from './SocialHubA2ui';
 import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import {
@@ -126,6 +141,7 @@ import {
 } from './ComposioDynamicBackend';
 import { aggregateSearchA2ui } from './AggregateSearchA2ui';
 import { callAggregateSearch } from './AggregateSearchClient';
+import { AggregateSearchResult, AggregateSearchSourceStatus } from './AggregateSearchTypes';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
@@ -178,9 +194,14 @@ import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
   DynamicMcpTool,
+  DynamicReadExecution,
+  DynamicReadExecutor,
+  DynamicRegistrationMetadata,
+  DynamicStructuredData,
   DynamicToolManifest,
   DynamicToolRegistration,
-  DynamicToolTransport
+  DynamicToolTransport,
+  GenericStructuredData
 } from './DynamicToolTypes';
 import {
   A2uiPartialDataPatch,
@@ -5541,6 +5562,190 @@ function structuredErrorWithData(
   return result;
 }
 
+function sourceAlreadyIncluded(sources: DataSource[], provider: string, operation: string): boolean {
+  return sources.some((source: DataSource): boolean =>
+    source.provider === provider && source.operation === operation);
+}
+
+function genericResultSource(result: DynamicGenericToolResult): DataSource {
+  return {
+    provider: result.sourceTag,
+    backend: result.sourceTag.startsWith('Composio') ? 'oauth_api' : 'local_adapter',
+    operation: result.toolName,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+function genericResultHasData(result: DynamicGenericToolResult): boolean {
+  if (result.status !== 'success') {
+    return false;
+  }
+  if (mediaVideoPlaybackUrl(result as A2uiGenericToolResultData).length > 0) {
+    return true;
+  }
+  if (result.title.indexOf('没有找到') >= 0 || result.rawPreview === 'empty places') {
+    return false;
+  }
+  for (let index = 0; index < result.rows.length; index++) {
+    if (result.rows[index].label === '结果数量' && result.rows[index].value.trim() === '0') {
+      return false;
+    }
+  }
+  return result.rows.length > 0 || result.rawPreview.trim().length > 0;
+}
+
+function genericResultIsFailure(result: DynamicGenericToolResult): boolean {
+  return result.status !== 'success' && result.status !== 'empty';
+}
+
+function firstGenericFailure(results: DynamicGenericToolResult[]): string {
+  for (let index = 0; index < results.length; index++) {
+    if (genericResultIsFailure(results[index])) {
+      return results[index].summary.length > 0 ? results[index].summary : results[index].title;
+    }
+  }
+  return 'Provider returned no successful result.';
+}
+
+export function genericStructuredDataResult(
+  toolId: string,
+  outputSchema: string,
+  results: DynamicGenericToolResult[]
+): DataResult {
+  const data: GenericStructuredData = { results: results };
+  const sources: DataSource[] = [];
+  const warnings: string[] = [];
+  let dataCount = 0;
+  let failureCount = 0;
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (genericResultHasData(result)) {
+      dataCount += 1;
+    }
+    if (genericResultIsFailure(result)) {
+      failureCount += 1;
+      warnings.push(result.sourceTag + '：' + (result.summary.length > 0 ? result.summary : result.title));
+    }
+    if (!sourceAlreadyIncluded(sources, result.sourceTag, result.toolName)) {
+      sources.push(genericResultSource(result));
+    }
+  });
+  if (dataCount > 0) {
+    return failureCount > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  if (failureCount > 0) {
+    return structuredErrorWithData(
+      toolId, outputSchema, data, 'PROVIDER_ERROR', firstGenericFailure(results), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult(toolId, outputSchema, data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
+export function mapsStructuredDataResult(toolId: string, provider: MapsPlaceProviderResult): DataResult {
+  const outputSchema = toolId === 'maps.place.details' ? 'place' : 'places';
+  const data: MapsStructuredData = { places: provider.places, query: provider.query };
+  const sources: DataSource[] = provider.attempted ? [localAdapterSource('Google Places API',
+    toolId === 'maps.place.details' ? 'details' : 'search')] : [];
+  if (provider.status === 'error') {
+    return structuredErrorWithData(
+      toolId,
+      outputSchema,
+      data,
+      provider.attempted ? 'MAPS_PROVIDER_ERROR' : 'MAPS_INPUT_OR_CONFIG_ERROR',
+      provider.message,
+      provider.attempted,
+      sources
+    );
+  }
+  const result = successfulDataResult(toolId, outputSchema, data, sources);
+  if (provider.status === 'empty') {
+    result.status = 'empty';
+    result.warnings = provider.message.length > 0 ? [provider.message] : [];
+  }
+  return result;
+}
+
+export function mapsDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as MapsStructuredData;
+  const provider: MapsPlaceProviderResult = {
+    toolId: result.toolId,
+    status: result.status === 'error' ? 'error' : (data.places.length > 0 ? 'success' : 'empty'),
+    places: data.places,
+    query: data.query,
+    message: result.error?.message === undefined ?
+      (result.warnings.length > 0 ? result.warnings[0] : '') : result.error.message,
+    attempted: result.sources.length > 0
+  };
+  return genericToolResultsA2ui(surfaceId, result.toolId, mapsPlaceProviderResultsForA2ui(provider));
+}
+
+function aggregateStatusFailed(status: AggregateSearchSourceStatus): boolean {
+  return status.status === 'error' || status.status === 'needs_auth' || status.status === 'unsupported';
+}
+
+export function aggregateStructuredDataResult(data: AggregateSearchResult): DataResult {
+  const sources: DataSource[] = data.sourceStatuses.map((status: AggregateSearchSourceStatus): DataSource => ({
+    provider: status.label,
+    backend: status.source === 'x' || status.source === 'hackernews' || status.source === 'reddit' ?
+      'oauth_api' : 'local_adapter',
+    operation: 'search',
+    fetchedAt: new Date().toISOString()
+  }));
+  const warnings = data.sourceStatuses
+    .filter((status: AggregateSearchSourceStatus): boolean => aggregateStatusFailed(status))
+    .map((status: AggregateSearchSourceStatus): string => status.label + '：' + status.message);
+  const itemCount = data.videos.length + data.posts.length;
+  if (itemCount > 0) {
+    return warnings.length > 0 ?
+      partialDataResult('media.aggregate.search', 'aggregateSearch', data, sources, warnings) :
+      successfulDataResult('media.aggregate.search', 'aggregateSearch', data, sources);
+  }
+  if (warnings.length > 0) {
+    return structuredErrorWithData(
+      'media.aggregate.search', 'aggregateSearch', data, 'AGGREGATE_PROVIDERS_FAILED',
+      warnings.join('；'), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult('media.aggregate.search', 'aggregateSearch', data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
+function socialConnectionFailed(connection: SocialHubConnectionData): boolean {
+  return connection.status === 'error' || connection.status === 'needs_auth' || connection.status === 'disabled';
+}
+
+export function socialHubStructuredDataResult(feed: SocialHubFeedResult): DataResult {
+  const data: SocialHubStructuredData = { items: feed.items, connections: feed.connections };
+  const sources: DataSource[] = feed.connections.map((connection: SocialHubConnectionData): DataSource => ({
+    provider: connection.displayName.length > 0 ? connection.displayName : connection.platform,
+    backend: 'oauth_api',
+    operation: 'feed',
+    fetchedAt: new Date().toISOString(),
+    accountHint: connection.accountId
+  }));
+  const warnings = feed.connections
+    .filter((connection: SocialHubConnectionData): boolean => socialConnectionFailed(connection))
+    .map((connection: SocialHubConnectionData): string =>
+      (connection.displayName.length > 0 ? connection.displayName : connection.platform) + '：' + connection.message);
+  if (feed.items.length > 0) {
+    return warnings.length > 0 ?
+      partialDataResult('social.feed.search', 'socialHubFeed', data, sources, warnings) :
+      successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
+  }
+  if (warnings.length > 0) {
+    return structuredErrorWithData(
+      'social.feed.search', 'socialHubFeed', data, 'SOCIAL_PROVIDERS_FAILED', warnings.join('；'), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
 function flightErrorData(title: string, body: string): FlightStructuredData {
   return { title: title, body: body, summary: body, flights: [] };
 }
@@ -9286,6 +9491,7 @@ const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
+let dynamicReadExecutor: DynamicReadExecutor = defaultDynamicReadExecutor;
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
@@ -9295,6 +9501,10 @@ let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvid
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureDynamicReadExecutorForTests(executor: DynamicReadExecutor | null): void {
+  dynamicReadExecutor = executor === null ? defaultDynamicReadExecutor : executor;
 }
 
 export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
@@ -9372,6 +9582,222 @@ function dynamicArgsFromPrompt(prompt: string): DynamicPromptArgs {
     weatherTargetLabel: dynamicWeatherTargetLabel(weatherTargetOffset),
     weatherForecast: weatherTargetOffset > 0
   };
+}
+
+interface DynamicReadRequestArgs {
+  operation?: Object | string | number | boolean | null;
+  qualifiedName?: Object | string | number | boolean | null;
+  toolSlug?: Object | string | number | boolean | null;
+  schema?: Object | string | number | boolean | null;
+  receipt?: Object | string | number | boolean | null;
+}
+
+function dynamicReadRequestArgs(args: Object | null): DynamicReadRequestArgs {
+  return args === null ? JSON.parse('{}') as DynamicReadRequestArgs : args as DynamicReadRequestArgs;
+}
+
+function dynamicQualifiedName(args: DynamicReadRequestArgs): string {
+  const qualified = textOf(args.qualifiedName).trim();
+  return qualified.length > 0 ? qualified : textOf(args.toolSlug).trim();
+}
+
+function dynamicVerbTokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((token: string): boolean => token.length > 0);
+}
+
+function containsDynamicVerb(tokens: string[], verbs: string[]): boolean {
+  return tokens.some((token: string): boolean => verbs.indexOf(token) >= 0);
+}
+
+function dynamicReadAuthorizationMessage(args: Object | null): string {
+  const request = dynamicReadRequestArgs(args);
+  const operation = textOf(request.operation).trim().toLowerCase();
+  const qualifiedName = dynamicQualifiedName(request);
+  const operationTokens = dynamicVerbTokens(operation.length > 0 ? operation : 'search');
+  const qualifiedTokens = dynamicVerbTokens(qualifiedName);
+  const writeVerbs = ['delete', 'create', 'update', 'send', 'write', 'execute', 'append', 'upload', 'publish'];
+  const readVerbs = ['read', 'search', 'list', 'get', 'find', 'query', 'fetch', 'lookup'];
+  if (containsDynamicVerb(operationTokens, writeVerbs) || containsDynamicVerb(qualifiedTokens, writeVerbs)) {
+    return 'dynamic.search only allows read/search/list/get operations.';
+  }
+  if (!containsDynamicVerb(operationTokens, readVerbs)) {
+    return 'Unknown dynamic operation: ' + (operation.length > 0 ? operation : 'unknown') + '.';
+  }
+  if (qualifiedName.length > 0 && !containsDynamicVerb(qualifiedTokens, readVerbs)) {
+    return 'Unknown dynamic tool verb: ' + qualifiedName + '.';
+  }
+  return '';
+}
+
+function dynamicRequestSchema(args: Object | null): Object {
+  const schema = dynamicReadRequestArgs(args).schema;
+  return schema !== undefined && schema !== null && typeof schema === 'object' ? schema : new Object();
+}
+
+function dynamicRequestReceipt(args: Object | null): string {
+  return textOf(dynamicReadRequestArgs(args).receipt).trim();
+}
+
+function dynamicRegistration(
+  provider: string,
+  qualifiedName: string,
+  schema: Object,
+  receipt: string
+): DynamicRegistrationMetadata {
+  return {
+    provider: provider,
+    qualifiedName: qualifiedName,
+    schema: schema,
+    receipt: receipt
+  };
+}
+
+function dynamicExecutionResult(
+  result: DynamicGenericToolResult,
+  registration: DynamicRegistrationMetadata
+): DynamicReadExecution {
+  return { results: [result], registration: registration };
+}
+
+function dynamicReadFailure(
+  provider: string,
+  qualifiedName: string,
+  schema: Object,
+  message: string,
+  status: string = 'error'
+): DynamicReadExecution {
+  const result = dynamicErrorResult(provider, qualifiedName, '动态读取失败', message);
+  result.status = status;
+  const registration = dynamicRegistration(provider, qualifiedName, schema, result.rawPreview);
+  return dynamicExecutionResult(result, registration);
+}
+
+function dynamicManifestTool(manifest: DynamicToolManifest, name: string): DynamicMcpTool | null {
+  for (let index = 0; index < manifest.tools.length; index++) {
+    if (manifest.tools[index].name === name) {
+      return manifest.tools[index];
+    }
+  }
+  return null;
+}
+
+function dynamicManifestReadAllowed(tool: DynamicMcpTool, transport: DynamicToolTransport): boolean {
+  if (tool.annotations?.readOnlyHint === true || transport.type === 'http_api' &&
+    transportOption(transport, 'method', 'GET').toUpperCase() === 'GET') {
+    return true;
+  }
+  const request: DynamicReadRequestArgs = {
+    operation: 'read',
+    qualifiedName: tool.name
+  };
+  return dynamicReadAuthorizationMessage(request as Object).length === 0;
+}
+
+async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResult, prompt: string): Promise<DynamicReadExecution> {
+  const manifest = discovery.manifest;
+  const transport = selectBestRemoteTransport(manifest);
+  const toolName = firstSafeToolName(manifest);
+  const tool = dynamicManifestTool(manifest, toolName);
+  if (transport === null || tool === null) {
+    return dynamicReadFailure(manifest.displayName, toolName, new Object(),
+      'No safe HAP-runnable dynamic read tool is available.');
+  }
+  if (!dynamicManifestReadAllowed(tool, transport)) {
+    return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+      'Dynamic tool is not a recognized read/search/list/get operation.', 'unsafe_action_blocked');
+  }
+  let credentialRef = '';
+  let credentialValue = '';
+  const requiredCredential = firstRequiredCredential(manifest);
+  if (requiredCredential !== null) {
+    credentialRef = credentialRefFor(manifest.id, requiredCredential.name);
+    credentialValue = await dynamicCredentialStore.get(credentialRef);
+    if (credentialValue.length === 0) {
+      return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+        'Dynamic read requires configured credentials.', 'needs_auth');
+    }
+  }
+  const registration: DynamicToolRegistration = {
+    toolId: discovery.toolId,
+    manifestId: manifest.id,
+    displayName: manifest.displayName,
+    status: 'candidate',
+    transport: transport,
+    mcpToolName: tool.name,
+    credentialRef: credentialRef,
+    sourceUrl: manifest.sourceUrl,
+    lastError: ''
+  };
+  let result: DynamicGenericToolResult;
+  if (transport.type === 'http_api') {
+    result = await callDynamicHttpApiTool(registration, credentialValue, prompt);
+  } else {
+    const preflight = await genericMcpClient.preflight(registration, credentialValue);
+    if (!preflight.ok) {
+      return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+        preflight.message.length > 0 ? preflight.message : 'Dynamic MCP preflight failed.');
+    }
+    result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
+  }
+  const metadata = dynamicRegistration(manifest.displayName, tool.name, tool.inputSchema, result.rawPreview);
+  return dynamicExecutionResult(result, metadata);
+}
+
+async function defaultDynamicReadExecutor(prompt: string, args: Object | null): Promise<DynamicReadExecution> {
+  const discovery = discoverDynamicToolForPrompt(prompt);
+  if (discovery !== null) {
+    return dynamicManifestReadExecution(discovery, prompt);
+  }
+  const result = await callComposioDynamic(prompt, args);
+  if (result === null) {
+    return dynamicReadFailure('dynamic.search', dynamicQualifiedName(dynamicReadRequestArgs(args)),
+      dynamicRequestSchema(args), 'No matching dynamic read provider was found.');
+  }
+  const providedRegistration = result.registration;
+  const qualifiedName = providedRegistration?.qualifiedName ??
+    (dynamicQualifiedName(dynamicReadRequestArgs(args)).length > 0 ?
+      dynamicQualifiedName(dynamicReadRequestArgs(args)) : result.toolName);
+  const metadata = providedRegistration ?? dynamicRegistration(
+    result.sourceTag,
+    qualifiedName,
+    dynamicRequestSchema(args),
+    dynamicRequestReceipt(args).length > 0 ? dynamicRequestReceipt(args) : result.rawPreview
+  );
+  result.registration = undefined;
+  return dynamicExecutionResult(result, metadata);
+}
+
+function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResult {
+  const base = genericStructuredDataResult('dynamic.search', 'genericToolResults', execution.results);
+  const data: DynamicStructuredData = {
+    results: execution.results,
+    registration: execution.registration
+  };
+  base.data = data;
+  base.sources = [{
+    provider: execution.registration.provider,
+    backend: execution.registration.provider === 'Composio' ? 'oauth_api' : 'mcp_remote',
+    operation: execution.registration.qualifiedName,
+    fetchedAt: new Date().toISOString(),
+    receipt: execution.registration.receipt
+  }];
+  return base;
+}
+
+async function callStructuredDynamicTool(prompt: string, args: Object | null): Promise<DataResult> {
+  const authorizationMessage = dynamicReadAuthorizationMessage(args);
+  if (authorizationMessage.length > 0) {
+    return errorDataResult(
+      'dynamic.search', 'genericToolResults', 'DYNAMIC_WRITE_NOT_ALLOWED', authorizationMessage
+    );
+  }
+  try {
+    return dynamicStructuredDataResult(await dynamicReadExecutor(prompt, args));
+  } catch (error) {
+    return errorDataResult(
+      'dynamic.search', 'genericToolResults', 'DYNAMIC_PROVIDER_ERROR', describeThrown(error), true
+    );
+  }
 }
 
 function transportOption(transport: DynamicToolTransport, key: string, fallback: string = ''): string {
@@ -9850,45 +10276,18 @@ async function buildDynamicToolJsonlWithManifest(toolId: string, prompt: string,
   return preflightAndCallDynamicTool(candidate, manifest, credentialValue, prompt, surfaceId);
 }
 
-function dynamicDiscoveryMissingManifest(prompt: string): DynamicToolManifest {
-  const manifest = missingDynamicManifest('dynamic.search');
-  manifest.displayName = '动态工具搜索';
-  manifest.sourceUrl = 'modelscope-local-catalog';
-  manifest.capabilities = ['dynamic.discovery'];
-  manifest.tools = [{
-    name: 'dynamic.search',
-    description: 'Search the local ModelScope-derived MCP catalog for a matching remote tool.',
-    inputSchema: new Object()
-  }];
-  manifest.fromSiteUrl = 'https://modelscope.cn/mcp';
-  return manifest;
-}
-
 async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  const discovery: DynamicToolDiscoveryResult | null = discoverDynamicToolForPrompt(prompt);
-  if (discovery === null) {
-    const composioResult = await callComposioDynamic(prompt, args);
-    if (composioResult !== null) {
-      aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=dynamic.search source=composio status=' + composioResult.status);
-      return genericToolResultsA2ui(surfaceId, 'dynamic.search', [composioResult]);
-    }
-    aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=none source=modelscope-local-catalog');
-    return connectCardA2ui(
-      surfaceId,
-      'dynamic.search',
-      dynamicDiscoveryMissingManifest(prompt),
-      'no_tool_found',
-      '已根据用户请求搜索本机 ModelScope MCP 候选目录，但没有找到可直接接入的远程 MCP/API。',
-      prompt
-    );
+  const result = await callStructuredDynamicTool(prompt, args);
+  const data = result.data as DynamicStructuredData;
+  if (Array.isArray(data.results)) {
+    return genericToolResultsA2ui(surfaceId, 'dynamic.search', data.results);
   }
-  aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt +
-    ' selectedToolId=' + discovery.toolId +
-    ' manifestId=' + discovery.manifest.id +
-    ' source=' + discovery.source +
-    ' score=' + discovery.score.toString() +
-    ' reason=' + discovery.reason);
-  return buildDynamicToolJsonlWithManifest(discovery.toolId, prompt, surfaceId, discovery.manifest);
+  return genericToolResultsA2ui(surfaceId, 'dynamic.search', [dynamicErrorResult(
+    'dynamic.search',
+    'dynamic.search',
+    '动态读取失败',
+    result.error?.message === undefined ? 'Dynamic read failed.' : result.error.message
+  )]);
 }
 
 async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -10426,6 +10825,7 @@ function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
 function composioFixedResult(toolId: string, appName: string, result: DynamicGenericToolResult, args: Object | null = null): DynamicGenericToolResult {
   result.toolName = toolId;
   result.sourceTag = 'Composio ' + appName;
+  result.registration = undefined;
   if (result.rows.find((row: A2uiLabelValueData) => row.label === 'Tool ID') === undefined) {
     result.rows.push({ label: 'Tool ID', value: toolId });
   }
@@ -10929,55 +11329,76 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     return socialHubDraftA2ui(surfaceId, draft);
   }
   if (toolId === 'social.feed.search') {
-    const result = await composioSocialAggregate(args);
-    return socialHubFeedA2ui(surfaceId, result.items, result.connections);
+    const result = await callStructuredSocialHubTool(args);
+    return socialHubStructuredDataA2ui(surfaceId, result.data as SocialHubStructuredData);
   }
   return socialHubFeedA2ui(surfaceId, [], []);
 }
 
-async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  return genericToolResultsA2ui(surfaceId, toolId, [
+async function callStructuredSocialHubTool(args: Object | null): Promise<DataResult> {
+  return socialHubStructuredDataResult(await composioSocialAggregate(args));
+}
+
+async function callStructuredXTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
+  return genericStructuredDataResult(toolId, 'genericToolResults', [
     await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
   ]);
 }
 
+async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const result = await callStructuredXTool(toolId, prompt, args);
+  return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
+}
+
+async function callStructuredYouTubeVideoTool(prompt: string, args: Object | null): Promise<DataResult> {
+  return genericStructuredDataResult(
+    'youtube.video.search',
+    'youtubeVideos',
+    await callYouTubeVideoSearch(
+      youtubeQueryFromArgs(prompt, args),
+      localProviderConfig.youtubeApiKey,
+      youtubeSearchOptionsFromArgs(args)
+    )
+  );
+}
+
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'youtube.video.search') {
-    return genericToolResultsA2ui(
-      surfaceId,
-      toolId,
-      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
-    );
+    const result = await callStructuredYouTubeVideoTool(prompt, args);
+    return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
   }
   return genericToolResultsA2ui(surfaceId, toolId, [
     await composioFixedAppResult(toolId, 'YouTube', prompt, toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表', args)
   ]);
 }
 
-async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callStructuredMediaTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
   if (toolId === 'media.video.search') {
-    return genericToolResultsA2ui(
-      surfaceId,
+    return genericStructuredDataResult(
       toolId,
-      await callMediaVideoSearch(
-        prompt,
-        args,
-        localProviderConfig.youtubeApiKey
-      )
+      'mediaVideos',
+      await callMediaVideoSearch(prompt, args, localProviderConfig.youtubeApiKey)
     );
   }
   if (toolId === 'media.aggregate.search') {
-    return aggregateSearchA2ui(
-      surfaceId,
-      await callAggregateSearch(
-        prompt,
-        args,
-        localProviderConfig.youtubeApiKey,
-        {
-          apiKey: localProviderConfig.zhihuApiKey
-        }
-      )
-    );
+    return aggregateStructuredDataResult(await callAggregateSearch(
+      prompt,
+      args,
+      localProviderConfig.youtubeApiKey,
+      { apiKey: localProviderConfig.zhihuApiKey }
+    ));
+  }
+  return errorDataResult(toolId, '', 'MEDIA_TOOL_UNSUPPORTED', 'Unsupported media tool: ' + toolId + '.');
+}
+
+async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'media.video.search') {
+    const result = await callStructuredMediaTool(toolId, prompt, args);
+    return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
+  }
+  if (toolId === 'media.aggregate.search') {
+    const result = await callStructuredMediaTool(toolId, prompt, args);
+    return aggregateSearchA2ui(surfaceId, result.data as AggregateSearchResult);
   }
   return genericToolResultsA2ui(surfaceId, toolId, [{
     sourceTag: '媒体聚合',
@@ -11548,11 +11969,21 @@ async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: stri
     return genericToolResultsA2ui(surfaceId, toolId, [mapsRouteResult(args)]);
   }
   const parsed = mapsArgs(args);
+  return mapsDataResultA2ui(surfaceId, await callStructuredMapsTool(toolId, prompt, parsed));
+}
+
+async function callStructuredMapsTool(toolId: string, prompt: string, args: MapsToolArgs): Promise<DataResult> {
   if (toolId === 'maps.place.details') {
-    return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceDetails(mapsPlaceId(parsed), localProviderConfig.googleMapsApiKey));
+    return mapsStructuredDataResult(
+      toolId,
+      await callMapsPlaceDetailsProvider(mapsPlaceId(args), localProviderConfig.googleMapsApiKey)
+    );
   }
-  const query = mapsSearchQuery(parsed);
-  return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceSearch(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey));
+  const query = mapsSearchQuery(args);
+  return mapsStructuredDataResult(
+    toolId,
+    await callMapsPlaceSearchProvider(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey)
+  );
 }
 
 function paymentArgs(args: Object | null): PaymentToolActionArgs {
@@ -12514,6 +12945,9 @@ export async function callStructuredTool(
   prompt: string,
   args: Object | null
 ): Promise<DataResult> {
+  if (toolId === 'dynamic.search') {
+    return callStructuredDynamicTool(prompt, args);
+  }
   const definition = toolDefinitionForToolId(toolId);
   const allowed = definition !== null && dataAgentToolDefinitions().some(
     (candidate: ToolDefinition): boolean => candidate.toolId === toolId
@@ -12540,6 +12974,21 @@ export async function callStructuredTool(
   }
   if (toolId === 'food.search') {
     return callStructuredFoodTool(prompt, args);
+  }
+  if (toolId === 'maps.place.search' || toolId === 'maps.place.details') {
+    return callStructuredMapsTool(toolId, prompt, mapsArgs(args));
+  }
+  if (toolId === 'media.video.search' || toolId === 'media.aggregate.search') {
+    return callStructuredMediaTool(toolId, prompt, args);
+  }
+  if (toolId === 'youtube.video.search') {
+    return callStructuredYouTubeVideoTool(prompt, args);
+  }
+  if (toolId === 'x.post.search') {
+    return callStructuredXTool(toolId, prompt, args);
+  }
+  if (toolId === 'social.feed.search') {
+    return callStructuredSocialHubTool(args);
   }
   return errorDataResult(
     toolId,

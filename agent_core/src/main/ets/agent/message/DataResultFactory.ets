@@ -6,7 +6,8 @@ function cloneSource(source: DataSource): DataSource {
     backend: source.backend,
     operation: source.operation,
     fetchedAt: source.fetchedAt,
-    accountHint: source.accountHint
+    accountHint: source.accountHint,
+    receipt: source.receipt
   };
 }
 

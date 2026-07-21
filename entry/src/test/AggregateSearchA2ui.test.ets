@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiSurfaceStore } from '@loop/agent-core';
 import { AggregateSearchResult } from '@loop/agent-core';
-import { aggregateSearchA2ui, parseA2uiJsonl, resolveData } from '@loop/agent-core';
+import { aggregateSearchA2ui, aggregateStructuredDataResult, parseA2uiJsonl, resolveData } from '@loop/agent-core';
 
 function sampleResult(): AggregateSearchResult {
   return {
@@ -65,6 +65,38 @@ export default function aggregateSearchA2uiTest() {
       expect(result.query).assertEqual('openai codex');
       expect(result.posts[0].title).assertEqual('OpenAI Codex discussion');
       expect(result.sourceStatuses[1].message.indexOf('ZHIHU_API_KEY')).assertLarger(-1);
+    });
+
+    it('uses real rows plus failed sources for partial and never partial without data', 0, () => {
+      const partial = aggregateStructuredDataResult(sampleResult());
+      const noDataFailure = sampleResult();
+      noDataFailure.videos = [];
+      noDataFailure.posts = [];
+      noDataFailure.sourceStatuses = [
+        { source: 'youtube', label: 'YouTube', status: 'error', message: 'timeout', count: 0 },
+        { source: 'zhihu', label: '知乎', status: 'needs_auth', message: 'auth required', count: 0 }
+      ];
+      const failed = aggregateStructuredDataResult(noDataFailure);
+
+      expect(partial.status).assertEqual('partial');
+      expect(partial.sources.length).assertEqual(2);
+      expect(failed.status).assertEqual('error');
+      expect(failed.error?.code).assertEqual('AGGREGATE_PROVIDERS_FAILED');
+    });
+
+    it('uses empty only when every requested aggregate source completed without data', 0, () => {
+      const emptyResult = sampleResult();
+      emptyResult.videos = [];
+      emptyResult.posts = [];
+      emptyResult.sourceStatuses = [
+        { source: 'youtube', label: 'YouTube', status: 'empty', message: '0 results', count: 0 },
+        { source: 'bilibili', label: 'B 站', status: 'empty', message: '0 results', count: 0 }
+      ];
+      const empty = aggregateStructuredDataResult(emptyResult);
+
+      expect(empty.status).assertEqual('empty');
+      expect(empty.error === undefined).assertTrue();
+      expect(JSON.stringify(empty.data).indexOf('updateComponents')).assertEqual(-1);
     });
   });
 }

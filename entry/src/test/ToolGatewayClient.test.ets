@@ -678,6 +678,34 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('dispatches maps media social and public X reads without rendered payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+        const tools: string[] = [
+          'maps.place.search', 'maps.place.details', 'media.video.search', 'media.aggregate.search',
+          'youtube.video.search', 'x.post.search', 'social.feed.search'
+        ];
+        for (let index = 0; index < tools.length; index++) {
+          let args: Object = new Object();
+          if (tools[index] === 'media.video.search' || tools[index] === 'media.aggregate.search') {
+            args = looseObject('{"query":"Codex","sources":["youtube"]}');
+          }
+          const result = await callStructuredTool(tools[index], 'Codex', args);
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('createSurface')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('updateDataModel')).assertEqual(-1);
+          if (tools[index] === 'x.post.search') {
+            expect(result.sources[0].backend).assertEqual('oauth_api');
+          }
+        }
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
     it('keeps normalized travel and food records intact in structured DataResults', 0, () => {
       const sources: DataSource[] = [{
         provider: 'fixture',

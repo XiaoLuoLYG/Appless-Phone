@@ -103,6 +103,18 @@ function parsedExecuteArgs(args: Object | null): ComposioExecuteArgs {
   return args as ComposioExecuteArgs;
 }
 
+function composioToolSchema(tool: ComposioSearchTool): Object {
+  const raw = textOf(tool.inputSchema).trim();
+  if (raw.length === 0) {
+    return new Object();
+  }
+  try {
+    return JSON.parse(raw) as Object;
+  } catch (_error) {
+    return new Object();
+  }
+}
+
 function slugContainsAny(slug: string, parts: string[]): boolean {
   for (let index = 0; index < parts.length; index++) {
     if (slug.indexOf(parts[index]) >= 0) {
@@ -1830,7 +1842,14 @@ async function callComposioSearchAndExecute(
   }
   const slug = textOf(tool.toolSlug).trim();
   const args = composioArgumentsForTool(tool, prompt, fixedToolId, parsed.fixedArgs ?? null);
-  return composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
+  const result = composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
+  result.registration = {
+    provider: 'Composio',
+    qualifiedName: slug,
+    schema: composioToolSchema(tool),
+    receipt: result.rawPreview
+  };
+  return result;
 }
 
 export async function callComposioFixedRaw(

@@ -84,7 +84,29 @@ export interface DynamicGenericToolResult {
   rows: A2uiLabelValueData[];
   rawPreview: string;
   actions?: A2uiAction[];
+  registration?: DynamicRegistrationMetadata;
 }
+
+export interface GenericStructuredData {
+  results: DynamicGenericToolResult[];
+}
+
+export interface DynamicRegistrationMetadata {
+  provider: string;
+  qualifiedName: string;
+  schema: Object;
+  receipt: string;
+}
+
+export interface DynamicStructuredData extends GenericStructuredData {
+  registration: DynamicRegistrationMetadata;
+}
+
+export interface DynamicReadExecution extends GenericStructuredData {
+  registration: DynamicRegistrationMetadata;
+}
+
+export type DynamicReadExecutor = (prompt: string, args: Object | null) => Promise<DynamicReadExecution>;
 
 export interface ModelScopeSchemaProperty {
   type?: string;
