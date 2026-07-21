@@ -145,7 +145,7 @@ args.bookingUrl: 经校验的 12306 URL
 3. Renderer：验证折叠态只有 `¥xxx起`，不含席别；展开态包含“去购票”；航班和其他卡片不受影响。
 4. 动作策略：验证文档内合法动作可通过，伪造动作、伪造域名、HTTP 和错误路径被拒绝。
 5. WebView 导航决策：覆盖 12306 页面、HTTPS 页面、未验证 Scheme 和关闭返回，不产生订票成功状态。
-6. 使用 `scripts/run-hvigor-tests-strict.mjs`，以 Hypium `test_result.txt` 为准，不以 shell 退出码代替断言结果。
+6. 使用当前分支的 DevEco `hvigorw test` 命令，并直接读取 Hypium `entry/.test/default/intermediates/test/coverage_data/test_result.txt`；不以 shell 退出码代替断言结果。
 
 ### 真机验收
 
