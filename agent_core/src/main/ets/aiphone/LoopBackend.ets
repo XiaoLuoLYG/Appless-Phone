@@ -180,10 +180,17 @@ function calendarToolDescription(definition: ToolDefinition): string {
   return description;
 }
 
+const GMAIL_SEARCH_MODEL_INSTRUCTIONS = '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query and args.pageSize; do not pass plain keywords. Always include query; if the user wants latest/recent Gmail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. Generate args.query only from exact keywords, names, acronyms, addresses, or phrases explicitly present in the current user request; preserve their spelling and meaning. Never add synonyms, translations, inferred topics, workflow terms, or likely related words that the user did not provide. A required entity remains mandatory: for example, an ECCV-related request uses query "ECCV", never "ECCV OR paper OR manuscript OR review OR conference". Only use Gmail OR when the user explicitly provides multiple alternative keywords. Never fabricate Gmail messages.';
+
 export function aiphoneToolDescriptionForModel(toolId: string): string {
   const definitions = allToolDefinitions();
   for (let index = 0; index < definitions.length; index++) {
     if (definitions[index].toolId === toolId) {
+      if (toolId === 'gmail.mail.search') {
+        const definition = definitions[index];
+        return definition.intent + ' risk=' + definition.riskLevel + ' inputSchema=' + definition.inputSchema +
+          ' outputSchema=' + definition.outputSchema + GMAIL_SEARCH_MODEL_INSTRUCTIONS;
+      }
       return calendarToolDescription(definitions[index]);
     }
   }
@@ -350,7 +357,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query and args.pageSize; do not pass plain keywords. Always include query; if the user wants latest/recent Gmail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. Generate args.query from the user request only when the user is searching by keyword; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
+      description += GMAIL_SEARCH_MODEL_INSTRUCTIONS;
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {
