@@ -25,6 +25,9 @@ const IDENTITY_KEYS: string[] = [
 const MAX_ACTION_OFFERS: number = 64;
 const MAX_ACTION_CANDIDATES: number = 256;
 const MAX_ACTION_ARGS_LENGTH: number = 8192;
+const MAX_ACTION_ARGS_DEPTH: number = 12;
+const MAX_ACTION_ARGS_NODES: number = 512;
+const DANGEROUS_ARG_KEYS: string[] = ['__proto__', 'constructor', 'prototype'];
 
 interface CandidateOffer {
   action: A2uiAction;
@@ -46,6 +49,10 @@ interface SocialDraftArgs {
   instruction: string;
 }
 
+interface CanonicalState {
+  nodes: number;
+}
+
 function recordOf(value: OfferValue): OfferRecord | null {
   if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -53,23 +60,59 @@ function recordOf(value: OfferValue): OfferRecord | null {
   return value as OfferRecord;
 }
 
-function safeSegment(value: string): string {
-  const source = value.trim();
-  let result = '';
-  for (let index = 0; index < source.length && result.length < 64; index++) {
-    const char = source.charAt(index);
-    const code = source.charCodeAt(index);
-    if (code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122 ||
-      char === '.' || char === '_' || char === '-') {
-      result += char;
-    }
+function canonicalJson(value: OfferValue, depth: number, state: CanonicalState): string | null {
+  state.nodes++;
+  if (state.nodes > MAX_ACTION_ARGS_NODES || depth > MAX_ACTION_ARGS_DEPTH) {
+    return null;
   }
-  return result.length > 0 ? result : 'item';
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? JSON.stringify(value) : null;
+  }
+  if (typeof value !== 'object') {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    const array = value as OfferValue[];
+    if (Object.keys(array).length !== array.length) {
+      return null;
+    }
+    const items: string[] = [];
+    for (let index = 0; index < array.length; index++) {
+      const item = canonicalJson(array[index], depth + 1, state);
+      if (item === null) {
+        return null;
+      }
+      items.push(item);
+    }
+    return '[' + items.join(',') + ']';
+  }
+  const record = value as OfferRecord;
+  const keys = Object.keys(record).sort();
+  const fields: string[] = [];
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (DANGEROUS_ARG_KEYS.indexOf(key) >= 0) {
+      return null;
+    }
+    const item = canonicalJson(record[key], depth + 1, state);
+    if (item === null) {
+      return null;
+    }
+    fields.push(JSON.stringify(key) + ':' + item);
+  }
+  return '{' + fields.join(',') + '}';
 }
 
-function cloneArgs(args: Object): Object | null {
+function canonicalArgs(args: Object): string | null {
   try {
-    return JSON.parse(JSON.stringify(args)) as Object;
+    const serialized = canonicalJson(args, 0, { nodes: 0 });
+    return serialized !== null && serialized.length <= MAX_ACTION_ARGS_LENGTH ? serialized : null;
   } catch (_error) {
     return null;
   }
@@ -170,6 +213,9 @@ function embeddedCandidates(data: DataResult): CandidateOffer[] {
     }
     const values = sourceValues(result);
     for (let actionIndex = 0; actionIndex < result.actions.length; actionIndex++) {
+      if (result.actions[actionIndex].kind === 'client') {
+        continue;
+      }
       candidates.push({
         action: result.actions[actionIndex],
         trusted: false,
@@ -256,13 +302,13 @@ export class RegisteredActionOfferResolver {
         candidate.action.label.trim().length === 0 || candidate.action.variant.trim().length === 0) {
         continue;
       }
-      const args = cloneArgs(candidate.action.args);
-      if (args === null || !candidate.trusted && !argsBelongToSource(args, candidate.sourceValues) ||
-        !this.catalog.validatePlacement(data.toolId, candidate.action.id, args).ok) {
+      const serializedArgs = canonicalArgs(candidate.action.args);
+      if (serializedArgs === null) {
         continue;
       }
-      const serializedArgs = JSON.stringify(args);
-      if (serializedArgs.length > MAX_ACTION_ARGS_LENGTH) {
+      const args = JSON.parse(serializedArgs) as Object;
+      if (!candidate.trusted && !argsBelongToSource(args, candidate.sourceValues) ||
+        !this.catalog.validatePlacement(data.toolId, candidate.action.id, args).ok) {
         continue;
       }
       const key = candidate.action.id + '\n' + serializedArgs;
@@ -285,8 +331,7 @@ export class RegisteredActionOfferResolver {
         continue;
       }
       const offer: ActionOffer = {
-        offerId: safeSegment(context.conversationId) + ':' + safeSegment(context.turnId) + ':' +
-          safeSegment(context.dataTaskId) + ':offer-' + index.toString(),
+        offerId: 'o' + index.toString(),
         actionId: candidate.action.id,
         label: candidate.action.label.substring(0, 80),
         variant: candidate.action.variant.substring(0, 24),

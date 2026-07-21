@@ -1,12 +1,15 @@
 import {
+  A2UI_COMPONENT_ACTION_BAR,
   A2UI_COMPONENT_COLUMN,
   A2UI_COMPONENT_ERROR_NOTICE,
+  A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
+  A2UI_COMPONENT_TOOL_CONNECT_CARD,
   A2UI_VERSION,
   A2uiAction,
   A2uiComponent,
-  A2uiDataValue,
+  A2uiDynamicToolConnectData,
   A2uiEnvelope,
   A2uiLabelValueData,
   A2uiSummaryData,
@@ -60,6 +63,8 @@ const MAX_LAYOUT_OUTPUT_LENGTH: number = 32768;
 const ACTION_TARGET_KEYS: string[] = [
   'requestKey', 'threadId', 'messageId', 'hotelId', 'itemId', 'eventId', 'orderId', 'traceId', 'bookingUrl', 'url'
 ];
+const YOUTUBE_WEB_URL: string = 'https://www.youtube.com/';
+const YOUTUBE_AUTH_URL: string = 'https://platform.composio.dev';
 
 interface PromptOffer {
   offerId: string;
@@ -268,14 +273,16 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
       }
       return foodStructuredDataA2ui(surfaceId, data.data as FoodStructuredData);
     case 'hotelSearchResults':
-      if (!hasArray(record, 'hotels') || record === null || record['ok'] !== true) {
+      if (!hasArray(record, 'hotels') || record === null || typeof record['ok'] !== 'boolean' ||
+        recordOf(record['query']) === null) {
         throw new Error('hotelSearchResults data is malformed');
       }
       return hotelSearchA2uiFromOffers(
         surfaceId, data.data as HotelSearchResult, offers, data.warnings
       );
     case 'hotelRatePlans':
-      if (!hasArray(record, 'rates') || record === null || record['ok'] !== true) {
+      if (!hasArray(record, 'rates') || record === null || typeof record['ok'] !== 'boolean' ||
+        recordOf(record['query']) === null) {
         throw new Error('hotelRatePlans data is malformed');
       }
       return hotelDetailA2uiFromOffers(
@@ -336,12 +343,69 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
   }
 }
 
+function youtubeAuthRequiredA2ui(surfaceId: string, toolId: string, message: string): string {
+  const connectData: A2uiDynamicToolConnectData = {
+    toolId,
+    prompt: '',
+    manifestId: 'composio.youtube',
+    displayName: 'YouTube',
+    sourceUrl: YOUTUBE_WEB_URL,
+    status: 'needs_auth',
+    message,
+    credentialName: 'Composio YouTube OAuth',
+    credentialRef: '',
+    registrationUrl: YOUTUBE_AUTH_URL,
+    actions: [
+      {
+        id: 'youtube.authorize', label: '授权 YouTube', prompt: YOUTUBE_AUTH_URL,
+        variant: 'primary', kind: 'client'
+      },
+      {
+        id: 'youtube.open.web', label: '打开 YouTube', prompt: YOUTUBE_WEB_URL,
+        variant: 'secondary', kind: 'client'
+      }
+    ]
+  };
+  const envelopes: A2uiEnvelope[] = [
+    {
+      version: A2UI_VERSION,
+      createSurface: {
+        surfaceId, root: 'root', title: 'YouTube', intent: 'youtube', status: 'needs_input', sendDataModel: true
+      }
+    },
+    {
+      version: A2UI_VERSION,
+      updateComponents: {
+        surfaceId,
+        components: [
+          {
+            id: 'root', component: A2UI_COMPONENT_SURFACE_ROOT, child: 'youtube_connect',
+            title: 'YouTube', status: 'needs_auth'
+          },
+          {
+            id: 'youtube_connect', component: A2UI_COMPONENT_TOOL_CONNECT_CARD,
+            title: 'YouTube', dataPath: '/dynamicToolConnect', status: 'needs_auth'
+          }
+        ]
+      }
+    },
+    {
+      version: A2UI_VERSION,
+      updateDataModel: { surfaceId, path: '/dynamicToolConnect', value: connectData }
+    }
+  ];
+  return envelopes.map((envelope: A2uiEnvelope): string => JSON.stringify(envelope)).join('\n') + '\n';
+}
+
 function authJsonl(data: DataResult, surfaceId: string): string | null {
   if (data.error === undefined || data.error.code !== 'AUTH_REQUIRED') {
     return null;
   }
-  if (data.toolId.indexOf('gmail.') === 0 || data.toolId.indexOf('youtube.') === 0) {
+  if (data.toolId.indexOf('gmail.') === 0) {
     return gmailAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
+  }
+  if (data.toolId.indexOf('youtube.') === 0) {
+    return youtubeAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
   }
   if (data.toolId.indexOf('calendar.') === 0) {
     return calendarAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
@@ -349,29 +413,25 @@ function authJsonl(data: DataResult, surfaceId: string): string | null {
   return null;
 }
 
-function cloneComponent(component: A2uiComponent, prefix: string): A2uiComponent {
+function cloneComponent(component: A2uiComponent, prefix: string, dataPrefix: string): A2uiComponent {
   const cloned = JSON.parse(JSON.stringify(component)) as A2uiComponent;
   cloned.id = prefix + component.id;
-  if (component.child !== undefined) {
+  if (component.child !== undefined && component.child.length > 0) {
     cloned.child = prefix + component.child;
+  } else {
+    cloned.child = undefined;
   }
   if (component.children !== undefined) {
-    cloned.children = component.children.map((id: string): string => prefix + id);
+    cloned.children = component.children.filter((id: string): boolean => id.length > 0)
+      .map((id: string): string => prefix + id);
   }
   if (component.actions !== undefined) {
     cloned.actions = JSON.parse(JSON.stringify(component.actions)) as A2uiAction[];
   }
-  return cloned;
-}
-
-function mergeDataValue(left: A2uiDataValue, right: A2uiDataValue): A2uiDataValue {
-  if (Array.isArray(left) && Array.isArray(right)) {
-    const combined: Object[] = [];
-    (left as Object[]).forEach((item: Object) => combined.push(item));
-    (right as Object[]).forEach((item: Object) => combined.push(item));
-    return combined as A2uiDataValue;
+  if (component.dataPath !== undefined) {
+    cloned.dataPath = dataPrefix + component.dataPath;
   }
-  return left;
+  return cloned;
 }
 
 function aggregateJsonl(jsonls: string[], surfaceId: string): string {
@@ -380,9 +440,7 @@ function aggregateJsonl(jsonls: string[], surfaceId: string): string {
   }
   const components: A2uiComponent[] = [];
   const children: string[] = [];
-  const componentKeys: Set<string> = new Set<string>();
-  const dataByPath: Map<string, A2uiDataValue> = new Map<string, A2uiDataValue>();
-  const pathOrder: string[] = [];
+  const dataUpdates: A2uiEnvelope[] = [];
   for (let resultIndex = 0; resultIndex < jsonls.length; resultIndex++) {
     const parsed = parseA2uiJsonl(jsonls[resultIndex]);
     if (parsed.error.length > 0) {
@@ -398,34 +456,31 @@ function aggregateJsonl(jsonls: string[], surfaceId: string): string {
         resultComponents = envelope.updateComponents.components;
       }
       if (envelope.updateDataModel !== undefined) {
-        const path = envelope.updateDataModel.path;
-        const current = dataByPath.get(path);
-        if (current === undefined) {
-          dataByPath.set(path, envelope.updateDataModel.value);
-          pathOrder.push(path);
-        } else {
-          dataByPath.set(path, mergeDataValue(current, envelope.updateDataModel.value));
-        }
+        const dataPrefix = '/results/' + resultIndex.toString();
+        dataUpdates.push({
+          version: A2UI_VERSION,
+          updateDataModel: {
+            surfaceId,
+            path: dataPrefix + envelope.updateDataModel.path,
+            value: envelope.updateDataModel.value
+          }
+        });
       }
     });
     if (rootId.length === 0 || resultComponents.length === 0) {
       throw new Error('Structured renderer returned an incomplete surface');
     }
     const prefix = 'result_' + resultIndex.toString() + '_';
+    const dataPrefix = '/results/' + resultIndex.toString();
     for (let componentIndex = 0; componentIndex < resultComponents.length; componentIndex++) {
       const component = resultComponents[componentIndex];
       if (component.id === rootId) {
-        const rootChildren = component.children === undefined ?
-          (component.child === undefined ? [] : [component.child]) : component.children;
+        const rootChildren = component.children !== undefined && component.children.length > 0 ?
+          component.children : (component.child === undefined || component.child.length === 0 ? [] : [component.child]);
         rootChildren.forEach((id: string) => children.push(prefix + id));
         continue;
       }
-      const key = component.component + '\n' + (component.dataPath === undefined ? prefix + component.id : component.dataPath);
-      if (componentKeys.has(key)) {
-        continue;
-      }
-      componentKeys.add(key);
-      components.push(cloneComponent(component, prefix));
+      components.push(cloneComponent(component, prefix, dataPrefix));
     }
   }
   const root: A2uiComponent = {
@@ -459,15 +514,7 @@ function aggregateJsonl(jsonls: string[], surfaceId: string): string {
       updateComponents: { surfaceId, components: [root, column].concat(components) }
     }
   ];
-  pathOrder.forEach((path: string) => {
-    const value = dataByPath.get(path);
-    if (value !== undefined) {
-      envelopes.push({
-        version: A2UI_VERSION,
-        updateDataModel: { surfaceId, path, value }
-      });
-    }
-  });
+  dataUpdates.forEach((envelope: A2uiEnvelope) => envelopes.push(envelope));
   return envelopes.map((envelope: A2uiEnvelope): string => JSON.stringify(envelope)).join('\n') + '\n';
 }
 
@@ -499,6 +546,244 @@ function preservesSemanticPaths(baseline: string, candidate: string): boolean {
     }
   }
   return true;
+}
+
+interface LayoutBaselineComponents {
+  rootId: string;
+  root: A2uiComponent;
+  byPath: Map<string, A2uiComponent>;
+}
+
+function exactRecordKeys(record: StructuredRecord, allowed: string[]): boolean {
+  const keys = Object.keys(record).sort();
+  return keys.join(',') === allowed.slice().sort().join(',');
+}
+
+function allowedRecordKeys(record: StructuredRecord, allowed: string[]): boolean {
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    if (allowed.indexOf(keys[index]) < 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function baselineComponents(jsonl: string): LayoutBaselineComponents | null {
+  const parsed = parseA2uiJsonl(jsonl);
+  if (parsed.error.length > 0) {
+    return null;
+  }
+  let rootId = '';
+  let components: A2uiComponent[] = [];
+  parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+    if (envelope.createSurface !== undefined && envelope.createSurface.root !== undefined) {
+      rootId = envelope.createSurface.root;
+    }
+    if (envelope.updateComponents !== undefined) {
+      components = envelope.updateComponents.components;
+    }
+  });
+  let root: A2uiComponent | null = null;
+  const byPath: Map<string, A2uiComponent> = new Map<string, A2uiComponent>();
+  for (let index = 0; index < components.length; index++) {
+    if (components[index].id === rootId) {
+      root = components[index];
+    }
+    if (components[index].dataPath !== undefined && components[index].dataPath!.length > 0) {
+      if (byPath.has(components[index].dataPath!)) {
+        return null;
+      }
+      byPath.set(components[index].dataPath!, components[index]);
+    }
+  }
+  return rootId.length > 0 && root !== null ? { rootId, root, byPath } : null;
+}
+
+function applyCandidateChildren(projected: A2uiComponent, record: StructuredRecord): boolean {
+  if (record['child'] !== undefined && record['children'] !== undefined) {
+    return false;
+  }
+  projected.child = undefined;
+  projected.children = undefined;
+  if (record['child'] !== undefined) {
+    if (typeof record['child'] !== 'string' || (record['child'] as string).length === 0) {
+      return false;
+    }
+    projected.child = record['child'] as string;
+  }
+  if (record['children'] !== undefined) {
+    if (!Array.isArray(record['children'])) {
+      return false;
+    }
+    const rawChildren = record['children'] as Object[];
+    const children: string[] = [];
+    for (let index = 0; index < rawChildren.length; index++) {
+      if (typeof rawChildren[index] !== 'string' || (rawChildren[index] as string).length === 0) {
+        return false;
+      }
+      children.push(rawChildren[index] as string);
+    }
+    projected.children = children;
+  }
+  return true;
+}
+
+function omitEmptyComponentDefaults(component: A2uiComponent): void {
+  if (component.child !== undefined && component.child.length === 0) {
+    component.child = undefined;
+  }
+  if (component.children !== undefined && component.children.length === 0) {
+    component.children = undefined;
+  }
+  if (component.dataPath !== undefined && component.dataPath.length === 0) {
+    component.dataPath = undefined;
+  }
+  if (component.path !== undefined && component.path.length === 0) {
+    component.path = undefined;
+  }
+  if (component.text !== undefined && component.text.length === 0) {
+    component.text = undefined;
+  }
+  if (component.body !== undefined && component.body.length === 0) {
+    component.body = undefined;
+  }
+  if (component.tone !== undefined && component.tone.length === 0) {
+    component.tone = undefined;
+  }
+  if (component.variant !== undefined && component.variant.length === 0) {
+    component.variant = undefined;
+  }
+  if (component.actions !== undefined && component.actions.length === 0) {
+    component.actions = undefined;
+  }
+}
+
+function projectLayoutCandidate(baseline: string, candidate: string, surfaceId: string): string | null {
+  if (candidate.trim().split(/\r?\n/).length !== 1) {
+    return null;
+  }
+  let envelope: StructuredRecord;
+  try {
+    const parsed = recordOf(JSON.parse(candidate) as Object);
+    if (parsed === null) {
+      return null;
+    }
+    envelope = parsed;
+  } catch (_error) {
+    return null;
+  }
+  if (!exactRecordKeys(envelope, ['updateComponents', 'version']) || envelope['version'] !== A2UI_VERSION) {
+    return null;
+  }
+  const update = recordOf(envelope['updateComponents']);
+  if (update === null || !exactRecordKeys(update, ['components', 'surfaceId']) ||
+    update['surfaceId'] !== surfaceId || !Array.isArray(update['components'])) {
+    return null;
+  }
+  const canonical = baselineComponents(baseline);
+  if (canonical === null) {
+    return null;
+  }
+  const rawComponents = update['components'] as Object[];
+  const projected: A2uiComponent[] = [];
+  const usedPaths: Set<string> = new Set<string>();
+  for (let index = 0; index < rawComponents.length; index++) {
+    const record = recordOf(rawComponents[index]);
+    if (record === null || typeof record['id'] !== 'string' || (record['id'] as string).length === 0 ||
+      typeof record['component'] !== 'string') {
+      return null;
+    }
+    const id = record['id'] as string;
+    const componentType = record['component'] as string;
+    let next: A2uiComponent;
+    if (id === canonical.rootId) {
+      if (componentType !== canonical.root.component ||
+        !allowedRecordKeys(record, ['child', 'children', 'component', 'id'])) {
+        return null;
+      }
+      next = JSON.parse(JSON.stringify(canonical.root)) as A2uiComponent;
+      next.id = id;
+      if (!applyCandidateChildren(next, record)) {
+        return null;
+      }
+    } else if (typeof record['dataPath'] === 'string') {
+      const path = record['dataPath'] as string;
+      const source = canonical.byPath.get(path);
+      if (source === undefined || source.component !== componentType || usedPaths.has(path) ||
+        !allowedRecordKeys(record, ['child', 'children', 'component', 'dataPath', 'id'])) {
+        return null;
+      }
+      next = JSON.parse(JSON.stringify(source)) as A2uiComponent;
+      next.id = id;
+      next.actions = undefined;
+      if (!applyCandidateChildren(next, record)) {
+        return null;
+      }
+      usedPaths.add(path);
+    } else if (componentType === A2UI_COMPONENT_ACTION_BAR) {
+      if (!exactRecordKeys(record, ['actions', 'component', 'id']) || !Array.isArray(record['actions'])) {
+        return null;
+      }
+      next = {
+        id,
+        component: A2UI_COMPONENT_ACTION_BAR,
+        actions: record['actions'] as A2uiAction[]
+      };
+    } else if (componentType === A2UI_COMPONENT_COLUMN || componentType === A2UI_COMPONENT_ROW) {
+      if (!allowedRecordKeys(record, ['child', 'children', 'component', 'id'])) {
+        return null;
+      }
+      next = { id, component: componentType };
+      if (!applyCandidateChildren(next, record)) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+    omitEmptyComponentDefaults(next);
+    projected.push(next);
+  }
+  const projectedEnvelope: A2uiEnvelope = {
+    version: A2UI_VERSION,
+    updateComponents: { surfaceId, components: projected }
+  };
+  return JSON.stringify(projectedEnvelope);
+}
+
+function restoreCanonicalComponentActions(baseline: string, merged: string): string {
+  const canonical = baselineComponents(baseline);
+  if (canonical === null) {
+    return baseline;
+  }
+  const lines = merged.split('\n');
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex].trim();
+    if (line.length === 0) {
+      continue;
+    }
+    let envelope: A2uiEnvelope;
+    try {
+      envelope = JSON.parse(line) as A2uiEnvelope;
+    } catch (_error) {
+      return baseline;
+    }
+    if (envelope.updateComponents === undefined) {
+      continue;
+    }
+    for (let index = 0; index < envelope.updateComponents.components.length; index++) {
+      const component = envelope.updateComponents.components[index];
+      if (component.dataPath === undefined) {
+        continue;
+      }
+      const source = canonical.byPath.get(component.dataPath);
+      if (source !== undefined && source.actions !== undefined) {
+        component.actions = JSON.parse(JSON.stringify(source.actions)) as A2uiAction[];
+      }
+    }
+    lines[lineIndex] = JSON.stringify(envelope);
+  }
+  return lines.join('\n');
 }
 
 export class StructuredToolUiRenderer implements UiTaskRenderer {
@@ -598,8 +883,15 @@ export class StructuredToolUiRenderer implements UiTaskRenderer {
       if (candidate === null || candidate.length > MAX_LAYOUT_OUTPUT_LENGTH) {
         return baseline;
       }
-      const merged = mergeA2uiLayout(baseline, candidate, surfaceId, offers);
-      return preservesSemanticPaths(baseline, merged) ? merged : baseline;
+      const projected = projectLayoutCandidate(baseline, candidate, surfaceId);
+      if (projected === null) {
+        return baseline;
+      }
+      const merged = mergeA2uiLayout(baseline, projected, surfaceId, offers);
+      if (!preservesSemanticPaths(baseline, merged) || merged === baseline) {
+        return baseline;
+      }
+      return restoreCanonicalComponentActions(baseline, merged);
     } catch (_error) {
       return baseline;
     } finally {

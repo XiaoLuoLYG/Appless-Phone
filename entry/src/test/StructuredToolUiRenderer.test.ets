@@ -222,11 +222,12 @@ function genericResult(
   title: string,
   rowsJson: string,
   actionsJson: string = '[]',
-  rawPreview: string = ''
+  rawPreview: string = '',
+  summary: string = 'fixture summary'
 ): Object {
   return object(
     '{"results":[{"sourceTag":"fixture","toolName":' + JSON.stringify(toolName) + ',' +
-    '"title":' + JSON.stringify(title) + ',"status":"success","summary":"fixture summary",' +
+    '"title":' + JSON.stringify(title) + ',"status":"success","summary":' + JSON.stringify(summary) + ',' +
     '"rows":' + rowsJson + ',"rawPreview":' + JSON.stringify(rawPreview) + ',' +
     '"actions":' + actionsJson + '}]}'
   );
@@ -249,6 +250,20 @@ function layoutCandidate(surfaceId: string, offerId: string): string {
   return '{"version":"v0.9.1","updateComponents":{"surfaceId":' + JSON.stringify(surfaceId) +
     ',"components":[{"id":"root","component":"SurfaceRoot","children":["results","actions"]},' +
     '{"id":"results","component":"GenericToolResults","dataPath":"/genericToolResults"},' +
+    '{"id":"actions","component":"ActionBar","actions":[{"offerId":' + JSON.stringify(offerId) +
+    '}]}]}}';
+}
+
+function mutatedLayoutCandidate(
+  surfaceId: string,
+  offerId: string,
+  componentType: string,
+  extraProperty: string
+): string {
+  return '{"version":"v0.9.1","updateComponents":{"surfaceId":' + JSON.stringify(surfaceId) +
+    ',"components":[{"id":"root","component":"SurfaceRoot","children":["results","actions"]},' +
+    '{"id":"results","component":' + JSON.stringify(componentType) +
+    ',"dataPath":"/genericToolResults"' + extraProperty + '},' +
     '{"id":"actions","component":"ActionBar","actions":[{"offerId":' + JSON.stringify(offerId) +
     '}]}]}}';
 }
@@ -426,6 +441,75 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.indexOf('event-1')).assertLarger(-1);
     });
 
+    it('namespaces same-schema components and every data path without dropping scalar or action data', 0, async () => {
+      const first = dataResult('calendar.events.search', 'calendarEvents', genericResult(
+        'calendar.events.search', 'First result',
+        '[{"label":"Event ID","value":"event-first"}]',
+        '[{"id":"calendar.open.web","label":"First action","prompt":"first",' +
+        '"variant":"primary","kind":"client","args":{"eventId":"event-first"}}]', '', 'first summary'
+      ));
+      const second = dataResult('calendar.events.search', 'calendarEvents', genericResult(
+        'calendar.events.search', 'Second result',
+        '[{"label":"Event ID","value":"event-second"}]',
+        '[{"id":"calendar.open.web","label":"Second action","prompt":"second",' +
+        '"variant":"secondary","kind":"client","args":{"eventId":"event-second"}}]', '', 'second summary'
+      ));
+      const renderer = new StructuredToolUiRenderer();
+
+      const rendered = await renderer.result(
+        uiTask(['first-data', 'second-data']), [first, second], [], 'surface-same-schema'
+      );
+      const repeated = await renderer.result(
+        uiTask(['first-data', 'second-data']), [first, second], [], 'surface-same-schema'
+      );
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const componentIds: Set<string> = new Set<string>();
+      const references: string[] = [];
+      const dataPaths: string[] = [];
+      let duplicateId = false;
+      parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+        if (envelope.updateComponents !== undefined) {
+          envelope.updateComponents.components.forEach((component: A2uiComponent) => {
+            duplicateId = duplicateId || componentIds.has(component.id);
+            componentIds.add(component.id);
+            if (component.child !== undefined && component.child.length > 0) {
+              references.push(component.child);
+            }
+            if (component.children !== undefined) {
+              component.children.forEach((childId: string) => references.push(childId));
+            }
+          });
+        }
+        if (envelope.updateDataModel !== undefined) {
+          dataPaths.push(envelope.updateDataModel.path);
+        }
+      });
+      let dangling = false;
+      references.forEach((childId: string) => dangling = dangling || !componentIds.has(childId));
+
+      expect(parsed.error).assertEqual('');
+      expect(duplicateId).assertFalse();
+      expect(dangling).assertFalse();
+      componentIds.forEach((componentId: string) => {
+        const expectedParents = componentId === 'root' ? 0 : 1;
+        expect(references.filter((childId: string): boolean => childId === componentId).length)
+          .assertEqual(expectedParents);
+      });
+      expect(dataPaths.indexOf('/results/0/genericToolResults')).assertLarger(-1);
+      expect(dataPaths.indexOf('/results/0/summary')).assertLarger(-1);
+      expect(dataPaths.indexOf('/results/1/genericToolResults')).assertLarger(-1);
+      expect(dataPaths.indexOf('/results/1/summary')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('First result')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('Second result')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('first summary')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('second summary')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('event-first')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('event-second')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('First action')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('Second action')).assertLarger(-1);
+      expect(rendered.jsonl).assertEqual(repeated.jsonl);
+    });
+
     it('resolves only registered, catalog-approved offers with exact real-item args', 0, async () => {
       const resolver = new RegisteredActionOfferResolver(catalog());
       const search = dataResult('hotel.search', 'hotelSearchResults', hotelSearchResult() as Object);
@@ -513,25 +597,58 @@ export default function structuredToolUiRendererTest() {
       expect(offers.length).assertEqual(0);
     });
 
-    it('bounds the number of real-field offers emitted from one result', 0, async () => {
-      const rows: string[] = [];
-      const actions: string[] = [];
-      for (let index = 0; index < 80; index++) {
-        const traceId = 'trace-' + index.toString();
-        const url = 'diditaxi://ride?traceId=' + traceId;
-        rows.push('{"label":"Trace","value":' + JSON.stringify(traceId) + '}',
-          '{"label":"URL","value":' + JSON.stringify(url) + '}');
-        actions.push('{"id":"ride.open.didi","label":"打开滴滴","prompt":"open",' +
-          '"variant":"primary","kind":"client","args":{"traceId":' + JSON.stringify(traceId) +
-          ',"url":' + JSON.stringify(url) + '}}');
-      }
+    it('keeps embedded client actions canonical and never promotes them into layout offers', 0, async () => {
+      const action = '{"id":"ride.open.didi","label":"打开滴滴","prompt":"open",' +
+        '"variant":"primary","kind":"client","args":{"traceId":"trace-client",' +
+        '"url":"diditaxi://ride?traceId=trace-client"}}';
       const result = dataResult('ride.app.link', 'genericToolResults', genericResult(
-        'ride.app.link', 'Ride links', '[' + rows.join(',') + ']', '[' + actions.join(',') + ']'
+        'ride.app.link', 'Ride link',
+        '[{"label":"Trace","value":"trace-client"},' +
+        '{"label":"URL","value":"diditaxi://ride?traceId=trace-client"}]', '[' + action + ']'
       ));
+      const resolver = new RegisteredActionOfferResolver(catalog());
+      const offers = await resolver.resolve(result, offerContext('ride-client-data'));
+      const planner = new RecordingPlanner();
+      const rendered = await new StructuredToolUiRenderer(planner, 100).result(
+        uiTask(), [result], offers, 'surface-client-action'
+      );
 
-      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(result, offerContext('ride-data'));
+      expect(offers.length).assertEqual(0);
+      expect(rendered.jsonl.indexOf('"id":"ride.open.didi"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('diditaxi://ride?traceId=trace-client')).assertLarger(-1);
+      expect(planner.prompt.indexOf('ride.open.didi')).assertEqual(-1);
+      expect(planner.prompt.indexOf('trace-client')).assertEqual(-1);
+    });
 
-      expect(offers.length).assertEqual(64);
+    it('deduplicates reordered nested args and rejects prototype-shaped args', 0, async () => {
+      const rows = '[{"label":"Trace","value":"trace-dedupe"},' +
+        '{"label":"URL","value":"diditaxi://ride?traceId=trace-dedupe"}]';
+      const actions = '[{"id":"ride.open.didi","label":"First","prompt":"first",' +
+        '"variant":"primary","kind":"prompt","args":{"traceId":"trace-dedupe",' +
+        '"url":"diditaxi://ride?traceId=trace-dedupe","meta":{"b":2,"a":1},"order":[1,2]}},' +
+        '{"id":"ride.open.didi","label":"Reordered","prompt":"second",' +
+        '"variant":"secondary","kind":"prompt","args":{"order":[1,2],"meta":{"a":1,"b":2},' +
+        '"url":"diditaxi://ride?traceId=trace-dedupe","traceId":"trace-dedupe"}},' +
+        '{"id":"ride.open.didi","label":"Distinct array","prompt":"third",' +
+        '"variant":"secondary","kind":"prompt","args":{"traceId":"trace-dedupe",' +
+        '"url":"diditaxi://ride?traceId=trace-dedupe","meta":{"a":1,"b":2},"order":[2,1]}}]';
+      const duplicateResult = dataResult('ride.app.link', 'genericToolResults', genericResult(
+        'ride.app.link', 'Ride links', rows, actions
+      ));
+      const prototypeResult = dataResult('ride.app.link', 'genericToolResults', genericResult(
+        'ride.app.link', 'Prototype args', rows,
+        '[{"id":"ride.open.didi","label":"Unsafe","prompt":"unsafe",' +
+        '"variant":"primary","kind":"prompt","args":{"traceId":"trace-dedupe",' +
+        '"url":"diditaxi://ride?traceId=trace-dedupe","__proto__":{"polluted":true}}}]'
+      ));
+      const resolver = new RegisteredActionOfferResolver(catalog());
+
+      const duplicateOffers = await resolver.resolve(duplicateResult, offerContext('dedupe-data'));
+      const prototypeOffers = await resolver.resolve(prototypeResult, offerContext('prototype-data'));
+
+      expect(duplicateOffers.length).assertEqual(1);
+      expect(JSON.stringify(duplicateOffers[0].args).indexOf('"order":[2,1]')).assertLarger(-1);
+      expect(prototypeOffers.length).assertEqual(0);
     });
 
     it('keeps mail and Gmail offer identity scoped to the exact data item and task', 0, async () => {
@@ -560,9 +677,29 @@ export default function structuredToolUiRendererTest() {
       expect(field(mailRead.args, 'messageId')).assertEqual('message-qq');
       expect(field(gmailRead.args, 'requestKey')).assertEqual('gmail:thread-gmail');
       expect(field(gmailRead.args, 'threadId')).assertEqual('thread-gmail');
-      expect(mailRead.offerId === gmailRead.offerId).assertFalse();
-      expect(mailRead.offerId.indexOf('mail-data')).assertLarger(-1);
-      expect(gmailRead.offerId.indexOf('gmail-data')).assertLarger(-1);
+      expect(mailRead.offerId).assertEqual('o0');
+      expect(gmailRead.offerId).assertEqual('o0');
+    });
+
+    it('uses render-local opaque offer IDs with no correlation action or item substrings', 0, async () => {
+      const resolver = new RegisteredActionOfferResolver(catalog());
+      const context: ActionOfferContext = {
+        conversationId: 'conversation-secret-47675',
+        turnId: 'turn-secret-hotel-booking-open',
+        dataTaskId: 'data-secret-bookingUrl'
+      };
+      const offers = await resolver.resolve(
+        dataResult('hotel.detail', 'hotelRatePlans', hotelDetailResult() as Object), context
+      );
+
+      for (let index = 0; index < offers.length; index++) {
+        expect(offers[index].offerId).assertEqual('o' + index.toString());
+        expect(offers[index].offerId.indexOf('conversation-secret')).assertEqual(-1);
+        expect(offers[index].offerId.indexOf('turn-secret')).assertEqual(-1);
+        expect(offers[index].offerId.indexOf('data-secret')).assertEqual(-1);
+        expect(offers[index].offerId.indexOf(offers[index].actionId)).assertEqual(-1);
+        expect(offers[index].offerId.indexOf('47675')).assertEqual(-1);
+      }
     });
 
     it('binds accepted layout references back to immutable original offer args', 0, async () => {
@@ -586,6 +723,42 @@ export default function structuredToolUiRendererTest() {
       expect(planner.prompt.indexOf(booking.actionId)).assertEqual(-1);
       expect(planner.prompt.indexOf('bookingUrl')).assertEqual(-1);
       expect(planner.prompt.indexOf('47675')).assertEqual(-1);
+    });
+
+    it('accepts layout-only placement but rejects authored content properties and type substitution', 0, async () => {
+      const resolver = new RegisteredActionOfferResolver(catalog());
+      const data = dataResult('hotel.detail', 'hotelRatePlans', hotelDetailResult() as Object);
+      const offers = await resolver.resolve(data, offerContext());
+      const booking = actionById(offers, 'hotel.booking.open') as ActionOffer;
+      const baseline = await new StructuredToolUiRenderer().result(uiTask(), [data], offers, 'surface-layout-only');
+      const accepted = new RecordingPlanner();
+      accepted.candidate = layoutCandidate('surface-layout-only', booking.offerId);
+      const acceptedRender = await new StructuredToolUiRenderer(accepted, 100).result(
+        uiTask(), [data], offers, 'surface-layout-only'
+      );
+
+      expect(acceptedRender.jsonl === baseline.jsonl).assertFalse();
+      expect(acceptedRender.jsonl.indexOf('深圳测试酒店')).assertLarger(-1);
+      expect(acceptedRender.jsonl.indexOf('"id":"hotel.search.restore"')).assertLarger(-1);
+      expect(acceptedRender.jsonl.indexOf('"id":"hotel.booking.open"')).assertLarger(-1);
+      expect(acceptedRender.jsonl.indexOf('"hotelId":47675')).assertLarger(-1);
+
+      const candidates: string[] = [
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'GenericToolResults', ',"title":"FORGED TITLE"'),
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'GenericToolResults', ',"body":"FORGED BODY"'),
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'GenericToolResults', ',"text":"FORGED TEXT"'),
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'GenericToolResults', ',"status":"error"'),
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'InfoRows', ''),
+        mutatedLayoutCandidate('surface-layout-only', booking.offerId, 'UnknownWidget', '')
+      ];
+      for (let index = 0; index < candidates.length; index++) {
+        const planner = new RecordingPlanner();
+        planner.candidate = candidates[index];
+        const rendered = await new StructuredToolUiRenderer(planner, 100).result(
+          uiTask(), [data], offers, 'surface-layout-only'
+        );
+        expect(rendered.jsonl).assertEqual(baseline.jsonl);
+      }
     });
 
     it('falls back exactly on malformed duplicate unknown timeout and thrown layouts', 0, async () => {
@@ -653,6 +826,54 @@ export default function structuredToolUiRendererTest() {
       expect(planner.prompt.indexOf(receipt)).assertEqual(-1);
       expect(planner.prompt.indexOf(body)).assertEqual(-1);
       expect(planner.prompt.indexOf('mailThread')).assertLarger(-1);
+    });
+
+    it('renders YouTube account authorization with exact YouTube manifest URLs and actions', 0, async () => {
+      const result = dataResult('youtube.mine.playlists', 'youtubePlaylists', genericResult(
+        'youtube.mine.playlists', 'YouTube', '[]'
+      ));
+      result.status = 'error';
+      result.error = { code: 'AUTH_REQUIRED', message: 'YouTube account authorization required' };
+
+      const rendered = await new StructuredToolUiRenderer().result(uiTask(), [result], [], 'surface-youtube-auth');
+
+      expect(rendered.jsonl.indexOf('"manifestId":"composio.youtube"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"displayName":"YouTube"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"title":"YouTube"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"sourceUrl":"https://www.youtube.com/"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"registrationUrl":"https://platform.composio.dev"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"id":"youtube.authorize"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"id":"youtube.open.web"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"manifestId":"google.gmail"')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('"id":"gmail.authorize"')).assertEqual(-1);
+    });
+
+    it('keeps valid hotel provider failures canonical while malformed payloads fail closed', 0, async () => {
+      const failedSearch = hotelSearchResult();
+      failedSearch.ok = false;
+      failedSearch.error = 'RollingGo search unavailable';
+      failedSearch.message = 'RollingGo search unavailable';
+      failedSearch.hotels = [];
+      const failedDetail = hotelDetailResult();
+      failedDetail.ok = false;
+      failedDetail.error = 'RollingGo detail unavailable';
+      failedDetail.message = 'RollingGo detail unavailable';
+      failedDetail.rates = [];
+      const search = dataResult('hotel.search', 'hotelSearchResults', failedSearch as Object);
+      const detail = dataResult('hotel.detail', 'hotelRatePlans', failedDetail as Object);
+      search.status = 'error';
+      detail.status = 'error';
+      const malformed = dataResult('hotel.search', 'hotelSearchResults', object('{"ok":false}'));
+
+      const searchRender = await new StructuredToolUiRenderer().result(uiTask(), [search], [], 'surface-hotel-error-search');
+      const detailRender = await new StructuredToolUiRenderer().result(uiTask(), [detail], [], 'surface-hotel-error-detail');
+      const malformedRender = await new StructuredToolUiRenderer().result(uiTask(), [malformed], [], 'surface-hotel-malformed');
+
+      expect(searchRender.jsonl.indexOf('RollingGo search unavailable')).assertLarger(-1);
+      expect(detailRender.jsonl.indexOf('RollingGo detail unavailable')).assertLarger(-1);
+      expect(searchRender.jsonl.indexOf('结构化结果格式无效')).assertEqual(-1);
+      expect(detailRender.jsonl.indexOf('结构化结果格式无效')).assertEqual(-1);
+      expect(malformedRender.jsonl.indexOf('结构化结果格式无效')).assertLarger(-1);
     });
 
     it('returns an honest error surface for unknown schema malformed data and renderer exceptions', 0, async () => {
