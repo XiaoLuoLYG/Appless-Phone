@@ -3,30 +3,53 @@
 ## Scope
 
 - Base commit: `15c49cd7215de2f03e267d2f073fd9d557b41436`.
-- Target commit message: `feat: register product action execution`.
-- Renamed the hotel-only registered executor and test to the product-level `AiphoneRegisteredActionExecutor` names.
-- Added one narrow `RegisteredPageAction(actionId, args, context)` callback seam and wired it through `MultiAgentRuntime`, the existing canary wrapper, and `Index.ets`.
-- Preserved the existing Petal Maps hotel-navigation and RollingGo in-app booking paths.
-- Added explicit Wave 3 routes for `luckin.order.preview`, `social.reply.draft`, `mail.draft.create`, `gmail.draft.create`, `gmail.draft.apply`, `gmail.open.web`, `worldcup.open`, `payment.send`, `payment.account.setup`, and `maps.route.open`.
-- Kept `gmail.message.send` for Task 7 and the remaining create/update/delete/send/ride writes for Task 8 fail-closed with no callback invocation.
+- Initial implementation: `ad17f649735c698127f104ed29a0ff8f2607d805` (`feat: register product action execution`).
+- Review fix: `78211438` (`fix: enforce registered action authority`).
+- Renamed the hotel-only registered executor to the product-level `AiphoneRegisteredActionExecutor` and kept one narrow `RegisteredPageAction(actionId, args, context)` product callback seam.
+- Added executor support for the ten Wave 3 routes: `luckin.order.preview`, `social.reply.draft`, `mail.draft.create`, `gmail.draft.create`, `gmail.draft.apply`, `gmail.open.web`, `worldcup.open`, `payment.send`, `payment.account.setup`, and `maps.route.open`.
+- Kept Task 7 `gmail.message.send` and the remaining Task 8 external writes fail-closed.
+
+## Review Fix Outcome
+
+### Real reachability authority
+
+- `RegisteredPageActionRoute.ets` resolves page actions only from the current surface's real registered `summary.toolName`, exact surface document action, and exact action arguments.
+- A direct same-ID Action definition may authorize its own fixed action. Otherwise the source definition must declare the action. The only cross-ID adapters are the two existing explicit UI relationships: `payment.confirm` to `payment.send`, and Stripe account actions to `payment.account.setup`.
+- `Index.ets` now routes a valid registered click through `MultiAgentCanaryRuntime.runPageAction` and the normal Action Agent lifecycle exactly once. Client-only, deferred, unknown, mutated, and stale-generation actions reject before the product callback.
+- The canary's initial Leader `actionIntent` path is limited to fixed, non-confirm-required Actions. Confirm-required routes remain exact-button flows, so an initial prompt cannot wait for a confirmation UI that does not exist.
+- The reachability tests cover all ten fixed executor routes: eight through actual current-button surface paths and two (`worldcup.open`, `maps.route.open`) through a real Leader `actionIntent` / `ACTION.PLAN.REQUEST` / Action Agent path. Test callbacks are controlled seams; this is routing evidence, not live-provider or device evidence.
+
+### Exact confirmation
+
+- A confirm-required direct click is authorized only after current `ActionCatalog.validateSurfaceExecution` succeeds for the exact conversation, turn, task, surface, source tool, run, action, arguments, and surface generation.
+- The proof is stored internally by `ActionAgent`, consumed once, and resumed through `ActionPlanRunner` so immediately-before-invoke catalog validation still runs.
+- Forged args, wrong correlation identity, a second use, cancel, and stop cannot execute. An unconfirmed bus message still pauses/rejects rather than inheriting a page click's authority.
+- No timeout, overlay, bus protocol field, second lifecycle, or automatic confirmation path was added.
+
+### Bounded replay state
+
+- Replay identity includes conversation, turn, surface, source tool, plan, run, and step, so distinct steps in one run remain executable while an exact replay rejects before a second side effect.
+- Each verified surface scope accepts at most 128 replay identities. The executor does not evict live entries; the 129th unique identity fails closed with `ACTION_REPLAY_CAPACITY`.
+- Replay state resets only after a verified authority-scope transition or explicit runtime disposal. A forged scope cannot reset it.
+- `MultiAgentRuntime`, `MultiAgentCanaryRuntime`, and `HotelAgentRuntime` now dispose the executor instances they own.
 
 ## TDD Evidence
 
-### Initial RED
+### Initial implementation RED/GREEN
 
-The executor test was renamed, registered in `List.test.ets`, and expanded before the production rename. The authoritative Hypium command failed in `:entry:default@UnitTestArkTS` because `AiphoneRegisteredActionExecutor.ets` did not exist. The other reported test type errors were compiler cascades from that missing import.
+The renamed executor test was registered before the production rename. The authoritative Hypium compile failed because `AiphoneRegisteredActionExecutor.ets` did not exist. The first implementation reached 1014/1014.
 
-The first GREEN implementation reached a complete authoritative result of 1014/1014.
+A later replay-correlation RED reported 1015 tests with one failure: a valid second plan step was rejected because replay protection keyed the whole run. Adding the exact step identity made 1015/1015 green.
 
-### Replay-correlation RED
+### Review RED/GREEN
 
-Self-review added `keeps distinct plan steps executable under one action run` before changing the replay key. The authoritative result then reported **1015 tests, 1 failure, 0 errors**: the second valid step returned `error` because replay protection keyed the whole run instead of the exact step.
+- Replay/lifecycle tests were written before the new API and failed compilation because executor `dispose()` did not exist. The implementation added the 128-entry fail-closed cap, verified-scope transition, forged-scope rejection, and disposal behavior.
+- Exact-button confirmation tests were written before the new API and failed compilation because `ActionAgent.authorizeDirectSurfaceRun()` did not exist. The implementation added internal one-shot authorization and resume-through-runner behavior.
+- Reachability tests exercise the real canary/Leader boundaries. They cover all ten supported routes and prove client/deferred/mutated/stale actions cannot invoke the callback.
 
-The key now includes the complete correlation tuple: conversation, turn, surface, source tool, plan, run, and step. An exact replay is rejected before a second callback, while a different step in the same run remains executable.
+## Final Verification
 
-### Final GREEN
-
-Command:
+Authoritative command:
 
 ```bash
 DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
@@ -34,69 +57,35 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T05:11:30+0800`:
+Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T05:46:36+0800`:
 
 ```text
-Tests run: 1015, Failure: 0, Error: 0, Pass: 1015, Ignore: 0
+Tests run: 1022, Failure: 0, Error: 0, Pass: 1022, Ignore: 0
 ```
 
-The named Task 6 cases in that file pass for exact Gmail draft, payment, Maps, all current Wave 3 routes, unknown/deferred routes, stale correlation/args, replay, distinct plan steps, and thrown/malformed/real-error callback results.
-
-## Implementation
-
-### One registered executor
-
-- `AiphoneRegisteredActionExecutor` derives registered Action membership from `actionAgentToolDefinitions()` and retains the existing registered `hotel.detail` follow-up bridge.
-- Every call validates non-empty correlation identity, current `ActionCatalog` placement or registered-step authority, and exact arguments before any URI opener or page callback runs.
-- Unknown, Data-owned, client-only, stale, mutated, deferred, and replayed executions return typed errors without invoking product behavior.
-- Replay reservation occurs before the asynchronous side effect. Rejected openers, thrown callback promises, non-boolean opener values, malformed callback results, cancellations, and real provider errors cannot become success or a fabricated receipt.
-- Hotel detail still produces the same paired Data/UI follow-up. Hotel navigation still builds the canonical Petal Maps URI. Hotel booking still accepts only the registered RollingGo URL through the existing opener.
-
-### Runtime and page callback
-
-- `MultiAgentRuntime` now defaults to the product registered executor while preserving explicit executor injection. Missing system/page adapters reject safely.
-- The existing canary memory wrapper delegates every non-memory action to that same product executor; the standalone hotel runtime injects a rejecting non-hotel callback.
-- `Index.ets` injects one callback into the canary. It has an explicit allowlist for only the current Wave 3 page routes and reuses `callToolById`, the existing Gmail Web opener, and the existing World Cup router.
-- Gateway output is observed and returned as the real parsed data model with the current correlation and surface status. Transport failures, error surfaces, error/blocked provider results, SocialHub draft errors, Stripe setup errors, malformed data, and rejected navigation return typed errors.
-- Gmail Web and World Cup navigation now return success only after their existing platform navigation calls succeed. No new transport, provider, registry, or receipt model was added.
-
-## Confirmation and Lifecycle Boundary
-
-- `ActionAgent` remains the owner of confirm-required pause/resume, immediately-before-invoke catalog reauthorization, cancel/timeout/stop suppression, plan progression, and terminal result publication.
-- The executor does not auto-confirm, create a second action lifecycle, or call a page handler twice.
-- `payment.send` retains its current preview/confirmation UI behavior. Task 8 owns payment confirmation and the remaining external-write routes.
-
-## Verification
-
-- Full authoritative Hypium: **1015/1015 passed**, zero failures and zero errors.
-- `node scripts/verify-loopy-backend.mjs`: **237 checks passed**, including a successful `agent_core` HAR build.
-- The passing registry ownership test proves **44 fixed definitions**, **44 unique IDs**, **24 Data tools**, and **20 Action tools**.
-- Capability audit: 44 registry tools; no missing matrix entries, missing docs, registry-only tools, model-only tools, or excluded smoke queries. The ten existing `reviewRequired` future capabilities remain unchanged.
+- Full Hypium: **1022/1022 passed**, zero failures and zero errors.
+- `node scripts/verify-loopy-backend.mjs`: **237 checks passed**, including a successful `agent_core` HAR build, on the exact committed implementation tree.
+- Capability audit: 44 registry tools, 36 actions, 69 capabilities; no missing matrix entries, missing docs, registry-only tools, model-only tools, or excluded smoke queries. The ten existing `reviewRequired` future capabilities remain unchanged.
 - `git diff --check`: passed.
-- Production/test scan: no `HotelRegisteredActionExecutor` reference remains; exactly one `AiphoneRegisteredActionExecutor` class exists.
-- Deferred Task 7/8 action IDs do not occur in the production executor, and no fake/mock/simulated/receipt success text was added to the executor or page adapter.
-- Runtime graph scan still shows one `LeaderAgent`, one `DataAgent`, one `UiAgent`, and one `ActionAgent`; `UiSurfaceWriter` remains owned by `UiAgent`.
 
-## Simplicity Review
+## Product and Evidence Boundary
 
-- The implementation is one executor, one injected callback type, one explicit page-route predicate, and one page adapter. It does not add a coordinator, registry, workflow engine, provider wrapper, dependency, or generic dynamic-write discovery.
-- Existing injected executor seams remain available for tests and specialized runtimes.
-- Client-only sort/filter/expand/back actions remain in `handleClientAction` and do not enter registered execution.
+- Product callbacks still return real parsed provider data or the real provider/config/navigation error. No fake receipt, order, provider success, registry mutation, or test-only source relationship was added.
+- Hotel detail, Petal Maps navigation, and RollingGo in-app booking keep their existing behavior.
+- The implementation remains one registered executor, one callback type, one route resolver, and the existing Action Agent lifecycle. It adds no coordinator, workflow engine, transport, provider wrapper, dependency, or generic dynamic-write discovery.
+- Hvigor still emits the pre-existing coverage reporter `00507008` JSON parse noise after Hypium completes. The fresh authoritative result file is complete and green.
+- This report claims deterministic unit/integration routing, action-lifecycle, structural-verifier, capability-audit, and HAR-build evidence only. It does not claim a live-provider success, signed package, or device run.
 
-## Files Changed
+## Review-Fix Files
 
+- `agent_core/src/main/ets/agent/action/ActionAgent.ets`
+- `agent_core/src/main/ets/agent/action/ActionCatalog.ets`
 - `entry/src/main/ets/pages/A2uiHome/Index.ets`
-- `entry/src/main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor.ets` (renamed)
+- `entry/src/main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/HotelAgentRuntime.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`
-- `entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes.ets`
-- `entry/src/test/AiphoneRegisteredActionExecutor.test.ets` (renamed)
-- `entry/src/test/HotelAgentRuntime.test.ets`
+- `entry/src/main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute.ets`
+- `entry/src/test/ActionAgent.test.ets`
+- `entry/src/test/AiphoneRegisteredActionExecutor.test.ets`
 - `entry/src/test/MultiAgentCanaryRuntime.test.ets`
-- `entry/src/test/List.test.ets`
-- `.superpowers/sdd/tasks/domain-task-06-report.md`
-
-## Evidence Boundary
-
-Hvigor still emits the pre-existing coverage reporter `00507008` JSON parse error after Hypium completes. The fresh authoritative result file is complete and green. This task has deterministic unit/integration, structural verifier, capability-audit, and HAR-build evidence; it does not claim a live-provider, signed-package, or device run.
