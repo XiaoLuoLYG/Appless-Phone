@@ -22,6 +22,7 @@ import {
   UiLayoutPlanner,
   UiSurfaceWriter,
   UserInputPayload,
+  VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
   VirtualActionIntent,
   VirtualActionIntentResolver,
   allToolDefinitions,
@@ -43,7 +44,6 @@ import {
 import { MultiAgentRuntime } from './MultiAgentRuntime';
 import { MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
-import { HtmlHomeDocument } from '../html/HtmlHomeTypes';
 import {
   authorizeHotelDataTask,
   HotelRuntimeSurfaceWriter,
@@ -62,9 +62,11 @@ import {
   SystemUriOpener
 } from './AiphoneRegisteredActionExecutor';
 import {
-  isInitialRegisteredPageAction,
+  RegisteredPageSnapshot,
   registeredPageSourceToolId,
-  resolveRegisteredPageAction
+  registeredPageSnapshotFingerprint,
+  resolveRegisteredPageAction,
+  resolveVirtualRegisteredPageAction
 } from './RegisteredPageActionRoute';
 
 const MEMORY_ACTION_ID: string = 'memory.update';
@@ -75,6 +77,7 @@ export interface MultiAgentCanaryOptions {
   selectedPersonaId: () => string;
   opener: SystemUriOpener;
   pageAction?: RegisteredPageAction;
+  currentPageSnapshot?: () => RegisteredPageSnapshot | null;
   onSurface: HotelSurfaceCallback;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void;
   downstreamWriter?: UiSurfaceWriter;
@@ -93,6 +96,7 @@ export interface MultiAgentCanaryActionContext {
   turnId: string;
   surfaceId: string;
   sourceToolId: string;
+  pageActionId?: string;
 }
 
 function memoryDefinition(): ToolDefinition {
@@ -177,12 +181,6 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
       return surfaceId.startsWith('virtual:') &&
         conversationId.length > 0 && turnId.length > 0 && memoryRequest(args) !== null;
     }
-    if (surfaceId.startsWith('virtual:') && isInitialRegisteredPageAction(actionId)) {
-      const values = args as Record<string, Object | string | number | boolean | null | undefined>;
-      return conversationId.length > 0 && turnId.length > 0 &&
-        typeof values['originalQuery'] === 'string' &&
-        (values['originalQuery'] as string).trim().length > 0;
-    }
     return this.hotel.allows(conversationId, turnId, surfaceId, actionId, args);
   }
 }
@@ -196,20 +194,19 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
     }
     const actionId = request.allowedActionIds[0];
     if (actionId !== MEMORY_ACTION_ID) {
-      const originalQuery = request.inputText.trim();
-      if (!isInitialRegisteredPageAction(actionId) || originalQuery.length === 0) {
+      const action = resolveVirtualRegisteredPageAction(actionId, request.inputText);
+      if (action === null || action.args === undefined) {
         return null;
       }
-      const args: InitialActionArgs = { originalQuery: originalQuery };
       const offer: ActionOffer = {
         offerId: 'initial-action:' + actionId,
         actionId: actionId,
         label: actionId,
         variant: 'primary',
-        args: args
+        args: action.args
       };
       const intent: VirtualActionIntent = {
-        sourceToolId: actionId,
+        sourceToolId: VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
         offer: offer,
         autoRun: true
       };
@@ -305,15 +302,11 @@ interface MemorySurfaceOutput {
   surfaceId: string;
 }
 
-interface InitialActionArgs {
-  originalQuery: string;
-}
-
 function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext {
   const tools: LeaderToolMetadata[] = allToolDefinitions().map(
     (definition: ToolDefinition): LeaderToolMetadata => {
       const actions = definition.actions.slice();
-      if (isInitialRegisteredPageAction(definition.toolId) &&
+      if ((definition.toolId === 'worldcup.open' || definition.toolId === 'maps.route.open') &&
         actions.indexOf(definition.toolId) < 0) {
         actions.push(definition.toolId);
       }
@@ -352,10 +345,6 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
       'hotel.detail',
       'hotel.navigate',
       'hotel.booking.open',
-      'luckin.order.preview',
-      'social.reply.draft',
-      'mail.draft.create',
-      'gmail.draft.create',
       'worldcup.open',
       'maps.route.open',
       MEMORY_ACTION_ID
@@ -369,6 +358,7 @@ export class MultiAgentCanaryRuntime {
   private readonly surfaceWriter: HotelRuntimeSurfaceWriter;
   private readonly conversationId: string;
   private readonly aiphoneExecutor: AiphoneRegisteredActionExecutor;
+  private readonly currentPageSnapshot: () => RegisteredPageSnapshot | null;
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
 
@@ -376,6 +366,8 @@ export class MultiAgentCanaryRuntime {
     const conversationId: string = options.conversationId === undefined ?
       'aiphone-canary-' + Date.now().toString() : options.conversationId;
     this.conversationId = conversationId;
+    this.currentPageSnapshot = options.currentPageSnapshot === undefined ?
+      (): RegisteredPageSnapshot | null => null : options.currentPageSnapshot;
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
     this.authority = new HotelSurfaceAuthority();
@@ -447,29 +439,35 @@ export class MultiAgentCanaryRuntime {
       sourceToolId: context.sourceToolId,
       planId: '',
       runId: '',
-      stepId: ''
+      stepId: '',
+      pageActionId: context.pageActionId
     };
     return this.runtime.runAction(action, execution);
   }
 
   runPageAction(
-    clicked: A2uiAction,
-    surface: A2uiSurfaceState,
-    document: HtmlHomeDocument,
-    generation: number
+    clicked: A2uiAction
   ): Promise<boolean> {
+    const snapshot = this.currentPageSnapshot();
+    if (snapshot === null) {
+      return Promise.resolve(false);
+    }
+    const surface = snapshot.surface;
+    const document = snapshot.document;
+    const generation = snapshot.generation;
     if (!Number.isSafeInteger(generation) || generation <= 0 ||
       surface.surfaceId.trim().length === 0 || clicked.args === undefined ||
+      document.surfaceId === undefined || document.surfaceId !== surface.surfaceId ||
+      document.generatedAt.trim().length === 0 ||
       !isHtmlHomeActionAllowed(document, clicked)) {
       return Promise.resolve(false);
     }
     const sourceToolId = registeredPageSourceToolId(surface);
-    const execution = resolveRegisteredPageAction(sourceToolId, clicked);
-    if (execution === null || execution.args === undefined) {
+    const route = resolveRegisteredPageAction(sourceToolId, clicked);
+    if (route === null || route.action.args === undefined) {
       return Promise.resolve(false);
     }
-    const fingerprint = surface.surfaceId + '\n' + surface.sequence.toString() + '\n' +
-      sourceToolId + '\n' + JSON.stringify(surface);
+    const fingerprint = registeredPageSnapshotFingerprint(snapshot);
     if (generation < this.pageGeneration ||
       (generation === this.pageGeneration && fingerprint !== this.pageFingerprint)) {
       return Promise.resolve(false);
@@ -490,9 +488,10 @@ export class MultiAgentCanaryRuntime {
       conversationId: this.conversationId,
       turnId,
       surfaceId: surface.surfaceId,
-      sourceToolId
+      sourceToolId,
+      pageActionId: route.pageActionId
     };
-    return this.runAction(execution, context);
+    return this.runAction(route.action, context);
   }
 
   currentActionContext(): MultiAgentCanaryActionContext | null {

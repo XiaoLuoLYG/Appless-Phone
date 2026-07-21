@@ -50,7 +50,9 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
     if (toolId === 'hotel.search') {
       return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
     }
-    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.booking.open') {
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
+      toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
+      toolId === 'maps.route.open' || toolId === 'memory.update') {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
@@ -251,6 +253,57 @@ export default function actionCatalogTest() {
       expect(result.ok).assertFalse();
       expect(result.code).assertEqual('ACTION_NOT_DECLARED');
       expect(surface.calls).assertEqual(0);
+    });
+
+    it('rejects self-source placement and limits actionIntent authority to World Cup and Maps', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        detailArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const placement = actionCatalog.validatePlacement(
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const surfaceExecution = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const worldCupIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('worldcup.open', new Object());
+      const mapsIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'maps.route.open',
+        args('{"origin":"深圳北","destination":"香港西九龙"}')
+      );
+      const hotelIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('hotel.detail', detailArgs);
+      const memoryIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('memory.update', new Object());
+
+      expect(placement.ok).assertFalse();
+      expect(placement.code).assertEqual('ACTION_NOT_DECLARED');
+      expect(surfaceExecution.ok).assertFalse();
+      expect(surface.calls).assertEqual(0);
+      expect(worldCupIntent.ok).assertTrue();
+      expect(mapsIntent.ok).assertTrue();
+      expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
+      expect(memoryIntent.code).assertEqual('ACTION_INTENT_DENIED');
     });
 
     it('recognizes only workflow run as the fixed workflow entry', 0, () => {

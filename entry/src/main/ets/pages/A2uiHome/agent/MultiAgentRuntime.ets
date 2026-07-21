@@ -303,7 +303,10 @@ export class MultiAgentRuntime {
       taskId,
       payload
     };
-    if (!this.action.authorizeDirectSurfaceRun(message)) {
+    if (!this.action.authorizeDirectSurfaceRun(
+      message,
+      context.pageActionId === undefined ? '' : context.pageActionId
+    )) {
       return Promise.resolve(false);
     }
     return new Promise<boolean>((resolve: (ok: boolean) => void) => {

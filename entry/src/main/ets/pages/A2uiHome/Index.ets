@@ -1,6 +1,5 @@
 import {
   A2uiAgentRunner,
-  ActionExecutionContext,
   ActionExecutionResult,
   ConversationTurnMessage,
   CurrentSurfaceSummary,
@@ -124,9 +123,16 @@ import {
 } from './agent/MultiAgentRuntimeTypes';
 import { SystemUriOpener } from './agent/AiphoneRegisteredActionExecutor';
 import {
-  registeredPageSourceToolId,
-  resolveRegisteredPageAction
+  RegisteredPageSnapshot,
+  RegisteredPageSnapshotStore,
+  dispatchRegisteredPageActionCandidate
 } from './agent/RegisteredPageActionRoute';
+import {
+  RegisteredPageActionHandler,
+  RegisteredPageToolInvocation,
+  RegisteredPageToolInvoker
+} from './agent/RegisteredPageActionHandler';
+import { RegisteredPageActionContext } from './agent/AiphoneRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
@@ -177,23 +183,8 @@ const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
 
-interface A2uiCallObservation {
-  result?: A2uiCallResult;
-}
-
-interface WorldCupPageActionOutput {
-  actionId: string;
-  route: string;
-  status: string;
-}
-
-interface RegisteredToolPageActionOutput {
-  actionId: string;
-  conversationId: string;
-  turnId: string;
-  surfaceId: string;
-  status: string;
-  data: A2uiRuntimeDataModel;
+interface RegisteredPageToolObservation {
+  result: A2uiCallResult | null;
 }
 
 function fingerprintPart(value: string): string {
@@ -242,6 +233,33 @@ class PageHotelUriOpener implements SystemUriOpener {
 
   open(uri: string): Promise<boolean> {
     return this.callback(uri);
+  }
+}
+
+class PageRegisteredToolInvoker implements RegisteredPageToolInvoker {
+  private readonly callback: (
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ) => Promise<RegisteredPageToolInvocation>;
+
+  constructor(callback: (
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ) => Promise<RegisteredPageToolInvocation>) {
+    this.callback = callback;
+  }
+
+  invoke(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    return this.callback(toolId, prompt, pageActionId, args);
   }
 }
 
@@ -577,6 +595,9 @@ struct Index {
   private mailCalendarSuggestions: Record<string, MailCalendarSuggestion> = {};
   private htmlHomeCacheKey: string = '';
   private htmlHomeCacheHtml: string = '';
+  private readonly registeredPageSnapshotStore: RegisteredPageSnapshotStore =
+    new RegisteredPageSnapshotStore();
+  private registeredPageRenderGeneration: number = 0;
   @State htmlHomeStableHtml: string = '';
   private voiceSession: VoiceInputSession | null = null;
   private voiceSessionSeq: number = 0;
@@ -624,6 +645,7 @@ struct Index {
     this.htmlHomeCacheHtml = renderHtmlHomeDocument(document, false);
     this.luckinInlinePatchJson = patchJson;
     this.luckinInlinePatchTick = this.luckinInlinePatchTick + 1;
+    this.recordRenderedPageSnapshot(surface, document);
     return true;
   }
 
@@ -1218,6 +1240,15 @@ struct Index {
       aiLogInfo('[AIPhone][HotelBookingOpen] host=rollinggo.cn');
       return Promise.resolve(true);
     });
+    const pageHandler = new RegisteredPageActionHandler(
+      new PageRegisteredToolInvoker((
+        toolId: string,
+        prompt: string,
+        pageActionId: string,
+        args: Object
+      ): Promise<RegisteredPageToolInvocation> =>
+        this.invokeRegisteredPageTool(toolId, prompt, pageActionId, args))
+    );
     const options: MultiAgentCanaryOptions = {
       model: model,
       selectedPersonaId: (): string => this.selectedPersonaId,
@@ -1232,8 +1263,10 @@ struct Index {
       pageAction: (
         actionId: string,
         args: Object,
-        context: ActionExecutionContext
-      ): Promise<ActionExecutionResult> => this.executeRegisteredPageAction(actionId, args, context),
+        context: RegisteredPageActionContext
+      ): Promise<ActionExecutionResult> => pageHandler.execute(actionId, args, context),
+      currentPageSnapshot: (): RegisteredPageSnapshot | null =>
+        this.registeredPageSnapshotStore.current(),
       currentLocalDate: (): string => this.currentLocalDate(),
       settingsFingerprint: fingerprint
     };
@@ -1366,6 +1399,7 @@ struct Index {
     }
     const document = this.currentHtmlHomeDocument();
     const html = renderHtmlHomeDocument(document, this.isBusy);
+    this.recordRenderedPageSnapshot(this.currentSurface, document);
     if (this.htmlHomeDebugExportEnabled) {
       this.writeHtmlHomeDebugExport(document, 'auto');
     }
@@ -1377,6 +1411,21 @@ struct Index {
       ' blocks=' + document.blocks.length.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
     return html;
+  }
+
+  private recordRenderedPageSnapshot(
+    surface: A2uiSurfaceState,
+    document: HtmlHomeDocument
+  ): void {
+    if (document.surfaceId === undefined || document.surfaceId !== surface.surfaceId) {
+      return;
+    }
+    this.registeredPageRenderGeneration++;
+    this.registeredPageSnapshotStore.record(
+      this.surfaceSnapshot(surface),
+      document,
+      this.registeredPageRenderGeneration
+    );
   }
 
   private writeHtmlHomeDebugExport(document: HtmlHomeDocument, reason: string): void {
@@ -1825,6 +1874,8 @@ struct Index {
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
     this.messages = [];
+    this.registeredPageSnapshotStore.clear();
+    this.registeredPageRenderGeneration = 0;
     this.currentSurface = this.surfaceSnapshot(createSeedA2uiSurface());
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
@@ -3838,7 +3889,10 @@ struct Index {
       await this.handleClientAction(action);
       return;
     }
-    if (!isHtmlHomeActionAllowed(this.currentHtmlHomeDocument(), action)) {
+    const renderedSnapshot = this.registeredPageSnapshotStore.current();
+    const document = renderedSnapshot === null ?
+      this.currentHtmlHomeDocument() : renderedSnapshot.document;
+    if (!isHtmlHomeActionAllowed(document, action)) {
       if (this.isLuckinPaymentActionId(action.id)) {
         this.logLuckinPaymentAction(action, 'blocked_not_allowed');
       }
@@ -3848,34 +3902,36 @@ struct Index {
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
-    const document = this.currentHtmlHomeDocument();
-    const registeredAction = resolveRegisteredPageAction(
-      registeredPageSourceToolId(this.currentSurface),
-      action
+    await dispatchRegisteredPageActionCandidate(
+      action,
+      (clicked: A2uiAction): Promise<boolean> => this.runRegisteredPageAction(clicked),
+      (legacy: A2uiAction): Promise<void> => this.sendLegacyAction(legacy, document)
     );
-    if (registeredAction !== null) {
-      const runtime = this.canaryRuntime();
-      this.isBusy = true;
-      try {
-        const ok = await runtime.runPageAction(
-          action,
-          this.currentSurface,
-          document,
-          this.surfaceRenderTick + this.luckinInlinePatchTick
-        );
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok,
-          status: ok ? 'ready' : 'error',
-          message: ok ? '操作已处理。' : '操作已被当前页面权限拒绝。',
-          requestDebug: this.lastModelRequest,
-          assistantDebug: this.lastModelOutput,
-          error: ok ? '' : 'registered action 与当前 surface/document 不匹配'
-        }));
-      } finally {
-        this.isBusy = false;
-      }
-      return;
+  }
+
+  private async runRegisteredPageAction(action: A2uiAction): Promise<boolean> {
+    const runtime = this.canaryRuntime();
+    this.isBusy = true;
+    try {
+      const ok = await runtime.runPageAction(action);
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok,
+        status: ok ? 'ready' : 'error',
+        message: ok ? '操作已处理。' : '操作已被当前页面权限拒绝。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: ok ? '' : 'registered action 与当前已渲染页面快照不匹配'
+      }));
+      return ok;
+    } finally {
+      this.isBusy = false;
     }
+  }
+
+  private async sendLegacyAction(
+    action: A2uiAction,
+    document: HtmlHomeDocument
+  ): Promise<void> {
     if (this.multiAgentRuntime !== null &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
       const runtime = this.multiAgentRuntime;
@@ -3972,127 +4028,28 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeDidiMcpSandboxToggle] enabled=' + (isSandbox ? 'true' : 'false'));
   }
 
-  private isRegisteredGatewayPageAction(actionId: string): boolean {
-    return actionId === 'luckin.order.preview' ||
-      actionId === 'social.reply.draft' ||
-      actionId === 'mail.draft.create' ||
-      actionId === 'gmail.draft.create' ||
-      actionId === 'gmail.draft.apply' ||
-      actionId === 'gmail.open.web' ||
-      actionId === 'payment.send' ||
-      actionId === 'payment.account.setup' ||
-      actionId === 'maps.route.open';
-  }
-
-  private registeredPageProviderError(model: A2uiRuntimeDataModel): string {
-    for (let index = 0; index < model.genericToolResults.length; index++) {
-      const result = model.genericToolResults[index];
-      if (result.status === 'error' || result.status === 'blocked') {
-        return result.summary.length > 0 ? result.summary : result.title;
-      }
-    }
-    if (model.socialHub.draft.status === 'error') {
-      return model.socialHub.draft.error;
-    }
-    if (model.stripeReceivingAccount !== undefined &&
-      (model.stripeReceivingAccount.status === 'error' ||
-        model.stripeReceivingAccount.status === 'blocked')) {
-      return model.stripeReceivingAccount.message;
-    }
-    return '';
-  }
-
-  private async executeRegisteredPageAction(
-    actionId: string,
+  private async invokeRegisteredPageTool(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
     args: Object,
-    context: ActionExecutionContext
-  ): Promise<ActionExecutionResult> {
-    if (actionId === 'worldcup.open') {
-      const opened = await this.callToolById(actionId, actionId, actionId, args);
-      if (!opened) {
-        return {
-          status: 'error',
-          errorCode: 'ACTION_PAGE_NAVIGATION_FAILED',
-          message: 'World Cup page could not be opened.'
-        };
-      }
-      const output: WorldCupPageActionOutput = {
-        actionId: actionId,
-        route: ANYTHING_DEMO_ROUTE_URL,
-        status: 'opened'
-      };
-      return {
-        status: 'success',
-        output: output
-      };
-    }
-    if (!this.isRegisteredGatewayPageAction(actionId)) {
-      return {
-        status: 'error',
-        errorCode: 'ACTION_PAGE_ROUTE_UNSUPPORTED',
-        message: 'Registered page action route is unsupported.'
-      };
-    }
-    const observation: A2uiCallObservation = {};
-    const values = args as Record<string, Object | string | number | boolean | null | undefined>;
-    const originalQuery = values['originalQuery'];
-    const prompt = typeof originalQuery === 'string' && originalQuery.trim().length > 0 ?
-      originalQuery : actionId;
+  ): Promise<RegisteredPageToolInvocation> {
+    const observation: RegisteredPageToolObservation = { result: null };
     const ok = await this.callToolById(
-      actionId,
+      toolId,
       prompt,
-      actionId,
+      pageActionId,
       args,
       (result: A2uiCallResult): void => {
         observation.result = result;
       }
     );
-    if (!ok || observation.result === undefined) {
-      const message = observation.result === undefined ?
-        'Registered page tool returned no result.' : observation.result.error;
-      return {
-        status: 'error',
-        errorCode: 'ACTION_PAGE_TOOL_FAILED',
-        message: message.length > 0 ? message : 'Registered page tool failed.'
-      };
-    }
-    const result: A2uiCallResult = observation.result;
-    if (result.surface.status === 'error' || result.surface.error.length > 0) {
-      return {
-        status: 'error',
-        errorCode: 'ACTION_PAGE_PROVIDER_ERROR',
-        message: result.surface.error.length > 0 ? result.surface.error : result.surface.title
-      };
-    }
-    let model: A2uiRuntimeDataModel;
-    try {
-      model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
-    } catch (_error) {
-      return {
-        status: 'error',
-        errorCode: 'ACTION_PAGE_TOOL_RESULT_INVALID',
-        message: 'Registered page tool returned an invalid data model.'
-      };
-    }
-    const providerError = this.registeredPageProviderError(model);
-    if (providerError.length > 0) {
-      return {
-        status: 'error',
-        errorCode: 'ACTION_PAGE_PROVIDER_ERROR',
-        message: providerError
-      };
-    }
-    const output: RegisteredToolPageActionOutput = {
-      actionId: actionId,
-      conversationId: context.conversationId,
-      turnId: context.turnId,
-      surfaceId: result.surface.surfaceId,
-      status: result.surface.status,
-      data: model
-    };
+    const observed = observation.result;
     return {
-      status: 'success',
-      output: output
+      ok,
+      result: observed,
+      error: observed === null ?
+        (ok ? '' : 'Registered page tool did not complete.') : observed.error
     };
   }
 

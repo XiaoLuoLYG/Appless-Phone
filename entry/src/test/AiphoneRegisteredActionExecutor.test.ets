@@ -243,6 +243,12 @@ function context(sourceToolId: string = 'hotel.search', isSurfaceEntry?: boolean
   };
 }
 
+function pageContext(pageActionId: string, sourceToolId: string = pageActionId): ActionExecutionContext {
+  const current = context(sourceToolId);
+  current.pageActionId = pageActionId;
+  return current;
+}
+
 function navigateArgs(): HotelNavigateArgs {
   return {
     hotelId: 47675,
@@ -511,7 +517,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       };
       const executor = pageExecutor('payment.send', args, recorder, new FakeUriOpener(), 'payment.send');
 
-      const result = await executor.execute('payment.send', args, context('payment.send'));
+      const result = await executor.execute('payment.send', args, pageContext('payment.send'));
 
       expect(result.status).assertEqual('success');
       expect(recorder.calls.length).assertEqual(1);
@@ -527,7 +533,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       const recorder = new RecordingPageAction();
       const executor = pageExecutor('maps.route.open', args, recorder, new FakeUriOpener(), 'maps.route.open');
 
-      const result = await executor.execute('maps.route.open', args, context('maps.route.open'));
+      const result = await executor.execute('maps.route.open', args, pageContext('maps.route.open'));
 
       expect(result.status).assertEqual('success');
       expect(recorder.calls.length).assertEqual(1);
@@ -550,7 +556,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
         const args = object('{"marker":"exact-' + index.toString() + '"}');
         const recorder = new RecordingPageAction();
         const executor = pageExecutor(actionId, args, recorder, new FakeUriOpener(), actionId);
-        const result = await executor.execute(actionId, args, context(actionId));
+        const result = await executor.execute(actionId, args, pageContext(actionId));
 
         expect(result.status).assertEqual('success');
         expect(recorder.calls.length).assertEqual(1);
@@ -644,8 +650,8 @@ export default function aiphoneRegisteredActionExecutorTest() {
       const recorder = new RecordingPageAction();
       const executor = pageExecutor('maps.route.open', args, recorder, new FakeUriOpener(), 'maps.route.open');
 
-      const first = await executor.execute('maps.route.open', args, context('maps.route.open'));
-      const replay = await executor.execute('maps.route.open', args, context('maps.route.open'));
+      const first = await executor.execute('maps.route.open', args, pageContext('maps.route.open'));
+      const replay = await executor.execute('maps.route.open', args, pageContext('maps.route.open'));
 
       expect(first.status).assertEqual('success');
       expect(replay.status).assertEqual('error');
@@ -760,7 +766,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       thrown.shouldThrow = true;
       const thrownResult = await pageExecutor(
         'maps.route.open', args, thrown, new FakeUriOpener(), 'maps.route.open'
-      ).execute('maps.route.open', args, context('maps.route.open'));
+      ).execute('maps.route.open', args, pageContext('maps.route.open'));
       expect(thrownResult.status).assertEqual('error');
       expect(JSON.stringify(thrownResult).indexOf('provider-receipt')).assertEqual(-1);
 
@@ -768,7 +774,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       falseHandler.returnFalse = true;
       const falseResult = await pageExecutor(
         'maps.route.open', args, falseHandler, new FakeUriOpener(), 'maps.route.open'
-      ).execute('maps.route.open', args, context('maps.route.open'));
+      ).execute('maps.route.open', args, pageContext('maps.route.open'));
       expect(falseResult.status).assertEqual('error');
       expect(JSON.stringify(falseResult).indexOf('provider-receipt')).assertEqual(-1);
 
@@ -780,7 +786,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       };
       const errorResult = await pageExecutor(
         'maps.route.open', args, realError, new FakeUriOpener(), 'maps.route.open'
-      ).execute('maps.route.open', args, context('maps.route.open'));
+      ).execute('maps.route.open', args, pageContext('maps.route.open'));
       expect(JSON.stringify(errorResult)).assertEqual(JSON.stringify(realError.result));
       expect(JSON.stringify(errorResult).indexOf('provider-receipt')).assertEqual(-1);
     });

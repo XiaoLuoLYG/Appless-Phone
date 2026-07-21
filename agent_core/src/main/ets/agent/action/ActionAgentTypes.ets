@@ -10,6 +10,8 @@ import {
 } from './ActionPlanTypes';
 import { ActionOffer } from './ActionOfferTypes';
 
+export const VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID: string = 'virtual.action-intent';
+
 export interface WorkflowRunArgs {
   planId: string;
   runId: string;

@@ -45,6 +45,10 @@ export interface ActionPlanRunContext {
   sourceToolId: string;
   planId: string;
   runId: string;
+  /** Internal authority for a page action resolved from the rendered snapshot. */
+  pageActionId?: string;
+  /** Internal authority for a zero-Data actionIntent resolved by the runtime. */
+  virtualAction?: boolean;
 }
 
 export interface ActionExecutionContext {
@@ -57,6 +61,10 @@ export interface ActionExecutionContext {
   stepId: string;
   /** True when this is the first action placed directly on the current surface. */
   isSurfaceEntry?: boolean;
+  /** Original immutable page operation, distinct from an adapted registered target. */
+  pageActionId?: string;
+  /** True only for an internally resolved zero-Data actionIntent. */
+  virtualAction?: boolean;
 }
 
 export interface ActionStepSuccessResult {

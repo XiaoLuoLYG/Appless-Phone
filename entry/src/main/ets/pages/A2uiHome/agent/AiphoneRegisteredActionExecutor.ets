@@ -19,10 +19,14 @@ export interface HotelActionIdFactory {
   nextId(prefix: string): string;
 }
 
+export interface RegisteredPageActionContext extends ActionExecutionContext {
+  pageActionId: string;
+}
+
 export type RegisteredPageAction = (
   actionId: string,
   args: Object,
-  context: ActionExecutionContext
+  context: RegisteredPageActionContext
 ) => Promise<ActionExecutionResult>;
 
 interface HotelFollowUpCreated {
@@ -115,14 +119,24 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
     }
     const current = context.isSurfaceEntry === false ?
       this.catalog.validateRegisteredStep(actionId, args) :
-      this.catalog.validateSurfaceExecution(
-        context.conversationId,
-        context.turnId,
-        context.surfaceId,
-        context.sourceToolId,
-        actionId,
-        args
-      );
+      context.virtualAction === true ?
+        this.catalog.validateActionIntentExecution(actionId, args) :
+        context.pageActionId !== undefined && context.pageActionId.length > 0 ?
+          this.catalog.validatePageExecution(
+            context.conversationId,
+            context.turnId,
+            context.surfaceId,
+            actionId,
+            args
+          ) :
+          this.catalog.validateSurfaceExecution(
+            context.conversationId,
+            context.turnId,
+            context.surfaceId,
+            context.sourceToolId,
+            actionId,
+            args
+          );
     if (!current.ok) {
       return {
         status: 'error',
@@ -186,7 +200,19 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         'RollingGo booking opened in App.'
       );
     }
-    return this.executePageAction(actionId, args, context);
+    return this.executePageAction(actionId, args, {
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      surfaceId: context.surfaceId,
+      sourceToolId: context.sourceToolId,
+      planId: context.planId,
+      runId: context.runId,
+      stepId: context.stepId,
+      isSurfaceEntry: context.isSurfaceEntry,
+      pageActionId: context.pageActionId === undefined || context.pageActionId.length === 0 ?
+        actionId : context.pageActionId,
+      virtualAction: context.virtualAction
+    });
   }
 
   dispose(): void {
@@ -197,7 +223,7 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
   private async executePageAction(
     actionId: string,
     args: Object,
-    context: ActionExecutionContext
+    context: RegisteredPageActionContext
   ): Promise<ActionExecutionResult> {
     let result: ActionExecutionResult;
     try {

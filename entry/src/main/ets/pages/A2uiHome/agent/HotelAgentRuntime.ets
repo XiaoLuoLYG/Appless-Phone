@@ -949,7 +949,8 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
       } else if (clicked.id === 'hotel.booking.open' && this.sourceToolId === 'hotel.detail') {
         execution = clicked;
       } else {
-        execution = resolveRegisteredPageAction(this.sourceToolId, clicked);
+        const route = resolveRegisteredPageAction(this.sourceToolId, clicked);
+        execution = route === null ? null : route.action;
       }
       if (execution !== null && execution.args !== undefined) {
         this.allowed.add(this.actionKey(execution.id, execution.args));

@@ -66,7 +66,7 @@ export class ActionCatalog {
       if (source === null) {
         return denied('ACTION_SOURCE_NOT_REGISTERED', 'Source tool is not registered.');
       }
-      if (source.actions.indexOf(actionId) < 0 && sourceToolId !== actionId) {
+      if (source.actions.indexOf(actionId) < 0) {
         return denied('ACTION_NOT_DECLARED', 'Action is not declared by the source tool.');
       }
       return this.validateEntryTarget(actionId, args);
@@ -87,9 +87,7 @@ export class ActionCatalog {
       return malformedArgs();
     }
     try {
-      const placement = sourceToolId === actionId ?
-        this.validateRegisteredStep(actionId, args) :
-        this.validatePlacement(sourceToolId, actionId, args);
+      const placement = this.validatePlacement(sourceToolId, actionId, args);
       if (!placement.ok) {
         return placement;
       }
@@ -100,6 +98,40 @@ export class ActionCatalog {
     } catch (_error) {
       return authorityFailed();
     }
+  }
+
+  validatePageExecution(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    args: Object
+  ): ActionCatalogResult {
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
+    }
+    try {
+      const registered = this.validateRegisteredStep(actionId, args);
+      if (!registered.ok) {
+        return registered;
+      }
+      if (!this.surfaceAuthorizer.allows(conversationId, turnId, surfaceId, actionId, args)) {
+        return denied('ACTION_SURFACE_DENIED', 'Action does not match the current surface.');
+      }
+      return registered;
+    } catch (_error) {
+      return authorityFailed();
+    }
+  }
+
+  validateActionIntentExecution(actionId: string, args: Object): ActionCatalogResult {
+    if (actionId !== 'worldcup.open' && actionId !== 'maps.route.open') {
+      return denied(
+        'ACTION_INTENT_DENIED',
+        'Only the registered World Cup and Maps actions may execute from actionIntent.'
+      );
+    }
+    return this.validateRegisteredStep(actionId, args);
   }
 
   validateRegisteredStep(actionId: string, args: Object): ActionCatalogResult {

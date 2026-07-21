@@ -17,6 +17,7 @@ import {
   ActionRunPayload,
   PausedActionRun,
   RegisteredActionExecutor,
+  VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
   VirtualActionIntent,
   VirtualActionIntentResolver,
   WorkflowRunArgs
@@ -126,6 +127,8 @@ interface DirectSurfaceAuthorization {
   runId: string;
   actionId: string;
   args: Object;
+  pageActionId: string;
+  confirmed: boolean;
   generation: number;
 }
 
@@ -134,7 +137,7 @@ function nonempty(value: string | undefined): boolean {
 }
 
 function copyContext(context: ActionPlanRunContext): ActionPlanRunContext {
-  return {
+  const copy: ActionPlanRunContext = {
     conversationId: context.conversationId,
     turnId: context.turnId,
     surfaceId: context.surfaceId,
@@ -142,6 +145,13 @@ function copyContext(context: ActionPlanRunContext): ActionPlanRunContext {
     planId: context.planId,
     runId: context.runId
   };
+  if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+    copy.pageActionId = context.pageActionId;
+  }
+  if (context.virtualAction === true) {
+    copy.virtualAction = true;
+  }
+  return copy;
 }
 
 function clonePlan(plan: ActionPlan): ActionPlan | null {
@@ -303,7 +313,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.directSurfaceAuthorizations.clear();
   }
 
-  authorizeDirectSurfaceRun(message: AgentMessage): boolean {
+  authorizeDirectSurfaceRun(message: AgentMessage, pageActionId: string = ''): boolean {
     if (!this.active || message.type !== AgentMessageType.ACTION_RUN) {
       return false;
     }
@@ -312,18 +322,28 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       payload.confirmedStepId !== undefined || !nonempty(payload.sourceToolId)) {
       return false;
     }
-    const current = this.catalog.validateSurfaceExecution(
-      message.conversationId,
-      message.turnId,
-      payload.surfaceId,
-      payload.sourceToolId as string,
-      payload.actionId,
-      payload.args
-    );
+    const exactPageActionId = pageActionId.trim();
+    const current = exactPageActionId.length > 0 ?
+      this.catalog.validatePageExecution(
+        message.conversationId,
+        message.turnId,
+        payload.surfaceId,
+        payload.actionId,
+        payload.args
+      ) :
+      this.catalog.validateSurfaceExecution(
+        message.conversationId,
+        message.turnId,
+        payload.surfaceId,
+        payload.sourceToolId as string,
+        payload.actionId,
+        payload.args
+      );
     if (!current.ok || current.definition === null) {
       return false;
     }
-    if (current.definition.riskLevel !== 'confirm_required') {
+    const confirmed = current.definition.riskLevel === 'confirm_required';
+    if (!confirmed && exactPageActionId.length === 0) {
       return true;
     }
     const key = this.runKey(
@@ -350,6 +370,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       runId: payload.runId,
       actionId: payload.actionId,
       args: cloned.value as Object,
+      pageActionId: exactPageActionId,
+      confirmed,
       generation: this.generation
     });
     return true;
@@ -834,15 +856,21 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
-    const offers: ActionOffer[] = this.sanitizeOffers(intent.sourceToolId, [intent.offer]);
-    if (offers.length !== 1) {
+    const actionIntent = intent.sourceToolId === VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID;
+    let offer: ActionOffer | null = null;
+    if (actionIntent) {
+      offer = this.sanitizeActionIntentOffer(intent.offer);
+    } else {
+      const placed = this.sanitizeOffers(intent.sourceToolId, [intent.offer]);
+      offer = placed.length === 1 ? placed[0] : null;
+    }
+    if (offer === null) {
       this.publishInputError(
         stored.message, '', '', '', 'ACTION_VIRTUAL_INTENT_INVALID',
         'Virtual Action resolver returned an unauthorized offer.'
       );
       return;
     }
-    const offer: ActionOffer = offers[0];
     const payload: ActionRunPayload = {
       surfaceId: 'virtual:' + stored.message.taskId,
       runId: 'virtual:' + stored.message.taskId,
@@ -850,7 +878,33 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       actionId: offer.actionId,
       args: offer.args
     };
-    this.startDirectRun(stored.message, payload);
+    this.startDirectRun(stored.message, payload, actionIntent);
+  }
+
+  private sanitizeActionIntentOffer(candidate: ActionOffer): ActionOffer | null {
+    if (candidate === null || typeof candidate !== 'object' ||
+      !nonempty(candidate.offerId) || !nonempty(candidate.actionId) ||
+      !nonempty(candidate.label) || !nonempty(candidate.variant) ||
+      candidate.args === null || typeof candidate.args !== 'object' ||
+      Array.isArray(candidate.args)) {
+      return null;
+    }
+    const cloned = cloneJsonValue(candidate.args);
+    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+      Array.isArray(cloned.value)) {
+      return null;
+    }
+    const args = cloned.value as Object;
+    if (!this.catalog.validateActionIntentExecution(candidate.actionId, args).ok) {
+      return null;
+    }
+    return {
+      offerId: candidate.offerId,
+      actionId: candidate.actionId,
+      label: candidate.label,
+      variant: candidate.variant,
+      args
+    };
   }
 
   private compileReadyRequests(conversationId: string, turnId: string): void {
@@ -1238,7 +1292,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.startDirectRun(message, payload);
   }
 
-  private startDirectRun(message: AgentMessage, payload: ActionRunPayload): void {
+  private startDirectRun(
+    message: AgentMessage,
+    payload: ActionRunPayload,
+    virtualAction: boolean = false
+  ): void {
     const key = this.runKey(
       message.conversationId,
       message.turnId,
@@ -1279,6 +1337,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
+    const authorization = this.directSurfaceAuthorization(message, payload, key, false);
     const plan = directPlan(message, payload);
     const context: ActionPlanRunContext = {
       conversationId: message.conversationId,
@@ -1288,6 +1347,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       planId: plan.planId,
       runId: payload.runId
     };
+    if (authorization !== null && authorization.pageActionId.length > 0) {
+      context.pageActionId = authorization.pageActionId;
+    }
+    if (virtualAction) {
+      context.virtualAction = true;
+    }
     const validation = this.runner.validate(plan, context);
     if (!validation.ok) {
       this.publishInputError(
@@ -1301,7 +1366,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
-    const directlyConfirmed = this.consumeDirectSurfaceAuthorization(message, payload, key);
+    const consumed = this.directSurfaceAuthorization(message, payload, key, true);
     this.executeStored({
       planId: plan.planId,
       runId: payload.runId,
@@ -1309,7 +1374,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       context,
       taskId: message.taskId,
       followUpPublished: false
-    }, null, directlyConfirmed ? 'step-1' : '');
+    }, null, consumed !== null && consumed.confirmed ? 'step-1' : '');
   }
 
   private startStoredRun(message: AgentMessage, payload: ActionRunPayload): void {
@@ -1819,6 +1884,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
     }
     if (stepIndex === 0) {
+      if (active.stored.context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(actionId, args);
+      }
+      if (active.stored.context.pageActionId !== undefined &&
+        active.stored.context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          actionId,
+          args
+        );
+      }
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
         context.turnId,
@@ -1855,7 +1933,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.context.conversationId !== context.conversationId ||
       stored.context.turnId !== context.turnId ||
       stored.context.surfaceId !== context.surfaceId ||
-      stored.context.sourceToolId !== context.sourceToolId) {
+      stored.context.sourceToolId !== context.sourceToolId ||
+      stored.context.pageActionId !== context.pageActionId ||
+      (stored.context.virtualAction === true) !== (context.virtualAction === true)) {
       return false;
     }
     for (let index = 0; index < stored.plan.steps.length; index++) {
@@ -1880,11 +1960,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.context.surfaceId === payload.surfaceId;
   }
 
-  private consumeDirectSurfaceAuthorization(
+  private directSurfaceAuthorization(
     message: AgentMessage,
     payload: ActionRunPayload,
-    key: string
-  ): boolean {
+    key: string,
+    consume: boolean
+  ): DirectSurfaceAuthorization | null {
     const authorization = this.directSurfaceAuthorizations.get(key);
     if (authorization === undefined || authorization.generation !== this.generation ||
       authorization.conversationId !== message.conversationId ||
@@ -1895,10 +1976,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       authorization.runId !== payload.runId ||
       authorization.actionId !== payload.actionId ||
       !sameJson(authorization.args as JsonValue, payload.args as JsonValue)) {
-      return false;
+      return null;
     }
-    this.directSurfaceAuthorizations.delete(key);
-    return true;
+    if (consume) {
+      this.directSurfaceAuthorizations.delete(key);
+    }
+    return authorization;
   }
 
   private matchesPaused(

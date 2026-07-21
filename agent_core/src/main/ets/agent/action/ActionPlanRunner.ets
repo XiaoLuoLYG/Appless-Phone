@@ -180,16 +180,24 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
       message: 'Action plan execution identity is malformed.'
     };
   }
+  const value: ActionPlanRunContext = {
+    conversationId: record['conversationId'] as string,
+    turnId: record['turnId'] as string,
+    surfaceId: record['surfaceId'] as string,
+    sourceToolId: record['sourceToolId'] as string,
+    planId: record['planId'] as string,
+    runId: record['runId'] as string
+  };
+  if (typeof record['pageActionId'] === 'string' &&
+    (record['pageActionId'] as string).length > 0) {
+    value.pageActionId = record['pageActionId'] as string;
+  }
+  if (record['virtualAction'] === true) {
+    value.virtualAction = true;
+  }
   return {
     ok: true,
-    value: {
-      conversationId: record['conversationId'] as string,
-      turnId: record['turnId'] as string,
-      surfaceId: record['surfaceId'] as string,
-      sourceToolId: record['sourceToolId'] as string,
-      planId: record['planId'] as string,
-      runId: record['runId'] as string
-    },
+    value,
     errorCode: '',
     message: ''
   };
@@ -264,7 +272,7 @@ function executionContext(
   stepId: string,
   stepIndex: number
 ): ActionExecutionContext {
-  return {
+  const execution: ActionExecutionContext = {
     conversationId: context.conversationId,
     turnId: context.turnId,
     surfaceId: context.surfaceId,
@@ -274,6 +282,13 @@ function executionContext(
     stepId: stepId,
     isSurfaceEntry: stepIndex === 0
   };
+  if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+    execution.pageActionId = context.pageActionId;
+  }
+  if (context.virtualAction === true) {
+    execution.virtualAction = true;
+  }
+  return execution;
 }
 
 export class ActionPlanRunner {
@@ -714,6 +729,18 @@ export class ActionPlanRunner {
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (index === 0) {
+      if (context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(step.actionId, args);
+      }
+      if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          step.actionId,
+          args
+        );
+      }
       if (!requireSurface) {
         return this.catalog.validatePlacement(
           context.sourceToolId,
@@ -741,6 +768,18 @@ export class ActionPlanRunner {
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (index === 0) {
+      if (context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(step.actionId, args);
+      }
+      if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          step.actionId,
+          args
+        );
+      }
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
         context.turnId,

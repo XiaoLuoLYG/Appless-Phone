@@ -120,13 +120,104 @@ function routeTravelMode(value: string | undefined): string {
   return ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler'].indexOf(mode) >= 0 ? mode : 'driving';
 }
 
-export function googleMapsDirectionsUrl(value: Object | null): string {
+export function normalizeMapsRouteInput(value: Object | null): MapsRouteArgs | null {
   const args = routeArgs(value);
   const origin = textOf(args.origin).trim();
   const destination = textOf(args.destination).trim();
   if (origin.length === 0 || destination.length === 0) {
+    return null;
+  }
+  return {
+    origin,
+    destination,
+    travelMode: routeTravelMode(args.travelMode),
+    navigate: args.navigate === true
+  };
+}
+
+function trimRoutePrefix(value: string): string {
+  const prefixes: string[] = [
+    '请帮我打开',
+    '帮我打开',
+    '请打开',
+    '打开',
+    '请帮我查看',
+    '帮我查看',
+    '请查看',
+    '查看'
+  ];
+  let current = value.trim();
+  for (let index = 0; index < prefixes.length; index++) {
+    if (current.startsWith(prefixes[index])) {
+      current = current.substring(prefixes[index].length).trim();
+      break;
+    }
+  }
+  if (current.startsWith('从')) {
+    current = current.substring(1).trim();
+  }
+  return current;
+}
+
+function trimRouteSuffix(value: string): string {
+  const suffixes: string[] = [
+    '并发起导航',
+    '并开始导航',
+    '的驾车路线',
+    '的步行路线',
+    '的骑行路线',
+    '的公交路线',
+    '的路线',
+    '路线',
+    '并导航',
+    '导航'
+  ];
+  let current = value.trim();
+  for (let index = 0; index < suffixes.length; index++) {
+    if (current.endsWith(suffixes[index])) {
+      current = current.substring(0, current.length - suffixes[index].length).trim();
+      break;
+    }
+  }
+  return current;
+}
+
+export function mapsRouteInputFromPrompt(prompt: string): MapsRouteArgs | null {
+  const source = trimRoutePrefix(prompt);
+  const separator = source.indexOf('到');
+  if (separator <= 0 || separator !== source.lastIndexOf('到')) {
+    return null;
+  }
+  const origin = source.substring(0, separator).trim();
+  const destination = trimRouteSuffix(source.substring(separator + 1));
+  if (origin.length < 2 || destination.length < 2 ||
+    origin.indexOf('路线') >= 0 || destination.indexOf('路线') >= 0) {
+    return null;
+  }
+  let travelMode = 'driving';
+  if (prompt.indexOf('步行') >= 0) {
+    travelMode = 'walking';
+  } else if (prompt.indexOf('骑行') >= 0 || prompt.indexOf('骑车') >= 0) {
+    travelMode = 'bicycling';
+  } else if (prompt.indexOf('公交') >= 0 || prompt.indexOf('公共交通') >= 0) {
+    travelMode = 'transit';
+  }
+  const candidate: MapsRouteArgs = {
+    origin,
+    destination,
+    travelMode,
+    navigate: prompt.indexOf('导航') >= 0
+  };
+  return normalizeMapsRouteInput(candidate as Object);
+}
+
+export function googleMapsDirectionsUrl(value: Object | null): string {
+  const args = normalizeMapsRouteInput(value);
+  if (args === null) {
     return '';
   }
+  const origin = args.origin as string;
+  const destination = args.destination as string;
   let url = 'https://www.google.com/maps/dir/?api=1&origin=' + encodeParam(origin) +
     '&destination=' + encodeParam(destination) + '&travelmode=' + routeTravelMode(args.travelMode);
   if (args.navigate === true) {

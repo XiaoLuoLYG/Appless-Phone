@@ -21,6 +21,7 @@ import hotelLeaderPlannerTest from './HotelLeaderPlanner.test';
 import hotelAgentRuntimeTest from './HotelAgentRuntime.test';
 import multiAgentRuntimeTest from './MultiAgentRuntime.test';
 import multiAgentCanaryRuntimeTest from './MultiAgentCanaryRuntime.test';
+import registeredPageActionMigrationTest from './RegisteredPageActionMigration.test';
 import dynamicToolA2uiTest from './DynamicToolA2ui.test';
 import composioConfigTest from './ComposioConfig.test';
 import composioAuthClientTest from './ComposioAuthClient.test';
@@ -114,6 +115,7 @@ export default function testsuite() {
   hotelAgentRuntimeTest();
   multiAgentRuntimeTest();
   multiAgentCanaryRuntimeTest();
+  registeredPageActionMigrationTest();
   dynamicToolA2uiTest();
   composioConfigTest();
   composioAuthClientTest();

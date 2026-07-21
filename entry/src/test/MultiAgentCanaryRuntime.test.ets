@@ -39,6 +39,7 @@ import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegiste
 import { MultiAgentSettledOutcome } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { RegisteredPageSnapshot } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 
 const SEARCH_TEXT: string = '帮我找深圳酒店';
 const SEARCH_INPUT: string = '{"originQuery":"帮我找深圳酒店","place":"深圳",' +
@@ -628,11 +629,15 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(mapsOutcome.status).assertEqual('success');
       expect(calls.length).assertEqual(2);
       expect(calls[0].actionId).assertEqual('worldcup.open');
-      expect(JSON.stringify(calls[0].args)).assertEqual('{"originalQuery":"打开世界杯页面"}');
-      expect(calls[0].context.sourceToolId).assertEqual('worldcup.open');
+      expect(JSON.stringify(calls[0].args)).assertEqual(
+        '{"route":"pages/A2uiHome/AnythingDemo"}'
+      );
+      expect(calls[0].context.sourceToolId).assertEqual('virtual.action-intent');
       expect(calls[1].actionId).assertEqual('maps.route.open');
-      expect(JSON.stringify(calls[1].args)).assertEqual('{"originalQuery":"打开深圳北到香港西九龙的路线"}');
-      expect(calls[1].context.sourceToolId).assertEqual('maps.route.open');
+      expect(JSON.stringify(calls[1].args)).assertEqual(
+        '{"origin":"深圳北","destination":"香港西九龙","travelMode":"driving","navigate":false}'
+      );
+      expect(calls[1].context.sourceToolId).assertEqual('virtual.action-intent');
       expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(2);
       expect(bus.count(AgentMessageType.ACTION_RESULT)).assertEqual(2);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
@@ -740,6 +745,7 @@ export default function multiAgentCanaryRuntimeTest() {
     it('routes exact declared and existing adapted product buttons through one ActionAgent run', 0, async () => {
       const calls: RecordedPageAction[] = [];
       const bus = new TrackingBus();
+      let currentSnapshot: RegisteredPageSnapshot | null = null;
       const options = canaryOptions(
         new QueueModel([]),
         new CanaryHotelExecutor(),
@@ -759,6 +765,7 @@ export default function multiAgentCanaryRuntimeTest() {
           output: JSON.parse('{"providerStatus":"exact"}') as Object
         };
       };
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
       const runtime = new MultiAgentCanaryRuntime(options);
       const routes: Array<[string, string, string, Object, string]> = [
         ['social.feed.search', 'social.reply.draft', 'social.reply.draft',
@@ -796,7 +803,8 @@ export default function multiAgentCanaryRuntimeTest() {
           isBusy: false,
           isAwaitingFirstSurface: false
         });
-        expect(await runtime.runPageAction(clicked, surface, document, index + 1)).assertTrue();
+        currentSnapshot = { surface, document, generation: index + 1 };
+        expect(await runtime.runPageAction(clicked)).assertTrue();
         expect(calls[index].actionId).assertEqual(route[2]);
         expect(JSON.stringify(calls[index].args)).assertEqual(JSON.stringify(route[3]));
       }
@@ -810,6 +818,7 @@ export default function multiAgentCanaryRuntimeTest() {
 
     it('rejects stale mutated client-only and deferred page actions before callback', 0, async () => {
       const calls: string[] = [];
+      let currentSnapshot: RegisteredPageSnapshot | null = null;
       const options = canaryOptions(
         new QueueModel([]),
         new CanaryHotelExecutor(),
@@ -825,6 +834,7 @@ export default function multiAgentCanaryRuntimeTest() {
         calls.push(actionId);
         return { status: 'success', output: new Object() };
       };
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
       const runtime = new MultiAgentCanaryRuntime(options);
       const args = JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object;
       const clicked: A2uiAction = {
@@ -842,6 +852,7 @@ export default function multiAgentCanaryRuntimeTest() {
         isBusy: false,
         isAwaitingFirstSurface: false
       });
+      currentSnapshot = { surface, document, generation: 10 };
       const mutated: A2uiAction = {
         id: clicked.id,
         label: clicked.label,
@@ -867,11 +878,12 @@ export default function multiAgentCanaryRuntimeTest() {
         args
       };
 
-      expect(await runtime.runPageAction(clicked, surface, document, 10)).assertTrue();
-      expect(await runtime.runPageAction(mutated, surface, document, 10)).assertFalse();
-      expect(await runtime.runPageAction(clientOnly, surface, document, 10)).assertFalse();
-      expect(await runtime.runPageAction(deferred, surface, document, 10)).assertFalse();
-      expect(await runtime.runPageAction(clicked, surface, document, 9)).assertFalse();
+      expect(await runtime.runPageAction(clicked)).assertTrue();
+      expect(await runtime.runPageAction(mutated)).assertFalse();
+      expect(await runtime.runPageAction(clientOnly)).assertFalse();
+      expect(await runtime.runPageAction(deferred)).assertFalse();
+      currentSnapshot = { surface, document, generation: 9 };
+      expect(await runtime.runPageAction(clicked)).assertFalse();
       expect(calls.length).assertEqual(1);
       runtime.dispose();
     });
