@@ -5,6 +5,7 @@
 - Base commit: `7a076147620e27fd9ea37603567004cd54283d29`.
 - Implementation commit: `7810e8d094f2af7da81f0bbe42fdd77132c80c51` (`feat: structure account and remaining read data`).
 - Review-fix commit: `bdc5ba874d9abe85e85ee92d86f7ec8f5a103812` (`fix: preserve mail provider identity and evidence`).
+- Auth-classification fix commit: `5be78576cc40d52e8594f0d48dea42b10eaed15d` (`fix: classify disconnected mail accounts as auth`).
 - Migrated `mail.search`, `mail.thread.read`, `gmail.mail.search`, `gmail.thread.read`, `youtube.mine.playlists`, `youtube.mine.subscriptions`, `calendar.events.search`, `luckin.order.status`, `ride.estimate`, `ride.app.link`, and `ride.driver.location` to structured `DataResult` dispatch.
 - Preserved current renderers, reply/draft actions, ride deep links and status actions, Luckin payment/status actions, and provider-facing errors.
 - Did not change the 44 fixed tool definitions, action ownership, provider configuration, signing, device state, branch, or worktree layout.
@@ -32,17 +33,18 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T03:29:51+0800`:
+Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T03:40:17+0800`:
 
 ```text
-Tests run: 972, Failure: 0, Error: 0, Pass: 972, Ignore: 0
+Tests run: 976, Failure: 0, Error: 0, Pass: 976, Ignore: 0
 ```
 
 ### Review RED and GREEN
 
 - Before review-fix production edits, the expanded tests-only diff failed `UnitTestArkTS` because the Gmail provider-phase seam and aggregate-mail evidence reducer did not exist. Evidence: `/tmp/domain-task-04-review-red.log`.
 - A later adversarial actual-entity test proved the old reducer incorrectly classified technical Outlook success metadata as data: 971/972 passed and the expected `success` versus `empty` assertion failed. Evidence: `/tmp/domain-task-04-review-entity-red.log`.
-- The final full suite passed 972/972 after implementing identity-preserving detail routing, provider-phase truth, actual-entity detection, and the shared direct Gmail normalizer. Evidence: `/tmp/domain-task-04-review-final2-hypium.log`.
+- Production-shaped disconnected-account tests then failed exactly three AUTH assertions while the transport lookalike passed: exact Outlook Chinese, exact Gmail English, and case/whitespace-normalized English. Evidence: `/tmp/domain-task-04-auth-phrase-whitespace-red.log`.
+- The final full suite passed 976/976 after implementing identity-preserving detail routing, provider-phase truth, actual-entity detection, the shared direct Gmail normalizer, and narrow disconnected-account auth classification. Evidence: `/tmp/domain-task-04-auth-phrase-final-hypium.log`.
 
 ## Implementation
 
@@ -61,6 +63,7 @@ Tests run: 972, Failure: 0, Error: 0, Pass: 972, Ignore: 0
 - Aggregate mail counts only entity-shaped Outlook/Gmail results as data. Successful-empty plus another provider failure remains `empty` with warnings; actual entities plus failures become `partial`; no successful provider response becomes `error`.
 - Missing credentials/configuration produce no source. Successful empty results and attempted transport/inner-provider failures carry their actual source. Retryability is limited to transport, network, timeout, DNS, and 5xx evidence.
 - Gmail fallback preserves local OAuth exceptions as execution evidence. A real local timeout wins over stale Composio discovery/auth state, while Composio contributes a source only when Task 3 marked the result `providerPhase: 'execution'`.
+- The shared auth classifier now recognizes the exact Composio disconnected shapes `没有 ACTIVE connected account` and `no active connection found` after case/whitespace normalization. Discovery-only results are nonretryable `AUTH_REQUIRED` with no source; similar transport wording remains retryable `PROVIDER_ERROR` with its execution source.
 - YouTube account reads remain authenticated-account routes and are not substituted with public video search. Calendar preserves exact event IDs from the existing normalizer.
 - Ride read providers now return normalized result arrays once; the legacy renderer consumes the same arrays. Full estimate trace IDs, Didi/Amap deep links, order IDs, driver IDs, and current refresh/cancel actions are retained.
 - Luckin status now returns a normalized provider result once; exact order/trace IDs and current payment/status actions survive structured serialization. Provider payload errors do not become success.
@@ -78,7 +81,7 @@ Tests run: 972, Failure: 0, Error: 0, Pass: 972, Ignore: 0
 
 ## Verification
 
-- Full Hypium: **972/972 passed**, zero failures and zero errors.
+- Full Hypium: **976/976 passed**, zero failures and zero errors.
 - `node scripts/verify-loopy-backend.mjs`: **237 checks passed**, including the `agent_core` HAR build and the structural Gmail no-A2UI-round-trip assertion.
 - `git diff --check`: passed.
 - Fixed registry remains **44 definitions with 44 unique IDs**; Task 4 added no definition.
@@ -104,5 +107,5 @@ Tests run: 972, Failure: 0, Error: 0, Pass: 972, Ignore: 0
 
 ## Concerns and Evidence Boundary
 
-- Hvigor still emits the pre-existing coverage reporter error `00507008` after test execution while exiting successfully. The freshly written authoritative result file is complete and reports 972/972.
+- Hvigor still emits the pre-existing coverage reporter error `00507008` after test execution while exiting successfully. The freshly written authoritative result file is complete and reports 976/976.
 - Verification used deterministic provider-shaped fixtures and fail-closed missing-configuration paths. This task does not claim live-provider, signed-package, or device evidence.
