@@ -2,7 +2,7 @@ import http from '@ohos.net.http';
 import util from '@ohos.util';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
 import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
-import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
+import { buildReActFormatRules, buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 import { LocalModel } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
 
@@ -184,7 +184,9 @@ export class OpenAiCompatibleModel implements LocalModel {
   }
 
   private systemPrompt(): string {
-    let content = 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool(JSON object) or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.';
+    let content = 'You are Loop, a concise ReAct agent on HarmonyOS.';
+    content += buildReActFormatRules();
+    content += ' Follow the tool-routing rules in the prompt exactly.';
     const skills = buildSkillsSection(this.skillSnapshot);
     if (skills.length > 0) {
       content += `\n\n${skills}`;

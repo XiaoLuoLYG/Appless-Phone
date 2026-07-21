@@ -528,5 +528,79 @@ export default function reActAgentRunnerTest() {
       expect(withoutModelScope.prompts[0].indexOf('Call modelscope only')).assertEqual(-1);
       expect(withModelScope.prompts[0].indexOf('Call modelscope only')).assertLarger(-1);
     });
+
+    it('runs independent tools in parallel when Execution is parallel', 0, async () => {
+      const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
+      const noteTool = new FixedTool('note', 'shopping list');
+      const registry = new ToolRegistry();
+      registry.register(timeTool);
+      registry.register(noteTool);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: need time and note independently\nExecution: parallel\nAction: time[]\nAction: note[shopping list]'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+
+      await runner.run('time and note', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(timeTool.calls.length).assertEqual(1);
+      expect(noteTool.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+    });
+
+    it('runs multiple actions serially in declaration order', 0, async () => {
+      const first = new FixedTool('tool.a', 'result-a');
+      const second = new FixedTool('tool.b', 'result-b');
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: second depends on first\nExecution: serial\nAction: tool.a({})\nAction: tool.b({})'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+
+      await runner.run('serial tools', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+      expect(actions[0].indexOf('tool.a')).assertLarger(-1);
+      expect(actions[1].indexOf('tool.b')).assertLarger(-1);
+    });
+
+    it('downgrades parallel to serial when read is included', 0, async () => {
+      const readTool = new FixedTool('read', '# Skill: weather\n\nUse weather API.');
+      const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
+      const registry = new ToolRegistry();
+      registry.register(readTool);
+      registry.register(timeTool);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: read skill and get time\nExecution: parallel\nAction: read[weather]\nAction: time[]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('read and time', (_event: AgentEvent): void => {});
+
+      expect(readTool.calls.length).assertEqual(1);
+      expect(timeTool.calls.length).assertEqual(1);
+    });
   });
 }

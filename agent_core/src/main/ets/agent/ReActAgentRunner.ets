@@ -11,7 +11,9 @@ export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
-const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
+const REACT_TAGS: string[] = ['Thought:', 'Execution:', 'Action:', 'Observation:', 'Final:'];
+
+type ExecutionMode = 'parallel' | 'serial';
 
 function padDatePart(value: number): string {
   return value < 10 ? '0' + value.toString() : value.toString();
@@ -33,6 +35,42 @@ class ToolCall {
   constructor(name: string, input: string) {
     this.name = name;
     this.input = input;
+  }
+}
+
+class ActionPlan {
+  mode: ExecutionMode;
+  calls: ToolCall[];
+
+  constructor(mode: ExecutionMode, calls: ToolCall[]) {
+    this.mode = mode;
+    this.calls = calls;
+  }
+}
+
+class ProcessedObservation {
+  text: string;
+  shouldStop: boolean;
+  failureKey: string;
+  finalText: string;
+
+  constructor(text: string, shouldStop: boolean, failureKey: string, finalText: string) {
+    this.text = text;
+    this.shouldStop = shouldStop;
+    this.failureKey = failureKey;
+    this.finalText = finalText;
+  }
+}
+
+class ParallelToolFinish {
+  index: number;
+  call: ToolCall;
+  observation: string | null;
+
+  constructor(index: number, call: ToolCall, observation: string | null) {
+    this.index = index;
+    this.call = call;
+    this.observation = observation;
   }
 }
 
@@ -81,57 +119,148 @@ export class ReActAgentRunner {
         return;
       }
 
-      const call = this.parseAction(response);
-      if (call === null) {
-        listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
+      const plan = this.parseActionPlan(response);
+      if (plan === null) {
+        const responseText = response.length > 0 ? response : '(empty response)';
+        listener(new AgentEvent(
+          AgentEventKind.ERROR,
+          `Model did not return an Action or Final answer.\n\nLLM response:\n${responseText}`
+        ));
         return;
       }
 
-      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      skillLogInfo(`ReActAgentRunner: execution=${plan.mode} toolCount=${plan.calls.length}`);
 
-      let observation: string;
+      const observationsForModel: string[] = [];
       try {
-        if (call.name === UI_TOOL_NAME) {
-          if (this.uiHandler === null) {
-            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+        if (plan.mode === 'parallel' && plan.calls.length > 1) {
+          const parallelObservations = await this.executeParallelToolCalls(plan.calls, listener);
+          if (parallelObservations === null) {
             return;
           }
-          observation = await this.runUiTool(call.input, listener);
-        } else {
-          if (call.name === READ_TOOL_NAME) {
-            skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+          for (let index = 0; index < parallelObservations.length; index++) {
+            observationsForModel.push(parallelObservations[index]);
           }
-          observation = await this.tools.run(call.name, call.input);
-          if (call.name === READ_TOOL_NAME) {
-            this.emitSkillRead(call.input, observation, listener);
+        } else {
+          for (let index = 0; index < plan.calls.length; index++) {
+            const call = plan.calls[index];
+            const observation = await this.executeToolCall(call, listener);
+            if (observation === null) {
+              return;
+            }
+            listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+            const processed = this.processObservation(observation, listener);
+            observationsForModel.push(processed.text);
+            if (processed.shouldStop) {
+              this.emitDigestFinal(processed, listener);
+              return;
+            }
           }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
-        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        listener(new AgentEvent(AgentEventKind.ERROR, message));
         return;
       }
 
-      const digest = summarizeA2uiObservation(observation);
-      const observationForModel = digest.isA2ui ? digest.text : `Observation: ${observation}`;
       scratchpad.push(response);
-      scratchpad.push(observationForModel);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observationForModel));
-
-      if (digest.isA2ui && digest.shouldStop) {
-        if (digest.failureKey.indexOf(':error') >= 0) {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
-        } else if (digest.failureKey.length > 0) {
-          listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
-        } else {
-          listener(new AgentEvent(AgentEventKind.FINAL,
-            digest.finalText.length > 0 ? digest.finalText : '工具结果已更新到主页。'));
-        }
-        return;
+      for (const observationForModel of observationsForModel) {
+        scratchpad.push(observationForModel);
       }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private async executeParallelToolCalls(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    const observationsForModel: string[] = [];
+    const pending = new Map<number, Promise<ParallelToolFinish>>();
+
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const finished = this.executeToolCall(call, listener).then(
+        (value: string | null): ParallelToolFinish => new ParallelToolFinish(index, call, value),
+        (reason: Error | Object | string | number | boolean | null | undefined): ParallelToolFinish => {
+          const message = reason instanceof Error ? reason.message : `${reason}`;
+          return new ParallelToolFinish(index, call, `Tool ${call.name} failed: ${message}`);
+        }
+      );
+      pending.set(index, finished);
+    }
+
+    while (pending.size > 0) {
+      const result = await Promise.race(pending.values());
+      pending.delete(result.index);
+
+      if (result.observation === null) {
+        return null;
+      }
+
+      listener(new AgentEvent(AgentEventKind.ACTION, `${result.call.name}(${result.call.input})`));
+      const processed = this.processObservation(result.observation, listener);
+      observationsForModel.push(processed.text);
+      if (processed.shouldStop) {
+        this.emitDigestFinal(processed, listener);
+        return null;
+      }
+    }
+
+    return observationsForModel;
+  }
+
+  private async executeToolCall(call: ToolCall, listener: AgentListener): Promise<string | null> {
+    if (call.name === UI_TOOL_NAME && this.tools.has(UI_TOOL_NAME)) {
+      if (this.uiHandler === null) {
+        listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+        return null;
+      }
+      return await this.runUiTool(call.input, listener);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+    }
+
+    let observation: string;
+    try {
+      observation = await this.tools.run(call.name, call.input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      throw new Error(`Tool ${call.name} failed: ${message}`);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      this.emitSkillRead(call.input, observation, listener);
+    }
+    return observation;
+  }
+
+  private processObservation(observation: string, listener: AgentListener): ProcessedObservation {
+    const digest = summarizeA2uiObservation(observation);
+    const text = digest.isA2ui ? digest.text : `Observation: ${observation}`;
+    listener(new AgentEvent(AgentEventKind.OBSERVATION, text));
+    return new ProcessedObservation(
+      text,
+      digest.isA2ui && digest.shouldStop,
+      digest.failureKey,
+      digest.finalText
+    );
+  }
+
+  private emitDigestFinal(processed: ProcessedObservation, listener: AgentListener): void {
+    if (processed.failureKey.indexOf(':error') >= 0) {
+      listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
+      return;
+    }
+    if (processed.failureKey.length > 0) {
+      listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
+      return;
+    }
+    listener(new AgentEvent(AgentEventKind.FINAL,
+      processed.finalText.length > 0 ? processed.finalText : '工具结果已更新到主页。'));
   }
 
   private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
@@ -148,9 +277,25 @@ export class ReActAgentRunner {
     }
   }
 
+  private parseJsonAction(action: string): ToolCall | null {
+    const trimmed = action.trim();
+    if (!trimmed.startsWith('{')) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
+      const operation = `${parsed.operation ?? ''}`;
+      if (operation === 'search' || operation === 'execute') {
+        return new ToolCall('modelscope', trimmed);
+      }
+    } catch (_error) {
+    }
+    return null;
+  }
+
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
     if (this.uiHandler === null) {
-      return 'UI rendering is not available in this session.';
+      throw new Error('UI rendering is not available for this agent.');
     }
 
     const prompt = description.trim().length > 0 ? description : 'Simple information card';
@@ -168,10 +313,10 @@ export class ReActAgentRunner {
   }
 
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
-    let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
-    prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
-    prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
+    let prompt = 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
+    prompt += this.buildParallelExecutionRules();
+    prompt += 'Every tool call must use exactly this syntax on one line: Action: tool_name(input) or Action: tool_name[input]. The tool name is mandatory; never put raw JSON directly after Action:.\n';
+    prompt += 'When a tool needs parameters, follow its description and pass structured values as valid JSON inside Action parentheses or brackets; use normal JSON arrays like ["a@example.com"], and do not pass bare keywords when a schema is required.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -210,10 +355,22 @@ export class ReActAgentRunner {
     return prompt;
   }
 
+  private buildParallelExecutionRules(): string {
+    return 'Before calling tools, decide whether they can run in parallel. Add Execution: parallel or Execution: serial on its own line after Thought:.\n'
+      + 'Use Execution: parallel only when every Action in this reply is independent (no output from one is needed by another). Good examples: time[] plus note[...].\n'
+      + 'Use Execution: serial when tools depend on each other, when using read or ui, or when modelscope needs search then execute across steps.\n'
+      + 'For parallel execution, emit multiple Action: lines (one tool per line). For serial execution with multiple tools, also emit multiple Action: lines in the required order.\n'
+      + 'For a single independent tool, use Execution: serial with one Action: line.\n';
+  }
+
   private emitResponse(response: string, listener: AgentListener): void {
     const thought = this.readLineValue(response, 'Thought:');
     if (thought !== null) {
       listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
+    }
+    const execution = this.readLineValue(response, 'Execution:');
+    if (execution !== null) {
+      skillLogInfo(`ReActAgentRunner: model chose execution=${execution.trim().toLowerCase()}`);
     }
   }
 
@@ -267,12 +424,62 @@ export class ReActAgentRunner {
     return previous === '\n' || previous === '\r' || previous === ' ' || previous === '\t';
   }
 
-  private parseAction(response: string): ToolCall | null {
-    const action = this.readLineValue(response, 'Action:');
-    if (action === null) {
+  private parseActionPlan(response: string): ActionPlan | null {
+    const actionTexts = this.extractTaggedLines(response, 'Action:');
+    if (actionTexts.length === 0) {
       return null;
     }
 
+    const calls: ToolCall[] = [];
+    for (let index = 0; index < actionTexts.length; index++) {
+      const call = this.parseActionText(actionTexts[index]);
+      if (call !== null) {
+        calls.push(call);
+      }
+    }
+    if (calls.length === 0) {
+      return null;
+    }
+
+    return new ActionPlan(this.parseExecutionMode(response, calls), calls);
+  }
+
+  private parseExecutionMode(response: string, calls: ToolCall[]): ExecutionMode {
+    const raw = this.readLineValue(response, 'Execution:');
+    if (raw === null) {
+      return 'serial';
+    }
+
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'parallel' && calls.length > 1 && !this.hasParallelUnsafeTools(calls)) {
+      return 'parallel';
+    }
+    return 'serial';
+  }
+
+  private hasParallelUnsafeTools(calls: ToolCall[]): boolean {
+    for (let index = 0; index < calls.length; index++) {
+      const name = calls[index].name;
+      if (name === READ_TOOL_NAME || name === UI_TOOL_NAME || name === 'composio' || name === 'modelscope') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private extractTaggedLines(text: string, prefix: string): string[] {
+    const values: string[] = [];
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const trimmed = lines[index].trim();
+      if (trimmed.startsWith(prefix)) {
+        values.push(trimmed.substring(prefix.length).trim());
+      }
+    }
+    return values;
+  }
+
+  private parseActionText(action: string): ToolCall | null {
     const parenCall = this.parseDelimitedAction(action, '(', ')');
     if (parenCall !== null) {
       return parenCall;
@@ -283,7 +490,7 @@ export class ReActAgentRunner {
       return bracketCall;
     }
 
-    return null;
+    return this.parseJsonAction(action);
   }
 
   private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {
