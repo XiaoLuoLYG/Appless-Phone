@@ -23,6 +23,32 @@ export interface LeaderActionIntent {
   allowedActionIds: string[];
 }
 
+export interface LeaderDecisionDataTask {
+  localId: string;
+  goal: string;
+  allowedToolIds: string[];
+  toolId: string;
+  input: Object;
+  required: boolean;
+}
+
+export interface LeaderUiIntent {
+  purpose: string;
+  preferredDensity: string;
+  requiredSections: string[];
+}
+
+export interface LeaderDecision {
+  personaId: string;
+  skillId: string;
+  roundAction: LeaderRoundAction;
+  dataTasks: LeaderDecisionDataTask[];
+  uiIntent: LeaderUiIntent;
+  actionIntent?: LeaderActionIntent;
+  answer?: string;
+  reasonCode: string;
+}
+
 export interface LeaderPlan {
   personaId: string;
   skillId: string;
@@ -64,10 +90,13 @@ export interface LeaderPlanningContext {
   personas: LeaderPersonaMetadata[];
 }
 
+export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
+
 export interface LeaderPlanner {
   plan(
     message: AgentMessage,
     input: InputUserPayload,
-    context: LeaderPlanningContext
-  ): Promise<LeaderPlan>;
+    context: LeaderPlanningContext,
+    round?: number
+  ): Promise<LeaderPlannerResult>;
 }

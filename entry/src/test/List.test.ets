@@ -77,6 +77,7 @@ import modelScopeDirectClientTest from './ModelScopeDirectClient.test';
 import agentMessageTest from './AgentMessage.test';
 import linkedMessageBusTest from './LinkedMessageBus.test';
 import leaderAgentTest from './LeaderAgent.test';
+import multiAgentLeaderPlannerTest from './MultiAgentLeaderPlanner.test';
 import dataAgentTest from './DataAgent.test';
 import uiAgentTest from './UiAgent.test';
 import actionCatalogTest from './ActionCatalog.test';
@@ -157,6 +158,7 @@ export default function testsuite() {
   agentMessageTest();
   linkedMessageBusTest();
   leaderAgentTest();
+  multiAgentLeaderPlannerTest();
   dataAgentTest();
   uiAgentTest();
   actionCatalogTest();

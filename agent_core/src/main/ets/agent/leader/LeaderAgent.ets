@@ -11,8 +11,11 @@ import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
   LeaderDataTask,
+  LeaderDecision,
+  LeaderDecisionDataTask,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPlannerResult,
   LeaderPersonaMetadata,
   LeaderPlanningContext,
   LeaderSkillMetadata,
@@ -21,6 +24,8 @@ import {
 } from './LeaderTypes';
 import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
+import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
+import { ToolDefinition } from '../../aiphone/runtime/ToolDefinitionTypes';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -28,6 +33,12 @@ interface LeaderTurnState {
   inputTaskId: string;
   uiTaskId: string;
   dataTaskId: string;
+  input: InputUserPayload;
+  round: number;
+  semantic: boolean;
+  planning: boolean;
+  pendingDataTools: Map<string, LeaderPendingDataTask>;
+  observations: ObservationDigest[];
   skillId: string;
   uiDone: boolean;
   dataDone: boolean;
@@ -36,11 +47,17 @@ interface LeaderTurnState {
   releasePlanning: (() => void) | null;
 }
 
+interface LeaderPendingDataTask {
+  toolId: string;
+  outputSchema: string;
+}
+
 export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly planner: LeaderPlanner;
   private readonly planningContext: LeaderPlanningContext;
   private readonly timeoutMs: number;
+  private readonly dataToolIds: Set<string>;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
   // Terminal state is reduced to exact identities so active turn payloads and
   // timers are released without permitting an old input to be dispatched twice.
@@ -56,6 +73,9 @@ export class LeaderAgent extends MessageDrivenAgent {
     this.bus = bus;
     this.planner = planner;
     this.planningContext = this.copyPlanningContext(planningContext);
+    this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
+      (definition: ToolDefinition): string => definition.toolId
+    ));
     this.timeoutMs = timeoutMs > 0 ? timeoutMs : 30000;
   }
 
@@ -94,6 +114,17 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (message.type === AgentMessageType.ACTION_RESULT) {
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_ERROR && message.taskId === state.inputTaskId) {
+      this.finishTurn(state);
+      return;
+    }
+    if (state.semantic) {
+      if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+        message.type === AgentMessageType.TASK_ERROR) {
+        this.handleSemanticObservation(state, message);
+      }
       return;
     }
     if (message.type === AgentMessageType.TASK_RESULT_UI && message.taskId === state.uiTaskId) {
@@ -142,7 +173,8 @@ export class LeaderAgent extends MessageDrivenAgent {
         currentSurfaceSummary as CurrentSurfaceSummary : {
           surfaceId: '', kind: '', status: '', entityRefs: [], actionOfferIds: []
         },
-      recentObservations: Array.isArray(recentObservations) ? recentObservations as ObservationDigest[] : []
+      recentObservations: Array.isArray(recentObservations) ?
+        this.boundedObservations(recentObservations as Object[]) : []
     };
     const key: string = this.turnKey(message);
     if (this.turns.has(key) || this.terminalTurns.has(key)) {
@@ -154,6 +186,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       inputTaskId: message.taskId,
       uiTaskId: '',
       dataTaskId: '',
+      input,
+      round: 1,
+      semantic: false,
+      planning: false,
+      pendingDataTools: new Map<string, LeaderPendingDataTask>(),
+      observations: input.recentObservations as ObservationDigest[],
       skillId: '',
       uiDone: false,
       dataDone: false,
@@ -161,28 +199,36 @@ export class LeaderAgent extends MessageDrivenAgent {
       timerId: -1,
       releasePlanning: null
     };
-    const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
-      state.releasePlanning = resolve;
-    });
     this.turns.set(key, state);
     state.timerId = setTimeout(() => {
       this.timeoutTurn(key);
     }, this.timeoutMs);
-    this.startPlanning(message, input, state, timeoutSignal);
+    this.startPlanning(message, input, state);
   }
 
   private startPlanning(
     message: AgentMessage,
     input: InputUserPayload,
-    state: LeaderTurnState,
-    timeoutSignal: Promise<void>
+    state: LeaderTurnState
   ): void {
+    if (state.terminal || state.planning) {
+      return;
+    }
+    state.planning = true;
+    const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
+      state.releasePlanning = resolve;
+    });
     try {
       Promise.race([
-        this.planner.plan(message, input, this.copyPlanningContext(this.planningContext)),
+        this.planner.plan(
+          message,
+          input,
+          this.copyPlanningContext(this.planningContext),
+          state.round
+        ),
         timeoutSignal
       ])
-        .then((outcome: LeaderPlan | void) => {
+        .then((outcome: LeaderPlannerResult | void) => {
           this.completePlanning(message, state, outcome);
         })
         .catch((error: Object) => {
@@ -193,12 +239,29 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
   }
 
-  private completePlanning(message: AgentMessage, state: LeaderTurnState, outcome: LeaderPlan | void): void {
-    state.releasePlanning = null;
+  private completePlanning(
+    message: AgentMessage,
+    state: LeaderTurnState,
+    outcome: LeaderPlannerResult | void
+  ): void {
+    state.planning = false;
     if (state.terminal) {
       return;
     }
-    const plan: LeaderPlan = outcome as LeaderPlan;
+    if (outcome === undefined) {
+      this.finishTurn(state);
+      this.publishError(message, 'LEADER_PLAN_FAILED', 'Leader planner returned no decision');
+      return;
+    }
+    const result: LeaderPlannerResult = outcome as LeaderPlannerResult;
+    if (this.isLegacyPlan(result)) {
+      this.completeLegacyPlanning(message, state, result as LeaderPlan);
+      return;
+    }
+    this.completeDecisionPlanning(message, state, result as LeaderDecision);
+  }
+
+  private completeLegacyPlanning(message: AgentMessage, state: LeaderTurnState, plan: LeaderPlan): void {
     if (!this.validPlan(plan)) {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader plan task fields must be non-empty and unique');
@@ -212,14 +275,167 @@ export class LeaderAgent extends MessageDrivenAgent {
     this.publishDataTask(message, dataTask);
   }
 
+  private completeDecisionPlanning(
+    message: AgentMessage,
+    state: LeaderTurnState,
+    decision: LeaderDecision
+  ): void {
+    if (!this.validDecision(decision)) {
+      this.finishTurn(state);
+      this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
+      return;
+    }
+    state.semantic = true;
+    state.skillId = decision.skillId;
+    if (decision.roundAction !== 'execute') {
+      this.finishTurn(state);
+      return;
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
+    }
+  }
+
   private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {
-    state.releasePlanning = null;
+    state.planning = false;
     if (state.terminal) {
       return;
     }
     this.finishTurn(state);
     const detail: string = error instanceof Error ? error.message : `${error}`;
     this.publishError(message, 'LEADER_PLAN_FAILED', detail);
+  }
+
+  private handleSemanticObservation(state: LeaderTurnState, message: AgentMessage): void {
+    const pending: LeaderPendingDataTask | undefined = state.pendingDataTools.get(message.taskId);
+    if (pending === undefined) {
+      return;
+    }
+    const digest: ObservationDigest = message.type === AgentMessageType.TASK_RESULT_DATA ?
+      this.resultDigest(message, pending) : this.errorDigest(message, pending.toolId);
+    state.pendingDataTools.delete(message.taskId);
+    state.observations.push(digest);
+    state.observations = this.boundedObservations(state.observations as Object[]);
+    if (state.pendingDataTools.size > 0) {
+      return;
+    }
+    if (state.round >= 3) {
+      const inputMessage: AgentMessage = this.inputMessage(state);
+      this.finishTurn(state);
+      this.publishError(inputMessage, 'LEADER_ROUND_LIMIT', 'Leader cannot plan more than three rounds');
+      return;
+    }
+    state.round++;
+    state.input = this.inputWithObservations(state.input, state.observations);
+    this.startPlanning(this.inputMessage(state), state.input, state);
+  }
+
+  private resultDigest(message: AgentMessage, pending: LeaderPendingDataTask): ObservationDigest {
+    const payload = message.payload as Object | null;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return this.invalidResultDigest(message, pending.toolId);
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const toolId = values['toolId'];
+    const outputSchema = values['outputSchema'];
+    const resultStatus = values['status'];
+    const sources = values['sources'];
+    const data = values['data'];
+    const warnings = values['warnings'];
+    const error = values['error'];
+    const validStatus: boolean = resultStatus === 'success' || resultStatus === 'partial' ||
+      resultStatus === 'empty' || resultStatus === 'error';
+    const validError: boolean = error === undefined || this.validResultError(error);
+    const validResult: boolean = toolId === pending.toolId && outputSchema === pending.outputSchema &&
+      validStatus && Array.isArray(sources) && data !== null && typeof data === 'object' &&
+      !Array.isArray(data) && Array.isArray(warnings) && validError;
+    const status: string = validResult ? resultStatus as string : 'error';
+    let summary: string = validResult ? pending.toolId + ' returned ' + status : 'Data task output was invalid';
+    let entityRefs: string[] = [];
+    if (validResult) {
+      const dataValues = data as Record<string, Object | string | number | boolean | null | undefined>;
+      const dataSummary = dataValues['summary'];
+      const dataEntityRefs = dataValues['entityRefs'];
+      if (typeof dataSummary === 'string' && dataSummary.trim().length > 0) {
+        summary = dataSummary;
+      }
+      if (Array.isArray(dataEntityRefs)) {
+        entityRefs = this.boundedStrings(dataEntityRefs as Object[], 16, 128);
+      }
+      if (summary === pending.toolId + ' returned ' + status &&
+        error !== undefined) {
+        const errorValues = error as Record<string, Object | string | number | boolean | null | undefined>;
+        summary = 'Data task failed: ' + (errorValues['code'] as string);
+      }
+    }
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId: pending.toolId,
+      status,
+      summary: this.boundedText(summary, 240),
+      entityRefs
+    };
+  }
+
+  private invalidResultDigest(message: AgentMessage, toolId: string): ObservationDigest {
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId,
+      status: 'error',
+      summary: 'Data task output was invalid',
+      entityRefs: []
+    };
+  }
+
+  private validResultError(error: Object | string | number | boolean | null): boolean {
+    if (error === null || typeof error !== 'object' || Array.isArray(error)) {
+      return false;
+    }
+    const keys: string = Object.keys(error).sort().join(',');
+    if (keys !== 'code,message' && keys !== 'code,message,retryable') {
+      return false;
+    }
+    const values = error as Record<string, Object | string | number | boolean | null | undefined>;
+    return typeof values['code'] === 'string' && (values['code'] as string).trim().length > 0 &&
+      typeof values['message'] === 'string' &&
+      (values['retryable'] === undefined || typeof values['retryable'] === 'boolean');
+  }
+
+  private errorDigest(message: AgentMessage, toolId: string): ObservationDigest {
+    const payload: TaskErrorPayload = message.payload as TaskErrorPayload;
+    const summary: string = payload !== null && typeof payload === 'object' &&
+      typeof payload.code === 'string' && payload.code.trim().length > 0 ?
+      'Data task failed: ' + payload.code : 'Data task failed';
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId,
+      status: 'error',
+      summary: this.boundedText(summary, 240),
+      entityRefs: []
+    };
+  }
+
+  private inputWithObservations(
+    input: InputUserPayload,
+    observations: ObservationDigest[]
+  ): InputUserPayload {
+    return {
+      text: input.text,
+      recentMessages: input.recentMessages,
+      previousPersonaId: input.previousPersonaId,
+      currentSurfaceSummary: input.currentSurfaceSummary,
+      recentObservations: this.boundedObservations(observations as Object[])
+    };
+  }
+
+  private inputMessage(state: LeaderTurnState): AgentMessage {
+    return {
+      type: AgentMessageType.INPUT_USER,
+      conversationId: state.conversationId,
+      turnId: state.turnId,
+      taskId: state.inputTaskId,
+      payload: state.input
+    };
   }
 
   private hasCorrelation(message: AgentMessage): boolean {
@@ -255,6 +471,158 @@ export class LeaderAgent extends MessageDrivenAgent {
       plan.ui.expectedOutputSchema === dataTask.outputSchema &&
       dataTask.toolId.trim().length > 0 &&
       dataTask.outputSchema.trim().length > 0;
+  }
+
+  private isLegacyPlan(result: LeaderPlannerResult): boolean {
+    return Object.keys(result).indexOf('ui') >= 0;
+  }
+
+  private validDecision(decision: LeaderDecision): boolean {
+    if (decision === undefined || decision === null) {
+      return false;
+    }
+    const keys: string = Object.keys(decision).sort().join(',');
+    if (keys !== 'dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
+      keys !== 'answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent') {
+      return false;
+    }
+    if (typeof decision.personaId !== 'string' || decision.personaId.trim().length === 0 ||
+      typeof decision.skillId !== 'string' ||
+      !this.validDecisionPersonaSkill(decision.personaId, decision.skillId) ||
+      !this.validRoundAction(decision.roundAction) ||
+      typeof decision.reasonCode !== 'string' || decision.reasonCode.trim().length === 0 ||
+      !Array.isArray(decision.dataTasks) || !this.validUiIntent(decision.uiIntent)) {
+      return false;
+    }
+    if ((decision.roundAction === 'execute' && decision.dataTasks.length === 0) ||
+      (decision.roundAction !== 'execute' && decision.dataTasks.length !== 0)) {
+      return false;
+    }
+    const answer = decision.answer;
+    if (answer !== undefined && (typeof answer !== 'string' || answer.trim().length === 0)) {
+      return false;
+    }
+    if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
+      typeof answer !== 'string') {
+      return false;
+    }
+    if (!this.validDecisionTasks(decision.dataTasks)) {
+      return false;
+    }
+    const actionIntent = decision.actionIntent;
+    return actionIntent === undefined || this.validActionIntent(actionIntent);
+  }
+
+  private validDecisionTasks(tasks: LeaderDecisionDataTask[]): boolean {
+    const localIds: Set<string> = new Set<string>();
+    for (let index = 0; index < tasks.length; index++) {
+      const task = tasks[index];
+      if (task === undefined || task === null ||
+        Object.keys(task).sort().join(',') !== 'allowedToolIds,goal,input,localId,required,toolId' ||
+        typeof task.localId !== 'string' || task.localId.trim().length === 0 || localIds.has(task.localId) ||
+        typeof task.goal !== 'string' || task.goal.trim().length === 0 ||
+        !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
+        typeof task.toolId !== 'string' || task.toolId.trim().length === 0 ||
+        task.input === null || typeof task.input !== 'object' || Array.isArray(task.input) ||
+        typeof task.required !== 'boolean') {
+        return false;
+      }
+      const allowed: Set<string> = new Set<string>();
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        const allowedId = task.allowedToolIds[allowedIndex];
+        if (typeof allowedId !== 'string' || allowedId.trim().length === 0 ||
+          allowed.has(allowedId) || !this.dataToolIds.has(allowedId) ||
+          this.toolMetadata(allowedId)?.riskLevel !== 'read') {
+          return false;
+        }
+        allowed.add(allowedId);
+      }
+      if (!allowed.has(task.toolId)) {
+        return false;
+      }
+      localIds.add(task.localId);
+    }
+    return true;
+  }
+
+  private validUiIntent(intent: Object): boolean {
+    if (intent === undefined || intent === null || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'preferredDensity,purpose,requiredSections') {
+      return false;
+    }
+    const values = intent as Record<string, Object | string | number | boolean | null | undefined>;
+    return typeof values['purpose'] === 'string' && (values['purpose'] as string).trim().length > 0 &&
+      typeof values['preferredDensity'] === 'string' &&
+      (values['preferredDensity'] as string).trim().length > 0 &&
+      Array.isArray(values['requiredSections']) &&
+      this.validUniqueStrings(values['requiredSections'] as Object[], true);
+  }
+
+  private validActionIntent(intent: Object | string | number | boolean | null): boolean {
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'allowedActionIds,goal') {
+      return false;
+    }
+    const values = intent as Record<string, Object | string | number | boolean | null | undefined>;
+    const allowedIds = values['allowedActionIds'];
+    if (typeof values['goal'] !== 'string' || (values['goal'] as string).trim().length === 0 ||
+      !Array.isArray(allowedIds) || !this.validUniqueStrings(allowedIds as Object[], false)) {
+      return false;
+    }
+    const registered: Set<string> = new Set<string>();
+    for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
+      const actions = this.planningContext.tools[toolIndex].actions;
+      for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        registered.add(actions[actionIndex]);
+      }
+    }
+    for (let index = 0; index < allowedIds.length; index++) {
+      if (!registered.has(allowedIds[index] as string)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private validUniqueStrings(values: Object[], allowEmpty: boolean): boolean {
+    if (!allowEmpty && values.length === 0) {
+      return false;
+    }
+    const seen: Set<string> = new Set<string>();
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index];
+      if (typeof value !== 'string' || value.trim().length === 0 || seen.has(value)) {
+        return false;
+      }
+      seen.add(value);
+    }
+    return true;
+  }
+
+  private validDecisionPersonaSkill(personaId: string, skillId: string): boolean {
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== personaId) {
+        continue;
+      }
+      if (skillId.length === 0) {
+        return true;
+      }
+      for (let skillIndex = 0; skillIndex < persona.activeSkills.length; skillIndex++) {
+        const skill = persona.activeSkills[skillIndex];
+        if (skill.skillId === skillId && skill.status === 'active') {
+          return true;
+        }
+      }
+      return false;
+    }
+    return false;
+  }
+
+  private validRoundAction(value: string): boolean {
+    return value === 'execute' || value === 'answer' || value === 'clarify' || value === 'legacy_handoff';
   }
 
   private validSelectedSkill(personaId: string, skillId: string): boolean {
@@ -294,6 +662,51 @@ export class LeaderAgent extends MessageDrivenAgent {
     return this.turnKeyFor(message.conversationId, message.turnId);
   }
 
+  private boundedObservations(values: Object[]): ObservationDigest[] {
+    const result: ObservationDigest[] = [];
+    const start: number = values.length > 8 ? values.length - 8 : 0;
+    for (let index = start; index < values.length; index++) {
+      const value = values[index];
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const fields = value as Record<string, Object | string | number | boolean | null | undefined>;
+      const taskId = fields['taskId'];
+      const toolId = fields['toolId'];
+      const status = fields['status'];
+      const summary = fields['summary'];
+      const entityRefs = fields['entityRefs'];
+      if (typeof taskId !== 'string' || typeof toolId !== 'string' ||
+        typeof status !== 'string' || typeof summary !== 'string' || !Array.isArray(entityRefs)) {
+        continue;
+      }
+      result.push({
+        taskId: this.boundedText(taskId, 128),
+        toolId: this.boundedText(toolId, 128),
+        status: this.boundedText(status, 32),
+        summary: this.boundedText(summary, 240),
+        entityRefs: this.boundedStrings(entityRefs as Object[], 16, 128)
+      });
+    }
+    return result;
+  }
+
+  private boundedStrings(values: Object[], maximum: number, length: number): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < values.length && result.length < maximum; index++) {
+      const value = values[index];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        result.push(this.boundedText(value, length));
+      }
+    }
+    return result;
+  }
+
+  private boundedText(value: string, maximum: number): string {
+    const trimmed: string = value.trim();
+    return trimmed.length > maximum ? trimmed.substring(0, maximum) : trimmed;
+  }
+
   private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
     const payload: CreateUiTaskPayload = {
       taskId: task.taskId,
@@ -328,6 +741,37 @@ export class LeaderAgent extends MessageDrivenAgent {
       conversationId: input.conversationId,
       turnId: input.turnId,
       taskId: task.taskId,
+      payload
+    });
+  }
+
+  private publishDecisionDataTask(
+    input: AgentMessage,
+    state: LeaderTurnState,
+    task: LeaderDecisionDataTask
+  ): void {
+    const definition: LeaderToolMetadata = this.toolMetadata(task.toolId) as LeaderToolMetadata;
+    const taskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':' + task.localId;
+    const payload: CreateDataTaskPayload = {
+      taskId,
+      roundId: state.turnId + ':round-' + state.round.toString(),
+      skillId: state.skillId,
+      goal: task.goal,
+      allowedToolIds: task.allowedToolIds.slice(),
+      toolId: task.toolId,
+      outputSchema: definition.outputSchema,
+      args: task.input,
+      required: task.required
+    };
+    state.pendingDataTools.set(taskId, {
+      toolId: task.toolId,
+      outputSchema: definition.outputSchema
+    });
+    this.bus.publish({
+      type: AgentMessageType.TASK_CREATE_DATA,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId,
       payload
     });
   }

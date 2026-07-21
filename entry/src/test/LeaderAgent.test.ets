@@ -5,9 +5,12 @@ import {
   AgentMessageType,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
+  DataResult,
   InputUserPayload,
   LeaderAgent,
   LeaderDataTask,
+  LeaderDecision,
+  LeaderDecisionDataTask,
   LeaderPlan,
   LeaderPlanner,
   LeaderPlanningContext,
@@ -163,6 +166,32 @@ class ControlledFirstPlanner implements LeaderPlanner {
   }
 }
 
+class RoundScriptedPlanner implements LeaderPlanner {
+  calls: number = 0;
+  inputs: InputUserPayload[] = [];
+  rounds: number[] = [];
+  private readonly decisions: LeaderDecision[];
+
+  constructor(decisions: LeaderDecision[]) {
+    this.decisions = decisions.slice();
+  }
+
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    round: number = 1
+  ): Promise<LeaderDecision> {
+    this.calls++;
+    this.inputs.push(input);
+    this.rounds.push(round);
+    if (this.decisions.length === 0) {
+      throw new Error('No scripted Leader decision');
+    }
+    return this.decisions.shift() as LeaderDecision;
+  }
+}
+
 function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): LeaderPlan {
   const ui: LeaderUiTask = {
     taskId: uiTaskId,
@@ -191,6 +220,36 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
   };
 }
 
+function semanticDataTask(localId: string, toolId: string = 'hotel.search'): LeaderDecisionDataTask {
+  return {
+    localId,
+    goal: 'Read real data for ' + localId,
+    allowedToolIds: [toolId],
+    toolId,
+    input: new Object(),
+    required: false
+  };
+}
+
+function semanticDecision(tasks: LeaderDecisionDataTask[], action: string = 'execute'): LeaderDecision {
+  const decision: LeaderDecision = {
+    personaId: 'travel_companion',
+    skillId: '',
+    roundAction: action === 'answer' ? 'answer' : 'execute',
+    dataTasks: tasks,
+    uiIntent: {
+      purpose: 'Show real data',
+      preferredDensity: 'comfortable',
+      requiredSections: tasks.map((task: LeaderDecisionDataTask): string => task.localId)
+    },
+    reasonCode: action === 'answer' ? 'observed' : 'read'
+  };
+  if (action === 'answer') {
+    decision.answer = 'Enough observations';
+  }
+  return decision;
+}
+
 function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
@@ -209,6 +268,20 @@ function realPersonaPlanningContext(): LeaderPlanningContext {
   return {
     tools: planningContext().tools,
     personas: leaderPersonaContext('food_companion')
+  };
+}
+
+function semanticPlanningContext(): LeaderPlanningContext {
+  return {
+    tools: planningContext().tools,
+    personas: [{
+      personaId: 'travel_companion',
+      name: 'Travel Companion',
+      soul: 'Use real travel results.',
+      memory: 'No saved preference.',
+      previous: false,
+      activeSkills: []
+    }]
   };
 }
 
@@ -255,6 +328,24 @@ function terminalMessage(type: AgentMessageType, taskId: string, turnId: string 
     turnId,
     taskId,
     payload: new Object()
+  };
+}
+
+function dataResultMessage(task: AgentMessage, summary: string = 'real result'): AgentMessage {
+  const payload: DataResult = {
+    toolId: (task.payload as CreateDataTaskPayload).toolId,
+    outputSchema: (task.payload as CreateDataTaskPayload).outputSchema,
+    status: 'success',
+    sources: [],
+    data: JSON.parse('{"summary":"' + summary + '","entityRefs":["entity-1"],"secret":"must-not-reach-model"}') as Object,
+    warnings: []
+  };
+  return {
+    type: AgentMessageType.TASK_RESULT_DATA,
+    conversationId: task.conversationId,
+    turnId: task.turnId,
+    taskId: task.taskId,
+    payload
   };
 }
 
@@ -388,6 +479,240 @@ export default function leaderAgentTest() {
       expect(input.currentSurfaceSummary!.entityRefs.length).assertEqual(0);
       expect(input.currentSurfaceSummary!.actionOfferIds.length).assertEqual(0);
       expect(input.recentObservations!.length).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('caps and sanitizes supplied observation history before the first model call', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new CapturingLeaderPlanner();
+      const leader = new LeaderAgent(bus, planner, planningContext());
+      const observer = bus.openReader();
+      leader.start();
+      const observations: Object[] = [];
+      for (let index = 0; index < 10; index++) {
+        observations.push(JSON.parse('{"taskId":"task-' + index.toString() + '","toolId":"hotel.search",' +
+          '"status":"success","summary":"' + 'x'.repeat(300) + '","entityRefs":["hotel-1"],' +
+          '"providerSecret":"must-not-reach-model"}') as Object);
+      }
+      const payload: Object = JSON.parse('{"text":"Find a hotel"}') as Object;
+      (payload as Record<string, Object | string | number | boolean | null | undefined>)['recentObservations'] =
+        observations;
+      bus.publish({
+        type: AgentMessageType.INPUT_USER,
+        conversationId: 'conversation-bounded-observations',
+        turnId: 'turn-bounded-observations',
+        taskId: 'input-bounded-observations',
+        payload
+      });
+      await receive(observer);
+      await receive(observer);
+      await receive(observer);
+      const input = planner.lastInput as InputUserPayload;
+
+      expect(input.recentObservations!.length).assertEqual(8);
+      expect(input.recentObservations![0].taskId).assertEqual('task-2');
+      expect(input.recentObservations![0].summary.length).assertEqual(240);
+      expect(JSON.stringify(input).indexOf('must-not-reach-model')).assertEqual(-1);
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes every independent semantic Data task before observing results', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('flight'), semanticDataTask('train')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const first = await receive(observer);
+      const second = await receive(observer);
+      const firstPayload = first.payload as CreateDataTaskPayload;
+      const secondPayload = second.payload as CreateDataTaskPayload;
+
+      expect(first.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect(second.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect(first.taskId === second.taskId).assertFalse();
+      expect(firstPayload.roundId).assertEqual(secondPayload.roundId);
+      expect(firstPayload.goal).assertEqual('Read real data for flight');
+      expect(secondPayload.goal).assertEqual('Read real data for train');
+      expect(planner.calls).assertEqual(1);
+
+      bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('starts a dependent second round with only bounded observation digests', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('place')]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const task = await receive(observer);
+      bus.publish(dataResultMessage(task));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      await settle();
+
+      expect(planner.calls).assertEqual(2);
+      expect(planner.rounds[0]).assertEqual(1);
+      expect(planner.rounds[1]).assertEqual(2);
+      expect(planner.inputs[1].recentObservations!.length).assertEqual(1);
+      expect(planner.inputs[1].recentObservations![0].summary).assertEqual('real result');
+      expect(planner.inputs[1].recentObservations![0].entityRefs[0]).assertEqual('entity-1');
+      expect(JSON.stringify(planner.inputs[1]).indexOf('must-not-reach-model')).assertEqual(-1);
+
+      leader.stop();
+      observer.close();
+    });
+
+    it('turns malformed results and wrong schemas into bounded digests without stopping the pump', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([
+          semanticDataTask('malformed'),
+          semanticDataTask('wrong-schema'),
+          semanticDataTask('null-payload')
+        ]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const malformedTask = await receive(observer);
+      const wrongSchemaTask = await receive(observer);
+      const nullPayloadTask = await receive(observer);
+      const malformedPayload: Object = JSON.parse(
+        '{"toolId":"hotel.search","outputSchema":"hotelSearchResults","status":"error",' +
+        '"sources":[],"data":{},"warnings":[],"error":{}}'
+      ) as Object;
+      const wrongSchemaPayload: Object = JSON.parse(
+        '{"toolId":"hotel.search","outputSchema":"wrongSchema","status":"success",' +
+        '"sources":[],"data":{"summary":"must-not-be-trusted"},"warnings":[]}'
+      ) as Object;
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: malformedTask.conversationId,
+        turnId: malformedTask.turnId,
+        taskId: malformedTask.taskId,
+        payload: malformedPayload
+      });
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: wrongSchemaTask.conversationId,
+        turnId: wrongSchemaTask.turnId,
+        taskId: wrongSchemaTask.taskId,
+        payload: wrongSchemaPayload
+      });
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: nullPayloadTask.conversationId,
+        turnId: nullPayloadTask.turnId,
+        taskId: nullPayloadTask.taskId,
+        payload: JSON.parse('null') as Object
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      await settle();
+
+      expect(planner.calls).assertEqual(2);
+      expect(planner.inputs[1].recentObservations!.length).assertEqual(3);
+      expect(planner.inputs[1].recentObservations![0].status).assertEqual('error');
+      expect(planner.inputs[1].recentObservations![1].status).assertEqual('error');
+      expect(planner.inputs[1].recentObservations![2].status).assertEqual('error');
+      expect(planner.inputs[1].recentObservations![0].summary).assertEqual('Data task output was invalid');
+      expect(planner.inputs[1].recentObservations![1].summary).assertEqual('Data task output was invalid');
+      expect(planner.inputs[1].recentObservations![2].summary).assertEqual('Data task output was invalid');
+      expect(JSON.stringify(planner.inputs[1]).indexOf('must-not-be-trusted')).assertEqual(-1);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects planning a fourth semantic round without publishing another task', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('round-1')]),
+        semanticDecision([semanticDataTask('round-2')]),
+        semanticDecision([semanticDataTask('round-3')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      for (let round = 1; round <= 3; round++) {
+        const task = await receive(observer);
+        expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect((task.payload as CreateDataTaskPayload).roundId.indexOf(round.toString()) >= 0).assertTrue();
+        bus.publish(dataResultMessage(task, 'round-' + round.toString()));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      }
+      const limit = await receive(observer);
+
+      expect(limit.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((limit.payload as TaskErrorPayload).code).assertEqual('LEADER_ROUND_LIMIT');
+      expect(planner.calls).assertEqual(3);
+      leader.stop();
+      observer.close();
+    });
+
+    it('cancels a semantic turn before observations can trigger another round', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('cancel')]),
+        semanticDecision([semanticDataTask('must-not-run')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const task = await receive(observer);
+      bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-semantic'));
+      bus.publish(dataResultMessage(task));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      await settle();
+
+      expect(planner.calls).assertEqual(1);
+      leader.stop();
+      observer.close();
+    });
+
+    it('times out a semantic turn waiting for observations', 1000, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('timeout')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext(), 10);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      const timeout = await receive(observer);
+
+      expect(timeout.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((timeout.payload as TaskErrorPayload).code).assertEqual('LEADER_TURN_TIMEOUT');
+      expect(planner.calls).assertEqual(1);
       leader.stop();
       observer.close();
     });
