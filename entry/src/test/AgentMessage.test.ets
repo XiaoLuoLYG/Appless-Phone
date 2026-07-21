@@ -13,6 +13,7 @@ import {
   LeaderDataTask,
   LeaderPlanningContext,
   LeaderUiTask,
+  TurnConversationRole,
   TurnResultPayload,
   UiRenderResult,
   UserInputPayload
@@ -76,7 +77,7 @@ export default function agentMessageTest() {
     });
 
     it('exposes the canonical planning offer and task contracts', 0, () => {
-      const role: ConversationRole = 'user';
+      const role: TurnConversationRole = 'user';
       const planningContext: LeaderPlanningContext = {
         tools: [{
           toolId: 'hotel.search',
@@ -149,6 +150,8 @@ export default function agentMessageTest() {
 
       expect(planningContext.tools[0].riskLevel).assertEqual('read');
       expect(role).assertEqual('user');
+      expect(ConversationRole.USER).assertEqual('user');
+      expect(ConversationRole.ASSISTANT).assertEqual('assistant');
       expect(plan.skillId).assertEqual(ui.skillId);
       expect(data.skillId).assertEqual(ui.skillId);
       expect(plan.dataTasks.length).assertEqual(2);

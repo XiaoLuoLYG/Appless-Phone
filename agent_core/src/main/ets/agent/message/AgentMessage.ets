@@ -24,10 +24,10 @@ export interface AgentMessage {
   payload: Object;
 }
 
-export type ConversationRole = 'user' | 'assistant';
+export type TurnConversationRole = 'user' | 'assistant';
 
 export interface ConversationTurnMessage {
-  role: ConversationRole;
+  role: TurnConversationRole;
   content: string;
 }
 

@@ -1,4 +1,4 @@
-export { ChatMessage, ConversationContext, ConversationRole as LegacyConversationRole } from './src/main/ets/agent/ConversationContext';
+export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
 export { TimeTool } from './src/main/ets/agent/TimeTool';
 export * from './src/main/ets/agent/message/AgentMessage';
 export * from './src/main/ets/agent/message/DataResult';
