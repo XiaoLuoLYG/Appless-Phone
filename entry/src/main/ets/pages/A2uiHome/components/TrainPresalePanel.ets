@@ -6,6 +6,7 @@ import {
   TrainPresaleDebugSelection,
   TrainPresaleDebugSelectionRequest
 } from '@loop/agent-core';
+import util from '@ohos.util';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_SOFT,
@@ -52,7 +53,7 @@ export interface TrainPresaleConfirmationInput extends TrainPresaleTrip, TrainPr
   createdAt: string;
 }
 
-export interface TrainPresaleDebugConfirmationInput {
+interface TrainPresaleDebugSafetyInput {
   debugEnabled: boolean;
   debugConfirmed: boolean;
   fromName: string;
@@ -62,21 +63,14 @@ export interface TrainPresaleDebugConfirmationInput {
   passengerNames: string[];
   seatPriority: string;
   unpaidOrderAuthorized: boolean;
+}
+
+export interface TrainPresaleDebugConfirmationInput extends TrainPresaleDebugSafetyInput {
   taskId: string;
   createdAt: string;
 }
 
-export interface TrainPresaleDebugRunInput {
-  debugEnabled: boolean;
-  debugConfirmed: boolean;
-  fromName: string;
-  fromCode: string;
-  toName: string;
-  toCode: string;
-  passengerNames: string[];
-  seatPriority: string;
-  unpaidOrderAuthorized: boolean;
-}
+export interface TrainPresaleDebugRunInput extends TrainPresaleDebugSafetyInput {}
 
 export interface TrainPresaleConfirmationResult {
   error: string;
@@ -249,6 +243,16 @@ function samePassengerNames(left: string[], right: string[]): boolean {
   return true;
 }
 
+function matchesExactDebugTaskIdentity(task: TrainPresaleTask, candidate: TrainPresaleTask): boolean {
+  return task.source === 'debug' && candidate.source === 'debug' &&
+    task.trainCode === candidate.trainCode && task.travelDate === candidate.travelDate &&
+    task.fromName === candidate.fromName && task.fromCode === candidate.fromCode &&
+    task.toName === candidate.toName && task.toCode === candidate.toCode &&
+    task.seatPriority === candidate.seatPriority &&
+    task.unpaidOrderAuthorized === candidate.unpaidOrderAuthorized &&
+    samePassengerNames(task.passengerNames, candidate.passengerNames);
+}
+
 function isActiveTrainPresaleTask(task: TrainPresaleTask): boolean {
   return task.state === 'scheduled' || task.state === 'executing' ||
     task.state === 'awaiting_payment' || task.state === 'needs_user';
@@ -262,26 +266,6 @@ function preferredActiveTask(current: TrainPresaleTask | undefined, candidate: T
   return states.indexOf(candidate.state) > states.indexOf(current.state) ? candidate : current;
 }
 
-function findActiveDebugTaskForContext(
-  tasks: TrainPresaleTask[],
-  input: TrainPresaleDebugRunInput,
-  travelDate: string
-): TrainPresaleTask | undefined {
-  const passengers = input.passengerNames.map((name: string): string => name.trim())
-    .filter((name: string): boolean => name.length > 0);
-  let found: TrainPresaleTask | undefined = undefined;
-  for (let index = 0; index < tasks.length; index++) {
-    const task = tasks[index];
-    if (task.source === 'debug' && isActiveTrainPresaleTask(task) && task.travelDate === travelDate &&
-      task.fromName === input.fromName.trim() && task.fromCode === input.fromCode.trim().toUpperCase() &&
-      task.toName === input.toName.trim() && task.toCode === input.toCode.trim().toUpperCase() &&
-      task.seatPriority === input.seatPriority.trim() && samePassengerNames(task.passengerNames, passengers)) {
-      found = preferredActiveTask(found, task);
-    }
-  }
-  return found;
-}
-
 function findMatchingTrainPresaleTaskForTask(
   tasks: TrainPresaleTask[],
   candidate: TrainPresaleTask
@@ -292,12 +276,7 @@ function findMatchingTrainPresaleTaskForTask(
   let found: TrainPresaleTask | undefined = undefined;
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
-    if (task.source === 'debug' && isActiveTrainPresaleTask(task) &&
-      task.trainCode === candidate.trainCode && task.travelDate === candidate.travelDate &&
-      task.fromName === candidate.fromName && task.fromCode === candidate.fromCode &&
-      task.toName === candidate.toName && task.toCode === candidate.toCode &&
-      task.seatPriority === candidate.seatPriority &&
-      samePassengerNames(task.passengerNames, candidate.passengerNames)) {
+    if (isActiveTrainPresaleTask(task) && matchesExactDebugTaskIdentity(task, candidate)) {
       found = preferredActiveTask(found, task);
     }
   }
@@ -383,11 +362,9 @@ export async function prepareTrainPresaleDebugConfirmation(
   selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>,
   clock: () => number = (): number => new Date(input.createdAt).getTime()
 ): Promise<TrainPresaleConfirmationResult> {
-  if (!input.debugEnabled) {
-    return validationError('当前版本不允许调试测试。');
-  }
-  if (!input.debugConfirmed) {
-    return validationError('请再次确认将创建真实未支付订单，支付仍需手动完成。');
+  const safetyError = validateTrainPresaleDebugSafetyGate(input);
+  if (safetyError.length > 0) {
+    return validationError(safetyError);
   }
   let selection: TrainPresaleDebugSelection;
   try {
@@ -455,27 +432,71 @@ function existingDebugTaskResult(task: TrainPresaleTask): TrainPresaleScheduleRe
   };
 }
 
+function validateTrainPresaleDebugSafetyGate(input: TrainPresaleDebugSafetyInput): string {
+  if (!input.debugEnabled) {
+    return '当前版本不允许调试测试。';
+  }
+  if (!input.debugConfirmed) {
+    return '请再次确认将创建真实未支付订单，支付仍需手动完成。';
+  }
+  if (!input.unpaidOrderAuthorized) {
+    return '请明确授权在开售时提交真实未支付订单。';
+  }
+  if (!Array.isArray(input.passengerNames) || input.passengerNames.length === 0) {
+    return '请填写至少一位乘车人姓名。';
+  }
+  const passengers: string[] = [];
+  for (let index = 0; index < input.passengerNames.length; index++) {
+    if (typeof input.passengerNames[index] !== 'string') {
+      return '请填写有效的乘车人姓名。';
+    }
+    const passenger = input.passengerNames[index].trim();
+    if (passenger.length === 0) {
+      return '请填写至少一位乘车人姓名。';
+    }
+    if (passengers.indexOf(passenger) >= 0) {
+      return '乘车人姓名不能重复。';
+    }
+    passengers.push(passenger);
+  }
+  if (!isSupportedSeat(input.seatPriority.trim())) {
+    return '请选择支持的席别。';
+  }
+  const fromName = input.fromName.trim();
+  const fromCode = input.fromCode.trim().toUpperCase();
+  const toName = input.toName.trim();
+  const toCode = input.toCode.trim().toUpperCase();
+  if (fromName.length === 0 || toName.length === 0 || !/^[A-Z]{3}$/.test(fromCode) ||
+    !/^[A-Z]{3}$/.test(toCode) || fromName === toName || fromCode === toCode) {
+    return '出发地或目的地无效，请重新查询。';
+  }
+  return '';
+}
+
 export async function runTrainPresaleDebugConfirmation(
   input: TrainPresaleDebugRunInput,
   store: TrainPresaleTaskStore,
   scheduler: SystemOneShotScheduler,
   selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>,
-  clock: () => number = (): number => Date.now()
+  clock: () => number = (): number => Date.now(),
+  taskIdFactory: () => string = (): string => util.generateRandomUUID(false)
 ): Promise<TrainPresaleScheduleResult> {
-  if (!input.debugEnabled) {
-    return { error: '当前版本不允许调试测试。', task: undefined };
-  }
-  if (!input.debugConfirmed) {
-    return { error: '请再次确认将创建真实未支付订单，支付仍需手动完成。', task: undefined };
+  const safetyError = validateTrainPresaleDebugSafetyGate(input);
+  if (safetyError.length > 0) {
+    return { error: safetyError, task: undefined };
   }
   const startedAt = clock();
   if (!Number.isFinite(startedAt)) {
     return { error: '无法读取10秒测试时间，请重试。', task: undefined };
   }
-  const existing = findActiveDebugTaskForContext(
-    store.list(), input, current12306BeijingDate((): number => startedAt));
-  if (existing !== undefined) {
-    return existingDebugTaskResult(existing);
+  let taskToken = '';
+  try {
+    taskToken = taskIdFactory().trim();
+  } catch (_error) {
+    return { error: '无法生成10秒测试任务编号，请重试。', task: undefined };
+  }
+  if (taskToken.length === 0 || taskToken.length > 128) {
+    return { error: '无法生成10秒测试任务编号，请重试。', task: undefined };
   }
   const prepared = await prepareTrainPresaleDebugConfirmation({
     debugEnabled: input.debugEnabled,
@@ -487,7 +508,7 @@ export async function runTrainPresaleDebugConfirmation(
     passengerNames: input.passengerNames,
     seatPriority: input.seatPriority,
     unpaidOrderAuthorized: input.unpaidOrderAuthorized,
-    taskId: 'train-debug-' + startedAt.toString(),
+    taskId: 'train-debug-' + taskToken,
     createdAt: new Date(startedAt).toISOString()
   }, selector, clock);
   if (prepared.task === undefined) {
@@ -526,7 +547,12 @@ export async function scheduleTrainPresaleTask(
   try {
     store.create(task);
     const reservation = store.get(task.taskId);
+    if (reservation !== undefined && task.source === 'debug' &&
+      !matchesExactDebugTaskIdentity(reservation, task)) {
+      return { error: '提醒创建失败：任务编号冲突，请重试。', task: undefined };
+    }
     if (reservation === undefined || reservation.state !== 'needs_user' || reservation.reminderId !== -1 ||
+      reservation.source !== task.source || reservation.unpaidOrderAuthorized !== task.unpaidOrderAuthorized ||
       !matchesTrainPresaleTask(reservation, trip)) {
       throw new Error('任务预留保存失败');
     }
