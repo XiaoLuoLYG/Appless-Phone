@@ -69,7 +69,7 @@ export function webHostForDisplay(url: string): string {
   const value = url.trim();
   const schemeEnd = value.indexOf('://');
   if (schemeEnd <= 0) {
-    return '';
+    return '未加载';
   }
   const start = schemeEnd + 3;
   let end = value.length;
@@ -90,11 +90,12 @@ export function webHostForDisplay(url: string): string {
   const hostAndPort = authority.substring(userInfoEnd + 1);
   if (hostAndPort.startsWith('[')) {
     const bracketEnd = hostAndPort.indexOf(']');
-    return bracketEnd > 1 ? hostAndPort.substring(0, bracketEnd + 1).toLowerCase() : '';
+    return bracketEnd > 1 ? hostAndPort.substring(0, bracketEnd + 1).toLowerCase() : '未加载';
   }
   const portStart = hostAndPort.lastIndexOf(':');
   const hostname = portStart >= 0 ? hostAndPort.substring(0, portStart) : hostAndPort;
-  return hostname.length > 0 && hostname.indexOf(' ') < 0 && hostname.indexOf('\\') < 0 ? hostname.toLowerCase() : '';
+  return hostname.length > 0 && hostname.indexOf(' ') < 0 && hostname.indexOf('\\') < 0 ?
+    hostname.toLowerCase() : '未加载';
 }
 
 @Component
@@ -126,8 +127,7 @@ export struct CheckoutWebOverlay {
     }
     if (this.kind === 'train') {
       const activeUrl = this.currentUrl.length > 0 ? this.currentUrl : checkoutWebInitialSource(this.kind, this.url);
-      const host = webHostForDisplay(activeUrl);
-      return host.length > 0 ? host : 'kyfw.12306.cn';
+      return webHostForDisplay(activeUrl);
     }
     const lower = this.url.trim().toLowerCase();
     return lower.indexOf('paypal.com') >= 0 ? 'paypal.com' :

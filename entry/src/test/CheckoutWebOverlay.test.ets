@@ -63,7 +63,11 @@ export default function checkoutWebOverlayTest() {
       )).assertEqual('evil.example');
       expect(webHostForDisplay('https://epay.12306.cn:8443/pay/webBusiness')).assertEqual('epay.12306.cn');
       expect(webHostForDisplay('https://cashier.example.com/payment/return')).assertEqual('cashier.example.com');
-      expect(webHostForDisplay('not a URL')).assertEqual('');
+      expect(webHostForDisplay('not a URL')).assertEqual('未加载');
+      expect(webHostForDisplay(checkoutWebInitialSource(
+        'train',
+        'https://kyfw.12306.cn@evil.example/otn/leftTicket/init'
+      ))).assertEqual('未加载');
     });
 
     it('keeps HTTPS train navigation in WebView and blocks unverified schemes', 0, () => {
