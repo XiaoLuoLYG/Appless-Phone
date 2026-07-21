@@ -1,6 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { preferences } from '@kit.ArkData';
 import util from '@ohos.util';
 import {
   aiLogError,
@@ -15,6 +16,12 @@ import {
   localProviderConfigDebugSummary
 } from '@loop/agent-core';
 import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
+import {
+  claimDueTrainPresaleTask,
+  parseTrainPresaleTaskList,
+  serializeTrainPresaleTaskList,
+  TRAIN_PRESALE_TASK_STORE_NAME
+} from '../pages/A2uiHome/train/TrainPresaleTaskStore';
 
 const DOMAIN = 0x0000;
 const LOCAL_PROVIDER_CONFIG_RAWFILE = 'aiphone_provider_config.json';
@@ -48,6 +55,8 @@ const GMAIL_OAUTH_URI_HINTS: string[] = [
 const COMPOSIO_CALLBACK_URI_HINTS: string[] = [
   'aiphone://composio/callback'
 ];
+const TRAIN_PRESALE_TASKS_KEY: string = 'tasks';
+const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
 
 function hasUriHint(uri: string, hints: string[]): boolean {
   for (let index = 0; index < hints.length; index++) {
@@ -185,6 +194,19 @@ function oauthUriFromWant(want: Want): string {
   return '';
 }
 
+function preferenceText(value: preferences.ValueType): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function trainPresaleTaskIdFromWant(want: Want): string | undefined {
+  const params = want.parameters;
+  if (params === undefined || params === null) {
+    return undefined;
+  }
+  const value = params['trainPresaleTaskId'];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -196,6 +218,7 @@ export default class EntryAbility extends UIAbility {
     this.loadComposioConfig();
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
+    this.claimTrainPresaleTask(want);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -278,6 +301,38 @@ export default class EntryAbility extends UIAbility {
     }
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
+    this.claimTrainPresaleTask(want);
+  }
+
+  private claimTrainPresaleTask(want: Want): void {
+    try {
+      const store = preferences.getPreferencesSync(this.context, { name: TRAIN_PRESALE_TASK_STORE_NAME });
+      const tasks = parseTrainPresaleTaskList(preferenceText(store.getSync(TRAIN_PRESALE_TASKS_KEY, '')));
+      const pendingTaskId = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+      for (let index = 0; index < tasks.length; index++) {
+        if (tasks[index].taskId === pendingTaskId && tasks[index].state === 'executing') {
+          aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + pendingTaskId + ' reused=true');
+          return;
+        }
+      }
+      if (pendingTaskId.length > 0) {
+        store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+      }
+      const result = claimDueTrainPresaleTask(tasks, new Date().toISOString(), trainPresaleTaskIdFromWant(want));
+      if (result.task === undefined) {
+        if (pendingTaskId.length > 0) {
+          store.flushSync();
+        }
+        return;
+      }
+      store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(result.tasks));
+      store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, result.task.taskId);
+      store.flushSync();
+      aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + result.task.taskId + ' reused=false');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][TrainPresaleClaim] error=' + message.substring(0, 240));
+    }
   }
 
   private handleOAuthWant(want: Want): void {

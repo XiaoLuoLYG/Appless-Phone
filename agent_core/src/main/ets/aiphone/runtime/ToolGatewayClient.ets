@@ -245,7 +245,49 @@ interface LeftTicketData {
 }
 
 interface LeftTicketPayload {
+  status?: boolean;
   data?: LeftTicketData;
+}
+
+export type TrainPresaleAvailabilityStatus =
+  'verified' | 'sold_out' | 'provider_error' | 'mismatch' | 'unsupported_seat';
+
+export interface TrainPresaleRecheckRequest {
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleAvailabilityCheck {
+  status: TrainPresaleAvailabilityStatus;
+  reason: string;
+  trainCode: string;
+  travelDate: string;
+  fromCode: string;
+  toCode: string;
+  seatPriority: string;
+  bookingUrl: string;
+}
+
+export interface TrainPresaleExecutionTask {
+  state: 'scheduled' | 'executing' | 'awaiting_payment' | 'needs_user' | 'cancelled';
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleExecutionDecision {
+  state: 'executing' | 'needs_user';
+  reason: string;
+  bookingUrl: string;
 }
 
 interface StationEntry {
@@ -4269,6 +4311,34 @@ export function build12306BookingUrl(
     '&flag=N,N,Y';
 }
 
+export function decideTrainPresaleExecution(
+  task: TrainPresaleExecutionTask,
+  check: TrainPresaleAvailabilityCheck
+): TrainPresaleExecutionDecision {
+  if (task.state !== 'executing') {
+    return { state: 'needs_user', reason: '开售任务不在执行状态，请重新确认。', bookingUrl: '' };
+  }
+  if (check.status !== 'verified') {
+    const reason = check.reason.length > 0 ? check.reason : '12306 当前余票未通过核验，请手动确认。';
+    return { state: 'needs_user', reason: reason, bookingUrl: '' };
+  }
+  const expectedUrl = build12306BookingUrl(
+    task.travelDate,
+    task.fromName,
+    task.fromCode,
+    task.toName,
+    task.toCode
+  );
+  if (check.trainCode.trim().toUpperCase() !== task.trainCode.trim().toUpperCase() ||
+    check.travelDate.trim() !== task.travelDate.trim() ||
+    check.fromCode.trim().toUpperCase() !== task.fromCode.trim().toUpperCase() ||
+    check.toCode.trim().toUpperCase() !== task.toCode.trim().toUpperCase() ||
+    check.seatPriority.trim() !== task.seatPriority.trim() || check.bookingUrl !== expectedUrl) {
+    return { state: 'needs_user', reason: '12306 返回的车次、日期、路线或席别与提醒不匹配，请手动确认。', bookingUrl: '' };
+  }
+  return { state: 'executing', reason: '', bookingUrl: expectedUrl };
+}
+
 function normalizedOfficialDate(yearText: string, monthText: string, dayText: string): string {
   const year = Number(yearText);
   const month = Number(monthText);
@@ -4813,8 +4883,114 @@ function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
     noSeat: fields.length > 26 ? fields[26] : '',
     hardSeat: fields.length > 29 ? fields[29] : '',
     sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : ''),
-    price: lowestAvailable12306Price(fields)
+    price: lowestAvailable12306Price(fields),
+    fromCode: fields.length > 6 ? fields[6] : '',
+    toCode: fields.length > 7 ? fields[7] : ''
   };
+}
+
+function trainSeatForPreference(item: A2uiTrainData, seatPriority: string): string {
+  if (seatPriority === '二等座') {
+    return item.second;
+  }
+  if (seatPriority === '一等座') {
+    return item.first;
+  }
+  if (seatPriority === '商务座') {
+    return item.business;
+  }
+  if (seatPriority === '无座') {
+    return item.noSeat;
+  }
+  return '';
+}
+
+function trainPresaleAvailability(
+  request: TrainPresaleRecheckRequest,
+  status: TrainPresaleAvailabilityStatus,
+  reason: string,
+  bookingUrl: string = ''
+): TrainPresaleAvailabilityCheck {
+  return {
+    status: status,
+    reason: reason,
+    trainCode: request.trainCode.trim().toUpperCase(),
+    travelDate: request.travelDate.trim(),
+    fromCode: request.fromCode.trim().toUpperCase(),
+    toCode: request.toCode.trim().toUpperCase(),
+    seatPriority: request.seatPriority.trim(),
+    bookingUrl: bookingUrl
+  };
+}
+
+export async function recheck12306TrainAvailability(
+  request: TrainPresaleRecheckRequest
+): Promise<TrainPresaleAvailabilityCheck> {
+  const seatPriority = request.seatPriority.trim();
+  if (seatPriority !== '二等座' && seatPriority !== '一等座' && seatPriority !== '商务座' && seatPriority !== '无座') {
+    return trainPresaleAvailability(request, 'unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
+  const trainCode = extractExactTrainCode(request.trainCode);
+  const travelDate = normalizeOfficialDate(request.travelDate);
+  const fromCode = request.fromCode.trim().toUpperCase();
+  const toCode = request.toCode.trim().toUpperCase();
+  if (trainCode.length === 0 || trainCode !== request.trainCode.trim().toUpperCase() ||
+    travelDate.length === 0 || travelDate !== request.travelDate.trim() ||
+    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) || fromCode === toCode ||
+    request.fromName.trim().length === 0 || request.toName.trim().length === 0) {
+    return trainPresaleAvailability(request, 'mismatch', '提醒中的车次、日期或路线无效，请重新查询。');
+  }
+  try {
+    const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    if (init.code < 200 || init.code >= 300) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 初始化返回 HTTP ' + init.code.toString() + '。');
+    }
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    const response = await request12306LeftTicket(travelDate, fromCode, toCode, leftTicketHeaders(cookieHeader));
+    if (response.code < 200 || response.code >= 300) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票查询返回 HTTP ' + response.code.toString() + '。');
+    }
+    let payload: LeftTicketPayload;
+    try {
+      payload = JSON.parse(response.text) as LeftTicketPayload;
+    } catch (_error) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票响应不是可解析的官方数据。');
+    }
+    if (payload.status !== true || payload.data === undefined || !Array.isArray(payload.data.result)) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票响应缺少有效结果。');
+    }
+    const rows = payload.data.result;
+    const emptyStations: StationCache = { entries: [], names: [] };
+    for (let index = 0; index < rows.length; index++) {
+      const fields = rows[index].split('|');
+      const item = parse12306Row(rows[index], emptyStations);
+      if (item.trainCode.trim().toUpperCase() !== trainCode) {
+        continue;
+      }
+      if (item.fromCode !== fromCode || item.toCode !== toCode) {
+        return trainPresaleAvailability(request, 'mismatch', '12306 返回的 ' + trainCode + ' 路线与提醒不匹配。');
+      }
+      const seat = trainSeatForPreference(item, seatPriority);
+      if (trainField(fields, 11) !== 'Y' || !isAvailableTrainSeat(seat)) {
+        return trainPresaleAvailability(request, 'sold_out', trainCode + ' ' + seatPriority + ' 当前无可用余票。');
+      }
+      const bookingUrl = build12306BookingUrl(
+        travelDate,
+        request.fromName.trim(),
+        fromCode,
+        request.toName.trim(),
+        toCode
+      );
+      return trainPresaleAvailability(request, 'verified', '', bookingUrl);
+    }
+    return trainPresaleAvailability(request, 'mismatch', '12306 当前结果未返回提醒中的车次 ' + trainCode + '。');
+  } catch (error) {
+    return trainPresaleAvailability(
+      request,
+      'provider_error',
+      '12306 实时余票查询失败：' + describeThrown(error).substring(0, 240)
+    );
+  }
 }
 
 function formatTrainSeatsSummary(item: A2uiTrainData): string {

@@ -89,6 +89,7 @@ import trainPresaleSearchTest from './TrainPresaleSearch.test';
 import trainPresaleTaskStoreTest from './TrainPresaleTaskStore.test';
 import systemOneShotSchedulerTest from './SystemOneShotScheduler.test';
 import trainPresaleConfirmationTest from './TrainPresaleConfirmation.test';
+import trainPresaleExecutionTest from './TrainPresaleExecution.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -174,6 +175,7 @@ export default function testsuite() {
   trainPresaleTaskStoreTest();
   systemOneShotSchedulerTest();
   trainPresaleConfirmationTest();
+  trainPresaleExecutionTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

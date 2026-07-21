@@ -61,13 +61,19 @@ import {
   configureLocalToolDebugConfig,
   currentComposioConfig,
   currentComposioUserId,
+  decideTrainPresaleExecution,
   defaultToolGatewayUrl,
   isRegisteredToolId,
   normalizeComposioUserId,
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
+  recheck12306TrainAvailability,
   sendLocalSocialHubReply,
-  shortComposioUserId
+  shortComposioUserId,
+  TrainPresaleAvailabilityCheck,
+  TrainPresaleExecutionDecision,
+  TrainPresaleExecutionTask,
+  TrainPresaleRecheckRequest
 } from '@loop/agent-core';
 import {
   NavigationCardSnapshot,
@@ -176,6 +182,7 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
+const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
 const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
@@ -638,6 +645,7 @@ struct Index {
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
   private trainPresaleTask: TrainPresaleTask | null = null;
+  private trainPresaleResumeInFlight: boolean = false;
 
   private isLuckinOptionSwitchArgs(args: Object | null): boolean {
     if (args === null) {
@@ -726,6 +734,11 @@ struct Index {
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
     void this.requestLocationPermissionOnLaunch();
+    void this.resumePendingTrainPresaleTask();
+  }
+
+  onPageShow(): void {
+    void this.resumePendingTrainPresaleTask();
   }
 
   aboutToDisappear(): void {
@@ -2989,14 +3002,129 @@ struct Index {
     }
   }
 
-  private trainPresaleStore(): TrainPresaleTaskStore | null {
+  private trainPresalePreferences(): preferences.Preferences | null {
     const context = this.getUIContext().getHostContext() as common.Context;
     if (context === null) {
       return null;
     }
-    return new TrainPresaleTaskStore(preferences.getPreferencesSync(context, {
+    return preferences.getPreferencesSync(context, {
       name: TRAIN_PRESALE_TASK_STORE_NAME
-    }));
+    });
+  }
+
+  private trainPresaleStore(): TrainPresaleTaskStore | null {
+    const store = this.trainPresalePreferences();
+    return store === null ? null : new TrainPresaleTaskStore(store);
+  }
+
+  private clearPendingTrainPresaleTask(store: preferences.Preferences, taskId: string): void {
+    if (this.preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim() !== taskId) {
+      return;
+    }
+    store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+    store.flushSync();
+  }
+
+  private async resumePendingTrainPresaleTask(): Promise<void> {
+    if (this.trainPresaleResumeInFlight) {
+      return;
+    }
+    const nativeStore = this.trainPresalePreferences();
+    if (nativeStore === null) {
+      return;
+    }
+    const taskId = this.preferenceText(nativeStore.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+    if (taskId.length === 0) {
+      return;
+    }
+    this.trainPresaleResumeInFlight = true;
+    let consume = false;
+    try {
+      const store = new TrainPresaleTaskStore(nativeStore);
+      const task = store.get(taskId);
+      if (task === undefined || task.state !== 'executing') {
+        consume = true;
+        aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' skipped=not_executing');
+        return;
+      }
+      this.trainPresaleTask = task;
+      this.trainPresaleTaskState = task.state;
+      this.trainPresaleTrip = {
+        trainCode: task.trainCode,
+        travelDate: task.travelDate,
+        fromName: task.fromName,
+        fromCode: task.fromCode,
+        toName: task.toName,
+        toCode: task.toCode,
+        saleAt: task.saleAt
+      };
+      this.trainPresaleWorking = true;
+      this.trainPresaleError = '';
+      this.showTrainPresalePanel = true;
+      const request: TrainPresaleRecheckRequest = {
+        trainCode: task.trainCode,
+        travelDate: task.travelDate,
+        fromName: task.fromName,
+        fromCode: task.fromCode,
+        toName: task.toName,
+        toCode: task.toCode,
+        seatPriority: task.seatPriority
+      };
+      const check: TrainPresaleAvailabilityCheck = await recheck12306TrainAvailability(request);
+      const executionTask: TrainPresaleExecutionTask = {
+        state: task.state,
+        trainCode: task.trainCode,
+        travelDate: task.travelDate,
+        fromName: task.fromName,
+        fromCode: task.fromCode,
+        toName: task.toName,
+        toCode: task.toCode,
+        seatPriority: task.seatPriority
+      };
+      const decision: TrainPresaleExecutionDecision = decideTrainPresaleExecution(executionTask, check);
+      if (decision.state === 'needs_user') {
+        store.update(taskId, { state: 'needs_user', lastError: decision.reason });
+        const persisted = store.get(taskId);
+        if (persisted === undefined || persisted.state !== 'needs_user') {
+          throw new Error('余票核验结果保存失败');
+        }
+        this.trainPresaleTask = persisted;
+        this.trainPresaleTaskState = persisted.state;
+        this.trainPresaleError = persisted.lastError;
+        consume = true;
+        aiLogError('[AIPhone][TrainPresaleResume] taskId=' + taskId +
+          ' status=' + check.status + ' reason=' + decision.reason.substring(0, 240));
+        return;
+      }
+      const latest = store.get(taskId);
+      if (latest === undefined || latest.state !== 'executing') {
+        consume = true;
+        aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' skipped=state_changed');
+        return;
+      }
+      this.trainPresaleTask = latest;
+      this.trainPresaleTaskState = latest.state;
+      this.checkoutWebKind = 'train';
+      this.checkoutWebUrl = decision.bookingUrl;
+      this.showCheckoutWeb = true;
+      consume = true;
+      aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' status=verified');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.trainPresaleError = '开售任务恢复失败：' + message;
+      aiLogError('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' error=' + message.substring(0, 240));
+    } finally {
+      if (consume) {
+        try {
+          this.clearPendingTrainPresaleTask(nativeStore, taskId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : JSON.stringify(error);
+          aiLogError('[AIPhone][TrainPresaleHandoff] taskId=' + taskId + ' error=' + message.substring(0, 240));
+        }
+      }
+      this.trainPresaleWorking = false;
+      this.trainPresaleResumeInFlight = false;
+    }
   }
 
   private async confirmTrainPresale(submission: TrainPresalePanelSubmission): Promise<void> {
