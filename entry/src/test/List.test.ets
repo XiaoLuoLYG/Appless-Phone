@@ -86,6 +86,8 @@ import a2uiLayoutMergerTest from './A2uiLayoutMerger.test';
 import checkoutWebOverlayTest from './CheckoutWebOverlay.test';
 import trainPresaleProviderTest from './TrainPresaleProvider.test';
 import trainPresaleSearchTest from './TrainPresaleSearch.test';
+import trainPresaleTaskStoreTest from './TrainPresaleTaskStore.test';
+import systemOneShotSchedulerTest from './SystemOneShotScheduler.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -168,6 +170,8 @@ export default function testsuite() {
   checkoutWebOverlayTest();
   trainPresaleProviderTest();
   trainPresaleSearchTest();
+  trainPresaleTaskStoreTest();
+  systemOneShotSchedulerTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();
