@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   callComposioDynamic,
+  callComposioSearchAndExecute,
   composioDynamicMissingConfigResult,
   composioArgumentsForTool,
   composioDynamicResultFromObservation,
@@ -14,12 +15,21 @@ import {
   currentComposioConfig,
   currentComposioUserId,
   ComposioSearchTool,
+  ComposioSearchExecuteClient,
+  dynamicManifestRegistrationMetadata,
+  dynamicReceiptFromProviderPayload,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute,
   normalizedComposioUseCase,
-  slackSearchQueryForPrompt
+  slackSearchQueryForPrompt,
+  xPostStructuredDataResult
 } from '@loop/agent-core';
-import { DynamicGenericToolResult } from '@loop/agent-core';
+import {
+  DataResult,
+  DynamicGenericToolResult,
+  DynamicMcpTool,
+  DynamicRegistrationMetadata
+} from '@loop/agent-core';
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
@@ -54,6 +64,46 @@ interface TestComposioObservationData {
 interface TestComposioObservation {
   data: TestComposioObservationData;
   error: null;
+}
+
+interface SelectedSlugCase {
+  prompt: string;
+  slug: string;
+}
+
+class RecordingComposioSearchExecuteClient implements ComposioSearchExecuteClient {
+  searchObservation: string;
+  executionObservation: string;
+  executedSlugs: string[] = [];
+
+  constructor(searchObservation: string, executionObservation: string) {
+    this.searchObservation = searchObservation;
+    this.executionObservation = executionObservation;
+  }
+
+  async search(_useCase: string): Promise<string> {
+    return this.searchObservation;
+  }
+
+  async execute(toolSlug: string, _args: Object): Promise<string> {
+    this.executedSlugs.push(toolSlug);
+    return this.executionObservation;
+  }
+}
+
+function searchObservationForTool(
+  slug: string,
+  inputSchema: string = '{}',
+  outputSchema: string = '{}'
+): string {
+  return '{"source":"Composio","authorizedToolkits":["test"],"tools":[{' +
+    '"toolSlug":' + JSON.stringify(slug) + ',"description":"selected provider tool",' +
+    '"inputSchema":' + JSON.stringify(inputSchema) + ',"outputSchema":' + JSON.stringify(outputSchema) +
+    '}],"instruction":"execute selected tool"}';
+}
+
+function successfulExecutionObservation(): string {
+  return '{"data":{"items":[{"id":"real-1","text":"real provider row","url":"https://example.com/real-1"}]}}';
 }
 
 export default function composioDynamicBackendTest() {
@@ -97,6 +147,160 @@ export default function composioDynamicBackendTest() {
       expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertTrue();
       expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertTrue();
       expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
+    });
+
+    it('reauthorizes every actual selected Composio slug before execute', 0, async () => {
+      const blocked: SelectedSlugCase[] = [
+        { prompt: 'use GitHub', slug: 'GITHUB_EXECUTE_WORKFLOW' },
+        { prompt: 'use Google Drive', slug: 'google-drive.write-file' },
+        { prompt: 'use Notion', slug: 'notionAppendBlock' },
+        { prompt: 'use Slack', slug: 'slackuploadfile' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_PUBLISH_RELEASE' },
+        { prompt: 'use GitHub', slug: 'GITHUB_SEARCH_AND_DELETE_REPOSITORY' },
+        { prompt: 'use GitHub', slug: 'GITHUB_SYNC_REPOSITORY' },
+        { prompt: 'use GitHub', slug: 'GITHUB_BUDGET_REPORT' },
+        { prompt: 'use Google Drive', slug: 'GOOGLEDRIVE_SPREADSHEET_EXPORT' }
+      ];
+      for (let index = 0; index < blocked.length; index++) {
+        const current = blocked[index];
+        const client = new RecordingComposioSearchExecuteClient(
+          searchObservationForTool(current.slug), successfulExecutionObservation()
+        );
+        const result = await callComposioSearchAndExecute(
+          client, current.prompt, looseObject('{"operation":"search"}')
+        );
+        expect(result.status).assertEqual('unsafe_action_blocked');
+        expect(client.executedSlugs.length).assertEqual(0);
+      }
+      const callerClaimedFixed = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GMAIL_CREATE_DRAFT'), successfulExecutionObservation()
+      );
+      const callerClaimedFixedResult = await callComposioSearchAndExecute(
+        callerClaimedFixed, 'use Gmail',
+        looseObject('{"operation":"search","fixedToolId":"gmail.draft.create",' +
+          '"fixedArgs":{"to":["alice@example.com"],"body":"hello"}}')
+      );
+      expect(callerClaimedFixedResult.status).assertEqual('unsafe_action_blocked');
+      expect(callerClaimedFixed.executedSlugs.length).assertEqual(0);
+
+      const allowed: SelectedSlugCase[] = [
+        { prompt: 'use GitHub', slug: 'GITHUB_SEARCH_REPOSITORIES' },
+        { prompt: 'use GitHub', slug: 'github.list-repositories' },
+        { prompt: 'use GitHub', slug: 'githubGetRepository' },
+        { prompt: 'use GitHub', slug: 'githubsearchrepositories' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_REPOSITORY' }
+      ];
+      for (let index = 0; index < allowed.length; index++) {
+        const current = allowed[index];
+        const client = new RecordingComposioSearchExecuteClient(
+          searchObservationForTool(current.slug), successfulExecutionObservation()
+        );
+        const result = await callComposioSearchAndExecute(
+          client, current.prompt, looseObject('{"operation":"search"}')
+        );
+        expect(result.status).assertEqual('success');
+        expect(result.providerPhase).assertEqual('execution');
+        expect(client.executedSlugs.length).assertEqual(1);
+        expect(client.executedSlugs[0]).assertEqual(current.slug);
+      }
+    });
+
+    it('preserves actual Composio schemas and only genuine bounded receipts', 0, async () => {
+      const inputSchema = '{"type":"object","properties":{"query":{"type":"string"}}}';
+      const outputSchema = '{"type":"object","properties":{"items":{"type":"array"}}}';
+      const observation = '{"request_id":"req.Trace-123","data":{"items":[{' +
+        '"id":"tweet-1","text":"payload-secret","token":"sk-live-secret",' +
+        '"url":"https://x.com/openai/status/1"}]}}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_SEARCH_TWEETS', inputSchema, outputSchema), observation
+      );
+      const result = await callComposioSearchAndExecute(
+        client, 'search Twitter posts', looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const registration = result.registration as DynamicRegistrationMetadata;
+
+      expect(JSON.stringify(registration.inputSchema)).assertEqual(inputSchema);
+      expect(JSON.stringify(registration.outputSchema)).assertEqual(outputSchema);
+      expect(registration.receipt).assertEqual('req.Trace-123');
+      expect(registration.receipt.length).assertLess(129);
+      expect(registration.receipt.indexOf('payload-secret')).assertEqual(-1);
+      expect(registration.receipt.indexOf('sk-live-secret')).assertEqual(-1);
+
+      const noReceiptClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GITHUB_SEARCH_REPOSITORIES'),
+        '{"data":{"items":[{"id":"payload-id-is-not-a-receipt","text":"secret-body"}]}}'
+      );
+      const noReceipt = await callComposioSearchAndExecute(
+        noReceiptClient, 'use GitHub', looseObject('{"operation":"search"}')
+      );
+      expect(noReceipt.registration?.receipt).assertEqual('');
+      expect(dynamicReceiptFromProviderPayload(noReceipt.rawPreview)).assertEqual('');
+    });
+
+    it('keeps ModelScope schemas distinct and payload data out of receipts', 0, () => {
+      const tool: DynamicMcpTool = {
+        name: 'weather.search',
+        description: 'Read weather',
+        inputSchema: looseObject('{"type":"object","properties":{"city":{"type":"string"}}}')
+      };
+      const providerResult: DynamicGenericToolResult = {
+        sourceTag: 'ModelScope Weather',
+        toolName: 'weather.search',
+        title: 'Weather result',
+        status: 'success',
+        summary: 'real weather',
+        rows: [{ label: 'temperature', value: '31 C' }],
+        rawPreview: '{"data":{"token":"secret-token","items":[{"id":"payload-id"}]}}'
+      };
+      const metadata = dynamicManifestRegistrationMetadata('ModelScope Weather', tool, providerResult);
+
+      expect(JSON.stringify(metadata.inputSchema).indexOf('city')).assertLarger(-1);
+      expect(JSON.stringify(metadata.outputSchema)).assertEqual('{}');
+      expect(metadata.receipt).assertEqual('');
+      expect(metadata.receipt.indexOf('secret-token')).assertEqual(-1);
+      expect(metadata.receipt.indexOf('payload-id')).assertEqual(-1);
+    });
+
+    it('does not relabel X discovery or fallback responses as post data', 0, async () => {
+      const noMatchClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_USER_LOOKUP_ME'), successfulExecutionObservation()
+      );
+      const noMatch = await callComposioSearchAndExecute(
+        noMatchClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const noMatchData: DataResult = xPostStructuredDataResult(noMatch);
+      expect(noMatch.status).assertEqual('error');
+      expect(noMatch.providerPhase).assertEqual('discovery');
+      expect(noMatchClient.executedSlugs.length).assertEqual(0);
+      expect(noMatchData.status).assertEqual('error');
+
+      const fallbackClient = new RecordingComposioSearchExecuteClient(
+        'Composio gateway returned no executable tool', successfulExecutionObservation()
+      );
+      const fallback = await callComposioSearchAndExecute(
+        fallbackClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      expect(fallback.status).assertEqual('error');
+      expect(fallback.providerPhase).assertEqual('discovery');
+      expect(fallbackClient.executedSlugs.length).assertEqual(0);
+      expect(xPostStructuredDataResult(fallback).status).assertEqual('error');
+
+      const postsClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_SEARCH_TWEETS'),
+        '{"data":{"posts":[{"id":"tweet-real-1","text":"real post",' +
+          '"url":"https://x.com/openai/status/tweet-real-1"}]}}'
+      );
+      const posts = await callComposioSearchAndExecute(
+        postsClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const postData = xPostStructuredDataResult(posts);
+      expect(posts.providerPhase).assertEqual('execution');
+      expect(postsClient.executedSlugs.length).assertEqual(1);
+      expect(postData.status).assertEqual('success');
+      expect(JSON.stringify(postData.data).indexOf('tweet-real-1')).assertLarger(-1);
     });
 
     it('maps Gmail fixed-tool args into the matched Composio schema', 0, () => {

@@ -697,13 +697,27 @@ export default function toolGatewayClientTest() {
           expect(JSON.stringify(result.data).indexOf('createSurface')).assertEqual(-1);
           expect(JSON.stringify(result.data).indexOf('updateDataModel')).assertEqual(-1);
           if (tools[index] === 'x.post.search') {
-            expect(result.sources[0].backend).assertEqual('oauth_api');
+            expect(result.status).assertEqual('error');
+            expect(result.error?.code).assertEqual('X_POST_TOOL_NOT_EXECUTED');
+            expect(result.sources.length).assertEqual(0);
           }
         }
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
         configureComposioConfigFromRawJson('{}');
       }
+    });
+
+    it('returns unsupported for a limited-only SocialHub platform without a provider source', 0, async () => {
+      const result = await callStructuredTool(
+        'social.feed.search',
+        'read my WhatsApp inbox',
+        looseObject('{"platforms":["whatsapp"]}')
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('SOCIAL_SOURCES_UNSUPPORTED');
+      expect(result.sources.length).assertEqual(0);
     });
 
     it('keeps normalized travel and food records intact in structured DataResults', 0, () => {

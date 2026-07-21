@@ -133,6 +133,7 @@ import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from '.
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import {
   callComposioDynamic,
+  callComposioFixedDynamic,
   callComposioFixedRaw,
   composioDynamicResultFromObservation,
   composioPhoneNumberIdsFromObservation,
@@ -201,7 +202,8 @@ import {
   DynamicToolManifest,
   DynamicToolRegistration,
   DynamicToolTransport,
-  GenericStructuredData
+  GenericStructuredData,
+  dynamicReceiptFromProviderPayload
 } from './DynamicToolTypes';
 import {
   A2uiPartialDataPatch,
@@ -233,11 +235,6 @@ interface HttpTextResponse {
   text: string;
   cookies: string;
   headers: string;
-}
-
-interface ComposioFixedRequestPayload {
-  fixedToolId: string;
-  fixedArgs?: Object;
 }
 
 interface SlackComposioReplyArgs {
@@ -5715,18 +5712,28 @@ export function aggregateStructuredDataResult(data: AggregateSearchResult): Data
 }
 
 function socialConnectionFailed(connection: SocialHubConnectionData): boolean {
-  return connection.status === 'error' || connection.status === 'needs_auth' || connection.status === 'disabled';
+  return connection.status !== 'connected';
+}
+
+function socialConnectionAttempted(connection: SocialHubConnectionData): boolean {
+  return connection.status === 'connected' || connection.status === 'error';
+}
+
+function socialConnectionUnsupported(connection: SocialHubConnectionData): boolean {
+  return connection.status === 'limited' || connection.status === 'disabled';
 }
 
 export function socialHubStructuredDataResult(feed: SocialHubFeedResult): DataResult {
   const data: SocialHubStructuredData = { items: feed.items, connections: feed.connections };
-  const sources: DataSource[] = feed.connections.map((connection: SocialHubConnectionData): DataSource => ({
-    provider: connection.displayName.length > 0 ? connection.displayName : connection.platform,
-    backend: 'oauth_api',
-    operation: 'feed',
-    fetchedAt: new Date().toISOString(),
-    accountHint: connection.accountId
-  }));
+  const sources: DataSource[] = feed.connections
+    .filter((connection: SocialHubConnectionData): boolean => socialConnectionAttempted(connection))
+    .map((connection: SocialHubConnectionData): DataSource => ({
+      provider: connection.displayName.length > 0 ? connection.displayName : connection.platform,
+      backend: 'oauth_api',
+      operation: 'feed',
+      fetchedAt: new Date().toISOString(),
+      accountHint: connection.accountId
+    }));
   const warnings = feed.connections
     .filter((connection: SocialHubConnectionData): boolean => socialConnectionFailed(connection))
     .map((connection: SocialHubConnectionData): string =>
@@ -5736,13 +5743,22 @@ export function socialHubStructuredDataResult(feed: SocialHubFeedResult): DataRe
       partialDataResult('social.feed.search', 'socialHubFeed', data, sources, warnings) :
       successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
   }
-  if (warnings.length > 0) {
+  const attemptedFailure = feed.connections.some((connection: SocialHubConnectionData): boolean =>
+    connection.status === 'error');
+  if (attemptedFailure) {
     return structuredErrorWithData(
       'social.feed.search', 'socialHubFeed', data, 'SOCIAL_PROVIDERS_FAILED', warnings.join('；'), false, sources, warnings
     );
   }
+  if (sources.length === 0 && feed.connections.length > 0 &&
+    feed.connections.every((connection: SocialHubConnectionData): boolean => socialConnectionUnsupported(connection))) {
+    return structuredErrorWithData(
+      'social.feed.search', 'socialHubFeed', data, 'SOCIAL_SOURCES_UNSUPPORTED', warnings.join('；'), false, [], warnings
+    );
+  }
   const empty = successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
   empty.status = 'empty';
+  empty.warnings = warnings;
   return empty;
 }
 
@@ -9588,8 +9604,6 @@ interface DynamicReadRequestArgs {
   operation?: Object | string | number | boolean | null;
   qualifiedName?: Object | string | number | boolean | null;
   toolSlug?: Object | string | number | boolean | null;
-  schema?: Object | string | number | boolean | null;
-  receipt?: Object | string | number | boolean | null;
 }
 
 function dynamicReadRequestArgs(args: Object | null): DynamicReadRequestArgs {
@@ -9629,25 +9643,18 @@ function dynamicReadAuthorizationMessage(args: Object | null): string {
   return '';
 }
 
-function dynamicRequestSchema(args: Object | null): Object {
-  const schema = dynamicReadRequestArgs(args).schema;
-  return schema !== undefined && schema !== null && typeof schema === 'object' ? schema : new Object();
-}
-
-function dynamicRequestReceipt(args: Object | null): string {
-  return textOf(dynamicReadRequestArgs(args).receipt).trim();
-}
-
 function dynamicRegistration(
   provider: string,
   qualifiedName: string,
-  schema: Object,
+  inputSchema: Object,
+  outputSchema: Object,
   receipt: string
 ): DynamicRegistrationMetadata {
   return {
     provider: provider,
     qualifiedName: qualifiedName,
-    schema: schema,
+    inputSchema: inputSchema,
+    outputSchema: outputSchema,
     receipt: receipt
   };
 }
@@ -9662,14 +9669,28 @@ function dynamicExecutionResult(
 function dynamicReadFailure(
   provider: string,
   qualifiedName: string,
-  schema: Object,
+  inputSchema: Object,
   message: string,
   status: string = 'error'
 ): DynamicReadExecution {
   const result = dynamicErrorResult(provider, qualifiedName, '动态读取失败', message);
   result.status = status;
-  const registration = dynamicRegistration(provider, qualifiedName, schema, result.rawPreview);
+  const registration = dynamicRegistration(provider, qualifiedName, inputSchema, new Object(), '');
   return dynamicExecutionResult(result, registration);
+}
+
+export function dynamicManifestRegistrationMetadata(
+  provider: string,
+  tool: DynamicMcpTool,
+  result: DynamicGenericToolResult
+): DynamicRegistrationMetadata {
+  return dynamicRegistration(
+    provider,
+    tool.name,
+    tool.inputSchema,
+    tool.outputSchema ?? new Object(),
+    dynamicReceiptFromProviderPayload(result.rawPreview)
+  );
 }
 
 function dynamicManifestTool(manifest: DynamicToolManifest, name: string): DynamicMcpTool | null {
@@ -9739,7 +9760,7 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
     }
     result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
   }
-  const metadata = dynamicRegistration(manifest.displayName, tool.name, tool.inputSchema, result.rawPreview);
+  const metadata = dynamicManifestRegistrationMetadata(manifest.displayName, tool, result);
   return dynamicExecutionResult(result, metadata);
 }
 
@@ -9751,7 +9772,7 @@ async function defaultDynamicReadExecutor(prompt: string, args: Object | null): 
   const result = await callComposioDynamic(prompt, args);
   if (result === null) {
     return dynamicReadFailure('dynamic.search', dynamicQualifiedName(dynamicReadRequestArgs(args)),
-      dynamicRequestSchema(args), 'No matching dynamic read provider was found.');
+      new Object(), 'No matching dynamic read provider was found.');
   }
   const providedRegistration = result.registration;
   const qualifiedName = providedRegistration?.qualifiedName ??
@@ -9760,8 +9781,9 @@ async function defaultDynamicReadExecutor(prompt: string, args: Object | null): 
   const metadata = providedRegistration ?? dynamicRegistration(
     result.sourceTag,
     qualifiedName,
-    dynamicRequestSchema(args),
-    dynamicRequestReceipt(args).length > 0 ? dynamicRequestReceipt(args) : result.rawPreview
+    new Object(),
+    new Object(),
+    dynamicReceiptFromProviderPayload(result.rawPreview)
   );
   result.registration = undefined;
   return dynamicExecutionResult(result, metadata);
@@ -9774,13 +9796,16 @@ function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResul
     registration: execution.registration
   };
   base.data = data;
-  base.sources = [{
+  const source: DataSource = {
     provider: execution.registration.provider,
     backend: execution.registration.provider === 'Composio' ? 'oauth_api' : 'mcp_remote',
     operation: execution.registration.qualifiedName,
-    fetchedAt: new Date().toISOString(),
-    receipt: execution.registration.receipt
-  }];
+    fetchedAt: new Date().toISOString()
+  };
+  if (execution.registration.receipt.length > 0) {
+    source.receipt = execution.registration.receipt;
+  }
+  base.sources = [source];
   return base;
 }
 
@@ -10796,16 +10821,6 @@ async function composioAppResult(appName: string, query: string, kind: string): 
   }
 }
 
-function composioFixedRequestArgs(toolId: string, args: Object | null = null): Object {
-  const payload: ComposioFixedRequestPayload = {
-    fixedToolId: toolId
-  };
-  if (args !== null) {
-    payload.fixedArgs = args;
-  }
-  return payload;
-}
-
 function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
   if (args === null || Array.isArray(args) || typeof args !== 'object') {
     return [];
@@ -10846,7 +10861,7 @@ async function composioFixedAppResult(
 ): Promise<DynamicGenericToolResult> {
   const prompt = composioProviderPrompt(appName, query, kind);
   try {
-    const result = await callComposioDynamic(prompt, composioFixedRequestArgs(toolId, args));
+    const result = await callComposioFixedDynamic(prompt, toolId, args);
     if (result !== null) {
       result.rows.push({ label: 'provider', value: appName });
       return composioFixedResult(toolId, appName, result, args);
@@ -11339,10 +11354,76 @@ async function callStructuredSocialHubTool(args: Object | null): Promise<DataRes
   return socialHubStructuredDataResult(await composioSocialAggregate(args));
 }
 
+interface XPostPreviewEnvelope {
+  posts?: Object[];
+  tweets?: Object[];
+  statuses?: Object[];
+  items?: Object[];
+  data?: Object | Object[] | null;
+}
+
+function xPostPreviewItems(value: Object | Object[] | null | undefined): Object[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const envelope = value as XPostPreviewEnvelope;
+  const candidates = [envelope.posts, envelope.tweets, envelope.statuses, envelope.items];
+  for (let index = 0; index < candidates.length; index++) {
+    if (Array.isArray(candidates[index])) {
+      return candidates[index] as Object[];
+    }
+  }
+  if (envelope.data !== value) {
+    return xPostPreviewItems(envelope.data);
+  }
+  return [];
+}
+
+function xPostPreviewHasRealPost(rawPreview: string): boolean {
+  try {
+    const items = xPostPreviewItems(JSON.parse(rawPreview) as Object);
+    for (let index = 0; index < items.length; index++) {
+      const record = items[index] as Record<string, Object | string | number | boolean | null | undefined>;
+      const id = textOf(record.id ?? record.tweet_id ?? record.post_id).trim();
+      const content = textOf(record.text ?? record.messageText ?? record.content ?? record.url).trim();
+      if (id.length > 0 && content.length > 0) {
+        return true;
+      }
+    }
+  } catch (_error) {
+  }
+  return false;
+}
+
+export function xPostStructuredDataResult(result: DynamicGenericToolResult): DataResult {
+  const data: GenericStructuredData = { results: [result] };
+  if (result.providerPhase !== 'execution') {
+    const message = result.summary.trim().length > 0 ? result.summary :
+      'Composio discovery did not execute an X post read tool.';
+    return structuredErrorWithData(
+      'x.post.search', 'genericToolResults', data, 'X_POST_TOOL_NOT_EXECUTED', message, false, [], [message]
+    );
+  }
+  if (result.status !== 'success') {
+    return genericStructuredDataResult('x.post.search', 'genericToolResults', [result]);
+  }
+  if (!xPostPreviewHasRealPost(result.rawPreview)) {
+    const empty = successfulDataResult(
+      'x.post.search', 'genericToolResults', data, [genericResultSource(result)]
+    );
+    empty.status = 'empty';
+    return empty;
+  }
+  return genericStructuredDataResult('x.post.search', 'genericToolResults', [result]);
+}
+
 async function callStructuredXTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
-  return genericStructuredDataResult(toolId, 'genericToolResults', [
+  return xPostStructuredDataResult(
     await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
-  ]);
+  );
 }
 
 async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {

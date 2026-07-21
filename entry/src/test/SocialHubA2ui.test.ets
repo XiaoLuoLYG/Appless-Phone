@@ -136,5 +136,56 @@ export default function socialHubA2uiTest() {
       expect(failed.status).assertEqual('error');
       expect(failed.error?.code).assertEqual('SOCIAL_PROVIDERS_FAILED');
     });
+
+    it('rejects limited-only SocialHub reads without inventing provider sources', 0, () => {
+      const result = socialHubStructuredDataResult({
+        items: [],
+        connections: [
+          { platform: 'whatsapp', status: 'limited', displayName: 'WhatsApp', accountId: '', message: 'Inbox reads unsupported' },
+          { platform: 'discord', status: 'limited', displayName: 'Discord', accountId: '', message: 'Message reads unsupported' }
+        ]
+      });
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('SOCIAL_SOURCES_UNSUPPORTED');
+      expect(result.sources.length).assertEqual(0);
+      expect(result.warnings.length).assertEqual(2);
+    });
+
+    it('uses partial only for real social data plus a limited source', 0, () => {
+      const items: SocialHubItemData[] = [{
+        id: 'slack-real-1', platform: 'slack', kind: 'message', author: 'Alice', handle: 'alice',
+        text: 'Real provider message', timestamp: '2026-07-22T02:00:00.000Z', url: '', mediaUrl: '',
+        channel: 'agents', channelId: 'C123', threadId: 'thread-1', unread: true
+      }];
+      const result = socialHubStructuredDataResult({
+        items: items,
+        connections: [
+          { platform: 'slack', status: 'connected', displayName: 'Slack', accountId: 'acct-1', message: '1 message' },
+          { platform: 'linkedin', status: 'limited', displayName: 'LinkedIn', accountId: '', message: 'DM reads unsupported' }
+        ]
+      });
+
+      expect(result.status).assertEqual('partial');
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('Slack');
+      expect(result.warnings.length).assertEqual(1);
+    });
+
+    it('keeps supported empty plus limited as empty with a warning', 0, () => {
+      const result = socialHubStructuredDataResult({
+        items: [],
+        connections: [
+          { platform: 'slack', status: 'connected', displayName: 'Slack', accountId: 'acct-1', message: '0 messages' },
+          { platform: 'whatsapp', status: 'limited', displayName: 'WhatsApp', accountId: '', message: 'Inbox reads unsupported' }
+        ]
+      });
+
+      expect(result.status).assertEqual('empty');
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('Slack');
+      expect(result.warnings.length).assertEqual(1);
+      expect(result.warnings[0].indexOf('WhatsApp')).assertLarger(-1);
+    });
   });
 }

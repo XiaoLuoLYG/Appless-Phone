@@ -60,7 +60,7 @@ export default function dynamicToolDiscoveryTest() {
           results: [providerResult],
           registration: {
             provider: 'Composio', qualifiedName: qualifiedName,
-            schema: looseObject('{"type":"object"}'), receipt: receipt
+            inputSchema: looseObject('{"type":"object"}'), outputSchema: looseObject('{}'), receipt: receipt
           }
         };
       });
@@ -111,7 +111,10 @@ export default function dynamicToolDiscoveryTest() {
         calls += 1;
         return {
           results: [],
-          registration: { provider: 'recording', qualifiedName: 'never', schema: looseObject('{}'), receipt: '' }
+          registration: {
+            provider: 'recording', qualifiedName: 'never',
+            inputSchema: looseObject('{}'), outputSchema: looseObject('{}'), receipt: ''
+          }
         };
       });
       try {
