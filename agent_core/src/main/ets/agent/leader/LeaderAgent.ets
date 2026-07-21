@@ -254,7 +254,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     const result: LeaderPlannerResult = outcome as LeaderPlannerResult;
-    if (this.isLegacyPlan(result)) {
+    if (this.isExactLegacyPlan(result)) {
+      if (state.round !== 1 || state.semantic) {
+        this.finishTurn(state);
+        this.publishError(message, 'LEADER_PLAN_INVALID', 'Legacy plan is allowed only as the first planner outcome');
+        return;
+      }
       this.completeLegacyPlanning(message, state, result as LeaderPlan);
       return;
     }
@@ -450,13 +455,21 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private validPlan(plan: LeaderPlan): boolean {
     if (plan === undefined || plan === null ||
+      Array.isArray(plan) ||
+      !this.validLegacyPlanKeys(plan) ||
       typeof plan.personaId !== 'string' ||
       typeof plan.skillId !== 'string' ||
       !this.validSelectedSkill(plan.personaId, plan.skillId) ||
-      plan.ui === undefined || !Array.isArray(plan.dataTasks) || plan.dataTasks.length !== 1) {
+      plan.roundAction !== 'execute' ||
+      typeof plan.reasonCode !== 'string' || plan.reasonCode.trim().length === 0 ||
+      !this.validLegacyUi(plan.ui) ||
+      !Array.isArray(plan.dataTasks) || plan.dataTasks.length !== 1) {
       return false;
     }
     const dataTask: LeaderDataTask = plan.dataTasks[0];
+    if (!this.validLegacyDataTask(dataTask)) {
+      return false;
+    }
     const tool: LeaderToolMetadata | null = this.toolMetadata(dataTask.toolId);
     if (tool === null || tool.riskLevel !== 'read' ||
       tool.outputSchema !== dataTask.outputSchema ||
@@ -473,8 +486,41 @@ export class LeaderAgent extends MessageDrivenAgent {
       dataTask.outputSchema.trim().length > 0;
   }
 
-  private isLegacyPlan(result: LeaderPlannerResult): boolean {
-    return Object.keys(result).indexOf('ui') >= 0;
+  private validLegacyPlanKeys(plan: LeaderPlan): boolean {
+    const keys: string = Object.keys(plan).sort().join(',');
+    if (keys !== 'dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'actionIntent,dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'answer,dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,roundAction,skillId,ui') {
+      return false;
+    }
+    if (plan.actionIntent !== undefined && !this.validActionIntent(plan.actionIntent)) {
+      return false;
+    }
+    return plan.answer === undefined ||
+      (typeof plan.answer === 'string' && plan.answer.trim().length > 0);
+  }
+
+  private validLegacyUi(ui: LeaderUiTask): boolean {
+    return ui !== undefined && ui !== null && !Array.isArray(ui) &&
+      Object.keys(ui).sort().join(',') === 'expectedOutputSchema,intent,taskId' &&
+      typeof ui.taskId === 'string' &&
+      typeof ui.intent === 'string' &&
+      typeof ui.expectedOutputSchema === 'string';
+  }
+
+  private validLegacyDataTask(task: LeaderDataTask): boolean {
+    return task !== undefined && task !== null && !Array.isArray(task) &&
+      Object.keys(task).sort().join(',') === 'args,outputSchema,taskId,toolId' &&
+      typeof task.taskId === 'string' &&
+      typeof task.toolId === 'string' &&
+      typeof task.outputSchema === 'string' &&
+      task.args !== null && typeof task.args === 'object' && !Array.isArray(task.args);
+  }
+
+  private isExactLegacyPlan(result: LeaderPlannerResult): boolean {
+    return result !== undefined && result !== null && !Array.isArray(result) &&
+      this.validPlan(result as LeaderPlan);
   }
 
   private validDecision(decision: LeaderDecision): boolean {

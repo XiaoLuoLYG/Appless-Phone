@@ -13,6 +13,7 @@ import {
   LeaderDecisionDataTask,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPlannerResult,
   LeaderPlanningContext,
   LeaderUiTask,
   LinkedMessageBus,
@@ -192,6 +193,28 @@ class RoundScriptedPlanner implements LeaderPlanner {
   }
 }
 
+class MixedRoundPlanner implements LeaderPlanner {
+  calls: number = 0;
+  private readonly results: LeaderPlannerResult[];
+
+  constructor(results: LeaderPlannerResult[]) {
+    this.results = results.slice();
+  }
+
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderPlannerResult> {
+    this.calls++;
+    if (this.results.length === 0) {
+      throw new Error('No mixed Leader result');
+    }
+    return this.results.shift() as LeaderPlannerResult;
+  }
+}
+
 function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): LeaderPlan {
   const ui: LeaderUiTask = {
     taskId: uiTaskId,
@@ -285,24 +308,15 @@ function semanticPlanningContext(): LeaderPlanningContext {
   };
 }
 
-function hotelPlanWithUnexpectedFields(): LeaderPlan {
-  const uiObject: Object = JSON.parse(
-    '{"taskId":"ui-1","intent":"Show a hotel search surface","expectedOutputSchema":"hotelSearchResults",' +
-      '"providerOutput":{"secret":"must-not-leak"},"jsonl":"{\\"createSurface\\":true}"}'
-  ) as Object;
-  const dataObject: Object = JSON.parse(
-    '{"taskId":"data-1","toolId":"hotel.search","outputSchema":"hotelSearchResults",' +
-      '"args":{"city":"Shenzhen","checkIn":"2026-07-21","checkOut":"2026-07-22","guests":2},' +
-      '"providerOutput":{"secret":"must-not-leak"},"jsonl":"forbidden"}'
-  ) as Object;
-  return {
-    personaId: '',
-    skillId: '',
-    roundAction: 'execute',
-    ui: uiObject as LeaderUiTask,
-    dataTasks: [dataObject as LeaderDataTask],
-    reasonCode: 'hotel_search'
-  };
+function hybridLeaderResult(): LeaderPlannerResult {
+  return JSON.parse(
+    '{"personaId":"","skillId":"","roundAction":"execute",' +
+    '"ui":{"taskId":"hybrid-ui","intent":"Show hotels","expectedOutputSchema":"hotelSearchResults"},' +
+    '"dataTasks":[{"taskId":"hybrid-data","toolId":"hotel.search",' +
+    '"outputSchema":"hotelSearchResults","args":{"city":"Shenzhen"}}],' +
+    '"uiIntent":{"purpose":"bypass","preferredDensity":"comfortable","requiredSections":["hotel"]},' +
+    '"reasonCode":"hybrid"}'
+  ) as LeaderPlannerResult;
 }
 
 function inputMessage(
@@ -366,11 +380,11 @@ async function settle(): Promise<void> {
 
 export default function leaderAgentTest() {
   describe('leaderAgent', () => {
-    it('publishes sanitized correlated UI then Data tasks and no fourth output', 0, async () => {
+    it('publishes an exact valid legacy hotel shape on round one', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const leader: LeaderAgent = new LeaderAgent(
         bus,
-        new ScriptedLeaderPlanner(hotelPlanWithUnexpectedFields()),
+        new ScriptedLeaderPlanner(hotelPlan()),
         planningContext()
       );
       const observer: AgentMessageReader = bus.openReader();
@@ -412,6 +426,88 @@ export default function leaderAgentTest() {
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-1'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a hybrid semantic and legacy result before publishing tasks', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new MixedRoundPlanner([hybridLeaderResult()]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const error = await receive(observer);
+
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect(error.taskId).assertEqual('input-1');
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+      expect(planner.calls).assertEqual(1);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a legacy-shaped second round immediately and keeps the pump available', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new MixedRoundPlanner([
+        semanticDecision([semanticDataTask('semantic-round-1')]),
+        hotelPlan('forbidden-round-2-ui', 'forbidden-round-2-data'),
+        hotelPlan('recovery-ui', 'recovery-data')
+      ]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const semanticTask = await receive(observer);
+      bus.publish(dataResultMessage(semanticTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const error = await receive(observer);
+
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect(error.taskId).assertEqual('input-1');
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+
+      bus.publish(inputMessage('conversation-hotel', 'turn-2', 'input-2'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const recoveryUi = await receive(observer);
+      const recoveryData = await receive(observer);
+      expect(recoveryUi.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      expect(recoveryData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect(recoveryUi.taskId).assertEqual('recovery-ui');
+      expect(recoveryData.taskId).assertEqual('recovery-data');
+      expect(planner.calls).assertEqual(3);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a non-execute legacy result before tasks and keeps the pump available', 0, async () => {
+      const nonExecute = hotelPlan('forbidden-answer-ui', 'forbidden-answer-data');
+      nonExecute.roundAction = 'answer';
+      nonExecute.answer = 'Do not publish legacy tasks';
+      const bus = new LinkedMessageBus();
+      const planner = new MixedRoundPlanner([
+        nonExecute,
+        hotelPlan('answer-recovery-ui', 'answer-recovery-data')
+      ]);
+      const leader = new LeaderAgent(bus, planner, planningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const error = await receive(observer);
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+
+      bus.publish(inputMessage('conversation-hotel', 'turn-answer-recovery', 'input-answer-recovery'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      expect((await receive(observer)).taskId).assertEqual('answer-recovery-ui');
+      expect((await receive(observer)).taskId).assertEqual('answer-recovery-data');
+      expect(planner.calls).assertEqual(2);
       leader.stop();
       observer.close();
     });
