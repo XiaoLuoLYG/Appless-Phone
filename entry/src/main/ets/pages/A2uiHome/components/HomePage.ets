@@ -82,6 +82,7 @@ export struct HomePage {
   @Prop showCheckoutWeb: boolean = false;
   @Prop checkoutWebKind: CheckoutWebKind = 'payment';
   @Prop checkoutWebUrl: string = '';
+  @Prop checkoutWebTaskId: string = '';
   @Prop showTrainPresalePanel: boolean = false;
   @Prop trainPresaleTrip: TrainPresaleTrip = emptyTrainPresaleTrip();
   @Prop trainPresaleTask: TrainPresaleTask | null = null;
@@ -100,7 +101,7 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
-  onCloseCheckoutWeb: () => void = () => {};
+  onCloseCheckoutWeb: (taskId: string) => void = (_taskId: string): void => {};
   onCheckoutWebReturn: (url: string) => void = (_url: string): void => {};
   onTrainPresaleConfirm: (submission: TrainPresalePanelSubmission) => void =
     (_submission: TrainPresalePanelSubmission): void => {};
@@ -396,6 +397,7 @@ export struct HomePage {
         CheckoutWebOverlay({
           kind: this.checkoutWebKind,
           url: this.checkoutWebUrl,
+          taskId: this.checkoutWebTaskId,
           onClose: this.onCloseCheckoutWeb,
           onReturnUrl: this.onCheckoutWebReturn
         })

@@ -15,13 +15,14 @@ import {
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
 import {
   claimTrainPresaleHandoff,
-  notifyTrainPresaleHandoff,
+  transitionBoundTrainPresaleCheckout,
   transitionTrainPresaleHandoff,
   TRAIN_PRESALE_PENDING_TASK_KEY,
   TRAIN_PRESALE_TASKS_KEY,
   TrainPresaleHandoffClaimResult,
   TrainPresaleHandoffTransitionResult
 } from '../main/ets/entryability/EntryAbility';
+import { TrainPresaleResumeDrain } from '../main/ets/pages/A2uiHome/train/TrainPresaleResumeDrain';
 
 class MemoryPreferences {
   private values: Map<string, preferences.ValueType> = new Map();
@@ -39,6 +40,25 @@ class MemoryPreferences {
   }
 
   flushSync(): void {}
+}
+
+class TestGate {
+  readonly promise: Promise<void>;
+  private resolvePromise: (() => void) | null = null;
+
+  constructor() {
+    this.promise = new Promise<void>((resolve: () => void) => {
+      this.resolvePromise = resolve;
+    });
+  }
+
+  open(): void {
+    const resolve = this.resolvePromise;
+    this.resolvePromise = null;
+    if (resolve !== null) {
+      resolve();
+    }
+  }
 }
 
 function nativePreferences(): preferences.Preferences {
@@ -213,14 +233,56 @@ export default function trainPresaleExecutionTest() {
       expect(pendingTaskId(store)).assertEqual('missing-task');
     });
 
-    it('emits one local delivery event only when the handoff changed', 0, () => {
-      let count = 0;
-      const emit = (): void => { count += 1; };
+    it('ignores a stale A checkout close while checkout and pending handoff are bound to B', 0, () => {
+      const store = nativePreferences();
+      const first = task('executing');
+      first.taskId = 'task-a';
+      const second = task('executing');
+      second.taskId = 'task-b';
+      saveTasks(store, [first, second], 'task-b');
 
-      notifyTrainPresaleHandoff(false, emit);
-      notifyTrainPresaleHandoff(true, emit);
+      const stale: TrainPresaleHandoffTransitionResult = transitionBoundTrainPresaleCheckout(
+        store, 'task-b', 'task-a', 'stale close');
 
-      expect(count).assertEqual(1);
+      expect(stale.cleared).assertFalse();
+      expect(pendingTaskId(store)).assertEqual('task-b');
+      expect(savedTasks(store)[0].state).assertEqual('executing');
+      expect(savedTasks(store)[1].state).assertEqual('executing');
+    });
+
+    it('drains a queued B after awaiting A once and skips repeat show for active B', 0, async () => {
+      let pendingTaskId = 'task-a';
+      let activeCheckoutTaskId = '';
+      const started: string[] = [];
+      const firstStarted = new TestGate();
+      const releaseFirst = new TestGate();
+      const drain = new TrainPresaleResumeDrain(
+        (): string => pendingTaskId,
+        (): string => activeCheckoutTaskId,
+        async (taskId: string): Promise<void> => {
+          started.push(taskId);
+          if (taskId === 'task-a') {
+            firstStarted.open();
+            await releaseFirst.promise;
+          }
+          activeCheckoutTaskId = taskId;
+        }
+      );
+
+      const running = drain.request();
+      await firstStarted.promise;
+      pendingTaskId = 'task-b';
+      void drain.request();
+      releaseFirst.open();
+      await running;
+      await drain.request();
+
+      expect(started.join(',')).assertEqual('task-a,task-b');
+      expect(activeCheckoutTaskId).assertEqual('task-b');
+
+      pendingTaskId = 'task-c';
+      await drain.request();
+      expect(started.join(',')).assertEqual('task-a,task-b,task-c');
     });
 
     it('requires the user when the requested seat is sold out', 0, () => {
@@ -304,6 +366,61 @@ export default function trainPresaleExecutionTest() {
 
       expect(result.status).assertEqual('mismatch');
       expect(result.reason.indexOf('车站') >= 0).assertTrue();
+    });
+
+    it('classifies empty or changed station payloads as provider schema errors', 0, () => {
+      const payload = '{"status":true,"data":{"result":[]}}';
+      const empty: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), '', payload);
+      const changed: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), '@bjn|北京南|NOT-A-CODE|beijingnan|bjn', payload);
+
+      expect(empty.status).assertEqual('provider_error');
+      expect(changed.status).assertEqual('provider_error');
+    });
+
+    it('rejects a truncated exact result row before interpreting its seat as sold out', 0, () => {
+      const fields: string[] = [];
+      for (let index = 0; index < 12; index++) {
+        fields.push('');
+      }
+      fields[3] = 'G1';
+      fields[6] = 'VNP';
+      fields[7] = 'AOH';
+      fields[11] = 'Y';
+      const payload = '{"status":true,"data":{"result":[' + JSON.stringify(fields.join('|')) + ']}}';
+      const stationPayload = '@bjn|北京南|VNP|beijingnan|bjn@shh|上海虹桥|AOH|shanghaihongqiao|shh';
+
+      const result: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, payload);
+
+      expect(result.status).assertEqual('provider_error');
+    });
+
+    it('rejects a non-string official result row as a provider schema error', 0, () => {
+      const stationPayload = '@bjn|北京南|VNP|beijingnan|bjn@shh|上海虹桥|AOH|shanghaihongqiao|shh';
+      const payload = '{"status":true,"data":{"result":[123]}}';
+
+      const result: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, payload);
+
+      expect(result.status).assertEqual('provider_error');
+    });
+
+    it('keeps valid no-train and empty-seat rows as mismatch and sold out', 0, () => {
+      const stationPayload = '@bjn|北京南|VNP|beijingnan|bjn@shh|上海虹桥|AOH|shanghaihongqiao|shh';
+      const noTrainPayload = '{"status":true,"data":{"result":[' +
+        JSON.stringify(trainRow('G2', 'VNP', 'AOH', '有')) + ']}}';
+      const emptySeatPayload = '{"status":true,"data":{"result":[' +
+        JSON.stringify(trainRow('G1', 'VNP', 'AOH', '')) + ']}}';
+
+      const noTrain: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, noTrainPayload);
+      const emptySeat: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, emptySeatPayload);
+
+      expect(noTrain.status).assertEqual('mismatch');
+      expect(emptySeat.status).assertEqual('sold_out');
     });
   });
 }

@@ -106,7 +106,8 @@ export function webHostForDisplay(url: string): string {
 export struct CheckoutWebOverlay {
   @Prop kind: CheckoutWebKind = 'payment';
   @Prop url: string = '';
-  onClose: () => void = () => {};
+  @Prop taskId: string = '';
+  onClose: (taskId: string) => void = (_taskId: string): void => {};
   onReturnUrl: (url: string) => void = (_url: string): void => {};
   @State blockedNavigation: string = '';
   @State currentUrl: string = '';
@@ -169,7 +170,7 @@ export struct CheckoutWebOverlay {
           label: this.closeLabel(),
           shape: 'pill',
           tone: 'secondary'
-        }).onClick(() => this.onClose())
+        }).onClick(() => this.onClose(this.taskId))
       }
       .width('100%')
       .height(72)

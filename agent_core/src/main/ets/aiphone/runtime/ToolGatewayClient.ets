@@ -4909,6 +4909,22 @@ function trainSeatForPreference(item: A2uiTrainData, seatPriority: string): stri
   return '';
 }
 
+function trainSeatColumnForPreference(seatPriority: string): number {
+  if (seatPriority === '二等座') {
+    return 30;
+  }
+  if (seatPriority === '一等座') {
+    return 31;
+  }
+  if (seatPriority === '商务座') {
+    return 32;
+  }
+  if (seatPriority === '无座') {
+    return 26;
+  }
+  return -1;
+}
+
 function trainPresaleAvailability(
   request: TrainPresaleRecheckRequest,
   status: TrainPresaleAvailabilityStatus,
@@ -4927,6 +4943,18 @@ function trainPresaleAvailability(
   };
 }
 
+function hasValid12306StationSchema(stations: StationCache): boolean {
+  if (stations.entries.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < stations.entries.length; index++) {
+    if (!/^[A-Z]{3}$/.test(stations.entries[index].code)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function trainPresaleAvailabilityFromOfficialPayload(
   request: TrainPresaleRecheckRequest,
   stations: StationCache,
@@ -4939,6 +4967,9 @@ function trainPresaleAvailabilityFromOfficialPayload(
   const fromName = request.fromName.trim();
   const toName = request.toName.trim();
   const seatPriority = request.seatPriority.trim();
+  if (!hasValid12306StationSchema(stations)) {
+    return trainPresaleAvailability(request, 'provider_error', '12306 车站数据格式无效或为空。');
+  }
   if (stationCodeFor(fromName, stations) !== fromCode || stationNameForCode(fromCode, stations) !== fromName ||
     stationCodeFor(toName, stations) !== toCode || stationNameForCode(toCode, stations) !== toName) {
     return trainPresaleAvailability(request, 'mismatch', '提醒中的车站名称与官方车站代码不匹配，请重新查询。');
@@ -4953,9 +4984,21 @@ function trainPresaleAvailabilityFromOfficialPayload(
     return trainPresaleAvailability(request, 'provider_error', '12306 余票响应缺少有效结果。');
   }
   const rows = payload.data.result;
+  const seatColumn = trainSeatColumnForPreference(seatPriority);
+  if (seatColumn < 0) {
+    return trainPresaleAvailability(request, 'unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
   for (let index = 0; index < rows.length; index++) {
-    const fields = rows[index].split('|');
-    const item = parse12306Row(rows[index], stations);
+    const row = rows[index];
+    if (typeof row !== 'string') {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票结果行不是文本。');
+    }
+    const fields = row.split('|');
+    if (fields.length <= 11 || fields.length <= seatColumn || trainField(fields, 3).trim().length === 0 ||
+      trainField(fields, 6).trim().length === 0 || trainField(fields, 7).trim().length === 0) {
+      return trainPresaleAvailability(request, 'provider_error', '12306 余票结果行格式已变化或不完整。');
+    }
+    const item = parse12306Row(row, stations);
     if (item.trainCode.trim().toUpperCase() !== trainCode) {
       continue;
     }

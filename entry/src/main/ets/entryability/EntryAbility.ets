@@ -316,10 +316,16 @@ export function transitionTrainPresaleHandoff(
   return { task: tasks[index], cleared: true };
 }
 
-export function notifyTrainPresaleHandoff(changed: boolean, emit: () => void): void {
-  if (changed) {
-    emit();
+export function transitionBoundTrainPresaleCheckout(
+  store: preferences.Preferences,
+  boundCheckoutTaskId: string,
+  closingTaskId: string,
+  reason: string
+): TrainPresaleHandoffTransitionResult {
+  if (boundCheckoutTaskId.length === 0 || closingTaskId !== boundCheckoutTaskId) {
+    return { task: undefined, cleared: false };
   }
+  return transitionTrainPresaleHandoff(store, closingTaskId, 'needs_user', reason);
 }
 
 export default class EntryAbility extends UIAbility {
@@ -417,9 +423,9 @@ export default class EntryAbility extends UIAbility {
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
     const result = this.claimTrainPresaleTask(want);
-    notifyTrainPresaleHandoff(result.changed, (): void => {
+    if (result.changed) {
       this.context.getApplicationContext().eventHub.emit(TRAIN_PRESALE_HANDOFF_EVENT);
-    });
+    }
   }
 
   private claimTrainPresaleTask(want: Want): TrainPresaleHandoffClaimResult {
