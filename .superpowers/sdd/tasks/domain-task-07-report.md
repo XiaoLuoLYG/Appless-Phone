@@ -5,7 +5,9 @@
 - Base commit: `f6a0eb69`.
 - Product commit: `3cf12d05` (`feat: migrate confirmed gmail reply send`).
 - Review-fix product commit: `47691b8e` (`fix: close gmail reply provider gaps`).
+- Second-review product commit: `a3452602` (`fix: enforce exact gmail tool selection`).
 - Independent review found **0 critical and 3 important** gaps; all three are covered by the review-fix commit and regression tests below.
+- Second review found **0 critical and 2 important** gaps; both are covered by the second-review product commit and regression tests below.
 - Changed the canonical `gmail.message.send` definition from `blocked` to `confirm_required` with the specified OAuth/mail-reply schemas.
 - Kept the visible `html_mail_reply_send` ID, `发送回复` label, composer, AI reply, draft save, and existing `MailReplyUiEvent` UI lifecycle.
 - Routed only an exact current Gmail reply button click through the registered Action Agent and the existing `sendConfiguredMailReply` provider path.
@@ -31,11 +33,13 @@
 
 ## Independent Review Fixes
 
-1. **Exact Gmail write pinning.** `gmail.reply.send` now requires discovery of the exact `GMAIL_REPLY_TO_THREAD` Composio tool. Read candidates or a single non-exact candidate cannot win through scoring or fallback, and no execute call occurs when the exact tool is absent.
+1. **Exact Gmail write pinning.** `gmail.reply.send` now requires discovery of the exact `GMAIL_REPLY_TO_THREAD` Composio tool. The first review fix protected scored selection but missed the generic singleton fallback. The second-review fix rejects a missing configured exact slug before any singleton fallback, so one read candidate or several non-exact candidates cannot execute. When the exact slug is present among read candidates, only the exact slug executes.
 2. **Provider-result truth.** Explicit `successful:false` / `success:false`, nested provider errors, missing result evidence, and malformed non-JSON write responses now fail closed. A write succeeds only with explicit positive provider evidence; read payload behavior and the existing Gmail draft-ID success exception remain intact.
-3. **Single-contract and fallback alignment.** The public and runtime registries are compared across every semantic field, `gmail.message.send` is `confirm_required` in both, and the obsolete blocked-send A2UI path is removed. The local fallback accepts only `html_mail_reply_send`, validates the exact Gmail reply identity before provider access, calls the configured provider path once, and renders the real provider/config error without legacy fallthrough or fabricated success.
+3. **Single-contract and fallback alignment.** The public and runtime registries are compared across every semantic field, `gmail.message.send` is `confirm_required` in both, and the obsolete blocked-send A2UI path is removed. Direct `ToolGatewayClient` Gmail reply execution is now terminally rejected and cannot invoke the provider; the authorized registered current-surface action in `Index.ets` owns the single provider invocation and preserves the real provider/config error without fabricated success.
 
-The generic semantic-registry check also exposed a pre-existing `calendar.event.update` public/runtime `inputSchema` mismatch. The public definition was aligned to the unchanged runtime contract so the requested zero-drift invariant is real rather than Gmail-only.
+The generic semantic-registry check also exposed a pre-existing `calendar.event.update` public/runtime `inputSchema` mismatch. The first review fix made the two registries equal by copying the runtime's required-field schema, but that contradicted the model and downstream lookup-first flow: callers may omit unresolved fields, while provider writes remain blocked until `eventId`, `title`, `start`, and `end` are complete. The second-review fix makes every public/runtime update field optional while preserving that downstream write validation.
+
+The pre-existing legacy reply branch in `Index.ets` remains because it is shared with QQ compatibility. Gmail exact current-surface clicks are intercepted by the registered dispatcher, and the no-fallthrough regressions prove the legacy branch does not become a second Gmail provider path.
 
 ## TDD Evidence
 
@@ -75,6 +79,13 @@ An intermediate ArkTS fixture literal failed type checking before the behavioral
 
 Each RED was observed before its corresponding production change. The final full-suite GREEN is recorded below.
 
+### Second review RED -> GREEN
+
+- **Exact absence before singleton fallback and Calendar optional contract:** at `2026-07-22T07:35:04+0800`, the authoritative run reported `Tests run: 1042, Failure: 2, Error: 0, Pass: 1040, Ignore: 0`. With exactly one discovered read candidate, the fixed Gmail reply incorrectly returned success instead of a terminal error. The public/runtime Calendar schemas also failed the expected all-optional contract, and the standalone verifier independently failed `Calendar update schema keeps lookup and destination fields optional`. The minimal product change moved exact-slug absence rejection before singleton fallback and changed both registry schemas to the all-optional contract. The next authoritative run passed 1042/1042.
+- **One authorized provider executor:** a focused test then required direct gateway Gmail reply execution to terminate without provider access. Its RED had exactly one Hypium failure because the gateway still returned its provider-path result, and the verifier failed `runtime Gmail fallback cannot invoke the reply provider`. The minimal change deleted the duplicate gateway parser, validator, provider/auth branch, and redundant identity test. The registered current-surface action in `Index.ets` remains the authorized provider executor.
+
+The second-review product diff is 65 insertions and 117 deletions across eight files (net -52 lines). This reduction is deliberate: it removes a second provider executor instead of adding another abstraction.
+
 ## Final Verification
 
 Authoritative command:
@@ -85,14 +96,14 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T07:20:02+0800`:
+Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T07:38:31+0800`:
 
 ```text
-Tests run: 1042, Failure: 0, Error: 0, Pass: 1042, Ignore: 0
+Tests run: 1041, Failure: 0, Error: 0, Pass: 1041, Ignore: 0
 ```
 
-- Full Hypium: **1042/1042 passed**, zero failures and zero errors.
-- `node scripts/verify-loopy-backend.mjs`: **242 checks passed**, including semantic registry equality, Gmail fallback/provider assertions, exact Composio slug pinning, and a successful `agent_core` HAR build.
+- Full Hypium: **1041/1041 passed**, zero failures and zero errors. The count decreased by one because the redundant gateway identity test was removed with the deleted gateway provider executor.
+- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, including semantic registry equality, the Calendar all-optional invariant, gateway no-provider ownership, exact Composio slug pinning, and a successful `agent_core` HAR build.
 - Repository-native registry/docs/matrix/smoke audit: **44 unique fixed tools = 24 Data + 20 Action**, **0 blocked**, **36 unique action offers**, **69 total fixed/action/virtual capabilities**; no registry/model, ownership-matrix, fixed-doc, or smoke-ID drift.
 - `node --check scripts/aiphone-device-smoke.mjs`, `node --check scripts/verify-loopy-backend.mjs`, stale-pattern scan, and `git diff --check`: passed.
 - Hvigor still emits the known coverage reporter `00507008` JSON parse noise after Hypium completes; the authoritative result file is complete and green.
@@ -107,7 +118,7 @@ Tests run: 1042, Failure: 0, Error: 0, Pass: 1042, Ignore: 0
 - Explicit false, missing-evidence, nested-error, and malformed write responses cannot produce a sent result.
 - Exact current Gmail click executes once with no paused/second-confirmation result.
 - Thread, message, request key, provider, recipient, empty body, stale surface, replay, and provider failure reject without a second side effect.
-- The local fallback rejects non-reply action IDs and incomplete identity before provider access, then preserves the configured provider's real error.
+- Direct gateway Gmail reply execution terminates before provider access; only the registered exact current-surface action owns Gmail reply provider execution.
 - QQ `html_mail_reply_send` stays on its existing client route.
 - Provider failure reaches the action result and current reply UI without fake success or legacy retry.
 
