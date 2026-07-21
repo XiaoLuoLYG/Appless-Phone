@@ -139,7 +139,7 @@ export default function toolDefinitionRegistryTest() {
       const search = toolDefinitionForToolId('hotel.search') as ToolDefinition;
       const detail = toolDefinitionForToolId('hotel.detail') as ToolDefinition;
       const navigate = toolDefinitionForToolId('hotel.navigate') as ToolDefinition;
-      const call = toolDefinitionForToolId('hotel.call') as ToolDefinition;
+      const booking = toolDefinitionForToolId('hotel.booking.open') as ToolDefinition;
 
       expect(search.domain).assertEqual('hotel');
       expect(search.riskLevel).assertEqual('read');
@@ -148,7 +148,7 @@ export default function toolDefinitionRegistryTest() {
       expect(search.inputSchema).assertEqual('hotelSearchRequest');
       expect(search.outputSchema).assertEqual('hotelSearchResults');
       expect(search.a2uiComponent).assertEqual('GenericToolResults');
-      expect(search.actions.join(',')).assertEqual('hotel.detail,hotel.navigate,hotel.call');
+      expect(search.actions.join(',')).assertEqual('hotel.detail,hotel.navigate');
       expect(detail.domain).assertEqual('hotel');
       expect(detail.riskLevel).assertEqual('read');
       expect(detail.backendPriority.join(',')).assertEqual('local_adapter');
@@ -156,19 +156,21 @@ export default function toolDefinitionRegistryTest() {
       expect(detail.inputSchema).assertEqual('hotelDetailRequest');
       expect(detail.outputSchema).assertEqual('hotelRatePlans');
       expect(detail.a2uiComponent).assertEqual('GenericToolResults');
-      expect(detail.actions.length).assertEqual(0);
+      expect(detail.actions.join(',')).assertEqual('hotel.booking.open');
       expect(navigate.riskLevel).assertEqual('read');
       expect(navigate.backendPriority.join(',')).assertEqual('system_intent');
       expect(navigate.authModes.join(',')).assertEqual('system');
       expect(navigate.inputSchema).assertEqual('hotelNavigateRequest');
       expect(navigate.outputSchema).assertEqual('systemIntentResult');
       expect(navigate.actions.length).assertEqual(0);
-      expect(call.riskLevel).assertEqual('draft');
-      expect(call.backendPriority.join(',')).assertEqual('system_intent');
-      expect(call.authModes.join(',')).assertEqual('system');
-      expect(call.inputSchema).assertEqual('hotelCallRequest');
-      expect(call.outputSchema).assertEqual('systemIntentResult');
-      expect(call.actions.length).assertEqual(0);
+      expect(booking.riskLevel).assertEqual('draft');
+      expect(booking.backendPriority.join(',')).assertEqual('web_session');
+      expect(booking.authModes.join(',')).assertEqual('web_session');
+      expect(booking.inputSchema).assertEqual('hotelBookingOpenRequest');
+      expect(booking.outputSchema).assertEqual('webSessionOpenResult');
+      expect(booking.actions.length).assertEqual(0);
+      const removedDialActionId = 'hotel.' + 'call';
+      expect(toolDefinitionForToolId(removedDialActionId)).assertEqual(null);
       expect(toolDefinitionForToolId('hotel.book')).assertEqual(null);
       expect(toolDefinitionForToolId('hotel.create')).assertEqual(null);
       expect(toolDefinitionForToolId('hotel.status')).assertEqual(null);
@@ -176,13 +178,14 @@ export default function toolDefinitionRegistryTest() {
       expect(isRegisteredAiphoneToolId('hotel.search')).assertTrue();
       expect(isRegisteredAiphoneToolId('hotel.detail')).assertTrue();
       expect(isRegisteredAiphoneToolId('hotel.navigate')).assertTrue();
-      expect(isRegisteredAiphoneToolId('hotel.call')).assertTrue();
+      expect(isRegisteredAiphoneToolId('hotel.booking.open')).assertTrue();
+      expect(isRegisteredAiphoneToolId(removedDialActionId)).assertFalse();
       expect(isRegisteredAiphoneToolId('hotel.create')).assertFalse();
       expect(aiphoneToolDefinitionCount()).assertEqual(allToolDefinitions().length);
       expect(JSON.stringify(hotelDefinitions(allAiphoneToolDefinitions())))
         .assertEqual(JSON.stringify(hotelDefinitions(allToolDefinitions())));
       expect(isSurfaceDerivedHotelActionId('hotel.navigate')).assertTrue();
-      expect(isSurfaceDerivedHotelActionId('hotel.call')).assertTrue();
+      expect(isSurfaceDerivedHotelActionId('hotel.booking.open')).assertTrue();
       expect(isSurfaceDerivedHotelActionId('hotel.detail')).assertFalse();
     });
 
@@ -190,7 +193,7 @@ export default function toolDefinitionRegistryTest() {
       const search = aiphoneToolDescriptionForModel('hotel.search');
       const detail = aiphoneToolDescriptionForModel('hotel.detail');
       const navigate = aiphoneToolDescriptionForModel('hotel.navigate');
-      const call = aiphoneToolDescriptionForModel('hotel.call');
+      const booking = aiphoneToolDescriptionForModel('hotel.booking.open');
 
       expect(search.indexOf('checkInDate')).assertLarger(-1);
       expect(search.indexOf('stayNights')).assertLarger(-1);
@@ -201,7 +204,7 @@ export default function toolDefinitionRegistryTest() {
       expect(detail.indexOf('ratePlanId')).assertLarger(-1);
       expect(detail.indexOf('does not create')).assertLarger(-1);
       expect(navigate).assertEqual('');
-      expect(call).assertEqual('');
+      expect(booking).assertEqual('');
     });
 
     it('registers Calendar writes and Maps POI search explicitly', 0, () => {

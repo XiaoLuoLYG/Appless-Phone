@@ -50,7 +50,7 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
     if (toolId === 'hotel.search') {
       return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
     }
-    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.call') {
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.booking.open') {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
@@ -285,9 +285,9 @@ export default function actionCatalogTest() {
 
     it('rejects exact surface identity action and argument tampering', 0, () => {
       const exactArgs = args(
-        '{"hotelId":47675,"phone":"+8675588888888","latitude":22.5,"longitude":114}'
+        '{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}'
       );
-      const lookup = new FakeToolDefinitionLookup(['hotel.navigate', 'hotel.call']);
+      const lookup = new FakeToolDefinitionLookup(['hotel.navigate', 'hotel.booking.open']);
       const surface = new ExactSurfaceAuthorizer(
         'conversation-1',
         'turn-1',
@@ -339,7 +339,7 @@ export default function actionCatalogTest() {
         'turn-1',
         'surface-1',
         'hotel.search',
-        'hotel.call',
+        'hotel.booking.open',
         exactArgs
       ).ok).assertFalse();
       expect(actionCatalog.validateSurfaceExecution(
@@ -348,7 +348,7 @@ export default function actionCatalogTest() {
         'surface-1',
         'hotel.search',
         'hotel.navigate',
-        args('{"hotelId":9,"phone":"+8675588888888","latitude":22.5,"longitude":114}')
+        args('{"hotelId":9,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
       ).ok).assertFalse();
       expect(actionCatalog.validateSurfaceExecution(
         'conversation-1',
@@ -356,7 +356,7 @@ export default function actionCatalogTest() {
         'surface-1',
         'hotel.search',
         'hotel.navigate',
-        args('{"hotelId":47675,"phone":"+8675511111111","latitude":22.5,"longitude":114}')
+        args('{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=999&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
       ).ok).assertFalse();
       expect(actionCatalog.validateSurfaceExecution(
         'conversation-1',
@@ -364,7 +364,7 @@ export default function actionCatalogTest() {
         'surface-1',
         'hotel.search',
         'hotel.navigate',
-        args('{"hotelId":47675,"phone":"+8675588888888","latitude":22.6,"longitude":114}')
+        args('{"hotelId":47675,"bookingUrl":"https://evil.example/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
       ).ok).assertFalse();
       expect(actionCatalog.validateSurfaceExecution(
         'conversation-1',
@@ -372,7 +372,7 @@ export default function actionCatalogTest() {
         'surface-1',
         'hotel.search',
         'hotel.navigate',
-        args('{"hotelId":47675,"phone":"+8675588888888","latitude":22.5,"longitude":113.9}')
+        args('{"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=bad&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}')
       ).ok).assertFalse();
     });
 

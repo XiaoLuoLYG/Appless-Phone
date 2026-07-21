@@ -102,7 +102,7 @@ function hotelDocumentFixture(): HtmlHomeDocument {
       { label: '餐食', value: '不含早餐' },
       { label: '取消政策', value: '免费取消截止至酒店当地时间 2026-08-12 08:00:00' },
       { label: '税费与有效期', value: '税费拆分与报价有效期：供应商未返回' },
-      { label: '能力边界', value: 'Appless 暂不支持创建或跟踪酒店订单' }
+      { label: '能力边界', value: 'Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用' }
     ],
     actions: [{
       id: 'hotel.search.restore',
@@ -120,7 +120,7 @@ function allowHotelAction(_action: A2uiAction): boolean {
   return true;
 }
 
-function hotelSearchDocumentFixture(withCoordinates: boolean = true, withContact: boolean = true): HtmlHomeDocument {
+function hotelSearchDocumentFixture(withCoordinates: boolean = true): HtmlHomeDocument {
   const parsed = parseHotelSearchRequest(JSON.parse('{' +
     '"originQuery":"深圳酒店","place":"深圳","placeType":"CITY","countryCode":"CN",' +
     '"checkInDate":"2026-08-15","stayNights":2,"adultCount":2,"childCount":0,' +
@@ -158,14 +158,6 @@ function hotelSearchDocumentFixture(withCoordinates: boolean = true, withContact
       tags: ['商务']
     }]
   };
-  if (withContact) {
-    result.hotels[0].contact = {
-      displayPhone: '+86 755 1234 5678',
-      dialPhone: '+8675512345678',
-      provider: 'Google Places',
-      providerPlaceId: 'places/ChIJ-real-hotel'
-    };
-  }
   const parsedJsonl = parseA2uiJsonl(hotelSearchA2ui('hotel-search-task-6', result, allowHotelAction));
   if (parsedJsonl.error.length > 0) {
     throw new Error(parsedJsonl.error);
@@ -2218,7 +2210,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('550 CNY')).assertLarger(-1);
       expect(html.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
       expect(html.indexOf('税费拆分与报价有效期：供应商未返回')).assertLarger(-1);
-      expect(html.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(html.indexOf('Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用')).assertLarger(-1);
       expect(html.indexOf('min-height: 44px')).assertLarger(-1);
       expect(html.indexOf('@media (prefers-reduced-motion: reduce)')).assertLarger(-1);
       expect(html.indexOf('LIVE HOTEL DATA')).assertEqual(-1);
@@ -2258,8 +2250,8 @@ export default function htmlHomeRendererTest() {
           item.label = '房型详情';
         } else if (item.id === 'hotel.navigate') {
           item.label = '去这里';
-        } else if (item.id === 'hotel.call') {
-          item.label = '致电前台';
+        } else if (item.id === 'hotel.booking.open') {
+          item.label = '继续预订';
         }
       });
       const html = renderHtmlHomeDocument(doc);
@@ -2268,23 +2260,23 @@ export default function htmlHomeRendererTest() {
       expect(doc.surfaceId).assertEqual('hotel-search-task-6');
       expect(JSON.stringify(actions).indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(JSON.stringify(actions).indexOf('"id":"hotel.navigate"')).assertLarger(-1);
-      expect(JSON.stringify(actions).indexOf('"id":"hotel.call"')).assertLarger(-1);
+      expect(JSON.stringify(actions).indexOf('"id":"hotel.booking.open"')).assertEqual(-1);
       expect(html.indexOf('房型详情')).assertLarger(-1);
       expect(html.indexOf('去这里')).assertLarger(-1);
-      expect(html.indexOf('致电前台')).assertLarger(-1);
+      expect(html.indexOf('继续预订')).assertEqual(-1);
       expect(html.indexOf('hotel-action-row')).assertLarger(-1);
       expect(html.indexOf('hotel-card-cta-primary')).assertLarger(-1);
       expect(html.indexOf('hotel-card-cta-secondary')).assertLarger(-1);
       expect(html.indexOf("actionFor(block, 'hotel.navigate')")).assertLarger(-1);
-      expect(html.indexOf("actionFor(block, 'hotel.call')")).assertLarger(-1);
+      expect(html.indexOf("actionFor(block, 'hotel.booking.open')")).assertEqual(-1);
       expect(html.indexOf('postAction(JSON.stringify(action))')).assertLarger(-1);
       expect(html.indexOf('collectHotelSmokeEvidence')).assertLarger(-1);
       expect(html.indexOf('clickLabel')).assertLarger(-1);
-      expect(html.indexOf('maskedSuffix')).assertLarger(-1);
+      expect(html.indexOf('bookingEvidence')).assertLarger(-1);
       expect(html.indexOf('coordinatesValid')).assertLarger(-1);
       expect(html.indexOf('var byActionId = {};')).assertLarger(-1);
       expect(html.indexOf('current.argsValid && !sanitized.argsValid')).assertLarger(-1);
-      expect(html.indexOf("['hotel.detail', 'hotel.navigate', 'hotel.call', 'hotel.book']")).assertLarger(-1);
+      expect(html.indexOf("['hotel.detail', 'hotel.navigate', 'hotel.booking.open']")).assertLarger(-1);
       expect(html.indexOf('evidence.push(sanitizeHotelAction(action))')).assertEqual(-1);
       expect(html.indexOf('"surfaceId":"hotel-search-task-6"')).assertLarger(-1);
       expect(html.indexOf('id: text(action.id)')).assertEqual(-1);
@@ -2292,13 +2284,13 @@ export default function htmlHomeRendererTest() {
     });
 
     it('keeps unavailable hotel navigation and call controls hidden', 0, () => {
-      const doc = hotelSearchDocumentFixture(false, false);
+      const doc = hotelSearchDocumentFixture(false);
       const html = renderHtmlHomeDocument(doc);
       const actions = JSON.stringify(doc.blocks[0].actions);
 
       expect(actions.indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(actions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
-      expect(actions.indexOf('"id":"hotel.call"')).assertEqual(-1);
+      expect(actions.indexOf('"id":"hotel.booking.open"')).assertEqual(-1);
       expect(actions.indexOf('"id":"hotel.book"')).assertEqual(-1);
       expect(html.indexOf('导航到酒店')).assertEqual(-1);
       expect(html.indexOf('联系酒店')).assertEqual(-1);

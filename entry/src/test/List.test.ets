@@ -15,7 +15,6 @@ import genericMcpClientTest from './GenericMcpClient.test';
 import hotelToolTypesTest from './HotelToolTypes.test';
 import hotelToolA2uiTest from './HotelToolA2ui.test';
 import hotelDataResultTest from './HotelDataResult.test';
-import hotelContactLookupTest from './HotelContactLookup.test';
 import hotelSystemIntentTest from './HotelSystemIntent.test';
 import hotelRegisteredActionExecutorTest from './HotelRegisteredActionExecutor.test';
 import hotelLeaderPlannerTest from './HotelLeaderPlanner.test';
@@ -102,7 +101,6 @@ export default function testsuite() {
   hotelToolTypesTest();
   hotelToolA2uiTest();
   hotelDataResultTest();
-  hotelContactLookupTest();
   hotelSystemIntentTest();
   hotelRegisteredActionExecutorTest();
   hotelLeaderPlannerTest();

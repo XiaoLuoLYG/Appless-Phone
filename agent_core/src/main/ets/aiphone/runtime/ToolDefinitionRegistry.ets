@@ -53,7 +53,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'hotelSearchRequest',
     outputSchema: 'hotelSearchResults',
     a2uiComponent: 'GenericToolResults',
-    actions: ['hotel.detail', 'hotel.navigate', 'hotel.call']
+    actions: ['hotel.detail', 'hotel.navigate']
   },
   {
     toolId: 'hotel.detail',
@@ -65,7 +65,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'hotelDetailRequest',
     outputSchema: 'hotelRatePlans',
     a2uiComponent: 'GenericToolResults',
-    actions: []
+    actions: ['hotel.booking.open']
   },
   {
     toolId: 'hotel.navigate',
@@ -80,14 +80,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
-    toolId: 'hotel.call',
+    toolId: 'hotel.booking.open',
     domain: 'hotel',
-    intent: 'hotel.call',
+    intent: 'hotel.booking.open',
     riskLevel: 'draft',
-    backendPriority: ['system_intent'],
-    authModes: ['system'],
-    inputSchema: 'hotelCallRequest',
-    outputSchema: 'systemIntentResult',
+    backendPriority: ['web_session'],
+    authModes: ['web_session'],
+    inputSchema: 'hotelBookingOpenRequest',
+    outputSchema: 'webSessionOpenResult',
     a2uiComponent: 'GenericToolResults',
     actions: []
   },

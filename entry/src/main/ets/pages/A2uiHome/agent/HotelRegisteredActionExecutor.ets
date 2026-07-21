@@ -3,10 +3,9 @@ import {
   ActionExecutionContext,
   ActionExecutionResult,
   ActionFollowUp,
-  HotelCallArgs,
+  HotelBookingOpenArgs,
   HotelNavigateArgs,
   RegisteredActionExecutor,
-  hotelDialUri,
   hotelNavigationUri
 } from '@loop/agent-core';
 
@@ -50,14 +49,16 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
     args: Object,
     context: ActionExecutionContext
   ): Promise<ActionExecutionResult> {
-    const current = this.catalog.validateSurfaceExecution(
-      context.conversationId,
-      context.turnId,
-      context.surfaceId,
-      context.sourceToolId,
-      actionId,
-      args
-    );
+    const current = context.isSurfaceEntry === false ?
+      this.catalog.validateRegisteredStep(actionId, args) :
+      this.catalog.validateSurfaceExecution(
+        context.conversationId,
+        context.turnId,
+        context.surfaceId,
+        context.sourceToolId,
+        actionId,
+        args
+      );
     if (!current.ok) {
       return {
         status: 'error',
@@ -75,11 +76,11 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
         'Petal Maps opened.'
       );
     }
-    if (actionId === 'hotel.call') {
+    if (actionId === 'hotel.booking.open') {
       return this.open(
         actionId,
-        hotelDialUri((args as HotelCallArgs).dialPhone),
-        'System dialer opened.'
+        (args as HotelBookingOpenArgs).bookingUrl,
+        'RollingGo booking opened in App.'
       );
     }
     return {
@@ -135,8 +136,8 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
     if (uri.length === 0) {
       return {
         status: 'error',
-        errorCode: 'HOTEL_SYSTEM_INTENT_INVALID',
-        message: 'Hotel system intent URI is invalid.'
+        errorCode: 'HOTEL_URI_INVALID',
+        message: 'Hotel URI is invalid.'
       };
     }
     let opened = false;
@@ -148,8 +149,8 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
     if (opened !== true) {
       return {
         status: 'error',
-        errorCode: 'HOTEL_SYSTEM_INTENT_OPEN_FAILED',
-        message: 'System could not open the hotel intent.'
+        errorCode: 'HOTEL_URI_OPEN_FAILED',
+        message: 'Hotel URI could not be opened.'
       };
     }
     const output: HotelSystemIntentOpened = {

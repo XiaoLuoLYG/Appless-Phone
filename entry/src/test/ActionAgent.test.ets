@@ -40,10 +40,10 @@ class ActionLookup implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
     this.calls++;
     if (toolId === 'hotel.search') {
-      return definition(toolId, 'read', ['hotel.detail', 'hotel.navigate', 'hotel.call']);
+      return definition(toolId, 'read', ['hotel.detail', 'hotel.navigate']);
     }
     if (toolId === 'hotel.detail') {
-      return definition(toolId, 'read', []);
+      return definition(toolId, 'read', ['hotel.booking.open']);
     }
     if (toolId === 'hotel.navigate') {
       const navigate = definition(toolId, 'draft', []);
@@ -51,7 +51,7 @@ class ActionLookup implements ToolDefinitionLookup {
       navigate.authModes = ['system'];
       return navigate;
     }
-    if (toolId === 'hotel.call') {
+    if (toolId === 'hotel.booking.open') {
       return definition(toolId, this.confirmCall ? 'confirm_required' : 'draft', []);
     }
     return null;
@@ -102,8 +102,9 @@ class ExactActionSurface implements SurfaceActionAuthorizer {
     if (actionId === 'hotel.navigate') {
       return JSON.stringify(args) === '{"hotelId":101,"latitude":22.5,"longitude":114}';
     }
-    if (actionId === 'hotel.call') {
-      return JSON.stringify(args) === '{"hotelId":101,"phone":"+8675588888888"}';
+    if (actionId === 'hotel.booking.open') {
+      return JSON.stringify(args).indexOf('"hotelId":101') >= 0 &&
+        JSON.stringify(args).indexOf('rollinggo.cn/pages/hotel/detail/index') >= 0;
     }
     return false;
   }
@@ -224,10 +225,10 @@ function compositePlan(
 function followUpThenConfirmPlan(planId: string): ActionPlan {
   return JSON.parse(
     `{"planId":"${planId}","turnId":"turn-1","surfaceId":"surface-1",` +
-      '"label":"Open detail then confirm call","steps":[' +
+      '"label":"Open detail then confirm booking","steps":[' +
       '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
-      '{"stepId":"call","actionId":"hotel.call",' +
-      '"args":{"hotelId":101,"phone":"+8675588888888"}}]}'
+      '{"stepId":"booking","actionId":"hotel.booking.open",' +
+      '"args":{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}}]}'
   ) as ActionPlan;
 }
 
@@ -298,12 +299,13 @@ function directRun(
   runId: string,
   actionId: string,
   args: Object,
-  surfaceId: string = 'surface-1'
+  surfaceId: string = 'surface-1',
+  sourceToolId: string = 'hotel.search'
 ): ActionRunPayload {
   return {
     surfaceId,
     runId,
-    sourceToolId: 'hotel.search',
+    sourceToolId,
     actionId,
     args
   };
@@ -419,7 +421,7 @@ export default function actionAgentTest() {
       )).payload as ActionPlanReadyPayload;
       const tampered = workflowRun(ready) as Object as JsonRecord;
       tampered['steps'] = JSON.parse(
-        '[{"stepId":"bad","actionId":"hotel.call","args":{"phone":"attacker"}}]'
+        '[{"stepId":"bad","actionId":"hotel.booking.open","args":{"hotelId":101,"bookingUrl":"https://evil.example/attacker"}}]'
       ) as Object;
       bus.publish(message(AgentMessageType.ACTION_RUN, tampered as Object));
       const rejected = (await receiveType(
@@ -467,8 +469,10 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RUN,
         directRun(
           'run-confirm',
-          'hotel.call',
-          JSON.parse('{"hotelId":101,"phone":"+8675588888888"}') as Object
+          'hotel.booking.open',
+          JSON.parse('{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}') as Object,
+          'surface-1',
+          'hotel.detail'
         )
       ));
       const pausedMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
@@ -539,7 +543,7 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RESULT
       )).payload as ActionResultPayload;
       expect(completed.status).assertEqual('success');
-      expect(executor.actionIds.join(',')).assertEqual('hotel.call');
+      expect(executor.actionIds.join(',')).assertEqual('hotel.booking.open');
 
       bus.publish(message(
         AgentMessageType.ACTION_RUN,
@@ -573,8 +577,10 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RUN,
         directRun(
           'run-reauthorize',
-          'hotel.call',
-          JSON.parse('{"hotelId":101,"phone":"+8675588888888"}') as Object
+          'hotel.booking.open',
+          JSON.parse('{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}') as Object,
+          'surface-1',
+          'hotel.detail'
         )
       ));
       const paused = (await receiveType(
@@ -619,8 +625,10 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RUN,
         directRun(
           'run-paused-cancel',
-          'hotel.call',
-          JSON.parse('{"hotelId":101,"phone":"+8675588888888"}') as Object
+          'hotel.booking.open',
+          JSON.parse('{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}') as Object,
+          'surface-1',
+          'hotel.detail'
         )
       ));
       await receiveType(observer, AgentMessageType.ACTION_RESULT);
@@ -862,7 +870,7 @@ export default function actionAgentTest() {
       expect(completed.status).assertEqual('success');
       expect(messagesOfType(afterResume, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
       expect(messagesOfType(afterResume, AgentMessageType.TASK_CREATE_DATA).length).assertEqual(0);
-      expect(executor.actionIds.join(',')).assertEqual('hotel.detail,hotel.call');
+      expect(executor.actionIds.join(',')).assertEqual('hotel.detail,hotel.booking.open');
 
       agent.stop();
       observer.close();

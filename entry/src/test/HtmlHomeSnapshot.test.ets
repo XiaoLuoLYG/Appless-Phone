@@ -713,7 +713,7 @@ export default function htmlHomeSnapshotTest() {
       };
       const doc = createHtmlHomeDocument({
         surface: surface('hotel', 'ready', [root('results'), results],
-          '{"genericToolResults":[{"sourceTag":"RollingGo","toolName":"hotel.detail","title":"豪华大床房","status":"success","summary":"550 CNY · 不含早餐","rows":[{"label":"酒店 ID","value":"47675"},{"label":"Rate plan ID","value":"5nAv6vObodN-6idXNkFPe3z"},{"label":"入住","value":"2026-08-15 → 2026-08-17"},{"label":"客人","value":"2 成人 · 1 间"},{"label":"平均价","value":"550 CNY"},{"label":"取消政策","value":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"},{"label":"能力边界","value":"Appless 暂不支持创建或跟踪酒店订单"}],"rawPreview":""}]}'),
+          '{"genericToolResults":[{"sourceTag":"RollingGo","toolName":"hotel.detail","title":"豪华大床房","status":"success","summary":"550 CNY · 不含早餐","rows":[{"label":"酒店 ID","value":"47675"},{"label":"Rate plan ID","value":"5nAv6vObodN-6idXNkFPe3z"},{"label":"入住","value":"2026-08-15 → 2026-08-17"},{"label":"客人","value":"2 成人 · 1 间"},{"label":"平均价","value":"550 CNY"},{"label":"取消政策","value":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"},{"label":"能力边界","value":"Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用"}],"rawPreview":""}]}'),
         messages: [],
         isBusy: false,
         isAwaitingFirstSurface: false
@@ -727,7 +727,7 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
       expect(serialized.indexOf('550 CNY')).assertLarger(-1);
       expect(serialized.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
-      expect(serialized.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(serialized.indexOf('Appless 支持打开 App 内 RollingGo Web 预订')).assertLarger(-1);
       expect(serialized.indexOf('订单编号')).assertEqual(-1);
     });
 

@@ -174,13 +174,6 @@ export interface HotelPrice {
   lowestPrice: number;
 }
 
-export interface HotelContact {
-  displayPhone: string;
-  dialPhone: string;
-  provider: string;
-  providerPlaceId: string;
-}
-
 export interface HotelSearchItem {
   hotelId: number;
   bookingUrl: string;
@@ -199,7 +192,6 @@ export interface HotelSearchItem {
   imageUrl: string;
   hotelAmenities: string[];
   tags: string[];
-  contact?: HotelContact;
 }
 
 export interface HotelSearchResult {

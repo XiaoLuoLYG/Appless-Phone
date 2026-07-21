@@ -15,6 +15,7 @@ import {
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
   shouldRetryHotelReturnToApp,
+  validateHotelDetailBookingEvidence,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
@@ -186,7 +187,8 @@ const coreRegressionCases = [
     query: '帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房',
     expectsTool: true,
     expectedToolId: 'hotel.search',
-    verifyHotelDetail: true
+    verifyHotelDetail: true,
+    hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
   }
 ];
 
@@ -667,7 +669,8 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'hotel.search',
-      verifyHotelDetail: true
+      verifyHotelDetail: true,
+      hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -969,7 +972,9 @@ function captureForegroundAbility(localName) {
 }
 
 function sanitizeExternalUrlLogs(logText) {
-  return String(logText || '').replace(/\burl=\S+/g, 'url=<redacted>');
+  return String(logText || '')
+    .replace(/("(?:bookingUrl|uri|url)"\s*:\s*")[^"]*(")/g, '$1<redacted>$2')
+    .replace(/\b(url|uri|bookingUrl)=\S+/g, '$1=<redacted>');
 }
 
 function collectLayoutText(layout) {
@@ -1946,9 +1951,6 @@ async function exerciseHotelSystemAction(
     evidenceCaptured: false,
     returnedToApp: false
   };
-  if (actionId === 'hotel.call') {
-    runtime.finalDialTriggered = false;
-  }
   if (located.center === null) {
     return {
       runtime,
@@ -1984,7 +1986,6 @@ async function exerciseHotelSystemAction(
   runtime.systemSurfaceOpened = schemeOpened && systemSurfaceRecognized;
   runtime.evidenceCaptured = screenPath.length > 0;
 
-  // Safety boundary: after a tel: intent, the smoke performs no dialer tap.
   // The only injected events on the external surface are bounded Back presses.
   let backPressCount = 0;
   let restoredForeground = {
@@ -2022,9 +2023,7 @@ async function exerciseHotelSystemAction(
     foregroundBundle: externalForeground.bundleName,
     restoredBundle: restoredForeground.bundleName,
     backPressCount,
-    interactionPolicy: actionId === 'hotel.call'
-      ? 'prefill screenshot then Back; no final dial tap'
-      : 'system map screenshot then Back',
+    interactionPolicy: 'system map screenshot then Back',
     logPath,
     abilityPath: externalForeground.path,
     screenPath,
@@ -2056,53 +2055,90 @@ async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
     runtime.navigation = navigationEvidence.runtime;
     currentLayout = navigationEvidence.restoredLayout;
   }
-
-  let callEvidence = {
-    skipped: true,
-    reason: `hotel.call action is ${validated.call.status}`
-  };
-  if (validated.call.status === 'visible') {
-    callEvidence = await exerciseHotelSystemAction(
-      currentLayout,
-      index,
-      'hotel.call',
-      '联系酒店',
-      'call',
-      'tel',
-      appPid
-    );
-    runtime.call = callEvidence.runtime;
-    currentLayout = callEvidence.restoredLayout;
-  } else if (validated.call.status === 'hidden') {
-    const located = await locateHotelSystemAction(
-      currentLayout,
-      '联系酒店',
-      index,
-      'call-hidden'
-    );
-    runtime.call = {
-      buttonVisible: located.center !== null,
-      finalDialTriggered: false
-    };
-    currentLayout = located.layout;
-    callEvidence = {
-      skipped: true,
-      hiddenButtonVerified: located.center === null,
-      reason: located.center === null
-        ? 'verified phone unavailable and call button is hidden'
-        : 'call button is visible despite missing verified-phone action evidence'
-    };
-  }
-
   const navigationReport = { ...navigationEvidence };
-  const callReport = { ...callEvidence };
   delete navigationReport.restoredLayout;
-  delete callReport.restoredLayout;
   return {
     ...evaluateHotelSystemActionEvidence(actionEvidence, runtime),
-    navigationEvidence: navigationReport,
-    callEvidence: callReport
+    navigationEvidence: navigationReport
   };
+}
+
+async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
+  const validated = validateHotelDetailBookingEvidence(actionEvidence);
+  const located = await locateHotelSystemAction(
+    layout,
+    '在 App 内继续预订',
+    index,
+    'booking'
+  );
+  const report = {
+    capability: 'hotel.booking.open',
+    actionEvidence: validated,
+    buttonVisible: located.center !== null,
+    foregroundBundle: '',
+    headerVisible: false,
+    domainVisible: false,
+    loginBoundaryReached: false,
+    returnedToRoom: false,
+    roomSurfaceRestored: false,
+    screenPath: '',
+    layoutPath: '',
+    restoredLayout: located.layout
+  };
+  if (!validated.ok) {
+    report.reason = 'detail surface does not contain exactly one valid hotel.booking.open action';
+    return { ...report, ok: false };
+  }
+  if (located.center === null) {
+    report.reason = '在 App 内继续预订 button not found';
+    return { ...report, ok: false };
+  }
+
+  clearHilog();
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
+  await sleep(2200);
+  const bookingLogs = sanitizeExternalUrlLogs(hdc(['shell', 'hilog', '-x']));
+  const logPath = join(outDir, `query-${index + 1}-hotel-booking.log`);
+  writeFileSync(logPath, bookingLogs + '\n');
+  const foreground = captureForegroundAbility(`query-${index + 1}-hotel-booking-ability.txt`);
+  report.foregroundBundle = foreground.bundleName;
+  report.screenPath = captureCurrentScreen(`query-${index + 1}-hotel-booking-screen.png`);
+  report.layoutPath = join(outDir, `query-${index + 1}-hotel-booking-layout.json`);
+  let bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-layout.json`);
+  const bookingText = collectLayoutText(bookingLayout).join('\n');
+  report.headerVisible = bookingText.includes('RollingGo 酒店预订');
+  report.domainVisible = /rollinggo\.cn/i.test(bookingText) || /rollinggo\.cn/i.test(bookingLogs);
+  report.returnedToRoom = foreground.bundleName === 'com.example.aiphonedemo';
+
+  const loginCenter = findExactTextCenter(bookingLayout, '登录查看价格');
+  if (loginCenter !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(loginCenter.x), String(loginCenter.y)]);
+    await sleep(1400);
+    bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-login-layout.json`);
+    const loginText = collectLayoutText(bookingLayout).join('\n');
+    report.loginBoundaryReached = /登录|手机号|验证码/.test(loginText);
+    captureCurrentScreen(`query-${index + 1}-hotel-booking-login-screen.png`);
+  } else {
+    report.loginBoundaryReached = report.headerVisible && report.domainVisible;
+  }
+
+  const backToRoom = findExactTextCenter(bookingLayout, '返回房型');
+  if (backToRoom !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backToRoom.x), String(backToRoom.y)]);
+    await sleep(1000);
+    report.restoredLayout = dumpLayout(`query-${index + 1}-hotel-booking-restored-room-layout.json`);
+    const roomText = collectLayoutText(report.restoredLayout).join('\n');
+    report.returnedToRoom = report.returnedToRoom && !roomText.includes('RollingGo 酒店预订');
+    report.roomSurfaceRestored = /房型与价格规则|价格与取消规则/.test(roomText);
+  }
+  report.logPath = logPath;
+  report.ok = report.returnedToRoom && report.headerVisible && report.domainVisible &&
+    report.loginBoundaryReached && report.roomSurfaceRestored;
+  report.blocked = !report.ok && report.returnedToRoom && report.screenPath.length > 0;
+  if (!report.ok && report.reason === undefined) {
+    report.reason = 'booking Web surface or room restoration evidence was incomplete';
+  }
+  return report;
 }
 
 async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
@@ -2158,7 +2194,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     hdc(['shell', 'uitest', 'uiInput', 'click', String(detailCenter.x), String(detailCenter.y)]);
     await sleep(1200);
   });
-  const detailLogText = detailLogs.join('\n');
+  const rawDetailLogText = detailLogs.join('\n');
+  const detailLogText = sanitizeExternalUrlLogs(rawDetailLogText);
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
   writeFileSync(detailLogPath, detailLogText + '\n');
   await sleep(700);
@@ -2189,6 +2226,17 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const textPath = join(outDir, `query-${index + 1}-hotel-rate-expanded-layout-text.txt`);
   writeFileSync(textPath, text + '\n');
   const screenPath = captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`);
+
+  const detailActionEvidence = hotelActionEvidenceFromLogs(rawDetailLogText);
+  const bookingAction = await verifyHotelBookingAction(
+    currentLayout,
+    index,
+    appPid,
+    detailActionEvidence
+  );
+  currentLayout = bookingAction.restoredLayout;
+  const bookingReport = { ...bookingAction };
+  delete bookingReport.restoredLayout;
 
   let backCenter = findTextCenter(currentLayout, '返回酒店结果');
   for (let attempt = 0; backCenter === null && attempt < 8; attempt += 1) {
@@ -2227,7 +2275,6 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const detailOk = detailLifecycle.ok ||
     /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
   const restoredOk = /酒店结果/.test(restoredText);
-  const detailActionEvidence = hotelActionEvidenceFromLogs(detailLogText);
   const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
   const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
   const surfaceIdentity = validateHotelSurfaceIdentity(
@@ -2246,12 +2293,13 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
       detailRequested && detailOk && /房型与价格规则/.test(text) &&
       /床型|餐食|取消政策/.test(text) && restoredOk &&
       searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
-      systemActions.ok,
+      bookingAction.ok && systemActions.ok,
     capability: 'hotel.detail',
     detailLabel,
     actionEvidence: searchActionEvidence,
     navigation: searchActionEvidence.navigation,
-    call: searchActionEvidence.call,
+    booking: bookingAction.actionEvidence.booking,
+    bookingAction: bookingReport,
     systemActions,
     surfaceIdentity,
     searchSurfaceId: surfaceIdentity.searchSurfaceId,
@@ -2593,15 +2641,18 @@ async function runQuery(query, index, expectedTool) {
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
   });
+  const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
+  const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
-  writeFileSync(logPath, logs.join('\n') + '\n');
+  writeFileSync(logPath, safeLogText + '\n');
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
-  const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  const summary = analyze(query, safeLogs, expectedTool, expectedToolId, expectedDiscoveredToolId);
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;
+  summary.hotelCapabilities = expectedCase.hotelCapabilities || [];
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
@@ -2730,10 +2781,11 @@ async function runQuery(query, index, expectedTool) {
     ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
     : { ok: true, skipped: true };
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
-    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, logs)
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs)
     : { ok: true, skipped: true };
+  summary.providerFailed = summary.providerFailed || summary.hotelDetailAction.bookingAction?.blocked === true;
   summary.hotelSearchLifecycle = expectedCase.verifyHotelDetail === true
-    ? hotelToolLifecycleFromLogs(logs.join('\n'))
+    ? hotelToolLifecycleFromLogs(safeLogText)
     : { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||

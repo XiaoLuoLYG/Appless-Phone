@@ -6,7 +6,7 @@ import {
   ActionExecutionResult,
   ActionValidationResult,
   ClientActionAuthorizer,
-  HotelCallArgs,
+  HotelBookingOpenArgs,
   HotelNavigateArgs,
   SurfaceActionAuthorizer,
   ToolDefinition,
@@ -28,11 +28,11 @@ function definition(toolId: string): ToolDefinition {
     toolId: toolId,
     domain: 'hotel',
     intent: toolId,
-    riskLevel: toolId === 'hotel.call' ? 'draft' : 'read',
-    backendPriority: [toolId === 'hotel.detail' ? 'local_adapter' : 'system_intent'],
-    authModes: [toolId === 'hotel.detail' ? 'provider_key' : 'system'],
-    inputSchema: toolId + 'Request',
-    outputSchema: toolId === 'hotel.detail' ? 'hotelRatePlans' : 'systemIntentResult',
+    riskLevel: toolId === 'hotel.booking.open' ? 'draft' : 'read',
+    backendPriority: [toolId === 'hotel.detail' ? 'local_adapter' : (toolId === 'hotel.booking.open' ? 'web_session' : 'system_intent')],
+    authModes: [toolId === 'hotel.detail' ? 'provider_key' : (toolId === 'hotel.booking.open' ? 'web_session' : 'system')],
+    inputSchema: toolId === 'hotel.booking.open' ? 'hotelBookingOpenRequest' : toolId + 'Request',
+    outputSchema: toolId === 'hotel.detail' ? 'hotelRatePlans' : (toolId === 'hotel.booking.open' ? 'webSessionOpenResult' : 'systemIntentResult'),
     a2uiComponent: 'GenericToolResults',
     actions: []
   };
@@ -42,11 +42,15 @@ class HotelDefinitions implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
     if (toolId === 'hotel.search') {
       const source = definition(toolId);
-      source.actions = ['hotel.detail', 'hotel.navigate', 'hotel.call'];
+      source.actions = ['hotel.detail', 'hotel.navigate'];
       return source;
     }
-    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.call') {
-      return definition(toolId);
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.booking.open') {
+      const source = definition(toolId);
+      if (toolId === 'hotel.detail') {
+        source.actions = ['hotel.booking.open'];
+      }
+      return source;
     }
     return null;
   }
@@ -139,15 +143,16 @@ function catalog(actionId: string, args: Object): ActionCatalog {
   );
 }
 
-function context(): ActionExecutionContext {
+function context(sourceToolId: string = 'hotel.search', isSurfaceEntry?: boolean): ActionExecutionContext {
   return {
     conversationId: 'conversation-1',
     turnId: 'turn-1',
     surfaceId: 'surface-1',
-    sourceToolId: 'hotel.search',
+    sourceToolId: sourceToolId,
     planId: 'plan-1',
     runId: 'run-1',
-    stepId: 'step-1'
+    stepId: 'step-1',
+    isSurfaceEntry: isSurfaceEntry
   };
 }
 
@@ -161,14 +166,11 @@ function navigateArgs(): HotelNavigateArgs {
   };
 }
 
-function callArgs(): HotelCallArgs {
+function bookingArgs(): HotelBookingOpenArgs {
   return {
     hotelId: 47675,
-    name: '深圳测试酒店',
-    displayPhone: '+86 138 0013 8000',
-    dialPhone: '+8613800138000',
-    provider: 'Google Places',
-    providerPlaceId: 'place-real-47675'
+    bookingUrl: 'https://rollinggo.cn/pages/hotel/detail/index?id=47675&' +
+      'checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0'
   };
 }
 
@@ -183,7 +185,7 @@ async function executeTampered(
     opener,
     new DeterministicIds()
   );
-  return executor.execute(actionId, tampered, context());
+  return executor.execute(actionId, tampered, actionId === 'hotel.booking.open' ? context('hotel.detail') : context());
 }
 
 export default function hotelRegisteredActionExecutorTest() {
@@ -208,45 +210,58 @@ export default function hotelRegisteredActionExecutorTest() {
       );
     });
 
-    it('opens the dialer once without claiming a call was placed', 0, async () => {
-      const args = callArgs();
+    it('opens the registered RollingGo booking URL once', 0, async () => {
+      const args = bookingArgs();
       const opener = new FakeUriOpener();
       const executor = new HotelRegisteredActionExecutor(
-        catalog('hotel.call', args),
+        catalog('hotel.booking.open', args),
         opener,
         new DeterministicIds()
       );
 
-      const result = await executor.execute('hotel.call', args, context());
+      const result = await executor.execute('hotel.booking.open', args, context('hotel.detail'));
       const serialized = JSON.stringify(result);
 
       expect(result.status).assertEqual('success');
-      expect(opener.uris.join(',')).assertEqual('tel:+8613800138000');
-      expect(serialized.indexOf('dialer opened')).assertLarger(-1);
-      expect(serialized.indexOf('call placed')).assertEqual(-1);
-      expect(serialized.indexOf('telprompt:')).assertEqual(-1);
+      expect(opener.uris.join(',')).assertEqual(args.bookingUrl);
+      expect(serialized.indexOf('RollingGo booking opened')).assertLarger(-1);
     });
 
-    it('rejects tampered phone coordinates hotel and place IDs before opening', 0, async () => {
+    it('allows a registered booking action after a prior composite step', 0, async () => {
+      const args = bookingArgs();
       const opener = new FakeUriOpener();
-      const call = callArgs();
-      const tamperedPhone = callArgs();
-      tamperedPhone.dialPhone = '+8613900139000';
-      const tamperedCallHotel = callArgs();
-      tamperedCallHotel.hotelId = 99999;
-      const tamperedPlace = callArgs();
-      tamperedPlace.providerPlaceId = 'place-attacker';
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.booking.open', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute(
+        'hotel.booking.open',
+        args,
+        context('hotel.search', false)
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(opener.uris.join(',')).assertEqual(args.bookingUrl);
+    });
+
+    it('rejects tampered booking URL and hotel ID before opening', 0, async () => {
+      const opener = new FakeUriOpener();
+      const booking = bookingArgs();
+      const tamperedUrl = bookingArgs();
+      tamperedUrl.bookingUrl = tamperedUrl.bookingUrl.replace('rollinggo.cn', 'evil.example');
+      const tamperedHotel = bookingArgs();
+      tamperedHotel.hotelId = 99999;
       const navigate = navigateArgs();
       const tamperedCoordinate = navigateArgs();
       tamperedCoordinate.latitude = 22.6;
       const tamperedNavigateHotel = navigateArgs();
       tamperedNavigateHotel.hotelId = 99999;
 
-      expect((await executeTampered(call, 'hotel.call', tamperedPhone, opener)).status)
+      expect((await executeTampered(booking, 'hotel.booking.open', tamperedUrl, opener)).status)
         .assertEqual('error');
-      expect((await executeTampered(call, 'hotel.call', tamperedCallHotel, opener)).status)
-        .assertEqual('error');
-      expect((await executeTampered(call, 'hotel.call', tamperedPlace, opener)).status)
+      expect((await executeTampered(booking, 'hotel.booking.open', tamperedHotel, opener)).status)
         .assertEqual('error');
       expect((await executeTampered(navigate, 'hotel.navigate', tamperedCoordinate, opener)).status)
         .assertEqual('error');

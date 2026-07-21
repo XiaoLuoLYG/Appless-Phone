@@ -17,7 +17,8 @@ export struct A2uiWebSurfaceView {
   @Prop domStorageEnabled: boolean = true;
   @Prop showLoading: boolean = true;
   onMessage: (message: A2uiWebMessage) => void = (_message: A2uiWebMessage): void => {};
-  onUrlIntercept: (url: string) => boolean = (_url: string): boolean => false;
+  onUrlIntercept: (url: string, isMainFrame: boolean) => boolean =
+    (_url: string, _isMainFrame: boolean): boolean => false;
   onLoadEnd: (url: string) => void = (_url: string): void => {};
   onLoadError: (message: string) => void = (_message: string): void => {};
   private controller: webview.WebviewController = new webview.WebviewController();
@@ -156,7 +157,8 @@ export struct A2uiWebSurfaceView {
         .onLoadIntercept((event) => {
           const request = event === undefined || event === null ? null : event.data;
           const pageUrl = request === null ? '' : request.getRequestUrl();
-          return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl) : false;
+          const isMainFrame = request !== null && request.isMainFrame();
+          return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
         })
         .onWindowNew((event: OnWindowNewEvent) => {
           if (!this.allowPopup) {
@@ -198,6 +200,12 @@ export struct A2uiWebSurfaceView {
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
+            .onLoadIntercept((event) => {
+              const request = event === undefined || event === null ? null : event.data;
+              const pageUrl = request === null ? '' : request.getRequestUrl();
+              const isMainFrame = request !== null && request.isMainFrame();
+              return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
+            })
             .onWindowExit(() => {
               this.popupVisible = false;
             })

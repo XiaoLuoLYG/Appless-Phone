@@ -1,23 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
-  HOTEL_CONTACT_DETAIL_FIELD_MASK,
-  HOTEL_CONTACT_SEARCH_FIELD_MASK,
   googleMapsDirectionsUrl,
-  hotelContactCandidatesFromPayload,
-  hotelContactDetailsFromPayload,
-  hotelContactFromDetails,
   mapsFoodRecordFromResult,
   mapsRouteResult,
   mapsTextSearchBody,
   mapsTextSearchResultsFromPayload
 } from '@loop/agent-core';
-import { unsafeHotelPhoneValues } from './HotelPhoneSafetyVectors';
-
-interface HotelPhonePayload {
-  id: string;
-  nationalPhoneNumber: string;
-  internationalPhoneNumber: string;
-}
 
 export default function mapsApiClientTest() {
   describe('mapsApiClient', () => {
@@ -35,57 +23,6 @@ export default function mapsApiClientTest() {
       expect(results[0].title).assertEqual('Coffee Lab');
       expect(results[0].rows[0].value).assertEqual('place-123');
       expect(JSON.stringify(results[0].rows).indexOf('"label":"Map Location","value":"22.609878,114.029506"')).assertLarger(-1);
-    });
-
-    it('uses identity-only search fields and requests phone only after a unique match', 0, () => {
-      expect(HOTEL_CONTACT_SEARCH_FIELD_MASK)
-        .assertEqual('places.id,places.displayName,places.formattedAddress,places.location');
-      expect(HOTEL_CONTACT_SEARCH_FIELD_MASK.indexOf('Phone')).assertEqual(-1);
-      expect(HOTEL_CONTACT_DETAIL_FIELD_MASK)
-        .assertEqual('id,displayName,formattedAddress,location,nationalPhoneNumber,internationalPhoneNumber');
-    });
-
-    it('normalizes provider-shaped contact payloads without fabricating coordinates or phones', 0, () => {
-      const candidates = hotelContactCandidatesFromPayload(
-        '{"places":[{"id":"place-123","displayName":{"text":"Hotel One"},"formattedAddress":"Address One"}]}'
-      );
-      const details = hotelContactDetailsFromPayload(
-        '{"id":"place-123","displayName":{"text":"Hotel One"},"nationalPhoneNumber":"010-12345678"}'
-      );
-
-      expect(candidates[0].latitude === null).assertTrue();
-      expect(candidates[0].longitude === null).assertTrue();
-      expect(details.internationalPhoneNumber).assertEqual('');
-      expect(details.nationalPhoneNumber).assertEqual('010-12345678');
-      expect(hotelContactFromDetails(details, 'place-123')?.displayPhone)
-        .assertEqual('010-12345678');
-      expect(hotelContactFromDetails(details, 'place-123')?.dialPhone)
-        .assertEqual('01012345678');
-    });
-
-    it('preserves unsafe provider phone characters through parsing for rejection', 0, () => {
-      const rejected = unsafeHotelPhoneValues();
-      for (let index = 0; index < rejected.length; index++) {
-        const internationalPayload: HotelPhonePayload = {
-          id: 'place-unsafe',
-          nationalPhoneNumber: '',
-          internationalPhoneNumber: rejected[index]
-        };
-        const nationalPayload: HotelPhonePayload = {
-          id: 'place-unsafe',
-          nationalPhoneNumber: rejected[index],
-          internationalPhoneNumber: ''
-        };
-        const internationalDetails =
-          hotelContactDetailsFromPayload(JSON.stringify(internationalPayload));
-        const nationalDetails =
-          hotelContactDetailsFromPayload(JSON.stringify(nationalPayload));
-
-        expect(internationalDetails.internationalPhoneNumber).assertEqual(rejected[index]);
-        expect(nationalDetails.nationalPhoneNumber).assertEqual(rejected[index]);
-        expect(hotelContactFromDetails(internationalDetails, 'place-unsafe') === null).assertTrue();
-        expect(hotelContactFromDetails(nationalDetails, 'place-unsafe') === null).assertTrue();
-      }
     });
 
     it('maps Google Places results into food records with food coordinate order', 0, () => {

@@ -158,7 +158,7 @@ function hotelDataResult(status: 'success' | 'partial' = 'partial'): DataResult 
     status,
     sources: [source],
     data: hotel,
-    warnings: ['Google Places phone enrichment unavailable']
+    warnings: []
   };
 }
 
@@ -245,7 +245,7 @@ export default function dataAgentTest() {
       expect(result.outputSchema).assertEqual('hotelSearchResults');
       expect(source.provider).assertEqual('rollinggo');
       expect(source.accountHint).assertEqual('rollinggo-account');
-      expect(result.warnings[0]).assertEqual('Google Places phone enrichment unavailable');
+      expect(result.warnings.length).assertEqual(0);
       expect(hotel.hotelId).assertEqual(987654);
       expect(hotel.ratePlanId).assertEqual('rate-plan-real-42');
       expect(Object.keys(result.data).sort().join(',')).assertEqual('hotelId,name,ratePlanId');

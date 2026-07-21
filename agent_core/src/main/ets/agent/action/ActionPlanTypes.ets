@@ -38,6 +38,8 @@ export interface ActionExecutionContext {
   planId: string;
   runId: string;
   stepId: string;
+  /** True when this is the first action placed directly on the current surface. */
+  isSurfaceEntry?: boolean;
 }
 
 export interface ActionStepSuccessResult {

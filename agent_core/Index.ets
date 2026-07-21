@@ -122,7 +122,6 @@ export * from './src/main/ets/aiphone/runtime/FoodNavigation';
 export * from './src/main/ets/aiphone/runtime/GenericMcpClient';
 export * from './src/main/ets/aiphone/runtime/HotelDataResult';
 export * from './src/main/ets/aiphone/runtime/HotelActions';
-export * from './src/main/ets/aiphone/runtime/HotelContactLookup';
 export * from './src/main/ets/aiphone/runtime/HotelSystemIntent';
 export * from './src/main/ets/aiphone/runtime/HotelToolA2ui';
 export * from './src/main/ets/aiphone/runtime/HotelToolTypes';

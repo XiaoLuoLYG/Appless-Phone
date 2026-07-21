@@ -14,6 +14,7 @@ import {
   DataTaskExecutor,
   HotelDetailRequest,
   HotelDetailResult,
+  HotelBookingOpenArgs,
   HotelRatePlan,
   HotelSearchItem,
   HotelSearchRequest,
@@ -23,7 +24,7 @@ import {
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   UiRenderResultPayload,
-  hotelCallAction,
+  hotelBookingOpenAction,
   hotelDetailAction,
   hotelNavigateAction,
   hotelSearchDataResult,
@@ -323,7 +324,7 @@ class DeferredFirstOpener extends RecordingOpener {
 function searchHotel(): HotelSearchItem {
   return {
     hotelId: 47675,
-    bookingUrl: 'https://hotel.example/47675',
+    bookingUrl: 'https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0',
     name: '深圳测试酒店',
     nameEn: 'Shenzhen Test Hotel',
     brand: '',
@@ -343,13 +344,7 @@ function searchHotel(): HotelSearchItem {
     description: 'provider description',
     imageUrl: 'https://img.example/hotel.jpg',
     hotelAmenities: ['Wi-Fi'],
-    tags: ['商务'],
-    contact: {
-      displayPhone: '+86 755 1234 5678',
-      dialPhone: '+8675512345678',
-      provider: 'Google Places',
-      providerPlaceId: 'places/ChIJ-real-hotel'
-    }
+    tags: ['商务']
   };
 }
 
@@ -523,7 +518,7 @@ function partialSearchResult(): DataResult {
   return hotelSearchDataResult(
     searchResult(searchRequest()),
     [],
-    ['Google Places contact enrichment unavailable']
+    ['RollingGo returned partial hotel data']
   );
 }
 
@@ -611,10 +606,8 @@ export default function hotelAgentRuntimeTest() {
       const query = parsedQuery.value;
       const hotel = searchHotel();
       expect(await runtime.runAction(hotelNavigateAction(hotel))).assertTrue();
-      expect(await runtime.runAction(hotelCallAction(hotel))).assertTrue();
-      expect(opener.uris.length).assertEqual(2);
+      expect(opener.uris.length).assertEqual(1);
       expect(opener.uris[0].indexOf('petalmaps://')).assertEqual(0);
-      expect(opener.uris[1]).assertEqual('tel:+8675512345678');
 
       const detailAction = hotelDetailAction(hotel, query);
       const oldTurn = messagesOf(bus, AgentMessageType.INPUT_USER)[0].turnId;
@@ -622,7 +615,7 @@ export default function hotelAgentRuntimeTest() {
       await flush(20);
 
       const actionRuns = messagesOf(bus, AgentMessageType.ACTION_RUN);
-      expect(actionRuns.length).assertEqual(3);
+      expect(actionRuns.length).assertEqual(2);
       const uiTasks = messagesOf(bus, AgentMessageType.TASK_CREATE_UI);
       const dataTasks = messagesOf(bus, AgentMessageType.TASK_CREATE_DATA);
       expect(uiTasks.length).assertEqual(2);
@@ -657,9 +650,8 @@ export default function hotelAgentRuntimeTest() {
       expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
       const hotel = searchHotel();
       expect(await runtime.runAction(hotelNavigateAction(hotel))).assertFalse();
-      expect(await runtime.runAction(hotelCallAction(hotel))).assertFalse();
       const results = messagesOf(bus, AgentMessageType.ACTION_RESULT);
-      expect(results.length).assertEqual(2);
+      expect(results.length).assertEqual(1);
       results.forEach((message: AgentMessage) => {
         const result = message.payload as ActionResultPayload;
         expect(result.status).assertEqual('error');
@@ -730,7 +722,7 @@ export default function hotelAgentRuntimeTest() {
       const wrongActionOutputs: ActionPlanStepOutput[] = [{
         stepId: 'step-1',
         output: {
-          actionId: 'hotel.call',
+          actionId: 'hotel.booking.open',
           status: 'opened'
         } as FakeActionSuccessOutput
       }];
@@ -815,91 +807,6 @@ export default function hotelAgentRuntimeTest() {
       expect(settled).assertFalse();
       opener.release.open();
       expect(await running).assertTrue();
-      runtime.dispose();
-    });
-
-    it('rejects wrong dial URI swapped scheme and forged call message with exact IDs', 0, async () => {
-      const bus = new TrackingBus();
-      const opener = new DeferredFirstOpener();
-      const runtime = new HotelAgentRuntime(options(
-        bus,
-        new FakeHotelProvider(),
-        new RecordingWriter(),
-        opener
-      ));
-      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
-      const running = runtime.runAction(hotelCallAction(searchHotel()));
-      let settled = false;
-      running.then((_ok: boolean): void => {
-        settled = true;
-      });
-      await opener.started.promise;
-      const actionRun = messagesOf(bus, AgentMessageType.ACTION_RUN)[0];
-      const run = actionRun.payload as ActionRunPayload;
-      const context = runtime.currentActionContext();
-      const exactBase: ActionResultPayload = {
-        surfaceId: context === null ? '' : context.surfaceId,
-        planId: 'direct:' + run.runId,
-        runId: run.runId,
-        status: 'success',
-        completedStepIds: ['step-1'],
-        outputs: []
-      };
-      const wrongDialOutputs: ActionPlanStepOutput[] = [{
-        stepId: 'step-1',
-        output: {
-          actionId: 'hotel.call',
-          status: 'opened',
-          uri: 'tel:+8613800138000',
-          message: 'System dialer opened.'
-        } as FakeSystemIntentSuccessOutput
-      }];
-      const swappedSchemeOutputs: ActionPlanStepOutput[] = [{
-        stepId: 'step-1',
-        output: {
-          actionId: 'hotel.call',
-          status: 'opened',
-          uri: 'petalmaps://navigation?daddr=114.0579,22.5431',
-          message: 'System dialer opened.'
-        } as FakeSystemIntentSuccessOutput
-      }];
-      const forgedMessageOutputs: ActionPlanStepOutput[] = [{
-        stepId: 'step-1',
-        output: {
-          actionId: 'hotel.call',
-          status: 'opened',
-          uri: opener.uris[0],
-          message: 'Phone opened.'
-        } as FakeSystemIntentSuccessOutput
-      }];
-      const invalidOutputs: ActionPlanStepOutput[][] = [
-        wrongDialOutputs,
-        swappedSchemeOutputs,
-        forgedMessageOutputs
-      ];
-      invalidOutputs.forEach((outputs: ActionPlanStepOutput[]) => {
-        const payload: ActionResultPayload = {
-          surfaceId: exactBase.surfaceId,
-          planId: exactBase.planId,
-          runId: exactBase.runId,
-          status: 'success',
-          completedStepIds: ['step-1'],
-          outputs: outputs
-        };
-        bus.publish({
-          type: AgentMessageType.ACTION_RESULT,
-          conversationId: actionRun.conversationId,
-          turnId: actionRun.turnId,
-          taskId: actionRun.taskId,
-          payload: payload
-        });
-      });
-      await flush();
-      const ignoredAll = !settled;
-      opener.release.open();
-      const realOutcome = await running;
-      expect(ignoredAll).assertTrue();
-      expect(realOutcome).assertTrue();
       runtime.dispose();
     });
 
@@ -1136,13 +1043,19 @@ export default function hotelAgentRuntimeTest() {
         opener
       ));
       expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
-      const invalidCall = hotelCallAction(searchHotel());
-      const invalidArgs = invalidCall.args as Record<
-        string,
-        Object | string | number | boolean | null | undefined
-      >;
-      invalidArgs.dialPhone = '';
-      expect(await runtime.runAction(invalidCall)).assertFalse();
+      const invalidBookingArgs: HotelBookingOpenArgs = {
+        hotelId: 47675,
+        bookingUrl: ''
+      };
+      const invalidBooking: A2uiAction = {
+        id: 'hotel.booking.open',
+        label: '在 App 内继续预订',
+        prompt: '打开 RollingGo 预订',
+        kind: 'prompt',
+        variant: 'primary',
+        args: invalidBookingArgs
+      };
+      expect(await runtime.runAction(invalidBooking)).assertFalse();
       expect(messagesOf(bus, AgentMessageType.ACTION_RUN).length).assertEqual(0);
       expect(opener.uris.length).assertEqual(0);
       runtime.dispose();
@@ -1377,7 +1290,7 @@ export default function hotelAgentRuntimeTest() {
       const outcome = await runtime.submit(SEARCH_QUERY);
       expect(outcome.ok).assertTrue();
       expect(outcome.status).assertEqual('partial');
-      expect(lastWriteContains(writer, 'Google Places contact enrichment unavailable')).assertTrue();
+      expect(lastWriteContains(writer, 'RollingGo returned partial hotel data')).assertTrue();
       runtime.dispose();
     });
 
@@ -1660,7 +1573,6 @@ export default function hotelAgentRuntimeTest() {
         expect(await runtime.runAction(hotelNavigateAction(hotel), detailContext)).assertFalse();
       }
       expect(await runtime.runAction(hotelNavigateAction(hotel))).assertTrue();
-      expect(await runtime.runAction(hotelCallAction(hotel))).assertTrue();
       expect(await runtime.runAction(hotelDetailAction(hotel, query))).assertTrue();
       runtime.dispose();
     });

@@ -22,7 +22,7 @@ import {
   DataAgent,
   DataResult,
   DataTaskExecutor,
-  HotelCallArgs,
+  HotelBookingOpenArgs,
   HotelDetailResult,
   HotelNavigateArgs,
   HotelRatePlan,
@@ -43,7 +43,6 @@ import {
   UiTaskRenderer,
   UserInputPayload,
   callStructuredHotelTool,
-  hotelDialUri,
   hotelDetailA2ui,
   hotelFailureA2ui,
   hotelNavigationUri,
@@ -322,15 +321,6 @@ function validDetailRequest(value: HotelValue): boolean {
   return parsed.ok && parsed.value !== null;
 }
 
-function validHotelContact(value: HotelValue): boolean {
-  const contact = recordOf(value);
-  return contact !== null &&
-    typeof contact['displayPhone'] === 'string' &&
-    typeof contact['dialPhone'] === 'string' &&
-    typeof contact['provider'] === 'string' &&
-    typeof contact['providerPlaceId'] === 'string';
-}
-
 function validHotelPrice(value: HotelValue): boolean {
   const price = recordOf(value);
   return price !== null &&
@@ -362,7 +352,7 @@ function validSearchItem(value: HotelValue): boolean {
     !isStringArray(item['tags'])) {
     return false;
   }
-  return item['contact'] === undefined || validHotelContact(item['contact']);
+  return true;
 }
 
 function validSearchResult(value: HotelValue): boolean {
@@ -789,7 +779,7 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     actions.forEach((candidate: HtmlHomeAction) => {
       if (candidate.id !== 'hotel.detail' &&
         candidate.id !== 'hotel.navigate' &&
-        candidate.id !== 'hotel.call') {
+        candidate.id !== 'hotel.booking.open') {
         return;
       }
       const action: A2uiAction = {
@@ -853,8 +843,12 @@ class HotelUiRenderer implements UiTaskRenderer {
         );
       }
       if (data.toolId === 'hotel.detail') {
+        const canPlace = (action: A2uiAction): boolean => {
+          return action.args !== undefined &&
+            this.catalog.validatePlacement('hotel.detail', action.id, action.args).ok;
+        };
         return this.rendered(
-          hotelDetailA2ui(surfaceId, data.data as HotelDetailResult, data.warnings)
+          hotelDetailA2ui(surfaceId, data.data as HotelDetailResult, canPlace, data.warnings)
         );
       }
     } catch (_error) {
@@ -1420,11 +1414,11 @@ export class HotelAgentRuntime {
     if (action.id === 'hotel.navigate') {
       expectedOutputUri = hotelNavigationUri(action.args as HotelNavigateArgs);
       expectedOutputMessage = 'Petal Maps opened.';
-    } else if (action.id === 'hotel.call') {
-      expectedOutputUri = hotelDialUri((action.args as HotelCallArgs).dialPhone);
-      expectedOutputMessage = 'System dialer opened.';
+    } else if (action.id === 'hotel.booking.open') {
+      expectedOutputUri = (action.args as HotelBookingOpenArgs).bookingUrl;
+      expectedOutputMessage = 'RollingGo booking opened in App.';
     }
-    if ((action.id === 'hotel.navigate' || action.id === 'hotel.call') &&
+    if ((action.id === 'hotel.navigate' || action.id === 'hotel.booking.open') &&
       expectedOutputUri.length === 0) {
       return Promise.resolve(false);
     }

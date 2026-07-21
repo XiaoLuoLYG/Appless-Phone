@@ -156,6 +156,19 @@ button:active { transform: scale(0.98); }
   font-size: 11px;
   font-weight: 760;
 }
+.hotel-booking-panel {
+  margin-top: 14px;
+  border: 1px solid rgba(153, 95, 76, 0.2);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 250, 244, 0.82);
+}
+.hotel-booking-note {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .hotel-board-head {
   display: flex;
   align-items: baseline;
@@ -502,10 +515,46 @@ const HOTEL_HOME_JS: string = `
   function positiveHotelId(args) {
     return Number.isInteger(args.hotelId) && args.hotelId > 0;
   }
-  function compactPhone(value) {
-    if (typeof value !== 'string') { return ''; }
-    var compact = value.replace(/[ ()-]/g, '');
-    return /^\\+?[0-9]{5,20}$/.test(compact) ? compact : '';
+  function bookingEvidence(action) {
+    var argsObject = objectArgs(action && action.args);
+    var args = argsObject ? action.args : {};
+    var url = typeof args.bookingUrl === 'string' ? args.bookingUrl.trim() : '';
+    var hostValid = /^https:\\/\\/rollinggo\\.cn\\//.test(url);
+    var pathValid = /^https:\\/\\/rollinggo\\.cn\\/pages\\/hotel\\/detail\\/index\\?/.test(url);
+    var values = {};
+    var query = url.indexOf('?') >= 0 ? url.substring(url.indexOf('?') + 1).split('#')[0] : '';
+    query.split('&').forEach(function (pair) {
+      var equals = pair.indexOf('=');
+      if (equals > 0) {
+        try {
+          var key = decodeURIComponent(pair.substring(0, equals));
+          if (values[key] === undefined) {
+            values[key] = decodeURIComponent(pair.substring(equals + 1));
+          }
+        } catch (error) {
+          values['__invalid__'] = 'true';
+        }
+      }
+    });
+    var datesValid = /^\\d{4}-\\d{2}-\\d{2}$/.test(text(values.checkInDate)) &&
+      /^\\d{4}-\\d{2}-\\d{2}$/.test(text(values.checkOutDate)) &&
+      text(values.checkOutDate) > text(values.checkInDate);
+    var occupancyValid = /^\\d+$/.test(text(values.roomCount)) && Number(values.roomCount) > 0 &&
+      /^\\d+$/.test(text(values.adultCount)) && Number(values.adultCount) > 0 &&
+      /^\\d+$/.test(text(values.childCount));
+    var idMatches = positiveHotelId(args) && text(values.id) === String(args.hotelId) &&
+      values.__invalid__ === undefined;
+    return {
+      actionId: 'hotel.booking.open',
+      argsObject: argsObject,
+      hotelIdPositive: positiveHotelId(args),
+      hostValid: hostValid,
+      pathValid: pathValid,
+      hotelIdMatches: idMatches,
+      datesValid: datesValid,
+      occupancyValid: occupancyValid,
+      argsValid: argsObject && hostValid && pathValid && idMatches && datesValid && occupancyValid
+    };
   }
   function sanitizeHotelAction(action) {
     var actionId = text(action && action.id);
@@ -523,24 +572,8 @@ const HOTEL_HOME_JS: string = `
       evidence.longitudeValid = Number.isFinite(args.longitude) && args.longitude >= -180 && args.longitude <= 180;
       evidence.coordinatesValid = evidence.latitudeValid && evidence.longitudeValid;
       evidence.argsValid = hotelIdPositive && evidence.coordinatesValid;
-    } else if (actionId === 'hotel.call') {
-      evidence.providerPresent = typeof args.provider === 'string' && args.provider.trim().length > 0;
-      evidence.providerPlaceIdPresent =
-        typeof args.providerPlaceId === 'string' && args.providerPlaceId.trim().length > 0;
-      var displayCompact = compactPhone(args.displayPhone);
-      var dialCompact = compactPhone(args.dialPhone);
-      evidence.phoneShapeValid = dialCompact.length > 0;
-      evidence.phoneMatchesDisplay = displayCompact.length > 0 && displayCompact === dialCompact;
-      evidence.maskedSuffix = evidence.phoneShapeValid ? '***' + dialCompact.slice(-4) : '';
-      evidence.argsValid = hotelIdPositive &&
-        evidence.providerPresent &&
-        evidence.providerPlaceIdPresent &&
-        evidence.phoneShapeValid &&
-        evidence.phoneMatchesDisplay;
-      displayCompact = '';
-      dialCompact = '';
-      args = {};
-      action = null;
+    } else if (actionId === 'hotel.booking.open') {
+      return bookingEvidence(action);
     } else if (actionId === 'hotel.detail') {
       evidence.clickLabel = typeof action.label === 'string' ? action.label.trim() : '';
       evidence.argsValid = hotelIdPositive;
@@ -552,7 +585,7 @@ const HOTEL_HOME_JS: string = `
     list(data.blocks).forEach(function (block) {
       list(block && block.actions).forEach(function (action) {
         var actionId = text(action && action.id);
-        if (/^hotel\\.(detail|navigate|call|book)$/.test(actionId)) {
+        if (/^hotel\\.(detail|navigate|booking\\.open)$/.test(actionId)) {
           var sanitized = sanitizeHotelAction(action);
           var current = byActionId[actionId];
           if (!current || (current.argsValid && !sanitized.argsValid)) {
@@ -561,7 +594,7 @@ const HOTEL_HOME_JS: string = `
         }
       });
     });
-    var evidence = ['hotel.detail', 'hotel.navigate', 'hotel.call', 'hotel.book']
+    var evidence = ['hotel.detail', 'hotel.navigate', 'hotel.booking.open']
       .map(function (actionId) { return byActionId[actionId]; })
       .filter(function (action) { return !!action; });
     return JSON.stringify({
@@ -597,7 +630,6 @@ const HOTEL_HOME_JS: string = `
   function renderSearchCard(parent, block) {
     var detailAction = actionFor(block, 'hotel.detail');
     var navigateAction = actionFor(block, 'hotel.navigate');
-    var callAction = actionFor(block, 'hotel.call');
     var card = add(parent, 'article', 'hotel-search-card');
     var imageUrl = safeImageUrl(rowValue(block, ['酒店图片']));
     if (imageUrl.length > 0) {
@@ -636,12 +668,6 @@ const HOTEL_HOME_JS: string = `
       navigateButton.type = 'button';
       navigateButton.disabled = isBusy;
       navigateButton.addEventListener('click', function () { postAction(navigateAction); });
-    }
-    if (callAction) {
-      var callButton = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-secondary', callAction.label);
-      callButton.type = 'button';
-      callButton.disabled = isBusy;
-      callButton.addEventListener('click', function () { postAction(callAction); });
     }
     if (actionRow.childNodes.length === 0) { actionRow.remove(); }
   }
@@ -732,7 +758,18 @@ const HOTEL_HOME_JS: string = `
     if (guests.length > 0) { add(context, 'span', 'hotel-context-item', guests); }
     if (context.childNodes.length === 0) { context.remove(); }
   }
-  add(heroContent, 'div', 'hotel-provider-line', 'RollingGo 实时查询');
+  if (isDetail && blocks.length > 0) {
+    var bookingAction = actionFor(blocks[0], 'hotel.booking.open');
+    if (bookingAction && bookingEvidence(bookingAction).argsValid) {
+      var bookingPanel = add(heroContent, 'div', 'hotel-booking-panel');
+      add(bookingPanel, 'p', 'hotel-booking-note', '房型与价格由 RollingGo 实时提供，最终房型与价格以预订页为准。');
+      var bookingButton = add(bookingPanel, 'button', 'hotel-card-cta hotel-card-cta-primary hotel-booking-cta', bookingAction.label);
+      bookingButton.type = 'button';
+      bookingButton.disabled = isBusy;
+      bookingButton.addEventListener('click', function () { postAction(bookingAction); });
+    }
+  }
+  add(heroContent, 'div', 'hotel-provider-line', isDetail ? 'RollingGo 实时房型与价格' : 'RollingGo 实时查询');
 
   var boardHead = add(shell, 'div', 'hotel-board-head');
   add(boardHead, 'h2', '', isDetail ? '房型与价格规则' : '酒店结果');

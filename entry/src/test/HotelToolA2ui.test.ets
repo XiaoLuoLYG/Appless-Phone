@@ -65,7 +65,7 @@ function hotelSearchResultFixture(): HotelSearchResult {
     isError: false,
     structuredContent: structured(
       '{"success":true,"message":"酒店搜索成功","hotelInformationList":[{"hotelId":47675,' +
-      '"bookingUrl":"https://hotel.example/47675","name":"深圳测试酒店","nameEn":"Shenzhen Test Hotel",' +
+      '"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0","name":"深圳测试酒店","nameEn":"Shenzhen Test Hotel",' +
       '"brand":null,"address":"深圳市南山区","destinationId":"6046792","latitude":22.5,"longitude":114.0,' +
       '"distanceInMeters":null,"starRating":5,"price":{"message":"2 晚参考价","hasPrice":true,' +
       '"currency":"USD","lowestPrice":1100},"areaCode":"NANSHAN","description":"provider description",' +
@@ -73,12 +73,6 @@ function hotelSearchResultFixture(): HotelSearchResult {
     )
   };
   const result = normalizeHotelSearchResult(payload, request.value);
-  result.hotels[0].contact = {
-    displayPhone: '+86 755 1234 5678',
-    dialPhone: '+8675512345678',
-    provider: 'Google Places',
-    providerPlaceId: 'places/ChIJ-real-hotel'
-  };
   return result;
 }
 
@@ -95,17 +89,13 @@ export default function hotelToolA2uiTest() {
       expect(jsonl.indexOf('"toolName":"hotel.search"')).assertLarger(-1);
       expect(jsonl.indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(jsonl.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
-      expect(jsonl.indexOf('"id":"hotel.call"')).assertLarger(-1);
       expect(jsonl.indexOf('"args":{"hotelId":47675,"checkInDate":"2026-08-15",' +
         '"checkOutDate":"2026-08-17","countryCode":"CN","currency":"CNY","adultCount":2,' +
         '"childCount":0,"childAgeDetails":[],"roomCount":1}')).assertLarger(-1);
       expect(jsonl.indexOf('"args":{"hotelId":47675,"name":"深圳测试酒店",' +
         '"address":"深圳市南山区","latitude":22.5,"longitude":114}')).assertLarger(-1);
-      expect(jsonl.indexOf('"args":{"hotelId":47675,"name":"深圳测试酒店",' +
-        '"displayPhone":"+86 755 1234 5678","dialPhone":"+8675512345678",' +
-        '"provider":"Google Places","providerPlaceId":"places/ChIJ-real-hotel"}')).assertLarger(-1);
       expect(jsonl.indexOf('搜索阶段仅传成人数')).assertLarger(-1);
-      expect(jsonl.indexOf('Appless 暂不支持创建或跟踪酒店订单')).assertLarger(-1);
+      expect(jsonl.indexOf('Appless 支持打开 App 内 RollingGo Web 预订')).assertLarger(-1);
       expect(jsonl.indexOf('hotel.book')).assertEqual(-1);
       expect(jsonl.indexOf('预订成功')).assertEqual(-1);
       expect(jsonl.indexOf('orderId')).assertEqual(-1);
@@ -118,20 +108,6 @@ export default function hotelToolA2uiTest() {
       const noNavigate = hotelSearchA2ui('hotel_no_nav', missingCoordinates, allowAll);
       expect(noNavigate.indexOf('"id":"hotel.detail"')).assertLarger(-1);
       expect(noNavigate.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
-      expect(noNavigate.indexOf('"id":"hotel.call"')).assertLarger(-1);
-
-      const missingContact = hotelSearchResultFixture();
-      missingContact.hotels[0].contact = undefined;
-      const noCall = hotelSearchA2ui('hotel_no_call', missingContact, allowAll);
-      expect(noCall.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
-      expect(noCall.indexOf('"id":"hotel.call"')).assertEqual(-1);
-
-      const unsafeContact = hotelSearchResultFixture();
-      if (unsafeContact.hotels[0].contact !== undefined) {
-        unsafeContact.hotels[0].contact.dialPhone = '+86;75512345678';
-      }
-      const noUnsafeCall = hotelSearchA2ui('hotel_unsafe_call', unsafeContact, allowAll);
-      expect(noUnsafeCall.indexOf('"id":"hotel.call"')).assertEqual(-1);
 
       const invalidCoordinates = hotelSearchResultFixture();
       invalidCoordinates.hotels[0].latitude = 91;
@@ -149,7 +125,6 @@ export default function hotelToolA2uiTest() {
       const noActions = hotelSearchA2ui('hotel_no_actions', invalidId, allowAll);
       expect(noActions.indexOf('"id":"hotel.detail"')).assertEqual(-1);
       expect(noActions.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
-      expect(noActions.indexOf('"id":"hotel.call"')).assertEqual(-1);
       expect(noActions.indexOf('"label":"酒店 ID"')).assertEqual(-1);
     });
 
@@ -157,12 +132,11 @@ export default function hotelToolA2uiTest() {
       const jsonl = hotelSearchA2ui(
         'hotel_catalog_denial',
         hotelSearchResultFixture(),
-        (action: A2uiAction): boolean => action.id !== 'hotel.call'
+        (action: A2uiAction): boolean => action.id !== 'hotel.navigate'
       );
 
       expect(jsonl.indexOf('"id":"hotel.detail"')).assertLarger(-1);
-      expect(jsonl.indexOf('"id":"hotel.navigate"')).assertLarger(-1);
-      expect(jsonl.indexOf('"id":"hotel.call"')).assertEqual(-1);
+      expect(jsonl.indexOf('"id":"hotel.navigate"')).assertEqual(-1);
     });
 
     it('renders exact provider rate and cancellation fields without order success', 0, () => {
@@ -184,7 +158,7 @@ export default function hotelToolA2uiTest() {
       const payload: McpToolResultPayload = {
         isError: false,
         structuredContent: structured(
-          '{"success":true,"hotelId":47675,"bookingUrl":"https://hotel.example/47675","name":"深圳测试酒店",' +
+          '{"success":true,"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0","name":"深圳测试酒店",' +
           '"nameEn":"Shenzhen Test Hotel","checkIn":"2026-08-15","checkOut":"2026-08-17","message":"搜索成功",' +
           '"roomRatePlans":[{"roomName":"豪华大床房","roomNameCn":"豪华大床房",' +
           '"ratePlanId":"5nAv6vObodN-6idXNkFPe3z","ratePlanName":"不含早餐","averagePrice":550,' +
@@ -192,12 +166,15 @@ export default function hotelToolA2uiTest() {
           '"isOnRequest":false,"cancelPolicy":"免费取消截止至酒店当地时间 2026-08-12 08:00:00"}]}'
         )
       };
-      const jsonl = hotelDetailA2ui('hotel_detail', normalizeHotelDetailResult(payload, request.value));
+      const jsonl = hotelDetailA2ui('hotel_detail', normalizeHotelDetailResult(payload, request.value), allowAll);
 
       expect(jsonl.indexOf('"intent":"hotel"')).assertLarger(-1);
       expect(jsonl.indexOf('"toolName":"hotel.detail"')).assertLarger(-1);
       expect(jsonl.indexOf('"id":"hotel.search.restore"')).assertLarger(-1);
       expect(jsonl.indexOf('"label":"返回酒店结果"')).assertLarger(-1);
+      expect(jsonl.split('"id":"hotel.booking.open"').length - 1).assertEqual(1);
+      expect(jsonl.indexOf('"label":"在 App 内继续预订"')).assertLarger(-1);
+      expect(jsonl.indexOf('第三方预订（离开 Appless）')).assertEqual(-1);
       expect(jsonl.indexOf('5nAv6vObodN-6idXNkFPe3z')).assertLarger(-1);
       expect(jsonl.indexOf('550 CNY')).assertLarger(-1);
       expect(jsonl.indexOf('免费取消截止至酒店当地时间')).assertLarger(-1);
@@ -225,7 +202,7 @@ export default function hotelToolA2uiTest() {
       const payload: McpToolResultPayload = {
         isError: false,
         structuredContent: structured(
-          '{"success":true,"hotelId":47675,"name":"深圳测试酒店","roomRatePlans":[' +
+          '{"success":true,"hotelId":47675,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0","name":"深圳测试酒店","roomRatePlans":[' +
           '{"ratePlanId":"provider-rate-unknown","averagePrice":"550","currency":123,"isOnRequest":"false"}]}'
         )
       };

@@ -1,6 +1,6 @@
 # 当前工具能力总表
 
-更新时间：2026-07-20
+更新时间：2026-07-21
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
@@ -15,9 +15,9 @@
 | 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
 | 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |
 | 酒店 | `hotel.search` | `帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房` | RollingGo 真实酒店结果、地址、语义标签和带口径的参考价；不伪造库存 | `read` | `ROLLINGGO_HOTEL_MCP_KEY` / `ROLLINGGO_HOTEL_MCP_URL` | 取决于 RollingGo 网络 | 否 | core C20 |
-| 酒店 | `hotel.detail` | 从 C20 的真实酒店卡点击“查看房型” | 使用上一步真实 hotelId 查询房型、价格和取消政策，可返回原搜索结果；不预订 | `read` | 同 `hotel.search`，且必须保留真实 hotelId | 取决于 RollingGo 网络 | 否 | core C20 衍生交互 |
+| 酒店 | `hotel.detail` | 从 C20 的真实酒店卡点击“查看房型” | 使用上一步真实 hotelId 查询房型、价格和取消政策，可返回原搜索结果；不创建原生订单 | `read` | 同 `hotel.search`，且必须保留真实 hotelId | 取决于 RollingGo 网络 | 否 | core C20 衍生交互 |
+| 酒店 | `hotel.booking.open` | 从 C20 的真实房型页点击“在 App 内继续预订” | 使用 RollingGo 原始酒店级 `bookingUrl` 在 Appless ArkWeb 中继续选房/登录；不提供原生订单创建、状态或取消，自动化不登录、不下单、不支付 | `draft` | 同 `hotel.detail`，且 URL 必须通过当前 surface 与 RollingGo 域名/参数校验 | 取决于 RollingGo Web 与网络 | 否 | core C20 衍生交互 |
 | 酒店 | `hotel.navigate` | 从 C20 的真实酒店卡点击“导航到酒店” | 仅使用该酒店返回的有效坐标打开系统地图；真机 smoke 截图后返回 App，不创建预订；无有效坐标时 E2E 为 `NOT_RUN` | `read` | 无 | 取决于系统地图 | 否 | core C20 衍生交互 |
-| 酒店 | `hotel.call` | 从 C20 的真实酒店卡点击“联系酒店” | 仅在 Google Places 验证电话和 place ID 后打开系统拨号盘；真机 smoke 只验证预填、截图并返回，绝不点击最终拨号；无验证电话时按钮隐藏为 PASS、拨号 E2E 为 `NOT_RUN` | `draft` | Google Places key 和已验证联系人 | 取决于 Google Places 与系统拨号 | 否 | core C20 衍生交互 |
 | 瑞幸 | `luckin.order.preview` | `帮我点一杯瑞幸生椰拿铁，半糖少冰` | 真实门店/菜单匹配与订单确认页；不创建订单 | `confirm_required` | `LUCKIN_MCP_TOKEN` | 取决于瑞幸 MCP 网络 | 否 | core C15 |
 | 瑞幸 | `luckin.order.create` | 从 C15 确认页执行确认动作 | 仅显式确认后创建真实订单；自动回归不点击 | `write` | `LUCKIN_MCP_TOKEN` + 完整门店/商品/规格 ID | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 瑞幸 | `luckin.order.status` | 使用真实订单号查询 | 仅查询真实已创建订单；无订单时不执行 | `read` | `LUCKIN_MCP_TOKEN` + 真实订单号 | 取决于瑞幸 MCP 网络 | 否 | manual-only |

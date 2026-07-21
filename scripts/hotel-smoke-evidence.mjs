@@ -2,16 +2,74 @@ function objectArgs(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function compactPhone(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  const compact = value.replace(/[ ()-]/g, '');
-  return /^\+?[0-9]{5,20}$/.test(compact) ? compact : '';
-}
-
 function positiveHotelId(args) {
   return Number.isInteger(args.hotelId) && args.hotelId > 0;
+}
+
+function validIsoDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validPositiveInteger(value, minimum = 1) {
+  return Number.isInteger(value) && value >= minimum;
+}
+
+function bookingUrlEvidence(args) {
+  const evidence = {
+    hostValid: false,
+    pathValid: false,
+    hotelIdMatches: false,
+    datesValid: false,
+    occupancyValid: false,
+    argsValid: false
+  };
+  if (typeof args.bookingUrl !== 'string' || args.bookingUrl.trim().length === 0) {
+    return evidence;
+  }
+  let url;
+  try {
+    url = new URL(args.bookingUrl);
+  } catch (_error) {
+    return evidence;
+  }
+  const queryKeys = [...url.searchParams.keys()];
+  if (new Set(queryKeys).size !== queryKeys.length) {
+    return evidence;
+  }
+  const authorityMatch = /^https:\/\/([^\/?#]+)/i.exec(args.bookingUrl.trim());
+  const authority = authorityMatch === null ? '' : authorityMatch[1].toLowerCase();
+  evidence.hostValid = url.protocol === 'https:' &&
+    authority === 'rollinggo.cn' &&
+    url.hostname === 'rollinggo.cn' &&
+    url.port.length === 0 &&
+    url.username.length === 0 &&
+    url.password.length === 0;
+  evidence.pathValid = url.pathname === '/pages/hotel/detail/index';
+  const urlHotelIdText = url.searchParams.get('id') || '';
+  evidence.hotelIdMatches = /^[1-9]\d*$/.test(urlHotelIdText) &&
+    positiveHotelId(args) && urlHotelIdText === args.hotelId.toString();
+  const checkInDate = url.searchParams.get('checkInDate') || '';
+  const checkOutDate = url.searchParams.get('checkOutDate') || '';
+  evidence.datesValid = validIsoDate(checkInDate) &&
+    validIsoDate(checkOutDate) &&
+    checkOutDate > checkInDate;
+  const parseCount = (name) => {
+    const value = url.searchParams.get(name) || '';
+    return /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  };
+  const roomCount = parseCount('roomCount');
+  const adultCount = parseCount('adultCount');
+  const childCount = parseCount('childCount');
+  evidence.occupancyValid = validPositiveInteger(roomCount) &&
+    validPositiveInteger(adultCount) &&
+    validPositiveInteger(childCount, 0);
+  evidence.argsValid = evidence.hostValid && evidence.pathValid &&
+    evidence.hotelIdMatches && evidence.datesValid && evidence.occupancyValid;
+  return evidence;
 }
 
 export function hotelActionEvidenceFromLogs(logText) {
@@ -76,10 +134,8 @@ export function hotelToolLifecycleFromLogs(logText) {
   const completed = readyEvents.findLast((ready) => {
     const callingIndex = callingBySurface.get(ready.surfaceId);
     return callingIndex !== undefined &&
-      successfulNetworkEvents.some((index) =>
-        index > callingIndex && index < ready.index) &&
-      hotelDocuments.some((document) =>
-        document.index > callingIndex && document.index < ready.index);
+      successfulNetworkEvents.some((index) => index > callingIndex && index < ready.index) &&
+      hotelDocuments.some((document) => document.index > callingIndex && document.index < ready.index);
   });
   return {
     requested: callingBySurface.size > 0,
@@ -97,12 +153,11 @@ export function hotelDetailLifecycleFromLogs(logText) {
 }
 
 export function hasSafeHotelSystemIntentOpen(logText, expectedScheme) {
-  if (expectedScheme !== 'petalmaps' && expectedScheme !== 'tel') {
+  if (expectedScheme !== 'petalmaps') {
     return false;
   }
-  const escapedScheme = expectedScheme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(
-    `\\[AIPhone\\]\\[A2uiHomeOpenUrl\\] ok=true scheme=${escapedScheme} chars=\\d+`
+    `\\[AIPhone\\]\\[A2uiHomeOpenUrl\\] ok=true scheme=${expectedScheme} chars=\\d+`
   ).test(String(logText || ''));
 }
 
@@ -123,13 +178,7 @@ export function isExpectedHotelSystemBundle(actionId, bundleName) {
     bundleName === 'com.example.aiphonedemo') {
     return false;
   }
-  if (actionId === 'hotel.navigate') {
-    return /(?:^|[._-])maps?(?:[._-]|$)/i.test(bundleName);
-  }
-  if (actionId === 'hotel.call') {
-    return /(?:contacts?|dialer)/i.test(bundleName);
-  }
-  return false;
+  return actionId === 'hotel.navigate' && /(?:^|[._-])maps?(?:[._-]|$)/i.test(bundleName);
 }
 
 export function shouldRetryHotelReturnToApp(bundleName, backPressCount, maxBackPresses = 3) {
@@ -157,22 +206,8 @@ function sanitizeAction(action) {
     evidence.longitudeValid = Number.isFinite(args.longitude) && args.longitude >= -180 && args.longitude <= 180;
     evidence.coordinatesValid = evidence.latitudeValid && evidence.longitudeValid;
     evidence.argsValid = hotelIdPositive && evidence.coordinatesValid;
-  } else if (actionId === 'hotel.call') {
-    evidence.providerPresent = typeof args.provider === 'string' && args.provider.trim().length > 0;
-    evidence.providerPlaceIdPresent =
-      typeof args.providerPlaceId === 'string' && args.providerPlaceId.trim().length > 0;
-    let displayCompact = compactPhone(args.displayPhone);
-    let dialCompact = compactPhone(args.dialPhone);
-    evidence.phoneShapeValid = dialCompact.length > 0;
-    evidence.phoneMatchesDisplay = displayCompact.length > 0 && displayCompact === dialCompact;
-    evidence.maskedSuffix = evidence.phoneShapeValid ? '***' + dialCompact.slice(-4) : '';
-    evidence.argsValid = hotelIdPositive &&
-      evidence.providerPresent &&
-      evidence.providerPlaceIdPresent &&
-      evidence.phoneShapeValid &&
-      evidence.phoneMatchesDisplay;
-    displayCompact = '';
-    dialCompact = '';
+  } else if (actionId === 'hotel.booking.open') {
+    Object.assign(evidence, bookingUrlEvidence(args));
   } else if (actionId === 'hotel.detail') {
     evidence.clickLabel = typeof action?.label === 'string' ? action.label.trim() : '';
     evidence.argsValid = hotelIdPositive;
@@ -180,12 +215,14 @@ function sanitizeAction(action) {
   return evidence;
 }
 
+const HOTEL_ACTION_PATTERN = /^hotel\.(?:detail|navigate|booking\.open)$/;
+
 export function hotelSearchActionEvidence(surfaceId, actions) {
   const safeActions = Array.isArray(actions) ? actions : [];
   return {
     surfaceId: typeof surfaceId === 'string' ? surfaceId : '',
     actions: safeActions
-      .filter((action) => /^hotel\.(detail|navigate|call|book)$/.test(String(action?.id || '')))
+      .filter((action) => HOTEL_ACTION_PATTERN.test(String(action?.id || '')))
       .map(sanitizeAction)
   };
 }
@@ -212,59 +249,59 @@ function sanitizeCollectedAction(action) {
     sanitized.longitudeValid = action?.longitudeValid === true;
     sanitized.coordinatesValid = action?.coordinatesValid === true;
     sanitized.argsValid = action?.argsValid === true &&
-      sanitized.argsObject &&
-      sanitized.hotelIdPositive &&
-      sanitized.latitudeValid &&
-      sanitized.longitudeValid &&
-      sanitized.coordinatesValid;
-  } else if (actionId === 'hotel.call') {
-    sanitized.providerPresent = action?.providerPresent === true;
-    sanitized.providerPlaceIdPresent = action?.providerPlaceIdPresent === true;
-    sanitized.phoneShapeValid = action?.phoneShapeValid === true;
-    sanitized.phoneMatchesDisplay = action?.phoneMatchesDisplay === true;
-    sanitized.maskedSuffix = typeof action?.maskedSuffix === 'string' &&
-      /^\*\*\*[0-9]{4}$/.test(action.maskedSuffix)
-      ? action.maskedSuffix
-      : '';
-    sanitized.argsValid = action?.argsValid === true &&
-      sanitized.argsObject &&
-      sanitized.hotelIdPositive &&
-      sanitized.providerPresent &&
-      sanitized.providerPlaceIdPresent &&
-      sanitized.phoneShapeValid &&
-      sanitized.phoneMatchesDisplay &&
-      sanitized.maskedSuffix.length > 0;
+      sanitized.argsObject && sanitized.hotelIdPositive &&
+      sanitized.latitudeValid && sanitized.longitudeValid && sanitized.coordinatesValid;
+  } else if (actionId === 'hotel.booking.open') {
+    sanitized.hostValid = action?.hostValid === true;
+    sanitized.pathValid = action?.pathValid === true;
+    sanitized.hotelIdMatches = action?.hotelIdMatches === true;
+    sanitized.datesValid = action?.datesValid === true;
+    sanitized.occupancyValid = action?.occupancyValid === true;
+    sanitized.argsValid = action?.argsValid === true && sanitized.argsObject &&
+      sanitized.hotelIdPositive && sanitized.hostValid && sanitized.pathValid &&
+      sanitized.hotelIdMatches && sanitized.datesValid && sanitized.occupancyValid;
   } else if (actionId === 'hotel.detail') {
     sanitized.clickLabel = typeof action?.clickLabel === 'string' ? action.clickLabel.trim() : '';
-    sanitized.argsValid = action?.argsValid === true &&
-      sanitized.argsObject &&
-      sanitized.hotelIdPositive;
+    sanitized.argsValid = action?.argsValid === true && sanitized.argsObject && sanitized.hotelIdPositive;
   }
   return sanitized;
 }
 
 export function validateHotelSearchActionEvidence(evidence) {
   const actions = Array.isArray(evidence?.actions)
-    ? evidence.actions
-      .filter((action) => /^hotel\.(detail|navigate|call|book)$/.test(String(action?.actionId || '')))
+    ? evidence.actions.filter((action) => HOTEL_ACTION_PATTERN.test(String(action?.actionId || '')))
       .map(sanitizeCollectedAction)
     : [];
   const detail = statusFor(actions, 'hotel.detail');
   const navigation = statusFor(actions, 'hotel.navigate');
-  const call = statusFor(actions, 'hotel.call');
-  const bookingCount = actions.filter((action) => action.actionId === 'hotel.book').length;
+  const booking = statusFor(actions, 'hotel.booking.open');
   return {
-    ok: typeof evidence?.surfaceId === 'string' &&
-      evidence.surfaceId.trim().length > 0 &&
-      detail.status === 'visible' &&
-      navigation.status !== 'invalid' &&
-      call.status !== 'invalid' &&
-      bookingCount === 0,
+    ok: typeof evidence?.surfaceId === 'string' && evidence.surfaceId.trim().length > 0 &&
+      detail.status === 'visible' && navigation.status !== 'invalid' && booking.status === 'hidden',
     surfaceId: typeof evidence?.surfaceId === 'string' ? evidence.surfaceId : '',
     detail,
     navigation,
-    call,
-    bookingCount,
+    booking,
+    actions
+  };
+}
+
+export function validateHotelDetailBookingEvidence(evidence) {
+  const actions = Array.isArray(evidence?.actions)
+    ? evidence.actions.filter((action) => action?.id === 'hotel.booking.open' ||
+      action?.actionId === 'hotel.booking.open').map((action) => {
+      if (action?.actionId === 'hotel.booking.open') {
+        return sanitizeCollectedAction(action);
+      }
+      return sanitizeAction(action);
+    })
+    : [];
+  const booking = statusFor(actions, 'hotel.booking.open');
+  const surfaceId = typeof evidence?.surfaceId === 'string' ? evidence.surfaceId : '';
+  return {
+    ok: surfaceId.trim().length > 0 && booking.status === 'visible' && booking.count === 1,
+    surfaceId,
+    booking,
     actions
   };
 }
@@ -274,10 +311,7 @@ export function hotelDetailClickLocator(evidence) {
   const labels = validated.actions
     .filter((action) => action.actionId === 'hotel.detail' && action.argsValid && action.clickLabel.length > 0)
     .map((action) => action.clickLabel);
-  return {
-    ok: validated.ok && labels.length > 0,
-    labels
-  };
+  return { ok: validated.ok && labels.length > 0, labels };
 }
 
 export function matchesHotelDetailAccessibleLabel(candidate, actionLabel) {
@@ -293,49 +327,24 @@ export function matchesHotelDetailAccessibleLabel(candidate, actionLabel) {
     return true;
   }
   const contextualPrefix = `${expected}：`;
-  return actual.startsWith(contextualPrefix) &&
-    actual.slice(contextualPrefix.length).trim().length > 0;
+  return actual.startsWith(contextualPrefix) && actual.slice(contextualPrefix.length).trim().length > 0;
 }
 
 function systemActionE2e(action, runtime, options = {}) {
-  if (options.finalDial === true && runtime?.finalDialTriggered === true) {
-    return {
-      status: 'FAIL',
-      reason: 'safety boundary violated: final dial was triggered'
-    };
-  }
   if (action.status === 'invalid') {
-    return {
-      status: 'BLOCKED',
-      reason: 'action arguments are invalid; system surface was not opened'
-    };
+    return { status: 'BLOCKED', reason: 'action arguments are invalid; system surface was not opened' };
   }
   if (action.status === 'hidden') {
-    return {
-      status: 'NOT_RUN',
-      reason: options.hiddenReason
-    };
+    return { status: 'NOT_RUN', reason: options.hiddenReason };
   }
   const missing = [];
-  if (runtime?.systemSurfaceOpened !== true) {
-    missing.push('system surface not verified');
-  }
-  if (runtime?.evidenceCaptured !== true) {
-    missing.push('system surface screenshot not captured');
-  }
-  if (runtime?.returnedToApp !== true) {
-    missing.push('return to AIPhone not verified');
-  }
+  if (runtime?.systemSurfaceOpened !== true) missing.push('system surface not verified');
+  if (runtime?.evidenceCaptured !== true) missing.push('system surface screenshot not captured');
+  if (runtime?.returnedToApp !== true) missing.push('return to AIPhone not verified');
   if (missing.length > 0) {
-    return {
-      status: 'BLOCKED',
-      reason: missing.join('; ')
-    };
+    return { status: 'BLOCKED', reason: missing.join('; ') };
   }
-  return {
-    status: 'PASS',
-    reason: options.passReason
-  };
+  return { status: 'PASS', reason: options.passReason };
 }
 
 export function evaluateHotelSystemActionEvidence(evidence, runtime = {}) {
@@ -344,58 +353,24 @@ export function evaluateHotelSystemActionEvidence(evidence, runtime = {}) {
     hiddenReason: 'valid hotel coordinates unavailable; navigation E2E not run',
     passReason: 'system map opened, evidence captured, and AIPhone restored'
   });
-  const callButton = validated.call.status === 'visible'
-    ? {
-      status: 'PASS',
-      reason: 'verified phone action is visible'
-    }
-    : validated.call.status === 'hidden'
-      ? runtime.call?.buttonVisible === false
-        ? {
-          status: 'PASS',
-          reason: 'verified phone unavailable; call action correctly hidden'
-        }
-        : {
-          status: 'BLOCKED',
-          reason: 'verified phone unavailable; hidden call button was not verified in the UI'
-        }
-      : {
-        status: 'FAIL',
-        reason: 'call action is visible with invalid verification arguments'
-      };
-  const callE2e = systemActionE2e(validated.call, runtime.call, {
-    finalDial: true,
-    hiddenReason: 'verified phone unavailable; dialer E2E not run',
-    passReason: 'dialer opened with a prefilled number, evidence captured, and AIPhone restored'
-  });
   const acceptableE2e = (result) => result.status === 'PASS' || result.status === 'NOT_RUN';
   return {
-    ok: validated.ok &&
-      acceptableE2e(navigationE2e) &&
-      callButton.status === 'PASS' &&
-      acceptableE2e(callE2e),
+    ok: validated.ok && acceptableE2e(navigationE2e),
+    detail: validated.detail,
     navigation: {
       actionStatus: validated.navigation.status,
       count: validated.navigation.count,
       e2e: navigationE2e
     },
-    call: {
-      actionStatus: validated.call.status,
-      count: validated.call.count,
-      button: callButton,
-      e2e: callE2e
-    }
+    booking: validated.booking
   };
 }
 
 export function validateHotelSurfaceIdentity(searchSurfaceId, detailSurfaceId, restoredSurfaceId) {
   return {
-    ok: typeof searchSurfaceId === 'string' &&
-      searchSurfaceId.trim().length > 0 &&
-      typeof detailSurfaceId === 'string' &&
-      detailSurfaceId.trim().length > 0 &&
-      detailSurfaceId !== searchSurfaceId &&
-      restoredSurfaceId === searchSurfaceId,
+    ok: typeof searchSurfaceId === 'string' && searchSurfaceId.trim().length > 0 &&
+      typeof detailSurfaceId === 'string' && detailSurfaceId.trim().length > 0 &&
+      detailSurfaceId !== searchSurfaceId && restoredSurfaceId === searchSurfaceId,
     searchSurfaceId,
     detailSurfaceId,
     restoredSurfaceId

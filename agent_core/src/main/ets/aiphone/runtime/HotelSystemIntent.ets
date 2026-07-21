@@ -1,17 +1,5 @@
 import { buildSystemFoodNavigationUri } from './FoodNavigation';
-import {
-  compactHotelDialPhone,
-  HotelNavigateArgs,
-  validHotelNavigateArgs
-} from './HotelActions';
-
-export function hotelDialUri(dialPhone: string): string {
-  const compact = compactHotelDialPhone(dialPhone);
-  if (compact.length === 0) {
-    return '';
-  }
-  return 'tel:' + compact;
-}
+import { HotelNavigateArgs, validHotelNavigateArgs } from './HotelActions';
 
 export function hotelNavigationUri(args: HotelNavigateArgs): string {
   if (args === null ||

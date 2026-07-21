@@ -172,7 +172,7 @@ export default function hotelToolTypesTest() {
       expect(serialized.indexOf('taxes')).assertEqual(-1);
     });
 
-    it('keeps missing hotel coordinates null and does not fabricate contact data', 0, () => {
+    it('keeps missing hotel coordinates null without adding provider data', 0, () => {
       const parsed = parseHotelSearchRequest(searchArgs());
       if (parsed.value === null) {
         return;
@@ -188,7 +188,7 @@ export default function hotelToolTypesTest() {
 
       expect(result.hotels[0].latitude === null).assertTrue();
       expect(result.hotels[0].longitude === null).assertTrue();
-      expect(result.hotels[0].contact === undefined).assertTrue();
+      expect(JSON.stringify(result.hotels[0]).indexOf('contact')).assertEqual(-1);
     });
 
     it('returns a controlled error for malformed provider result arrays', 0, () => {

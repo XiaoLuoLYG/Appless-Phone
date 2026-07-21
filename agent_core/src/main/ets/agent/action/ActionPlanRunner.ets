@@ -260,7 +260,8 @@ function completedOutput(completed: CompletedStep[], stepId: string): JsonValue 
 
 function executionContext(
   context: ActionPlanRunContext,
-  stepId: string
+  stepId: string,
+  stepIndex: number
 ): ActionExecutionContext {
   return {
     conversationId: context.conversationId,
@@ -269,7 +270,8 @@ function executionContext(
     sourceToolId: context.sourceToolId,
     planId: context.planId,
     runId: context.runId,
-    stepId: stepId
+    stepId: stepId,
+    isSurfaceEntry: stepIndex === 0
   };
 }
 
@@ -532,7 +534,7 @@ export class ActionPlanRunner {
           rawResult = await this.executor.execute(
             step.actionId,
             boundArgs,
-            executionContext(contextSnapshot, step.stepId)
+            executionContext(contextSnapshot, step.stepId, index)
           );
         } catch (_error) {
           return errorOutcome(

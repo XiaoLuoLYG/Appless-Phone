@@ -6,6 +6,7 @@ import {
   StripeReceivingAccountCardData,
   defaultLocalModelSettings
 } from '@loop/agent-core';
+import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
 import router from '@ohos.router';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -98,6 +99,7 @@ import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
+import { CheckoutWebKind } from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
 import {
   HotelAgentRuntime,
@@ -552,8 +554,9 @@ struct Index {
   @State inputText: string = '';
   @State isVoiceListening: boolean = false;
   @State voiceInputMessage: string = '';
-  @State showPaymentCheckout: boolean = false;
-  @State paymentCheckoutUrl: string = '';
+  @State showCheckoutWeb: boolean = false;
+  @State checkoutWebKind: CheckoutWebKind = 'payment';
+  @State checkoutWebUrl: string = '';
   @State paymentCheckoutProvider: string = '';
   @State paymentCheckoutProviderSessionId: string = '';
   @State paymentCheckoutRecipient: string = '';
@@ -1206,7 +1209,17 @@ struct Index {
     );
     const model = new OpenAiCompatibleModel(provider);
     const opener = new PageHotelUriOpener((uri: string): Promise<boolean> => {
-      return this.openExternalUrl(uri, ['tel', 'petalmaps']);
+      if (uri.startsWith('petalmaps://')) {
+        return this.openExternalUrl(uri, ['petalmaps']);
+      }
+      if (!isRollingGoHotelBookingUrl(uri)) {
+        return Promise.resolve(false);
+      }
+      this.checkoutWebKind = 'hotel';
+      this.checkoutWebUrl = uri;
+      this.showCheckoutWeb = true;
+      aiLogInfo('[AIPhone][HotelBookingOpen] host=rollinggo.cn');
+      return Promise.resolve(true);
     });
     const options: HotelAgentRuntimeOptions = {
       model: model,
@@ -1441,7 +1454,7 @@ struct Index {
     }
     const surface = this.surfaceSnapshot(this.luckinReturnSurface);
     this.luckinReturnSurface = null;
-    this.showPaymentCheckout = false;
+    this.showCheckoutWeb = false;
     this.forceApplySurface(surface, reason);
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: true,
@@ -3008,7 +3021,8 @@ struct Index {
 
   private rememberPaymentCheckout(action: A2uiAction, checkoutUrl: string): void {
     const payload = this.paymentCheckoutPayload(action);
-    this.paymentCheckoutUrl = checkoutUrl;
+    this.checkoutWebUrl = checkoutUrl;
+    this.checkoutWebKind = 'payment';
     this.paymentCheckoutProvider = this.actionText(payload.provider).trim().toLowerCase();
     this.paymentCheckoutProviderSessionId = this.actionText(payload.providerSessionId).trim();
     this.paymentCheckoutRecipient = this.actionText(payload.recipient).trim();
@@ -3034,7 +3048,7 @@ struct Index {
   }
 
   private async handlePaymentCheckoutReturn(url: string): Promise<void> {
-    this.showPaymentCheckout = false;
+    this.showCheckoutWeb = false;
     const lower = url.toLowerCase();
     if (lower.indexOf('/cancel') >= 0) {
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -3495,7 +3509,8 @@ struct Index {
         return;
       }
       this.rememberPaymentCheckout(action, checkoutUrl);
-      this.showPaymentCheckout = true;
+      this.checkoutWebKind = 'payment';
+      this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
       return;
     }
@@ -3769,7 +3784,7 @@ struct Index {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
     if (this.hotelAgentRuntime !== null &&
-      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.call')) {
+      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
       const runtime = this.hotelAgentRuntime;
       const context = runtime.currentActionContext();
       const document = this.currentHtmlHomeDocument();
@@ -4156,8 +4171,9 @@ struct Index {
         isVoiceListening: this.isVoiceListening,
         voiceInputMessage: this.voiceInputMessage,
         showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
-        showPaymentCheckout: this.showPaymentCheckout,
-        paymentCheckoutUrl: this.paymentCheckoutUrl,
+        showCheckoutWeb: this.showCheckoutWeb,
+        checkoutWebKind: this.checkoutWebKind,
+        checkoutWebUrl: this.checkoutWebUrl,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -4181,10 +4197,10 @@ struct Index {
         onStopVoiceInput: () => {
           this.stopVoiceInput();
         },
-        onClosePaymentCheckout: () => {
-          this.showPaymentCheckout = false;
+        onCloseCheckoutWeb: () => {
+          this.showCheckoutWeb = false;
         },
-        onPaymentCheckoutReturn: (url: string) => {
+        onCheckoutWebReturn: (url: string) => {
           this.handlePaymentCheckoutReturn(url);
         },
         onAction: (action: A2uiAction) => {

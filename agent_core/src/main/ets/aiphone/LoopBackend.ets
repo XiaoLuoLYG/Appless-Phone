@@ -175,7 +175,7 @@ function calendarToolDescription(definition: ToolDefinition): string {
     return description + '. Use for real hotel discovery through RollingGo. Input must be JSON with originQuery, place, placeType, countryCode, checkInDate in YYYY-MM-DD, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and optional size. Never omit place or dates: the provider otherwise defaults to unrelated inventory. This tool is read-only and does not create a reservation.';
   }
   if (definition.toolId === 'hotel.detail') {
-    return description + '. Use only after hotel.search returns a real hotelId. Preserve the action args exactly: hotelId, checkInDate, checkOutDate, countryCode, currency, adultCount, childCount, childAgeDetails, and roomCount. It returns live room ratePlanId, average price/currency, bed, meal, availability, and cancellation policy. It does not create, confirm, or track an order.';
+    return description + '. Use only after hotel.search returns a real hotelId. Preserve the action args exactly: hotelId, checkInDate, checkOutDate, countryCode, currency, adultCount, childCount, childAgeDetails, and roomCount. It returns live room ratePlanId, average price/currency, bed, meal, availability, and cancellation policy. The current room surface may open the provider booking page through the registered hotel.booking.open action; this does not create, confirm, or track an order.';
   }
   return description;
 }
@@ -194,7 +194,7 @@ export function aiphoneToolDescriptionForModel(toolId: string): string {
 }
 
 export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
-  return toolId === 'hotel.navigate' || toolId === 'hotel.call';
+  return toolId === 'hotel.navigate' || toolId === 'hotel.booking.open';
 }
 
 export class LoopBackend {

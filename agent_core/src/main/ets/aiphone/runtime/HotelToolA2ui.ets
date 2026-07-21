@@ -9,7 +9,12 @@ import {
 } from './A2uiTypes';
 import { genericToolResultsA2ui } from './DynamicToolA2ui';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
-import { hotelActionsFor } from './HotelActions';
+import {
+  hotelActionsFor,
+  hotelBookingOpenAction,
+  validHotelBookingOpenArgs,
+  HotelBookingOpenArgs
+} from './HotelActions';
 import {
   HotelDetailResult,
   HotelRatePlan,
@@ -19,7 +24,8 @@ import {
 } from './HotelToolTypes';
 
 const HOTEL_SOURCE: string = 'RollingGo';
-const HOTEL_LIMITATION: string = 'Appless 暂不支持创建或跟踪酒店订单';
+const HOTEL_LIMITATION: string = 'Appless 支持打开 App 内 RollingGo Web 预订；原生订单创建、状态和取消不可用';
+const HOTEL_BOOKING_NOTE: string = '房型与价格由 RollingGo 实时提供，最终房型与价格以预订页为准。';
 const HOTEL_PRICE_LIMITATION: string = '税费拆分与报价有效期：供应商未返回';
 const HOTEL_SEARCH_PRICE_SCOPE: string = '搜索阶段仅传成人数；完整客人与房间数在实时房型中查询';
 
@@ -155,9 +161,6 @@ function searchRows(hotel: HotelSearchItem, request: HotelSearchRequest): A2uiLa
     row('标签', hotel.tags.join(' · ')),
     row('能力边界', HOTEL_LIMITATION)
   );
-  if (hotel.bookingUrl.length > 0) {
-    rows.push(row('第三方预订（离开 Appless）', hotel.bookingUrl));
-  }
   if (hotel.imageUrl.length > 0) {
     rows.push(row('酒店图片', hotel.imageUrl));
   }
@@ -200,9 +203,6 @@ function rateRows(result: HotelDetailResult, rate: HotelRatePlan): A2uiLabelValu
     row('税费与有效期', HOTEL_PRICE_LIMITATION),
     row('能力边界', HOTEL_LIMITATION)
   ];
-  if (result.bookingUrl.length > 0) {
-    rows.push(row('第三方预订（离开 Appless）', result.bookingUrl));
-  }
   return rows;
 }
 
@@ -275,6 +275,7 @@ export function hotelSearchA2ui(
 export function hotelDetailA2ui(
   surfaceId: string,
   result: HotelDetailResult,
+  canPlace: (action: A2uiAction) => boolean = (_action: A2uiAction): boolean => true,
   warnings: string[] = []
 ): string {
   const items: DynamicGenericToolResult[] = [];
@@ -300,7 +301,15 @@ export function hotelDetailA2ui(
     }
   }
   if (items.length > 0) {
-    items[0].actions = [restoreSearchAction()];
+    const actions: A2uiAction[] = [restoreSearchAction()];
+    if (result.ok && result.rates.length > 0) {
+      const booking = hotelBookingOpenAction(result);
+      if (validHotelBookingOpenArgs(booking.args as HotelBookingOpenArgs).ok && canPlace(booking)) {
+        actions.push(booking);
+        items[0].rows.push(row('预订说明', HOTEL_BOOKING_NOTE));
+      }
+    }
+    items[0].actions = actions;
   }
   appendWarnings(items, warnings);
   return genericToolResultsA2ui(surfaceId, 'hotel.detail', items, 'hotel', result.name.length > 0 ? result.name : '实时房型与报价');

@@ -2,6 +2,7 @@ import { ActionValidationResult } from '../../agent/action/ActionCatalogTypes';
 import { A2uiAction } from './A2uiTypes';
 import {
   HotelDetailRequest,
+  HotelDetailResult,
   HotelSearchItem,
   HotelSearchRequest,
   parseHotelDetailRequest
@@ -15,13 +16,9 @@ export interface HotelNavigateArgs {
   longitude: number;
 }
 
-export interface HotelCallArgs {
+export interface HotelBookingOpenArgs {
   hotelId: number;
-  name: string;
-  displayPhone: string;
-  dialPhone: string;
-  provider: string;
-  providerPlaceId: string;
+  bookingUrl: string;
 }
 
 function valid(): ActionValidationResult {
@@ -38,14 +35,6 @@ function displayName(hotel: HotelSearchItem): string {
 
 function validCoordinate(value: number, minimum: number, maximum: number): boolean {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
-}
-
-export function compactHotelDialPhone(value: string): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  const compact = value.replace(/[ ()-]/g, '');
-  return /^\+?[0-9]{5,20}$/.test(compact) ? compact : '';
 }
 
 export function hasValidHotelCoordinates(hotel: HotelSearchItem): boolean {
@@ -69,34 +58,6 @@ export function validHotelNavigateArgs(args: HotelNavigateArgs): ActionValidatio
   }
   if (!validCoordinate(args.latitude, -90, 90) || !validCoordinate(args.longitude, -180, 180)) {
     return invalid('Hotel navigation requires finite bounded coordinates.');
-  }
-  return valid();
-}
-
-export function hotelCallArgs(hotel: HotelSearchItem): HotelCallArgs {
-  return {
-    hotelId: hotel.hotelId,
-    name: displayName(hotel),
-    displayPhone: hotel.contact === undefined ? '' : hotel.contact.displayPhone,
-    dialPhone: hotel.contact === undefined ? '' : hotel.contact.dialPhone,
-    provider: hotel.contact === undefined ? '' : hotel.contact.provider,
-    providerPlaceId: hotel.contact === undefined ? '' : hotel.contact.providerPlaceId
-  };
-}
-
-export function validHotelCallArgs(args: HotelCallArgs): ActionValidationResult {
-  if (!Number.isInteger(args.hotelId) || args.hotelId <= 0) {
-    return invalid('Hotel call requires a positive hotelId.');
-  }
-  const displayCompact = typeof args.displayPhone === 'string' ?
-    compactHotelDialPhone(args.displayPhone) : '';
-  const dialCompact = typeof args.dialPhone === 'string' ?
-    compactHotelDialPhone(args.dialPhone) : '';
-  if (typeof args.displayPhone !== 'string' || typeof args.dialPhone !== 'string' ||
-    typeof args.provider !== 'string' || typeof args.providerPlaceId !== 'string' ||
-    displayCompact.length === 0 || dialCompact.length === 0 || displayCompact !== dialCompact ||
-    args.provider.trim().length === 0 || args.providerPlaceId.trim().length === 0) {
-    return invalid('Hotel call requires a verified provider phone and place ID.');
   }
   return valid();
 }
@@ -134,15 +95,114 @@ export function hotelNavigateAction(hotel: HotelSearchItem): A2uiAction {
   };
 }
 
-export function hotelCallAction(hotel: HotelSearchItem): A2uiAction {
+export function hotelBookingOpenAction(result: HotelDetailResult): A2uiAction {
   return {
-    id: 'hotel.call',
-    label: '联系酒店',
-    prompt: '打开 ' + displayName(hotel) + ' 的系统拨号盘',
+    id: 'hotel.booking.open',
+    label: '在 App 内继续预订',
+    prompt: '在 Appless 内打开 RollingGo 酒店预订',
     kind: 'prompt',
-    variant: 'secondary',
-    args: hotelCallArgs(hotel)
+    variant: 'primary',
+    args: {
+      hotelId: result.hotelId,
+      bookingUrl: result.bookingUrl
+    } as HotelBookingOpenArgs
   };
+}
+
+interface ParsedHotelUrl {
+  authority: string;
+  path: string;
+  query: Record<string, string>;
+  duplicateKeys: string[];
+}
+
+function parsedHttpsHotelUrl(value: string): ParsedHotelUrl | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const match = /^https:\/\/([^\/?#]+)(\/[^?#]*)?(?:\?([^#]*))?(?:#.*)?$/.exec(value.trim());
+  if (match === null || match[1].indexOf('@') >= 0) {
+    return null;
+  }
+  const query: Record<string, string> = {};
+  const duplicateKeys: string[] = [];
+  const rawQuery = match[3] === undefined ? '' : match[3];
+  if (rawQuery.length > 0) {
+    const pairs = rawQuery.split('&');
+    for (let index = 0; index < pairs.length; index += 1) {
+      const equals = pairs[index].indexOf('=');
+      if (equals <= 0) {
+        return null;
+      }
+      let key = '';
+      let decoded = '';
+      try {
+        key = decodeURIComponent(pairs[index].substring(0, equals));
+        decoded = decodeURIComponent(pairs[index].substring(equals + 1));
+      } catch (_error) {
+        return null;
+      }
+      if (Object.keys(query).indexOf(key) >= 0) {
+        duplicateKeys.push(key);
+      } else {
+        query[key] = decoded;
+      }
+    }
+  }
+  return {
+    authority: match[1].toLowerCase(),
+    path: match[2] === undefined || match[2].length === 0 ? '/' : match[2],
+    query: query,
+    duplicateKeys: duplicateKeys
+  };
+}
+
+function validIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const time = Date.parse(value + 'T00:00:00Z');
+  return Number.isFinite(time) && new Date(time).toISOString().substring(0, 10) === value;
+}
+
+function validCount(value: string, allowZero: boolean): boolean {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+  const count = Number.parseInt(value, 10);
+  return Number.isInteger(count) && (allowZero ? count >= 0 : count > 0);
+}
+
+export function isAllowedHotelBookingNavigationUrl(value: string): boolean {
+  const parsed = parsedHttpsHotelUrl(value);
+  return parsed !== null && parsed.authority === 'rollinggo.cn';
+}
+
+export function isRollingGoHotelBookingUrl(value: string): boolean {
+  const parsed = parsedHttpsHotelUrl(value);
+  if (parsed === null || parsed.authority !== 'rollinggo.cn' ||
+    parsed.path !== '/pages/hotel/detail/index' || parsed.duplicateKeys.length > 0) {
+    return false;
+  }
+  const query = parsed.query;
+  return /^[1-9]\d*$/.test(query['id'] || '') &&
+    validIsoDate(query['checkInDate'] || '') &&
+    validIsoDate(query['checkOutDate'] || '') &&
+    query['checkOutDate'] > query['checkInDate'] &&
+    validCount(query['roomCount'] || '', false) &&
+    validCount(query['adultCount'] || '', false) &&
+    validCount(query['childCount'] || '', true);
+}
+
+export function validHotelBookingOpenArgs(args: HotelBookingOpenArgs): ActionValidationResult {
+  if (args === null || typeof args !== 'object' ||
+    !Number.isInteger(args.hotelId) || args.hotelId <= 0 ||
+    typeof args.bookingUrl !== 'string' || !isRollingGoHotelBookingUrl(args.bookingUrl)) {
+    return invalid('Hotel booking requires a valid RollingGo hotel URL.');
+  }
+  const parsed = parsedHttpsHotelUrl(args.bookingUrl) as ParsedHotelUrl;
+  return parsed.query['id'] === args.hotelId.toString() ? valid() :
+    invalid('Hotel booking URL id must match hotelId.');
 }
 
 export function validateHotelActionArgs(actionId: string, args: Object): ActionValidationResult {
@@ -153,8 +213,8 @@ export function validateHotelActionArgs(actionId: string, args: Object): ActionV
   if (actionId === 'hotel.navigate') {
     return validHotelNavigateArgs(args as HotelNavigateArgs);
   }
-  if (actionId === 'hotel.call') {
-    return validHotelCallArgs(args as HotelCallArgs);
+  if (actionId === 'hotel.booking.open') {
+    return validHotelBookingOpenArgs(args as HotelBookingOpenArgs);
   }
   return invalid('Unsupported hotel action: ' + actionId + '.');
 }
@@ -176,12 +236,6 @@ export function hotelActionsFor(
     const navigate = hotelNavigateAction(hotel);
     if (validHotelNavigateArgs(navigate.args as HotelNavigateArgs).ok && canPlace(navigate)) {
       actions.push(navigate);
-    }
-  }
-  if (hotel.contact !== undefined) {
-    const call = hotelCallAction(hotel);
-    if (validHotelCallArgs(call.args as HotelCallArgs).ok && canPlace(call)) {
-      actions.push(call);
     }
   }
   return actions;

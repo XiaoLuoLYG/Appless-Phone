@@ -74,13 +74,11 @@ import {
   ToolDefinitionLookup
 } from '../../agent/action/ActionCatalogTypes';
 import { hotelDetailDataResult, hotelSearchDataResult } from './HotelDataResult';
-import { HotelContactLookupResult } from './HotelContactLookup';
 import { validateHotelActionArgs } from './HotelActions';
 import { hotelDetailA2ui, hotelFailureA2ui, hotelSearchA2ui } from './HotelToolA2ui';
 import {
   HotelDetailResult,
   HotelDetailParseResult,
-  HotelSearchItem,
   HotelSearchResult,
   HotelSearchParseResult,
   hotelDetailProviderArgs,
@@ -104,7 +102,7 @@ import {
   calendarResultsFromComposioObservation,
   normalizedCalendarArgsForPrompt
 } from './CalendarApiClient';
-import { callHotelContactLookup, callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
+import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
 import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from './SocialHubClient';
@@ -8860,21 +8858,8 @@ let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
 export type HotelTimestampProvider = () => string;
-export type HotelContactLookupProvider = (
-  hotel: HotelSearchItem,
-  apiKey: string
-) => Promise<HotelContactLookupResult>;
-export const HOTEL_CONTACT_ENRICHMENT_LIMIT: number = 5;
-export const HOTEL_CONTACT_ENRICHMENT_CONCURRENCY: number = 3;
-export const HOTEL_CONTACT_ENRICHMENT_DEADLINE_MS: number = 8000;
 const defaultHotelTimestampProvider: HotelTimestampProvider = (): string => new Date().toISOString();
-const defaultHotelContactLookupProvider: HotelContactLookupProvider = (
-  hotel: HotelSearchItem,
-  apiKey: string
-): Promise<HotelContactLookupResult> => callHotelContactLookup(hotel, apiKey);
 let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvider;
-let hotelContactLookupProvider: HotelContactLookupProvider = defaultHotelContactLookupProvider;
-let hotelContactEnrichmentDeadlineMs: number = HOTEL_CONTACT_ENRICHMENT_DEADLINE_MS;
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
@@ -8882,16 +8867,6 @@ export function configureGmailMcpClientForTests(client: GenericMcpClient | null)
 
 export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
   hotelMcpClient = client === null ? genericMcpClient : client;
-}
-
-export function configureHotelContactLookupForTests(provider: HotelContactLookupProvider | null): void {
-  hotelContactLookupProvider = provider === null ? defaultHotelContactLookupProvider : provider;
-}
-
-export function configureHotelContactEnrichmentDeadlineForTests(deadlineMs: number | null): void {
-  hotelContactEnrichmentDeadlineMs = deadlineMs === null
-    ? HOTEL_CONTACT_ENRICHMENT_DEADLINE_MS
-    : (deadlineMs > 0 ? deadlineMs : 1);
 }
 
 export function configureHotelTimestampProviderForTests(provider: HotelTimestampProvider | null): void {
@@ -12045,151 +12020,6 @@ function hotelDataSource(operation: string): DataSource {
   };
 }
 
-function hotelPlacesDataSource(): DataSource {
-  return {
-    provider: 'Google Places',
-    backend: 'local_adapter',
-    operation: 'hotelContactLookup',
-    fetchedAt: hotelTimestampProvider()
-  };
-}
-
-function addHotelWarning(warnings: string[], warning: string): void {
-  const bounded = warning.substring(0, 240);
-  if (bounded.length === 0 || warnings.length >= 3 || warnings.indexOf(bounded) >= 0) {
-    return;
-  }
-  warnings.push(bounded);
-}
-
-interface HotelContactWorkState {
-  nextIndex: number;
-  acceptingResults: boolean;
-}
-
-interface HotelContactEnrichmentOutcome {
-  hotelIndex: number;
-  lookup: HotelContactLookupResult;
-}
-
-interface HotelContactEnrichmentSummary {
-  warnings: string[];
-  placesResponseReceived: boolean;
-}
-
-function validHotelContactCoordinates(hotel: HotelSearchItem): boolean {
-  return hotel.latitude !== null && hotel.longitude !== null &&
-    Number.isFinite(hotel.latitude) && Number.isFinite(hotel.longitude) &&
-    hotel.latitude >= -90 && hotel.latitude <= 90 &&
-    hotel.longitude >= -180 && hotel.longitude <= 180;
-}
-
-function hotelContactLookupEligible(hotel: HotelSearchItem): boolean {
-  const hasName = hotel.name.trim().length > 0 || hotel.nameEn.trim().length > 0;
-  return hotel.hotelId > 0 && hasName &&
-    (validHotelContactCoordinates(hotel) || hotel.address.trim().length >= 6);
-}
-
-function hotelContactLookupInput(hotel: HotelSearchItem): HotelSearchItem {
-  return JSON.parse(JSON.stringify(hotel)) as HotelSearchItem;
-}
-
-function failedHotelContactLookup(error: Object): HotelContactLookupResult {
-  const message = error instanceof Error ? error.message : JSON.stringify(error);
-  return {
-    contact: null,
-    warning: 'Google Places contact lookup failed: ' + message,
-    sourceReceived: false
-  };
-}
-
-async function runHotelContactWorker(
-  hotels: HotelSearchItem[],
-  hotelIndexes: number[],
-  apiKey: string,
-  state: HotelContactWorkState,
-  outcomes: HotelContactEnrichmentOutcome[]
-): Promise<void> {
-  while (state.acceptingResults) {
-    const workIndex = state.nextIndex;
-    state.nextIndex += 1;
-    if (workIndex >= hotelIndexes.length) {
-      return;
-    }
-    const hotelIndex = hotelIndexes[workIndex];
-    let lookup: HotelContactLookupResult;
-    try {
-      lookup = await hotelContactLookupProvider(hotelContactLookupInput(hotels[hotelIndex]), apiKey);
-    } catch (error) {
-      lookup = failedHotelContactLookup(error as Object);
-    }
-    if (!state.acceptingResults) {
-      return;
-    }
-    outcomes.push({ hotelIndex: hotelIndex, lookup: lookup });
-  }
-}
-
-async function enrichHotelContacts(
-  result: HotelSearchResult,
-  apiKey: string
-): Promise<HotelContactEnrichmentSummary> {
-  const eligibleIndexes: number[] = [];
-  for (let index = 0; index < result.hotels.length; index++) {
-    if (hotelContactLookupEligible(result.hotels[index])) {
-      eligibleIndexes.push(index);
-    }
-  }
-  const warnings: string[] = [];
-  if (eligibleIndexes.length === 0) {
-    return { warnings: warnings, placesResponseReceived: false };
-  }
-  if (apiKey.trim().length === 0) {
-    addHotelWarning(warnings, 'Google Places contact lookup skipped: GOOGLE_MAPS_API_KEY is missing.');
-    return { warnings: warnings, placesResponseReceived: false };
-  }
-
-  const selectedIndexes = eligibleIndexes.slice(0, HOTEL_CONTACT_ENRICHMENT_LIMIT);
-  const state: HotelContactWorkState = { nextIndex: 0, acceptingResults: true };
-  const outcomes: HotelContactEnrichmentOutcome[] = [];
-  const workers: Promise<void>[] = [];
-  const workerCount = selectedIndexes.length < HOTEL_CONTACT_ENRICHMENT_CONCURRENCY
-    ? selectedIndexes.length
-    : HOTEL_CONTACT_ENRICHMENT_CONCURRENCY;
-  for (let index = 0; index < workerCount; index++) {
-    workers.push(runHotelContactWorker(result.hotels, selectedIndexes, apiKey.trim(), state, outcomes));
-  }
-
-  let timerId = -1;
-  const completed: Promise<boolean> = Promise.all(workers)
-    .then((_values: void[]): boolean => false);
-  const deadline: Promise<boolean> = new Promise<boolean>((resolve: (timedOut: boolean) => void) => {
-    timerId = setTimeout(() => resolve(true), hotelContactEnrichmentDeadlineMs);
-  });
-  const timedOut = await Promise.race([completed, deadline]);
-  state.acceptingResults = false;
-  if (timerId >= 0) {
-    clearTimeout(timerId);
-  }
-
-  if (eligibleIndexes.length > selectedIndexes.length) {
-    addHotelWarning(warnings, 'Google Places contact enrichment limit reached; remaining hotels were not queried.');
-  }
-  if (timedOut) {
-    addHotelWarning(warnings, 'Google Places contact enrichment deadline reached; late results were ignored.');
-  }
-  let placesResponseReceived = false;
-  for (let index = 0; index < outcomes.length; index++) {
-    const outcome = outcomes[index];
-    placesResponseReceived = placesResponseReceived || outcome.lookup.sourceReceived;
-    addHotelWarning(warnings, outcome.lookup.warning);
-    if (outcome.lookup.contact !== null) {
-      result.hotels[outcome.hotelIndex].contact = outcome.lookup.contact;
-    }
-  }
-  return { warnings: warnings, placesResponseReceived: placesResponseReceived };
-}
-
 function sanitizedHotelTransportMessage(message: string): string {
   let sanitized = message.length > 0 ? message : 'RollingGo transport exception.';
   if (localProviderConfig.hotelMcpKey.length > 0) {
@@ -12231,15 +12061,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
         return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
       }
       const result = normalizeHotelSearchResult(response.result, parsed.value);
-      if (!result.ok) {
-        return hotelSearchDataResult(result, [source]);
-      }
-      const enrichment = await enrichHotelContacts(result, localProviderConfig.googleMapsApiKey);
-      const sources: DataSource[] = [source];
-      if (enrichment.placesResponseReceived) {
-        sources.push(hotelPlacesDataSource());
-      }
-      return hotelSearchDataResult(result, sources, enrichment.warnings);
+      return hotelSearchDataResult(result, [source]);
     } catch (error) {
       const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
       return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
@@ -12304,9 +12126,9 @@ const LEGACY_HOTEL_ACTION_CATALOG: ActionCatalog = new ActionCatalog(
   new CurrentHotelArgsValidator()
 );
 
-function canPlaceLegacyHotelAction(action: A2uiAction): boolean {
+function canPlaceLegacyHotelAction(sourceToolId: string, action: A2uiAction): boolean {
   return action.args !== undefined &&
-    LEGACY_HOTEL_ACTION_CATALOG.validatePlacement('hotel.search', action.id, action.args).ok;
+    LEGACY_HOTEL_ACTION_CATALOG.validatePlacement(sourceToolId, action.id, action.args).ok;
 }
 
 async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
@@ -12318,10 +12140,18 @@ async function callLocalHotelTool(toolId: string, surfaceId: string, args: Objec
     throw new Error(result.error.message);
   }
   if (toolId === 'hotel.search' && result.status !== 'error') {
-    return hotelSearchA2ui(surfaceId, result.data as HotelSearchResult, canPlaceLegacyHotelAction);
+    return hotelSearchA2ui(
+      surfaceId,
+      result.data as HotelSearchResult,
+      (action: A2uiAction): boolean => canPlaceLegacyHotelAction('hotel.search', action)
+    );
   }
   if (toolId === 'hotel.detail' && result.status !== 'error') {
-    return hotelDetailA2ui(surfaceId, result.data as HotelDetailResult);
+    return hotelDetailA2ui(
+      surfaceId,
+      result.data as HotelDetailResult,
+      (action: A2uiAction): boolean => canPlaceLegacyHotelAction('hotel.detail', action)
+    );
   }
   return hotelFailureA2ui(surfaceId, toolId, result.error?.message === undefined ? '酒店供应商调用失败。' : result.error.message);
 }
