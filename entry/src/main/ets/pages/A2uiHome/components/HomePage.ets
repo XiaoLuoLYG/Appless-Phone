@@ -22,7 +22,7 @@ import { A2uiButtonView } from './common/A2uiButtonView';
 import { HistoryPanelView } from './HistoryPanelView';
 import { HtmlHomeSurfaceView } from './HtmlHomeSurfaceView';
 import { A2uiSurfaceView } from './A2uiSurfaceView';
-import { PaymentCheckoutOverlay } from './PaymentCheckoutOverlay';
+import { CheckoutWebKind, CheckoutWebOverlay } from './CheckoutWebOverlay';
 import {
   isPromptInputEnabled,
   nextSendSpinnerRotation
@@ -72,8 +72,9 @@ export struct HomePage {
   @Prop isVoiceListening: boolean = false;
   @Prop voiceInputMessage: string = '';
   @Prop showWelcome: boolean = false;
-  @Prop showPaymentCheckout: boolean = false;
-  @Prop paymentCheckoutUrl: string = '';
+  @Prop showCheckoutWeb: boolean = false;
+  @Prop checkoutWebKind: CheckoutWebKind = 'payment';
+  @Prop checkoutWebUrl: string = '';
   @State sendSpinnerRotation: number = 0;
   @State voicePulseTick: number = 0;
   private sendSpinnerTimerId: number = -1;
@@ -85,8 +86,8 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
-  onClosePaymentCheckout: () => void = () => {};
-  onPaymentCheckoutReturn: (url: string) => void = (_url: string): void => {};
+  onCloseCheckoutWeb: () => void = () => {};
+  onCheckoutWebReturn: (url: string) => void = (_url: string): void => {};
   onAction: (action: A2uiAction) => void = (_action: A2uiAction) => {};
 
   aboutToAppear(): void {
@@ -359,11 +360,12 @@ export struct HomePage {
       .margin({ top: this.showHistory ? A2UI_HOME_SECTION_GAP : 0 })
       .animation({ duration: A2UI_MOTION_NORMAL_MS, curve: A2UI_MOTION_MOVE_CURVE })
 
-      if (this.showPaymentCheckout && this.paymentCheckoutUrl.trim().length > 0) {
-        PaymentCheckoutOverlay({
-          url: this.paymentCheckoutUrl,
-          onClose: this.onClosePaymentCheckout,
-          onReturnUrl: this.onPaymentCheckoutReturn
+      if (this.showCheckoutWeb && this.checkoutWebUrl.trim().length > 0) {
+        CheckoutWebOverlay({
+          kind: this.checkoutWebKind,
+          url: this.checkoutWebUrl,
+          onClose: this.onCloseCheckoutWeb,
+          onReturnUrl: this.onCheckoutWebReturn
         })
           .layoutWeight(1)
           .margin({ top: A2UI_HOME_SECTION_GAP })

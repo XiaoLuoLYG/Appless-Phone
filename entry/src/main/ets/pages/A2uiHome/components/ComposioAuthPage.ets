@@ -8,7 +8,14 @@ import {
   COLOR_PANEL,
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
-import { composioAuthActionLabel, composioAuthStatusLabel, sortedComposioAuthConfigs } from './ComposioAuthViewData';
+import {
+  composioAuthActionLabel,
+  composioAuthStatusLabel,
+  composioToolkitDisplayName,
+  EXTERNAL_AUTH_APPS,
+  ExternalAuthApp,
+  sortedComposioAuthConfigs
+} from './ComposioAuthViewData';
 import { composioToolkitLogoResource } from './ComposioLogoResource';
 import { StatusBadgeView } from './StatusBadgeView';
 
@@ -21,21 +28,17 @@ export struct ComposioAuthPage {
   onBack: () => void = () => {};
   onRefresh: () => void = () => {};
   onAuthorize: (item: ComposioAuthConfigItem) => void = (_item: ComposioAuthConfigItem) => {};
+  onOpenExternalAuth: (url: string) => void = (_url: string) => {};
 
   private visibleItems(): ComposioAuthConfigItem[] {
     return sortedComposioAuthConfigs(this.items);
   }
 
   private displayToolkitName(item: ComposioAuthConfigItem): string {
-    const slug = item.toolkitSlug.trim().toLowerCase().split(' ').join('').split('-').join('').split('_').join('');
-    if (slug === 'googlecalendar' || slug === 'calendar') {
-      return 'Google Cal';
-    }
-    return item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug;
+    return composioToolkitDisplayName(item.toolkitSlug, item.toolkitName);
   }
 
-  private toolkitInitial(item: ComposioAuthConfigItem): string {
-    const label = this.displayToolkitName(item).trim();
+  private toolkitInitial(label: string): string {
     return label.length > 0 ? label.substring(0, 1).toUpperCase() : '?';
   }
 
@@ -50,15 +53,15 @@ export struct ComposioAuthPage {
   }
 
   @Builder
-  ToolkitBadge(item: ComposioAuthConfigItem) {
+  ToolkitBadge(slug: string, label: string) {
     Stack({ alignContent: Alignment.Center }) {
-      if (composioToolkitLogoResource(item.toolkitSlug) !== null) {
-        Image(composioToolkitLogoResource(item.toolkitSlug) as Resource)
+      if (composioToolkitLogoResource(slug) !== null) {
+        Image(composioToolkitLogoResource(slug) as Resource)
           .width(36)
           .height(36)
           .objectFit(ImageFit.Contain)
       } else {
-        Text(this.toolkitInitial(item))
+        Text(this.toolkitInitial(label))
           .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
@@ -72,7 +75,7 @@ export struct ComposioAuthPage {
   AuthCard(item: ComposioAuthConfigItem) {
     Column() {
       Row() {
-        this.ToolkitBadge(item)
+        this.ToolkitBadge(item.toolkitSlug, this.displayToolkitName(item))
 
         Column() {
           Text(this.displayToolkitName(item))
@@ -128,6 +131,65 @@ export struct ComposioAuthPage {
     .margin({ bottom: 10 })
   }
 
+  @Builder
+  ExternalAuthCard(app: ExternalAuthApp) {
+    Column() {
+      Row() {
+        this.ToolkitBadge(app.slug, app.name)
+
+        Column() {
+          Text(app.name)
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(app.subtitle)
+            .fontSize(12)
+            .fontColor(COLOR_MUTED)
+            .margin({ top: 4 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 10, right: 10 })
+
+        StatusBadgeView({ status: 'needs_auth', label: '外部授权' })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row() {
+        Text(app.source)
+          .fontSize(12)
+          .fontColor(COLOR_MUTED)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Button('授权')
+          .height(34)
+          .fontSize(12)
+          .fontColor(Color.White)
+          .backgroundColor(COLOR_ACCENT)
+          .borderRadius(9)
+          .onClick(() => {
+            this.onOpenExternalAuth(app.url);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 12 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding(14)
+    .backgroundColor(COLOR_CARD_RAISED)
+    .borderRadius(12)
+    .border({ width: 1, color: COLOR_CARD_EDGE })
+    .margin({ bottom: 10 })
+  }
+
   build() {
     Scroll() {
       Column() {
@@ -145,7 +207,7 @@ export struct ComposioAuthPage {
             })
 
           Column() {
-            Text('Composio 授权')
+            Text('应用授权')
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
               .fontColor(COLOR_INK)
@@ -198,6 +260,21 @@ export struct ComposioAuthPage {
               this.AuthCard(item)
             }, (item: ComposioAuthConfigItem) => item.authConfigId + '_' + item.toolkitSlug)
           }
+
+          Text('其他应用')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_INK)
+            .margin({ top: 14, bottom: 4 })
+          Text('以下入口仅打开官方授权页面，当前功能仍使用已配置的默认凭证。')
+            .fontSize(12)
+            .fontColor(COLOR_MUTED)
+            .lineHeight(18)
+            .margin({ bottom: 12 })
+
+          ForEach(EXTERNAL_AUTH_APPS, (app: ExternalAuthApp) => {
+            this.ExternalAuthCard(app)
+          }, (app: ExternalAuthApp) => app.slug)
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)

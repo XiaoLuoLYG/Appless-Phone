@@ -11,6 +11,7 @@ import {
   normalizeAggregateSearchStatus,
   redditPostsFromComposioResult,
   unsupportedSourceStatus,
+  xPostsFromComposioResult,
   zhihuPostsFromSearchPayload,
   zhihuSearchUrl
 } from '@loop/agent-core';
@@ -176,6 +177,24 @@ export default function aggregateSearchClientTest() {
       expect(posts[0].url).assertEqual('https://www.reddit.com/r/OpenAI/comments/2/codex');
       expect(posts[0].score).assertEqual('9');
       expect(posts[0].commentCount).assertEqual('2');
+    });
+
+    it('maps X Composio payloads into aggregate discussion cards', 0, () => {
+      const posts = xPostsFromComposioResult({
+        sourceTag: 'Composio',
+        toolName: 'x.post.search',
+        title: 'Composio Twitter 结果',
+        status: 'success',
+        summary: '返回 1 条',
+        rows: [],
+        rawPreview: '{"data":[{"id":"x-1","text":"OpenAI Codex update","author_id":"user-1","created_at":"2026-07-20T01:00:00.000Z"}]}'
+      });
+
+      expect(posts.length).assertEqual(1);
+      expect(posts[0].source).assertEqual('x');
+      expect(posts[0].provider).assertEqual('X');
+      expect(posts[0].text).assertEqual('OpenAI Codex update');
+      expect(posts[0].publishedAt).assertEqual('2026-07-20T01:00:00.000Z');
     });
 
     it('skips non-success Hacker News rows', 0, () => {

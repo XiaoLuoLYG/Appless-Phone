@@ -63,22 +63,23 @@ import {
   saveGmailOAuthPending,
   saveGmailOAuthTokenSet
 } from './GmailOAuthClient';
-import {
-  X_DEFAULT_REDIRECT_URI,
-  X_OAUTH_ACCESS_TOKEN_REF,
-  XOAuthConfig,
-  buildXOAuthAuthorizationUrl,
-  createXOAuthPending,
-  isXAccessTokenFresh,
-  loadXOAuthTokenSet,
-  refreshXOAuthAccessToken,
-  saveXOAuthPending,
-  saveXOAuthTokenSet
-} from './XOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
+import { DataResult, DataSource } from '../../agent/message/DataResult';
+import { ActionCatalog } from '../../agent/action/ActionCatalog';
+import {
+  ActionArgsValidator,
+  ActionValidationResult,
+  ClientActionAuthorizer,
+  SurfaceActionAuthorizer,
+  ToolDefinitionLookup
+} from '../../agent/action/ActionCatalogTypes';
+import { hotelDetailDataResult, hotelSearchDataResult } from './HotelDataResult';
+import { validateHotelActionArgs } from './HotelActions';
 import { hotelDetailA2ui, hotelFailureA2ui, hotelSearchA2ui } from './HotelToolA2ui';
 import {
+  HotelDetailResult,
   HotelDetailParseResult,
+  HotelSearchResult,
   HotelSearchParseResult,
   hotelDetailProviderArgs,
   hotelSearchProviderArgs,
@@ -104,7 +105,7 @@ import {
 import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
+import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from './SocialHubClient';
 import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
 import {
   callComposioDynamic,
@@ -119,7 +120,8 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
+import { ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
   PaymentMode,
@@ -208,6 +210,12 @@ interface ComposioFixedRequestPayload {
   fixedArgs?: Object;
 }
 
+interface SlackComposioReplyArgs {
+  channel: string;
+  text: string;
+  threadTs: string;
+}
+
 interface HttpRequestHeaders {
   'User-Agent'?: string;
   'Accept'?: string;
@@ -257,12 +265,6 @@ interface StationDefault {
 
 interface LocalProviderConfig {
   toolGatewayApiKey: string;
-  xBearerToken: string;
-  xUsername: string;
-  xOauthClientId: string;
-  xOauthRedirectUri: string;
-  slackUserToken: string;
-  slackBotToken: string;
   flightMcpKey: string;
   variflightApiUrl: string;
   hotelMcpKey: string;
@@ -330,14 +332,6 @@ interface LocalProviderConfig {
 
 interface LocalProviderRawConfig {
   TOOL_GATEWAY_API_KEY?: string;
-  X_BEARER_TOKEN?: string;
-  X_ACCESS_TOKEN?: string;
-  X_OAUTH_TOKEN?: string;
-  X_USERNAME?: string;
-  X_OAUTH_CLIENT_ID?: string;
-  X_OAUTH_REDIRECT_URI?: string;
-  SLACK_USER_TOKEN?: string;
-  SLACK_BOT_TOKEN?: string;
   FLIGHT_MCP_KEY?: string;
   VARIFLIGHT_API_KEY?: string;
   X_VARIFLIGHT_KEY?: string;
@@ -473,12 +467,6 @@ interface LocalProviderRawConfig {
   paymentLiveAllowedStripeAccountIds?: string;
   paymentLiveMaxAmountMinor?: string;
   toolGatewayApiKey?: string;
-  xBearerToken?: string;
-  xUsername?: string;
-  xOauthClientId?: string;
-  xOauthRedirectUri?: string;
-  slackUserToken?: string;
-  slackBotToken?: string;
 }
 
 interface VariFlightRequestParams {
@@ -1254,12 +1242,6 @@ const CHINA_FLIGHT_CITY_CODES: FlightCityCode[] = [
 let stationCache: StationCache | null = null;
 let localProviderConfig: LocalProviderConfig = {
   toolGatewayApiKey: '',
-  xBearerToken: '',
-  xUsername: '',
-  xOauthClientId: '',
-  xOauthRedirectUri: X_DEFAULT_REDIRECT_URI,
-  slackUserToken: '',
-  slackBotToken: '',
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
   hotelMcpKey: '',
@@ -1674,12 +1656,6 @@ function firstText(values: Array<Object | string | number | boolean | null | und
 export function configureLocalProviderConfig(config: LocalProviderConfig): void {
   localProviderConfig = {
     toolGatewayApiKey: config.toolGatewayApiKey.trim(),
-    xBearerToken: config.xBearerToken.trim(),
-    xUsername: config.xUsername.trim().replace('@', ''),
-    xOauthClientId: config.xOauthClientId.trim(),
-    xOauthRedirectUri: config.xOauthRedirectUri.trim().length > 0 ? config.xOauthRedirectUri.trim() : X_DEFAULT_REDIRECT_URI,
-    slackUserToken: config.slackUserToken.trim(),
-    slackBotToken: config.slackBotToken.trim(),
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
     hotelMcpKey: config.hotelMcpKey.trim(),
@@ -1747,11 +1723,6 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ' toolGatewayApiKeyChars=' + localProviderConfig.toolGatewayApiKey.length.toString() +
-    ' xBearerTokenChars=' + localProviderConfig.xBearerToken.length.toString() +
-    ' xUsernamePresent=' + (localProviderConfig.xUsername.length > 0 ? 'true' : 'false') +
-    ' xOauthClientIdChars=' + localProviderConfig.xOauthClientId.length.toString() +
-    ' slackUserTokenChars=' + localProviderConfig.slackUserToken.length.toString() +
-    ' slackBotTokenChars=' + localProviderConfig.slackBotToken.length.toString() +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
     ' hotelKeyChars=' + localProviderConfig.hotelMcpKey.length.toString() +
     ' hotelUrlPresent=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'true' : 'false') +
@@ -1811,12 +1782,6 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_TEST_SECRET_KEY, parsed.stripeSecretKey]);
   configureLocalProviderConfig({
     toolGatewayApiKey: firstText([parsed.TOOL_GATEWAY_API_KEY, parsed.toolGatewayApiKey]),
-    xBearerToken: firstText([parsed.X_BEARER_TOKEN, parsed.X_ACCESS_TOKEN, parsed.X_OAUTH_TOKEN, parsed.xBearerToken]),
-    xUsername: firstText([parsed.X_USERNAME, parsed.xUsername]),
-    xOauthClientId: firstText([parsed.X_OAUTH_CLIENT_ID, parsed.xOauthClientId]),
-    xOauthRedirectUri: firstText([parsed.X_OAUTH_REDIRECT_URI, parsed.xOauthRedirectUri]),
-    slackUserToken: firstText([parsed.SLACK_USER_TOKEN, parsed.slackUserToken]),
-    slackBotToken: firstText([parsed.SLACK_BOT_TOKEN, parsed.slackBotToken]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
     hotelMcpKey: firstText([parsed.ROLLINGGO_HOTEL_MCP_KEY, parsed.hotelMcpKey]),
@@ -1886,11 +1851,6 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
 export function localProviderConfigDebugSummary(): string {
   return 'rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
     ', toolGatewayApiKey=' + (localProviderConfig.toolGatewayApiKey.length > 0 ? 'present(' + localProviderConfig.toolGatewayApiKey.length.toString() + ')' : 'missing') +
-    ', xBearerToken=' + (localProviderConfig.xBearerToken.length > 0 ? 'present(' + localProviderConfig.xBearerToken.length.toString() + ')' : 'missing') +
-    ', xUsername=' + (localProviderConfig.xUsername.length > 0 ? 'present' : 'missing') +
-    ', xOauthClientId=' + (localProviderConfig.xOauthClientId.length > 0 ? 'present(' + localProviderConfig.xOauthClientId.length.toString() + ')' : 'missing') +
-    ', slackUserToken=' + (localProviderConfig.slackUserToken.length > 0 ? 'present(' + localProviderConfig.slackUserToken.length.toString() + ')' : 'missing') +
-    ', slackBotToken=' + (localProviderConfig.slackBotToken.length > 0 ? 'present(' + localProviderConfig.slackBotToken.length.toString() + ')' : 'missing') +
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
     ', hotelKey=' + (localProviderConfig.hotelMcpKey.length > 0 ? 'present(' + localProviderConfig.hotelMcpKey.length.toString() + ')' : 'missing') +
     ', hotelUrl=' + (localProviderConfig.hotelMcpUrl.length > 0 ? 'present' : 'missing') +
@@ -8894,13 +8854,23 @@ const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
-const X_OAUTH_SETUP_URL: string = 'https://developer.x.com/en/portal/dashboard';
-
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
+let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
+export type HotelTimestampProvider = () => string;
+const defaultHotelTimestampProvider: HotelTimestampProvider = (): string => new Date().toISOString();
+let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvider;
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
+  hotelMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureHotelTimestampProviderForTests(provider: HotelTimestampProvider | null): void {
+  hotelTimestampProvider = provider === null ? defaultHotelTimestampProvider : provider;
 }
 
 export function configureGmailCredentialStoreForTests(store: CredentialStore | null): void {
@@ -9551,58 +9521,6 @@ export async function prepareGoogleOAuthAuthorizationUrl(setupUrl: string = GMAI
 
 export async function prepareGmailOAuthAuthorizationUrl(): Promise<string> {
   return prepareGoogleOAuthAuthorizationUrl(GMAIL_MCP_AUTH_SETUP_URL);
-}
-
-export function xOAuthConfigFromProvider(): XOAuthConfig {
-  return {
-    clientId: localProviderConfig.xOauthClientId,
-    redirectUri: localProviderConfig.xOauthRedirectUri.length > 0 ? localProviderConfig.xOauthRedirectUri : X_DEFAULT_REDIRECT_URI
-  };
-}
-
-export async function prepareXOAuthAuthorizationUrl(): Promise<string> {
-  const config = xOAuthConfigFromProvider();
-  if (config.clientId.length === 0 || config.redirectUri.length === 0) {
-    aiLogInfo('[AIPhone][XOAuthAuthorizeUrl] source=setup-docs clientConfigured=' +
-      (config.clientId.length > 0 ? 'true' : 'false') +
-      ' redirectConfigured=' + (config.redirectUri.length > 0 ? 'true' : 'false'));
-    return X_OAUTH_SETUP_URL;
-  }
-  const pending = createXOAuthPending();
-  await saveXOAuthPending(dynamicCredentialStore, pending);
-  aiLogInfo('[AIPhone][XOAuthPendingSaved] stateChars=' + pending.state.length.toString() +
-    ' verifierChars=' + pending.codeVerifier.length.toString() +
-    ' redirectChars=' + config.redirectUri.length.toString() +
-    ' clientChars=' + config.clientId.length.toString());
-  return buildXOAuthAuthorizationUrl(config, pending);
-}
-
-async function xAccessTokenForDm(): Promise<string> {
-  const token = await loadXOAuthTokenSet(dynamicCredentialStore);
-  if (token !== null) {
-    if (isXAccessTokenFresh(token)) {
-      return token.accessToken;
-    }
-    if (token.refreshToken.length > 0) {
-      const config = xOAuthConfigFromProvider();
-      if (config.clientId.length > 0) {
-        const refreshed = await refreshXOAuthAccessToken(config, token.refreshToken);
-        const saved = await saveXOAuthTokenSet(dynamicCredentialStore, refreshed);
-        return saved.accessToken;
-      }
-    }
-    return token.accessToken;
-  }
-  return dynamicCredentialStore.get(X_OAUTH_ACCESS_TOKEN_REF);
-}
-
-async function safeXAccessTokenForDm(): Promise<string> {
-  try {
-    return await xAccessTokenForDm();
-  } catch (error) {
-    aiLogError('[AIPhone][XOAuthAccessLoadFailed] ' + describeThrown(error));
-    return '';
-  }
 }
 
 async function gmailAccessTokenForMcp(): Promise<string> {
@@ -10292,16 +10210,6 @@ function isSocialHubToolId(toolId: string): boolean {
   return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
 }
 
-function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProviderConfig {
-  return {
-    xBearerToken: localProviderConfig.xBearerToken,
-    xUsername: localProviderConfig.xUsername,
-    xUserAccessToken: xUserAccessToken,
-    slackUserToken: localProviderConfig.slackUserToken,
-    slackBotToken: localProviderConfig.slackBotToken
-  };
-}
-
 function socialHubDefaultPlatforms(): SocialHubPlatform[] {
   return ['x', 'slack', 'wecom', 'discord', 'linkedin', 'whatsapp', 'instagram'];
 }
@@ -10515,7 +10423,65 @@ async function composioSocialAggregate(args: Object | null): Promise<SocialHubFe
 }
 
 export async function sendLocalSocialHubReply(item: SocialHubItemData, text: string): Promise<SocialHubDraftData> {
-  return socialHubClient.sendReply(item, text, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig());
+  if (item.platform === 'slack') {
+    const message = text.trim();
+    if (message.length === 0) {
+      return {
+        itemId: item.id,
+        platform: item.platform,
+        text: '',
+        status: 'error',
+        error: '请输入要发送的 Slack 回复。',
+        localOnly: true,
+        sent: false
+      };
+    }
+    const channelId = item.channelId.trim().length > 0 ? item.channelId.trim() : item.channel.trim();
+    if (channelId.length === 0) {
+      return {
+        itemId: item.id,
+        platform: item.platform,
+        text: '',
+        status: 'error',
+        error: 'Slack 搜索结果缺少 channel id，不能发送回复。',
+        localOnly: true,
+        sent: false
+      };
+    }
+    const args: SlackComposioReplyArgs = {
+      channel: channelId,
+      text: message,
+      threadTs: item.threadId.trim().length > 0 ? item.threadId.trim() : item.timestamp.trim()
+    };
+    const result = await composioFixedAppResult(
+      'social.slack.message.send',
+      'Slack',
+      '回复 Slack 消息',
+      '消息回复',
+      args as Object
+    );
+    if (result.status !== 'success') {
+      return {
+        itemId: item.id,
+        platform: item.platform,
+        text: '',
+        status: 'error',
+        error: result.summary.trim().length > 0 ? result.summary : result.title,
+        localOnly: true,
+        sent: false
+      };
+    }
+    return {
+      itemId: item.id,
+      platform: item.platform,
+      text: '已通过 Composio 发送到 Slack：' + message,
+      status: 'draft',
+      error: '',
+      localOnly: false,
+      sent: true
+    };
+  }
+  return socialHubClient.sendReply(item, text);
 }
 
 async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -10526,9 +10492,7 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     const draft = await socialHubClient.draft(
       itemId.length > 0 ? itemId : prompt,
       socialHubPlatformFromText(textOf(request.platform)),
-      instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿',
-      localProviderConfig.toolGatewayApiKey,
-      socialHubProviderConfig()
+      instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿'
     );
     return socialHubDraftA2ui(surfaceId, draft);
   }
@@ -10577,8 +10541,6 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
         prompt,
         args,
         localProviderConfig.youtubeApiKey,
-        socialHubClient,
-        socialHubProviderConfig(),
         {
           apiKey: localProviderConfig.zhihuApiKey
         }
@@ -12026,11 +11988,58 @@ function hotelMcpRegistration(toolId: string, mcpToolName: string): DynamicToolR
   };
 }
 
-async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
+function hotelDataError(
+  toolId: string,
+  outputSchema: string,
+  code: string,
+  message: string,
+  sources: DataSource[] = [],
+  retryable: boolean = false
+): DataResult {
+  return {
+    toolId: toolId,
+    outputSchema: outputSchema,
+    status: 'error',
+    sources: sources,
+    data: new Object(),
+    warnings: [],
+    error: {
+      code: code,
+      message: message,
+      retryable: retryable
+    }
+  };
+}
+
+function hotelDataSource(operation: string): DataSource {
+  return {
+    provider: 'RollingGo',
+    backend: 'local_adapter',
+    operation: operation,
+    fetchedAt: hotelTimestampProvider()
+  };
+}
+
+function sanitizedHotelTransportMessage(message: string): string {
+  let sanitized = message.length > 0 ? message : 'RollingGo transport exception.';
+  if (localProviderConfig.hotelMcpKey.length > 0) {
+    sanitized = sanitized.split(localProviderConfig.hotelMcpKey).join('[REDACTED]');
+  }
+  if (localProviderConfig.hotelMcpUrl.length > 0) {
+    sanitized = sanitized.split(localProviderConfig.hotelMcpUrl).join('[REDACTED]');
+  }
+  return sanitized.substring(0, 1200);
+}
+
+export async function callStructuredHotelTool(toolId: string, args: Object | null): Promise<DataResult> {
+  if (toolId !== 'hotel.search' && toolId !== 'hotel.detail') {
+    return hotelDataError(toolId, '', 'HOTEL_TOOL_UNSUPPORTED', 'Unsupported hotel tool: ' + toolId + '.');
+  }
   if (localProviderConfig.hotelMcpKey.length === 0 || localProviderConfig.hotelMcpUrl.length === 0) {
-    return hotelFailureA2ui(
-      surfaceId,
+    return hotelDataError(
       toolId,
+      toolId === 'hotel.search' ? 'hotelSearchResults' : 'hotelRatePlans',
+      'HOTEL_CONFIG_MISSING',
       '缺少本机 ignored 配置 ROLLINGGO_HOTEL_MCP_KEY 或 ROLLINGGO_HOTEL_MCP_URL。'
     );
   }
@@ -12038,31 +12047,113 @@ async function callLocalHotelTool(toolId: string, surfaceId: string, args: Objec
   if (toolId === 'hotel.search') {
     const parsed: HotelSearchParseResult = parseHotelSearchRequest(rawArgs);
     if (!parsed.ok || parsed.value === null) {
-      return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_INVALID_ARGUMENTS', parsed.error);
     }
-    const response: McpToolCallResult = await genericMcpClient.callToolPayload(
-      hotelMcpRegistration(toolId, 'searchHotels'),
-      localProviderConfig.hotelMcpKey,
-      hotelSearchProviderArgs(parsed.value)
-    );
-    if (!response.ok || response.result === null) {
-      return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+    const operation = 'searchHotels';
+    try {
+      const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
+        hotelMcpRegistration(toolId, operation),
+        localProviderConfig.hotelMcpKey,
+        hotelSearchProviderArgs(parsed.value)
+      );
+      const source = hotelDataSource(operation);
+      if (!response.ok || response.result === null) {
+        return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+      }
+      const result = normalizeHotelSearchResult(response.result, parsed.value);
+      return hotelSearchDataResult(result, [source]);
+    } catch (error) {
+      const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
+      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
     }
-    return hotelSearchA2ui(surfaceId, normalizeHotelSearchResult(response.result, parsed.value));
   }
   const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
   if (!parsed.ok || parsed.value === null) {
-    return hotelFailureA2ui(surfaceId, toolId, parsed.error);
+    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_INVALID_ARGUMENTS', parsed.error);
   }
-  const response: McpToolCallResult = await genericMcpClient.callToolPayload(
-    hotelMcpRegistration(toolId, 'getHotelDetail'),
-    localProviderConfig.hotelMcpKey,
-    hotelDetailProviderArgs(parsed.value)
-  );
-  if (!response.ok || response.result === null) {
-    return hotelFailureA2ui(surfaceId, toolId, response.errorMessage);
+  const operation = 'getHotelDetail';
+  try {
+    const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
+      hotelMcpRegistration(toolId, operation),
+      localProviderConfig.hotelMcpKey,
+      hotelDetailProviderArgs(parsed.value)
+    );
+    const source = hotelDataSource(operation);
+    if (!response.ok || response.result === null) {
+      return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+    }
+    return hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
+  } catch (error) {
+    const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
+    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
   }
-  return hotelDetailA2ui(surfaceId, normalizeHotelDetailResult(response.result, parsed.value));
+}
+
+class CurrentHotelToolLookup implements ToolDefinitionLookup {
+  find(toolId: string): ToolDefinition | null {
+    return toolDefinitionForToolId(toolId);
+  }
+}
+
+class RejectHotelSurfaceAction implements SurfaceActionAuthorizer {
+  allows(
+    _conversationId: string,
+    _turnId: string,
+    _surfaceId: string,
+    _actionId: string,
+    _args: Object
+  ): boolean {
+    return false;
+  }
+}
+
+class RejectHotelClientAction implements ClientActionAuthorizer {
+  allows(_actionId: string, _args: Object): boolean {
+    return false;
+  }
+}
+
+class CurrentHotelArgsValidator implements ActionArgsValidator {
+  validate(actionId: string, args: Object): ActionValidationResult {
+    return validateHotelActionArgs(actionId, args);
+  }
+}
+
+const LEGACY_HOTEL_ACTION_CATALOG: ActionCatalog = new ActionCatalog(
+  new CurrentHotelToolLookup(),
+  new RejectHotelSurfaceAction(),
+  new RejectHotelClientAction(),
+  new CurrentHotelArgsValidator()
+);
+
+function canPlaceLegacyHotelAction(sourceToolId: string, action: A2uiAction): boolean {
+  return action.args !== undefined &&
+    LEGACY_HOTEL_ACTION_CATALOG.validatePlacement(sourceToolId, action.id, action.args).ok;
+}
+
+async function callLocalHotelTool(toolId: string, surfaceId: string, args: Object | null): Promise<string> {
+  if (toolId !== 'hotel.search' && toolId !== 'hotel.detail') {
+    return hotelFailureA2ui(surfaceId, toolId, 'Unsupported hotel tool: ' + toolId + '.');
+  }
+  const result = await callStructuredHotelTool(toolId, args);
+  if (result.error?.code === 'HOTEL_TRANSPORT_EXCEPTION') {
+    throw new Error(result.error.message);
+  }
+  if (toolId === 'hotel.search' && result.status !== 'error') {
+    return hotelSearchA2ui(
+      surfaceId,
+      result.data as HotelSearchResult,
+      (action: A2uiAction): boolean => canPlaceLegacyHotelAction('hotel.search', action)
+    );
+  }
+  if (toolId === 'hotel.detail' && result.status !== 'error') {
+    return hotelDetailA2ui(
+      surfaceId,
+      result.data as HotelDetailResult,
+      (action: A2uiAction): boolean => canPlaceLegacyHotelAction('hotel.detail', action)
+    );
+  }
+  return hotelFailureA2ui(surfaceId, toolId, result.error?.message === undefined ? '酒店供应商调用失败。' : result.error.message);
 }
 
 async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
@@ -12105,7 +12196,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   if (isLuckinToolId(toolId)) {
     return callLocalLuckinTool(toolId, prompt, surfaceId, args);
   }
-  if (isHotelToolId(toolId)) {
+  if (isHotelToolId(toolId) || toolId.startsWith('hotel.')) {
     return callLocalHotelTool(toolId, surfaceId, args);
   }
   if (toolId === 'travel.search') {

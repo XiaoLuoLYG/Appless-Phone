@@ -25,37 +25,12 @@ import { parsePersonaMarkdown, PersonaMarkdownSection, PersonaSkillMarkdown } fr
 import { connectionStatusLabel } from '../state/A2uiHomeState';
 import { DebugTextPanel } from './DebugTextPanel';
 import { personaAvatarResource } from './PersonaAvatar';
+import {
+  COMPOSIO_SUPPORTED_TOOLKITS,
+  composioToolkitDisplayName,
+  ComposioToolkitSummary
+} from './ComposioAuthViewData';
 import { composioToolkitLogoResource } from './ComposioLogoResource';
-
-interface ComposioToolkitSummary {
-  slug: string;
-  name: string;
-}
-
-const COMPOSIO_SUPPORTED_TOOLKITS: ComposioToolkitSummary[] = [
-  { slug: 'gmail', name: 'Gmail' },
-  { slug: 'github', name: 'GitHub' },
-  { slug: 'googlecalendar', name: 'Google Calendar' },
-  { slug: 'googledrive', name: 'Google Drive' },
-  { slug: 'googledocs', name: 'Google Docs' },
-  { slug: 'slack', name: 'Slack' },
-  { slug: 'notion', name: 'Notion' },
-  { slug: 'linear', name: 'Linear' },
-  { slug: 'asana', name: 'Asana' },
-  { slug: 'trello', name: 'Trello' },
-  { slug: 'outlook', name: 'Outlook' },
-  { slug: 'discord', name: 'Discord' },
-  { slug: 'linkedin', name: 'LinkedIn' },
-  { slug: 'whatsapp', name: 'WhatsApp' },
-  { slug: 'instagram', name: 'Instagram' },
-  { slug: 'youtube', name: 'YouTube' },
-  { slug: 'x', name: 'X' },
-  { slug: 'spotify', name: 'Spotify' },
-  { slug: 'tiktok', name: 'TikTok' },
-  { slug: 'ticketmaster', name: 'Ticketmaster' },
-  { slug: 'hubspot', name: 'HubSpot' },
-  { slug: 'salesforce', name: 'Salesforce' }
-];
 
 @Component
 export struct ConfigPage {
@@ -239,7 +214,7 @@ export struct ConfigPage {
       if (slug.length > 0 && !this.hasToolkit(previews, slug)) {
         previews.push({
           slug: slug,
-          name: item.toolkitName.length > 0 ? item.toolkitName : item.toolkitSlug
+          name: composioToolkitDisplayName(slug, item.toolkitName)
         });
       }
     }
@@ -398,7 +373,7 @@ export struct ConfigPage {
             .onClick(() => {
               this.onRefreshComposioAuth();
             })
-          Button('Composio 授权')
+          Button('管理授权')
             .height(38)
             .layoutWeight(1)
             .fontSize(12)

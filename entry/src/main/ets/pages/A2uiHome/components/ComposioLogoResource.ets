@@ -111,6 +111,9 @@ export function composioToolkitLogoResource(toolkitSlug: string): Resource | nul
   if (slug === 'luckin') {
     return $r('app.media.logo_luckin');
   }
+  if (slug === 'didi') {
+    return $r('app.media.logo_didi');
+  }
   if (slug === 'mcdonalds' || slug === 'mcd') {
     return $r('app.media.logo_mcdonalds');
   }

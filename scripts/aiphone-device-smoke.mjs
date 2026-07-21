@@ -3,6 +3,22 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  evaluateHotelSystemActionEvidence,
+  foregroundBundleFromAbilityDump,
+  hasPopulatedHotelActionEvidence,
+  hotelActionEvidenceFromLogs,
+  hotelDetailLifecycleFromLogs,
+  hotelDetailClickLocator,
+  hotelToolLifecycleFromLogs,
+  hasSafeHotelSystemIntentOpen,
+  isExpectedHotelSystemBundle,
+  matchesHotelDetailAccessibleLabel,
+  shouldRetryHotelReturnToApp,
+  validateHotelDetailBookingEvidence,
+  validateHotelSearchActionEvidence,
+  validateHotelSurfaceIdentity
+} from './hotel-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const outDir = join(rootDir, 'tool-gateway', '.smoke');
@@ -171,7 +187,8 @@ const coreRegressionCases = [
     query: '帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房',
     expectsTool: true,
     expectedToolId: 'hotel.search',
-    verifyHotelDetail: true
+    verifyHotelDetail: true,
+    hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
   }
 ];
 
@@ -652,7 +669,8 @@ function expectedCaseForQuery(query) {
     return {
       expectsTool: true,
       expectedToolId: 'hotel.search',
-      verifyHotelDetail: true
+      verifyHotelDetail: true,
+      hotelCapabilities: ['hotel.detail', 'hotel.booking.open', 'hotel.navigate']
     };
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
@@ -930,13 +948,33 @@ function dumpLayout(localName = 'latest-layout.json') {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function captureScreen(localName = 'latest-screen.png') {
-  moveAppWindowIntoScreenshot();
+function captureCurrentScreen(localName = 'latest-screen.png') {
   const remote = '/data/local/tmp/aiphone-smoke-screen.png';
   const local = join(outDir, localName);
   hdc(['shell', 'uitest', 'screenCap', '-p', remote]);
   hdc(['file', 'recv', remote, local]);
   return local;
+}
+
+function captureScreen(localName = 'latest-screen.png') {
+  moveAppWindowIntoScreenshot();
+  return captureCurrentScreen(localName);
+}
+
+function captureForegroundAbility(localName) {
+  const output = hdc(['shell', 'aa', 'dump', '-l']);
+  const path = join(outDir, localName);
+  writeFileSync(path, output);
+  return {
+    bundleName: foregroundBundleFromAbilityDump(output),
+    path
+  };
+}
+
+function sanitizeExternalUrlLogs(logText) {
+  return String(logText || '')
+    .replace(/("(?:bookingUrl|uri|url)"\s*:\s*")[^"]*(")/g, '$1<redacted>$2')
+    .replace(/\b(url|uri|bookingUrl)=\S+/g, '$1=<redacted>');
 }
 
 function collectLayoutText(layout) {
@@ -967,6 +1005,13 @@ function findTextCenter(layout, marker) {
 function findExactTextCenter(layout, marker) {
   const match = findTextMatches(layout, marker).find((item) =>
     item.text.split('|').some((value) => value.trim() === marker));
+  return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
+}
+
+function findHotelDetailTextCenter(layout, marker) {
+  const match = findTextMatches(layout, marker).find((item) =>
+    item.text.split('|').some((value) =>
+      matchesHotelDetailAccessibleLabel(value, marker)));
   return match === undefined ? null : { x: match.bounds.x, y: match.bounds.y };
 }
 
@@ -1010,7 +1055,7 @@ function findHeaderSettingsCenter(layout) {
     }
   });
   candidates.sort((left, right) => right.x - left.x);
-  return candidates.length >= 2 ? { x: candidates[1].x, y: candidates[1].y } : null;
+  return candidates.length > 0 ? { x: candidates[0].x, y: candidates[0].y } : null;
 }
 
 async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) {
@@ -1021,6 +1066,32 @@ async function findTextCenterWithScroll(marker, localNamePrefix, maxSwipes = 4) 
     const found = findTextCenter(layout, marker);
     if (found !== null) {
       return found;
+    }
+    swipeResultsUp();
+    await sleep(800);
+  }
+  return null;
+}
+
+async function findExternalAuthActionWithScroll(appName, localNamePrefix, maxSwipes = 5) {
+  for (let attempt = 0; attempt <= maxSwipes; attempt += 1) {
+    const layout = dumpLayout(`${localNamePrefix}-${attempt + 1}.json`);
+    const text = collectLayoutText(layout).join('\n');
+    writeFileSync(join(outDir, `${localNamePrefix}-${attempt + 1}-text.txt`), text + '\n');
+    const app = findTextMatches(layout, appName).find((item) =>
+      item.text.split('|').some((value) => value.trim() === appName));
+    const actions = findTextMatches(layout, '授权').filter((item) =>
+      item.text.split('|').some((value) => value.trim() === '授权'));
+    if (app !== undefined) {
+      const action = actions
+        .filter((item) => item.bounds.y > app.bounds.y &&
+          item.bounds.y - app.bounds.y < 280 &&
+          item.bounds.x > app.bounds.x)
+        .sort((left, right) =>
+          Math.abs(left.bounds.y - app.bounds.y) - Math.abs(right.bounds.y - app.bounds.y))[0];
+      if (action !== undefined) {
+        return { x: action.bounds.x, y: action.bounds.y };
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -1150,14 +1221,33 @@ async function captureWhile(appPid, runAction) {
     while (Date.now() - started < timeoutMs) {
       await sleep(500);
       const text = logs.join('\n');
-      const done = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
+      const hotelActionEvidence = hotelActionEvidenceFromLogs(text);
+      const hasHotelActionEvidence =
+        typeof hotelActionEvidence.surfaceId === 'string' &&
+        hotelActionEvidence.surfaceId.length > 0;
+      const hotelActionEvidencePopulated =
+        hasPopulatedHotelActionEvidence(hotelActionEvidence);
+      const hotelToolLifecycle = hotelToolLifecycleFromLogs(text);
+      const hotelToolLifecycleComplete = hotelToolLifecycle.ok;
+      const hasTerminalOutcome =
+        /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
+      const done = hotelActionEvidencePopulated ||
+        hotelToolLifecycleComplete ||
+        hasTerminalOutcome;
+      const hotelActionRequested =
+        /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
+      const hotelRuntimeRequested = hotelActionRequested || hotelToolLifecycle.requested;
       const hasQueryHtmlDocument = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=(?!welcome\b)[^ \n]+[^\n]*chars=\d+[^\n]*blocks=\d+/.test(text);
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      if (done && (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
+      const hotelUiReady = hotelActionEvidencePopulated ||
+        (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
+        (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
+      if (done && (!hotelRuntimeRequested || hotelUiReady) &&
+        (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
       const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
@@ -1166,6 +1256,50 @@ async function captureWhile(appPid, runAction) {
         break;
       }
     }
+  } catch (error) {
+    actionError = error;
+  } finally {
+    child.kill('SIGTERM');
+    await waitForProcessExit(child, 1500);
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await waitForProcessExit(child, 1500);
+    }
+    cleanupHilogProcesses();
+  }
+  if (actionError !== null) {
+    throw actionError;
+  }
+  return logs;
+}
+
+async function captureAppLogsFor(appPid, runAction, durationMs = 2500) {
+  const logs = [];
+  const child = spawn('hdc', ['-t', target, 'hilog'], {
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  let buffer = '';
+  const onData = (chunk) => {
+    buffer += chunk;
+    const parts = buffer.split('\n');
+    buffer = parts.pop() || '';
+    for (const line of parts) {
+      if (lineMatchesPid(line, appPid) &&
+        (line.includes('AIPhone') || line.includes('aiphonedemo'))) {
+        logs.push(line);
+      }
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+
+  let actionError = null;
+  try {
+    await sleep(800);
+    await runAction();
+    await sleep(durationMs);
   } catch (error) {
     actionError = error;
   } finally {
@@ -1302,7 +1436,9 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
       (missingConfig && expectedToolId !== 'travel.search'),
     modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
     toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
-    gmailWebOpened: /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true url=https:\/\/mail\.google\.com/.test(text),
+    gmailWebOpened:
+      /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=gmail\.open\.web/.test(text) &&
+      /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true scheme=https chars=\d+/.test(text),
     worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
@@ -1590,7 +1726,7 @@ function layoutExpectationsForQuery(query) {
     return ['高铁', '12306', 'train.search'];
   }
   if (isHotelQuery(query)) {
-    return ['酒店 · 实时搜索', 'RollingGo', '查看房型'];
+    return ['酒店 · 实时搜索', 'RollingGo'];
   }
   if (/瑞幸|luckin|ruixing/i.test(query) && /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|帮我买|购买一杯|购买瑞幸|来一杯|要一杯/.test(query)) {
     return ['瑞幸', 'luckin.order.preview', '选择瑞幸门店', '确认瑞幸订单', '确认下单'];
@@ -1770,11 +1906,272 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
   return { ok: false, capability: 'calendar.event.delete.confirm', reason: '确认删除 button not found' };
 }
 
-async function verifyHotelDetailAction(layout, index, appPid) {
+async function locateHotelSystemAction(layout, label, index, actionName) {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    swipeResultsDown();
+    await sleep(250);
+  }
+  currentLayout = dumpLayout(`query-${index + 1}-hotel-${actionName}-top-layout.json`);
+  for (let attempt = 0; attempt <= 8; attempt += 1) {
+    const center = findExactTextCenter(currentLayout, label);
+    if (center !== null) {
+      return {
+        center,
+        layout: currentLayout
+      };
+    }
+    if (attempt < 8) {
+      swipeResultsUp();
+      await sleep(500);
+      currentLayout = dumpLayout(
+        `query-${index + 1}-hotel-${actionName}-scan-${attempt + 1}-layout.json`
+      );
+    }
+  }
+  return {
+    center: null,
+    layout: currentLayout
+  };
+}
+
+async function exerciseHotelSystemAction(
+  layout,
+  index,
+  actionId,
+  label,
+  actionName,
+  expectedScheme,
+  appPid
+) {
+  const located = await locateHotelSystemAction(layout, label, index, actionName);
+  const runtime = {
+    buttonVisible: located.center !== null,
+    systemSurfaceOpened: false,
+    evidenceCaptured: false,
+    returnedToApp: false
+  };
+  if (located.center === null) {
+    return {
+      runtime,
+      reason: `exact ${actionId} action button not found`,
+      restoredLayout: located.layout
+    };
+  }
+
+  clearHilog();
+  const capturedActionLogs = await captureAppLogsFor(appPid, async () => {
+    hdc([
+      'shell',
+      'uitest',
+      'uiInput',
+      'click',
+      String(located.center.x),
+      String(located.center.y)
+    ]);
+    await sleep(1800);
+  });
+  const rawActionLogs = capturedActionLogs.join('\n');
+  const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
+  const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
+  writeFileSync(logPath, actionLogs + '\n');
+  const schemeOpened = hasSafeHotelSystemIntentOpen(actionLogs, expectedScheme);
+  const externalForeground = captureForegroundAbility(
+    `query-${index + 1}-hotel-${actionName}-external-ability.txt`
+  );
+  const systemSurfaceRecognized = isExpectedHotelSystemBundle(actionId, externalForeground.bundleName);
+  const screenPath = captureCurrentScreen(
+    `query-${index + 1}-hotel-${actionName}-system-screen.png`
+  );
+  runtime.systemSurfaceOpened = schemeOpened && systemSurfaceRecognized;
+  runtime.evidenceCaptured = screenPath.length > 0;
+
+  // The only injected events on the external surface are bounded Back presses.
+  let backPressCount = 0;
+  let restoredForeground = {
+    bundleName: externalForeground.bundleName,
+    path: externalForeground.path
+  };
+  do {
+    hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+    backPressCount += 1;
+    await sleep(1400);
+    restoredForeground = captureForegroundAbility(
+      `query-${index + 1}-hotel-${actionName}-restored-ability-${backPressCount}.txt`
+    );
+  } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
+  runtime.returnedToApp = restoredForeground.bundleName === 'com.example.aiphonedemo';
+  let restoredLayout = located.layout;
+  let restoredLayoutPath = '';
+  let restoredScreenPath = '';
+  if (runtime.returnedToApp) {
+    restoredLayoutPath = join(
+      outDir,
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredLayout = dumpLayout(
+      `query-${index + 1}-hotel-${actionName}-restored-layout.json`
+    );
+    restoredScreenPath = captureScreen(
+      `query-${index + 1}-hotel-${actionName}-restored-screen.png`
+    );
+  }
+  return {
+    runtime,
+    schemeOpened,
+    systemSurfaceRecognized,
+    foregroundBundle: externalForeground.bundleName,
+    restoredBundle: restoredForeground.bundleName,
+    backPressCount,
+    interactionPolicy: 'system map screenshot then Back',
+    logPath,
+    abilityPath: externalForeground.path,
+    screenPath,
+    restoredAbilityPath: restoredForeground.path,
+    restoredLayoutPath,
+    restoredScreenPath,
+    restoredLayout
+  };
+}
+
+async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
+  const validated = validateHotelSearchActionEvidence(actionEvidence);
+  let currentLayout = layout;
+  const runtime = {};
+  let navigationEvidence = {
+    skipped: true,
+    reason: `hotel.navigate action is ${validated.navigation.status}`
+  };
+  if (validated.navigation.status === 'visible') {
+    navigationEvidence = await exerciseHotelSystemAction(
+      currentLayout,
+      index,
+      'hotel.navigate',
+      '导航到酒店',
+      'navigate',
+      'petalmaps',
+      appPid
+    );
+    runtime.navigation = navigationEvidence.runtime;
+    currentLayout = navigationEvidence.restoredLayout;
+  }
+  const navigationReport = { ...navigationEvidence };
+  delete navigationReport.restoredLayout;
+  return {
+    ...evaluateHotelSystemActionEvidence(actionEvidence, runtime),
+    navigationEvidence: navigationReport
+  };
+}
+
+async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
+  const validated = validateHotelDetailBookingEvidence(actionEvidence);
+  const located = await locateHotelSystemAction(
+    layout,
+    '在 App 内继续预订',
+    index,
+    'booking'
+  );
+  const report = {
+    capability: 'hotel.booking.open',
+    actionEvidence: validated,
+    buttonVisible: located.center !== null,
+    foregroundBundle: '',
+    headerVisible: false,
+    domainVisible: false,
+    loginBoundaryReached: false,
+    returnedToRoom: false,
+    roomSurfaceRestored: false,
+    screenPath: '',
+    layoutPath: '',
+    restoredLayout: located.layout
+  };
+  if (!validated.ok) {
+    report.reason = 'detail surface does not contain exactly one valid hotel.booking.open action';
+    return { ...report, ok: false };
+  }
+  if (located.center === null) {
+    report.reason = '在 App 内继续预订 button not found';
+    return { ...report, ok: false };
+  }
+
+  clearHilog();
+  hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
+  await sleep(2200);
+  const bookingLogs = sanitizeExternalUrlLogs(hdc(['shell', 'hilog', '-x']));
+  const logPath = join(outDir, `query-${index + 1}-hotel-booking.log`);
+  writeFileSync(logPath, bookingLogs + '\n');
+  const foreground = captureForegroundAbility(`query-${index + 1}-hotel-booking-ability.txt`);
+  report.foregroundBundle = foreground.bundleName;
+  report.screenPath = captureCurrentScreen(`query-${index + 1}-hotel-booking-screen.png`);
+  report.layoutPath = join(outDir, `query-${index + 1}-hotel-booking-layout.json`);
+  let bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-layout.json`);
+  const bookingText = collectLayoutText(bookingLayout).join('\n');
+  report.headerVisible = bookingText.includes('RollingGo 酒店预订');
+  report.domainVisible = /rollinggo\.cn/i.test(bookingText) || /rollinggo\.cn/i.test(bookingLogs);
+  report.returnedToRoom = foreground.bundleName === 'com.example.aiphonedemo';
+
+  const loginCenter = findExactTextCenter(bookingLayout, '登录查看价格');
+  if (loginCenter !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(loginCenter.x), String(loginCenter.y)]);
+    await sleep(1400);
+    bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-login-layout.json`);
+    const loginText = collectLayoutText(bookingLayout).join('\n');
+    report.loginBoundaryReached = /登录|手机号|验证码/.test(loginText);
+    captureCurrentScreen(`query-${index + 1}-hotel-booking-login-screen.png`);
+  } else {
+    report.loginBoundaryReached = report.headerVisible && report.domainVisible;
+  }
+
+  const backToRoom = findExactTextCenter(bookingLayout, '返回房型');
+  if (backToRoom !== null) {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backToRoom.x), String(backToRoom.y)]);
+    await sleep(1000);
+    report.restoredLayout = dumpLayout(`query-${index + 1}-hotel-booking-restored-room-layout.json`);
+    const roomText = collectLayoutText(report.restoredLayout).join('\n');
+    report.returnedToRoom = report.returnedToRoom && !roomText.includes('RollingGo 酒店预订');
+    report.roomSurfaceRestored = /房型与价格规则|价格与取消规则/.test(roomText);
+  }
+  report.logPath = logPath;
+  report.ok = report.returnedToRoom && report.headerVisible && report.domainVisible &&
+    report.loginBoundaryReached && report.roomSurfaceRestored;
+  report.blocked = !report.ok && report.returnedToRoom && report.screenPath.length > 0;
+  if (!report.ok && report.reason === undefined) {
+    report.reason = 'booking Web surface or room restoration evidence was incomplete';
+  }
+  return report;
+}
+
+async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   let currentLayout = layout;
   let detailCenter = null;
+  let detailLabel = '';
+  const searchLayoutText = collectLayoutText(layout).join('\n');
+  const pendingSearchCardAbsent =
+    !/正在查询 RollingGo|正在等待 RollingGo/.test(searchLayoutText);
+  const rawSearchActionEvidence = hotelActionEvidenceFromLogs(queryLogs.join('\n'));
+  const searchActionEvidence = validateHotelSearchActionEvidence(rawSearchActionEvidence);
+  const unverifiedSystemActions = evaluateHotelSystemActionEvidence(
+    rawSearchActionEvidence,
+    {}
+  );
+  const detailClickLocator = hotelDetailClickLocator(rawSearchActionEvidence);
+  if (!detailClickLocator.ok) {
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'current hotel surface has no exact valid hotel.detail click locator',
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
+    };
+  }
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    detailCenter = findTextCenter(currentLayout, '查看房型');
+    for (const label of detailClickLocator.labels) {
+      detailCenter = findHotelDetailTextCenter(currentLayout, label);
+      if (detailCenter !== null) {
+        detailLabel = label;
+        break;
+      }
+    }
     if (detailCenter !== null) {
       break;
     }
@@ -1783,14 +2180,22 @@ async function verifyHotelDetailAction(layout, index, appPid) {
     currentLayout = dumpLayout(`query-${index + 1}-hotel-search-scroll-${attempt + 1}.json`);
   }
   if (detailCenter === null) {
-    return { ok: false, capability: 'hotel.detail', reason: '查看房型 button not found' };
+    return {
+      ok: false,
+      capability: 'hotel.detail',
+      reason: 'exact hotel.detail action click label not found in current layout',
+      actionEvidence: searchActionEvidence,
+      systemActions: unverifiedSystemActions
+    };
   }
 
   clearHilog();
   const detailLogs = await captureWhile(appPid, async () => {
     hdc(['shell', 'uitest', 'uiInput', 'click', String(detailCenter.x), String(detailCenter.y)]);
+    await sleep(1200);
   });
-  const detailLogText = detailLogs.join('\n');
+  const rawDetailLogText = detailLogs.join('\n');
+  const detailLogText = sanitizeExternalUrlLogs(rawDetailLogText);
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
   writeFileSync(detailLogPath, detailLogText + '\n');
   await sleep(700);
@@ -1808,7 +2213,8 @@ async function verifyHotelDetailAction(layout, index, appPid) {
       ok: false,
       capability: 'hotel.detail',
       reason: '价格与取消规则 button not found',
-      detailLogPath
+      detailLogPath,
+      systemActions: unverifiedSystemActions
     };
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(rateExpand.x), String(rateExpand.y)]);
@@ -1820,6 +2226,17 @@ async function verifyHotelDetailAction(layout, index, appPid) {
   const textPath = join(outDir, `query-${index + 1}-hotel-rate-expanded-layout-text.txt`);
   writeFileSync(textPath, text + '\n');
   const screenPath = captureScreen(`query-${index + 1}-hotel-rate-expanded-screen.png`);
+
+  const detailActionEvidence = hotelActionEvidenceFromLogs(rawDetailLogText);
+  const bookingAction = await verifyHotelBookingAction(
+    currentLayout,
+    index,
+    appPid,
+    detailActionEvidence
+  );
+  currentLayout = bookingAction.restoredLayout;
+  const bookingReport = { ...bookingAction };
+  delete bookingReport.restoredLayout;
 
   let backCenter = findTextCenter(currentLayout, '返回酒店结果');
   for (let attempt = 0; backCenter === null && attempt < 8; attempt += 1) {
@@ -1835,26 +2252,63 @@ async function verifyHotelDetailAction(layout, index, appPid) {
       reason: '返回酒店结果 button not found',
       detailLogPath,
       textPath,
-      screenPath
+      screenPath,
+      systemActions: unverifiedSystemActions
     };
   }
-  hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+  clearHilog();
+  const restoreLogs = await captureWhile(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(backCenter.x), String(backCenter.y)]);
+    await sleep(1200);
+  });
+  const restoreLogText = restoreLogs.join('\n');
   await sleep(700);
   const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
   const restoredText = collectLayoutText(restoredLayout).join('\n');
   const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
-  const detailRequested = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
+  const detailLifecycle = hotelDetailLifecycleFromLogs(detailLogText);
+  const detailRequested = detailLifecycle.requested ||
+    /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
     /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
-  const detailOk = /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
-  const restoredOk = /酒店结果/.test(restoredText) && /查看房型/.test(restoredText);
+  const detailOk = detailLifecycle.ok ||
+    /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
+  const restoredOk = /酒店结果/.test(restoredText);
+  const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
+  const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
+  const surfaceIdentity = validateHotelSurfaceIdentity(
+    searchActionEvidence.surfaceId,
+    typeof detailActionEvidence.surfaceId === 'string' ? detailActionEvidence.surfaceId : '',
+    restoredActionEvidence.surfaceId
+  );
+  const systemActions = await verifyHotelSystemActions(
+    restoredLayout,
+    index,
+    rawRestoredActionEvidence,
+    appPid
+  );
   return {
-    ok: detailRequested && detailOk && /房型与价格规则/.test(text) &&
-      /床型|餐食|取消政策/.test(text) && restoredOk,
+    ok: pendingSearchCardAbsent &&
+      detailRequested && detailOk && /房型与价格规则/.test(text) &&
+      /床型|餐食|取消政策/.test(text) && restoredOk &&
+      searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
+      bookingAction.ok && systemActions.ok,
     capability: 'hotel.detail',
+    detailLabel,
+    actionEvidence: searchActionEvidence,
+    navigation: searchActionEvidence.navigation,
+    booking: bookingAction.actionEvidence.booking,
+    bookingAction: bookingReport,
+    systemActions,
+    surfaceIdentity,
+    searchSurfaceId: surfaceIdentity.searchSurfaceId,
+    detailSurfaceId: surfaceIdentity.detailSurfaceId,
+    restoredSurfaceId: surfaceIdentity.restoredSurfaceId,
+    pendingSearchCardAbsent,
     detailRequested,
     detailOk,
+    detailLifecycle,
     restoredOk,
     detailLogPath,
     textPath,
@@ -2187,15 +2641,18 @@ async function runQuery(query, index, expectedTool) {
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
   });
+  const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
+  const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
-  writeFileSync(logPath, logs.join('\n') + '\n');
+  writeFileSync(logPath, safeLogText + '\n');
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
-  const summary = analyze(query, logs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  const summary = analyze(query, safeLogs, expectedTool, expectedToolId, expectedDiscoveredToolId);
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;
+  summary.hotelCapabilities = expectedCase.hotelCapabilities || [];
   summary.logPath = logPath;
   const layout = dumpLayout(`query-${index + 1}-final-layout.json`);
   const layoutTextValues = collectLayoutText(layout);
@@ -2324,8 +2781,12 @@ async function runQuery(query, index, expectedTool) {
     ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
     : { ok: true, skipped: true };
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
-    ? await verifyHotelDetailAction(evidenceLayout, index, appPid)
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs)
     : { ok: true, skipped: true };
+  summary.providerFailed = summary.providerFailed || summary.hotelDetailAction.bookingAction?.blocked === true;
+  summary.hotelSearchLifecycle = expectedCase.verifyHotelDetail === true
+    ? hotelToolLifecycleFromLogs(safeLogText)
+    : { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
     !evidenceText.includes(summary.expectedAbsentText) ||
@@ -2369,7 +2830,17 @@ async function runQuery(query, index, expectedTool) {
     !summary.syntheticFallback &&
     summary.layoutOk;
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
-  if (isSocialHubCase) {
+  if (expectedCase.verifyHotelDetail === true) {
+    summary.ok = summary.hotelSearchLifecycle.ok &&
+      summary.hotelSearchLifecycle.network200 &&
+      summary.htmlHomeSurfaceLoad.ok &&
+      !summary.htmlLoadError &&
+      !summary.syntheticFallback &&
+      !summary.providerFailed &&
+      expectedMisses.length === 0 &&
+      summary.layoutOk &&
+      summary.hotelDetailAction.ok;
+  } else if (isSocialHubCase) {
     const socialHubRecovered = socialHubVisibleOutput &&
       summary.htmlHomeSurfaceLoad.ok &&
       !summary.htmlLoadError &&
@@ -2420,7 +2891,7 @@ async function runQuery(query, index, expectedTool) {
 }
 
 async function waitForComposioAuthEvidence() {
-  const requiredMarkers = ['Composio 授权', '当前用户'];
+  const requiredMarkers = ['应用授权', '当前用户'];
   const authActionLabels = ['授权', '重新授权'];
   const authStatusLabels = [
     '待授权',
@@ -2437,6 +2908,31 @@ async function waitForComposioAuthEvidence() {
     'OAuth',
     'Composio ·'
   ];
+  const appNames = [
+    'Gmail',
+    'GitHub',
+    'Google Calendar',
+    'Google Drive',
+    'Google Docs',
+    'Slack',
+    'Notion',
+    'Linear',
+    'Asana',
+    'Trello',
+    'Outlook',
+    'Discord',
+    'LinkedIn',
+    'WhatsApp',
+    'Instagram',
+    'YouTube',
+    'X',
+    'Spotify',
+    'TikTok',
+    'Ticketmaster',
+    'HubSpot',
+    'Salesforce',
+    'Reddit'
+  ];
   let last = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const layout = dumpLayout(`composio-auth-page-${attempt + 1}.json`);
@@ -2452,11 +2948,15 @@ async function waitForComposioAuthEvidence() {
       markerHits: requiredMarkers.filter((marker) => text.includes(marker)),
       authActionHits: authActionLabels.filter((marker) => layoutTextValues.includes(marker)),
       authStatusHits: authStatusLabels.filter((marker) => layoutTextValues.includes(marker)),
-      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker))
+      toolkitHits: toolkitMarkers.filter((marker) => text.includes(marker)),
+      appNameHits: appNames.filter((marker) => layoutTextValues.includes(marker)),
+      authConfigNameLeaks: layoutTextValues.filter((value) => /^auth_config_/i.test(value))
     };
     if (last.markerHits.length === requiredMarkers.length &&
       last.authActionHits.length > 0 &&
-      last.authStatusHits.length > 0) {
+      last.authStatusHits.length > 0 &&
+      last.appNameHits.length > 0 &&
+      last.authConfigNameLeaks.length === 0) {
       return last;
     }
     await sleep(1000);
@@ -2482,11 +2982,15 @@ async function runComposioAuthSmoke() {
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(settings.x), String(settings.y)]);
   await sleep(1200);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    swipeResultsDown();
+    await sleep(300);
+  }
 
   const configLayout = dumpLayout('composio-auth-config-collapsed.json');
   const configText = collectLayoutText(configLayout).join('\n');
   writeFileSync(join(outDir, 'composio-auth-config-collapsed-text.txt'), configText + '\n');
-  if (!configText.includes('Composio 授权')) {
+  if (!configText.includes('管理授权')) {
     const expandAuth = findTextCenter(configLayout, '展开');
     if (expandAuth !== null) {
       hdc(['shell', 'uitest', 'uiInput', 'click', String(expandAuth.x), String(expandAuth.y)]);
@@ -2494,9 +2998,12 @@ async function runComposioAuthSmoke() {
     }
   }
 
-  const authButton = await findTextCenterWithScroll('Composio 授权', 'composio-auth-config-layout');
+  let authButton = findTextCenter(configLayout, '管理授权');
   if (authButton === null) {
-    throw new Error('Could not locate the Config page Composio 授权 button.');
+    authButton = await findTextCenterWithScroll('管理授权', 'composio-auth-config-layout');
+  }
+  if (authButton === null) {
+    throw new Error('Could not locate the Config page 管理授权 button.');
   }
   hdc(['shell', 'uitest', 'uiInput', 'click', String(authButton.x), String(authButton.y)]);
 
@@ -2504,15 +3011,83 @@ async function runComposioAuthSmoke() {
   if (evidence === null) {
     throw new Error('Could not capture Composio auth page layout evidence.');
   }
+  const externalAuthAppHits = [];
+  const externalAuthJumps = [];
+  const externalApps = [
+    {
+      name: 'QQ 邮箱',
+      url: 'https://wx.mail.qq.com/list/readtemplate?name=app_intro.html#/agreement/authorizationCode'
+    },
+    {
+      name: '瑞幸咖啡',
+      url: 'https://open01.luckincoffeecdn.com/'
+    },
+    {
+      name: '滴滴出行',
+      url: 'https://mcp.didichuxing.com'
+    }
+  ];
+  for (let index = 0; index < externalApps.length; index += 1) {
+    const app = externalApps[index];
+    const actionCenter = await findExternalAuthActionWithScroll(app.name, `external-auth-${index + 1}`, 10);
+    if (actionCenter !== null) {
+      externalAuthAppHits.push(app.name);
+      clearHilog();
+      hdc(['shell', 'uitest', 'uiInput', 'click', String(actionCenter.x), String(actionCenter.y)]);
+      await sleep(1500);
+      const logs = hdc(['shell', 'hilog', '-d']);
+      const windowDump = hdc(['shell', 'hidumper', '-s', 'WindowManagerService', '-a', '-a']);
+      const focusMatch = /Focus window:\s*(\d+)/.exec(windowDump);
+      const focusWindowId = focusMatch === null ? '' : focusMatch[1];
+      const focusWindowLine = focusWindowId.length === 0 ? '' :
+        (windowDump.split('\n').find((line) => line.includes(` ${focusWindowId} `)) || '');
+      const intentLogSeen = logs.includes(`[AIPhone][A2uiHomeOpenUrl] ok=true url=${app.url}`);
+      const browserFocused = /browser|quark/i.test(focusWindowLine);
+      const opened = intentLogSeen || browserFocused;
+      const logPath = join(outDir, `external-auth-${index + 1}-open.log`);
+      writeFileSync(logPath,
+        logs.split('\n').filter((line) => line.includes('[AIPhone][A2uiHomeOpenUrl]')).join('\n') +
+        `\nfocusWindow=${focusWindowLine}\n`);
+      externalAuthJumps.push({
+        app: app.name,
+        url: app.url,
+        opened,
+        intentLogSeen,
+        browserFocused,
+        logPath
+      });
+      hdc(['shell', 'aa', 'force-stop', 'com.huawei.hmos.browser']);
+      hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
+      await sleep(1200);
+    } else {
+      externalAuthJumps.push({
+        app: app.name,
+        url: app.url,
+        opened: false,
+        reason: 'authorization action not found'
+      });
+    }
+  }
   const screenPath = captureScreen('composio-auth-page-screen.png');
   const summary = {
     mode: 'composio-auth',
-    ok: evidence.markerHits.length === 2 && evidence.authActionHits.length > 0 && evidence.authStatusHits.length > 0,
-    requiredMarkers: ['Composio 授权', '当前用户'],
+    ok: evidence.markerHits.length === 2 &&
+      evidence.authActionHits.length > 0 &&
+      evidence.authStatusHits.length > 0 &&
+      evidence.appNameHits.length > 0 &&
+      externalAuthAppHits.length === 3 &&
+      externalAuthJumps.length === 3 &&
+      externalAuthJumps.every((jump) => jump.opened === true) &&
+      evidence.authConfigNameLeaks.length === 0,
+    requiredMarkers: ['应用授权', '当前用户'],
     markerHits: evidence.markerHits,
     authActionHits: evidence.authActionHits,
     authStatusHits: evidence.authStatusHits,
     toolkitHits: evidence.toolkitHits,
+    appNameHits: evidence.appNameHits,
+    externalAuthAppHits,
+    externalAuthJumps,
+    authConfigNameLeaks: evidence.authConfigNameLeaks,
     layoutPath: evidence.layoutPath,
     textPath: evidence.textPath,
     screenPath

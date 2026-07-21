@@ -1,4 +1,14 @@
-import { LocalModelSettings, PaymentAccount, StripeReceivingAccountCardData, defaultLocalModelSettings } from '@loop/agent-core';
+import {
+  A2uiAgentRunner,
+  LlmProvider,
+  LocalModelSettings,
+  OpenAiA2uiModel,
+  OpenAiCompatibleModel,
+  PaymentAccount,
+  StripeReceivingAccountCardData,
+  defaultLocalModelSettings
+} from '@loop/agent-core';
+import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
 import router from '@ohos.router';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -56,7 +66,6 @@ import {
   normalizeComposioUserId,
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
-  prepareXOAuthAuthorizationUrl,
   sendLocalSocialHubReply,
   shortComposioUserId
 } from '@loop/agent-core';
@@ -92,7 +101,15 @@ import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
+import { CheckoutWebKind } from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
+import {
+  HotelAgentRuntime,
+  HotelAgentRuntimeOptions,
+  HotelTurnOutcome,
+  HotelTurnStatus
+} from './agent/HotelAgentRuntime';
+import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
@@ -142,6 +159,100 @@ const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
+
+export function shouldRouteToHotelAgent(prompt: string): boolean {
+  const value = prompt.trim().toLowerCase();
+  if (value.length === 0 ||
+    /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
+    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email|meeting rooms?|classrooms?|newsrooms?)\b/.test(value) ||
+    /\brooms?\s+(to improve|to maneuver|to manoeuvre|for growth|for improvement|for maneuver|for manoeuvre|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value) ||
+    /\brooms?\s+in\s+(this|the)\s+(paragraph|document|email)\b/.test(value)) {
+    return false;
+  }
+  const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
+  if (hasChineseHotel &&
+    /(找|查|搜|订|预订|入住|想住|要住|推荐|附近|今晚|明晚|明天|后天|一晚|两晚|几晚)/.test(value)) {
+    return true;
+  }
+  if (/^[\u4e00-\u9fffA-Za-z0-9·]{1,12}(酒店|住宿|旅馆|宾馆|客房)$/.test(value)) {
+    return true;
+  }
+  const hasEnglishHotel =
+    /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
+  if (hasEnglishHotel &&
+    /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
+    return true;
+  }
+  const hasRoomTerm = /\b(guest\s+)?rooms?\b/.test(value);
+  const hasRoomBooking =
+    /\b(book|reserve)\s+(a|an|one|some)?\s*(guest\s+)?rooms?\b/.test(value);
+  const hasRoomLocation =
+    /\b(guest\s+)?rooms?\s+(in|near|at)\s+(?!this\b)(?!the\s+(paragraph|document|email)\b)[a-z0-9]/.test(value);
+  const hasRoomSearch = /\b(find|search|look|looking)\b/.test(value);
+  const hasLodgingContext =
+    /\b(tonight|tomorrow|nights?|guests?|check-?in|check-?out|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(value) ||
+    /\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b/.test(value);
+  if (hasRoomBooking ||
+    hasRoomLocation ||
+    (hasRoomTerm && hasRoomSearch && hasLodgingContext)) {
+    return true;
+  }
+  if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||
+    /^(hotel|hotels|lodging|accommodation)\s+(in|near|at)\s+[a-z]/.test(value) ||
+    /\bstay\s+(in|near|at)\s+[a-z]/.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+function fingerprintPart(value: string): string {
+  return value.length.toString() + ':' + value;
+}
+
+function opaqueSettingsDigest(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ (code + index), 0x5bd1e995);
+  }
+  return (first >>> 0).toString(16) + '-' + (second >>> 0).toString(16);
+}
+
+export function hotelModelSettingsFingerprint(settings: LocalModelSettings): string {
+  const material = fingerprintPart(settings.provider) + '|' +
+    fingerprintPart(settings.baseUrl) + '|' +
+    fingerprintPart(settings.apiKey) + '|' +
+    fingerprintPart(settings.model) + '|' +
+    fingerprintPart(settings.customParametersJson);
+  return 'hotel-settings-v1:' + opaqueSettingsDigest(material);
+}
+
+export function hotelTurnReadyMessage(status: HotelTurnStatus, title: string): string {
+  if (status === 'success') {
+    return title + ' 已返回真实酒店结果。';
+  }
+  if (status === 'partial') {
+    return title + ' 已返回部分酒店结果，请查看提示。';
+  }
+  if (status === 'empty') {
+    return title + ' 查询完成，未找到符合条件的酒店。';
+  }
+  return '';
+}
+
+class PageHotelUriOpener implements SystemUriOpener {
+  private readonly callback: (uri: string) => Promise<boolean>;
+
+  constructor(callback: (uri: string) => Promise<boolean>) {
+    this.callback = callback;
+  }
+
+  open(uri: string): Promise<boolean> {
+    return this.callback(uri);
+  }
+}
 
 type RideActionArgValue = Object | string | number | boolean | null | undefined;
 
@@ -445,8 +556,9 @@ struct Index {
   @State inputText: string = '';
   @State isVoiceListening: boolean = false;
   @State voiceInputMessage: string = '';
-  @State showPaymentCheckout: boolean = false;
-  @State paymentCheckoutUrl: string = '';
+  @State showCheckoutWeb: boolean = false;
+  @State checkoutWebKind: CheckoutWebKind = 'payment';
+  @State checkoutWebUrl: string = '';
   @State paymentCheckoutProvider: string = '';
   @State paymentCheckoutProviderSessionId: string = '';
   @State paymentCheckoutRecipient: string = '';
@@ -478,6 +590,8 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
+  private hotelAgentRuntime: HotelAgentRuntime | null = null;
+  private hotelAgentRuntimeFingerprint: string = '';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -568,6 +682,10 @@ struct Index {
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
     void this.requestLocationPermissionOnLaunch();
+  }
+
+  aboutToDisappear(): void {
+    this.disposeHotelRuntime();
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -1069,6 +1187,67 @@ struct Index {
     };
   }
 
+  private currentLocalDate(): string {
+    const now = new Date();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    return now.getFullYear().toString() + '-' + month + '-' + day;
+  }
+
+  private hotelRuntime(): HotelAgentRuntime {
+    const settings = this.getSettings();
+    const fingerprint = hotelModelSettingsFingerprint(settings);
+    if (this.hotelAgentRuntime !== null &&
+      this.hotelAgentRuntimeFingerprint === fingerprint) {
+      return this.hotelAgentRuntime;
+    }
+    this.disposeHotelRuntime();
+    const provider = new LlmProvider(
+      settings.provider,
+      settings.apiKey,
+      settings.baseUrl,
+      settings.model,
+      settings.customParametersJson
+    );
+    const model = new OpenAiCompatibleModel(provider);
+    const opener = new PageHotelUriOpener((uri: string): Promise<boolean> => {
+      if (uri.startsWith('petalmaps://')) {
+        return this.openExternalUrl(uri, ['petalmaps']);
+      }
+      if (!isRollingGoHotelBookingUrl(uri)) {
+        return Promise.resolve(false);
+      }
+      this.checkoutWebKind = 'hotel';
+      this.checkoutWebUrl = uri;
+      this.showCheckoutWeb = true;
+      aiLogInfo('[AIPhone][HotelBookingOpen] host=rollinggo.cn');
+      return Promise.resolve(true);
+    });
+    const options: HotelAgentRuntimeOptions = {
+      model: model,
+      currentLocalDate: (): string => this.currentLocalDate(),
+      opener: opener,
+      onSurface: (surface: A2uiSurfaceState): void => {
+        this.isAwaitingFirstSurface = false;
+        this.applySurface(surface);
+      }
+    };
+    if (provider.isConfigured()) {
+      options.uiLayoutPlanner = new A2uiAgentRunner(new OpenAiA2uiModel(provider));
+    }
+    this.hotelAgentRuntime = new HotelAgentRuntime(options);
+    this.hotelAgentRuntimeFingerprint = fingerprint;
+    return this.hotelAgentRuntime;
+  }
+
+  private disposeHotelRuntime(): void {
+    if (this.hotelAgentRuntime !== null) {
+      this.hotelAgentRuntime.dispose();
+      this.hotelAgentRuntime = null;
+    }
+    this.hotelAgentRuntimeFingerprint = '';
+  }
+
   private currentPanelState(): ConnectionPanelState {
     return {
       connectionStatus: this.connectionStatus,
@@ -1280,7 +1459,7 @@ struct Index {
     }
     const surface = this.surfaceSnapshot(this.luckinReturnSurface);
     this.luckinReturnSurface = null;
-    this.showPaymentCheckout = false;
+    this.showCheckoutWeb = false;
     this.forceApplySurface(surface, reason);
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: true,
@@ -1628,7 +1807,6 @@ struct Index {
         action.id === 'social_hub_draft_reply' ||
         action.id === 'social_hub_send_reply' ||
         action.id === 'social_hub_open_source' ||
-        action.id === 'x.authorize' ||
         action.id === 'social_hub_authorize');
   }
 
@@ -1637,6 +1815,7 @@ struct Index {
   }
 
   private resetCurrentSession(): void {
+    this.disposeHotelRuntime();
     this.showHistory = false;
     this.isBusy = false;
     this.isAwaitingFirstSurface = false;
@@ -1686,9 +1865,28 @@ struct Index {
     return model.dynamicToolConnect;
   }
 
-  private async openExternalUrl(url: string): Promise<void> {
+  private async openExternalUrl(
+    url: string,
+    allowedSchemes: string[] = ['https']
+  ): Promise<boolean> {
     if (url.length === 0) {
-      return;
+      return false;
+    }
+    const schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(url);
+    const scheme = schemeMatch === null ? 'unknown' : schemeMatch[1].toLowerCase();
+    const urlMeta = ' scheme=' + scheme + ' chars=' + url.length.toString();
+    if (allowedSchemes.indexOf(scheme) < 0) {
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: false,
+        status: 'error',
+        message: '无法打开不受信任的外部页面。',
+        requestDebug: this.lastModelRequest,
+        assistantDebug: this.lastModelOutput,
+        error: 'external URL scheme is not allowed'
+      }));
+      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false' + urlMeta +
+        ' code=SCHEME_NOT_ALLOWED');
+      return false;
     }
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -1696,7 +1894,8 @@ struct Index {
         action: 'ohos.want.action.viewData',
         uri: url
       });
-      aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true url=' + url);
+      aiLogInfo('[AIPhone][A2uiHomeOpenUrl] ok=true' + urlMeta);
+      return true;
     } catch (error) {
       const businessError = error as BusinessError;
       const message = '外部页面打开失败：' + businessError.message;
@@ -1708,7 +1907,8 @@ struct Index {
         assistantDebug: this.lastModelOutput,
         error: message
       }));
-      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false url=' + url + ' message=' + businessError.message);
+      aiLogError('[AIPhone][A2uiHomeOpenUrl] ok=false' + urlMeta + ' code=' + businessError.code.toString());
+      return false;
     }
   }
 
@@ -1754,6 +1954,32 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
+      const routeToHotel = actionId.length === 0 && shouldRouteToHotelAgent(trimmed);
+      if (!routeToHotel && this.hotelAgentRuntime !== null) {
+        this.hotelAgentRuntime.cancelActiveTurn('non_hotel_prompt');
+      }
+      if (routeToHotel) {
+        const hotelOutcome: HotelTurnOutcome = await this.hotelRuntime().submit(trimmed);
+        if (!hotelOutcome.ok) {
+          throw new Error(hotelOutcome.message.length > 0 ?
+            hotelOutcome.message : '酒店四 Agent 运行时未能完成当前查询。');
+        }
+        this.isAwaitingFirstSurface = false;
+        const readyMessage = hotelTurnReadyMessage(
+          hotelOutcome.status,
+          this.currentSurface.title
+        );
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: true,
+          status: 'ready',
+          message: readyMessage,
+          requestDebug: 'hotel-agent-runtime',
+          assistantDebug: this.currentSurface.title,
+          error: ''
+        }));
+        this.appendMessage('assistant', readyMessage);
+        return;
+      }
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
         modelPrompt,
@@ -2800,7 +3026,8 @@ struct Index {
 
   private rememberPaymentCheckout(action: A2uiAction, checkoutUrl: string): void {
     const payload = this.paymentCheckoutPayload(action);
-    this.paymentCheckoutUrl = checkoutUrl;
+    this.checkoutWebUrl = checkoutUrl;
+    this.checkoutWebKind = 'payment';
     this.paymentCheckoutProvider = this.actionText(payload.provider).trim().toLowerCase();
     this.paymentCheckoutProviderSessionId = this.actionText(payload.providerSessionId).trim();
     this.paymentCheckoutRecipient = this.actionText(payload.recipient).trim();
@@ -2826,7 +3053,7 @@ struct Index {
   }
 
   private async handlePaymentCheckoutReturn(url: string): Promise<void> {
-    this.showPaymentCheckout = false;
+    this.showCheckoutWeb = false;
     const lower = url.toLowerCase();
     if (lower.indexOf('/cancel') >= 0) {
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
@@ -3215,6 +3442,21 @@ struct Index {
       return;
     }
     if (action.id === 'hotel.search.restore') {
+      if (this.hotelAgentRuntime !== null) {
+        const restored = this.hotelAgentRuntime.restoreSearchSurface();
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: restored,
+          status: restored ? 'ready' : 'error',
+          message: restored ? '已返回酒店搜索结果。' : '酒店搜索结果已失效。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: restored ? '' : 'hotel search surface restore rejected'
+        }));
+        if (restored) {
+          this.hotelReturnSurface = null;
+        }
+        return;
+      }
       this.restoreHotelReturnSurface(action.prompt.length > 0 ? action.prompt : action.id);
       return;
     }
@@ -3272,7 +3514,8 @@ struct Index {
         return;
       }
       this.rememberPaymentCheckout(action, checkoutUrl);
-      this.showPaymentCheckout = true;
+      this.checkoutWebKind = 'payment';
+      this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
       return;
     }
@@ -3283,14 +3526,14 @@ struct Index {
         this.logHtmlHomeActionError(action, 'invalid_luckin_pay_url');
         return;
       }
-      aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl);
-      await this.openExternalUrl(payUrl);
+      aiLogInfo('[AIPhone][LuckinWechatPayOpen] chars=' + payUrl.length.toString());
+      await this.openExternalUrl(payUrl, ['https', 'weixin']);
       return;
     }
     if (action.id === 'luckin.demo.alipay.open') {
       const url = action.prompt.trim().length > 0 ? action.prompt.trim() : 'alipays://';
       aiLogInfo('[AIPhone][LuckinDemoAlipayOpen] chars=' + url.length.toString());
-      await this.openExternalUrl(url);
+      await this.openExternalUrl(url, ['alipays']);
       return;
     }
     if (action.id === 'luckin.demo.googlepay.open') {
@@ -3319,10 +3562,6 @@ struct Index {
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GMAIL_MCP_AUTH_SETUP_URL);
       return;
     }
-    if (action.id === 'x.authorize') {
-      await this.openExternalUrl(await prepareXOAuthAuthorizationUrl());
-      return;
-    }
     if (action.id === 'calendar.authorize') {
       const authorizeUrl = await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL);
       await this.openExternalUrl(authorizeUrl.length > 0 ? authorizeUrl : GOOGLE_OAUTH_SETUP_URL);
@@ -3349,7 +3588,10 @@ struct Index {
         this.logHtmlHomeActionError(action, 'missing_ride_app_link');
         return;
       }
-      await this.openExternalUrl(action.prompt);
+      await this.openExternalUrl(
+        action.prompt,
+        action.id === 'ride.open.didi' ? ['diditaxi'] : ['amapuri']
+      );
       return;
     }
     if (action.id === 'media.open.web') {
@@ -3546,6 +3788,31 @@ struct Index {
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
+    if (this.hotelAgentRuntime !== null &&
+      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
+      const runtime = this.hotelAgentRuntime;
+      const context = runtime.currentActionContext();
+      const document = this.currentHtmlHomeDocument();
+      if (context === null || !isHtmlHomeActionAllowed(document, action)) {
+        this.logHtmlHomeActionError(action, 'hotel_context_not_current');
+        return;
+      }
+      this.isBusy = true;
+      try {
+        const ok = await runtime.runAction(action, context, document);
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: ok,
+          status: ok ? 'ready' : 'error',
+          message: ok ? '酒店操作已处理。' : '酒店操作已被当前页面权限拒绝。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: ok ? '' : '酒店 action 与当前 surface/document 不匹配'
+        }));
+      } finally {
+        this.isBusy = false;
+      }
+      return;
+    }
     const directPaymentToolId = directPaymentToolIdForActionId(action.id);
     if (directPaymentToolId.length > 0) {
       await this.callToolById(
@@ -3570,16 +3837,6 @@ struct Index {
       await this.callToolById(
         action.id,
         action.prompt.length > 0 ? action.prompt : action.label,
-        action.id,
-        action.args === undefined ? null : action.args
-      );
-      return;
-    }
-    if (action.id === 'hotel.detail') {
-      this.rememberHotelReturnSurface();
-      await this.callToolById(
-        'hotel.detail',
-        action.prompt,
         action.id,
         action.args === undefined ? null : action.args
       );
@@ -3835,6 +4092,9 @@ struct Index {
         },
         onAuthorize: (item: ComposioAuthConfigItem) => {
           this.openComposioAuthLink(item);
+        },
+        onOpenExternalAuth: (url: string) => {
+          this.openExternalUrl(url);
         }
       })
     } else if (this.showConfigPage) {
@@ -3916,8 +4176,9 @@ struct Index {
         isVoiceListening: this.isVoiceListening,
         voiceInputMessage: this.voiceInputMessage,
         showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
-        showPaymentCheckout: this.showPaymentCheckout,
-        paymentCheckoutUrl: this.paymentCheckoutUrl,
+        showCheckoutWeb: this.showCheckoutWeb,
+        checkoutWebKind: this.checkoutWebKind,
+        checkoutWebUrl: this.checkoutWebUrl,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -3941,10 +4202,10 @@ struct Index {
         onStopVoiceInput: () => {
           this.stopVoiceInput();
         },
-        onClosePaymentCheckout: () => {
-          this.showPaymentCheckout = false;
+        onCloseCheckoutWeb: () => {
+          this.showCheckoutWeb = false;
         },
-        onPaymentCheckoutReturn: (url: string) => {
+        onCheckoutWebReturn: (url: string) => {
           this.handlePaymentCheckoutReturn(url);
         },
         onAction: (action: A2uiAction) => {

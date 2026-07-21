@@ -1,4 +1,28 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export { TimeTool } from './src/main/ets/agent/TimeTool';
+export * from './src/main/ets/agent/message/AgentMessage';
+export * from './src/main/ets/agent/message/DataResult';
+export { AgentMessageReader, LinkedMessageBus } from './src/main/ets/agent/message/LinkedMessageBus';
+export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
+export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';
+export * from './src/main/ets/agent/leader/LeaderTypes';
+export { DataAgent } from './src/main/ets/agent/data/DataAgent';
+export * from './src/main/ets/agent/data/DataAgentTypes';
+export { UiAgent } from './src/main/ets/agent/ui/UiAgent';
+export * from './src/main/ets/agent/ui/UiAgentTypes';
+export { ActionCatalog } from './src/main/ets/agent/action/ActionCatalog';
+export * from './src/main/ets/agent/action/ActionCatalogTypes';
+export * from './src/main/ets/agent/action/ActionOfferTypes';
+export * from './src/main/ets/agent/action/ActionPlanTypes';
+export {
+  JsonPointerResult,
+  JsonPointerSetResult,
+  resolveJsonPointer,
+  setJsonPointer
+} from './src/main/ets/agent/action/JsonPointer';
+export { ActionPlanRunner } from './src/main/ets/agent/action/ActionPlanRunner';
+export { ActionAgent } from './src/main/ets/agent/action/ActionAgent';
+export * from './src/main/ets/agent/action/ActionAgentTypes';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
@@ -9,7 +33,7 @@ export {
   createConfiguredLoopToolRegistry,
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
-export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
+export { ReActAgentRunner, AgentListener, ReActRunOptions, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
 export { LocalModel } from './src/main/ets/model/LocalModel';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
 export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
@@ -32,21 +56,22 @@ export * from './src/main/ets/composio/ComposioUserId';
 export { A2UI_VERSION, AGENUI_CATALOG_ID, buildCreateSurface, buildDeleteSurface, parseJsonl, extractJsonObjects, newSurfaceId } from './src/main/ets/a2ui/A2uiProtocol';
 export { A2uiComponentDef, CreateSurfaceBody, UpdateComponentsBody } from './src/main/ets/a2ui/A2uiTypes';
 export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';
-export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener } from './src/main/ets/a2ui/A2uiAgentRunner';
+export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener, UiLayoutPlanner } from './src/main/ets/a2ui/A2uiAgentRunner';
+export { mergeA2uiLayout } from './src/main/ets/a2ui/A2uiLayoutMerger';
+export { OpenAiA2uiModel } from './src/main/ets/a2ui/OpenAiA2uiModel';
 export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiModelFactory';
-export { LoopBackend, aiphoneToolDescriptionForModel, isExplicitLuckinOrderPrompt, parseLoopToolInputArgs } from './src/main/ets/aiphone/LoopBackend';
+export { LoopBackend, aiphoneToolDescriptionForModel, isExplicitLuckinOrderPrompt, isSurfaceDerivedHotelActionId, parseLoopToolInputArgs } from './src/main/ets/aiphone/LoopBackend';
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
 export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
 export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { AiphoneToolSurfaceCallback, aiphoneToolSurfaceCallback, ignoreSurface } from './src/main/ets/aiphone/AiphoneToolExecutor';
-export { aiphoneToolDefinitionCount, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
+export { aiphoneToolDefinitionCount, allToolDefinitions as allAiphoneToolDefinitions, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel } from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export { GMAIL_TOOL_IDS, allToolDefinitions, backendLabel, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
-export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, xOAuthConfigFromProvider, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
+export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from './src/main/ets/aiphone/runtime/GmailToolA2ui';
 export { AssetCredentialStore, CredentialStore, credentialRefFor } from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
 export { GmailOAuthConfig, GmailOAuthRedirectResult, GmailOAuthTokenSet, handleGmailOAuthRedirect } from './src/main/ets/aiphone/runtime/GmailOAuthClient';
-export { XOAuthConfig, XOAuthTokenSet, handleXOAuthRedirect } from './src/main/ets/aiphone/runtime/XOAuthClient';
 export * from './src/main/ets/aiphone/runtime/A2uiData';
 export * from './src/main/ets/aiphone/runtime/A2uiParser';
 export * from './src/main/ets/aiphone/runtime/A2uiPartialUpdatePlanner';
@@ -68,6 +93,9 @@ export * from './src/main/ets/aiphone/runtime/DynamicToolSamples';
 export * from './src/main/ets/aiphone/runtime/DynamicToolTypes';
 export * from './src/main/ets/aiphone/runtime/FoodNavigation';
 export * from './src/main/ets/aiphone/runtime/GenericMcpClient';
+export * from './src/main/ets/aiphone/runtime/HotelDataResult';
+export * from './src/main/ets/aiphone/runtime/HotelActions';
+export * from './src/main/ets/aiphone/runtime/HotelSystemIntent';
 export * from './src/main/ets/aiphone/runtime/HotelToolA2ui';
 export * from './src/main/ets/aiphone/runtime/HotelToolTypes';
 export * from './src/main/ets/aiphone/runtime/GmailApiClient';
@@ -92,7 +120,6 @@ export * from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
 export * from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export * from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export * from './src/main/ets/aiphone/runtime/Utf8Bytes';
-export * from './src/main/ets/aiphone/runtime/XOAuthClient';
 export * from './src/main/ets/aiphone/runtime/YouTubeApiClient';
 export * from './src/main/ets/aiphone/payment/PaymentCore';
 export * from './src/main/ets/aiphone/payment/PaymentA2ui';

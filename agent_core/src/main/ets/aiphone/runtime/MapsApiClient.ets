@@ -297,7 +297,13 @@ export function mapsTextSearchResultsFromPayload(rawJson: string, query: string)
   return results;
 }
 
-async function requestJson(method: http.RequestMethod, url: string, apiKey: string, fieldMask: string, body: Object | null): Promise<Object> {
+async function requestJson(
+  method: http.RequestMethod,
+  url: string,
+  apiKey: string,
+  fieldMask: string,
+  body: Object | null
+): Promise<Object> {
   const request = http.createHttp();
   try {
     const headers: Record<string, string> = {

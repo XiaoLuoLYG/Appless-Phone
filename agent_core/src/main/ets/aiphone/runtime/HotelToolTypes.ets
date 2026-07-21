@@ -182,8 +182,8 @@ export interface HotelSearchItem {
   brand: string;
   address: string;
   destinationId: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   distanceInMeters: number;
   starRating: number;
   price: HotelPrice;
@@ -528,8 +528,8 @@ function normalizeHotelItem(item: RollingGoHotelSearchItemRecord): HotelSearchIt
     brand: textOf(item.brand),
     address: textOf(item.address),
     destinationId: textOf(item.destinationId),
-    latitude: numberOf(item.latitude),
-    longitude: numberOf(item.longitude),
+    latitude: optionalNumberOf(item.latitude),
+    longitude: optionalNumberOf(item.longitude),
     distanceInMeters: numberOf(item.distanceInMeters),
     starRating: numberOf(item.starRating),
     price: isRecordValue(item.price) ? normalizeHotelPrice(item.price as RollingGoHotelPriceRecord) :

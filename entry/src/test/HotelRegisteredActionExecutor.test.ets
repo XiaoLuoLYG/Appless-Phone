@@ -1,0 +1,366 @@
+import { describe, it, expect } from '@ohos/hypium';
+import {
+  ActionArgsValidator,
+  ActionCatalog,
+  ActionExecutionContext,
+  ActionExecutionResult,
+  ActionValidationResult,
+  ClientActionAuthorizer,
+  HotelBookingOpenArgs,
+  HotelNavigateArgs,
+  SurfaceActionAuthorizer,
+  ToolDefinition,
+  ToolDefinitionLookup,
+  validateHotelActionArgs
+} from '@loop/agent-core';
+import {
+  HotelActionIdFactory,
+  HotelRegisteredActionExecutor,
+  SystemUriOpener
+} from '../main/ets/pages/A2uiHome/agent/HotelRegisteredActionExecutor';
+
+function object(raw: string): Object {
+  return JSON.parse(raw) as Object;
+}
+
+function definition(toolId: string): ToolDefinition {
+  return {
+    toolId: toolId,
+    domain: 'hotel',
+    intent: toolId,
+    riskLevel: toolId === 'hotel.booking.open' ? 'draft' : 'read',
+    backendPriority: [toolId === 'hotel.detail' ? 'local_adapter' : (toolId === 'hotel.booking.open' ? 'web_session' : 'system_intent')],
+    authModes: [toolId === 'hotel.detail' ? 'provider_key' : (toolId === 'hotel.booking.open' ? 'web_session' : 'system')],
+    inputSchema: toolId === 'hotel.booking.open' ? 'hotelBookingOpenRequest' : toolId + 'Request',
+    outputSchema: toolId === 'hotel.detail' ? 'hotelRatePlans' : (toolId === 'hotel.booking.open' ? 'webSessionOpenResult' : 'systemIntentResult'),
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  };
+}
+
+class HotelDefinitions implements ToolDefinitionLookup {
+  find(toolId: string): ToolDefinition | null {
+    if (toolId === 'hotel.search') {
+      const source = definition(toolId);
+      source.actions = ['hotel.detail', 'hotel.navigate'];
+      return source;
+    }
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.booking.open') {
+      const source = definition(toolId);
+      if (toolId === 'hotel.detail') {
+        source.actions = ['hotel.booking.open'];
+      }
+      return source;
+    }
+    return null;
+  }
+}
+
+class ExactSurface implements SurfaceActionAuthorizer {
+  private actionId: string;
+  private serializedArgs: string;
+
+  constructor(actionId: string, args: Object) {
+    this.actionId = actionId;
+    this.serializedArgs = JSON.stringify(args);
+  }
+
+  allows(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    args: Object
+  ): boolean {
+    return conversationId === 'conversation-1' &&
+      turnId === 'turn-1' &&
+      surfaceId === 'surface-1' &&
+      actionId === this.actionId &&
+      JSON.stringify(args) === this.serializedArgs;
+  }
+}
+
+class NoClientAction implements ClientActionAuthorizer {
+  allows(_actionId: string, _args: Object): boolean {
+    return false;
+  }
+}
+
+class HotelArgsValidator implements ActionArgsValidator {
+  validate(actionId: string, args: Object): ActionValidationResult {
+    return validateHotelActionArgs(actionId, args);
+  }
+}
+
+class FakeUriOpener implements SystemUriOpener {
+  opened: boolean = true;
+  uris: string[] = [];
+
+  async open(uri: string): Promise<boolean> {
+    this.uris.push(uri);
+    return this.opened;
+  }
+}
+
+class RuntimeValueUriOpener implements SystemUriOpener {
+  rawValue: string;
+  calls: number = 0;
+
+  constructor(rawValue: string) {
+    this.rawValue = rawValue;
+  }
+
+  async open(_uri: string): Promise<boolean> {
+    this.calls += 1;
+    return JSON.parse(this.rawValue) as boolean;
+  }
+}
+
+class RejectingUriOpener implements SystemUriOpener {
+  calls: number = 0;
+
+  async open(_uri: string): Promise<boolean> {
+    this.calls += 1;
+    throw new Error('system rejected URI');
+  }
+}
+
+class DeterministicIds implements HotelActionIdFactory {
+  next: number = 0;
+
+  nextId(prefix: string): string {
+    this.next += 1;
+    return prefix + '-' + this.next.toString();
+  }
+}
+
+function catalog(actionId: string, args: Object): ActionCatalog {
+  return new ActionCatalog(
+    new HotelDefinitions(),
+    new ExactSurface(actionId, args),
+    new NoClientAction(),
+    new HotelArgsValidator()
+  );
+}
+
+function context(sourceToolId: string = 'hotel.search', isSurfaceEntry?: boolean): ActionExecutionContext {
+  return {
+    conversationId: 'conversation-1',
+    turnId: 'turn-1',
+    surfaceId: 'surface-1',
+    sourceToolId: sourceToolId,
+    planId: 'plan-1',
+    runId: 'run-1',
+    stepId: 'step-1',
+    isSurfaceEntry: isSurfaceEntry
+  };
+}
+
+function navigateArgs(): HotelNavigateArgs {
+  return {
+    hotelId: 47675,
+    name: '深圳测试酒店',
+    address: '深圳市南山区科技南路 88 号',
+    latitude: 22.5431,
+    longitude: 114.0579
+  };
+}
+
+function bookingArgs(): HotelBookingOpenArgs {
+  return {
+    hotelId: 47675,
+    bookingUrl: 'https://rollinggo.cn/pages/hotel/detail/index?id=47675&' +
+      'checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0'
+  };
+}
+
+async function executeTampered(
+  expected: Object,
+  actionId: string,
+  tampered: Object,
+  opener: FakeUriOpener
+): Promise<ActionExecutionResult> {
+  const executor = new HotelRegisteredActionExecutor(
+    catalog(actionId, expected),
+    opener,
+    new DeterministicIds()
+  );
+  return executor.execute(actionId, tampered, actionId === 'hotel.booking.open' ? context('hotel.detail') : context());
+}
+
+export default function hotelRegisteredActionExecutorTest() {
+  describe('hotelRegisteredActionExecutor', () => {
+    it('opens one exact Petal Maps URI only after current catalog validation', 0, async () => {
+      const args = navigateArgs();
+      const opener = new FakeUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.navigate', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.navigate', args, context());
+
+      expect(result.status).assertEqual('success');
+      expect(opener.uris.length).assertEqual(1);
+      expect(opener.uris[0]).assertEqual(
+        'petalmaps://poidetail?center=22.5431,114.0579&z=16&marker=22.5431,114.0579&' +
+        'name=%E6%B7%B1%E5%9C%B3%E6%B5%8B%E8%AF%95%E9%85%92%E5%BA%97&' +
+        'utm_source=com.example.aiphonedemo'
+      );
+    });
+
+    it('opens the registered RollingGo booking URL once', 0, async () => {
+      const args = bookingArgs();
+      const opener = new FakeUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.booking.open', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.booking.open', args, context('hotel.detail'));
+      const serialized = JSON.stringify(result);
+
+      expect(result.status).assertEqual('success');
+      expect(opener.uris.join(',')).assertEqual(args.bookingUrl);
+      expect(serialized.indexOf('RollingGo booking opened')).assertLarger(-1);
+    });
+
+    it('allows a registered booking action after a prior composite step', 0, async () => {
+      const args = bookingArgs();
+      const opener = new FakeUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.booking.open', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute(
+        'hotel.booking.open',
+        args,
+        context('hotel.search', false)
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(opener.uris.join(',')).assertEqual(args.bookingUrl);
+    });
+
+    it('rejects tampered booking URL and hotel ID before opening', 0, async () => {
+      const opener = new FakeUriOpener();
+      const booking = bookingArgs();
+      const tamperedUrl = bookingArgs();
+      tamperedUrl.bookingUrl = tamperedUrl.bookingUrl.replace('rollinggo.cn', 'evil.example');
+      const tamperedHotel = bookingArgs();
+      tamperedHotel.hotelId = 99999;
+      const navigate = navigateArgs();
+      const tamperedCoordinate = navigateArgs();
+      tamperedCoordinate.latitude = 22.6;
+      const tamperedNavigateHotel = navigateArgs();
+      tamperedNavigateHotel.hotelId = 99999;
+
+      expect((await executeTampered(booking, 'hotel.booking.open', tamperedUrl, opener)).status)
+        .assertEqual('error');
+      expect((await executeTampered(booking, 'hotel.booking.open', tamperedHotel, opener)).status)
+        .assertEqual('error');
+      expect((await executeTampered(navigate, 'hotel.navigate', tamperedCoordinate, opener)).status)
+        .assertEqual('error');
+      expect((await executeTampered(navigate, 'hotel.navigate', tamperedNavigateHotel, opener)).status)
+        .assertEqual('error');
+      expect(opener.uris.length).assertEqual(0);
+    });
+
+    it('returns one paired typed detail follow-up and preserves exact query args', 0, async () => {
+      const args = object(
+        '{"hotelId":47675,"checkInDate":"2026-08-15","checkOutDate":"2026-08-17",' +
+        '"countryCode":"CN","currency":"CNY","adultCount":2,"childCount":1,' +
+        '"childAgeDetails":[8],"roomCount":1}'
+      );
+      const opener = new FakeUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.detail', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.detail', args, context());
+      const serialized = JSON.stringify(result);
+
+      expect(result.status).assertEqual('success');
+      expect(opener.uris.length).assertEqual(0);
+      expect(serialized.indexOf('"taskId":"hotel-detail-data-1"')).assertLarger(-1);
+      expect(serialized.indexOf('"taskId":"hotel-detail-ui-2"')).assertLarger(-1);
+      expect(serialized.indexOf('"dataTaskId":"hotel-detail-data-1"')).assertLarger(-1);
+      expect(serialized.indexOf('"toolId":"hotel.detail"')).assertLarger(-1);
+      expect(serialized.indexOf('"outputSchema":"hotelRatePlans"')).assertLarger(-1);
+      expect(serialized.indexOf(JSON.stringify(args))).assertLarger(-1);
+      expect(serialized.indexOf('turnId')).assertEqual(-1);
+    });
+
+    it('rejects unregistered booking without opening a URI', 0, async () => {
+      const args = object('{"hotelId":47675,"ratePlanId":"real-rate"}');
+      const opener = new FakeUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.book', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.book', args, context());
+
+      expect(result.status).assertEqual('error');
+      expect(opener.uris.length).assertEqual(0);
+    });
+
+    it('returns an error when the system rejects the URI', 0, async () => {
+      const args = navigateArgs();
+      const opener = new FakeUriOpener();
+      opener.opened = false;
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.navigate', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.navigate', args, context());
+
+      expect(result.status).assertEqual('error');
+      expect(opener.uris.length).assertEqual(1);
+      expect(JSON.stringify(result).indexOf('OPEN_FAILED')).assertLarger(-1);
+    });
+
+    it('accepts only the exact boolean true from the runtime opener', 0, async () => {
+      const args = navigateArgs();
+      const values: string[] = ['"true"', '1', '{}'];
+      for (let index = 0; index < values.length; index++) {
+        const opener = new RuntimeValueUriOpener(values[index]);
+        const executor = new HotelRegisteredActionExecutor(
+          catalog('hotel.navigate', args),
+          opener,
+          new DeterministicIds()
+        );
+
+        const result = await executor.execute('hotel.navigate', args, context());
+
+        expect(result.status).assertEqual('error');
+        expect(opener.calls).assertEqual(1);
+      }
+    });
+
+    it('contains a rejected opener promise as one typed error', 0, async () => {
+      const args = navigateArgs();
+      const opener = new RejectingUriOpener();
+      const executor = new HotelRegisteredActionExecutor(
+        catalog('hotel.navigate', args),
+        opener,
+        new DeterministicIds()
+      );
+
+      const result = await executor.execute('hotel.navigate', args, context());
+
+      expect(result.status).assertEqual('error');
+      expect(opener.calls).assertEqual(1);
+      expect(JSON.stringify(result).indexOf('OPEN_FAILED')).assertLarger(-1);
+    });
+  });
+}

@@ -1,4 +1,4 @@
-import { HtmlHomeDocument } from './HtmlHomeTypes';
+import { HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
 
 type HtmlHotelTextValue = Object | string | number | boolean | null | undefined;
 
@@ -156,6 +156,19 @@ button:active { transform: scale(0.98); }
   font-size: 11px;
   font-weight: 760;
 }
+.hotel-booking-panel {
+  margin-top: 14px;
+  border: 1px solid rgba(153, 95, 76, 0.2);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 250, 244, 0.82);
+}
+.hotel-booking-note {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .hotel-board-head {
   display: flex;
   align-items: baseline;
@@ -252,10 +265,16 @@ button:active { transform: scale(0.98); }
 .hotel-search-footer {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: auto;
   padding-top: 12px;
+}
+.hotel-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
 }
 .hotel-price { min-width: 0; }
 .hotel-price-value {
@@ -284,6 +303,11 @@ button:active { transform: scale(0.98); }
   font-size: 11px;
   font-weight: 760;
   transition: transform 140ms var(--ease-out), background-color 180ms ease;
+}
+.hotel-card-cta-secondary {
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
 }
 .hotel-room-card {
   border-radius: 17px;
@@ -474,14 +498,7 @@ const HOTEL_HOME_JS: string = `
     if (isBusy || !action) { return; }
     try {
       if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
-        window.AIPhoneHome.postAction(JSON.stringify({
-          id: text(action.id),
-          label: text(action.label || action.id),
-          prompt: text(action.prompt),
-          variant: text(action.variant),
-          kind: text(action.kind),
-          args: action.args && typeof action.args === 'object' ? action.args : null
-        }));
+        window.AIPhoneHome.postAction(JSON.stringify(action));
       }
     } catch (error) {}
   }
@@ -492,6 +509,99 @@ const HOTEL_HOME_JS: string = `
     }
     return null;
   }
+  function objectArgs(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+  function positiveHotelId(args) {
+    return Number.isInteger(args.hotelId) && args.hotelId > 0;
+  }
+  function bookingEvidence(action) {
+    var argsObject = objectArgs(action && action.args);
+    var args = argsObject ? action.args : {};
+    var url = typeof args.bookingUrl === 'string' ? args.bookingUrl.trim() : '';
+    var hostValid = /^https:\\/\\/rollinggo\\.cn\\//.test(url);
+    var pathValid = /^https:\\/\\/rollinggo\\.cn\\/pages\\/hotel\\/detail\\/index\\?/.test(url);
+    var values = {};
+    var query = url.indexOf('?') >= 0 ? url.substring(url.indexOf('?') + 1).split('#')[0] : '';
+    query.split('&').forEach(function (pair) {
+      var equals = pair.indexOf('=');
+      if (equals > 0) {
+        try {
+          var key = decodeURIComponent(pair.substring(0, equals));
+          if (values[key] === undefined) {
+            values[key] = decodeURIComponent(pair.substring(equals + 1));
+          }
+        } catch (error) {
+          values['__invalid__'] = 'true';
+        }
+      }
+    });
+    var datesValid = /^\\d{4}-\\d{2}-\\d{2}$/.test(text(values.checkInDate)) &&
+      /^\\d{4}-\\d{2}-\\d{2}$/.test(text(values.checkOutDate)) &&
+      text(values.checkOutDate) > text(values.checkInDate);
+    var occupancyValid = /^\\d+$/.test(text(values.roomCount)) && Number(values.roomCount) > 0 &&
+      /^\\d+$/.test(text(values.adultCount)) && Number(values.adultCount) > 0 &&
+      /^\\d+$/.test(text(values.childCount));
+    var idMatches = positiveHotelId(args) && text(values.id) === String(args.hotelId) &&
+      values.__invalid__ === undefined;
+    return {
+      actionId: 'hotel.booking.open',
+      argsObject: argsObject,
+      hotelIdPositive: positiveHotelId(args),
+      hostValid: hostValid,
+      pathValid: pathValid,
+      hotelIdMatches: idMatches,
+      datesValid: datesValid,
+      occupancyValid: occupancyValid,
+      argsValid: argsObject && hostValid && pathValid && idMatches && datesValid && occupancyValid
+    };
+  }
+  function sanitizeHotelAction(action) {
+    var actionId = text(action && action.id);
+    var argsObject = objectArgs(action && action.args);
+    var args = argsObject ? action.args : {};
+    var hotelIdPositive = argsObject && positiveHotelId(args);
+    var evidence = {
+      actionId: actionId,
+      argsObject: argsObject,
+      hotelIdPositive: hotelIdPositive,
+      argsValid: false
+    };
+    if (actionId === 'hotel.navigate') {
+      evidence.latitudeValid = Number.isFinite(args.latitude) && args.latitude >= -90 && args.latitude <= 90;
+      evidence.longitudeValid = Number.isFinite(args.longitude) && args.longitude >= -180 && args.longitude <= 180;
+      evidence.coordinatesValid = evidence.latitudeValid && evidence.longitudeValid;
+      evidence.argsValid = hotelIdPositive && evidence.coordinatesValid;
+    } else if (actionId === 'hotel.booking.open') {
+      return bookingEvidence(action);
+    } else if (actionId === 'hotel.detail') {
+      evidence.clickLabel = typeof action.label === 'string' ? action.label.trim() : '';
+      evidence.argsValid = hotelIdPositive;
+    }
+    return evidence;
+  }
+  window.collectHotelSmokeEvidence = function () {
+    var byActionId = {};
+    list(data.blocks).forEach(function (block) {
+      list(block && block.actions).forEach(function (action) {
+        var actionId = text(action && action.id);
+        if (/^hotel\\.(detail|navigate|booking\\.open)$/.test(actionId)) {
+          var sanitized = sanitizeHotelAction(action);
+          var current = byActionId[actionId];
+          if (!current || (current.argsValid && !sanitized.argsValid)) {
+            byActionId[actionId] = sanitized;
+          }
+        }
+      });
+    });
+    var evidence = ['hotel.detail', 'hotel.navigate', 'hotel.booking.open']
+      .map(function (actionId) { return byActionId[actionId]; })
+      .filter(function (action) { return !!action; });
+    return JSON.stringify({
+      surfaceId: text(data.surfaceId),
+      actions: evidence
+    });
+  };
   function addTag(parent, value) {
     var label = text(value).trim();
     if (label.length > 0) { add(parent, 'span', 'hotel-tag', label); }
@@ -518,6 +628,8 @@ const HOTEL_HOME_JS: string = `
     return host;
   }
   function renderSearchCard(parent, block) {
+    var detailAction = actionFor(block, 'hotel.detail');
+    var navigateAction = actionFor(block, 'hotel.navigate');
     var card = add(parent, 'article', 'hotel-search-card');
     var imageUrl = safeImageUrl(rowValue(block, ['酒店图片']));
     if (imageUrl.length > 0) {
@@ -543,14 +655,21 @@ const HOTEL_HOME_JS: string = `
     if (tags.childNodes.length === 0) { tags.remove(); }
     var footer = add(body, 'div', 'hotel-search-footer');
     addPrice(footer, rowValue(block, ['参考价']), rowValue(block, ['价格说明']) || '参考价');
-    var detailAction = actionFor(block, 'hotel.detail');
+    var actionRow = add(body, 'div', 'hotel-action-row');
     if (detailAction) {
-      var button = add(footer, 'button', 'hotel-card-cta', '查看房型 →');
+      var button = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-primary', detailAction.label);
       button.type = 'button';
       button.disabled = isBusy;
-      button.setAttribute('aria-label', '查看房型：' + text(block && block.title));
+      button.setAttribute('aria-label', text(detailAction.label) + '：' + text(block && block.title));
       button.addEventListener('click', function () { postAction(detailAction); });
     }
+    if (navigateAction) {
+      var navigateButton = add(actionRow, 'button', 'hotel-card-cta hotel-card-cta-secondary', navigateAction.label);
+      navigateButton.type = 'button';
+      navigateButton.disabled = isBusy;
+      navigateButton.addEventListener('click', function () { postAction(navigateAction); });
+    }
+    if (actionRow.childNodes.length === 0) { actionRow.remove(); }
   }
   function addFact(parent, label, value) {
     if (text(value).length === 0) { return; }
@@ -606,9 +725,15 @@ const HOTEL_HOME_JS: string = `
     setExpanded(card, details, toggle, false);
   }
 
-  var blocks = list(data.blocks);
-  var firstTool = blocks.length > 0 ? metricValue(blocks[0], ['toolName']) : '';
-  var isDetail = firstTool === 'hotel.detail';
+  var allBlocks = list(data.blocks);
+  var detailBlocks = allBlocks.filter(function (block) {
+    return metricValue(block, ['toolName']) === 'hotel.detail';
+  });
+  var searchBlocks = allBlocks.filter(function (block) {
+    return metricValue(block, ['toolName']) === 'hotel.search';
+  });
+  var isDetail = detailBlocks.length > 0;
+  var blocks = isDetail ? detailBlocks : searchBlocks;
   var shell = add(app, 'main', 'hotel-shell');
   var hero = add(shell, 'header', isDetail ? 'hotel-hero is-detail' : 'hotel-hero');
   add(hero, 'div', 'hotel-hero-media');
@@ -633,7 +758,18 @@ const HOTEL_HOME_JS: string = `
     if (guests.length > 0) { add(context, 'span', 'hotel-context-item', guests); }
     if (context.childNodes.length === 0) { context.remove(); }
   }
-  add(heroContent, 'div', 'hotel-provider-line', 'RollingGo 实时查询');
+  if (isDetail && blocks.length > 0) {
+    var bookingAction = actionFor(blocks[0], 'hotel.booking.open');
+    if (bookingAction && bookingEvidence(bookingAction).argsValid) {
+      var bookingPanel = add(heroContent, 'div', 'hotel-booking-panel');
+      add(bookingPanel, 'p', 'hotel-booking-note', '房型与价格由 RollingGo 实时提供，最终房型与价格以预订页为准。');
+      var bookingButton = add(bookingPanel, 'button', 'hotel-card-cta hotel-card-cta-primary hotel-booking-cta', bookingAction.label);
+      bookingButton.type = 'button';
+      bookingButton.disabled = isBusy;
+      bookingButton.addEventListener('click', function () { postAction(bookingAction); });
+    }
+  }
+  add(heroContent, 'div', 'hotel-provider-line', isDetail ? 'RollingGo 实时房型与价格' : 'RollingGo 实时查询');
 
   var boardHead = add(shell, 'div', 'hotel-board-head');
   add(boardHead, 'h2', '', isDetail ? '房型与价格规则' : '酒店结果');
@@ -656,6 +792,7 @@ export function shouldRenderHotelHomeDocument(document: HtmlHomeDocument): boole
 export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
   const renderDocument: HtmlHotelHomeDocumentWithBusy = {
     version: document.version,
+    surfaceId: document.surfaceId === undefined ? '' : document.surfaceId,
     source: document.source,
     kind: document.kind,
     title: document.title,
@@ -663,7 +800,7 @@ export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: bool
     chips: document.chips,
     metrics: document.metrics,
     timeline: document.timeline,
-    blocks: document.blocks,
+    blocks: hotelResultBlocks(document.blocks),
     actions: document.actions,
     history: [],
     persona: document.persona,
@@ -688,6 +825,19 @@ export function renderHotelHomeDocument(document: HtmlHomeDocument, isBusy: bool
 <script>${HOTEL_HOME_JS}</script>
 </body>
 </html>`;
+}
+
+function hotelResultBlocks(blocks: HtmlHomeBlock[]): HtmlHomeBlock[] {
+  return blocks.filter((block: HtmlHomeBlock): boolean => {
+    for (let index = 0; index < block.metrics.length; index++) {
+      const metric = block.metrics[index];
+      if (metric.label === 'toolName' &&
+        (metric.value === 'hotel.search' || metric.value === 'hotel.detail')) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 function escapeScriptJson(json: string): string {
