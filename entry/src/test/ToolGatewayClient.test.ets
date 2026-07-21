@@ -2159,6 +2159,71 @@ export default function toolGatewayClientTest() {
       expect(successfulEmptyWithFailure.error === undefined).assertTrue();
     });
 
+    it('classifies the exact Composio Outlook disconnected-account message as auth required', 0, () => {
+      const disconnected: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook',
+        toolName: 'outlook.mail.search',
+        title: 'Composio Outlook discovery failed',
+        status: 'error',
+        summary: 'Composio 用户 aiphone-luoyige 没有 ACTIVE connected account',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [disconnected] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(result.error?.retryable).assertFalse();
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('normalizes case and whitespace only around the exact disconnected-account phrase', 0, () => {
+      const disconnected: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail discovery failed',
+        status: 'error',
+        summary: 'HTTP 400: NO\n  ACTIVE\tCONNECTION   FOUND for toolkit gmail',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [disconnected] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(result.error?.retryable).assertFalse();
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('keeps a disconnected-message lookalike transport failure as provider evidence', 0, () => {
+      const providerFailure: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook',
+        toolName: 'outlook.mail.search',
+        title: 'Outlook provider failed',
+        status: 'error',
+        summary: 'Provider error: no active connection candidates found; HTTP 503 transport timeout',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'execution'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [providerFailure] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(result.error?.retryable).assertTrue();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('Composio Outlook');
+      expect(result.sources[0].operation).assertEqual('outlook.mail.search');
+    });
+
     it('extracts aggregate mail keyword when model timeout falls back without args', 0, () => {
       const parsed = mailSearchArgs('聚合搜索 Gmail 和 QQ 邮箱里关键词 loopy 的邮件', null);
 
@@ -2508,6 +2573,34 @@ export default function toolGatewayClientTest() {
       } finally {
         configureGmailComposioResultForTests(null);
         configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('classifies the exact Composio Gmail no-active-connection discovery message as auth required', 0, async () => {
+      const emptyStore = new MemoryCredentialStore();
+      configureGmailCredentialStoreForTests(emptyStore);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail discovery failed',
+        status: 'error',
+        summary: 'HTTP 400: no active connection found for toolkit gmail',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+        expect(result.error?.retryable).assertFalse();
+        expect(result.sources.length).assertEqual(0);
+      } finally {
+        configureGmailComposioResultForTests(null);
         configureGmailCredentialStoreForTests(null);
       }
     });

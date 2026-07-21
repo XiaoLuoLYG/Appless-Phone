@@ -5667,11 +5667,12 @@ function remainingReadText(result: DynamicGenericToolResult): string {
 }
 
 function remainingReadAuthFailure(result: DynamicGenericToolResult): boolean {
-  const text = remainingReadText(result);
+  const text = remainingReadText(result).replace(/\s+/g, ' ').trim();
   return result.status === 'needs_auth' ||
     text.indexOf('oauth') >= 0 || text.indexOf('未授权') >= 0 || text.indexOf('未配置') >= 0 ||
     text.indexOf('disconnected') >= 0 || text.indexOf('access token') >= 0 ||
-    text.indexOf('mcp key') >= 0 || text.indexOf('_token') >= 0;
+    text.indexOf('mcp key') >= 0 || text.indexOf('_token') >= 0 ||
+    text.indexOf('没有 active connected account') >= 0 || text.indexOf('no active connection found') >= 0;
 }
 
 function remainingReadInputFailure(result: DynamicGenericToolResult): boolean {
