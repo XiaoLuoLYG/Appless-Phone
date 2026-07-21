@@ -46,17 +46,17 @@ export function checkoutWebNavigationDecision(
   url: string,
   isMainFrame: boolean
 ): CheckoutNavigationDecision {
+  const value = url.trim().toLowerCase();
+  if (kind === 'train' && !value.startsWith('https://')) {
+    return 'block';
+  }
   if (!isMainFrame) {
     return 'allow';
   }
-  const value = url.trim().toLowerCase();
   if (kind === 'payment' && value.startsWith('aiphone://payment/')) {
     return 'payment_return';
   }
   if (kind === 'hotel' && !isAllowedHotelBookingNavigationUrl(url)) {
-    return 'block';
-  }
-  if (kind === 'train' && !value.startsWith('https://')) {
     return 'block';
   }
   return 'allow';

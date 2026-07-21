@@ -329,8 +329,8 @@ export default function toolGatewayClientTest() {
       );
       expect(url).assertEqual(
         'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
-        '&fs=%E6%B7%B1%E5%9C%B3%E5%8C%97%2CIOQ' +
-        '&ts=%E9%A6%99%E6%B8%AF%E8%A5%BF%E4%B9%9D%E9%BE%99%2CXJA' +
+        '&fs=%E6%B7%B1%E5%9C%B3%E5%8C%97,IOQ' +
+        '&ts=%E9%A6%99%E6%B8%AF%E8%A5%BF%E4%B9%9D%E9%BE%99,XJA' +
         '&date=2026-07-22&flag=N,N,Y'
       );
     });

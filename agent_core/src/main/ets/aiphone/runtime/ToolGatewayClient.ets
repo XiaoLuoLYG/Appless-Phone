@@ -4194,8 +4194,8 @@ export function build12306BookingUrl(
   toCode: string
 ): string {
   return 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
-    '&fs=' + encodeURIComponent(fromName + ',' + fromCode) +
-    '&ts=' + encodeURIComponent(toName + ',' + toCode) +
+    '&fs=' + encodeURIComponent(fromName) + ',' + encodeURIComponent(fromCode) +
+    '&ts=' + encodeURIComponent(toName) + ',' + encodeURIComponent(toCode) +
     '&date=' + encodeURIComponent(date) +
     '&flag=N,N,Y';
 }

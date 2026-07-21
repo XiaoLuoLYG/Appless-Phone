@@ -90,7 +90,7 @@ export default function checkoutWebOverlayTest() {
       )).assertEqual('allow');
       expect(checkoutWebNavigationDecision('train', 'alipays://platformapi/startapp', true)).assertEqual('block');
       expect(checkoutWebNavigationDecision('train', 'javascript:alert(1)', true)).assertEqual('block');
-      expect(checkoutWebNavigationDecision('train', 'alipays://platformapi/startapp', false)).assertEqual('allow');
+      expect(checkoutWebNavigationDecision('train', 'alipays://platformapi/startapp', false)).assertEqual('block');
     });
 
     it('does not regress payment and hotel decisions', 0, () => {
