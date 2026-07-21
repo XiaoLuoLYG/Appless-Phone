@@ -80,6 +80,17 @@ export struct A2uiWebSurfaceView {
     return info.length > 0 ? '页面加载失败：' + info : '页面加载失败，请检查网络后重试。';
   }
 
+  private closePopup(): void {
+    let mainUrl = '';
+    try {
+      mainUrl = this.controller.getUrl();
+    } catch (_error) {
+      mainUrl = '';
+    }
+    this.popupVisible = false;
+    this.onLoadEnd(mainUrl);
+  }
+
   @Builder
   private LoadingView() {
     if (this.showLoading && this.loading && this.errorText.length === 0) {
@@ -188,7 +199,7 @@ export struct A2uiWebSurfaceView {
               .backgroundColor(COLOR_CARD)
               .borderRadius(16)
               .onClick(() => {
-                this.popupVisible = false;
+                this.closePopup();
               })
           }
           .height(50)
@@ -216,7 +227,7 @@ export struct A2uiWebSurfaceView {
               return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
             })
             .onWindowExit(() => {
-              this.popupVisible = false;
+              this.closePopup();
             })
         }
         .width('100%')
