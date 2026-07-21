@@ -159,7 +159,16 @@ export default function composioDynamicBackendTest() {
         { prompt: 'use GitHub', slug: 'GITHUB_SEARCH_AND_DELETE_REPOSITORY' },
         { prompt: 'use GitHub', slug: 'GITHUB_SYNC_REPOSITORY' },
         { prompt: 'use GitHub', slug: 'GITHUB_BUDGET_REPORT' },
-        { prompt: 'use Google Drive', slug: 'GOOGLEDRIVE_SPREADSHEET_EXPORT' }
+        { prompt: 'use Google Drive', slug: 'GOOGLEDRIVE_SPREADSHEET_EXPORT' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GET_AND_MERGE_PULL_REQUEST' },
+        { prompt: 'use GitHub', slug: 'github.get-and-archive-repository' },
+        { prompt: 'use GitHub', slug: 'githubGetAndTriggerWorkflow' },
+        { prompt: 'use GitHub', slug: 'githubGetThenRunWorkflow' },
+        { prompt: 'use GitHub', slug: 'github.get-or-copy-repository' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GETANDTRIGGERWORKFLOW' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GETAWAY' },
+        { prompt: 'use GitHub', slug: 'githubGetaway' },
+        { prompt: 'use GitHub', slug: 'githubgetaway' }
       ];
       for (let index = 0; index < blocked.length; index++) {
         const current = blocked[index];
@@ -188,7 +197,17 @@ export default function composioDynamicBackendTest() {
         { prompt: 'use GitHub', slug: 'github.list-repositories' },
         { prompt: 'use GitHub', slug: 'githubGetRepository' },
         { prompt: 'use GitHub', slug: 'githubsearchrepositories' },
-        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_REPOSITORY' }
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_REPOSITORY' },
+        { prompt: 'search Twitter posts', slug: 'TWITTER_SEARCH_POSTS' },
+        { prompt: 'use Slack', slug: 'slack.list-channels' },
+        { prompt: 'use Gmail', slug: 'gmailGetMessage' },
+        { prompt: 'use Google Drive', slug: 'googledrivereadfile' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_FILE' },
+        { prompt: 'use Google Docs', slug: 'GOOGLEDOCS_SEARCH_DOCUMENTS' },
+        { prompt: 'use TikTok', slug: 'TIKTOK_SEARCH_VIDEOS' },
+        { prompt: 'use Gmail', slug: 'GMAIL_SEARCH_PEOPLE' },
+        { prompt: 'use Gmail', slug: 'GMAIL_SEARCH_CONTACTS' },
+        { prompt: 'use GitHub', slug: 'GITHUB_LIST_PULL_REQUESTS' }
       ];
       for (let index = 0; index < allowed.length; index++) {
         const current = allowed[index];
@@ -203,6 +222,22 @@ export default function composioDynamicBackendTest() {
         expect(client.executedSlugs.length).assertEqual(1);
         expect(client.executedSlugs[0]).assertEqual(current.slug);
       }
+      const mixedReadAndWrite = new RecordingComposioSearchExecuteClient(
+        '{"source":"Composio","authorizedToolkits":["twitter"],"tools":[' +
+          '{"toolSlug":"TWITTER_SEARCH_POSTS","description":"Search public posts",' +
+            '"inputSchema":"{}","outputSchema":"{}"},' +
+          '{"toolSlug":"TWITTER_CREATE_POST","description":"Create a public post",' +
+            '"inputSchema":"{}","outputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}',
+        successfulExecutionObservation()
+      );
+      const mixedResult = await callComposioSearchAndExecute(
+        mixedReadAndWrite, 'search Twitter posts', looseObject('{"operation":"search"}')
+      );
+      expect(mixedResult.status).assertEqual('success');
+      expect(mixedResult.providerPhase).assertEqual('execution');
+      expect(mixedReadAndWrite.executedSlugs.length).assertEqual(1);
+      expect(mixedReadAndWrite.executedSlugs[0]).assertEqual('TWITTER_SEARCH_POSTS');
     });
 
     it('preserves actual Composio schemas and only genuine bounded receipts', 0, async () => {

@@ -1,7 +1,14 @@
 import { ComposioConfig } from '../../composio/ComposioConfig';
 import { ComposioSessionClient, proxyToolkitAccountsFromAuthConfigs } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
-import { isUnsafeMcpTool } from './DynamicToolRegistry';
+import {
+  dynamicCompoundControlPrefix,
+  dynamicMutationActionPrefix,
+  isDynamicCompoundControlToken,
+  isDynamicMutationActionToken,
+  isUnsafeMcpTool,
+  normalizedDynamicToolTokens
+} from './DynamicToolRegistry';
 import { DynamicGenericToolResult, dynamicReceiptFromProviderPayload } from './DynamicToolTypes';
 
 interface ComposioExecuteArgs {
@@ -1733,45 +1740,133 @@ export function isUnsafeComposioExecute(toolSlug: string, _argsJson: string): bo
   return isUnsafeMcpTool(toolSlug, '');
 }
 
-function normalizedSelectedSlug(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+const SELECTED_READ_OPERATIONS: string[] = ['read', 'search', 'list', 'get'];
+const SELECTED_PROVIDER_PREFIXES: string[] = [
+  'googlecalendar', 'googledrive', 'googledocs', 'ticketmaster', 'hackernews', 'salesforce',
+  'composio', 'instagram', 'linkedin', 'whatsapp', 'github', 'twitter', 'youtube',
+  'outlook', 'discord', 'spotify', 'tiktok', 'hubspot', 'notion', 'slack', 'gmail',
+  'reddit', 'linear', 'trello', 'asana', 'google', 'calendar', 'drive', 'hacker',
+  'news', 'git', 'hub', 'x'
+];
+const SELECTED_READ_NOUNS: string[] = [
+  'phonenumbers', 'pullrequests', 'subscriptions', 'conversations', 'repositories',
+  'spreadsheets', 'documents', 'playlists', 'permissions', 'notifications', 'activities',
+  'channels', 'messages', 'threads', 'profiles', 'statuses', 'settings', 'comments',
+  'replies', 'orders', 'posts', 'tweets', 'events', 'emails', 'accounts', 'members',
+  'numbers', 'repository', 'spreadsheet', 'document', 'playlist', 'permission',
+  'notification', 'activity', 'channel', 'message', 'thread', 'profile', 'status',
+  'event', 'email', 'account', 'member', 'phone', 'conversation', 'subscription',
+  'pullrequest', 'pull', 'requests', 'videos', 'video', 'people', 'contacts', 'contact',
+  'files', 'pages', 'users', 'items', 'results', 'details', 'information',
+  'file', 'page', 'user', 'item', 'result', 'data', 'weather', 'forecast', 'info',
+  'code', 'issues', 'issue', 'subreddits', 'subreddit', 'across', 'recent', 'all', 'mine',
+  'my', 'by', 'for', 'from', 'in', 'of'
+];
+
+function stripSelectedProviderPrefixes(value: string): string {
+  let remaining = value;
+  let removed = true;
+  while (remaining.length > 0 && removed) {
+    removed = false;
+    for (let index = 0; index < SELECTED_PROVIDER_PREFIXES.length; index++) {
+      const prefix = SELECTED_PROVIDER_PREFIXES[index];
+      if (remaining === prefix) {
+        return '';
+      }
+      if (remaining.startsWith(prefix) && remaining.length > prefix.length) {
+        remaining = remaining.substring(prefix.length);
+        removed = true;
+        break;
+      }
+    }
+  }
+  return remaining;
 }
 
-function selectedSlugContainsVerb(value: string, verbs: string[]): boolean {
-  const normalized = normalizedSelectedSlug(value);
-  const tokens = normalized.split(/[^a-z0-9]+/).filter((token: string): boolean => token.length > 0);
-  const providerPrefixes = [
-    'composio', 'googledrive', 'googlecalendar', 'hackernews', 'ticketmaster',
-    'github', 'notion', 'slack', 'twitter', 'gmail', 'youtube', 'outlook', 'discord',
-    'linkedin', 'whatsapp', 'instagram', 'spotify', 'tiktok', 'reddit', 'linear',
-    'asana', 'trello', 'hubspot', 'salesforce'
-  ];
-  for (let index = 0; index < verbs.length; index++) {
-    if (tokens.indexOf(verbs[index]) >= 0) {
-      return true;
+function selectedSemanticTokens(toolSlug: string): string[] {
+  const tokens = normalizedDynamicToolTokens(toolSlug);
+  while (tokens.length > 0) {
+    const stripped = stripSelectedProviderPrefixes(tokens[0]);
+    if (stripped.length === 0) {
+      tokens.shift();
+      continue;
+    }
+    if (stripped !== tokens[0]) {
+      tokens[0] = stripped;
+    }
+    break;
+  }
+  return tokens;
+}
+
+function readNounPrefix(value: string): string {
+  for (let index = 0; index < SELECTED_READ_NOUNS.length; index++) {
+    if (value.startsWith(SELECTED_READ_NOUNS[index])) {
+      return SELECTED_READ_NOUNS[index];
     }
   }
-  for (let index = 0; index < tokens.length; index++) {
-    let compactOperation = tokens[index];
-    let removedPrefix = true;
-    while (removedPrefix && compactOperation.length > 0) {
-      removedPrefix = false;
-      for (let prefixIndex = 0; prefixIndex < providerPrefixes.length; prefixIndex++) {
-        const prefix = providerPrefixes[prefixIndex];
-        if (compactOperation.startsWith(prefix) && compactOperation.length > prefix.length) {
-          compactOperation = compactOperation.substring(prefix.length);
-          removedPrefix = true;
-          break;
-        }
-      }
+  return '';
+}
+
+function compactReadTailAllowed(value: string): boolean {
+  let remaining = value;
+  while (remaining.length > 0) {
+    const noun = readNounPrefix(remaining);
+    if (noun.length > 0) {
+      remaining = remaining.substring(noun.length);
+      continue;
     }
-    for (let verbIndex = 0; verbIndex < verbs.length; verbIndex++) {
-      if (compactOperation.startsWith(verbs[verbIndex])) {
-        return true;
-      }
+    if (dynamicCompoundControlPrefix(remaining).length > 0 || dynamicMutationActionPrefix(remaining).length > 0) {
+      return false;
+    }
+    return false;
+  }
+  return true;
+}
+
+function compactSelectedReadOperation(value: string): string {
+  for (let index = 0; index < SELECTED_READ_OPERATIONS.length; index++) {
+    const operation = SELECTED_READ_OPERATIONS[index];
+    if (value.length > operation.length && value.substring(0, operation.length) === operation) {
+      return operation;
     }
   }
-  return false;
+  return '';
+}
+
+function selectedSlugGrammarMessage(toolSlug: string): string {
+  const semantic = selectedSemanticTokens(toolSlug);
+  if (semantic.length === 0) {
+    return 'Selected Composio tool has no semantic operation: ' + toolSlug + '.';
+  }
+  let operation = semantic[0];
+  let compactTail = '';
+  if (SELECTED_READ_OPERATIONS.indexOf(operation) < 0) {
+    const compactOperation = compactSelectedReadOperation(operation);
+    if (compactOperation.length > 0) {
+      operation = compactOperation;
+      compactTail = semantic[0].substring(compactOperation.length);
+    }
+  }
+  if (SELECTED_READ_OPERATIONS.indexOf(operation) < 0) {
+    return 'Selected Composio tool has an unknown operation: ' + toolSlug + '.';
+  }
+  if (compactTail.length > 0 && !compactReadTailAllowed(compactTail)) {
+    return 'Selected Composio tool has an ambiguous compact operation: ' + toolSlug + '.';
+  }
+  for (let index = 1; index < semantic.length; index++) {
+    const token = semantic[index];
+    if (isDynamicCompoundControlToken(token)) {
+      return 'Selected Composio tool is a compound operation: ' + toolSlug + '.';
+    }
+    if (isDynamicMutationActionToken(token)) {
+      return 'Selected Composio tool is write-like: ' + toolSlug + '.';
+    }
+    if (SELECTED_READ_NOUNS.indexOf(token) < 0) {
+      return 'Selected Composio tool has an unknown semantic token: ' + toolSlug + '.';
+    }
+  }
+  return '';
 }
 
 function selectedSlugAuthorizationMessage(
@@ -1785,15 +1880,7 @@ function selectedSlugAuthorizationMessage(
     fixedToolAllowsSideEffectSlug(fixedToolId, lowerSlug))) {
     return '';
   }
-  const writeVerbs = ['write', 'create', 'update', 'delete', 'send', 'execute', 'append', 'upload', 'publish'];
-  if (selectedSlugContainsVerb(toolSlug, writeVerbs)) {
-    return 'Selected Composio tool is write-like: ' + toolSlug + '.';
-  }
-  const readVerbs = ['read', 'search', 'list', 'get'];
-  if (!selectedSlugContainsVerb(toolSlug, readVerbs)) {
-    return 'Selected Composio tool has an unknown operation: ' + toolSlug + '.';
-  }
-  return '';
+  return selectedSlugGrammarMessage(toolSlug);
 }
 
 function blockedSelectedSlugResult(toolSlug: string, message: string): DynamicGenericToolResult {
@@ -1813,8 +1900,11 @@ function blockedSelectedSlugResult(toolSlug: string, message: string): DynamicGe
 }
 
 function isXPostReadSlug(toolSlug: string): boolean {
-  return selectedSlugContainsVerb(toolSlug, ['search', 'list', 'get', 'read']) &&
-    selectedSlugContainsVerb(toolSlug, ['tweet', 'tweets', 'post', 'posts', 'status', 'statuses']);
+  if (selectedSlugGrammarMessage(toolSlug).length > 0) {
+    return false;
+  }
+  const compact = normalizedDynamicToolTokens(toolSlug).join('');
+  return compact.indexOf('tweet') >= 0 || compact.indexOf('posts') >= 0 || compact.indexOf('status') >= 0;
 }
 
 function xDiscoveryFailure(prompt: string, observation: string): DynamicGenericToolResult {

@@ -20,24 +20,16 @@ const BUILT_IN_TOOL_IDS: string[] = [
   'food.search'
 ];
 
-const UNSAFE_TOOL_PATTERNS: string[] = [
-  'book',
-  'pay',
-  'create',
-  'create_order',
-  'submit_order',
-  'send',
-  'update',
-  'delete',
-  'cancel',
-  'refund',
-  'redeem',
-  'grab_ticket',
-  'purchase',
-  'transfer',
-  'post',
-  'invite',
-  'share'
+const DYNAMIC_MUTATION_ACTION_TOKENS: string[] = [
+  'create', 'update', 'delete', 'send', 'write', 'execute', 'append', 'upload', 'publish',
+  'merge', 'archive', 'trigger', 'sync', 'export', 'import', 'move', 'copy', 'rename',
+  'approve', 'reject', 'close', 'open', 'start', 'stop', 'run', 'invite', 'add', 'remove',
+  'set', 'assign', 'grant', 'revoke', 'pay', 'purchase', 'order', 'post', 'comment', 'reply',
+  'forward', 'book', 'cancel', 'refund', 'redeem', 'grab', 'transfer', 'share', 'submit'
+];
+
+const DYNAMIC_COMPOUND_CONTROL_TOKENS: string[] = [
+  'and', 'then', 'or', 'plus', 'also', 'after', 'before', 'with', 'next', 'while', 'followedby'
 ];
 
 export function isBuiltInToolId(toolId: string): boolean {
@@ -48,16 +40,72 @@ export function isRunnableRemoteTransport(type: string): boolean {
   return type === 'streamable_http' || type === 'sse' || type === 'http_api';
 }
 
+export function normalizedDynamicToolTokens(value: string): string[] {
+  const acronymSeparated = value.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  const camelSeparated = acronymSeparated.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return camelSeparated.split(/[^a-z0-9]+/).filter((token: string): boolean => token.length > 0);
+}
+
+export function isDynamicMutationActionToken(token: string): boolean {
+  return DYNAMIC_MUTATION_ACTION_TOKENS.indexOf(token.toLowerCase()) >= 0;
+}
+
+export function dynamicMutationActionPrefix(value: string): string {
+  const lower = value.toLowerCase();
+  for (let index = 0; index < DYNAMIC_MUTATION_ACTION_TOKENS.length; index++) {
+    if (lower.startsWith(DYNAMIC_MUTATION_ACTION_TOKENS[index])) {
+      return DYNAMIC_MUTATION_ACTION_TOKENS[index];
+    }
+  }
+  return '';
+}
+
+export function isDynamicCompoundControlToken(token: string): boolean {
+  return DYNAMIC_COMPOUND_CONTROL_TOKENS.indexOf(token.toLowerCase()) >= 0;
+}
+
+export function dynamicCompoundControlPrefix(value: string): string {
+  const lower = value.toLowerCase();
+  for (let index = 0; index < DYNAMIC_COMPOUND_CONTROL_TOKENS.length; index++) {
+    if (lower.startsWith(DYNAMIC_COMPOUND_CONTROL_TOKENS[index])) {
+      return DYNAMIC_COMPOUND_CONTROL_TOKENS[index];
+    }
+  }
+  return '';
+}
+
+function isPluralReadActionOccurrence(value: string, index: number, action: string): boolean {
+  if (action !== 'post' && action !== 'comment' && action !== 'order') {
+    return false;
+  }
+  return value.substring(index, index + action.length + 1) === action + 's';
+}
+
+function compactNameContainsMutationAction(value: string, action: string): boolean {
+  let cursor = 0;
+  while (cursor < value.length) {
+    const index = value.indexOf(action, cursor);
+    if (index < 0) {
+      return false;
+    }
+    if (!isPluralReadActionOccurrence(value, index, action)) {
+      return true;
+    }
+    cursor = index + action.length + 1;
+  }
+  return false;
+}
+
 export function isUnsafeMcpTool(name: string, description: string): boolean {
-  const source = (name + ' ' + description).toLowerCase();
-  const underscored = source.replace(/[-\s]+/g, '_');
-  const compact = source.replace(/[^a-z0-9]/g, '');
-  for (let index = 0; index < UNSAFE_TOOL_PATTERNS.length; index++) {
-    const pattern = UNSAFE_TOOL_PATTERNS[index];
-    const patternCompact = pattern.replace(/_/g, '');
-    if (source.indexOf(pattern) >= 0 ||
-      underscored.indexOf(pattern) >= 0 ||
-      compact.indexOf(patternCompact) >= 0) {
+  const tokens = normalizedDynamicToolTokens(name + ' ' + description);
+  for (let index = 0; index < tokens.length; index++) {
+    if (isDynamicMutationActionToken(tokens[index])) {
+      return true;
+    }
+  }
+  const compactName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (let index = 0; index < DYNAMIC_MUTATION_ACTION_TOKENS.length; index++) {
+    if (compactNameContainsMutationAction(compactName, DYNAMIC_MUTATION_ACTION_TOKENS[index])) {
       return true;
     }
   }
