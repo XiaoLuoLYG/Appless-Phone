@@ -1,15 +1,49 @@
 import { describe, expect, it } from '@ohos/hypium';
+import { preferences } from '@kit.ArkData';
 import {
   decideTrainPresaleExecution,
+  trainPresaleAvailabilityFromOfficialPayloadForTest,
   TrainPresaleAvailabilityCheck,
   TrainPresaleExecutionDecision,
-  TrainPresaleExecutionTask
+  TrainPresaleExecutionTask,
+  TrainPresaleRecheckRequest
 } from '@loop/agent-core';
 import {
-  claimDueTrainPresaleTask,
+  parseTrainPresaleTaskList,
   TrainPresaleTask,
   TrainPresaleTaskState
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
+import {
+  claimTrainPresaleHandoff,
+  notifyTrainPresaleHandoff,
+  transitionTrainPresaleHandoff,
+  TRAIN_PRESALE_PENDING_TASK_KEY,
+  TRAIN_PRESALE_TASKS_KEY,
+  TrainPresaleHandoffClaimResult,
+  TrainPresaleHandoffTransitionResult
+} from '../main/ets/entryability/EntryAbility';
+
+class MemoryPreferences {
+  private values: Map<string, preferences.ValueType> = new Map();
+
+  getSync(key: string, defaultValue: preferences.ValueType): preferences.ValueType {
+    return this.values.has(key) ? this.values.get(key) as preferences.ValueType : defaultValue;
+  }
+
+  putSync(key: string, value: preferences.ValueType): void {
+    this.values.set(key, value);
+  }
+
+  deleteSync(key: string): void {
+    this.values.delete(key);
+  }
+
+  flushSync(): void {}
+}
+
+function nativePreferences(): preferences.Preferences {
+  return new MemoryPreferences() as Object as preferences.Preferences;
+}
 
 function task(state: TrainPresaleTaskState = 'scheduled'): TrainPresaleTask {
   return {
@@ -61,16 +95,132 @@ function availability(
   };
 }
 
+function saveTasks(store: preferences.Preferences, tasks: TrainPresaleTask[], pendingTaskId: string = ''): void {
+  store.putSync(TRAIN_PRESALE_TASKS_KEY, JSON.stringify(tasks));
+  if (pendingTaskId.length > 0) {
+    store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, pendingTaskId);
+  }
+}
+
+function savedTasks(store: preferences.Preferences): TrainPresaleTask[] {
+  const raw = store.getSync(TRAIN_PRESALE_TASKS_KEY, '');
+  return parseTrainPresaleTaskList(typeof raw === 'string' ? raw : '');
+}
+
+function pendingTaskId(store: preferences.Preferences): string {
+  const value = store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '');
+  return typeof value === 'string' ? value : '';
+}
+
+function trainRow(trainCode: string, fromCode: string, toCode: string, second: string, first: string = ''): string {
+  const fields: string[] = [];
+  for (let index = 0; index < 40; index++) {
+    fields.push('');
+  }
+  fields[3] = trainCode;
+  fields[6] = fromCode;
+  fields[7] = toCode;
+  fields[11] = 'Y';
+  fields[30] = second;
+  fields[31] = first;
+  return fields.join('|');
+}
+
+function recheckRequest(): TrainPresaleRecheckRequest {
+  return {
+    trainCode: 'G1',
+    travelDate: '2026-08-06',
+    fromName: '北京南',
+    fromCode: 'VNP',
+    toName: '上海虹桥',
+    toCode: 'AOH',
+    seatPriority: '二等座'
+  };
+}
+
 export default function trainPresaleExecutionTest() {
   describe('trainPresaleExecution', () => {
-    it('claims a due scheduled task once but not an executing or cancelled task', 0, () => {
-      const due = claimDueTrainPresaleTask([task()], '2026-07-22T12:45:00+08:00', 'task-1');
-      const claimedAgain = claimDueTrainPresaleTask(due.tasks, '2026-07-22T12:45:01+08:00', 'task-1');
-      const cancelled = claimDueTrainPresaleTask([task('cancelled')], '2026-07-22T12:45:01+08:00', 'task-1');
+    it('claims a due scheduled handoff once but not an executing or cancelled task', 0, () => {
+      const store = nativePreferences();
+      const cancelled = task('cancelled');
+      cancelled.taskId = 'task-cancelled';
+      saveTasks(store, [task(), cancelled]);
+      const due: TrainPresaleHandoffClaimResult = claimTrainPresaleHandoff(
+        store, '2026-07-22T12:45:00+08:00', 'task-1');
+      const claimedAgain: TrainPresaleHandoffClaimResult = claimTrainPresaleHandoff(
+        store, '2026-07-22T12:45:01+08:00', 'task-1');
+      const cancelledClaim: TrainPresaleHandoffClaimResult = claimTrainPresaleHandoff(
+        store, '2026-07-22T12:45:01+08:00', 'task-cancelled');
 
-      expect(due.task?.state).assertEqual('executing');
-      expect(claimedAgain.task).assertEqual(undefined);
-      expect(cancelled.task).assertEqual(undefined);
+      expect(due.taskId).assertEqual('task-1');
+      expect(due.changed).assertTrue();
+      expect(claimedAgain.taskId).assertEqual('task-1');
+      expect(claimedAgain.changed).assertFalse();
+      expect(cancelledClaim.taskId).assertEqual('task-1');
+      expect(cancelledClaim.changed).assertFalse();
+      expect(savedTasks(store)[0].state).assertEqual('executing');
+      expect(savedTasks(store)[1].state).assertEqual('cancelled');
+    });
+
+    it('gives an explicit task precedence and recovers the replaced executing handoff', 0, () => {
+      const store = nativePreferences();
+      const first = task('executing');
+      first.taskId = 'task-a';
+      const second = task();
+      second.taskId = 'task-b';
+      saveTasks(store, [first, second], 'task-a');
+
+      const result: TrainPresaleHandoffClaimResult = claimTrainPresaleHandoff(
+        store, '2026-07-22T12:45:00+08:00', 'task-b');
+      const tasks = savedTasks(store);
+
+      expect(result.taskId).assertEqual('task-b');
+      expect(pendingTaskId(store)).assertEqual('task-b');
+      expect(tasks[0].state).assertEqual('needs_user');
+      expect(tasks[0].lastError.indexOf('新的开售提醒') >= 0).assertTrue();
+      expect(tasks[1].state).assertEqual('executing');
+    });
+
+    it('retains an executing handoff for crash reopen and compare-deletes only after durable state', 0, () => {
+      const store = nativePreferences();
+      saveTasks(store, [task('executing')], 'task-1');
+
+      expect(transitionTrainPresaleHandoff(store, 'task-1', 'executing', '').cleared).assertFalse();
+      expect(pendingTaskId(store)).assertEqual('task-1');
+      const reopened: TrainPresaleHandoffClaimResult = claimTrainPresaleHandoff(
+        store, '2026-07-22T12:46:00+08:00');
+      expect(reopened.taskId).assertEqual('task-1');
+      expect(reopened.changed).assertFalse();
+      expect(transitionTrainPresaleHandoff(store, 'other', 'needs_user', 'ignored').cleared).assertFalse();
+      expect(pendingTaskId(store)).assertEqual('task-1');
+      const closed: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+        store, 'task-1', 'needs_user', '已关闭 12306 购票页，请重新打开任务继续。');
+
+      expect(closed.cleared).assertTrue();
+      expect(pendingTaskId(store)).assertEqual('');
+      expect(savedTasks(store)[0].state).assertEqual('needs_user');
+      expect(savedTasks(store)[0].lastError.indexOf('已关闭') >= 0).assertTrue();
+    });
+
+    it('does not clear a handoff when its durable task record is missing', 0, () => {
+      const store = nativePreferences();
+      saveTasks(store, [], 'missing-task');
+
+      const result: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+        store, 'missing-task', 'needs_user', '任务记录缺失');
+
+      expect(result.cleared).assertFalse();
+      expect(pendingTaskId(store)).assertEqual('missing-task');
+    });
+
+    it('emits one local delivery event only when the handoff changed', 0, () => {
+      let count = 0;
+      const emit = (): void => { count += 1; };
+
+      notifyTrainPresaleHandoff(false, emit);
+      notifyTrainPresaleHandoff(true, emit);
+
+      expect(count).assertEqual(1);
     });
 
     it('requires the user when the requested seat is sold out', 0, () => {
@@ -118,6 +268,42 @@ export default function trainPresaleExecutionTest() {
       expect(decision.state).assertEqual('executing');
       expect(decision.reason).assertEqual('');
       expect(decision.bookingUrl).assertEqual(check.bookingUrl);
+    });
+
+    it('parses the actual official row and requested seat against the station map', 0, () => {
+      const row = trainRow('G1', 'VNP', 'AOH', '有', '3');
+      const payload = '{"status":true,"data":{"result":[' + JSON.stringify(row) + ']}}';
+      const stationPayload = '@bjn|北京南|VNP|beijingnan|bjn@shh|上海虹桥|AOH|shanghaihongqiao|shh';
+      const verified: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, payload);
+      const firstRequest = recheckRequest();
+      firstRequest.seatPriority = '一等座';
+      const first: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        firstRequest, stationPayload, payload);
+      const soldOutPayload = '{"status":true,"data":{"result":[' +
+        JSON.stringify(trainRow('G1', 'VNP', 'AOH', '无', '3')) + ']}}';
+      const soldOut: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        recheckRequest(), stationPayload, soldOutPayload);
+
+      expect(verified.status).assertEqual('verified');
+      expect(verified.bookingUrl.indexOf('%E5%8C%97%E4%BA%AC%E5%8D%97,VNP') >= 0).assertTrue();
+      expect(first.status).assertEqual('verified');
+      expect(soldOut.status).assertEqual('sold_out');
+    });
+
+    it('rejects a stored station name/code mismatch before accepting a row', 0, () => {
+      const row = trainRow('G1', 'VNP', 'AOH', '有');
+      const payload = '{"status":true,"data":{"result":[' + JSON.stringify(row) + ']}}';
+      const request = recheckRequest();
+      request.fromName = '北京站';
+      const result: TrainPresaleAvailabilityCheck = trainPresaleAvailabilityFromOfficialPayloadForTest(
+        request,
+        '@bjn|北京南|VNP|beijingnan|bjn@shh|上海虹桥|AOH|shanghaihongqiao|shh',
+        payload
+      );
+
+      expect(result.status).assertEqual('mismatch');
+      expect(result.reason.indexOf('车站') >= 0).assertTrue();
     });
   });
 }

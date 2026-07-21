@@ -139,8 +139,15 @@ import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
 import { SystemOneShotScheduler } from './train/SystemOneShotScheduler';
 import {
+  transitionTrainPresaleHandoff,
+  TRAIN_PRESALE_HANDOFF_EVENT,
+  TRAIN_PRESALE_PENDING_TASK_KEY,
+  TrainPresaleHandoffTransitionResult
+} from '../../entryability/EntryAbility';
+import {
   TRAIN_PRESALE_TASK_STORE_NAME,
   TrainPresaleTask,
+  TrainPresaleTaskState,
   TrainPresaleTaskStore
 } from './train/TrainPresaleTaskStore';
 import {
@@ -182,7 +189,6 @@ const PAYMENT_ACCOUNT_BOOK_KEY: string = 'payment_account_book';
 const STRIPE_RECEIVING_PROFILE_KEY: string = 'stripe_receiving_profile';
 const COMPOSIO_AUTH_STORE_NAME: string = 'aiphone_composio_auth_store';
 const COMPOSIO_USER_ID_KEY: string = 'composio_user_id';
-const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
 const ANYTHING_DEMO_ROUTE_URL: string = 'pages/A2uiHome/AnythingDemo';
 const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
@@ -646,6 +652,10 @@ struct Index {
   private luckinOptionSwitchInFlight: boolean = false;
   private trainPresaleTask: TrainPresaleTask | null = null;
   private trainPresaleResumeInFlight: boolean = false;
+  private trainPresaleHandoffSubscribed: boolean = false;
+  private readonly trainPresaleHandoffListener = (): void => {
+    void this.resumePendingTrainPresaleTask();
+  };
 
   private isLuckinOptionSwitchArgs(args: Object | null): boolean {
     if (args === null) {
@@ -734,14 +744,17 @@ struct Index {
     this.loadPaymentAccounts();
     this.loadStripeReceivingProfile();
     void this.requestLocationPermissionOnLaunch();
+    this.subscribeTrainPresaleHandoff();
     void this.resumePendingTrainPresaleTask();
   }
 
   onPageShow(): void {
+    this.subscribeTrainPresaleHandoff();
     void this.resumePendingTrainPresaleTask();
   }
 
   aboutToDisappear(): void {
+    this.unsubscribeTrainPresaleHandoff();
     this.disposeHotelRuntime();
   }
 
@@ -3017,12 +3030,26 @@ struct Index {
     return store === null ? null : new TrainPresaleTaskStore(store);
   }
 
-  private clearPendingTrainPresaleTask(store: preferences.Preferences, taskId: string): void {
-    if (this.preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim() !== taskId) {
+  private subscribeTrainPresaleHandoff(): void {
+    if (this.trainPresaleHandoffSubscribed) {
       return;
     }
-    store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
-    store.flushSync();
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context !== null) {
+      context.getApplicationContext().eventHub.on(TRAIN_PRESALE_HANDOFF_EVENT, this.trainPresaleHandoffListener);
+      this.trainPresaleHandoffSubscribed = true;
+    }
+  }
+
+  private unsubscribeTrainPresaleHandoff(): void {
+    if (!this.trainPresaleHandoffSubscribed) {
+      return;
+    }
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context !== null) {
+      context.getApplicationContext().eventHub.off(TRAIN_PRESALE_HANDOFF_EVENT, this.trainPresaleHandoffListener);
+    }
+    this.trainPresaleHandoffSubscribed = false;
   }
 
   private async resumePendingTrainPresaleTask(): Promise<void> {
@@ -3038,12 +3065,14 @@ struct Index {
       return;
     }
     this.trainPresaleResumeInFlight = true;
-    let consume = false;
     try {
       const store = new TrainPresaleTaskStore(nativeStore);
       const task = store.get(taskId);
       if (task === undefined || task.state !== 'executing') {
-        consume = true;
+        const state: TrainPresaleTaskState = task === undefined || task.state === 'scheduled' ? 'needs_user' : task.state;
+        const reason = task === undefined ? '' :
+          (task.state === 'scheduled' ? '开售任务交接状态异常，请重新打开任务。' : task.lastError);
+        transitionTrainPresaleHandoff(nativeStore, taskId, state, reason);
         aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' skipped=not_executing');
         return;
       }
@@ -3083,22 +3112,24 @@ struct Index {
       };
       const decision: TrainPresaleExecutionDecision = decideTrainPresaleExecution(executionTask, check);
       if (decision.state === 'needs_user') {
-        store.update(taskId, { state: 'needs_user', lastError: decision.reason });
-        const persisted = store.get(taskId);
+        const transition: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+          nativeStore, taskId, 'needs_user', decision.reason);
+        const persisted = transition.task;
         if (persisted === undefined || persisted.state !== 'needs_user') {
           throw new Error('余票核验结果保存失败');
         }
         this.trainPresaleTask = persisted;
         this.trainPresaleTaskState = persisted.state;
         this.trainPresaleError = persisted.lastError;
-        consume = true;
         aiLogError('[AIPhone][TrainPresaleResume] taskId=' + taskId +
           ' status=' + check.status + ' reason=' + decision.reason.substring(0, 240));
         return;
       }
       const latest = store.get(taskId);
       if (latest === undefined || latest.state !== 'executing') {
-        consume = true;
+        if (latest !== undefined) {
+          transitionTrainPresaleHandoff(nativeStore, taskId, latest.state, latest.lastError);
+        }
         aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' skipped=state_changed');
         return;
       }
@@ -3107,23 +3138,42 @@ struct Index {
       this.checkoutWebKind = 'train';
       this.checkoutWebUrl = decision.bookingUrl;
       this.showCheckoutWeb = true;
-      consume = true;
       aiLogInfo('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' status=verified');
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       this.trainPresaleError = '开售任务恢复失败：' + message;
       aiLogError('[AIPhone][TrainPresaleResume] taskId=' + taskId + ' error=' + message.substring(0, 240));
     } finally {
-      if (consume) {
-        try {
-          this.clearPendingTrainPresaleTask(nativeStore, taskId);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : JSON.stringify(error);
-          aiLogError('[AIPhone][TrainPresaleHandoff] taskId=' + taskId + ' error=' + message.substring(0, 240));
-        }
-      }
       this.trainPresaleWorking = false;
       this.trainPresaleResumeInFlight = false;
+    }
+  }
+
+  private closeExecutingTrainCheckout(): void {
+    const task = this.trainPresaleTask;
+    if (task === null || task.state !== 'executing') {
+      return;
+    }
+    const nativeStore = this.trainPresalePreferences();
+    if (nativeStore === null) {
+      this.trainPresaleError = '无法保存购票页关闭状态，请重新打开应用后继续。';
+      return;
+    }
+    const reason = '已关闭 12306 购票页；尚未进入订单协助，请重新打开任务继续。';
+    try {
+      const transition: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+        nativeStore, task.taskId, 'needs_user', reason);
+      if (transition.task === undefined || transition.task.state !== 'needs_user') {
+        throw new Error('关闭状态保存失败');
+      }
+      this.trainPresaleTask = transition.task;
+      this.trainPresaleTaskState = transition.task.state;
+      this.trainPresaleError = transition.task.lastError;
+      this.getUIContext().getPromptAction().showToast({ message: reason });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.trainPresaleError = '关闭购票页后状态保存失败：' + message;
+      aiLogError('[AIPhone][TrainPresaleCheckoutClose] taskId=' + task.taskId + ' error=' + message.substring(0, 240));
     }
   }
 
@@ -4580,7 +4630,9 @@ struct Index {
         onCloseCheckoutWeb: () => {
           const closedTrainBooking = this.checkoutWebKind === 'train';
           this.showCheckoutWeb = false;
-          if (closedTrainBooking) {
+          if (closedTrainBooking && this.trainPresaleTask?.state === 'executing') {
+            this.closeExecutingTrainCheckout();
+          } else if (closedTrainBooking) {
             this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
               ok: true,
               status: 'ready',

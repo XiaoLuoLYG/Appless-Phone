@@ -20,7 +20,10 @@ import {
   claimDueTrainPresaleTask,
   parseTrainPresaleTaskList,
   serializeTrainPresaleTaskList,
-  TRAIN_PRESALE_TASK_STORE_NAME
+  TRAIN_PRESALE_TASK_STORE_NAME,
+  TrainPresaleTask,
+  TrainPresaleTaskState,
+  updateTrainPresaleTask
 } from '../pages/A2uiHome/train/TrainPresaleTaskStore';
 
 const DOMAIN = 0x0000;
@@ -55,8 +58,20 @@ const GMAIL_OAUTH_URI_HINTS: string[] = [
 const COMPOSIO_CALLBACK_URI_HINTS: string[] = [
   'aiphone://composio/callback'
 ];
-const TRAIN_PRESALE_TASKS_KEY: string = 'tasks';
-const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
+export const TRAIN_PRESALE_TASKS_KEY: string = 'tasks';
+export const TRAIN_PRESALE_PENDING_TASK_KEY: string = 'pending_execution_task_id';
+export const TRAIN_PRESALE_HANDOFF_EVENT: string = 'trainPresaleHandoffChanged';
+const TRAIN_PRESALE_REPLACED_REASON: string = '新的开售提醒已到达；请重新打开此任务继续。';
+
+export interface TrainPresaleHandoffClaimResult {
+  taskId: string;
+  changed: boolean;
+}
+
+export interface TrainPresaleHandoffTransitionResult {
+  task: TrainPresaleTask | undefined;
+  cleared: boolean;
+}
 
 function hasUriHint(uri: string, hints: string[]): boolean {
   for (let index = 0; index < hints.length; index++) {
@@ -207,6 +222,106 @@ function trainPresaleTaskIdFromWant(want: Want): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function trainPresaleTasks(store: preferences.Preferences): TrainPresaleTask[] {
+  return parseTrainPresaleTaskList(preferenceText(store.getSync(TRAIN_PRESALE_TASKS_KEY, '')));
+}
+
+function trainPresaleTaskIndex(tasks: TrainPresaleTask[], taskId: string): number {
+  for (let index = 0; index < tasks.length; index++) {
+    if (tasks[index].taskId === taskId) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+export function claimTrainPresaleHandoff(
+  store: preferences.Preferences,
+  nowIso: string,
+  explicitTaskId?: string
+): TrainPresaleHandoffClaimResult {
+  const tasks = trainPresaleTasks(store);
+  const previousPending = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  const explicit = explicitTaskId === undefined ? '' : explicitTaskId.trim();
+  if (explicit.length > 0) {
+    const targetIndex = trainPresaleTaskIndex(tasks, explicit);
+    if (targetIndex < 0) {
+      return { taskId: previousPending, changed: false };
+    }
+    let updatedTasks = tasks;
+    let target = tasks[targetIndex];
+    if (target.state === 'scheduled') {
+      const claimed = claimDueTrainPresaleTask(tasks, nowIso, explicit);
+      if (claimed.task === undefined) {
+        return { taskId: previousPending, changed: false };
+      }
+      updatedTasks = claimed.tasks;
+      target = claimed.task;
+    } else if (target.state !== 'executing') {
+      return { taskId: previousPending, changed: false };
+    }
+    if (previousPending.length > 0 && previousPending !== explicit) {
+      const replacedIndex = trainPresaleTaskIndex(updatedTasks, previousPending);
+      if (replacedIndex >= 0 && updatedTasks[replacedIndex].state === 'executing') {
+        updatedTasks[replacedIndex] = updateTrainPresaleTask(updatedTasks[replacedIndex], {
+          state: 'needs_user',
+          lastError: TRAIN_PRESALE_REPLACED_REASON
+        });
+      }
+    }
+    store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(updatedTasks));
+    store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, target.taskId);
+    store.flushSync();
+    return { taskId: target.taskId, changed: previousPending !== target.taskId || tasks[targetIndex].state === 'scheduled' };
+  }
+  const pendingIndex = trainPresaleTaskIndex(tasks, previousPending);
+  if (pendingIndex >= 0 && tasks[pendingIndex].state === 'executing') {
+    return { taskId: previousPending, changed: false };
+  }
+  const claimed = claimDueTrainPresaleTask(tasks, nowIso);
+  if (claimed.task === undefined) {
+    if (previousPending.length > 0) {
+      store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+      store.flushSync();
+    }
+    return { taskId: '', changed: false };
+  }
+  store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(claimed.tasks));
+  store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, claimed.task.taskId);
+  store.flushSync();
+  return { taskId: claimed.task.taskId, changed: true };
+}
+
+export function transitionTrainPresaleHandoff(
+  store: preferences.Preferences,
+  taskId: string,
+  state: TrainPresaleTaskState,
+  reason: string
+): TrainPresaleHandoffTransitionResult {
+  const pending = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  const tasks = trainPresaleTasks(store);
+  const index = trainPresaleTaskIndex(tasks, taskId);
+  const current = index < 0 ? undefined : tasks[index];
+  if (state === 'executing' || pending !== taskId || current === undefined) {
+    return { task: current, cleared: false };
+  }
+  const updated = updateTrainPresaleTask(current, { state: state, lastError: reason });
+  if (updated.state !== state) {
+    return { task: current, cleared: false };
+  }
+  tasks[index] = updated;
+  store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(tasks));
+  store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
+  store.flushSync();
+  return { task: tasks[index], cleared: true };
+}
+
+export function notifyTrainPresaleHandoff(changed: boolean, emit: () => void): void {
+  if (changed) {
+    emit();
+  }
+}
+
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -301,37 +416,25 @@ export default class EntryAbility extends UIAbility {
     }
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
-    this.claimTrainPresaleTask(want);
+    const result = this.claimTrainPresaleTask(want);
+    notifyTrainPresaleHandoff(result.changed, (): void => {
+      this.context.getApplicationContext().eventHub.emit(TRAIN_PRESALE_HANDOFF_EVENT);
+    });
   }
 
-  private claimTrainPresaleTask(want: Want): void {
+  private claimTrainPresaleTask(want: Want): TrainPresaleHandoffClaimResult {
     try {
       const store = preferences.getPreferencesSync(this.context, { name: TRAIN_PRESALE_TASK_STORE_NAME });
-      const tasks = parseTrainPresaleTaskList(preferenceText(store.getSync(TRAIN_PRESALE_TASKS_KEY, '')));
-      const pendingTaskId = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
-      for (let index = 0; index < tasks.length; index++) {
-        if (tasks[index].taskId === pendingTaskId && tasks[index].state === 'executing') {
-          aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + pendingTaskId + ' reused=true');
-          return;
-        }
+      const result = claimTrainPresaleHandoff(store, new Date().toISOString(), trainPresaleTaskIdFromWant(want));
+      if (result.taskId.length > 0) {
+        aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + result.taskId +
+          ' changed=' + (result.changed ? 'true' : 'false'));
       }
-      if (pendingTaskId.length > 0) {
-        store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
-      }
-      const result = claimDueTrainPresaleTask(tasks, new Date().toISOString(), trainPresaleTaskIdFromWant(want));
-      if (result.task === undefined) {
-        if (pendingTaskId.length > 0) {
-          store.flushSync();
-        }
-        return;
-      }
-      store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(result.tasks));
-      store.putSync(TRAIN_PRESALE_PENDING_TASK_KEY, result.task.taskId);
-      store.flushSync();
-      aiLogInfo('[AIPhone][TrainPresaleClaim] taskId=' + result.task.taskId + ' reused=false');
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       aiLogError('[AIPhone][TrainPresaleClaim] error=' + message.substring(0, 240));
+      return { taskId: '', changed: false };
     }
   }
 
