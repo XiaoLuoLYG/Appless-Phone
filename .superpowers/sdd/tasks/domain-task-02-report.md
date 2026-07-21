@@ -109,3 +109,56 @@ The same fixture is rendered through the current A2UI helpers and still emits th
 - `A2uiData.ets` was not changed because the required normalized records already existed there; duplicating or wrapping them would create a second domain model.
 - `A2uiBusinessData.test.ets` and `A2uiTrainOptionsState.test.ets` were not changed because their existing tests passed unchanged and the new contract/renderer assertions fit the existing `ToolGatewayClient.test.ets` seam.
 - No global HTTP transport seam was added. Deterministic success coverage uses the existing normalized provider-shaped fixtures and pure structured-result builders; real dispatcher coverage uses fail-closed config/argument paths without live network. This task therefore does not claim live provider or device success.
+
+## Independent Review Fix
+
+The first implementation commit `4257d72c17e699039aa9d9a35e6ba0cd4ab32be4` was not approved because it inferred aggregate retryability from provenance, flattened provider operations, conflated successful empty responses with errors, and collapsed code-specific legacy error surfaces.
+
+Fix commit: `a3d224f5695e28a819489ef49d492b6a8e5986b9` (`fix: preserve travel provider semantics`).
+
+### Review RED
+
+Five focused tests were added before the fix. The authoritative Hypium command failed at `UnitTestArkTS` with the expected missing contracts:
+
+- `combineTravelStructuredResults`
+- `flightDataResultFromProviderResponse`
+- `foodStructuredDataResultFromProviders`
+- `flightDataResultA2ui`
+- `trainDataResultA2ui`
+- `FoodProviderResult.succeeded`
+- `FoodProviderResult.operation`
+
+This was a compile RED caused by the reviewed behaviors being absent, not by a test typo.
+
+### Review Fixes
+
+- Aggregate `travel.search` retryability is now the logical OR of only explicit child `error.retryable === true` values. Source-bearing authentication, 4xx, and other nonretryable failures stay nonretryable.
+- Food results carry only two additional optional facts: `operation` and `succeeded`. No new provider hierarchy or transport abstraction was added.
+- Actual Amap location resolution is recorded as `operation=geocode`; restaurant/provider retrieval is `operation=search`.
+- Food sources are deduplicated by provider, backend, and operation. Actual responses and thrown calls create sources; config, missing-location, and other preflight omissions do not.
+- Successful zero-result food searches produce `empty`, including when other sources fail. Results plus failures produce `partial`; `error` is reserved for the case where no search provider successfully responded.
+- A VariFlight HTTP 2xx response with an empty flight list now produces typed `status=empty` with the real `flights` source.
+- Flight and train structured errors retain response/request diagnostics in `warnings`; the legacy A2UI adapter restores code-specific examples and actions such as `补充日期`, `补充城市`, `补充车站名`, `检查 Key`, and `检查供应商返回` without another provider call.
+
+### Review GREEN
+
+Authoritative result:
+
+```text
+Tests run: 930, Failure: 0, Error: 0, Pass: 930, Ignore: 0
+```
+
+The result file contains successful entries for all five focused review tests:
+
+- aggregate travel retryability from child error flags
+- successful VariFlight empty list
+- food provenance dedupe and empty/partial/error states
+- code-specific flight error A2UI
+- code-specific train error A2UI
+
+Additional gates:
+
+- `node scripts/verify-loopy-backend.mjs`: **236 checks passed**, including `agent_core` HAR build.
+- `git diff --check`: passed.
+- A2UI snapshot roundtrip search: zero matches.
+- The known post-test coverage reporter `00507008` noise remains separate from the authoritative zero-failure result.
