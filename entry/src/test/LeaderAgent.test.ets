@@ -64,6 +64,26 @@ class CapturingLeaderPlanner implements LeaderPlanner {
   }
 }
 
+class ExplicitWorkPersonaPlanner implements LeaderPlanner {
+  lastInput: InputUserPayload | null = null;
+  lastContext: LeaderPlanningContext | null = null;
+  lastPlan: LeaderPlan | null = null;
+
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
+    this.lastInput = input;
+    this.lastContext = context;
+    const plan = hotelPlan('work-ui', 'work-data');
+    plan.personaId = 'work_companion';
+    plan.skillId = 'work-search';
+    this.lastPlan = plan;
+    return plan;
+  }
+}
+
 class FirstCallHangingPlanner implements LeaderPlanner {
   calls: number = 0;
   private readonly scriptedPlan: LeaderPlan;
@@ -159,7 +179,7 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
   };
   return {
     personaId: '',
-    skillId: 'hotel-search',
+    skillId: '',
     roundAction: 'execute',
     ui,
     dataTasks: [data],
@@ -177,16 +197,36 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
     }],
+    personas: []
+  };
+}
+
+function personaPlanningContext(): LeaderPlanningContext {
+  const tools = planningContext().tools;
+  return {
+    tools,
     personas: [{
-      personaId: 'hotel_test',
-      name: 'Hotel test',
+      personaId: 'food_companion',
+      name: 'Food',
+      soul: '',
+      memory: '',
+      previous: true,
+      activeSkills: [{
+        skillId: 'food-search',
+        description: 'Search food.',
+        instructions: 'Use food.search.',
+        status: 'active'
+      }]
+    }, {
+      personaId: 'work_companion',
+      name: 'Work',
       soul: '',
       memory: '',
       previous: false,
       activeSkills: [{
-        skillId: 'hotel-search',
-        description: 'Search real hotel inventory.',
-        instructions: 'Use hotel.search and do not claim booking.',
+        skillId: 'work-search',
+        description: 'Search work.',
+        instructions: 'Use mail.search.',
         status: 'active'
       }]
     }]
@@ -205,7 +245,7 @@ function hotelPlanWithUnexpectedFields(): LeaderPlan {
   ) as Object;
   return {
     personaId: '',
-    skillId: 'hotel-search',
+    skillId: '',
     roundAction: 'execute',
     ui: uiObject as LeaderUiTask,
     dataTasks: [dataObject as LeaderDataTask],
@@ -288,8 +328,8 @@ export default function leaderAgentTest() {
       expect(data.taskId).assertEqual(dataMessage.taskId);
       expect(data.toolId).assertEqual('hotel.search');
       expect(data.outputSchema).assertEqual('hotelSearchResults');
-      expect(ui.skillId).assertEqual('hotel-search');
-      expect(data.skillId).assertEqual('hotel-search');
+      expect(ui.skillId).assertEqual('');
+      expect(data.skillId).assertEqual('');
       expect(args.city).assertEqual('Shenzhen');
       expect(args.guests).assertEqual(2);
       expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskIds,expectedOutputSchema,intent,skillId,taskId');
@@ -369,6 +409,82 @@ export default function leaderAgentTest() {
       expect(input.currentSurfaceSummary!.entityRefs.length).assertEqual(0);
       expect(input.currentSurfaceSummary!.actionOfferIds.length).assertEqual(0);
       expect(input.recentObservations!.length).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a skill owned by a different persona', 0, async () => {
+      const plan = hotelPlan();
+      plan.personaId = 'work_companion';
+      plan.skillId = 'food-search';
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), personaPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const error = await receive(observer);
+
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a non-empty skill without a selected persona', 0, async () => {
+      const plan = hotelPlan();
+      plan.skillId = 'food-search';
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), personaPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const error = await receive(observer);
+
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+      leader.stop();
+      observer.close();
+    });
+
+    it('accepts matching work persona skill for explicit work wording', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new ExplicitWorkPersonaPlanner();
+      const leader = new LeaderAgent(bus, planner, personaPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+      const payload: InputUserPayload = {
+        text: '用工作分身',
+        previousPersonaId: 'food_companion'
+      };
+      const inputMessage: AgentMessage = {
+        type: AgentMessageType.INPUT_USER,
+        conversationId: 'conversation-work',
+        turnId: 'turn-work',
+        taskId: 'input-work',
+        payload: payload
+      };
+      bus.publish(inputMessage);
+      await receive(observer);
+      const ui = await receive(observer);
+      const data = await receive(observer);
+      const plan = planner.lastPlan as LeaderPlan;
+      const context = planner.lastContext as LeaderPlanningContext;
+      const input = planner.lastInput as InputUserPayload;
+
+      expect(input.text).assertEqual('用工作分身');
+      expect(input.previousPersonaId).assertEqual('food_companion');
+      expect(plan.personaId).assertEqual('work_companion');
+      expect(plan.skillId).assertEqual('work-search');
+      expect(context.personas[0].previous).assertTrue();
+      expect(context.personas[1].personaId).assertEqual(plan.personaId);
+      expect(context.personas[1].activeSkills[0].skillId).assertEqual(plan.skillId);
+      expect(context.personas[0].activeSkills[0].skillId === plan.skillId).assertFalse();
+      expect((ui.payload as CreateUiTaskPayload).skillId).assertEqual('work-search');
+      expect((data.payload as CreateDataTaskPayload).skillId).assertEqual('work-search');
       leader.stop();
       observer.close();
     });

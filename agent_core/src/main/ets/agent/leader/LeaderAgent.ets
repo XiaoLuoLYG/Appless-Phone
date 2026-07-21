@@ -234,8 +234,9 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private validPlan(plan: LeaderPlan): boolean {
     if (plan === undefined || plan === null ||
+      typeof plan.personaId !== 'string' ||
       typeof plan.skillId !== 'string' ||
-      !this.validSelectedSkill(plan.skillId) ||
+      !this.validSelectedSkill(plan.personaId, plan.skillId) ||
       plan.ui === undefined || !Array.isArray(plan.dataTasks) || plan.dataTasks.length !== 1) {
       return false;
     }
@@ -256,17 +257,25 @@ export class LeaderAgent extends MessageDrivenAgent {
       dataTask.outputSchema.trim().length > 0;
   }
 
-  private validSelectedSkill(skillId: string): boolean {
+  private validSelectedSkill(personaId: string, skillId: string): boolean {
     if (skillId.trim().length === 0) {
       return true;
     }
+    if (personaId.trim().length === 0) {
+      return false;
+    }
     for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
-      const skills = this.planningContext.personas[personaIndex].activeSkills;
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== personaId) {
+        continue;
+      }
+      const skills = persona.activeSkills;
       for (let skillIndex = 0; skillIndex < skills.length; skillIndex++) {
         if (skills[skillIndex].skillId === skillId) {
           return true;
         }
       }
+      return false;
     }
     return false;
   }
