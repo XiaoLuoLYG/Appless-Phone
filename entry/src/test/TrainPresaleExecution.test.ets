@@ -2,6 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import { preferences } from '@kit.ArkData';
 import {
   decideTrainPresaleExecution,
+  recheck12306TrainAvailabilityWithStationPayloadForTest,
   trainPresaleAvailabilityFromOfficialPayloadForTest,
   TrainPresaleAvailabilityCheck,
   TrainPresaleExecutionDecision,
@@ -378,6 +379,18 @@ export default function trainPresaleExecutionTest() {
       expect(empty.status).assertEqual('provider_error');
       expect(changed.status).assertEqual('provider_error');
     });
+
+    it('rejects an HTTP-200 malformed station payload in the live recheck wrapper before identity lookup', 0,
+      async () => {
+        const empty: TrainPresaleAvailabilityCheck =
+          await recheck12306TrainAvailabilityWithStationPayloadForTest(recheckRequest(), '');
+        const malformed: TrainPresaleAvailabilityCheck =
+          await recheck12306TrainAvailabilityWithStationPayloadForTest(
+            recheckRequest(), '@bjn|北京南|NOT-A-CODE|beijingnan|bjn');
+
+        expect(empty.status).assertEqual('provider_error');
+        expect(malformed.status).assertEqual('provider_error');
+      });
 
     it('rejects a truncated exact result row before interpreting its seat as sold out', 0, () => {
       const fields: string[] = [];

@@ -4756,6 +4756,10 @@ async function resolveFuturePresaleTrain(
 
 async function load12306Stations(): Promise<StationCache> {
   if (stationCache !== null) {
+    if (!hasValid12306StationSchema(stationCache)) {
+      stationCache = null;
+      throw new Error('12306 station_name schema invalid');
+    }
     return stationCache;
   }
   const response = await requestText('https://kyfw.12306.cn/otn/resources/js/framework/station_name.js', userAgentHeaders());
@@ -4763,7 +4767,11 @@ async function load12306Stations(): Promise<StationCache> {
     throw new Error('12306 station_name HTTP ' + response.code.toString());
   }
 
-  stationCache = parse12306Stations(response.text);
+  const loaded = parse12306Stations(response.text);
+  if (!hasValid12306StationSchema(loaded)) {
+    throw new Error('12306 station_name schema invalid');
+  }
+  stationCache = loaded;
   aiLogInfo('[AIPhone][LocalToolStations] count=' + stationCache.entries.length.toString());
   return stationCache;
 }
@@ -5027,8 +5035,9 @@ export function trainPresaleAvailabilityFromOfficialPayloadForTest(
   return trainPresaleAvailabilityFromOfficialPayload(request, parse12306Stations(stationPayload), payloadText);
 }
 
-export async function recheck12306TrainAvailability(
-  request: TrainPresaleRecheckRequest
+async function recheck12306TrainAvailabilityWithStationLoader(
+  request: TrainPresaleRecheckRequest,
+  stationLoader: () => Promise<StationCache>
 ): Promise<TrainPresaleAvailabilityCheck> {
   const seatPriority = request.seatPriority.trim();
   if (seatPriority !== '二等座' && seatPriority !== '一等座' && seatPriority !== '商务座' && seatPriority !== '无座') {
@@ -5045,7 +5054,7 @@ export async function recheck12306TrainAvailability(
     return trainPresaleAvailability(request, 'mismatch', '提醒中的车次、日期或路线无效，请重新查询。');
   }
   try {
-    const stations = await load12306Stations();
+    const stations = await stationLoader();
     if (stationCodeFor(request.fromName.trim(), stations) !== fromCode ||
       stationCodeFor(request.toName.trim(), stations) !== toCode) {
       return trainPresaleAvailability(request, 'mismatch', '提醒中的车站名称与官方车站代码不匹配，请重新查询。');
@@ -5067,6 +5076,31 @@ export async function recheck12306TrainAvailability(
       '12306 实时余票查询失败：' + describeThrown(error).substring(0, 240)
     );
   }
+}
+
+export async function recheck12306TrainAvailability(
+  request: TrainPresaleRecheckRequest
+): Promise<TrainPresaleAvailabilityCheck> {
+  return recheck12306TrainAvailabilityWithStationLoader(
+    request,
+    async (): Promise<StationCache> => load12306Stations()
+  );
+}
+
+export async function recheck12306TrainAvailabilityWithStationPayloadForTest(
+  request: TrainPresaleRecheckRequest,
+  stationPayload: string
+): Promise<TrainPresaleAvailabilityCheck> {
+  return recheck12306TrainAvailabilityWithStationLoader(
+    request,
+    async (): Promise<StationCache> => {
+      const loaded = parse12306Stations(stationPayload);
+      if (!hasValid12306StationSchema(loaded)) {
+        throw new Error('12306 station_name schema invalid');
+      }
+      return loaded;
+    }
+  );
 }
 
 function formatTrainSeatsSummary(item: A2uiTrainData): string {
