@@ -285,6 +285,7 @@ interface PresaleResponsePayload {
 }
 
 interface FutureTrainSearchItem {
+  date?: string;
   station_train_code?: string;
   train_no?: string;
   from_station?: string;
@@ -4267,20 +4268,49 @@ export function build12306BookingUrl(
     '&flag=N,N,Y';
 }
 
-function normalizeOfficialDate(value: string, fallbackYear: string = ''): string {
+function normalizedOfficialDate(yearText: string, monthText: string, dayText: string): string {
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (year < 2000 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return '';
+  }
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return '';
+  }
+  return year.toString() + '-' + pad2(month) + '-' + pad2(day);
+}
+
+function normalizeOfficialDate(value: string, fallbackDate: string = ''): string {
   const compact = /^(20\d{2})(\d{2})(\d{2})$/.exec(value.trim());
   if (compact !== null) {
-    return compact[1] + '-' + compact[2] + '-' + compact[3];
+    return normalizedOfficialDate(compact[1], compact[2], compact[3]);
   }
   const iso = /^(20\d{2})[-年](\d{1,2})[-月](\d{1,2})日?$/.exec(value.trim());
   if (iso !== null) {
-    return iso[1] + '-' + pad2(Number(iso[2])) + '-' + pad2(Number(iso[3]));
+    return normalizedOfficialDate(iso[1], iso[2], iso[3]);
   }
   const monthDay = /^(\d{1,2})月(\d{1,2})日$/.exec(value.trim());
-  if (monthDay !== null && /^20\d{2}$/.test(fallbackYear)) {
-    return fallbackYear + '-' + pad2(Number(monthDay[1])) + '-' + pad2(Number(monthDay[2]));
+  if (monthDay !== null && /^20\d{2}-\d{2}-\d{2}$/.test(fallbackDate)) {
+    const reference = normalizeOfficialDate(fallbackDate);
+    if (reference.length === 0) {
+      return '';
+    }
+    let year = Number(reference.substring(0, 4));
+    let result = normalizedOfficialDate(year.toString(), monthDay[1], monthDay[2]);
+    if (result.length > 0 && result < reference) {
+      year += 1;
+      result = normalizedOfficialDate(year.toString(), monthDay[1], monthDay[2]);
+    }
+    return result;
   }
   return '';
+}
+
+function isOfficialTime(value: string): boolean {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
 }
 
 export function parsePresaleRange(payload: string): PresaleRange | undefined {
@@ -4290,7 +4320,7 @@ export function parsePresaleRange(payload: string): PresaleRange | undefined {
       return undefined;
     }
     const today = normalizeOfficialDate(parsed.data.today === undefined ? '' : parsed.data.today);
-    const lastSaleDate = normalizeOfficialDate(parsed.data.hlwlptysq === undefined ? '' : parsed.data.hlwlptysq, today.substring(0, 4));
+    const lastSaleDate = normalizeOfficialDate(parsed.data.hlwlptysq === undefined ? '' : parsed.data.hlwlptysq, today);
     return today.length > 0 && lastSaleDate.length > 0 ? { today: today, lastSaleDate: lastSaleDate } : undefined;
   } catch (_error) {
     return undefined;
@@ -4299,7 +4329,15 @@ export function parsePresaleRange(payload: string): PresaleRange | undefined {
 
 export function extractExactTrainCode(text: string): string {
   const match = /(?:^|[^A-Z0-9])([GDCZTKYLSP]\d{1,5})(?:次|$|[^A-Z0-9])/i.exec(text);
-  return match === null ? '' : match[1].toUpperCase();
+  if (match !== null) {
+    return match[1].toUpperCase();
+  }
+  const numeric = /(?:^|[^\d])(\d{1,5})\s*次(?:$|[^\d])/.exec(text);
+  if (numeric !== null) {
+    return numeric[1];
+  }
+  const exact = text.trim();
+  return /^\d{1,5}$/.test(exact) ? exact : '';
 }
 
 function emptyFutureTrainMetadata(trainCode: string): FutureTrainMetadata {
@@ -4331,6 +4369,9 @@ export function parseFutureTrainMetadata(payload: string, trainCode: string): Fu
         if ((item.station_train_code === undefined ? '' : item.station_train_code.toUpperCase()) !== exactCode) {
           continue;
         }
+        if (normalizeOfficialDate(item.date === undefined ? '' : item.date).length === 0) {
+          continue;
+        }
         const trainNo = item.train_no === undefined ? '' : item.train_no.trim();
         const from = item.from_station === undefined ? '' : item.from_station.trim();
         const to = item.to_station === undefined ? '' : item.to_station.trim();
@@ -4357,7 +4398,7 @@ export function parseFutureTrainMetadata(payload: string, trainCode: string): Fu
     const depart = origin.start_time === undefined ? '' : origin.start_time.trim();
     const arrive = destination.arrive_time === undefined ? '' : destination.arrive_time.trim();
     if (from.length === 0 || to.length === 0 || fromStopNo.length === 0 || toStopNo.length === 0 ||
-      !/^\d{2}:\d{2}$/.test(depart) || !/^\d{2}:\d{2}$/.test(arrive)) {
+      !isOfficialTime(depart) || !isOfficialTime(arrive)) {
       return undefined;
     }
     const metadata = emptyFutureTrainMetadata(exactCode);
@@ -4381,7 +4422,7 @@ export function parseStationSaleTime(payload: string, stationName: string): stri
     }
     for (let index = 0; index < parsed.data.length; index++) {
       const item = parsed.data[index];
-      if (item.name !== stationName || item.value === undefined || !/^\d{2}:\d{2}$/.test(item.value.trim())) {
+      if (item.name !== stationName || item.value === undefined || !isOfficialTime(item.value.trim())) {
         continue;
       }
       return item.value.trim();
@@ -4390,6 +4431,11 @@ export function parseStationSaleTime(payload: string, stationName: string): stri
     return '';
   }
   return '';
+}
+
+export function presaleSaleAt(travelDate: string, saleTime: string): string {
+  const date = normalizeOfficialDate(travelDate);
+  return date.length > 0 && isOfficialTime(saleTime) ? date + 'T' + saleTime + ':00+08:00' : '';
 }
 
 export function parseLowestTrainPrice(payload: string): number | undefined {
@@ -4554,7 +4600,8 @@ async function resolveFuturePresaleTrain(
   }
   const saleResponse = await requestText('https://mobile.12306.cn/weixin/wxcore/queryQssj?stationName=' + encodeURIComponent(fromName), userAgentHeaders());
   const saleTime = saleResponse.code >= 200 && saleResponse.code < 300 ? parseStationSaleTime(saleResponse.text, fromName) : '';
-  if (saleTime.length === 0) {
+  const saleAt = presaleSaleAt(date, saleTime);
+  if (saleAt.length === 0) {
     return undefined;
   }
   const priceResponse = await requestText(build12306TrainPriceUrl({
@@ -4590,7 +4637,7 @@ async function resolveFuturePresaleTrain(
     bookingUrl: build12306BookingUrl(date, fromName, fromCode, toName, toCode),
     travelDate: date,
     saleState: 'presale',
-    saleAt: date + 'T' + saleTime + ':00+08:00',
+    saleAt: saleAt,
     fromCode: fromCode,
     toCode: toCode
   };
