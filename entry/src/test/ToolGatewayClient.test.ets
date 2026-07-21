@@ -26,6 +26,7 @@ import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-cor
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
+  combineTravelStructuredResults,
   callStructuredTool,
   callToolGateway,
   callStructuredHotelTool,
@@ -40,11 +41,14 @@ import {
   defaultToolGatewayUrl,
   emptyDataResult,
   errorDataResult,
+  flightDataResultA2ui,
+  flightDataResultFromProviderResponse,
   flightStructuredDataA2ui,
   flightStructuredDataResult,
   foodA2uiRenderState,
   foodStructuredDataA2ui,
   foodStructuredDataResult,
+  foodStructuredDataResultFromProviders,
   foodDistanceMeters,
   foodProviderProgressRows,
   foodRecordFromBaiduPlace,
@@ -92,6 +96,7 @@ import {
   streamFoodProviderResultsWithPartials,
   successfulDataResult,
   trainStructuredDataA2ui,
+  trainDataResultA2ui,
   trainStructuredDataResult,
   travelStructuredDataA2ui,
   travelStructuredDataResult,
@@ -745,6 +750,181 @@ export default function toolGatewayClientTest() {
         title: '12306 查询结果为空', body: '没有车次', summary: '暂无车次', trains: []
       };
       expect(trainStructuredDataResult(emptyTrain, sources, ['暂无车次']).status).assertEqual('empty');
+    });
+
+    it('derives aggregate travel retryability only from child error flags', 0, () => {
+      const trainSource: DataSource = {
+        provider: '12306', backend: 'local_adapter', operation: 'leftTicket',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      };
+      const flightSource: DataSource = {
+        provider: '飞常准', backend: 'local_adapter', operation: 'flights',
+        fetchedAt: '2026-07-22T00:00:01.000Z'
+      };
+      const trainData: TrainStructuredData = {
+        title: '12306 查询失败', body: 'HTTP 401', summary: 'HTTP 401', trains: []
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准查询失败', body: '参数错误', summary: '参数错误', flights: []
+      };
+      const trainNonRetryable = errorDataResult(
+        'train.search', 'trains', 'TRAIN_PROVIDER_HTTP_ERROR', 'HTTP 401', false, [trainSource]
+      );
+      trainNonRetryable.data = trainData;
+      const flightNonRetryable = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_PROVIDER_ERROR', '参数错误', false, [flightSource]
+      );
+      flightNonRetryable.data = flightData;
+
+      const nonRetryable = combineTravelStructuredResults(
+        '北京到上海', trainNonRetryable, flightNonRetryable
+      );
+      expect(nonRetryable.status).assertEqual('error');
+      expect(nonRetryable.sources.length).assertEqual(2);
+      expect(nonRetryable.error?.retryable).assertFalse();
+
+      const flightRetryable = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_TRANSPORT_EXCEPTION', 'timeout', true, [flightSource]
+      );
+      flightRetryable.data = flightData;
+      const retryable = combineTravelStructuredResults('北京到上海', trainNonRetryable, flightRetryable);
+      expect(retryable.error?.retryable).assertTrue();
+    });
+
+    it('treats a successful VariFlight empty list as typed empty data', 0, () => {
+      const source: DataSource = {
+        provider: '飞常准', backend: 'local_adapter', operation: 'flights',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      };
+      const result = flightDataResultFromProviderResponse(
+        200,
+        '{"success":true,"data":{"flights":[]}}',
+        source,
+        false,
+        '深圳到上海 2026-07-23'
+      );
+
+      expect(result.status).assertEqual('empty');
+      expect(result.error).assertUndefined();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].operation).assertEqual('flights');
+      expect((result.data as FlightStructuredData).flights.length).assertEqual(0);
+      expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('dedupes food operation provenance and preserves empty partial and error states', 0, () => {
+      const emptyData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '没有可展示结果', foods: [], rows: []
+      };
+      const successfulEmpty: FoodProviderResult = {
+        provider: '高德', foods: [], error: '高德没有返回可展示餐饮 POI。',
+        attempted: true, succeeded: true, operation: 'search'
+      };
+      const duplicateSuccessfulEmpty: FoodProviderResult = {
+        provider: '高德', foods: [], error: '', attempted: true, succeeded: true, operation: 'search'
+      };
+      const geocodeFailure: FoodProviderResult = {
+        provider: '高德', foods: [], error: '地点解析超时', attempted: true, succeeded: false, operation: 'geocode'
+      };
+      const configOmission: FoodProviderResult = {
+        provider: '腾讯地图', foods: [], error: '未配置 TENCENT_MAP_KEY',
+        attempted: false, succeeded: false, operation: 'search'
+      };
+
+      const empty = foodStructuredDataResultFromProviders(
+        emptyData,
+        [geocodeFailure, successfulEmpty, duplicateSuccessfulEmpty, configOmission]
+      );
+      expect(empty.status).assertEqual('empty');
+      expect(empty.error).assertUndefined();
+      expect(empty.sources.length).assertEqual(2);
+      expect(empty.sources[0].operation).assertEqual('geocode');
+      expect(empty.sources[1].operation).assertEqual('search');
+      expect(empty.sources[0].provider).assertEqual('高德');
+      expect(empty.sources[1].provider).assertEqual('高德');
+      expect(empty.warnings.length).assertLarger(0);
+
+      const food: A2uiFoodData = {
+        name: '真实餐厅', category: '餐饮', address: '深圳', distance: '100米', sourceTags: ['高德']
+      };
+      const partialData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '1 个结果', foods: [food], rows: []
+      };
+      const successWithData: FoodProviderResult = {
+        provider: '高德', foods: [food], error: '', attempted: true, succeeded: true, operation: 'search'
+      };
+      expect(foodStructuredDataResultFromProviders(
+        partialData, [successWithData, geocodeFailure]
+      ).status).assertEqual('partial');
+
+      const providerFailure: FoodProviderResult = {
+        provider: '百度地图', foods: [], error: 'HTTP 500', attempted: true, succeeded: false, operation: 'search'
+      };
+      const error = foodStructuredDataResultFromProviders(emptyData, [providerFailure, configOmission]);
+      expect(error.status).assertEqual('error');
+      expect(error.error?.code).assertEqual('FOOD_PROVIDER_ERROR');
+      expect(error.sources.length).assertEqual(1);
+    });
+
+    it('preserves code-specific flight error details and actions in legacy A2UI', 0, () => {
+      const invalid = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_INVALID_ARGUMENTS', '参数不足'
+      );
+      invalid.data = {
+        title: '飞常准查询参数不足', body: '参数不足', summary: '参数不足', flights: []
+      } as FlightStructuredData;
+      const invalidJsonl = flightDataResultA2ui('flight_invalid', invalid);
+      expect(invalidJsonl.indexOf('示例：明天北京到上海航班')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充日期')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充城市')).assertLarger(-1);
+
+      const malformed = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_INVALID_RESPONSE', '返回内容不是 JSON'
+      );
+      malformed.data = {
+        title: '飞常准返回格式异常', body: '返回内容不是 JSON', summary: '返回内容不是 JSON', flights: []
+      } as FlightStructuredData;
+      malformed.warnings = ['not-json-provider-body'];
+      const malformedJsonl = flightDataResultA2ui('flight_malformed', malformed);
+      expect(malformedJsonl.indexOf('not-json-provider-body')).assertLarger(-1);
+      expect(malformedJsonl.indexOf('检查供应商返回')).assertLarger(-1);
+
+      const providerError = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_PROVIDER_ERROR', 'invalid key'
+      );
+      providerError.data = {
+        title: '飞常准 Key 或参数需要检查', body: 'invalid key', summary: 'invalid key', flights: []
+      } as FlightStructuredData;
+      providerError.warnings = ['{"endpoint":"flights"}'];
+      const providerJsonl = flightDataResultA2ui('flight_provider', providerError);
+      expect(providerJsonl.indexOf('endpoint')).assertLarger(-1);
+      expect(providerJsonl.indexOf('检查 Key')).assertLarger(-1);
+      expect(providerJsonl.indexOf('换日期或城市')).assertLarger(-1);
+    });
+
+    it('preserves code-specific train error details and actions in legacy A2UI', 0, () => {
+      const invalid = errorDataResult(
+        'train.search', 'trains', 'TRAIN_INVALID_ARGUMENTS', '参数不足'
+      );
+      invalid.data = {
+        title: '12306 查询参数不足', body: '参数不足', summary: '参数不足', trains: []
+      } as TrainStructuredData;
+      const invalidJsonl = trainDataResultA2ui('train_invalid', invalid);
+      expect(invalidJsonl.indexOf('示例：明天北京到上海高铁票')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充日期')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充城市')).assertLarger(-1);
+
+      const station = errorDataResult(
+        'train.search', 'trains', 'TRAIN_STATION_NOT_FOUND', '车站识别失败'
+      );
+      station.data = {
+        title: '车站识别失败', body: '车站识别失败', summary: '车站识别失败', trains: []
+      } as TrainStructuredData;
+      station.warnings = ['深圳科技园', '香港'];
+      const stationJsonl = trainDataResultA2ui('train_station', station);
+      expect(stationJsonl.indexOf('深圳科技园')).assertLarger(-1);
+      expect(stationJsonl.indexOf('香港')).assertLarger(-1);
+      expect(stationJsonl.indexOf('补充车站名')).assertLarger(-1);
     });
 
     it('delegates structured hotel reads without rewriting sources or errors', 0, async () => {
