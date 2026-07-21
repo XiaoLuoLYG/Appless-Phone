@@ -589,6 +589,103 @@ export default function uiAgentTest() {
       observer.close();
     });
 
+    it('buffers pre-UI Data errors and renders the first declared error once', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+      const trainError: TaskErrorPayload = {
+        code: 'TRAIN_FAILED',
+        message: 'train unavailable'
+      };
+      const flightError: TaskErrorPayload = {
+        code: 'FLIGHT_FAILED',
+        message: 'flight unavailable'
+      };
+
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-multi',
+        'train-data',
+        trainError
+      ));
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-multi',
+        'flight-data',
+        flightError
+      ));
+      bus.publish(multiUiTaskMessage(['flight-data', 'train-data']));
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PROGRESS,
+        'conversation-a',
+        'turn-multi',
+        'error-barrier',
+        actionPayload(writer.writes[0].surfaceId, 'error-barrier', 'running')
+      ));
+      await receiveUiState(observer, 'action');
+
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('error:')
+      ).join(',')).assertEqual(`error:ui-multi:${writer.writes[0].surfaceId}`);
+      expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('error:flight unavailable'));
+      expect(writer.writes.length).assertEqual(3);
+      agent.stop();
+      observer.close();
+    });
+
+    it('keeps the first Data-or-error state for contradictory pre-UI terminals', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+      const lateFlightError: TaskErrorPayload = {
+        code: 'LATE_FLIGHT_ERROR',
+        message: 'must not replace Data'
+      };
+      const trainError: TaskErrorPayload = {
+        code: 'TRAIN_FAILED',
+        message: 'first train terminal'
+      };
+
+      bus.publish(dataResultMessage('conversation-a', 'turn-multi', 'flight-data', 101));
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-multi',
+        'flight-data',
+        lateFlightError
+      ));
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-multi',
+        'train-data',
+        trainError
+      ));
+      bus.publish(dataResultMessage('conversation-a', 'turn-multi', 'train-data', 202));
+      bus.publish(multiUiTaskMessage(['flight-data', 'train-data']));
+      await receiveUiState(observer, 'skeleton');
+      bus.publish(offersReadyMessage('conversation-a', 'turn-multi', 'flight-data'));
+      bus.publish(offersReadyMessage('conversation-a', 'turn-multi', 'train-data'));
+      await receiveUiState(observer, 'result');
+
+      expect(renderer.resultHotelIds.join(',')).assertEqual('101');
+      expect(renderer.resultBatchSizes.join(',')).assertEqual('1');
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('error:')
+      ).length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
     it('writes a skeleton then patches the same surface when UI arrives first', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const renderer: RecordingRenderer = new RecordingRenderer();

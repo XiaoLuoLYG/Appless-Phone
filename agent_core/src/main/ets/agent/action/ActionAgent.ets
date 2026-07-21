@@ -82,6 +82,9 @@ interface ObservedDataTask {
   taskId: string;
   toolId: string;
   outputSchema: string;
+  generation: number;
+  token: number;
+  resolving: boolean;
 }
 
 interface StoredActionDraft {
@@ -228,13 +231,13 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     new Map<string, StoredActionDraft>();
   private readonly availableOffers: Map<string, StoredAvailableOffers> =
     new Map<string, StoredAvailableOffers>();
-  private readonly availableOfferOrder: string[] = [];
   private readonly pendingPlanRequests: Map<string, StoredPlanRequest> =
     new Map<string, StoredPlanRequest>();
   private readonly terminalPlanRequests: Set<string> = new Set<string>();
+  private readonly terminalPlanRequestOrder: string[] = [];
   private readonly uiSurfaces: Map<string, string> = new Map<string, string>();
-  private readonly uiSurfaceOrder: string[] = [];
   private generation: number = 0;
+  private observationSequence: number = 0;
   private active: boolean = false;
 
   constructor(
@@ -274,11 +277,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.observedDataTasks.clear();
     this.pendingDrafts.clear();
     this.availableOffers.clear();
-    this.availableOfferOrder.splice(0, this.availableOfferOrder.length);
     this.pendingPlanRequests.clear();
     this.terminalPlanRequests.clear();
+    this.terminalPlanRequestOrder.splice(0, this.terminalPlanRequestOrder.length);
     this.uiSurfaces.clear();
-    this.uiSurfaceOrder.splice(0, this.uiSurfaceOrder.length);
   }
 
   inspectPausedRun(
@@ -333,7 +335,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
       if (message.type === AgentMessageType.TASK_RESULT_DATA ||
         message.type === AgentMessageType.TASK_ERROR) {
-        await this.resolveOffers(message);
+        this.startOfferResolution(message);
         return;
       }
       if (message.type === AgentMessageType.ACTION_PLAN_DRAFT) {
@@ -480,30 +482,34 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
     const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
     if (!this.observedDataTasks.has(key)) {
+      this.observationSequence++;
       this.observedDataTasks.set(key, {
         conversationId: message.conversationId,
         turnId: message.turnId,
         taskId: message.taskId,
         toolId: task.toolId,
-        outputSchema: task.outputSchema
+        outputSchema: task.outputSchema,
+        generation: this.generation,
+        token: this.observationSequence,
+        resolving: false
       });
     }
   }
 
-  private async resolveOffers(message: AgentMessage): Promise<void> {
+  private startOfferResolution(message: AgentMessage): void {
     const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
     const observed = this.observedDataTasks.get(key);
-    if (observed === undefined) {
+    if (observed === undefined || observed.resolving) {
       return;
     }
-    this.observedDataTasks.delete(key);
+    observed.resolving = true;
     if (message.type === AgentMessageType.TASK_ERROR) {
-      this.publishOffers(message, observed, []);
+      this.finishOfferResolution(key, message, observed, []);
       return;
     }
     const data = this.dataResult(message.payload, observed);
     if (data === null) {
-      this.publishOffers(message, observed, []);
+      this.finishOfferResolution(key, message, observed, []);
       return;
     }
     const context: ActionOfferContext = {
@@ -511,13 +517,36 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       turnId: message.turnId,
       dataTaskId: message.taskId
     };
-    let resolved: ActionOffer[];
     try {
-      resolved = await this.offerResolver(data, context);
+      this.offerResolver(data, context).then((resolved: ActionOffer[]) => {
+        this.finishOfferResolution(
+          key,
+          message,
+          observed,
+          this.sanitizeOffers(data.toolId, resolved)
+        );
+      }).catch((_error: Object) => {
+        this.finishOfferResolution(key, message, observed, []);
+      });
     } catch (_error) {
-      resolved = [];
+      this.finishOfferResolution(key, message, observed, []);
     }
-    this.publishOffers(message, observed, this.sanitizeOffers(data.toolId, resolved));
+  }
+
+  private finishOfferResolution(
+    key: string,
+    message: AgentMessage,
+    observed: ObservedDataTask,
+    offers: ActionOffer[]
+  ): void {
+    const current = this.observedDataTasks.get(key);
+    if (!this.active || observed.generation !== this.generation ||
+      current !== observed || current.token !== observed.token ||
+      this.canceledTurns.has(this.turnKey(observed.conversationId, observed.turnId))) {
+      return;
+    }
+    this.observedDataTasks.delete(key);
+    this.publishOffers(message, observed, offers);
   }
 
   private publishOffers(
@@ -525,7 +554,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     observed: ObservedDataTask,
     offers: ActionOffer[]
   ): void {
-    this.rememberAvailableOffers(message, observed, offers);
+    if (!this.rememberAvailableOffers(message, observed, offers)) {
+      this.publishInputError(
+        message, '', '', '', 'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
+    }
     const payload: ActionOffersReadyPayload = {
       dataTaskId: observed.taskId,
       sourceToolId: observed.toolId,
@@ -581,25 +615,23 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     message: AgentMessage,
     observed: ObservedDataTask,
     offers: ActionOffer[]
-  ): void {
+  ): boolean {
     const cloned = cloneJsonValue(offers as Object);
     if (!cloned.ok || !Array.isArray(cloned.value)) {
-      return;
+      return true;
     }
     const key = this.dataTaskKey(message.conversationId, message.turnId, observed.taskId);
-    if (!this.availableOffers.has(key)) {
-      this.availableOfferOrder.push(key);
+    if (!this.hasLiveStateCapacity(
+      this.availableOffers.size,
+      this.availableOffers.has(key)
+    )) {
+      return false;
     }
     this.availableOffers.set(key, {
       sourceToolId: observed.toolId,
       offers: cloned.value as ActionOffer[]
     });
-    while (this.availableOfferOrder.length > LIVE_RUN_LIMIT) {
-      const oldest = this.availableOfferOrder.shift();
-      if (oldest !== undefined) {
-        this.availableOffers.delete(oldest);
-      }
-    }
+    return true;
   }
 
   private storePlanRequest(message: AgentMessage): void {
@@ -630,7 +662,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     if (this.compiler === null) {
-      this.terminalPlanRequests.add(key);
+      this.rememberTerminalPlanRequest(key);
       this.publishInputError(
         message, '', '', '', 'ACTION_PLAN_COMPILER_UNAVAILABLE',
         'Action plan compiler is unavailable.'
@@ -640,7 +672,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     for (let index = 0; index < request.allowedActionIds.length; index++) {
       const current = this.catalog.validateRegisteredAction(request.allowedActionIds[index]);
       if (!current.ok) {
-        this.terminalPlanRequests.add(key);
+        this.rememberTerminalPlanRequest(key);
         this.publishInputError(message, '', '', '', current.code, current.message);
         return;
       }
@@ -752,7 +784,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.pendingPlanRequests.delete(key);
-    this.terminalPlanRequests.add(key);
+    this.rememberTerminalPlanRequest(key);
     const draft = cloneDraft(candidate);
     if (draft === null || !this.validDraft(draft)) {
       this.publishInputError(
@@ -824,7 +856,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.pendingPlanRequests.delete(key);
-    this.terminalPlanRequests.add(key);
+    this.rememberTerminalPlanRequest(key);
     this.publishInputError(
       stored.message, '', '', '', errorCode,
       errorCode === 'ACTION_PLAN_COMPILE_FAILED' ?
@@ -914,7 +946,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     if (ui === null || ui.state !== 'result') {
       return;
     }
-    this.rememberUiSurface(message, ui.surfaceId);
+    if (!this.rememberUiSurface(message, ui.surfaceId)) {
+      this.publishInputError(
+        message, '', '', ui.surfaceId, 'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
+    }
     const matches: StoredActionDraft[] = [];
     this.pendingDrafts.forEach((stored: StoredActionDraft) => {
       if (stored.conversationId === message.conversationId &&
@@ -927,20 +964,17 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
   }
 
-  private rememberUiSurface(message: AgentMessage, surfaceId: string): void {
+  private rememberUiSurface(message: AgentMessage, surfaceId: string): boolean {
     const key = this.uiSurfaceKey(message.conversationId, message.turnId, message.taskId);
     const current = this.uiSurfaces.get(key);
     if (current !== undefined) {
-      return;
+      return true;
+    }
+    if (!this.hasLiveStateCapacity(this.uiSurfaces.size, false)) {
+      return false;
     }
     this.uiSurfaces.set(key, surfaceId);
-    this.uiSurfaceOrder.push(key);
-    while (this.uiSurfaceOrder.length > LIVE_RUN_LIMIT) {
-      const oldest = this.uiSurfaceOrder.shift();
-      if (oldest !== undefined) {
-        this.uiSurfaces.delete(oldest);
-      }
-    }
+    return true;
   }
 
   private bindDraft(storedDraft: StoredActionDraft, surfaceId: string): void {
@@ -1325,13 +1359,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.availableOffers.forEach((_offers: StoredAvailableOffers, key: string) => {
       if (key.startsWith(prefix)) {
         this.availableOffers.delete(key);
-        this.removeOrderedKey(this.availableOfferOrder, key);
       }
     });
     this.uiSurfaces.forEach((_surfaceId: string, key: string) => {
       if (key.startsWith(prefix)) {
         this.uiSurfaces.delete(key);
-        this.removeOrderedKey(this.uiSurfaceOrder, key);
       }
     });
     const canceled: Set<string> = new Set<string>();
@@ -1907,6 +1939,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       LIVE_RUN_LIMIT;
   }
 
+  private hasLiveStateCapacity(size: number, alreadyPresent: boolean): boolean {
+    return alreadyPresent || size < LIVE_RUN_LIMIT;
+  }
+
   private runExists(key: string): boolean {
     return this.readyRuns.has(key) ||
       this.pausedRuns.has(key) ||
@@ -1919,6 +1955,20 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.terminalRuns.add(key);
+  }
+
+  private rememberTerminalPlanRequest(key: string): void {
+    if (this.terminalPlanRequests.has(key)) {
+      return;
+    }
+    while (this.terminalPlanRequestOrder.length >= LIVE_RUN_LIMIT) {
+      const oldest = this.terminalPlanRequestOrder.shift();
+      if (oldest !== undefined) {
+        this.terminalPlanRequests.delete(oldest);
+      }
+    }
+    this.terminalPlanRequests.add(key);
+    this.terminalPlanRequestOrder.push(key);
   }
 
   private rememberCanceledTurn(conversationId: string, turnId: string): void {
@@ -1947,13 +1997,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   private turnPrefix(conversationId: string, turnId: string): string {
     return `${conversationId.length}:${conversationId}${turnId.length}:${turnId}`;
-  }
-
-  private removeOrderedKey(order: string[], key: string): void {
-    const index = order.indexOf(key);
-    if (index >= 0) {
-      order.splice(index, 1);
-    }
   }
 
   private draftKey(

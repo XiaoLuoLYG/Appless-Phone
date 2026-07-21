@@ -171,17 +171,11 @@ export class UiAgent extends MessageDrivenAgent {
       return;
     }
     if (message.type === AgentMessageType.TASK_RESULT_DATA ||
-      message.type === AgentMessageType.ACTION_OFFERS_READY) {
+      message.type === AgentMessageType.ACTION_OFFERS_READY ||
+      message.type === AgentMessageType.TASK_ERROR) {
       const current: UiTurnContext | undefined = this.contexts.get(key);
       const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
       this.enqueue(message, key, context);
-      return;
-    }
-    if (message.type === AgentMessageType.TASK_ERROR) {
-      const context: UiTurnContext | undefined = this.contexts.get(key);
-      if (context !== undefined) {
-        this.enqueue(message, key, context);
-      }
       return;
     }
     const context: UiTurnContext | undefined = this.contexts.get(key);
@@ -412,18 +406,20 @@ export class UiAgent extends MessageDrivenAgent {
 
   private async handleTaskError(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
     if (context.canceled || context.resultWritten ||
-      context.terminalRenderStarted || context.uiTask === undefined ||
-      !this.ownsDataTask(context.uiTask, message.taskId)) {
+      context.terminalRenderStarted ||
+      (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId))) {
       return;
     }
     const errorMessage: string | null = this.taskErrorMessage(message.payload);
     if (errorMessage === null) {
-      this.publishOwnedDataError(
-        context,
-        message.taskId,
-        'UI_DATA_ERROR_INVALID',
-        'Data error payload is malformed'
-      );
+      if (context.uiTask !== undefined) {
+        this.publishOwnedDataError(
+          context,
+          message.taskId,
+          'UI_DATA_ERROR_INVALID',
+          'Data error payload is malformed'
+        );
+      }
       return;
     }
     this.rememberPendingError(context, message.taskId, errorMessage);
@@ -551,7 +547,8 @@ export class UiAgent extends MessageDrivenAgent {
 
   private rememberPendingError(context: UiTurnContext, taskId: string, message: string): void {
     const current = context.pendingDataByTaskId.get(taskId);
-    if (current !== undefined && current.errorMessage !== undefined) {
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
       return;
     }
     this.rememberPendingEntry(context, taskId, {

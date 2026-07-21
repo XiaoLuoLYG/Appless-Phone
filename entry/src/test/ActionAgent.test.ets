@@ -174,6 +174,33 @@ class TestGate {
   }
 }
 
+class DeferredOfferResolver {
+  readonly starts: TestGate[] = [new TestGate(), new TestGate()];
+  calls: number = 0;
+  private readonly resolvers: Array<((offers: ActionOffer[]) => void) | null> = [];
+
+  async resolve(
+    _data: DataResult,
+    _context: ActionOfferContext
+  ): Promise<ActionOffer[]> {
+    const index = this.calls;
+    this.calls++;
+    const pending = new Promise<ActionOffer[]>((resolve: (offers: ActionOffer[]) => void) => {
+      this.resolvers[index] = resolve;
+    });
+    this.starts[index].open();
+    return pending;
+  }
+
+  finish(index: number, offers: ActionOffer[]): void {
+    const resolve = this.resolvers[index];
+    this.resolvers[index] = null;
+    if (resolve !== null && resolve !== undefined) {
+      resolve(offers);
+    }
+  }
+}
+
 class RecordingRegisteredExecutor implements RegisteredActionExecutor {
   readonly actionIds: string[] = [];
   readonly serializedArgs: string[] = [];
@@ -302,6 +329,43 @@ function compiledPlan(firstArgs: Object = new Object()): ActionPlanDraft {
         path: '/body'
       }]
     }]
+  };
+}
+
+function singleOfferPlan(
+  planId: string = 'single-plan',
+  runId: string = 'single-run'
+): ActionPlanDraft {
+  return {
+    planId,
+    runId,
+    label: '生成回复',
+    steps: [{
+      stepId: 'generate',
+      actionId: 'social.reply.draft',
+      args: new Object()
+    }]
+  };
+}
+
+function singlePlanRequest(index: number): ActionPlanRequestPayload {
+  return {
+    uiTaskId: `capacity-ui-${index}`,
+    dataTaskIds: [`capacity-data-${index}`],
+    goal: `capacity-goal-${index}`,
+    allowedActionIds: ['social.reply.draft']
+  };
+}
+
+function navigateOffer(offerId: string): ActionOffer {
+  return {
+    offerId,
+    actionId: 'hotel.navigate',
+    label: '导航到酒店',
+    variant: 'secondary',
+    args: JSON.parse(
+      '{"hotelId":101,"latitude":22.5,"longitude":114}'
+    ) as Object
   };
 }
 
@@ -668,6 +732,158 @@ export default function actionAgentTest() {
       expect(result.status).assertEqual('success');
       expect(compiler.goals.length).assertEqual(0);
       expect(executor.actionIds.join(',')).assertEqual('hotel.navigate');
+      agent.stop();
+      observer.close();
+    });
+
+    it('does not let a pending offer resolver block cancellation or later Actions', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const deferred = new DeferredOfferResolver();
+      const executor = new RecordingRegisteredExecutor();
+      const resolveOffers = async (
+        data: DataResult,
+        context: ActionOfferContext
+      ): Promise<ActionOffer[]> => deferred.resolve(data, context);
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        resolveOffers,
+        executor
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.TASK_CREATE_DATA,
+        observedTask('resolver-data', 'hotel.search'),
+        'turn-1',
+        'resolver-data'
+      ));
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_DATA,
+        observedResult('hotel.search'),
+        'turn-1',
+        'resolver-data'
+      ));
+      await deferred.starts[0].promise;
+      bus.publish(message(
+        AgentMessageType.TURN_CANCEL,
+        new Object(),
+        'turn-1',
+        'cancel-resolver'
+      ));
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'after-resolver-cancel',
+          'hotel.navigate',
+          JSON.parse(
+            '{"hotelId":101,"latitude":22.5,"longitude":114}'
+          ) as Object,
+          'surface-2'
+        ),
+        'turn-2',
+        'after-resolver-cancel',
+        'conversation-2'
+      ));
+      await settle();
+      const recoveredBeforeResolver = executor.actionIds.length === 1;
+
+      deferred.finish(0, [navigateOffer('late-canceled-offer')]);
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"resolver-cancel-marker"}') as Object,
+        'marker-turn',
+        'resolver-cancel-marker'
+      ));
+      let lateOffers = 0;
+      let next = await receive(observer);
+      while (next.type !== AgentMessageType.INPUT_USER) {
+        if (next.type === AgentMessageType.ACTION_OFFERS_READY &&
+          next.taskId === 'resolver-data') {
+          lateOffers++;
+        }
+        next = await receive(observer);
+      }
+
+      expect(recoveredBeforeResolver).assertTrue();
+      expect(executor.actionIds.join(',')).assertEqual('hotel.navigate');
+      expect(lateOffers).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('fences late offer resolution across stop and reused task identities', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const deferred = new DeferredOfferResolver();
+      const resolveOffers = async (
+        data: DataResult,
+        context: ActionOfferContext
+      ): Promise<ActionOffer[]> => deferred.resolve(data, context);
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        resolveOffers,
+        new RecordingRegisteredExecutor()
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.TASK_CREATE_DATA,
+        observedTask('reused-data', 'hotel.search'),
+        'turn-1',
+        'reused-data'
+      ));
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_DATA,
+        observedResult('hotel.search'),
+        'turn-1',
+        'reused-data'
+      ));
+      await deferred.starts[0].promise;
+
+      agent.stop();
+      agent.start();
+      bus.publish(message(
+        AgentMessageType.TASK_CREATE_DATA,
+        observedTask('reused-data', 'hotel.search'),
+        'turn-1',
+        'reused-data'
+      ));
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_DATA,
+        observedResult('hotel.search'),
+        'turn-1',
+        'reused-data'
+      ));
+      await settle();
+      const restartedBeforeOldCompletion = deferred.calls === 2;
+
+      deferred.finish(0, [navigateOffer('stale-reused-offer')]);
+      await deferred.starts[1].promise;
+      deferred.finish(1, [navigateOffer('current-reused-offer')]);
+      await settle();
+      bus.publish(message(
+        AgentMessageType.INPUT_USER,
+        JSON.parse('{"text":"resolver-restart-marker"}') as Object,
+        'marker-turn',
+        'resolver-restart-marker'
+      ));
+      const offers: ActionOffersReadyPayload[] = [];
+      let next = await receive(observer);
+      while (next.type !== AgentMessageType.INPUT_USER) {
+        if (next.type === AgentMessageType.ACTION_OFFERS_READY &&
+          next.taskId === 'reused-data') {
+          offers.push(next.payload as ActionOffersReadyPayload);
+        }
+        next = await receive(observer);
+      }
+
+      expect(restartedBeforeOldCompletion).assertTrue();
+      expect(offers.length).assertEqual(1);
+      expect(offers[0].offers[0].offerId).assertEqual('current-reused-offer');
       agent.stop();
       observer.close();
     });
@@ -1382,6 +1598,250 @@ export default function actionAgentTest() {
         'hotel.detail,hotel.navigate,hotel.detail,hotel.navigate'
       );
 
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects the 129th pending compiler request without losing earlier work', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(singleOfferPlan());
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        composedOffers,
+        new RecordingRegisteredExecutor(),
+        compiler
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_REQUEST,
+          singlePlanRequest(index),
+          'turn-1',
+          `capacity-request-${index}`
+        ));
+      }
+      const overflow = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(overflow.errorCode).assertEqual('ACTION_STATE_CAPACITY');
+
+      bus.publish(message(
+        AgentMessageType.TASK_CREATE_DATA,
+        observedTask('capacity-data-0', 'social.source'),
+        'turn-1',
+        'capacity-data-0'
+      ));
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_DATA,
+        observedResult('social.source'),
+        'turn-1',
+        'capacity-data-0'
+      ));
+      await receiveType(observer, AgentMessageType.ACTION_PLAN_DRAFT);
+      const ui: UiRenderResultPayload = { surfaceId: 'surface-1', state: 'result' };
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_UI,
+        ui,
+        'turn-1',
+        'capacity-ui-0'
+      ));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+
+      expect(compiler.goals.join(',')).assertEqual('capacity-goal-0');
+      expect(ready.uiTaskId).assertEqual('capacity-ui-0');
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects excess early offer state instead of evicting a live correlation', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(singleOfferPlan());
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        composedOffers,
+        new RecordingRegisteredExecutor(),
+        compiler
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 129; index++) {
+        const taskId = `early-offer-${index}`;
+        bus.publish(message(
+          AgentMessageType.TASK_CREATE_DATA,
+          observedTask(taskId, 'social.source'),
+          'turn-1',
+          taskId
+        ));
+        bus.publish(message(
+          AgentMessageType.TASK_RESULT_DATA,
+          observedResult('social.source'),
+          'turn-1',
+          taskId
+        ));
+      }
+      let readyOffers = 0;
+      let capacityErrors = 0;
+      while (readyOffers < 129) {
+        const next = await receive(observer);
+        if (next.type === AgentMessageType.ACTION_OFFERS_READY) {
+          readyOffers++;
+        }
+        if (next.type === AgentMessageType.ACTION_RESULT &&
+          (next.payload as ActionResultPayload).errorCode === 'ACTION_STATE_CAPACITY') {
+          capacityErrors++;
+        }
+      }
+
+      let firstCorrelationCompleted = false;
+      if (capacityErrors === 1) {
+        const firstRequest: ActionPlanRequestPayload = {
+          uiTaskId: 'early-offer-ui',
+          dataTaskIds: ['early-offer-0'],
+          goal: 'use preserved first offer',
+          allowedActionIds: ['social.reply.draft']
+        };
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_REQUEST,
+          firstRequest,
+          'turn-1',
+          'early-offer-request'
+        ));
+        await receiveType(observer, AgentMessageType.ACTION_PLAN_DRAFT);
+        const ui: UiRenderResultPayload = { surfaceId: 'surface-1', state: 'result' };
+        bus.publish(message(
+          AgentMessageType.TASK_RESULT_UI,
+          ui,
+          'turn-1',
+          'early-offer-ui'
+        ));
+        await receiveType(observer, AgentMessageType.ACTION_PLAN_READY);
+        firstCorrelationCompleted = true;
+      }
+
+      expect(capacityErrors).assertEqual(1);
+      expect(firstCorrelationCompleted).assertTrue();
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects excess early UI state and preserves the first surface binding', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      const ui: UiRenderResultPayload = { surfaceId: 'surface-1', state: 'result' };
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.TASK_RESULT_UI,
+          ui,
+          'turn-1',
+          `early-ui-${index}`
+        ));
+      }
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'early-ui-barrier',
+          'hotel.detail',
+          JSON.parse('{"hotelId":101}') as Object
+        ),
+        'turn-1',
+        'early-ui-barrier'
+      ));
+      let capacityErrors = 0;
+      let barrierComplete = false;
+      while (!barrierComplete) {
+        const next = await receive(observer);
+        if (next.type === AgentMessageType.ACTION_RESULT) {
+          const result = next.payload as ActionResultPayload;
+          if (result.errorCode === 'ACTION_STATE_CAPACITY') {
+            capacityErrors++;
+          }
+          barrierComplete = result.runId === 'early-ui-barrier';
+        }
+      }
+
+      let firstSurfaceBound = false;
+      if (capacityErrors === 1) {
+        const draftPayload: ActionPlanDraftPayload = {
+          uiTaskId: 'early-ui-0',
+          dataTaskId: 'early-ui-data',
+          sourceToolId: 'social.source',
+          draft: singleOfferPlan('early-ui-plan', 'early-ui-run')
+        };
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_DRAFT,
+          draftPayload,
+          'turn-1',
+          'early-ui-draft'
+        ));
+        const ready = (await receiveType(
+          observer,
+          AgentMessageType.ACTION_PLAN_READY
+        )).payload as ActionPlanReadyPayload;
+        firstSurfaceBound = ready.surfaceId === 'surface-1';
+      }
+
+      expect(capacityErrors).assertEqual(1);
+      expect(firstSurfaceBound).assertTrue();
+      agent.stop();
+      observer.close();
+    });
+
+    it('bounds compiler-request tombstones while protecting current duplicates', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        new RecordingRegisteredExecutor()
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      for (let index = 0; index < 129; index++) {
+        bus.publish(message(
+          AgentMessageType.ACTION_PLAN_REQUEST,
+          singlePlanRequest(index),
+          'turn-1',
+          `terminal-request-${index}`
+        ));
+        await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      }
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        singlePlanRequest(0),
+        'turn-1',
+        'terminal-request-oldest-replay'
+      ));
+      const oldest = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        singlePlanRequest(128),
+        'turn-1',
+        'terminal-request-current-replay'
+      ));
+      const current = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(oldest.errorCode).assertEqual('ACTION_PLAN_COMPILER_UNAVAILABLE');
+      expect(current.errorCode).assertEqual('ACTION_PLAN_REQUEST_DUPLICATE');
       agent.stop();
       observer.close();
     });
