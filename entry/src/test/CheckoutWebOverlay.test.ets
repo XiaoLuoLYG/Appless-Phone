@@ -12,6 +12,9 @@ import { a2uiWebExecutionTokenForRequest, a2uiWebNavigationBindingForBegin,
   a2uiWebOwnershipAfterNavigationBegin, A2uiWebExecutionToken, A2uiWebNavigationBinding,
   initialA2uiWebExecutionOwnership, invalidateA2uiWebExecutionOwnership,
   isCurrentA2uiWebExecutionToken } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
+import { isCurrentTrainWebAssistTimer, nextTrainWebAssistEpoch,
+  trainWebAssistNavigationTimeoutOutcome,
+  TrainWebAssistExecutionBinding } from '../main/ets/pages/A2uiHome/train/TrainPresaleWebAutomation';
 
 export default function checkoutWebOverlayTest() {
   describe('checkoutWebOverlay', () => {
@@ -172,9 +175,43 @@ export default function checkoutWebOverlayTest() {
       const redirectBState = a2uiWebOwnershipAfterNavigationBegin(redirectAState, 'main');
       const redirectB = a2uiWebNavigationBindingForBegin(redirectA, redirectBState, 'main', 5,
         'https://kyfw.12306.cn/otn/confirmPassenger/initDc');
-      expect(a2uiWebNavigationTokenForEvent(redirectBState, redirectA, redirectA.url)).assertEqual(undefined);
-      expect(a2uiWebNavigationTokenForEvent(redirectBState, redirectB, redirectB.url)?.generation)
-        .assertEqual(redirectBState.mainGeneration);
+      expect(a2uiWebNavigationTokenForEvent(redirectBState, redirectB, redirectA.url)).assertEqual(undefined);
+      const acceptedRedirectB = a2uiWebNavigationTokenForEvent(redirectBState, redirectB, redirectB.url);
+      expect(acceptedRedirectB?.generation).assertEqual(redirectBState.mainGeneration);
+      const mainTimeoutBinding: TrainWebAssistExecutionBinding = acceptedRedirectB === undefined ?
+        { controller: 'main', generation: -1, session: -1 } :
+        { controller: acceptedRedirectB.controller, generation: acceptedRedirectB.generation,
+          session: acceptedRedirectB.session };
+      expect(trainWebAssistNavigationTimeoutOutcome('main', mainTimeoutBinding.generation,
+        mainTimeoutBinding.session, mainTimeoutBinding)?.state).assertEqual('needs_user');
+      const mainTimeoutEpoch = 30;
+      const mainClearedEpoch = nextTrainWebAssistEpoch(mainTimeoutEpoch);
+      const lateMainTimeout = isCurrentTrainWebAssistTimer(mainTimeoutEpoch, mainClearedEpoch, false) ?
+        trainWebAssistNavigationTimeoutOutcome('main', mainTimeoutBinding.generation,
+          mainTimeoutBinding.session, mainTimeoutBinding) : undefined;
+      expect(lateMainTimeout).assertEqual(undefined);
+      const popupRedirectOwner = a2uiWebOwnershipAfterPopupOpen(state);
+      const popupRedirectAState = a2uiWebOwnershipAfterNavigationBegin(popupRedirectOwner, 'popup');
+      const popupRedirectA = a2uiWebNavigationBindingForBegin(undefined, popupRedirectAState, 'popup', 6,
+        'https://kyfw.12306.cn/otn/leftTicket/init');
+      const popupRedirectBState = a2uiWebOwnershipAfterNavigationBegin(popupRedirectAState, 'popup');
+      const popupRedirectB = a2uiWebNavigationBindingForBegin(popupRedirectA, popupRedirectBState, 'popup', 6,
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc');
+      expect(a2uiWebNavigationTokenForEvent(popupRedirectBState, popupRedirectB, popupRedirectA.url))
+        .assertEqual(undefined);
+      const acceptedPopupRedirectB = a2uiWebNavigationTokenForEvent(popupRedirectBState,
+        popupRedirectB, popupRedirectB.url);
+      expect(acceptedPopupRedirectB?.controller).assertEqual('popup');
+      const popupTimeoutBinding: TrainWebAssistExecutionBinding = acceptedPopupRedirectB === undefined ?
+        { controller: 'popup', generation: -1, session: -1 } :
+        { controller: acceptedPopupRedirectB.controller, generation: acceptedPopupRedirectB.generation,
+          session: acceptedPopupRedirectB.session };
+      const popupTimeoutEpoch = 40;
+      const popupClearedEpoch = nextTrainWebAssistEpoch(popupTimeoutEpoch);
+      const latePopupTimeout = isCurrentTrainWebAssistTimer(popupTimeoutEpoch, popupClearedEpoch, false) ?
+        trainWebAssistNavigationTimeoutOutcome('popup', popupTimeoutBinding.generation,
+          popupTimeoutBinding.session, popupTimeoutBinding) : undefined;
+      expect(latePopupTimeout).assertEqual(undefined);
       expect(isOfficial12306PaymentUrl('https://epay.12306.cn/pay/webBusiness')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/payOrder/init')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertFalse();
