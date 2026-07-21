@@ -6,6 +6,7 @@ import {
   isAllowed12306BookingUrl,
   webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
+import { shouldRunOneShotPageScript } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
 
 export default function checkoutWebOverlayTest() {
   describe('checkoutWebOverlay', () => {
@@ -104,6 +105,13 @@ export default function checkoutWebOverlayTest() {
         'https://evil.example/',
         true
       )).assertEqual('block');
+    });
+
+    it('runs a page script once per real navigation only', 0, () => {
+      expect(shouldRunOneShotPageScript('assist()', 3, -1)).assertTrue();
+      expect(shouldRunOneShotPageScript('assist()', 3, 3)).assertFalse();
+      expect(shouldRunOneShotPageScript('assist()', 4, 3)).assertTrue();
+      expect(shouldRunOneShotPageScript('', 4, 3)).assertFalse();
     });
   });
 }

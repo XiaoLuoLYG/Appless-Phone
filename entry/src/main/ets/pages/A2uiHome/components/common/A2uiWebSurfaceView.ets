@@ -5,6 +5,14 @@ import { A2uiWebBridge, A2uiWebMessage } from './A2uiWebBridge';
 
 export type A2uiWebSurfaceMode = 'html' | 'url';
 
+export function shouldRunOneShotPageScript(
+  pageScript: string,
+  navigationId: number,
+  completedNavigationId: number
+): boolean {
+  return pageScript.length > 0 && navigationId !== completedNavigationId;
+}
+
 @Component
 export struct A2uiWebSurfaceView {
   @Prop @Watch('onSourceChange') mode: A2uiWebSurfaceMode = 'html';
@@ -17,16 +25,23 @@ export struct A2uiWebSurfaceView {
   @Prop javaScriptEnabled: boolean = true;
   @Prop domStorageEnabled: boolean = true;
   @Prop showLoading: boolean = true;
+  @Prop @Watch('onPageScriptChange') pageScript: string = '';
   onMessage: (message: A2uiWebMessage) => void = (_message: A2uiWebMessage): void => {};
   onUrlIntercept: (url: string, isMainFrame: boolean) => boolean =
     (_url: string, _isMainFrame: boolean): boolean => false;
   onLoadEnd: (url: string) => void = (_url: string): void => {};
   onLoadError: (message: string) => void = (_message: string): void => {};
+  onPageScriptResult: (result: string) => void = (_result: string): void => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   private popupController: webview.WebviewController = new webview.WebviewController();
   private bridge: A2uiWebBridge = new A2uiWebBridge();
   private webReady: boolean = false;
+  private popupReady: boolean = false;
   private loadedHtml: string = '';
+  private mainNavigationId: number = 0;
+  private popupNavigationId: number = 0;
+  private mainScriptNavigationId: number = -1;
+  private popupScriptNavigationId: number = -1;
   @State private loading: boolean = true;
   @State private errorText: string = '';
   @State private popupVisible: boolean = false;
@@ -69,6 +84,45 @@ export struct A2uiWebSurfaceView {
     if (this.mode === 'html') {
       this.loadHtmlIfNeeded();
     }
+  }
+
+  onPageScriptChange(): void {
+    if (this.webReady) {
+      this.runPageScriptOnce(this.controller, this.mainNavigationId, false);
+    }
+    if (this.popupVisible && this.popupReady) {
+      this.runPageScriptOnce(this.popupController, this.popupNavigationId, true);
+    }
+  }
+
+  private runPageScriptOnce(
+    controller: webview.WebviewController,
+    navigationId: number,
+    popup: boolean
+  ): void {
+    const completedNavigationId = popup ? this.popupScriptNavigationId : this.mainScriptNavigationId;
+    if (!shouldRunOneShotPageScript(this.pageScript, navigationId, completedNavigationId)) {
+      return;
+    }
+    if (popup) {
+      this.popupScriptNavigationId = navigationId;
+    } else {
+      this.mainScriptNavigationId = navigationId;
+    }
+    controller.runJavaScript(this.pageScript)
+      .then((result: string) => {
+        const currentNavigationId = popup ? this.popupNavigationId : this.mainNavigationId;
+        if (currentNavigationId === navigationId) {
+          this.onPageScriptResult(result);
+        }
+      })
+      .catch((_error: Error) => {
+        const currentNavigationId = popup ? this.popupNavigationId : this.mainNavigationId;
+        if (currentNavigationId === navigationId) {
+          aiLogError('[AIPhone][A2uiWebSurfacePageScriptError]');
+          this.onPageScriptResult('');
+        }
+      });
   }
 
   private mainFrameError(event: OnErrorReceiveEvent): boolean {
@@ -151,6 +205,7 @@ export struct A2uiWebSurfaceView {
         .height('100%')
         .backgroundColor(COLOR_PAGE)
         .onPageBegin(() => {
+          this.mainNavigationId += 1;
           this.loading = true;
           this.errorText = '';
         })
@@ -160,6 +215,7 @@ export struct A2uiWebSurfaceView {
           this.loading = false;
           this.loadHtmlIfNeeded();
           this.onLoadEnd(pageUrl);
+          this.runPageScriptOnce(this.controller, this.mainNavigationId, false);
         })
         .onErrorReceive((event) => {
           if (event !== undefined && event !== null && this.mainFrameError(event)) {
@@ -216,9 +272,15 @@ export struct A2uiWebSurfaceView {
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
+            .onPageBegin(() => {
+              this.popupNavigationId += 1;
+              this.popupReady = false;
+            })
             .onPageEnd((event) => {
               const pageUrl = event === undefined || event === null ? '' : event.url;
+              this.popupReady = true;
               this.onLoadEnd(pageUrl);
+              this.runPageScriptOnce(this.popupController, this.popupNavigationId, true);
             })
             .onLoadIntercept((event) => {
               const request = event === undefined || event === null ? null : event.data;
@@ -227,6 +289,7 @@ export struct A2uiWebSurfaceView {
               return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
             })
             .onWindowExit(() => {
+              this.popupReady = false;
               this.closePopup();
             })
         }

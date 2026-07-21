@@ -1,5 +1,26 @@
-import { aiLogInfo, isAllowedHotelBookingNavigationUrl } from '@loop/agent-core';
+import { aiLogError, aiLogInfo, isAllowedHotelBookingNavigationUrl } from '@loop/agent-core';
+import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
+import { webview } from '@kit.ArkWeb';
 import { url as arkUrl } from '@kit.ArkTS';
+import {
+  transitionTrainPresaleHandoff,
+  TRAIN_PRESALE_HANDOFF_EVENT,
+  TrainPresaleHandoffTransitionResult
+} from '../../../entryability/EntryAbility';
+import {
+  parseTrainWebAssistOutcome,
+  trainPresaleWebAssistScriptForCheckout,
+  trainWebAssistReasonText,
+  trainWebAssistTargetState,
+  TrainWebAssistOutcome
+} from '../train/TrainPresaleWebAutomation';
+import {
+  TRAIN_PRESALE_TASK_STORE_NAME,
+  TrainPresaleTask,
+  TrainPresaleTaskState,
+  TrainPresaleTaskStore
+} from '../train/TrainPresaleTaskStore';
 import { COLOR_CARD, COLOR_CARD_EDGE, COLOR_ERROR, COLOR_ERROR_SOFT, COLOR_INK, COLOR_MUTED, COLOR_PAGE } from '../style/A2uiHomeTheme';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
@@ -111,6 +132,78 @@ export struct CheckoutWebOverlay {
   onReturnUrl: (url: string) => void = (_url: string): void => {};
   @State blockedNavigation: string = '';
   @State currentUrl: string = '';
+  @State assistScript: string = '';
+
+  aboutToAppear(): void {
+    this.assistScript = this.trainAssistScript();
+  }
+
+  private trainPreferences(): preferences.Preferences | null {
+    if (this.kind !== 'train' || this.taskId.length === 0) {
+      return null;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.Context;
+      return preferences.getPreferencesSync(context, { name: TRAIN_PRESALE_TASK_STORE_NAME });
+    } catch (_error) {
+      aiLogError('[AIPhone][TrainWebAssistStore] ok=false');
+      return null;
+    }
+  }
+
+  private trainAssistScript(): string {
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) {
+      return '';
+    }
+    const task: TrainPresaleTask | undefined = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+    return trainPresaleWebAssistScriptForCheckout(this.kind, this.taskId, task);
+  }
+
+  private saveTrainCookies(): void {
+    if (this.kind !== 'train') {
+      return;
+    }
+    webview.WebCookieManager.saveCookieAsync()
+      .catch((_error: Error) => {
+        aiLogError('[AIPhone][TrainWebCookieSave] ok=false');
+      });
+  }
+
+  private close(): void {
+    this.saveTrainCookies();
+    this.onClose(this.taskId);
+  }
+
+  private handleAssistResult(raw: string): void {
+    if (this.assistScript.length === 0 || this.taskId.length === 0) {
+      return;
+    }
+    const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
+    const targetState: TrainPresaleTaskState | undefined = trainWebAssistTargetState(outcome);
+    if (targetState === undefined) {
+      return;
+    }
+    this.assistScript = '';
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) {
+      return;
+    }
+    const reason = outcome.state === 'needs_user' ? trainWebAssistReasonText(outcome.reason) : '';
+    try {
+      const transition: TrainPresaleHandoffTransitionResult = transitionTrainPresaleHandoff(
+        nativeStore, this.taskId, targetState, reason);
+      if (transition.task === undefined || transition.task.state !== targetState || !transition.cleared) {
+        aiLogError('[AIPhone][TrainWebAssistTransition] ok=false');
+        return;
+      }
+      const context = this.getUIContext().getHostContext() as common.Context;
+      context.getApplicationContext().eventHub.emit(TRAIN_PRESALE_HANDOFF_EVENT);
+      aiLogInfo('[AIPhone][TrainWebAssistTransition] state=' + targetState);
+    } catch (_error) {
+      aiLogError('[AIPhone][TrainWebAssistTransition] ok=false');
+    }
+  }
 
   private title(): string {
     if (this.kind === 'train') {
@@ -170,7 +263,7 @@ export struct CheckoutWebOverlay {
           label: this.closeLabel(),
           shape: 'pill',
           tone: 'secondary'
-        }).onClick(() => this.onClose(this.taskId))
+        }).onClick(() => this.close())
       }
       .width('100%')
       .height(72)
@@ -195,9 +288,12 @@ export struct CheckoutWebOverlay {
         allowPopup: true,
         javaScriptEnabled: true,
         domStorageEnabled: true,
+        pageScript: this.assistScript,
+        onPageScriptResult: (result: string): void => this.handleAssistResult(result),
         onUrlIntercept: (url: string, isMainFrame: boolean): boolean => this.intercept(url, isMainFrame),
         onLoadEnd: (url: string): void => {
           this.currentUrl = url;
+          this.saveTrainCookies();
           aiLogInfo('[AIPhone][CheckoutWebLoadEnd] kind=' + this.kind + ' chars=' + url.length.toString());
         }
       }).layoutWeight(1)

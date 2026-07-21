@@ -657,6 +657,7 @@ struct Index {
   private trainPresaleResumeDrain: TrainPresaleResumeDrain | null = null;
   private trainPresaleHandoffSubscribed: boolean = false;
   private readonly trainPresaleHandoffListener = (): void => {
+    this.refreshBoundTrainPresaleCheckoutTask();
     this.requestPendingTrainPresaleResume();
   };
 
@@ -3071,6 +3072,20 @@ struct Index {
     return this.showCheckoutWeb && this.checkoutWebKind === 'train' ? this.trainPresaleCheckoutTaskId : '';
   }
 
+  private refreshBoundTrainPresaleCheckoutTask(): void {
+    if (this.trainPresaleCheckoutTaskId.length === 0) {
+      return;
+    }
+    const store: TrainPresaleTaskStore | null = this.trainPresaleStore();
+    const task: TrainPresaleTask | undefined = store === null ? undefined : store.get(this.trainPresaleCheckoutTaskId);
+    if (task === undefined || task.state === 'executing') {
+      return;
+    }
+    this.trainPresaleTask = task;
+    this.trainPresaleTaskState = task.state;
+    this.trainPresaleError = task.lastError;
+  }
+
   private pendingTrainPresaleResumeDrain(): TrainPresaleResumeDrain {
     if (this.trainPresaleResumeDrain === null) {
       this.trainPresaleResumeDrain = new TrainPresaleResumeDrain(
@@ -3200,6 +3215,14 @@ struct Index {
     }
     const reason = '已关闭 12306 购票页；尚未进入订单协助，请重新打开任务继续。';
     try {
+      const current = new TrainPresaleTaskStore(nativeStore).get(closingTaskId);
+      if (current !== undefined && current.state !== 'executing') {
+        this.trainPresaleTask = current;
+        this.trainPresaleTaskState = current.state;
+        this.trainPresaleError = current.lastError;
+        this.trainPresaleCheckoutTaskId = '';
+        return;
+      }
       const transition: TrainPresaleHandoffTransitionResult = transitionBoundTrainPresaleCheckout(
         nativeStore, this.trainPresaleCheckoutTaskId, closingTaskId, reason);
       if (transition.task === undefined || transition.task.state !== 'needs_user') {

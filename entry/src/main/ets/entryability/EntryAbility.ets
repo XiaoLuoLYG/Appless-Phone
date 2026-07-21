@@ -1,6 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { webview } from '@kit.ArkWeb';
 import { preferences } from '@kit.ArkData';
 import util from '@ohos.util';
 import {
@@ -311,6 +312,7 @@ export function transitionTrainPresaleHandoff(
   }
   tasks[index] = updated;
   store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(tasks));
+  store.flushSync();
   store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
   store.flushSync();
   return { task: tasks[index], cleared: true };
@@ -507,6 +509,10 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     // Ability has back to background
+    webview.WebCookieManager.saveCookieAsync()
+      .catch((_error: Error) => {
+        aiLogError('[AIPhone][WebCookieSaveOnBackground] ok=false');
+      });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 }
