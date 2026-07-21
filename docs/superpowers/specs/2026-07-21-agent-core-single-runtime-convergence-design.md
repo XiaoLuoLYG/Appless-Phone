@@ -118,8 +118,8 @@ For hotel data:
 
 - detail is offered only with a real positive `hotelId` and valid search context;
 - navigation is offered only with bounded real coordinates;
-- call is offered only with verified phone/provider/place ID;
-- no hotel booking offer exists.
+- hotel phone/contact enrichment is not part of the shared runtime;
+- the hotel room surface may expose the separately registered `hotel.booking.open` web-session action, with no native order API.
 
 ### 4.5 UI Agent
 
