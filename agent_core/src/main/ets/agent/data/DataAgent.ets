@@ -32,7 +32,6 @@ export class DataAgent extends MessageDrivenAgent {
   private readonly dataTools: Map<string, ToolDefinition> = new Map<string, ToolDefinition>();
   private readonly canceled: Set<string> = new Set<string>();
   private readonly runningTasks: Set<string> = new Set<string>();
-  private readonly completedTasks: Set<string> = new Set<string>();
   private active: boolean = false;
   private generation: number = 0;
 
@@ -68,7 +67,6 @@ export class DataAgent extends MessageDrivenAgent {
     super.stop();
     this.canceled.clear();
     this.runningTasks.clear();
-    this.completedTasks.clear();
   }
 
   protected accepts(message: AgentMessage): boolean {
@@ -90,38 +88,40 @@ export class DataAgent extends MessageDrivenAgent {
       this.publishInputError(message, 'DATA_TASK_INVALID', 'Data task payload is malformed');
       return;
     }
+    if (this.planner === null) {
+      let authorization: DataTaskAuthorizationResult;
+      try {
+        authorization = this.authorizer(task);
+      } catch (_error) {
+        this.publishInputError(message, 'DATA_TASK_UNAUTHORIZED', 'Data task authorization failed');
+        return;
+      }
+      if (!authorization.ok) {
+        this.publishInputError(
+          message,
+          authorization.code.length === 0 ? 'DATA_TASK_UNAUTHORIZED' : authorization.code,
+          authorization.message.length === 0 ? 'Data task is not authorized' : authorization.message
+        );
+        return;
+      }
+      this.execute(message, task, key, '');
+      return;
+    }
+    if (!this.validToolIds(task.allowedToolIds as Object[])) {
+      this.publishInputError(message, 'DATA_TASK_INVALID', 'Data task payload is malformed');
+      return;
+    }
     const taskKey: string = this.taskKey(message);
-    if (this.runningTasks.has(taskKey) || this.completedTasks.has(taskKey)) {
+    if (this.runningTasks.has(taskKey)) {
       return;
     }
     this.runningTasks.add(taskKey);
     if (!this.allowedReadCall(task, task.toolId)) {
       this.publishInputError(message, 'TOOL_NOT_ALLOWED', 'Data task selected a disallowed tool');
-      this.completeTask(taskKey, this.generation, true);
+      this.completeTask(taskKey, this.generation);
       return;
     }
-    if (this.planner !== null) {
-      this.executePlanned(message, task, key, taskKey);
-      return;
-    }
-    let authorization: DataTaskAuthorizationResult;
-    try {
-      authorization = this.authorizer(task);
-    } catch (_error) {
-      this.publishInputError(message, 'DATA_TASK_UNAUTHORIZED', 'Data task authorization failed');
-      this.completeTask(taskKey, this.generation, true);
-      return;
-    }
-    if (!authorization.ok) {
-      this.publishInputError(
-        message,
-        authorization.code.length === 0 ? 'DATA_TASK_UNAUTHORIZED' : authorization.code,
-        authorization.message.length === 0 ? 'Data task is not authorized' : authorization.message
-      );
-      this.completeTask(taskKey, this.generation, true);
-      return;
-    }
-    this.execute(message, task, key, taskKey);
+    this.executePlanned(message, task, key, taskKey);
   }
 
   private execute(
@@ -145,19 +145,19 @@ export class DataAgent extends MessageDrivenAgent {
               );
             }
           }
-          this.completeTask(taskKey, generation, this.canPublish(key, generation));
+          this.completeTask(taskKey, generation);
         })
         .catch((error: Object) => {
           if (this.canPublish(key, generation)) {
             this.publishError(message, error);
           }
-          this.completeTask(taskKey, generation, this.canPublish(key, generation));
+          this.completeTask(taskKey, generation);
         });
     } catch (error) {
       if (this.canPublish(key, generation)) {
         this.publishError(message, error as Object);
       }
-      this.completeTask(taskKey, generation, this.canPublish(key, generation));
+      this.completeTask(taskKey, generation);
     }
   }
 
@@ -174,7 +174,7 @@ export class DataAgent extends MessageDrivenAgent {
           const detail: string = error instanceof Error ? error.message : `${error}`;
           this.publishInputError(message, 'DATA_PLAN_INVALID', detail);
         }
-        this.completeTask(taskKey, generation, this.canPublish(key, generation));
+        this.completeTask(taskKey, generation);
       });
   }
 
@@ -201,16 +201,16 @@ export class DataAgent extends MessageDrivenAgent {
           const detail: string = error instanceof Error ? error.message : `${error}`;
           this.publishInputError(message, 'DATA_PLAN_INVALID', detail);
         }
-        this.completeTask(taskKey, generation, this.canPublish(key, generation));
+        this.completeTask(taskKey, generation);
         return;
       }
       if (!this.canPublish(key, generation)) {
-        this.completeTask(taskKey, generation, false);
+        this.completeTask(taskKey, generation);
         return;
       }
       if (!this.validDecision(decision)) {
         this.publishInputError(message, 'DATA_PLAN_INVALID', 'Data planner decision is malformed');
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       if (decision.kind === 'finish') {
@@ -224,18 +224,18 @@ export class DataAgent extends MessageDrivenAgent {
         } else {
           this.publishResult(message, result);
         }
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       if (calls >= MAX_DATA_CALLS) {
         this.publishInputError(message, 'DATA_STEP_LIMIT', 'Data task cannot execute more than three calls');
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       const callTask: CreateDataTaskPayload | null = this.plannedCallTask(task, decision);
       if (callTask === null) {
         this.publishInputError(message, 'TOOL_NOT_ALLOWED', 'Data planner selected a disallowed tool');
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       let authorization: DataTaskAuthorizationResult;
@@ -243,7 +243,7 @@ export class DataAgent extends MessageDrivenAgent {
         authorization = this.authorizer(callTask);
       } catch (_error) {
         this.publishInputError(message, 'DATA_TASK_UNAUTHORIZED', 'Data task authorization failed');
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       if (!authorization.ok) {
@@ -252,7 +252,7 @@ export class DataAgent extends MessageDrivenAgent {
           authorization.code.length === 0 ? 'DATA_TASK_UNAUTHORIZED' : authorization.code,
           authorization.message.length === 0 ? 'Data task is not authorized' : authorization.message
         );
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       calls++;
@@ -263,11 +263,11 @@ export class DataAgent extends MessageDrivenAgent {
         if (this.canPublish(key, generation)) {
           this.publishError(message, error as Object);
         }
-        this.completeTask(taskKey, generation, this.canPublish(key, generation));
+        this.completeTask(taskKey, generation);
         return;
       }
       if (!this.canPublish(key, generation)) {
-        this.completeTask(taskKey, generation, false);
+        this.completeTask(taskKey, generation);
         return;
       }
       if (!this.validResult(callTask, result)) {
@@ -276,13 +276,13 @@ export class DataAgent extends MessageDrivenAgent {
           'DATA_TASK_OUTPUT_INVALID',
           'Data task output does not match the authorized call'
         );
-        this.completeTask(taskKey, generation, true);
+        this.completeTask(taskKey, generation);
         return;
       }
       results.push(result);
       observations.push(this.observation(task.taskId, result));
     }
-    this.completeTask(taskKey, generation, false);
+    this.completeTask(taskKey, generation);
   }
 
   private validDecision(decision: DataStepDecision): boolean {
@@ -391,14 +391,11 @@ export class DataAgent extends MessageDrivenAgent {
     return trimmed.length > maximum ? trimmed.substring(0, maximum) : trimmed;
   }
 
-  private completeTask(taskKey: string, generation: number, terminal: boolean): void {
+  private completeTask(taskKey: string, generation: number): void {
     if (generation !== this.generation) {
       return;
     }
     this.runningTasks.delete(taskKey);
-    if (terminal && this.active) {
-      this.completedTasks.add(taskKey);
-    }
   }
 
   private canPublish(key: string, generation: number): boolean {
@@ -459,7 +456,7 @@ export class DataAgent extends MessageDrivenAgent {
       typeof roundId !== 'string' || roundId.trim().length === 0 ||
       typeof skillId !== 'string' ||
       typeof goal !== 'string' || goal.trim().length === 0 ||
-      !Array.isArray(allowedToolIds) || !this.validToolIds(allowedToolIds as Object[]) ||
+      !Array.isArray(allowedToolIds) || allowedToolIds.length === 0 ||
       typeof toolId !== 'string' || toolId.trim().length === 0 ||
       typeof outputSchema !== 'string' || outputSchema.trim().length === 0 ||
       args === null || typeof args !== 'object' || Array.isArray(args) ||

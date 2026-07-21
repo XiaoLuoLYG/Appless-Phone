@@ -177,9 +177,11 @@ class TwoControlledDataExecutor implements DataTaskExecutor {
 
 class SingleControlledDataExecutor implements DataTaskExecutor {
   readonly started: TestGate = new TestGate();
+  calls: number = 0;
   private resolveResult: ((result: DataResult) => void) | null = null;
 
   async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls++;
     return new Promise<DataResult>((resolve: (result: DataResult) => void) => {
       this.resolveResult = resolve;
       this.started.open();
@@ -237,6 +239,39 @@ function dynamicDataResult(index: number = 1): DataResult {
   return {
     toolId: 'dynamic.search',
     outputSchema: 'dynamicToolConnect',
+    status: 'success',
+    sources: [source],
+    data,
+    warnings: []
+  };
+}
+
+function genericDataResult(toolId: string, outputSchema: string): DataResult {
+  return {
+    toolId,
+    outputSchema,
+    status: 'success',
+    sources: [],
+    data: new Object(),
+    warnings: []
+  };
+}
+
+function gmailSearchResult(): DataResult {
+  const source: DataSource = {
+    provider: 'google',
+    backend: 'oauth_api',
+    operation: 'gmail.mail.search',
+    fetchedAt: '2026-07-21T11:00:00.000Z'
+  };
+  const data: DynamicResultData = {
+    entityRefs: ['gmail-thread-real-1'],
+    recordId: 'gmail-thread-real-1',
+    privatePayload: ''
+  };
+  return {
+    toolId: 'gmail.mail.search',
+    outputSchema: 'mailThreads',
     status: 'success',
     sources: [source],
     data,
@@ -312,6 +347,31 @@ function dynamicDataTaskMessage(
   };
 }
 
+function customDataTaskMessage(
+  taskId: string,
+  toolId: string,
+  outputSchema: string
+): AgentMessage {
+  const payload: CreateDataTaskPayload = {
+    taskId,
+    roundId: 'round-custom',
+    skillId: '',
+    goal: toolId,
+    allowedToolIds: [toolId],
+    toolId,
+    outputSchema,
+    args: new Object(),
+    required: true
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_DATA,
+    conversationId: 'conversation-custom',
+    turnId: 'turn-custom',
+    taskId,
+    payload
+  };
+}
+
 function allowDataTask(_task: CreateDataTaskPayload): DataTaskAuthorizationResult {
   return { ok: true, code: '', message: '' };
 }
@@ -351,13 +411,73 @@ async function receiveType(reader: AgentMessageReader, type: AgentMessageType): 
   }
 }
 
-async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+async function receiveDataTerminal(reader: AgentMessageReader): Promise<AgentMessage> {
+  while (true) {
+    const received: AgentMessage = await receive(reader);
+    if (received.type === AgentMessageType.TASK_RESULT_DATA ||
+      received.type === AgentMessageType.TASK_ERROR) {
+      return received;
+    }
+  }
+}
+
+async function settle(rounds: number = 2): Promise<void> {
+  for (let index = 0; index < rounds; index++) {
+    await Promise.resolve();
+  }
 }
 
 export default function dataAgentTest() {
   describe('dataAgent', () => {
+    it('keeps custom authorized tools compatible on the three-argument one-shot path', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(
+        genericDataResult('test.custom.read', 'testCustomResult')
+      );
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-custom', 'test.custom.read', 'testCustomResult'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect(terminal.taskId).assertEqual('data-custom');
+      expect(authorizationCalls).assertEqual(1);
+      expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('allows a planned Gmail read owned by Data despite its web-session fallback', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([gmailSearchResult()]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'gmail.mail.search'), decision('finish', 'gmail.mail.search')
+      ]);
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-gmail', 'gmail.mail.search', 'mailThreads'));
+      const result: DataResult = (await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).payload as DataResult;
+
+      expect(result.toolId).assertEqual('gmail.mail.search');
+      expect(result.sources[0].provider).assertEqual('google');
+      expect(authorizationCalls).assertEqual(1);
+      expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
     it('runs call observe finish and publishes only the actual read result', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SequenceDataExecutor = new SequenceDataExecutor([dynamicDataResult()]);
@@ -454,9 +574,9 @@ export default function dataAgentTest() {
       observer.close();
     });
 
-    it('executes one planned task once when its message is duplicated', 0, async () => {
+    it('suppresses only a concurrent duplicate while a planned task is in flight', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const executor: SequenceDataExecutor = new SequenceDataExecutor([dynamicDataResult()]);
+      const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
       const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
         decision('call', 'dynamic.search'), decision('finish', 'dynamic.search')
       ]);
@@ -467,15 +587,41 @@ export default function dataAgentTest() {
 
       bus.publish(task);
       bus.publish(task);
+      await executor.started.promise;
+      await settle(4);
+      expect(executor.calls).assertEqual(1);
+      executor.complete(dynamicDataResult());
       expect((await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).taskId)
         .assertEqual('data-duplicate');
-      bus.publish(task);
-      await settle();
-      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
 
-      expect((await receiveType(observer, AgentMessageType.ACTION_RUN)).type)
-        .assertEqual(AgentMessageType.ACTION_RUN);
       expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('releases planned task identity after completion so a replay can run again', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        dynamicDataResult(1), dynamicDataResult(2)
+      ]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'dynamic.search'), decision('finish', 'dynamic.search'),
+        decision('call', 'dynamic.search'), decision('finish', 'dynamic.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = dynamicDataTaskMessage('data-replay');
+      agent.start();
+
+      bus.publish(task);
+      expect((await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).taskId)
+        .assertEqual('data-replay');
+      bus.publish(task);
+      await settle(12);
+
+      expect(executor.calls).assertEqual(2);
+      const replay: DataResult = (await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).payload as DataResult;
+      expect((replay.data as DynamicResultData).recordId).assertEqual('weather-record-real-2');
       agent.stop();
       observer.close();
     });
