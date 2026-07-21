@@ -28,9 +28,9 @@ interface PaymentCheckoutArgsFixture {
 
 interface MailReplyArgsFixture {
   requestKey: string;
-  provider: string;
+  provider?: string;
   threadId: string;
-  messageId: string;
+  messageId?: string;
   to: string[];
   subject: string;
   body: string;
@@ -334,11 +334,15 @@ export default function htmlHomeActionPolicyTest() {
 
     it('allows mail reply submissions only for the matching visible mail card', 0, () => {
       const doc = documentFixture();
-      const template: MailReplyArgsFixture = {
-        requestKey: '',
+      const detailIdentity: MailCalendarArgsFixture = {
+        requestKey: 'gmail:thread-123',
         provider: 'gmail',
         threadId: 'thread-123',
-        messageId: 'message-123',
+        messageId: 'message-123'
+      };
+      const template: MailReplyArgsFixture = {
+        requestKey: '',
+        threadId: 'thread-123',
         to: ['alice@example.com'],
         subject: 'Re: Status update',
         body: ''
@@ -357,7 +361,8 @@ export default function htmlHomeActionPolicyTest() {
           label: '加载正文',
           prompt: 'gmail:thread-123',
           variant: 'secondary',
-          kind: 'client'
+          kind: 'client',
+          args: detailIdentity
         }, {
           id: 'gmail.ai.reply.draft',
           label: 'AI 回复草稿',
@@ -385,6 +390,16 @@ export default function htmlHomeActionPolicyTest() {
         subject: 'Re: Status update',
         body: 'Confirmed.'
       };
+      const wrongMessage: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongMessage.messageId = 'message-stale';
+      const wrongRequest: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongRequest.requestKey = 'gmail:thread-stale';
+      const wrongProvider: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongProvider.provider = 'qq';
+      const wrongRecipient: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      wrongRecipient.to = ['mallory@example.com'];
+      const emptyBody: MailReplyArgsFixture = JSON.parse(JSON.stringify(allowed)) as MailReplyArgsFixture;
+      emptyBody.body = '   ';
 
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_save', 'gmail:thread-123', 'client', allowed))).assertTrue();
@@ -394,6 +409,16 @@ export default function htmlHomeActionPolicyTest() {
         action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_send', 'gmail:thread-123', 'client', blocked))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongMessage))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-stale', 'client', wrongRequest))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongProvider))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', wrongRecipient))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('html_mail_reply_send', 'gmail:thread-123', 'client', emptyBody))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
         action('html_mail_reply_ai_generate', 'gmail:thread-123', 'client', blocked))).assertFalse();
     });

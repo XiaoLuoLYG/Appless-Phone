@@ -18,7 +18,9 @@ import {
   AiphoneRegisteredActionExecutor,
   HotelActionIdFactory,
   RegisteredPageAction,
-  SystemUriOpener
+  RegisteredPageActionContext,
+  SystemUriOpener,
+  validateGmailReplyActionArgs
 } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 
 function object(raw: string): Object {
@@ -124,6 +126,9 @@ class NoClientAction implements ClientActionAuthorizer {
 
 class RegisteredArgsValidator implements ActionArgsValidator {
   validate(actionId: string, args: Object): ActionValidationResult {
+    if (actionId === 'gmail.message.send') {
+      return validateGmailReplyActionArgs(args);
+    }
     if (actionId.indexOf('hotel.') === 0) {
       return validateHotelActionArgs(actionId, args);
     }
@@ -541,6 +546,77 @@ export default function aiphoneRegisteredActionExecutorTest() {
       expect(JSON.stringify(result)).assertEqual(JSON.stringify(recorder.result));
     });
 
+    it('routes one exact confirmed Gmail reply send and rejects its replay', 0, async () => {
+      const args = object(
+        '{"requestKey":"gmail:thread-real-1","provider":"gmail","accountLabel":"g***@gmail.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      );
+      const recorder = new RecordingPageAction();
+      const executor = pageExecutor(
+        'gmail.message.send', args, recorder, new FakeUriOpener(), 'gmail.thread.read'
+      );
+
+      const first = await executor.execute(
+        'gmail.message.send', args, pageContext('html_mail_reply_send', 'gmail.thread.read')
+      );
+      const replay = await executor.execute(
+        'gmail.message.send', args, pageContext('html_mail_reply_send', 'gmail.thread.read')
+      );
+
+      expect(first.status).assertEqual('success');
+      expect(replay.status).assertEqual('error');
+      expect(JSON.stringify(replay).indexOf('DUPLICATE')).assertLarger(-1);
+      expect(recorder.calls.length).assertEqual(1);
+      expect(recorder.calls[0].actionId).assertEqual('gmail.message.send');
+      expect((recorder.calls[0].context as RegisteredPageActionContext).pageActionId)
+        .assertEqual('html_mail_reply_send');
+    });
+
+    it('rejects Gmail reply provider mismatch before the page provider callback', 0, async () => {
+      const args = object(
+        '{"requestKey":"qq:message-real-1","provider":"qq","accountLabel":"q***@qq.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      );
+      const recorder = new RecordingPageAction();
+      const executor = pageExecutor(
+        'gmail.message.send', args, recorder, new FakeUriOpener(), 'mail.search'
+      );
+
+      const result = await executor.execute(
+        'gmail.message.send', args, pageContext('html_mail_reply_send', 'mail.search')
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(recorder.calls.length).assertEqual(0);
+    });
+
+    it('surfaces the real Gmail reply provider error without a success receipt', 0, async () => {
+      const args = object(
+        '{"requestKey":"gmail:thread-real-1","provider":"gmail","accountLabel":"g***@gmail.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      );
+      const recorder = new RecordingPageAction();
+      recorder.result = {
+        status: 'error',
+        errorCode: 'GMAIL_AUTH_REQUIRED',
+        message: 'Gmail OAuth account is not connected.'
+      };
+      const executor = pageExecutor(
+        'gmail.message.send', args, recorder, new FakeUriOpener(), 'gmail.mail.search'
+      );
+
+      const result = await executor.execute(
+        'gmail.message.send', args, pageContext('html_mail_reply_send', 'gmail.mail.search')
+      );
+
+      expect(JSON.stringify(result)).assertEqual(JSON.stringify(recorder.result));
+      expect(JSON.stringify(result).indexOf('provider-receipt')).assertEqual(-1);
+      expect(recorder.calls.length).assertEqual(1);
+    });
+
     it('routes every current Wave 3 draft preview system and Web action explicitly', 0, async () => {
       const actionIds: string[] = [
         'luckin.order.preview',
@@ -565,12 +641,11 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('rejects unknown Data client-only and explicitly deferred Task 7 and Task 8 actions', 0, async () => {
+    it('rejects unknown Data client-only and explicitly deferred Task 8 actions', 0, async () => {
       const rejected: string[] = [
         'unknown.action',
         'travel.search',
         'payment.confirm',
-        'gmail.message.send',
         'luckin.order.create',
         'calendar.event.create',
         'calendar.event.update',

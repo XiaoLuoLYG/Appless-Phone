@@ -181,12 +181,17 @@ function calendarToolDescription(definition: ToolDefinition): string {
 }
 
 export function aiphoneToolDescriptionForModel(toolId: string): string {
-  if (isSurfaceDerivedHotelActionId(toolId)) {
+  if (!isLoopToolExposedToModel(toolId)) {
     return '';
   }
   const definitions = allToolDefinitions();
   for (let index = 0; index < definitions.length; index++) {
     if (definitions[index].toolId === toolId) {
+      if (toolId === 'gmail.draft.create') {
+        return calendarToolDescription(definitions[index]) +
+          '. For every unbound natural-language request to write or send Gmail, create a draft first. ' +
+          'gmail.message.send is available only from the exact current mail reply Send button.';
+      }
       return calendarToolDescription(definitions[index]);
     }
   }
@@ -195,6 +200,10 @@ export function aiphoneToolDescriptionForModel(toolId: string): string {
 
 export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
   return toolId === 'hotel.navigate' || toolId === 'hotel.booking.open';
+}
+
+function isLoopToolExposedToModel(toolId: string): boolean {
+  return !isSurfaceDerivedHotelActionId(toolId) && toolId !== 'gmail.message.send';
 }
 
 export class LoopBackend {
@@ -290,7 +299,7 @@ export class LoopBackend {
     const currentPrompt = request.userPrompt === undefined || request.userPrompt.trim().length === 0 ?
       request.prompt : request.userPrompt;
     for (const definition of allToolDefinitions()) {
-      if (isSurfaceDerivedHotelActionId(definition.toolId)) {
+      if (!isLoopToolExposedToModel(definition.toolId)) {
         continue;
       }
       if (definition.toolId === 'luckin.order.preview' && !isExplicitLuckinOrderPrompt(currentPrompt)) {
@@ -370,7 +379,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'gmail.open.web') {
       description += '. Use only when the user explicitly asks to open Gmail in the browser/web app.';
     } else if (definition.toolId === 'gmail.message.send') {
-      description += '. Blocked safety fallback. Do not use for ordinary writing, composing, replying, or "send an email saying..." requests; use gmail.draft.create. Use only if the user explicitly asks to bypass review or confirmation and send immediately, and expect the client to block it.';
+      description += '. Available only from the exact current mail reply Send button after surface and argument validation. Never select it for a natural-language request; create a reviewable Gmail draft first.';
     } else if (definition.toolId === 'media.video.search') {
       description += '. Use for Bilibili/B站/哔哩哔哩 video search or multi-source video search. If the same request mentions YouTube and Bilibili, choose media.video.search with sources ["youtube","bilibili"].';
     } else if (definition.toolId === 'media.aggregate.search') {

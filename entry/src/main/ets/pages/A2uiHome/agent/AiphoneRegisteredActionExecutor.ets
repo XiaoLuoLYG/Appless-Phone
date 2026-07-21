@@ -3,6 +3,7 @@ import {
   ActionExecutionContext,
   ActionExecutionResult,
   ActionFollowUp,
+  ActionValidationResult,
   HotelBookingOpenArgs,
   HotelNavigateArgs,
   RegisteredActionExecutor,
@@ -43,8 +44,42 @@ interface HotelSystemIntentOpened {
 
 const REPLAY_IDENTITY_LIMIT: number = 128;
 
+type MailReplyArgValue = Object | string | number | boolean | null | undefined;
+type MailReplyArgRecord = Record<string, MailReplyArgValue>;
+
 function nonempty(value: string): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function validateGmailReplyActionArgs(args: Object): ActionValidationResult {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return {
+      ok: false,
+      code: 'GMAIL_REPLY_ARGS_INVALID',
+      message: 'Gmail reply command is invalid.'
+    };
+  }
+  const values = args as MailReplyArgRecord;
+  const provider = typeof values['provider'] === 'string' ? values['provider'].trim().toLowerCase() : '';
+  const threadId = typeof values['threadId'] === 'string' ? values['threadId'].trim() : '';
+  const messageId = typeof values['messageId'] === 'string' ? values['messageId'].trim() : '';
+  const requestKey = typeof values['requestKey'] === 'string' ? values['requestKey'].trim() : '';
+  const subject = typeof values['subject'] === 'string' ? values['subject'].trim() : '';
+  const body = typeof values['body'] === 'string' ? values['body'].trim() : '';
+  const replyMode = typeof values['replyMode'] === 'string' ? values['replyMode'].trim() : '';
+  const to = values['to'];
+  const recipientsValid = Array.isArray(to) && to.length > 0 && to.every(
+    (recipient: Object | string | number | boolean | null | undefined): boolean =>
+      typeof recipient === 'string' && recipient.trim().length > 0
+  );
+  const valid = provider === 'gmail' && threadId.length > 0 && messageId.length > 0 &&
+    requestKey === 'gmail:' + threadId && subject.length > 0 && body.length > 0 &&
+    replyMode === 'reply' && recipientsValid;
+  return {
+    ok: valid,
+    code: valid ? '' : 'GMAIL_REPLY_ARGS_INVALID',
+    message: valid ? '' : 'Gmail reply requires the exact current thread, message, recipient, and body.'
+  };
 }
 
 function pageActionRoute(actionId: string): boolean {
@@ -57,7 +92,8 @@ function pageActionRoute(actionId: string): boolean {
     actionId === 'worldcup.open' ||
     actionId === 'payment.send' ||
     actionId === 'payment.account.setup' ||
-    actionId === 'maps.route.open';
+    actionId === 'maps.route.open' ||
+    actionId === 'gmail.message.send';
 }
 
 function validPageResult(result: ActionExecutionResult): boolean {

@@ -1034,7 +1034,7 @@ export default function a2uiHomeToolRequestTest() {
         '帮我在 Gmail 回复 Alice，先起草一封邮件',
         ''
       );
-      const blockedSend = resolveA2uiHomeToolRequest(
+      const directSendDraft = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
         '帮我 Gmail 直接发送这封邮件，不用确认直接发',
         ''
@@ -1047,9 +1047,9 @@ export default function a2uiHomeToolRequestTest() {
 
       expect(inbox.toolId).assertEqual('gmail.mail.search');
       expect(draft.toolId).assertEqual('gmail.draft.create');
-      expect(blockedSend.toolId).assertEqual('gmail.message.send');
+      expect(directSendDraft.toolId).assertEqual('gmail.draft.create');
       expect(openWeb.toolId).assertEqual('gmail.open.web');
-      expect(blockedSend.actionId).assertEqual('client_intent_fallback');
+      expect(directSendDraft.actionId).assertEqual('client_intent_fallback');
     });
 
     it('preserves model-provided Gmail structured args', 0, () => {
@@ -1146,14 +1146,14 @@ export default function a2uiHomeToolRequestTest() {
       expect(JSON.stringify(resolved.args).indexOf('thread-123')).assertLarger(-1);
     });
 
-    it('forces direct Gmail send prompts into the blocked send tool even when the model selects draft', 0, () => {
+    it('forces unbound direct Gmail send prompts into a reviewable draft', 0, () => {
       const resolved = resolveA2uiHomeToolRequest(
-        surfaceWithToolRequest('gmail.draft.create', '创建 Gmail 草稿', 'model_tool_request'),
-        '用 Gmail 直接发送一封邮件给 alice@example.com 说测试',
+        surfaceWithToolRequest('gmail.message.send', '直接发送 Gmail', 'model_tool_request'),
+        'Use Gmail to send an email to alice@example.com saying test.',
         ''
       );
 
-      expect(resolved.toolId).assertEqual('gmail.message.send');
+      expect(resolved.toolId).assertEqual('gmail.draft.create');
       expect(resolved.actionId).assertEqual('client_gmail_safety_reroute');
     });
 
@@ -1182,7 +1182,7 @@ export default function a2uiHomeToolRequestTest() {
       expect(latestImportant.toolId).assertEqual('gmail.mail.search');
       expect(openWeb.toolId).assertEqual('gmail.open.web');
       expect(draftMail.toolId).assertEqual('gmail.draft.create');
-      expect(directSend.toolId).assertEqual('gmail.message.send');
+      expect(directSend.toolId).assertEqual('gmail.draft.create');
     });
   });
 }

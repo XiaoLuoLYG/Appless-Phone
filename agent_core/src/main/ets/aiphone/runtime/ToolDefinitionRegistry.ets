@@ -275,13 +275,13 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     toolId: 'gmail.message.send',
     domain: 'gmail',
     intent: 'gmail.message.send',
-    riskLevel: 'blocked',
-    backendPriority: ['system_intent'],
-    authModes: ['system'],
-    inputSchema: 'messageSendRequest',
-    outputSchema: 'blockedAction',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['oauth'],
+    inputSchema: 'mailReplyCommand',
+    outputSchema: 'mailReplyOperationResult',
     a2uiComponent: 'GenericToolResults',
-    actions: ['gmail.authorize', 'gmail.draft.apply', 'gmail.open.web']
+    actions: []
   },
   {
     toolId: 'youtube.video.search',

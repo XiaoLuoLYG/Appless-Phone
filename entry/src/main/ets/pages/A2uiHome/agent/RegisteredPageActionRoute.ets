@@ -21,7 +21,8 @@ const FIXED_PAGE_ACTION_IDS: string[] = [
   'worldcup.open',
   'payment.send',
   'payment.account.setup',
-  'maps.route.open'
+  'maps.route.open',
+  'gmail.message.send'
 ];
 
 const PAGE_ACTION_CANDIDATE_IDS: string[] = [
@@ -89,6 +90,29 @@ function adaptedTarget(sourceToolId: string, clickedActionId: string): string {
     return 'payment.account.setup';
   }
   return '';
+}
+
+function gmailReplySendTarget(sourceToolId: string, clicked: A2uiAction): string {
+  if (clicked.id !== 'html_mail_reply_send' || clicked.kind !== 'client' ||
+    clicked.args === undefined || clicked.args === null || Array.isArray(clicked.args) ||
+    (sourceToolId !== 'mail.search' && sourceToolId !== 'mail.thread.read' &&
+      sourceToolId !== 'gmail.mail.search' && sourceToolId !== 'gmail.thread.read')) {
+    return '';
+  }
+  const values = clicked.args as Record<string, Object | string | number | boolean | null | undefined>;
+  const provider = values['provider'];
+  return typeof provider === 'string' && provider.trim().toLowerCase() === 'gmail' ?
+    'gmail.message.send' : '';
+}
+
+function isGmailReplySendCandidate(action: A2uiAction): boolean {
+  if (action.id !== 'html_mail_reply_send' || action.kind !== 'client' ||
+    action.args === undefined || action.args === null || Array.isArray(action.args)) {
+    return false;
+  }
+  const values = action.args as Record<string, Object | string | number | boolean | null | undefined>;
+  const provider = values['provider'];
+  return typeof provider === 'string' && provider.trim().toLowerCase() === 'gmail';
 }
 
 function cloneSnapshot(snapshot: RegisteredPageSnapshot): RegisteredPageSnapshot | null {
@@ -205,7 +229,10 @@ export function resolveRegisteredPageAction(
   } else if (sourceToolId === 'luckin.order.preview' && clicked.id === 'luckin.order.preview') {
     targetId = clicked.id;
   } else {
-    targetId = adaptedTarget(sourceToolId, clicked.id);
+    targetId = gmailReplySendTarget(sourceToolId, clicked);
+    if (targetId.length === 0) {
+      targetId = adaptedTarget(sourceToolId, clicked.id);
+    }
   }
   if (!registeredProductAction(targetId)) {
     return null;
@@ -236,7 +263,7 @@ export async function dispatchRegisteredPageActionCandidate(
   registered: RegisteredPageCandidateRunner,
   legacy: LegacyPageActionRunner
 ): Promise<RegisteredPageDispatchResult> {
-  if (isRegisteredPageActionCandidate(action.id)) {
+  if (isRegisteredPageActionCandidate(action.id) || isGmailReplySendCandidate(action)) {
     let ok = false;
     try {
       ok = await registered(action);

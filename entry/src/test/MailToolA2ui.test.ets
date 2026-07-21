@@ -185,6 +185,7 @@ export default function mailToolA2uiTest() {
         expect(action.id).assertEqual('mail.ai.reply.draft');
         expect(action.label).assertEqual('AI 回复草稿');
         expect(action.prompt.indexOf('mail.draft.create')).assertLarger(-1);
+        expect(action.prompt.indexOf('gmail.message.send')).assertEqual(-1);
         expect(action.prompt.indexOf('"provider":"qq"')).assertLarger(-1);
         expect(action.prompt.indexOf('"messageId":"qq-message"')).assertLarger(-1);
       }

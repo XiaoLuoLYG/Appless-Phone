@@ -19,6 +19,7 @@ import {
   MultiAgentCanaryRuntime
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import {
+  RegisteredPageAction,
   RegisteredPageActionContext,
   SystemUriOpener
 } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
@@ -157,6 +158,46 @@ function documentFor(surface: A2uiSurfaceState): HtmlHomeDocument {
   });
 }
 
+function mailReplyDocument(
+  surface: A2uiSurfaceState,
+  provider: string,
+  args: Object
+): HtmlHomeDocument {
+  const command = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const document = documentFor(surface);
+  const expected = JSON.parse(JSON.stringify(args)) as Record<string, Object | string | number | boolean | null | undefined>;
+  expected['requestKey'] = '';
+  expected['body'] = '';
+  document.kind = 'gmail';
+  document.actions = [];
+  document.blocks = [{
+    id: provider + '-message-real-1',
+    kind: 'generic-tool-result',
+    title: 'QA',
+    subtitle: '',
+    status: 'success',
+    source: provider === 'gmail' ? 'Gmail' : 'QQ Mail',
+    metrics: [],
+    rows: [],
+    actions: [{
+      id: 'html_mail_detail_read',
+      label: '加载正文',
+      prompt: command['requestKey'] as string,
+      variant: 'secondary',
+      kind: 'client',
+      args: args
+    }, {
+      id: provider === 'gmail' ? 'gmail.ai.reply.draft' : 'mail.ai.reply.draft',
+      label: 'AI 回复草稿',
+      prompt: 'reply',
+      variant: 'primary',
+      kind: 'prompt',
+      args: expected as Object
+    }]
+  }];
+  return document;
+}
+
 function snapshot(surface: A2uiSurfaceState, generation: number): RegisteredPageSnapshot {
   return {
     surface,
@@ -189,17 +230,18 @@ function canary(
   model: LocalModel,
   handler: RegisteredPageActionHandler,
   currentSnapshot: () => RegisteredPageSnapshot | null,
-  bus?: LinkedMessageBus
+  bus?: LinkedMessageBus,
+  pageAction?: RegisteredPageAction
 ): MultiAgentCanaryRuntime {
   const options: MultiAgentCanaryOptions = {
     model,
     selectedPersonaId: (): string => 'travel_companion',
     opener: new RecordingOpener(),
-    pageAction: (
+    pageAction: pageAction === undefined ? (
       actionId: string,
       args: Object,
       context: RegisteredPageActionContext
-    ): Promise<ActionExecutionResult> => handler.execute(actionId, args, context),
+    ): Promise<ActionExecutionResult> => handler.execute(actionId, args, context) : pageAction,
     currentPageSnapshot: currentSnapshot,
     onSurface: (_surface: A2uiSurfaceState): void => {},
     onMemoryUpdate: (): void => {},
@@ -228,6 +270,165 @@ function cloneSnapshot(value: RegisteredPageSnapshot): RegisteredPageSnapshot {
 
 export default function registeredPageActionMigrationTest() {
   describe('registeredPageActionMigration', () => {
+    it('routes the exact current Gmail Send click once without a second confirmation pause', 0, async () => {
+      const invoker = new RecordingPageToolInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const bus = new TrackingBus();
+      const command = JSON.parse(
+        '{"requestKey":"gmail:thread-real-1","provider":"gmail","accountLabel":"g***@gmail.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      ) as Object;
+      const clicked = action('html_mail_reply_send', command, 'client');
+      clicked.label = '发送回复';
+      clicked.prompt = 'gmail:thread-real-1';
+      const surface = pageSurface('gmail.mail.search', action(
+        'gmail.ai.reply.draft', command
+      ), 1);
+      let current: RegisteredPageSnapshot | null = {
+        surface,
+        document: mailReplyDocument(surface, 'gmail', command),
+        generation: 1
+      };
+      let sendCalls = 0;
+      const pageAction: RegisteredPageAction = async (
+        actionId: string,
+        args: Object,
+        context: RegisteredPageActionContext
+      ): Promise<ActionExecutionResult> => {
+        sendCalls++;
+        expect(actionId).assertEqual('gmail.message.send');
+        expect(context.pageActionId).assertEqual('html_mail_reply_send');
+        expect(JSON.stringify(args)).assertEqual(JSON.stringify(command));
+        return {
+          status: 'success',
+          output: JSON.parse(
+            '{"requestKey":"gmail:thread-real-1","operation":"send",' +
+            '"provider":"gmail","status":"success","message":"Gmail 回复已发送。"}'
+          ) as Object
+        };
+      };
+      const runtime = canary(
+        new QueueModel([]), handler, (): RegisteredPageSnapshot | null => current, bus, pageAction
+      );
+      let legacyCalls = 0;
+      const dispatched = await dispatchRegisteredPageActionCandidate(
+        clicked,
+        (currentAction: A2uiAction): Promise<boolean> => runtime.runPageAction(currentAction),
+        async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+      );
+
+      expect(dispatched.candidate).assertTrue();
+      expect(dispatched.ok).assertTrue();
+      expect(sendCalls).assertEqual(1);
+      expect(legacyCalls).assertEqual(0);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_RESULT &&
+          JSON.stringify(message.payload).indexOf('"status":"paused"') >= 0
+      ).length).assertEqual(0);
+
+      const stale = cloneSnapshot(current as RegisteredPageSnapshot);
+      stale.document.generatedAt = stale.document.generatedAt + '-stale';
+      current = stale;
+      const staleResult = await dispatchRegisteredPageActionCandidate(
+        clicked,
+        (currentAction: A2uiAction): Promise<boolean> => runtime.runPageAction(currentAction),
+        async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+      );
+      expect(staleResult.candidate).assertTrue();
+      expect(staleResult.ok).assertFalse();
+      expect(sendCalls).assertEqual(1);
+      expect(legacyCalls).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('keeps the same QQ mail Send action on the existing client route', 0, async () => {
+      const invoker = new RecordingPageToolInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const command = JSON.parse(
+        '{"requestKey":"qq:message-real-1","provider":"qq","accountLabel":"q***@qq.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      ) as Object;
+      const clicked = action('html_mail_reply_send', command, 'client');
+      clicked.label = '发送回复';
+      clicked.prompt = 'qq:message-real-1';
+      const surface = pageSurface('mail.search', action('mail.ai.reply.draft', command), 1);
+      const current: RegisteredPageSnapshot = {
+        surface,
+        document: mailReplyDocument(surface, 'qq', command),
+        generation: 1
+      };
+      let registeredCalls = 0;
+      let legacyCalls = 0;
+      const runtime = canary(
+        new QueueModel([]), handler, (): RegisteredPageSnapshot | null => current
+      );
+      const dispatched = await dispatchRegisteredPageActionCandidate(
+        clicked,
+        async (_currentAction: A2uiAction): Promise<boolean> => {
+          registeredCalls++;
+          return runtime.runPageAction(clicked);
+        },
+        async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+      );
+
+      expect(dispatched.candidate).assertFalse();
+      expect(dispatched.ok).assertTrue();
+      expect(registeredCalls).assertEqual(0);
+      expect(legacyCalls).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('surfaces Gmail provider failure without legacy fallthrough or fake success', 0, async () => {
+      const invoker = new RecordingPageToolInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const bus = new TrackingBus();
+      const command = JSON.parse(
+        '{"requestKey":"gmail:thread-real-1","provider":"gmail","accountLabel":"g***@gmail.com",' +
+        '"threadId":"thread-real-1","messageId":"message-real-1","to":["alice@example.com"],' +
+        '"subject":"Re: QA","body":"Exact reply","replyMode":"reply","contextSummary":"QA"}'
+      ) as Object;
+      const clicked = action('html_mail_reply_send', command, 'client');
+      clicked.label = '发送回复';
+      clicked.prompt = 'gmail:thread-real-1';
+      const surface = pageSurface('gmail.thread.read', action('gmail.ai.reply.draft', command), 1);
+      const current: RegisteredPageSnapshot = {
+        surface,
+        document: mailReplyDocument(surface, 'gmail', command),
+        generation: 1
+      };
+      let providerCalls = 0;
+      let legacyCalls = 0;
+      const runtime = canary(
+        new QueueModel([]),
+        handler,
+        (): RegisteredPageSnapshot | null => current,
+        bus,
+        async (_actionId: string, _args: Object, _context: RegisteredPageActionContext): Promise<ActionExecutionResult> => {
+          providerCalls++;
+          return {
+            status: 'error',
+            errorCode: 'GMAIL_AUTH_REQUIRED',
+            message: 'Gmail OAuth account is not connected.'
+          };
+        }
+      );
+      const dispatched = await dispatchRegisteredPageActionCandidate(
+        clicked,
+        (currentAction: A2uiAction): Promise<boolean> => runtime.runPageAction(currentAction),
+        async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+      );
+
+      expect(dispatched.candidate).assertTrue();
+      expect(dispatched.ok).assertFalse();
+      expect(providerCalls).assertEqual(1);
+      expect(legacyCalls).assertEqual(0);
+      expect(lastActionResult(bus).indexOf('Gmail OAuth account is not connected.')).assertLarger(-1);
+      expect(lastActionResult(bus).indexOf('"status":"success"')).assertEqual(-1);
+      runtime.dispose();
+    });
+
     it('preserves each Stripe page operation through the real registered page handler', 0, async () => {
       const invoker = new RecordingPageToolInvoker();
       invoker.failingPageActionId = 'stripe.account.refresh';

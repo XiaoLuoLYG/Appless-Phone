@@ -268,7 +268,7 @@ export default function toolDefinitionRegistryTest() {
       expect(deleteDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
     });
 
-    it('keeps Gmail definitions declarative and direct send blocked', 0, () => {
+    it('registers Gmail reply send as an exact OAuth confirmation action only', 0, () => {
       const mailSearch = toolDefinitionForToolId('gmail.mail.search') as ToolDefinition;
       const draftApply = toolDefinitionForToolId('gmail.draft.apply') as ToolDefinition;
       const messageSend = toolDefinitionForToolId('gmail.message.send') as ToolDefinition;
@@ -281,9 +281,16 @@ export default function toolDefinitionRegistryTest() {
       expect(mailSearch.a2uiComponent).assertEqual('GenericToolResults');
       expect(mailSearch.actions[0]).assertEqual('gmail.authorize');
       expect(draftApply.riskLevel).assertEqual('confirm_required');
-      expect(messageSend.riskLevel).assertEqual('blocked');
-      expect(messageSend.outputSchema).assertEqual('blockedAction');
+      expect(messageSend.riskLevel).assertEqual('confirm_required');
+      expect(messageSend.backendPriority.join(',')).assertEqual('oauth_api');
+      expect(messageSend.authModes.join(',')).assertEqual('oauth');
+      expect(messageSend.inputSchema).assertEqual('mailReplyCommand');
+      expect(messageSend.outputSchema).assertEqual('mailReplyOperationResult');
+      expect(messageSend.actions.length).assertEqual(0);
       expect(GMAIL_TOOL_IDS.indexOf('gmail.message.send') >= 0).assertTrue();
+      expect(aiphoneToolDescriptionForModel('gmail.message.send')).assertEqual('');
+      expect(aiphoneToolDescriptionForModel('gmail.draft.create').indexOf('create a draft first'))
+        .assertLarger(-1);
     });
 
     it('registers aggregate mail tools without enabling send', 0, () => {
@@ -463,6 +470,8 @@ export default function toolDefinitionRegistryTest() {
       expect(data.length).assertEqual(24);
       expect(action.length).assertEqual(20);
       expect(new Set<string>(ids).size).assertEqual(44);
+      expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
+        .assertEqual(0);
       expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();
       expect(data.map((item: ToolDefinition): string => item.toolId).indexOf('hotel.navigate')).assertEqual(-1);
       expect(ids.indexOf('dynamic.search')).assertEqual(-1);

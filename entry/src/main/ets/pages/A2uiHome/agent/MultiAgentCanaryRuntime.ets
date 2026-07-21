@@ -59,7 +59,8 @@ import {
 import {
   AiphoneRegisteredActionExecutor,
   RegisteredPageAction,
-  SystemUriOpener
+  SystemUriOpener,
+  validateGmailReplyActionArgs
 } from './AiphoneRegisteredActionExecutor';
 import {
   RegisteredPageSnapshot,
@@ -153,6 +154,9 @@ class CanaryArgsValidator implements ActionArgsValidator {
     }
     if (actionId.indexOf('hotel.') === 0) {
       return validateHotelActionArgs(actionId, args);
+    }
+    if (actionId === 'gmail.message.send') {
+      return validateGmailReplyActionArgs(args);
     }
     const valid = args !== null && typeof args === 'object' && !Array.isArray(args);
     return {
@@ -482,7 +486,8 @@ export class MultiAgentCanaryRuntime {
       turnId,
       surface.surfaceId,
       sourceToolId,
-      document
+      document,
+      route.action
     );
     const context: MultiAgentCanaryActionContext = {
       conversationId: this.conversationId,

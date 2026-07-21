@@ -1264,7 +1264,8 @@ struct Index {
         actionId: string,
         args: Object,
         context: RegisteredPageActionContext
-      ): Promise<ActionExecutionResult> => pageHandler.execute(actionId, args, context),
+      ): Promise<ActionExecutionResult> => actionId === 'gmail.message.send' ?
+        this.executeRegisteredGmailReply(args) : pageHandler.execute(actionId, args, context),
       currentPageSnapshot: (): RegisteredPageSnapshot | null =>
         this.registeredPageSnapshotStore.current(),
       currentLocalDate: (): string => this.currentLocalDate(),
@@ -2726,6 +2727,67 @@ struct Index {
     this.mailReplyEventJson = JSON.stringify(event);
   }
 
+  private mailReplyOperationEvent(
+    requestKey: string,
+    operation: string,
+    status: string,
+    message: string,
+    error: string
+  ): void {
+    const event: MailReplyUiEvent = {
+      sequence: Date.now(),
+      requestKey,
+      operation,
+      status,
+      message,
+      error
+    };
+    this.mailReplyEventJson = JSON.stringify(event);
+  }
+
+  private async executeRegisteredGmailReply(args: Object): Promise<ActionExecutionResult> {
+    const command = args as MailReplyCommand;
+    const requestKey = this.actionText(command.requestKey).trim();
+    if (this.actionText(command.provider).trim().toLowerCase() !== 'gmail') {
+      const message = 'Gmail reply provider does not match the current mail surface.';
+      this.mailReplyOperationEvent(requestKey, 'send', 'error', '', message);
+      return {
+        status: 'error',
+        errorCode: 'GMAIL_REPLY_PROVIDER_MISMATCH',
+        message
+      };
+    }
+    try {
+      const result = await sendConfiguredMailReply(command);
+      if (result.status !== 'success') {
+        this.mailReplyOperationEvent(requestKey, 'send', result.status, '', result.message);
+        return {
+          status: 'error',
+          errorCode: 'GMAIL_REPLY_PROVIDER_ERROR',
+          message: result.message
+        };
+      }
+      this.mailReplyOperationEvent(
+        result.requestKey,
+        result.operation,
+        result.status,
+        result.message,
+        ''
+      );
+      return { status: 'success', output: result as Object };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.mailReplyOperationEvent(requestKey, 'send', 'error', '', message);
+      aiLogError('[AIPhone][MailReplyOperationFailed] provider=gmail operation=send error=' +
+        message.substring(0, 240));
+      return {
+        status: 'error',
+        errorCode: 'GMAIL_REPLY_PROVIDER_ERROR',
+        message
+      };
+    }
+  }
+
   private async generateMailReplyDraft(action: A2uiAction): Promise<void> {
     if (action.args === undefined) {
       this.logHtmlHomeActionError(action, 'missing_mail_reply_ai_args');
@@ -3494,26 +3556,10 @@ struct Index {
         } else {
           result = await sendConfiguredMailReply(command);
         }
-        const event: MailReplyUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          operation: operation,
-          status: result.status,
-          message: result.message,
-          error: ''
-        };
-        this.mailReplyEventJson = JSON.stringify(event);
+        this.mailReplyOperationEvent(requestKey, operation, result.status, result.message, '');
       } catch (error) {
         const message = error instanceof Error ? error.message : JSON.stringify(error);
-        const event: MailReplyUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          operation: operation,
-          status: 'error',
-          message: '',
-          error: message
-        };
-        this.mailReplyEventJson = JSON.stringify(event);
+        this.mailReplyOperationEvent(requestKey, operation, 'error', '', message);
         aiLogError('[AIPhone][MailReplyOperationFailed] provider=' + this.actionText(command.provider) +
           ' operation=' + operation + ' error=' + message.substring(0, 240));
       }

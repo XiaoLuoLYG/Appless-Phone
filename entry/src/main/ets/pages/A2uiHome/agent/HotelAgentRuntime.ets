@@ -880,7 +880,8 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     turnId: string,
     surfaceId: string,
     sourceToolId: string,
-    document: HtmlHomeDocument
+    document: HtmlHomeDocument,
+    exactPageAction?: A2uiAction
   ): void {
     this.clear();
     this.conversationId = conversationId;
@@ -891,6 +892,9 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     document.blocks.forEach((block) => {
       this.collect(document, block.actions);
     });
+    if (exactPageAction !== undefined && exactPageAction.args !== undefined) {
+      this.allowed.add(this.actionKey(exactPageAction.id, exactPageAction.args));
+    }
   }
 
   clear(): void {
