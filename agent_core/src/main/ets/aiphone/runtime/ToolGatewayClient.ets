@@ -266,6 +266,7 @@ export interface PresaleRange {
 export interface FutureTrainMetadata {
   trainCode: string;
   trainNo: string;
+  travelDate: string;
   from: string;
   to: string;
   fromStopNo: string;
@@ -4344,6 +4345,7 @@ function emptyFutureTrainMetadata(trainCode: string): FutureTrainMetadata {
   return {
     trainCode: trainCode,
     trainNo: '',
+    travelDate: '',
     from: '',
     to: '',
     fromStopNo: '',
@@ -4369,7 +4371,8 @@ export function parseFutureTrainMetadata(payload: string, trainCode: string): Fu
         if ((item.station_train_code === undefined ? '' : item.station_train_code.toUpperCase()) !== exactCode) {
           continue;
         }
-        if (normalizeOfficialDate(item.date === undefined ? '' : item.date).length === 0) {
+        const travelDate = normalizeOfficialDate(item.date === undefined ? '' : item.date);
+        if (travelDate.length === 0) {
           continue;
         }
         const trainNo = item.train_no === undefined ? '' : item.train_no.trim();
@@ -4378,6 +4381,7 @@ export function parseFutureTrainMetadata(payload: string, trainCode: string): Fu
         if (trainNo.length > 0 && from.length > 0 && to.length > 0) {
           const metadata = emptyFutureTrainMetadata(exactCode);
           metadata.trainNo = trainNo;
+          metadata.travelDate = travelDate;
           metadata.from = from;
           metadata.to = to;
           return metadata;
@@ -4412,6 +4416,12 @@ export function parseFutureTrainMetadata(payload: string, trainCode: string): Fu
   } catch (_error) {
     return undefined;
   }
+}
+
+export function parseFutureTrainForTravelDate(payload: string, trainCode: string, expectedTravelDate: string): FutureTrainMetadata | undefined {
+  const metadata = parseFutureTrainMetadata(payload, trainCode);
+  const expected = normalizeOfficialDate(expectedTravelDate);
+  return metadata === undefined || expected.length === 0 || metadata.travelDate !== expected ? undefined : metadata;
 }
 
 export function parseStationSaleTime(payload: string, stationName: string): string {
@@ -4589,7 +4599,7 @@ async function resolveFuturePresaleTrain(
     return undefined;
   }
   const trainResponse = await requestText(build12306FutureTrainSearchUrl(date, trainCode), userAgentHeaders());
-  const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainMetadata(trainResponse.text, trainCode) : undefined;
+  const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainForTravelDate(trainResponse.text, trainCode, date) : undefined;
   if (searched === undefined || searched.from !== fromName || searched.to !== toName) {
     return undefined;
   }
@@ -4607,6 +4617,7 @@ async function resolveFuturePresaleTrain(
   const priceResponse = await requestText(build12306TrainPriceUrl({
     trainCode: trainCode,
     trainNo: searched.trainNo,
+    travelDate: searched.travelDate,
     from: fromName,
     to: toName,
     fromStopNo: stops.fromStopNo,

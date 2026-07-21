@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   extractExactTrainCode,
+  parseFutureTrainForTravelDate,
   parseFutureTrainMetadata,
   parseLowestTrainPrice,
   parsePresaleRange,
@@ -36,6 +37,11 @@ export default function trainPresaleProviderTest() {
         expect(metadata.to).assertEqual('上海虹桥');
       }
       expect(parseFutureTrainMetadata(TRAIN_SEARCH_FIXTURE, 'G2') === undefined).assertTrue();
+    });
+
+    it('fails closed when an exact train record is for another travel date', 0, () => {
+      expect(parseFutureTrainForTravelDate(TRAIN_SEARCH_FIXTURE, 'G1', '2026-08-06') === undefined).assertFalse();
+      expect(parseFutureTrainForTravelDate(TRAIN_SEARCH_FIXTURE, 'G1', '2026-08-07')).assertEqual(undefined);
     });
 
     it('resolves verified origin and destination stops', 0, () => {
