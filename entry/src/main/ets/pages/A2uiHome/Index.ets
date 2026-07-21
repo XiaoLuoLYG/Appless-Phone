@@ -1204,6 +1204,7 @@ struct Index {
       onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
         this.applyPersonaMemoryUpdate(update);
       },
+      currentLocalDate: (): string => this.currentLocalDate(),
       settingsFingerprint: fingerprint
     };
     if (provider.isConfigured()) {

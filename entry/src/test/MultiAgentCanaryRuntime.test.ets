@@ -22,6 +22,11 @@ import {
 } from '@loop/agent-core';
 import { PersonaMemoryUpdateRequest } from '../main/ets/model/PersonaMemoryUpdate';
 import {
+  configureDefaultPersonaStoreForTests,
+  personaPackForId,
+  updatePersonaPackText
+} from '../main/ets/model/PersonaStore';
+import {
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
@@ -54,19 +59,57 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
+const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"roundAction":"execute","dataTasks":[{"localId":"mail-search",' +
+  '"goal":"search real mail","allowedToolIds":["mail.search"],' +
+  '"toolId":"mail.search","input":{"query":"酒店确认"},"required":true}],' +
+  '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["mail"]},"reasonCode":"mail_search"}';
+const WEATHER_HANDOFF_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
+  '"roundAction":"legacy_handoff","dataTasks":[],' +
+  '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"reasonCode":"capability_unavailable"}';
+const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
+  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"conversation",' +
+  '"preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"已按更新后的瑞幸偏好继续","reasonCode":"memory_context_routed"}';
 
 class QueueModel implements LocalModel {
+  readonly prompts: string[] = [];
   private readonly outputs: string[];
 
   constructor(outputs: string[]) {
     this.outputs = outputs.slice();
   }
 
-  async complete(_prompt: string): Promise<string> {
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
     if (this.outputs.length === 0) {
       throw new Error('No scripted canary Leader output.');
     }
     return this.outputs.shift() as string;
+  }
+}
+
+class MemoryAwareModel implements LocalModel {
+  readonly prompts: string[] = [];
+  secondTurnUsedUpdatedFoodContext: boolean = false;
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    if (this.prompts.length === 1) {
+      return MEMORY_DECISION;
+    }
+    const foodStart: number = prompt.indexOf('{"personaId":"food_companion"');
+    const nextPersona: number = foodStart < 0 ? -1 : prompt.indexOf('},{"personaId"', foodStart);
+    const foodContext: string = foodStart < 0 ? '' : prompt.substring(
+      foodStart,
+      nextPersona < 0 ? prompt.length : nextPersona
+    );
+    this.secondTurnUsedUpdatedFoodContext =
+      foodContext.indexOf('我只喝瑞幸咖啡') >= 0 &&
+        foodContext.indexOf('"previous":true') >= 0;
+    return this.secondTurnUsedUpdatedFoodContext ? FOOD_CONTEXT_ANSWER : ANSWER_DECISION;
   }
 }
 
@@ -91,11 +134,13 @@ class TestGate {
 
 class CanaryHotelExecutor implements DataTaskExecutor {
   readonly calls: string[] = [];
+  readonly tasks: CreateDataTaskPayload[] = [];
   readonly detailStarted: TestGate = new TestGate();
   readonly detailRelease: TestGate = new TestGate();
 
   async execute(task: CreateDataTaskPayload): Promise<DataResult> {
     this.calls.push(task.toolId);
+    this.tasks.push(task);
     if (task.toolId === 'hotel.detail') {
       this.detailStarted.open();
       await this.detailRelease.promise;
@@ -252,6 +297,7 @@ function canaryOptions(
       updates.push(update);
     },
     dataExecutor: executor,
+    currentLocalDate: (): string => '2026-07-21',
     bus,
     conversationId: 'canary-test',
     downstreamWriter: new RecordingWriter(),
@@ -313,6 +359,75 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('hands unmigrated and unavailable real-planner choices to legacy before execution', 0, async () => {
+      const model = new QueueModel([
+        MAIL_DECISION,
+        WEATHER_HANDOFF_DECISION,
+        MAIL_DECISION
+      ]);
+      const executor = new CanaryHotelExecutor();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const mail = await runtime.submit('查一下酒店确认邮件', { text: '' });
+      const weather = await runtime.submit('查询北京天气', { text: '' });
+      const misleadingHotel = await runtime.submit('酒店两个字不要误导，查我的邮件', { text: '' });
+
+      expect(mail.kind).assertEqual('handoff');
+      expect(weather.kind).assertEqual('handoff');
+      expect(misleadingHotel.kind).assertEqual('handoff');
+      expect(executor.calls.length).assertEqual(0);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA ||
+          message.type === AgentMessageType.TASK_CREATE_UI ||
+          message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      ).length).assertEqual(0);
+      expect(model.prompts[0].indexOf('LeaderDecision schema:') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('"roundAction":"execute|answer|clarify|legacy_handoff"') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('unavailable or not runtime-owned') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Runtime-owned tool IDs:') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('mail.search') >= 0).assertTrue();
+      runtime.dispose();
+    });
+
+    it('rejects malformed hotel destination date year guests and origin before task publication', 0, async () => {
+      const mutations: string[] = [
+        SEARCH_INPUT.replace('"place":"深圳"', '"place":""'),
+        SEARCH_INPUT.replace('2026-08-15', '2026-02-30'),
+        SEARCH_INPUT.replace('2026-08-15', '26-08-15'),
+        SEARCH_INPUT.replace('"adultCount":2', '"adultCount":0'),
+        SEARCH_INPUT.replace('"originQuery":"帮我找深圳酒店"', '"originQuery":"默认曼谷酒店"')
+      ];
+      for (let index = 0; index < mutations.length; index++) {
+        const decision: string = HOTEL_DECISION.replace(SEARCH_INPUT, mutations[index]);
+        const executor = new CanaryHotelExecutor();
+        const bus = new TrackingBus();
+        const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+          new QueueModel([decision]),
+          executor,
+          new RecordingOpener(),
+          [],
+          [],
+          bus
+        ));
+
+        const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+
+        expect(outcome.status).assertEqual('error');
+        expect(executor.calls.length).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_UI)).assertEqual(0);
+        runtime.dispose();
+      }
+    });
+
     it('owns C11 as one virtual memory action and renders the real update', 0, async () => {
       const updates: PersonaMemoryUpdateRequest[] = [];
       const surfaces: A2uiSurfaceState[] = [];
@@ -337,6 +452,46 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('refreshes second-turn planning from the updated C11 persona memory', 0, async () => {
+      configureDefaultPersonaStoreForTests();
+      const updates: PersonaMemoryUpdateRequest[] = [];
+      const model = new MemoryAwareModel();
+      const options = canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        updates
+      );
+      options.selectedPersonaId = (): string => 'food_companion';
+      options.onMemoryUpdate = (update: PersonaMemoryUpdateRequest): void => {
+        updates.push(update);
+        const pack = personaPackForId(update.personaId);
+        updatePersonaPackText(update.personaId, pack.soul, update.memoryText);
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      try {
+        const remembered = await runtime.submit('我只喝瑞幸咖啡', {
+          text: '',
+          previousPersonaId: 'food_companion'
+        }) as MultiAgentSettledOutcome;
+        const continued = await runtime.submit('继续', {
+          text: '',
+          previousPersonaId: 'food_companion'
+        }) as MultiAgentSettledOutcome;
+
+        expect(remembered.status).assertEqual('success');
+        expect(continued.status).assertEqual('success');
+        expect(continued.message).assertEqual('已按更新后的瑞幸偏好继续');
+        expect(updates.length).assertEqual(1);
+        expect(model.prompts.length).assertEqual(2);
+        expect(model.secondTurnUsedUpdatedFoodContext).assertTrue();
+      } finally {
+        runtime.dispose();
+        configureDefaultPersonaStoreForTests();
+      }
+    });
+
     it('keeps C20 search navigation detail booking and return under the canary runtime', 0, async () => {
       const executor = new CanaryHotelExecutor();
       const opener = new RecordingOpener();
@@ -356,6 +511,9 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(searchContext?.sourceToolId).assertEqual('hotel.search');
       expect(executor.calls.join(',')).assertEqual('hotel.search');
+      const normalizedSearch = executor.tasks[0].args as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(normalizedSearch.originQuery).assertEqual(SEARCH_TEXT);
+      expect(normalizedSearch.checkOutDate).assertEqual('2026-08-17');
 
       const navigate = renderedAction(surfaces[surfaces.length - 1], 'hotel.navigate');
       expect(navigate === null).assertFalse();

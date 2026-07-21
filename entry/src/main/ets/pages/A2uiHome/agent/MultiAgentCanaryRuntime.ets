@@ -26,6 +26,7 @@ import {
   UserInputPayload,
   VirtualActionIntent,
   VirtualActionIntentResolver,
+  allToolDefinitions,
   validateHotelActionArgs,
   toolDefinitionForToolId
 } from '@loop/agent-core';
@@ -37,6 +38,10 @@ import {
 } from '../../../model/PersonaMemoryUpdate';
 import { personaPackForId } from '../../../model/PersonaStore';
 import { MultiAgentLeaderPlanner } from './MultiAgentLeaderPlanner';
+import {
+  HotelLocalDateProvider,
+  normalizeHotelSearchTaskInput
+} from './HotelLeaderPlanner';
 import { MultiAgentRuntime } from './MultiAgentRuntime';
 import { MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import {
@@ -71,6 +76,7 @@ export interface MultiAgentCanaryOptions {
   settingsFingerprint?: string;
   submitTimeoutMs?: number;
   actionTimeoutMs?: number;
+  currentLocalDate?: HotelLocalDateProvider;
   dataExecutor?: DataTaskExecutor;
   bus?: LinkedMessageBus;
   conversationId?: string;
@@ -250,18 +256,16 @@ interface MemorySurfaceOutput {
 }
 
 function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext {
-  const hotel = toolDefinitionForToolId('hotel.search');
-  const tools: LeaderToolMetadata[] = [];
-  if (hotel !== null) {
-    tools.push({
-      toolId: hotel.toolId,
-      intent: hotel.intent,
-      riskLevel: hotel.riskLevel,
-      inputSchema: hotel.inputSchema,
-      outputSchema: hotel.outputSchema,
-      actions: hotel.actions.slice()
-    });
-  }
+  const tools: LeaderToolMetadata[] = allToolDefinitions().map(
+    (definition: ToolDefinition): LeaderToolMetadata => ({
+      toolId: definition.toolId,
+      intent: definition.intent,
+      riskLevel: definition.riskLevel,
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
+      actions: definition.actions.slice()
+    })
+  );
   const memory = memoryDefinition();
   tools.push({
     toolId: memory.toolId,
@@ -273,7 +277,14 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
   });
   return {
     tools,
-    personas: leaderPersonaContext(previousPersonaId)
+    personas: leaderPersonaContext(previousPersonaId),
+    runtimeOwnedToolIds: [
+      'hotel.search',
+      'hotel.detail',
+      'hotel.navigate',
+      'hotel.booking.open',
+      MEMORY_ACTION_ID
+    ]
   };
 }
 
@@ -315,10 +326,11 @@ export class MultiAgentCanaryRuntime {
     this.runtime = new MultiAgentRuntime({
       conversationId,
       bus: options.bus,
-      planner: new MultiAgentLeaderPlanner(options.model),
+      planner: new MultiAgentLeaderPlanner(options.model, options.currentLocalDate),
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
         canaryPlanningContext(options.selectedPersonaId()),
+      dataTaskInputNormalizer: normalizeHotelSearchTaskInput,
       dataAuthorizer: authorizeHotelDataTask,
       dataExecutor: options.dataExecutor === undefined ?
         new StructuredHotelDataExecutor() : options.dataExecutor,

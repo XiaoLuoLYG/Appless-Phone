@@ -6,6 +6,8 @@ import {
   ActionExecutionResult,
   ActionOffer,
   ActionOfferContext,
+  ActionPlanRequestPayload,
+  ActionResultPayload,
   ActionValidationResult,
   AgentMessage,
   AgentMessageReader,
@@ -25,13 +27,17 @@ import {
   LinkedMessageBus,
   RegisteredActionExecutor,
   SurfaceActionAuthorizer,
+  TaskErrorPayload,
   ToolDefinition,
   ToolDefinitionLookup,
   TurnResultPayload,
+  UiRenderResultPayload,
   UiRenderResult,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
-  UiTaskRenderer
+  UiTaskRenderer,
+  VirtualActionIntent,
+  VirtualActionIntentResolver
 } from '@loop/agent-core';
 import { MultiAgentRuntime } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
 import {
@@ -235,6 +241,20 @@ class ControlledWriter implements UiSurfaceWriter {
 
 class TestLookup implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
+    if (toolId === 'memory.update') {
+      return {
+        toolId,
+        domain: 'memory',
+        intent: toolId,
+        riskLevel: 'draft',
+        backendPriority: ['local_adapter'],
+        authModes: ['none'],
+        inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult',
+        a2uiComponent: 'MemoryUpdate',
+        actions: ['memory.update']
+      };
+    }
     if (toolId !== 'hotel.search') {
       return null;
     }
@@ -287,6 +307,63 @@ class NoopRegisteredExecutor implements RegisteredActionExecutor {
   }
 }
 
+class VirtualMemoryPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    return {
+      personaId: 'travel_companion',
+      skillId: '',
+      roundAction: 'execute',
+      dataTasks: [],
+      uiIntent: {
+        purpose: 'memory.update',
+        preferredDensity: 'comfortable',
+        requiredSections: []
+      },
+      actionIntent: {
+        goal: 'Remember an explicit preference',
+        allowedActionIds: ['memory.update']
+      },
+      reasonCode: 'stable_preference'
+    };
+  }
+}
+
+class StaticVirtualResolver implements VirtualActionIntentResolver {
+  async resolve(_request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
+    return {
+      sourceToolId: 'memory.update',
+      offer: {
+        offerId: 'memory-offer',
+        actionId: 'memory.update',
+        label: 'Remember',
+        variant: 'primary',
+        args: JSON.parse('{"value":"remember me"}') as Object
+      },
+      autoRun: true
+    };
+  }
+}
+
+class BlockingVirtualExecutor implements RegisteredActionExecutor {
+  readonly started: TestGate = new TestGate();
+  readonly release: TestGate = new TestGate();
+
+  async execute(
+    _actionId: string,
+    _args: Object,
+    _context: ActionExecutionContext
+  ): Promise<ActionExecutionResult> {
+    this.started.open();
+    await this.release.promise;
+    return { status: 'success', output: new Object() };
+  }
+}
+
 function answerDecision(answer: string): LeaderDecision {
   return {
     personaId: 'travel_companion',
@@ -305,14 +382,24 @@ function answerDecision(answer: string): LeaderDecision {
 
 function planningContext(): LeaderPlanningContext {
   return {
-    tools: [{
-      toolId: 'hotel.search',
-      intent: 'hotel.search',
-      riskLevel: 'read',
-      inputSchema: 'hotelSearchRequest',
-      outputSchema: 'hotelSearchResults',
-      actions: []
-    }],
+    tools: [
+      {
+        toolId: 'hotel.search',
+        intent: 'hotel.search',
+        riskLevel: 'read',
+        inputSchema: 'hotelSearchRequest',
+        outputSchema: 'hotelSearchResults',
+        actions: []
+      },
+      {
+        toolId: 'memory.update',
+        intent: 'memory.update',
+        riskLevel: 'draft',
+        inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult',
+        actions: ['memory.update']
+      }
+    ],
     personas: [{
       personaId: 'travel_companion',
       name: 'Travel Companion',
@@ -368,6 +455,63 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 16; index++) {
     await Promise.resolve();
   }
+}
+
+function latestInput(bus: CountingBus): AgentMessage {
+  const inputs: AgentMessage[] = bus.published.filter((message: AgentMessage): boolean =>
+    message.type === AgentMessageType.INPUT_USER
+  );
+  return inputs[inputs.length - 1];
+}
+
+function publishUiTask(bus: CountingBus, input: AgentMessage, taskId: string): void {
+  const payload: CreateUiTaskPayload = {
+    taskId,
+    dataTaskIds: [taskId + ':data'],
+    skillId: '',
+    intent: 'manual UI correlation',
+    expectedOutputSchema: 'hotelSearchResults'
+  };
+  bus.publish({
+    type: AgentMessageType.TASK_CREATE_UI,
+    conversationId: input.conversationId,
+    turnId: input.turnId,
+    taskId,
+    payload
+  });
+}
+
+function publishUiTerminal(
+  bus: CountingBus,
+  input: AgentMessage,
+  taskId: string,
+  surfaceId: string,
+  state: 'result' | 'error'
+): void {
+  const payload: UiRenderResultPayload = { surfaceId, state };
+  bus.publish({
+    type: AgentMessageType.TASK_RESULT_UI,
+    conversationId: input.conversationId,
+    turnId: input.turnId,
+    taskId,
+    payload
+  });
+}
+
+function publishTurnTerminal(
+  bus: CountingBus,
+  input: AgentMessage,
+  status: 'success' | 'error',
+  message: string
+): void {
+  const payload: TurnResultPayload = { status, roundCount: 2, message };
+  bus.publish({
+    type: AgentMessageType.TURN_RESULT,
+    conversationId: input.conversationId,
+    turnId: input.turnId,
+    taskId: input.taskId,
+    payload
+  });
 }
 
 export default function multiAgentRuntimeTest() {
@@ -434,6 +578,177 @@ export default function multiAgentRuntimeTest() {
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('酒店结果已就绪');
       expect(result.surfaceId.length > 0).assertTrue();
+      runtime.dispose();
+    });
+
+    it('joins an exact UI error with Leader terminal before canceling and settling', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter(),
+        1000
+      ));
+      let resolved: boolean = false;
+      const pending = runtime.submit('manual UI error', { text: '' });
+      pending.then((): void => {
+        resolved = true;
+      });
+      await bus.inputSeen.promise;
+      const input: AgentMessage = latestInput(bus);
+      publishUiTask(bus, input, 'manual-ui');
+      publishUiTerminal(bus, input, 'manual-ui', 'surface-error', 'error');
+      await settle();
+
+      expect(resolved).assertFalse();
+      publishTurnTerminal(bus, input, 'success', 'provider work completed');
+      const result = await pending as MultiAgentSettledOutcome;
+      const correlated: AgentMessage[] = bus.published.filter((message: AgentMessage): boolean =>
+        message.turnId === input.turnId &&
+          (message.type === AgentMessageType.TURN_CANCEL ||
+            message.type === AgentMessageType.TURN_RESULT)
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.surfaceId).assertEqual('surface-error');
+      expect(correlated[correlated.length - 2].type).assertEqual(AgentMessageType.TURN_CANCEL);
+      expect(correlated[correlated.length - 1].type).assertEqual(AgentMessageType.TURN_RESULT);
+      runtime.dispose();
+    });
+
+    it('cancels an old UI-error turn before a new surface and rejects its late replan', 0, async () => {
+      const bus = new CountingBus();
+      const activated: string[] = [];
+      const options = runtimeOptions(bus, new HangingPlanner(), new ControlledWriter(), 1000);
+      options.surfaceTurnActivator = (turnId: string): void => {
+        activated.push(turnId);
+      };
+      const runtime = new MultiAgentRuntime(options);
+      const oldPending = runtime.submit('old turn', { text: '' });
+      await bus.inputSeen.promise;
+      const oldInput: AgentMessage = latestInput(bus);
+      publishUiTask(bus, oldInput, 'old-ui');
+      publishUiTerminal(bus, oldInput, 'old-ui', 'surface-old-error', 'error');
+      await settle();
+
+      const newPending = runtime.submit('new turn', { text: '' });
+      const old = await oldPending as MultiAgentSettledOutcome;
+      await settle();
+      const newInput: AgentMessage = latestInput(bus);
+      publishUiTask(bus, newInput, 'new-ui');
+      publishTurnTerminal(bus, newInput, 'success', 'new ready');
+      publishUiTerminal(bus, newInput, 'new-ui', 'surface-new', 'result');
+      const current = await newPending as MultiAgentSettledOutcome;
+
+      publishUiTask(bus, oldInput, 'old-late-ui');
+      publishUiTerminal(bus, oldInput, 'old-late-ui', 'surface-old-late', 'result');
+      publishTurnTerminal(bus, oldInput, 'success', 'old late replan');
+      await settle();
+
+      expect(old.status).assertEqual('canceled');
+      expect(current.status).assertEqual('success');
+      expect(current.surfaceId).assertEqual('surface-new');
+      expect(activated[activated.length - 1]).assertEqual(newInput.turnId);
+      expect(activated.filter((turnId: string): boolean => turnId === oldInput.turnId).length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('publishes TURN.CANCEL before a host-forced task-error terminal', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter(),
+        1000
+      ));
+      const pending = runtime.submit('forced error', { text: '' });
+      await bus.inputSeen.promise;
+      const input: AgentMessage = latestInput(bus);
+      const error: TaskErrorPayload = { code: 'FORCED', message: 'forced failure' };
+      bus.publish({
+        type: AgentMessageType.TASK_ERROR,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: input.taskId,
+        payload: error
+      });
+      const result = await pending as MultiAgentSettledOutcome;
+      const correlated: AgentMessage[] = bus.published.filter((message: AgentMessage): boolean =>
+        message.turnId === input.turnId &&
+          (message.type === AgentMessageType.TURN_CANCEL ||
+            message.type === AgentMessageType.TURN_RESULT)
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(correlated[0].type).assertEqual(AgentMessageType.TURN_CANCEL);
+      expect(correlated[1].type).assertEqual(AgentMessageType.TURN_RESULT);
+      runtime.dispose();
+    });
+
+    it('rejects exact-task virtual results with forged surface, plan, or run identity', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new BlockingVirtualExecutor();
+      const options = runtimeOptions(
+        bus,
+        new VirtualMemoryPlanner(),
+        new ControlledWriter(),
+        1000
+      );
+      options.virtualActionResolver = new StaticVirtualResolver();
+      options.actionExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+      let resolved: boolean = false;
+      const pending = runtime.submit('remember me', { text: '' });
+      pending.then((): void => {
+        resolved = true;
+      });
+      await executor.started.promise;
+      const requests: AgentMessage[] = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      );
+      const request: AgentMessage = requests[0];
+      const surfaceId: string = 'virtual:' + request.taskId;
+      const planId: string = 'direct:' + surfaceId;
+      const accepted: boolean[] = [];
+      const forgeries: ActionResultPayload[] = [
+        {
+          surfaceId: 'virtual:forged',
+          planId,
+          runId: surfaceId,
+          status: 'success',
+          completedStepIds: []
+        },
+        {
+          surfaceId,
+          planId: 'direct:forged',
+          runId: surfaceId,
+          status: 'success',
+          completedStepIds: []
+        },
+        {
+          surfaceId,
+          planId,
+          runId: 'virtual:forged',
+          status: 'success',
+          completedStepIds: []
+        }
+      ];
+      for (let index = 0; index < forgeries.length; index++) {
+        bus.publish({
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: request.conversationId,
+          turnId: request.turnId,
+          taskId: request.taskId,
+          payload: forgeries[index]
+        });
+        await settle();
+        accepted.push(resolved);
+      }
+      executor.release.open();
+      const result = await pending as MultiAgentSettledOutcome;
+
+      expect(accepted.join(',')).assertEqual('false,false,false');
+      expect(result.status).assertEqual('success');
       runtime.dispose();
     });
 

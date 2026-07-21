@@ -88,7 +88,13 @@ export interface LeaderPersonaMetadata {
 export interface LeaderPlanningContext {
   tools: LeaderToolMetadata[];
   personas: LeaderPersonaMetadata[];
+  runtimeOwnedToolIds?: string[];
 }
+
+export type LeaderDataTaskInputNormalizer = (
+  input: InputUserPayload,
+  task: LeaderDecisionDataTask
+) => Object;
 
 export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
 

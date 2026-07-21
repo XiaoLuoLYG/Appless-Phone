@@ -144,6 +144,22 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('travel_companion') >= 0).assertTrue();
     });
 
+    it('carries the old hotel date and anti-invention contract in the shared prompt', 0, async () => {
+      const model: QueueLocalModel = new QueueLocalModel([PARALLEL_DECISION]);
+      const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(
+        model,
+        (): string => '2026-07-21'
+      );
+      const input: InputUserPayload = { text: '8月15日深圳住两晚的酒店' };
+
+      await planner.plan(inputMessage(), input, planningContext(), 1);
+
+      expect(model.prompts[0].indexOf('Current local date: 2026-07-21') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('originQuery, place, placeType, countryCode') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Do not invent missing destination, date, year, guest') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
+    });
+
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {
       const extraTop = PARALLEL_DECISION.substring(0, PARALLEL_DECISION.length - 1) +
         ',"providerFacts":{}}';

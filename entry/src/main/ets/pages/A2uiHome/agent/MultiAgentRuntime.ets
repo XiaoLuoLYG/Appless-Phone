@@ -45,9 +45,13 @@ interface PendingTurn {
   generation: number;
   uiTaskId: string;
   uiTerminal: boolean;
+  uiState: '' | 'result' | 'error';
   uiSurfaceId: string;
   terminal: TurnResultPayload | null;
   virtualActionTaskId: string;
+  virtualActionSurfaceId: string;
+  virtualActionPlanId: string;
+  virtualActionRunId: string;
   timerId: number;
   resolve: (outcome: MultiAgentTurnOutcome) => void;
 }
@@ -134,7 +138,13 @@ export class MultiAgentRuntime {
     this.actionTimeoutMs = boundedTimeout(options.actionTimeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
     this.surfaceTurnActivator = options.surfaceTurnActivator === undefined ?
       null : options.surfaceTurnActivator;
-    this.leader = new LeaderAgent(this.bus, options.planner, options.planningContext);
+    this.leader = new LeaderAgent(
+      this.bus,
+      options.planner,
+      options.planningContext,
+      this.submitTimeoutMs,
+      options.dataTaskInputNormalizer
+    );
     this.planningContextProvider = options.planningContextProvider === undefined ?
       null : options.planningContextProvider;
     this.data = new DataAgent(
@@ -188,9 +198,13 @@ export class MultiAgentRuntime {
         generation: this.generation,
         uiTaskId: '',
         uiTerminal: false,
+        uiState: '',
         uiSurfaceId: '',
         terminal: null,
         virtualActionTaskId: '',
+        virtualActionSurfaceId: '',
+        virtualActionPlanId: '',
+        virtualActionRunId: '',
         timerId: -1,
         resolve
       };
@@ -356,6 +370,7 @@ export class MultiAgentRuntime {
       this.activateSurfaceTurn(message.turnId);
       pending.uiTaskId = message.taskId;
       pending.uiTerminal = false;
+      pending.uiState = '';
       pending.uiSurfaceId = '';
       return;
     }
@@ -384,8 +399,7 @@ export class MultiAgentRuntime {
       if (message.taskId === pending.inputTaskId || message.taskId === pending.uiTaskId ||
         message.taskId === pending.virtualActionTaskId) {
         const detail: string = nonempty(error.message) ? error.message : 'Multi-agent task failed.';
-        this.publishRuntimeTurnResult(pending, 'error', detail, pending.uiSurfaceId);
-        this.settleTurn(pending, settled('error', detail, pending.uiSurfaceId));
+        this.forceTurn(pending, 'error', detail, pending.uiSurfaceId, 'task_error');
       }
     }
   }
@@ -400,13 +414,8 @@ export class MultiAgentRuntime {
       return;
     }
     pending.uiTerminal = true;
+    pending.uiState = result.state;
     pending.uiSurfaceId = result.surfaceId;
-    if (result.state === 'error') {
-      const detail: string = 'Multi-agent UI rendering failed.';
-      this.publishRuntimeTurnResult(pending, 'error', detail, result.surfaceId);
-      this.settleTurn(pending, settled('error', detail, result.surfaceId));
-      return;
-    }
     this.trySettleTurn(pending);
   }
 
@@ -415,6 +424,9 @@ export class MultiAgentRuntime {
     if (request.virtual === true && Array.isArray(request.dataTaskIds) &&
       request.dataTaskIds.length === 0) {
       pending.virtualActionTaskId = message.taskId;
+      pending.virtualActionSurfaceId = 'virtual:' + message.taskId;
+      pending.virtualActionRunId = pending.virtualActionSurfaceId;
+      pending.virtualActionPlanId = 'direct:' + pending.virtualActionRunId;
     }
   }
 
@@ -423,7 +435,10 @@ export class MultiAgentRuntime {
       return;
     }
     const result: ActionResultPayload = message.payload as ActionResultPayload;
-    if (result.status === 'paused') {
+    if (result.surfaceId !== pending.virtualActionSurfaceId ||
+      result.planId !== pending.virtualActionPlanId ||
+      result.runId !== pending.virtualActionRunId ||
+      result.status === 'paused') {
       return;
     }
     const status: TurnResultStatus = result.status === 'success' ? 'success' :
@@ -431,6 +446,9 @@ export class MultiAgentRuntime {
     const messageText: string = result.status === 'success' ?
       'Action completed.' : nonempty(result.message) ? result.message as string : 'Action failed.';
     const surfaceId: string = this.actionOutputSurfaceId(result);
+    if (status !== 'success') {
+      this.publishCancel(pending.turnId, 'virtual_action_' + status);
+    }
     this.publishRuntimeTurnResult(pending, status, messageText, surfaceId);
   }
 
@@ -472,6 +490,16 @@ export class MultiAgentRuntime {
     const result: TurnResultPayload = pending.terminal;
     const surfaceId: string = pending.uiTaskId.length > 0 ?
       pending.uiSurfaceId : result.surfaceId === undefined ? '' : result.surfaceId;
+    if (pending.uiState === 'error') {
+      this.forceTurn(
+        pending,
+        'error',
+        'Multi-agent UI rendering failed.',
+        surfaceId,
+        'ui_error'
+      );
+      return;
+    }
     this.activeConversationId = pending.conversationId;
     this.activeTurnId = pending.turnId;
     this.activeSurfaceId = surfaceId;
@@ -690,11 +718,26 @@ export class MultiAgentRuntime {
   private failPending(message: string): void {
     const pending: PendingTurn | null = this.pendingTurn;
     if (pending !== null) {
-      this.settleTurn(pending, settled('error', message, pending.uiSurfaceId));
+      this.forceTurn(pending, 'error', message, pending.uiSurfaceId, 'observer_error');
     }
     this.pendingActions.forEach((action: PendingAction) => {
       this.settleAction(action, false);
     });
+  }
+
+  private forceTurn(
+    pending: PendingTurn,
+    status: TurnResultStatus,
+    message: string,
+    surfaceId: string,
+    reason: string
+  ): void {
+    if (this.pendingTurn !== pending) {
+      return;
+    }
+    this.publishCancel(pending.turnId, reason);
+    this.publishRuntimeTurnResult(pending, status, message, surfaceId);
+    this.settleTurn(pending, settled(status, message, surfaceId));
   }
 
   private validTurnResult(result: TurnResultPayload): boolean {

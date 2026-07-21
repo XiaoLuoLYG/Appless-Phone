@@ -7,6 +7,7 @@ import {
   DataTaskExecutor,
   DataTaskPlanner,
   LeaderPlanner,
+  LeaderDataTaskInputNormalizer,
   LeaderPlanningContext,
   LinkedMessageBus,
   RegisteredActionExecutor,
@@ -37,6 +38,7 @@ export interface MultiAgentRuntimeOptions {
   planner: LeaderPlanner;
   planningContext: LeaderPlanningContext;
   planningContextProvider?: () => LeaderPlanningContext;
+  dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer;
   dataAuthorizer: DataTaskAuthorizer;
   dataExecutor: DataTaskExecutor;
   uiRenderer: UiTaskRenderer;

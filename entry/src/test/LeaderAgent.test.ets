@@ -7,6 +7,7 @@ import {
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
+  DataResultStatus,
   InputUserPayload,
   LeaderAgent,
   LeaderDataTask,
@@ -364,6 +365,57 @@ function dataResultMessage(task: AgentMessage, summary: string = 'real result'):
     taskId: task.taskId,
     payload
   };
+}
+
+function dataResultMessageWithStatus(task: AgentMessage, status: DataResultStatus): AgentMessage {
+  const payload: DataResult = {
+    toolId: (task.payload as CreateDataTaskPayload).toolId,
+    outputSchema: (task.payload as CreateDataTaskPayload).outputSchema,
+    status,
+    sources: [],
+    data: JSON.parse('{"summary":"' + status + '","entityRefs":[]}') as Object,
+    warnings: []
+  };
+  return {
+    type: AgentMessageType.TASK_RESULT_DATA,
+    conversationId: task.conversationId,
+    turnId: task.turnId,
+    taskId: task.taskId,
+    payload
+  };
+}
+
+async function semanticTerminalStatus(statuses: DataResultStatus[]): Promise<string> {
+  const bus = new LinkedMessageBus();
+  const tasks: LeaderDecisionDataTask[] = statuses.map(
+    (_status: DataResultStatus, index: number): LeaderDecisionDataTask =>
+      semanticDataTask('status-' + index.toString())
+  );
+  const planner = new RoundScriptedPlanner([
+    semanticDecision(tasks),
+    semanticDecision([], 'answer')
+  ]);
+  const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+  const observer = bus.openReader();
+  leader.start();
+  try {
+    bus.publish(inputMessage());
+    await receive(observer);
+    await receive(observer);
+    const dataTasks: AgentMessage[] = [];
+    for (let index = 0; index < statuses.length; index++) {
+      dataTasks.push(await receive(observer));
+    }
+    for (let index = 0; index < statuses.length; index++) {
+      bus.publish(dataResultMessageWithStatus(dataTasks[index], statuses[index]));
+      await receive(observer);
+    }
+    const terminal: AgentMessage = await receive(observer);
+    return (terminal.payload as TurnResultPayload).status;
+  } finally {
+    leader.stop();
+    observer.close();
+  }
 }
 
 async function receive(reader: AgentMessageReader): Promise<AgentMessage> {
@@ -838,6 +890,14 @@ export default function leaderAgentTest() {
 
       leader.stop();
       observer.close();
+    });
+
+    it('derives data-backed terminal status from only this turn observations', 0, async () => {
+      expect(await semanticTerminalStatus(['error', 'error'])).assertEqual('error');
+      expect(await semanticTerminalStatus(['success', 'error'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['partial'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['empty'])).assertEqual('empty');
+      expect(await semanticTerminalStatus(['success'])).assertEqual('success');
     });
 
     it('turns malformed results and wrong schemas into bounded digests without stopping the pump', 0, async () => {

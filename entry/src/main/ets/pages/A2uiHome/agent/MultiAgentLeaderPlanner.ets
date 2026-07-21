@@ -15,6 +15,7 @@ import {
   ToolDefinition,
   dataAgentToolDefinitions
 } from '@loop/agent-core';
+import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
 const DECISION_KEYS: string[] = [
   'dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent',
@@ -35,9 +36,16 @@ interface JsonContainerFrame {
 export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private readonly model: LocalModel;
   private readonly dataToolIds: Set<string>;
+  private readonly currentLocalDate: HotelLocalDateProvider;
 
-  constructor(model: LocalModel) {
+  constructor(model: LocalModel, currentLocalDate?: HotelLocalDateProvider) {
     this.model = model;
+    this.currentLocalDate = currentLocalDate === undefined ? (): string => {
+      const now = new Date();
+      const month: string = (now.getMonth() + 1).toString().padStart(2, '0');
+      const day: string = now.getDate().toString().padStart(2, '0');
+      return now.getFullYear().toString() + '-' + month + '-' + day;
+    } : currentLocalDate;
     this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
       (definition: ToolDefinition): string => definition.toolId
     ));
@@ -126,13 +134,26 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     return [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
+      'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
+        '"roundAction":"execute|answer|clarify|legacy_handoff","dataTasks":[' +
+        '{"localId":"string","goal":"string","allowedToolIds":["string"],' +
+        '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
+        '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
+        '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
+        '"answer":"string" optional,"reasonCode":"string"}.',
       'Select one persona and at most one active skill.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
+      hotelSearchPlanningContract(this.currentLocalDate()),
+      'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +
+        'conversation and is unavailable or not runtime-owned.',
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
       'Context: ' + JSON.stringify(input),
-      'Capabilities: ' + JSON.stringify(context.tools),
+      'Registry capabilities: ' + JSON.stringify(context.tools),
+      'Runtime-owned tool IDs: ' + JSON.stringify(
+        context.runtimeOwnedToolIds === undefined ? [] : context.runtimeOwnedToolIds
+      ),
       'Personas: ' + JSON.stringify(context.personas)
     ].join('\n');
   }

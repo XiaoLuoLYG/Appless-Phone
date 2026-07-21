@@ -3,6 +3,7 @@ import {
   HotelSearchParseResult,
   HotelSearchRequest,
   InputUserPayload,
+  LeaderDecisionDataTask,
   LeaderPlan,
   LeaderPlanner,
   LeaderPlanningContext,
@@ -48,6 +49,42 @@ export interface HotelPlannerIdFactory {
 
 export type HotelLocalDateProvider = () => string;
 
+export function hotelSearchPlanningContract(currentLocalDate: string): string {
+  return 'Current local date: ' + currentLocalDate + '. Resolve relative dates from this date.\n' +
+    'For hotel.search, input must contain exactly originQuery, place, placeType, countryCode, ' +
+    'checkInDate, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and size.\n' +
+    'Use currency "" when the user does not specify it; local code applies the bounded CNY default.\n' +
+    'Use size 0 when the user does not specify a positive result limit; bounded local code applies the default.\n' +
+    'Do not invent missing destination, date, year, guest, child-age, or room values.\n' +
+    'Chinese 预订酒店 and English book hotel wording mean search real RollingGo inventory and rates only. ' +
+    'No hotel.book or transaction capability exists.\n' +
+    'Preserve originQuery exactly.';
+}
+
+function normalizeHotelSearchInput(query: string, value: Object): Object {
+  if (value === null || Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== HOTEL_SEARCH_KEYS) {
+    throw new Error('Hotel planner output contains missing or unknown fields.');
+  }
+  const raw = value as HotelSearchModelArgs;
+  if (raw.originQuery !== query.trim() || raw.countryCode.trim().length === 0) {
+    throw new Error('Hotel planner output changed the query or omitted countryCode.');
+  }
+  const parsed: HotelSearchParseResult = parseHotelSearchRequest(value);
+  if (!parsed.ok || parsed.value === null) {
+    throw new Error(parsed.error.length > 0 ? parsed.error : 'Invalid hotel search request.');
+  }
+  return parsed.value;
+}
+
+export function normalizeHotelSearchTaskInput(
+  input: InputUserPayload,
+  task: LeaderDecisionDataTask
+): Object {
+  return task.toolId === 'hotel.search' ?
+    normalizeHotelSearchInput(input.text, task.input) : task.input;
+}
+
 export class HotelLeaderPlanner implements LeaderPlanner {
   private readonly model: LocalModel;
   private readonly currentLocalDate: HotelLocalDateProvider;
@@ -79,20 +116,10 @@ export class HotelLeaderPlanner implements LeaderPlanner {
       throw new Error('Hotel planner requires exactly one JSON object.');
     }
     const parsedObject = JSON.parse(objects[0]) as Object;
-    if (parsedObject === null || Array.isArray(parsedObject) ||
-      Object.keys(parsedObject).sort().join(',') !== HOTEL_SEARCH_KEYS) {
-      throw new Error('Hotel planner output contains missing or unknown fields.');
-    }
-    const raw = parsedObject as HotelSearchModelArgs;
-    if (raw.originQuery !== query ||
-      raw.countryCode.trim().length === 0) {
-      throw new Error('Hotel planner output changed the query or omitted countryCode.');
-    }
-    const parsed: HotelSearchParseResult = parseHotelSearchRequest(parsedObject);
-    if (!parsed.ok || parsed.value === null) {
-      throw new Error(parsed.error.length > 0 ? parsed.error : 'Invalid hotel search request.');
-    }
-    return this.pairedPlan(parsed.value, definition);
+    return this.pairedPlan(
+      normalizeHotelSearchInput(query, parsedObject) as HotelSearchRequest,
+      definition
+    );
   }
 
   private pairedPlan(request: HotelSearchRequest, definition: LeaderToolMetadata): LeaderPlan {
@@ -132,16 +159,9 @@ export class HotelLeaderPlanner implements LeaderPlanner {
 
   private prompt(query: string): string {
     return 'Extract one validated hotel.search request from the user text.\n' +
-      'Current local date: ' + this.currentLocalDate() + '. Resolve relative dates from this date.\n' +
-      'Return exactly one JSON object containing only originQuery, place, placeType, countryCode, ' +
-      'checkInDate, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and size.\n' +
-      'Use currency "" when the user does not specify it; local code applies the bounded CNY default.\n' +
-      'Use size 0 when the user does not specify a positive result limit; bounded local code applies the default.\n' +
+      hotelSearchPlanningContract(this.currentLocalDate()) + '\n' +
+      'Return exactly one JSON object with that hotel.search input shape.\n' +
       'Do not return a tool ID, action ID, markdown explanation, or multiple objects.\n' +
-      'Do not invent missing destination, date, guest, child-age, or room values.\n' +
-      'Chinese 预订酒店 and English book hotel wording mean search real RollingGo inventory and rates only. ' +
-      'No hotel.book or transaction capability exists.\n' +
-      'Preserve originQuery exactly.\n' +
       'User text: ' + query;
   }
 }

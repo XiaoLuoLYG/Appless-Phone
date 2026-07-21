@@ -13,6 +13,7 @@ import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
   LeaderDataTask,
+  LeaderDataTaskInputNormalizer,
   LeaderDecision,
   LeaderDecisionDataTask,
   LeaderPlan,
@@ -42,6 +43,7 @@ interface LeaderTurnState {
   planning: boolean;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
   observations: ObservationDigest[];
+  turnObservations: ObservationDigest[];
   skillId: string;
   uiDone: boolean;
   dataDone: boolean;
@@ -61,6 +63,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   private planningContext: LeaderPlanningContext;
   private readonly timeoutMs: number;
   private readonly dataToolIds: Set<string>;
+  private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
   // Terminal state is reduced to exact identities so active turn payloads and
   // timers are released without permitting an old input to be dispatched twice.
@@ -70,7 +73,8 @@ export class LeaderAgent extends MessageDrivenAgent {
     bus: LinkedMessageBus,
     planner: LeaderPlanner,
     planningContext: LeaderPlanningContext,
-    timeoutMs: number = 30000
+    timeoutMs: number = 30000,
+    dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer
   ) {
     super(bus);
     this.bus = bus;
@@ -80,6 +84,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       (definition: ToolDefinition): string => definition.toolId
     ));
     this.timeoutMs = timeoutMs > 0 ? timeoutMs : 30000;
+    this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
+      null : dataTaskInputNormalizer;
   }
 
   stop(): void {
@@ -199,6 +205,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       planning: false,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
       observations: input.recentObservations as ObservationDigest[],
+      turnObservations: [],
       skillId: '',
       uiDone: false,
       dataDone: false,
@@ -297,6 +304,19 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
     }
+    if (!this.runtimeOwnsDecision(decision)) {
+      this.publishHandoff(message, decision);
+      this.finishTurn(state);
+      return;
+    }
+    try {
+      this.normalizeDecisionInputs(state.input, decision);
+    } catch (error) {
+      this.finishTurn(state);
+      const detail: string = error instanceof Error ? error.message : `${error}`;
+      this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
+      return;
+    }
     state.semantic = true;
     state.skillId = decision.skillId;
     if (decision.roundAction === 'legacy_handoff') {
@@ -348,6 +368,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.resultDigest(message, pending) : this.errorDigest(message, pending.toolId);
     state.pendingDataTools.delete(message.taskId);
     state.observations.push(digest);
+    state.turnObservations.push(digest);
     state.observations = this.boundedObservations(state.observations as Object[]);
     if (state.pendingDataTools.size > 0) {
       return;
@@ -588,6 +609,52 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const actionIntent = decision.actionIntent;
     return actionIntent === undefined || this.validActionIntent(actionIntent);
+  }
+
+  private runtimeOwnsDecision(decision: LeaderDecision): boolean {
+    const ownedIds: string[] | undefined = this.planningContext.runtimeOwnedToolIds;
+    if (ownedIds === undefined) {
+      return true;
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task = decision.dataTasks[taskIndex];
+      if (ownedIds.indexOf(task.toolId) < 0) {
+        return false;
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (ownedIds.indexOf(task.allowedToolIds[allowedIndex]) < 0) {
+          return false;
+        }
+      }
+    }
+    if (decision.actionIntent === undefined) {
+      return true;
+    }
+    for (let actionIndex = 0; actionIndex < decision.actionIntent.allowedActionIds.length; actionIndex++) {
+      const actionId: string = decision.actionIntent.allowedActionIds[actionIndex];
+      let owned: boolean = false;
+      for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
+        const tool = this.planningContext.tools[toolIndex];
+        if (ownedIds.indexOf(tool.toolId) >= 0 && tool.actions.indexOf(actionId) >= 0) {
+          owned = true;
+          break;
+        }
+      }
+      if (!owned) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private normalizeDecisionInputs(input: InputUserPayload, decision: LeaderDecision): void {
+    const normalizer: LeaderDataTaskInputNormalizer | null = this.dataTaskInputNormalizer;
+    if (normalizer === null) {
+      return;
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      decision.dataTasks[index].input = normalizer(input, decision.dataTasks[index]);
+    }
   }
 
   private validDecisionTasks(tasks: LeaderDecisionDataTask[]): boolean {
@@ -924,7 +991,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     answer: string
   ): void {
     const payload: TurnResultPayload = {
-      status: 'success',
+      status: this.turnResultStatus(state),
       roundCount: state.round,
       message: answer
     };
@@ -939,6 +1006,32 @@ export class LeaderAgent extends MessageDrivenAgent {
       taskId: state.inputTaskId,
       payload
     });
+  }
+
+  private turnResultStatus(state: LeaderTurnState): 'success' | 'partial' | 'empty' | 'error' {
+    if (state.turnObservations.length === 0) {
+      return 'success';
+    }
+    let allError: boolean = true;
+    let allEmpty: boolean = true;
+    const firstStatus: string = state.turnObservations[0].status;
+    let mixed: boolean = false;
+    for (let index = 0; index < state.turnObservations.length; index++) {
+      const status: string = state.turnObservations[index].status;
+      allError = allError && status === 'error';
+      allEmpty = allEmpty && status === 'empty';
+      mixed = mixed || status !== firstStatus;
+      if (status === 'partial') {
+        return 'partial';
+      }
+    }
+    if (allError) {
+      return 'error';
+    }
+    if (mixed) {
+      return 'partial';
+    }
+    return allEmpty ? 'empty' : 'success';
   }
 
   private publishHandoff(input: AgentMessage, decision: LeaderDecision): void {
@@ -994,7 +1087,9 @@ export class LeaderAgent extends MessageDrivenAgent {
         }))
       });
     }
-    return { tools, personas };
+    const runtimeOwnedToolIds: string[] | undefined = context.runtimeOwnedToolIds === undefined ?
+      undefined : context.runtimeOwnedToolIds.slice();
+    return { tools, personas, runtimeOwnedToolIds };
   }
 
   private publishError(message: AgentMessage, code: string, detail: string): void {
