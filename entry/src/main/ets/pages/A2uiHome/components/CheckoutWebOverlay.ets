@@ -22,6 +22,8 @@ import {
   trainWebAssistBudgetForStageTransition,
   trainWebAssistFinalClickMayHaveRun,
   trainWebAssistLoadErrorOutcome,
+  trainWebAssistNavigationTimeoutMs,
+  trainWebAssistNavigationTimeoutOutcome,
   trainWebAssistReasonText,
   trainWebAssistRetryExhausted,
   trainWebAssistTargetState,
@@ -283,6 +285,18 @@ export struct CheckoutWebOverlay {
     }, 250);
   }
 
+  private scheduleTrainAssistNavigationTimeout(binding: TrainWebAssistExecutionBinding): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    const epoch = this.assistEpoch;
+    this.assistTimer = setTimeout(() => {
+      this.assistTimer = -1;
+      if (!isCurrentTrainWebAssistTimer(epoch, this.assistEpoch, this.assistDisposed)) return;
+      const outcome = trainWebAssistNavigationTimeoutOutcome(this.activeController, this.activeGeneration,
+        this.assistScriptSession, binding);
+      if (outcome !== undefined) this.handleTerminalAssist(outcome, this.activeUrl);
+    }, trainWebAssistNavigationTimeoutMs());
+  }
+
   private trainAssistPreflight(sourceUrl: string, controller: 'main' | 'popup', generation: number,
     session: number): string {
     const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
@@ -310,8 +324,10 @@ export struct CheckoutWebOverlay {
     this.activeUrl = url;
     this.currentUrl = url;
     this.assistBudget = trainWebAssistBudgetAfterActivation(this.assistBudget);
-    if (this.kind === 'train' && this.taskId.length > 0 && controller !== 'none' && url.length > 0) {
-      this.requestTrainAssist();
+    if (this.kind === 'train' && this.taskId.length > 0 && controller !== 'none') {
+      if (url.length > 0) this.requestTrainAssist();
+      else this.scheduleTrainAssistNavigationTimeout({ controller, generation,
+        session: this.assistScriptSession } as TrainWebAssistExecutionBinding);
     }
   }
 

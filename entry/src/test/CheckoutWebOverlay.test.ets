@@ -7,8 +7,9 @@ import {
   isOfficial12306PaymentUrl,
   webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
-import { a2uiWebExecutionTokenForRequest, a2uiWebOwnershipAfterPopupClose, a2uiWebOwnershipAfterPopupOpen,
-  a2uiWebLoadErrorTokenForEvent, a2uiWebOwnershipAfterNavigationBegin, A2uiWebExecutionToken,
+import { a2uiWebExecutionTokenForRequest, a2uiWebNavigationBindingForBegin,
+  a2uiWebNavigationTokenForEvent, a2uiWebOwnershipAfterPopupClose, a2uiWebOwnershipAfterPopupOpen,
+  a2uiWebOwnershipAfterNavigationBegin, A2uiWebExecutionToken, A2uiWebNavigationBinding,
   initialA2uiWebExecutionOwnership, invalidateA2uiWebExecutionOwnership,
   isCurrentA2uiWebExecutionToken } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
 
@@ -141,14 +142,39 @@ export default function checkoutWebOverlayTest() {
       expect(disposed.active).assertEqual('none');
       expect(isCurrentA2uiWebExecutionToken(disposed, token)).assertFalse();
       expect(a2uiWebExecutionTokenForRequest(state, 'main', 0, 2, '', true, false)).assertEqual(undefined);
-      const mainError = a2uiWebLoadErrorTokenForEvent(state, 'main', 3);
-      expect(mainError?.controller).assertEqual('main');
-      const popupState = a2uiWebOwnershipAfterPopupOpen(state);
-      expect(a2uiWebLoadErrorTokenForEvent(popupState, 'main', 3)).assertEqual(undefined);
-      expect(a2uiWebLoadErrorTokenForEvent(popupState, 'popup', 3)?.generation)
-        .assertEqual(popupState.popupGeneration);
-      const staleState = a2uiWebOwnershipAfterNavigationBegin(state, 'main');
-      expect(mainError === undefined ? true : isCurrentA2uiWebExecutionToken(staleState, mainError)).assertFalse();
+      const navAState = a2uiWebOwnershipAfterNavigationBegin(state, 'main');
+      const navA: A2uiWebNavigationBinding = a2uiWebNavigationBindingForBegin(undefined,
+        navAState, 'main', 3, 'https://kyfw.12306.cn/otn/leftTicket/init');
+      const navBState = a2uiWebOwnershipAfterNavigationBegin(navAState, 'main');
+      const navB: A2uiWebNavigationBinding = a2uiWebNavigationBindingForBegin(navA,
+        navBState, 'main', 3, 'https://kyfw.12306.cn/otn/leftTicket/init');
+      expect(a2uiWebNavigationTokenForEvent(navBState, navA,
+        'https://kyfw.12306.cn/otn/leftTicket/init')).assertEqual(undefined);
+      expect(a2uiWebNavigationTokenForEvent(navBState, undefined,
+        'https://kyfw.12306.cn/otn/leftTicket/init')).assertEqual(undefined);
+      expect(a2uiWebNavigationTokenForEvent(navBState, navB,
+        'https://kyfw.12306.cn/otn/leftTicket/init')).assertEqual(undefined);
+      const currentPopupState = a2uiWebOwnershipAfterPopupOpen(state);
+      const currentPopup: A2uiWebNavigationBinding = a2uiWebNavigationBindingForBegin(undefined,
+        currentPopupState, 'popup', 4, 'https://kyfw.12306.cn/otn/confirmPassenger/initDc');
+      expect(a2uiWebNavigationTokenForEvent(currentPopupState, currentPopup,
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc')?.controller).assertEqual('popup');
+      const popupReloadState = a2uiWebOwnershipAfterNavigationBegin(currentPopupState, 'popup');
+      const popupReload = a2uiWebNavigationBindingForBegin(currentPopup, popupReloadState, 'popup', 4,
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc');
+      expect(a2uiWebNavigationTokenForEvent(popupReloadState, currentPopup, currentPopup.url))
+        .assertEqual(undefined);
+      expect(a2uiWebNavigationTokenForEvent(popupReloadState, popupReload, popupReload.url))
+        .assertEqual(undefined);
+      const redirectAState = a2uiWebOwnershipAfterNavigationBegin(state, 'main');
+      const redirectA = a2uiWebNavigationBindingForBegin(undefined, redirectAState, 'main', 5,
+        'https://kyfw.12306.cn/otn/leftTicket/init');
+      const redirectBState = a2uiWebOwnershipAfterNavigationBegin(redirectAState, 'main');
+      const redirectB = a2uiWebNavigationBindingForBegin(redirectA, redirectBState, 'main', 5,
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc');
+      expect(a2uiWebNavigationTokenForEvent(redirectBState, redirectA, redirectA.url)).assertEqual(undefined);
+      expect(a2uiWebNavigationTokenForEvent(redirectBState, redirectB, redirectB.url)?.generation)
+        .assertEqual(redirectBState.mainGeneration);
       expect(isOfficial12306PaymentUrl('https://epay.12306.cn/pay/webBusiness')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/payOrder/init')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertFalse();

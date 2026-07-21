@@ -10,6 +10,7 @@ import {
   initialTrainWebAssistBudget, trainWebAssistBudgetAfterActivation,
   trainWebAssistBudgetAfterExecution, trainWebAssistBudgetForOutcome,
   trainWebAssistBudgetForStageTransition, trainWebAssistLoadErrorOutcome,
+  trainWebAssistNavigationTimeoutMs, trainWebAssistNavigationTimeoutOutcome,
   TrainWebAssistBudget, TrainWebAssistExecutionBinding,
   TrainWebAssistOutcome, TrainWebAssistRetryOutcome
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleWebAutomation';
@@ -174,6 +175,18 @@ export default function trainPresaleWebAutomationTest() {
         .assertEqual('invalid_result');
       expect(trainWebAssistLoadErrorOutcome('page_mismatch', 'main', 8, 11, activeError))
         .assertEqual(undefined);
+      expect(trainWebAssistNavigationTimeoutMs()).assertEqual(15000);
+      const timeoutOutcome = trainWebAssistNavigationTimeoutOutcome('main', 7, 11, activeError);
+      expect(timeoutOutcome?.reason).assertEqual('timeout');
+      expect(timeoutOutcome === undefined ? undefined : trainWebAssistTargetState(timeoutOutcome))
+        .assertEqual('needs_user');
+      expect(trainWebAssistNavigationTimeoutOutcome('main', 8, 11, activeError))
+        .assertEqual(undefined);
+      const popupTimeout: TrainWebAssistExecutionBinding = { controller: 'popup', generation: 9, session: 13 };
+      expect(trainWebAssistNavigationTimeoutOutcome('popup', 9, 13, popupTimeout)?.state)
+        .assertEqual('needs_user');
+      const timeoutCancelledEpoch = nextTrainWebAssistEpoch(12);
+      expect(isCurrentTrainWebAssistTimer(12, timeoutCancelledEpoch, false)).assertFalse();
     });
 
     it('flushes terminal task before compare-and-clearing matching handoff', 0, () => {

@@ -104,6 +104,15 @@ export function trainWebAssistLoadErrorOutcome(reason: string, activeController:
     { state: 'needs_user', reason: sanitizedReason(reason) } : undefined;
 }
 
+export function trainWebAssistNavigationTimeoutMs(): number { return 15000; }
+
+export function trainWebAssistNavigationTimeoutOutcome(activeController: 'main' | 'popup' | 'none',
+  activeGeneration: number, activeSession: number,
+  actual: TrainWebAssistExecutionBinding): TrainWebAssistNeedsUserOutcome | undefined {
+  return isCurrentTrainWebAssistLifecycleEvent(activeController, activeGeneration, activeSession, actual) ?
+    { state: 'needs_user', reason: 'timeout' } : undefined;
+}
+
 export function nextTrainWebAssistEpoch(current: number): number { return current + 1; }
 
 export function isCurrentTrainWebAssistTimer(capturedEpoch: number, currentEpoch: number,

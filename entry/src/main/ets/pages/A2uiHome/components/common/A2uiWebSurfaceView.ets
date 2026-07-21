@@ -19,6 +19,11 @@ export interface A2uiWebExecutionToken {
   session: number;
 }
 
+export interface A2uiWebNavigationBinding extends A2uiWebExecutionToken {
+  url: string;
+  ambiguous: boolean;
+}
+
 export function initialA2uiWebExecutionOwnership(): A2uiWebExecutionOwnership {
   return { active: 'main', mainGeneration: 0, popupGeneration: 0, disposed: false };
 }
@@ -64,10 +69,20 @@ export function a2uiWebExecutionTokenForRequest(state: A2uiWebExecutionOwnership
     { controller: state.active, generation, session } as A2uiWebExecutionToken : undefined;
 }
 
-export function a2uiWebLoadErrorTokenForEvent(state: A2uiWebExecutionOwnership,
-  controller: 'main' | 'popup', session: number): A2uiWebExecutionToken | undefined {
-  if (state.disposed || state.active !== controller) return undefined;
-  return { controller, generation: controller === 'main' ? state.mainGeneration : state.popupGeneration, session };
+export function a2uiWebNavigationBindingForBegin(previous: A2uiWebNavigationBinding | undefined,
+  state: A2uiWebExecutionOwnership, controller: 'main' | 'popup', session: number,
+  url: string): A2uiWebNavigationBinding {
+  return { controller, generation: controller === 'main' ? state.mainGeneration : state.popupGeneration,
+    session, url, ambiguous: previous !== undefined && previous.controller === controller && previous.url === url };
+}
+
+export function a2uiWebNavigationTokenForEvent(state: A2uiWebExecutionOwnership,
+  binding: A2uiWebNavigationBinding | undefined, eventUrl: string): A2uiWebExecutionToken | undefined {
+  if (binding === undefined || binding.ambiguous || binding.url.length === 0 || binding.url !== eventUrl ||
+    state.disposed) return undefined;
+  const generation = binding.controller === 'main' ? state.mainGeneration : state.popupGeneration;
+  return generation === binding.generation ? { controller: binding.controller,
+    generation: binding.generation, session: binding.session } : undefined;
 }
 
 @Component
@@ -110,6 +125,8 @@ export struct A2uiWebSurfaceView {
   private popupReady: boolean = false;
   private loadedHtml: string = '';
   private ownership: A2uiWebExecutionOwnership = initialA2uiWebExecutionOwnership();
+  private mainNavigationBinding: A2uiWebNavigationBinding | undefined = undefined;
+  private popupNavigationBinding: A2uiWebNavigationBinding | undefined = undefined;
   private completedExecutionKey: string = '';
   @State private loading: boolean = true;
   @State private errorText: string = '';
@@ -117,6 +134,8 @@ export struct A2uiWebSurfaceView {
 
   aboutToAppear(): void {
     this.ownership = initialA2uiWebExecutionOwnership();
+    this.mainNavigationBinding = undefined;
+    this.popupNavigationBinding = undefined;
     this.bridge.onMessage = (message: A2uiWebMessage): void => {
       this.onMessage(message);
     };
@@ -179,6 +198,10 @@ export struct A2uiWebSurfaceView {
   private invalidateAllExecutions(disposed: boolean): void {
     this.ownership = invalidateA2uiWebExecutionOwnership(this.ownership, disposed);
     this.completedExecutionKey = '';
+    if (disposed) {
+      this.mainNavigationBinding = undefined;
+      this.popupNavigationBinding = undefined;
+    }
   }
 
   private executeActiveRequest(): void {
@@ -237,15 +260,19 @@ export struct A2uiWebSurfaceView {
     return info.length > 0 ? '页面加载失败：' + info : '页面加载失败，请检查网络后重试。';
   }
 
-  private notifyLoadError(controller: 'main' | 'popup'): void {
-    const token = a2uiWebLoadErrorTokenForEvent(this.ownership, controller, this.pageScriptSession);
-    if (token !== undefined) {
-      this.onLoadError('page_mismatch', token.controller, token.generation, token.session);
-    }
+  private notifyLoadError(controller: 'main' | 'popup', eventUrl: string): boolean {
+    const binding = controller === 'main' ? this.mainNavigationBinding : this.popupNavigationBinding;
+    const token = a2uiWebNavigationTokenForEvent(this.ownership, binding, eventUrl);
+    if (token === undefined) return false;
+    if (controller === 'main') this.mainNavigationBinding = undefined;
+    else this.popupNavigationBinding = undefined;
+    this.onLoadError('page_mismatch', token.controller, token.generation, token.session);
+    return true;
   }
 
   private closePopup(): void {
     this.ownership = a2uiWebOwnershipAfterPopupClose(this.ownership);
+    this.popupNavigationBinding = undefined;
     this.popupReady = false;
     this.popupVisible = false;
     this.onActiveControllerChange('main', this.webReady ? this.currentUrl(this.controller) : '',
@@ -311,9 +338,12 @@ export struct A2uiWebSurfaceView {
         .width('100%')
         .height('100%')
         .backgroundColor(COLOR_PAGE)
-        .onPageBegin(() => {
+        .onPageBegin((event) => {
+          const pageUrl = event === undefined || event === null ? '' : event.url;
           this.webReady = false;
           this.ownership = a2uiWebOwnershipAfterNavigationBegin(this.ownership, 'main');
+          this.mainNavigationBinding = a2uiWebNavigationBindingForBegin(this.mainNavigationBinding,
+            this.ownership, 'main', this.pageScriptSession, pageUrl);
           this.loading = true;
           this.errorText = '';
           if (this.ownership.active === 'main') {
@@ -322,19 +352,24 @@ export struct A2uiWebSurfaceView {
         })
         .onPageEnd((event) => {
           const pageUrl = event === undefined || event === null ? '' : event.url;
+          const token = a2uiWebNavigationTokenForEvent(this.ownership, this.mainNavigationBinding, pageUrl);
+          if (token === undefined) return;
+          this.mainNavigationBinding = undefined;
           this.webReady = true;
           this.loading = false;
           this.loadHtmlIfNeeded();
           this.onLoadEnd(pageUrl, 'main');
           if (this.ownership.active === 'main') {
-            this.onActiveControllerChange('main', pageUrl, this.ownership.mainGeneration);
+            this.onActiveControllerChange('main', pageUrl, token.generation);
           }
         })
         .onErrorReceive((event) => {
           if (event !== undefined && event !== null && this.mainFrameError(event)) {
-            this.errorText = this.webErrorText(event);
-            this.loading = false;
-            this.notifyLoadError('main');
+            if (this.notifyLoadError('main', event.request.getRequestUrl())) {
+              this.errorText = this.webErrorText(event);
+              this.loading = false;
+              this.webReady = false;
+            }
           }
         })
         .onLoadIntercept((event) => {
@@ -348,6 +383,7 @@ export struct A2uiWebSurfaceView {
             return;
           }
           this.ownership = a2uiWebOwnershipAfterPopupOpen(this.ownership);
+          this.popupNavigationBinding = undefined;
           this.popupVisible = true;
           this.popupReady = false;
           this.onActiveControllerChange('popup', '', this.ownership.popupGeneration);
@@ -388,19 +424,25 @@ export struct A2uiWebSurfaceView {
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
-            .onPageBegin(() => {
+            .onPageBegin((event) => {
+              const pageUrl = event === undefined || event === null ? '' : event.url;
               this.popupReady = false;
               this.ownership = a2uiWebOwnershipAfterNavigationBegin(this.ownership, 'popup');
+              this.popupNavigationBinding = a2uiWebNavigationBindingForBegin(this.popupNavigationBinding,
+                this.ownership, 'popup', this.pageScriptSession, pageUrl);
               if (this.ownership.active === 'popup') {
                 this.onActiveControllerChange('popup', '', this.ownership.popupGeneration);
               }
             })
             .onPageEnd((event) => {
               const pageUrl = event === undefined || event === null ? '' : event.url;
+              const token = a2uiWebNavigationTokenForEvent(this.ownership, this.popupNavigationBinding, pageUrl);
+              if (token === undefined) return;
+              this.popupNavigationBinding = undefined;
               this.popupReady = true;
               this.onLoadEnd(pageUrl, 'popup');
               if (this.ownership.active === 'popup') {
-                this.onActiveControllerChange('popup', pageUrl, this.ownership.popupGeneration);
+                this.onActiveControllerChange('popup', pageUrl, token.generation);
               }
             })
             .onLoadIntercept((event) => {
@@ -411,8 +453,7 @@ export struct A2uiWebSurfaceView {
             })
             .onErrorReceive((event) => {
               if (event !== undefined && event !== null && this.mainFrameError(event)) {
-                this.popupReady = false;
-                this.notifyLoadError('popup');
+                if (this.notifyLoadError('popup', event.request.getRequestUrl())) this.popupReady = false;
               }
             })
             .onWindowExit(() => {
