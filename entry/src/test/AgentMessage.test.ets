@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   ActionOffer,
-  ActionPlanDraft,
   AgentMessage,
   AgentMessageType,
+  ConversationRole,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
@@ -76,12 +76,7 @@ export default function agentMessageTest() {
     });
 
     it('exposes the canonical planning offer and task contracts', 0, () => {
-      const draft: ActionPlanDraft = {
-        planId: 'plan-1',
-        runId: 'run-1',
-        label: '查看详情后导航',
-        steps: []
-      };
+      const role: ConversationRole = 'user';
       const planningContext: LeaderPlanningContext = {
         tools: [{
           toolId: 'hotel.search',
@@ -153,6 +148,7 @@ export default function agentMessageTest() {
       const render: UiRenderResult = { jsonl: '{}' };
 
       expect(planningContext.tools[0].riskLevel).assertEqual('read');
+      expect(role).assertEqual('user');
       expect(plan.skillId).assertEqual(ui.skillId);
       expect(data.skillId).assertEqual(ui.skillId);
       expect(plan.dataTasks.length).assertEqual(2);

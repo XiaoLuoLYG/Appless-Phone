@@ -2,6 +2,9 @@ import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
+  ConversationTurnMessage,
+  CurrentSurfaceSummary,
+  ObservationDigest,
   TaskErrorPayload
 } from '../message/AgentMessage';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
@@ -125,7 +128,21 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_INPUT_INVALID', 'User input text must not be empty');
       return;
     }
-    const input: InputUserPayload = { text: inputText };
+    const recentMessages = inputRecord['recentMessages'];
+    const previousPersonaId = inputRecord['previousPersonaId'];
+    const currentSurfaceSummary = inputRecord['currentSurfaceSummary'];
+    const recentObservations = inputRecord['recentObservations'];
+    const input: InputUserPayload = {
+      text: inputText,
+      recentMessages: Array.isArray(recentMessages) ? recentMessages as ConversationTurnMessage[] : [],
+      previousPersonaId: typeof previousPersonaId === 'string' ? previousPersonaId : '',
+      currentSurfaceSummary: currentSurfaceSummary !== null &&
+        typeof currentSurfaceSummary === 'object' && !Array.isArray(currentSurfaceSummary) ?
+        currentSurfaceSummary as CurrentSurfaceSummary : {
+          surfaceId: '', kind: '', status: '', entityRefs: [], actionOfferIds: []
+        },
+      recentObservations: Array.isArray(recentObservations) ? recentObservations as ObservationDigest[] : []
+    };
     const key: string = this.turnKey(message);
     if (this.turns.has(key) || this.terminalTurns.has(key)) {
       return;

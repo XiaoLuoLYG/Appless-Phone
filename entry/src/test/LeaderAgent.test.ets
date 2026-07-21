@@ -51,6 +51,19 @@ class ThrowingLeaderPlanner implements LeaderPlanner {
   }
 }
 
+class CapturingLeaderPlanner implements LeaderPlanner {
+  lastInput: InputUserPayload | null = null;
+
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    _context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
+    this.lastInput = input;
+    return hotelPlan();
+  }
+}
+
 class FirstCallHangingPlanner implements LeaderPlanner {
   calls: number = 0;
   private readonly scriptedPlan: LeaderPlan;
@@ -281,6 +294,73 @@ export default function leaderAgentTest() {
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-1'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('passes supplied bounded input context to the planner', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new CapturingLeaderPlanner();
+      const leader = new LeaderAgent(bus, planner, planningContext());
+      const observer = bus.openReader();
+      leader.start();
+      const payload: InputUserPayload = {
+        text: 'Find a Shenzhen hotel',
+        recentMessages: [{ role: 'user', content: 'Near Futian' }],
+        previousPersonaId: 'travel_companion',
+        currentSurfaceSummary: {
+          surfaceId: 'surface-1',
+          kind: 'hotel',
+          status: 'ready',
+          entityRefs: ['hotel-1'],
+          actionOfferIds: ['offer-1']
+        },
+        recentObservations: [{
+          taskId: 'data-1',
+          toolId: 'hotel.search',
+          status: 'success',
+          summary: 'one hotel',
+          entityRefs: ['hotel-1']
+        }]
+      };
+      bus.publish({
+        type: AgentMessageType.INPUT_USER,
+        conversationId: 'conversation-context',
+        turnId: 'turn-context',
+        taskId: 'input-context',
+        payload
+      });
+      await receive(observer);
+      await receive(observer);
+      await receive(observer);
+      const input = planner.lastInput as InputUserPayload;
+
+      expect(input.recentMessages!.length).assertEqual(1);
+      expect(input.previousPersonaId).assertEqual('travel_companion');
+      expect(input.currentSurfaceSummary!.surfaceId).assertEqual('surface-1');
+      expect(input.recentObservations![0].toolId).assertEqual('hotel.search');
+      leader.stop();
+      observer.close();
+    });
+
+    it('normalizes omitted bounded input context before planning', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new CapturingLeaderPlanner();
+      const leader = new LeaderAgent(bus, planner, planningContext());
+      const observer = bus.openReader();
+      leader.start();
+      bus.publish(inputMessage());
+      await receive(observer);
+      await receive(observer);
+      await receive(observer);
+      const input = planner.lastInput as InputUserPayload;
+
+      expect(input.recentMessages!.length).assertEqual(0);
+      expect(input.previousPersonaId).assertEqual('');
+      expect(input.currentSurfaceSummary!.surfaceId).assertEqual('');
+      expect(input.currentSurfaceSummary!.entityRefs.length).assertEqual(0);
+      expect(input.currentSurfaceSummary!.actionOfferIds.length).assertEqual(0);
+      expect(input.recentObservations!.length).assertEqual(0);
       leader.stop();
       observer.close();
     });
