@@ -383,7 +383,21 @@ interface StationSaleTimePayload {
   data?: StationSaleTimeItem[];
 }
 
-interface TrainPriceData {}
+type TrainPriceValue = string | number;
+
+interface TrainPriceData {
+  WZ?: TrainPriceValue;
+  A1?: TrainPriceValue;
+  A2?: TrainPriceValue;
+  A3?: TrainPriceValue;
+  A4?: TrainPriceValue;
+  A6?: TrainPriceValue;
+  A9?: TrainPriceValue;
+  F?: TrainPriceValue;
+  M?: TrainPriceValue;
+  O?: TrainPriceValue;
+  P?: TrainPriceValue;
+}
 
 interface TrainPricePayload {
   status?: boolean;
@@ -4623,15 +4637,19 @@ export function parseLowestTrainPrice(payload: string): number | undefined {
       return undefined;
     }
     let lowest: number | undefined = undefined;
-    const matcher = /"[A-Z0-9]+"\s*:\s*"?(\d+(?:\.\d{1,2})?)"?/g;
-    const dataText = JSON.stringify(parsed.data);
-    let match: RegExpExecArray | null = matcher.exec(dataText);
-    while (match !== null) {
+    const values: (TrainPriceValue | undefined)[] = [parsed.data.WZ, parsed.data.A1, parsed.data.A2,
+      parsed.data.A3, parsed.data.A4, parsed.data.A6, parsed.data.A9, parsed.data.F, parsed.data.M,
+      parsed.data.O, parsed.data.P];
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index];
+      const match = value === undefined ? null : /^[¥￥]?(\d+(?:\.\d{1,2})?)$/.exec(value.toString().trim());
+      if (match === null) {
+        continue;
+      }
       const price = Number(match[1]);
       if (price > 0 && (lowest === undefined || price < lowest)) {
         lowest = price;
       }
-      match = matcher.exec(dataText);
     }
     return lowest;
   } catch (_error) {

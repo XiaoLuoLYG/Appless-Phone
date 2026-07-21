@@ -14,6 +14,8 @@ const TRAIN_SEARCH_FIXTURE: string = '{"data":[{"date":"20260806","from_station"
 const TRAIN_STOPS_FIXTURE: string = '{"status":true,"data":{"data":[{"station_name":"北京南","station_train_code":"G1","station_no":"01","start_time":"06:30"},{"station_name":"上海虹桥","station_no":"07","arrive_time":"11:24"}]}}';
 const STATION_SALE_FIXTURE: string = '{"data":[{"name":"北京","value":"10:00"},{"name":"北京南","value":"12:45"}],"status":true}';
 const PRICE_FIXTURE: string = '{"status":true,"data":{"O":"553.0","M":"672.5","WZ":"--","A9":"0"}}';
+const OFFICIAL_SYMBOL_PRICE_FIXTURE: string =
+  '{"status":true,"data":{"WZ":"¥661.0","A9":"¥2315.0","M":"¥1058.0","O":"¥661.0","9":23150}}';
 const NUMERIC_TRAIN_FIXTURE: string = '{"data":[{"date":"20260806","from_station":"北京南","station_train_code":"1234","to_station":"上海虹桥","train_no":"24000000N10L"},{"date":"20260806","from_station":"北京南","station_train_code":"12345","to_station":"上海虹桥","train_no":"2400000N1000"}]}';
 
 export default function trainPresaleProviderTest() {
@@ -82,6 +84,19 @@ export default function trainPresaleProviderTest() {
 
     it('uses the lowest valid official train price', 0, () => {
       expect(parseLowestTrainPrice(PRICE_FIXTURE)).assertEqual(553);
+    });
+
+    it('uses official symbol-prefixed seat fares instead of internal numeric metadata', 0, () => {
+      expect(parseLowestTrainPrice(OFFICIAL_SYMBOL_PRICE_FIXTURE)).assertEqual(661);
+    });
+
+    it('accepts strict official seat fare formats and rejects invalid prices', 0, () => {
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A1":"￥653"}}')).assertEqual(653);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A2":"¥661.5"}}')).assertEqual(661.5);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A3":"661.05"}}')).assertEqual(661.05);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"O":"6610"}}')).assertEqual(6610);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A4":"1.234","A6":"-1","A9":"0","M":"NaN","O":"6610x","X":"1","9":1}}'))
+        .assertEqual(undefined);
     });
 
     it('fails closed for malformed or non-matching provider responses', 0, () => {
