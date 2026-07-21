@@ -60,6 +60,8 @@ class EpochSequence {
 class MemoryPreferences {
   private value: preferences.ValueType = '';
   reads: number = 0;
+  writes: number = 0;
+  flushes: number = 0;
 
   getSync(_key: string, defaultValue: preferences.ValueType): preferences.ValueType {
     this.reads++;
@@ -67,10 +69,56 @@ class MemoryPreferences {
   }
 
   putSync(_key: string, value: preferences.ValueType): void {
+    this.writes++;
     this.value = value;
   }
 
-  flushSync(): void {}
+  flushSync(): void {
+    this.flushes++;
+  }
+}
+
+class MutationCountingStore extends TrainPresaleTaskStore {
+  updateCalls: number = 0;
+  cancelCalls: number = 0;
+
+  constructor(store: preferences.Preferences) {
+    super(store);
+  }
+
+  update(taskId: string, patch: Partial<TrainPresaleTask>): void {
+    this.updateCalls++;
+    super.update(taskId, patch);
+  }
+
+  cancel(taskId: string): void {
+    this.cancelCalls++;
+    super.cancel(taskId);
+  }
+}
+
+class ForeignOwnerInjectingStore extends MutationCountingStore {
+  private foreignOwner: TrainPresaleTask;
+  private injected: boolean = false;
+
+  constructor(store: preferences.Preferences, foreignOwner: TrainPresaleTask) {
+    super(store);
+    this.foreignOwner = foreignOwner;
+  }
+
+  create(task: TrainPresaleTask): void {
+    if (!this.injected) {
+      this.injected = true;
+      super.create(this.foreignOwner);
+    }
+    super.create(task);
+  }
+}
+
+class SchedulerCalls {
+  publish: number = 0;
+  cancel: number = 0;
+  list: number = 0;
 }
 
 function request(): TrainPresaleDebugSelectionRequest {
@@ -143,6 +191,22 @@ function testScheduler(onPublish: () => void): SystemOneShotScheduler {
     },
     async (_reminderId: number): Promise<void> => {},
     async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+  );
+}
+
+function observedScheduler(calls: SchedulerCalls): SystemOneShotScheduler {
+  return new SystemOneShotScheduler(
+    async (_reminder: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+      calls.publish++;
+      return 88;
+    },
+    async (_reminderId: number): Promise<void> => {
+      calls.cancel++;
+    },
+    async (): Promise<reminderAgentManager.ReminderRequest[]> => {
+      calls.list++;
+      return [];
+    }
   );
 }
 
@@ -661,6 +725,105 @@ export default function trainPresaleDebugTest() {
       expect(persisted?.state).assertEqual('needs_user');
       expect(persisted?.lastError).assertEqual('需要用户处理');
       expect(publishCalls).assertEqual(0);
+    });
+
+    it('fails closed on thrown, blank, overlong, or illegal task id factory values', 0, async () => {
+      const factories: Array<() => string> = [];
+      factories.push((): string => { throw new Error('uuid unavailable'); });
+      factories.push((): string => '');
+      factories.push((): string => '   ');
+      let overlong = '';
+      for (let index = 0; index < 129; index++) {
+        overlong += 'x';
+      }
+      factories.push((): string => overlong);
+      factories.push((): string => 'bad/value');
+
+      for (let index = 0; index < factories.length; index++) {
+        const native = new MemoryPreferences();
+        const store = new MutationCountingStore(native as Object as preferences.Preferences);
+        const schedulerCalls = new SchedulerCalls();
+        let providerCalls = 0;
+        const result = await runTrainPresaleDebugConfirmation(
+          runInput(), store, observedScheduler(schedulerCalls),
+          async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+            providerCalls++;
+            return verifiedSelection();
+          },
+          (): number => new Date('2026-07-22T04:05:00.000Z').getTime(), factories[index]);
+
+        expect(result.task).assertEqual(undefined);
+        expect(result.error).assertEqual('无法生成10秒测试任务编号，请重试。');
+        expect(providerCalls).assertEqual(0);
+        expect(native.reads).assertEqual(0);
+        expect(native.writes).assertEqual(0);
+        expect(store.updateCalls).assertEqual(0);
+        expect(store.cancelCalls).assertEqual(0);
+        expect(schedulerCalls.publish + schedulerCalls.cancel + schedulerCalls.list).assertEqual(0);
+      }
+    });
+
+    it('treats a repeated id owned by a cancelled exact task as conflict without mutation', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new MutationCountingStore(native as Object as preferences.Preferences);
+      const owner = activeDebugTask('cancelled');
+      owner.taskId = 'train-debug-repeat-id';
+      owner.reminderId = 144;
+      owner.lastError = 'keep cancelled owner';
+      store.create(owner);
+      const before = JSON.stringify(store.get(owner.taskId));
+      const schedulerCalls = new SchedulerCalls();
+      let providerCalls = 0;
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, observedScheduler(schedulerCalls),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+          providerCalls++;
+          return verifiedSelection();
+        },
+        (): number => new Date('2026-07-22T04:05:00.000Z').getTime(),
+        (): string => 'repeat-id');
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error.indexOf('任务编号冲突')).assertLarger(-1);
+      expect(providerCalls).assertEqual(1);
+      expect(JSON.stringify(store.get(owner.taskId))).assertEqual(before);
+      expect(store.list().length).assertEqual(1);
+      expect(store.updateCalls).assertEqual(0);
+      expect(store.cancelCalls).assertEqual(0);
+      expect(schedulerCalls.publish + schedulerCalls.cancel + schedulerCalls.list).assertEqual(0);
+    });
+
+    it('keeps post-create ownership validation for a foreign owner injected after precheck', 0, async () => {
+      const native = new MemoryPreferences();
+      const foreign = activeDebugTask('cancelled');
+      foreign.taskId = 'train-debug-race-id';
+      foreign.trainCode = 'G2';
+      foreign.passengerNames = ['李四'];
+      foreign.reminderId = 155;
+      foreign.lastError = 'foreign owner wins race';
+      const store = new ForeignOwnerInjectingStore(
+        native as Object as preferences.Preferences, foreign);
+      const schedulerCalls = new SchedulerCalls();
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, observedScheduler(schedulerCalls),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => verifiedSelection(),
+        (): number => new Date('2026-07-22T04:05:00.000Z').getTime(),
+        (): string => 'race-id');
+      const persisted = store.get(foreign.taskId);
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error.indexOf('任务编号冲突')).assertLarger(-1);
+      expect(persisted?.trainCode).assertEqual('G2');
+      expect(persisted?.passengerNames[0]).assertEqual('李四');
+      expect(persisted?.state).assertEqual('cancelled');
+      expect(persisted?.reminderId).assertEqual(155);
+      expect(persisted?.lastError).assertEqual('foreign owner wins race');
+      expect(store.list().length).assertEqual(1);
+      expect(store.updateCalls).assertEqual(0);
+      expect(store.cancelCalls).assertEqual(0);
+      expect(schedulerCalls.publish + schedulerCalls.cancel + schedulerCalls.list).assertEqual(0);
     });
 
     it('creates a durable debug task for ten seconds later through the production scheduler seam', 0, async () => {

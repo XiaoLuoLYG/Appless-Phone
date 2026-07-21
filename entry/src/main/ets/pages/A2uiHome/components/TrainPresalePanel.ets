@@ -495,7 +495,7 @@ export async function runTrainPresaleDebugConfirmation(
   } catch (_error) {
     return { error: '无法生成10秒测试任务编号，请重试。', task: undefined };
   }
-  if (taskToken.length === 0 || taskToken.length > 128) {
+  if (!/^[A-Za-z0-9-]{1,128}$/.test(taskToken)) {
     return { error: '无法生成10秒测试任务编号，请重试。', task: undefined };
   }
   const prepared = await prepareTrainPresaleDebugConfirmation({
@@ -514,6 +514,9 @@ export async function runTrainPresaleDebugConfirmation(
   if (prepared.task === undefined) {
     return prepared;
   }
+  if (store.get(prepared.task.taskId) !== undefined) {
+    return { error: '提醒创建失败：任务编号冲突，请重试。', task: undefined };
+  }
   const exactExisting = findMatchingTrainPresaleTaskForTask(store.list(), prepared.task);
   if (exactExisting !== undefined) {
     return existingDebugTaskResult(exactExisting);
@@ -531,6 +534,9 @@ export async function scheduleTrainPresaleTask(
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleScheduleResult> {
   const trip = tripFromTrainPresaleTask(task);
+  if (store.get(task.taskId) !== undefined) {
+    return { error: '提醒创建失败：任务编号冲突，请重试。', task: undefined };
+  }
   const duplicate = findMatchingTrainPresaleTaskForTask(store.list(), task);
   if (duplicate !== undefined) {
     const reconciled = await reconcileTrainPresaleTask(duplicate, store, scheduler);
