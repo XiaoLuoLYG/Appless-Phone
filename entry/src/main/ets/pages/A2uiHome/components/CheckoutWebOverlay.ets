@@ -44,30 +44,55 @@ import { A2uiWebControllerIdentity, A2uiWebSurfaceView } from './common/A2uiWebS
 export type CheckoutWebKind = 'payment' | 'hotel' | 'train';
 export type CheckoutNavigationDecision = 'allow' | 'payment_return' | 'block';
 
+interface StrictHttpsLocation {
+  host: string;
+  path: string;
+}
+
+function strictHttpsLocation(value: string): StrictHttpsLocation | undefined {
+  const url = value.trim();
+  if (!url.toLowerCase().startsWith('https://') || url.indexOf('\\') >= 0) return undefined;
+  const remainder = url.substring(8);
+  let authorityEnd = remainder.length;
+  const separators: number[] = [remainder.indexOf('/'), remainder.indexOf('?'), remainder.indexOf('#')];
+  for (let index = 0; index < separators.length; index++) {
+    if (separators[index] >= 0 && separators[index] < authorityEnd) authorityEnd = separators[index];
+  }
+  const authority = remainder.substring(0, authorityEnd);
+  if (authority.length === 0 || authority.indexOf('@') >= 0 || authority.indexOf(':') >= 0 ||
+    /\s/.test(authority)) return undefined;
+  const suffix = remainder.substring(authorityEnd);
+  const queryStart = suffix.indexOf('?');
+  const fragmentStart = suffix.indexOf('#');
+  let pathEnd = suffix.length;
+  if (queryStart >= 0 && queryStart < pathEnd) pathEnd = queryStart;
+  if (fragmentStart >= 0 && fragmentStart < pathEnd) pathEnd = fragmentStart;
+  const path = suffix.startsWith('/') ? suffix.substring(0, pathEnd) : '/';
+  return { host: authority.toLowerCase(), path: path };
+}
+
+function isAllowed12306MainFrameUrl(value: string): boolean {
+  const parsed = strictHttpsLocation(value);
+  if (parsed === undefined) return false;
+  if (parsed.host === 'epay.12306.cn') {
+    return ['/pay/webBusiness', '/pay/payGatewayT', '/pay/payResponse'].indexOf(parsed.path) >= 0;
+  }
+  if (parsed.host !== 'kyfw.12306.cn') return false;
+  return [
+    '/otn/leftTicket/init',
+    '/otn/login/init',
+    '/otn//login/init',
+    '/otn/resources/login.html',
+    '/otn/passport',
+    '/otn/confirmPassenger/initDc',
+    '/otn/payOrder/init',
+    '/payOrder/init'
+  ].indexOf(parsed.path) >= 0;
+}
+
 export function isAllowed12306BookingUrl(url: string): boolean {
-  try {
-    const parsed = new arkUrl.URL(url.trim());
-    if (parsed.protocol.length > 0) {
-      return parsed.protocol.toLowerCase() === 'https:' &&
-        parsed.hostname.toLowerCase() === 'kyfw.12306.cn' &&
-        parsed.port.length === 0 &&
-        parsed.username.length === 0 &&
-        parsed.password.length === 0 &&
-        parsed.pathname === '/otn/leftTicket/init';
-    }
-  } catch (_error) {}
-  const value = url.trim();
-  const authority = 'https://kyfw.12306.cn';
-  if (!value.toLowerCase().startsWith(authority)) {
-    return false;
-  }
-  const suffix = value.substring(authority.length);
-  const path = '/otn/leftTicket/init';
-  if (!suffix.startsWith(path)) {
-    return false;
-  }
-  const tail = suffix.substring(path.length);
-  return tail.length === 0 || tail.startsWith('?') || tail.startsWith('#');
+  const parsed = strictHttpsLocation(url);
+  return parsed !== undefined && parsed.host === 'kyfw.12306.cn' && parsed.path === '/otn/leftTicket/init';
 }
 
 export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): string {
@@ -79,29 +104,11 @@ export function checkoutWebMobileReadable(kind: CheckoutWebKind): boolean {
 }
 
 export function isOfficial12306PaymentUrl(value: string): boolean {
-  try {
-    const parsed = new arkUrl.URL(value.trim());
-    if (parsed.protocol.length > 0) {
-      return parsed.protocol.toLowerCase() === 'https:' && parsed.port.length === 0 &&
-        parsed.username.length === 0 && parsed.password.length === 0 &&
-        (parsed.hostname.toLowerCase() === 'epay.12306.cn' ||
-          (parsed.hostname.toLowerCase() === 'kyfw.12306.cn' && parsed.pathname.indexOf('/payOrder/') === 0));
-    }
-  } catch (_error) {}
-  // ponytail: local Hypium URL stubs do not parse absolute URLs, so retain a small exact fallback.
-  const normalized = value.trim().toLowerCase();
-  if (!normalized.startsWith('https://')) return false;
-  const afterScheme = normalized.substring(8);
-  let authorityEnd = afterScheme.length;
-  const slash = afterScheme.indexOf('/');
-  const query = afterScheme.indexOf('?');
-  const fragment = afterScheme.indexOf('#');
-  if (slash >= 0 && slash < authorityEnd) authorityEnd = slash;
-  if (query >= 0 && query < authorityEnd) authorityEnd = query;
-  if (fragment >= 0 && fragment < authorityEnd) authorityEnd = fragment;
-  const authority = afterScheme.substring(0, authorityEnd);
-  const path = slash >= 0 ? afterScheme.substring(slash) : '';
-  return authority === 'epay.12306.cn' || (authority === 'kyfw.12306.cn' && path.indexOf('/payorder/') === 0);
+  const parsed = strictHttpsLocation(value);
+  return parsed !== undefined && ((parsed.host === 'epay.12306.cn' &&
+    ['/pay/webBusiness', '/pay/payGatewayT', '/pay/payResponse'].indexOf(parsed.path) >= 0) ||
+    (parsed.host === 'kyfw.12306.cn' &&
+      (parsed.path === '/otn/payOrder/init' || parsed.path === '/payOrder/init')));
 }
 
 export function checkoutWebNavigationDecision(
@@ -120,6 +127,9 @@ export function checkoutWebNavigationDecision(
     return 'payment_return';
   }
   if (kind === 'hotel' && !isAllowedHotelBookingNavigationUrl(url)) {
+    return 'block';
+  }
+  if (kind === 'train' && !isAllowed12306MainFrameUrl(url)) {
     return 'block';
   }
   return 'allow';

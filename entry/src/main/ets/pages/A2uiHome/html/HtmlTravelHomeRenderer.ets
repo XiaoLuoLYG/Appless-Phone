@@ -422,7 +422,7 @@ button:disabled { cursor: default; opacity: 0.52; }
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   margin-top: 10px;
@@ -674,6 +674,10 @@ const TRAVEL_HOME_JS: string = `
     var match = raw.match(/([01]?\\d|2[0-3]):([0-5]\\d)(?::[0-5]\\d)?/);
     if (!match) { return raw; }
     return (match[1].length === 1 ? '0' + match[1] : match[1]) + ':' + match[2];
+  }
+  function trainPrice(value) {
+    var raw = text(value).trim().replace(/^¥+/, '').replace(/起+$/, '').trim();
+    return raw.length > 0 ? '¥' + raw + '起' : '';
   }
   function available(value) {
     var raw = text(value);
@@ -966,9 +970,10 @@ const TRAVEL_HOME_JS: string = `
     add(right, 'b', '', displayTime(metric(block, ['arrive', 'arrTime'])) || '--');
     add(right, 'span', '', metric(block, ['to', 'arr']) || '到达');
     var price = metric(block, ['price']);
-    if (source === 'train' && price.length > 0) {
+    var displayPrice = trainPrice(price);
+    if (source === 'train' && displayPrice.length > 0) {
       var priceBlock = add(mainline, 'div', 'journey-price');
-      add(priceBlock, 'b', '', '¥' + price + '起');
+      add(priceBlock, 'b', '', displayPrice);
     }
     var metrics = add(card, 'div', 'journey-metrics');
     var summaryMetrics = [
@@ -986,6 +991,7 @@ const TRAVEL_HOME_JS: string = `
     detailRow(grid, '来源', sourceLabel(block));
     list(block.metrics).concat(list(block.rows)).forEach(function (item) {
       if (text(item && item.label) === 'source') { return; }
+      if (source === 'train' && text(item && item.label).toLowerCase() === 'price') { return; }
       detailRow(grid, text(item && item.label), text(item && item.value));
     });
     addActionButtons(detail, block.actions);

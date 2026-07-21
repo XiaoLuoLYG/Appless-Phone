@@ -41,10 +41,15 @@ function isState(value: TrainPresaleTaskState): boolean {
 }
 
 function hasPassengerNames(value: string[]): boolean {
+  if (value.length === 0) return false;
+  const seen: string[] = [];
   for (let index = 0; index < value.length; index++) {
     if (typeof value[index] !== 'string' || value[index].trim().length === 0) {
       return false;
     }
+    const name = value[index].trim();
+    if (seen.indexOf(name) >= 0) return false;
+    seen.push(name);
   }
   return true;
 }

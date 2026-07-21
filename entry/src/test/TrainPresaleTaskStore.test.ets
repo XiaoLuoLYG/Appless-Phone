@@ -127,12 +127,27 @@ export default function trainPresaleTaskStoreTest() {
       store.create(task());
       const malformed = task('malformed-passenger') as Object as TrainPresaleTask;
       malformed.passengerNames = [null] as Object as string[];
+      const empty = task('empty-passengers');
+      empty.passengerNames = [];
+      const duplicate = task('duplicate-passengers');
+      duplicate.passengerNames = ['张三', '张三'];
+      const whitespaceDuplicate = task('whitespace-duplicate-passengers');
+      whitespaceDuplicate.passengerNames = ['张三', ' 张三 '];
 
       store.create(malformed);
+      store.create(empty);
+      store.create(duplicate);
+      store.create(whitespaceDuplicate);
 
       expect(store.list().length).assertEqual(1);
       expect(store.get('task-1') === undefined).assertFalse();
       expect(store.get('malformed-passenger')).assertEqual(undefined);
+      expect(store.get('empty-passengers')).assertEqual(undefined);
+      expect(store.get('duplicate-passengers')).assertEqual(undefined);
+      expect(store.get('whitespace-duplicate-passengers')).assertEqual(undefined);
+      expect(serializeTrainPresaleTaskList([empty, duplicate, whitespaceDuplicate])).assertEqual('[]');
+      expect(parseTrainPresaleTaskList(JSON.stringify([empty, duplicate, whitespaceDuplicate])).length)
+        .assertEqual(0);
     });
 
     it('rejects unparseable task timestamps on create and reload', 0, () => {

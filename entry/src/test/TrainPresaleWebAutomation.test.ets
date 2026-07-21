@@ -62,11 +62,48 @@ export default function trainPresaleWebAutomationTest() {
       expect(finalScript.indexOf("confirm.click()") >= 0).assertTrue();
       expect(initial.indexOf('txt(link)===cfg.trainCode') >= 0).assertTrue();
       expect(initial.indexOf("'#seatType_'+(i+1)") >= 0).assertTrue();
+      expect(initial.indexOf('"travelDate":"2026-07-23"') >= 0).assertTrue();
+      expect(initial.indexOf('"fromName":"上海虹桥"') >= 0).assertTrue();
+      expect(initial.indexOf('"fromCode":"AOH"') >= 0).assertTrue();
+      expect(initial.indexOf('"toName":"北京南"') >= 0).assertTrue();
+      expect(initial.indexOf('"toCode":"VNP"') >= 0).assertTrue();
+    });
+
+    it('production query and form seams fail closed on any stale authorized trip identity', 0, () => {
+      const initial = buildTrainPresaleWebAssistScript(task());
+      const finalScript = buildTrainPresaleFinalConfirmScript(task());
+      expect(initial.indexOf('new URLSearchParams(location.search)') >= 0).assertTrue();
+      expect(initial.indexOf("params.get('date')===cfg.travelDate") >= 0).assertTrue();
+      expect(initial.indexOf("params.get('fs')===cfg.fromName+','+cfg.fromCode") >= 0).assertTrue();
+      expect(initial.indexOf("params.get('ts')===cfg.toName+','+cfg.toCode") >= 0).assertTrue();
+      expect(initial.indexOf("field('#train_date')") >= 0).assertTrue();
+      expect(initial.indexOf("field('#fromStationText')===cfg.fromName") >= 0).assertTrue();
+      expect(initial.indexOf("field('#fromStation')===cfg.fromCode") >= 0).assertTrue();
+      expect(initial.indexOf("field('#toStationText')===cfg.toName") >= 0).assertTrue();
+      expect(initial.indexOf("field('#toStation')===cfg.toCode") >= 0).assertTrue();
+      expect(initial.indexOf("parts[parts.length-2]!==cfg.fromCode") >= 0).assertTrue();
+      expect(initial.indexOf("parts[parts.length-1]!==cfg.toCode") >= 0).assertTrue();
+      expect(initial.indexOf("names[0]!==cfg.fromName||names[1]!==cfg.toName") >= 0).assertTrue();
+      expect(initial.indexOf("detail.station_train_code!==cfg.trainCode") >= 0).assertTrue();
+      expect(initial.indexOf("detail.from_station_name!==cfg.fromName") >= 0).assertTrue();
+      expect(initial.indexOf("detail.from_station_telecode!==cfg.fromCode") >= 0).assertTrue();
+      expect(initial.indexOf("detail.to_station_name!==cfg.toName") >= 0).assertTrue();
+      expect(initial.indexOf("detail.to_station_telecode!==cfg.toCode") >= 0).assertTrue();
+      expect(initial.indexOf("exactDate(detail.start_train_date)") >= 0).assertTrue();
+      expect(initial.indexOf("return stop('trip_mismatch')") >= 0).assertTrue();
+      expect(finalScript.indexOf('formTrip()') >= 0).assertTrue();
+      const unsafe = task();
+      unsafe.fromName = '</script><script>alert(1)</script>';
+      expect(buildTrainPresaleWebAssistScript(unsafe).indexOf('</script>')).assertEqual(-1);
+      expect(buildTrainPresaleWebAssistScript(unsafe).indexOf('\\u003c/script\\u003e')).assertLarger(-1);
     });
 
     it('production script snapshot enforces exact visible modal multiplicity and seat-row alignment', 0, () => {
       const script = buildTrainPresaleFinalConfirmScript(task());
       expect(script.indexOf("cells.filter((v)=>v===cfg.trainCode).length!==1") >= 0).assertTrue();
+      expect(script.indexOf("cells.some((v)=>exactDate(v))") >= 0).assertTrue();
+      expect(script.indexOf("cells.some((v)=>exactStation(v,cfg.fromName,'from'))") >= 0).assertTrue();
+      expect(script.indexOf("cells.some((v)=>exactStation(v,cfg.toName,'to'))") >= 0).assertTrue();
       expect(script.indexOf('rows.length!==cfg.passengerNames.length') >= 0).assertTrue();
       expect(script.indexOf("rc.filter((v)=>v===name).length===1") >= 0).assertTrue();
       expect(script.indexOf("rc.filter((v)=>v.indexOf(cfg.seatPriority)===0).length!==1") >= 0).assertTrue();

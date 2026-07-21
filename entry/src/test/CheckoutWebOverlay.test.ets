@@ -86,7 +86,7 @@ export default function checkoutWebOverlayTest() {
       ))).assertEqual('未加载');
     });
 
-    it('keeps HTTPS train navigation in WebView and blocks unverified schemes', 0, () => {
+    it('allows only exact official train main-frame booking routes', 0, () => {
       expect(checkoutWebNavigationDecision(
         'train',
         'https://kyfw.12306.cn/otn/leftTicket/init',
@@ -94,12 +94,60 @@ export default function checkoutWebOverlayTest() {
       )).assertEqual('allow');
       expect(checkoutWebNavigationDecision(
         'train',
+        'https://kyfw.12306.cn/otn/resources/login.html',
+        true
+      )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision(
+        'train',
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc',
+        true
+      )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision(
+        'train',
+        'https://kyfw.12306.cn/otn/payOrder/init',
+        true
+      )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision(
+        'train',
         'https://epay.12306.cn/pay/webBusiness',
         true
       )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision(
+        'train',
+        'https://epay.12306.cn/pay/payGatewayT',
+        true
+      )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision(
+        'train',
+        'https://epay.12306.cn/pay/payResponse',
+        true
+      )).assertEqual('allow');
+      expect(checkoutWebNavigationDecision('train', 'https://evil.example/', true)).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://kyfw.12306.cn.evil.example/otn/leftTicket/init', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://kyfw.12306.cn@evil.example/otn/leftTicket/init', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://user:secret@kyfw.12306.cn/otn/leftTicket/init', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://kyfw.12306.cn:8443/otn/leftTicket/init', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'http://kyfw.12306.cn/otn/leftTicket/init', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://kyfw.12306.cn/otn/view/passengers.html', true
+      )).assertEqual('block');
+      expect(checkoutWebNavigationDecision(
+        'train', 'https://kyfw.12306.cn/otn/leftTicket/query', true
+      )).assertEqual('block');
       expect(checkoutWebNavigationDecision('train', 'alipays://platformapi/startapp', true)).assertEqual('block');
       expect(checkoutWebNavigationDecision('train', 'javascript:alert(1)', true)).assertEqual('block');
       expect(checkoutWebNavigationDecision('train', 'alipays://platformapi/startapp', false)).assertEqual('block');
+      expect(checkoutWebNavigationDecision('train', 'https://static.example/frame', false)).assertEqual('allow');
     });
 
     it('does not regress payment and hotel decisions', 0, () => {

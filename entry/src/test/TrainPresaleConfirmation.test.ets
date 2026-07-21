@@ -7,6 +7,7 @@ import {
   reconcileTrainPresaleTask,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
+  TrainPresaleReconcileResult,
   validateTrainPresaleConfirmation,
   validateTrainPresaleTrip
 } from '../main/ets/pages/A2uiHome/components/TrainPresalePanel';
@@ -70,6 +71,12 @@ function task(): TrainPresaleTask {
     throw new Error(result.error);
   }
   return result.task;
+}
+
+function listedReminder(value: TrainPresaleTask, reminderId: number): ListedReminderRequest {
+  const request = buildReminderRequest(value, value.saleAt) as Object as ListedReminderRequest;
+  request.reminderId = reminderId;
+  return request;
 }
 
 function validInput(): TrainPresaleConfirmationInput {
@@ -422,6 +429,85 @@ export default function trainPresaleConfirmationTest() {
 
       expect(reconciled.task.state).assertEqual('scheduled');
       expect(reconciled.error).assertEqual('');
+    });
+
+    it('recovers the unique published reminder after a crash before local reminder ID persistence', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const reservation = task();
+      reservation.state = 'needs_user';
+      reservation.reminderId = -1;
+      reservation.lastError = '正在创建系统提醒；如流程中断，可重试取消或清除预留。';
+      store.create(reservation);
+      let cancelledId = -1;
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (reminderId: number): Promise<void> => { cancelledId = reminderId; },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => [listedReminder(reservation, 73)]
+      );
+
+      const recovered = await reconcileTrainPresaleTask(reservation, store, scheduler);
+
+      expect(recovered.error).assertEqual('');
+      expect(recovered.task.state).assertEqual('scheduled');
+      expect(recovered.task.reminderId).assertEqual(73);
+      expect(store.get('train-1')?.state).assertEqual('scheduled');
+      const cancelled = await cancelScheduledTrainPresaleTask(recovered.task, store, scheduler);
+      expect(cancelled.state).assertEqual('cancelled');
+      expect(cancelledId).assertEqual(73);
+    });
+
+    it('fails closed when publication recovery is absent ambiguous malformed unrelated or unavailable', 0, async () => {
+      const reconcileWith = async (reminders: reminderAgentManager.ReminderRequest[]):
+        Promise<TrainPresaleReconcileResult> => {
+        const native = new MemoryPreferences();
+        const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+        const reservation = task();
+        reservation.state = 'needs_user';
+        reservation.reminderId = -1;
+        reservation.lastError = '正在创建系统提醒；如流程中断，可重试取消或清除预留。';
+        store.create(reservation);
+        const scheduler = new SystemOneShotScheduler(
+          async (): Promise<number> => 0,
+          async (): Promise<void> => {},
+          async (): Promise<reminderAgentManager.ReminderRequest[]> => reminders
+        );
+        return reconcileTrainPresaleTask(reservation, store, scheduler);
+      };
+      const reservation = task();
+      reservation.state = 'needs_user';
+      reservation.reminderId = -1;
+      const unrelated = task();
+      unrelated.taskId = 'other-task';
+
+      const absent = await reconcileWith([]);
+      const unrelatedResult = await reconcileWith([listedReminder(unrelated, 80)]);
+      const ambiguous = await reconcileWith([listedReminder(reservation, 73), listedReminder(reservation, 74)]);
+      const malformed = await reconcileWith([listedReminder(reservation, 0)]);
+
+      expect(absent.task.state).assertEqual('needs_user');
+      expect(absent.error.indexOf('正在创建系统提醒')).assertLarger(-1);
+      expect(unrelatedResult.task.state).assertEqual('needs_user');
+      expect(unrelatedResult.error.indexOf('正在创建系统提醒')).assertLarger(-1);
+      expect(ambiguous.task.state).assertEqual('needs_user');
+      expect(ambiguous.error.indexOf('多个')).assertLarger(-1);
+      expect(malformed.task.state).assertEqual('needs_user');
+      expect(malformed.error.indexOf('编号无效')).assertLarger(-1);
+
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const pending = task();
+      pending.state = 'needs_user';
+      pending.reminderId = -1;
+      pending.lastError = 'publication pending';
+      store.create(pending);
+      const failed = await reconcileTrainPresaleTask(pending, store, new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (): Promise<void> => {},
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => { throw new Error('list failed'); }
+      ));
+      expect(failed.task.state).assertEqual('needs_user');
+      expect(failed.error.indexOf('list failed')).assertLarger(-1);
     });
 
     it('restores the durable needs-user error when reopening', 0, async () => {

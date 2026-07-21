@@ -641,6 +641,43 @@ export async function reconcileTrainPresaleTask(
   store: TrainPresaleTaskStore,
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleReconcileResult> {
+  if (task.state === 'needs_user' && task.reminderId < 1) {
+    let reminders: ListedReminderRequest[] = [];
+    try {
+      reminders = await scheduler.list() as ListedReminderRequest[];
+    } catch (listError) {
+      const message = listError instanceof Error ? listError.message : JSON.stringify(listError);
+      const error = '无法核验已发布的系统提醒：' + message + '。请重试或清除预留。';
+      try { store.update(task.taskId, { lastError: error }); } catch (_error) {}
+      task.lastError = error;
+      return { error: error, task: task };
+    }
+    const matches: ListedReminderRequest[] = [];
+    for (let index = 0; index < reminders.length; index++) {
+      const parameters = reminders[index].wantAgent?.parameters;
+      const embeddedTaskId = parameters === undefined ? undefined : parameters['trainPresaleTaskId'];
+      if (typeof embeddedTaskId === 'string' && embeddedTaskId === task.taskId) matches.push(reminders[index]);
+    }
+    if (matches.length === 1 && typeof matches[0].reminderId === 'number' && matches[0].reminderId > 0 &&
+      matches[0].reminderId % 1 === 0) {
+      try {
+        store.update(task.taskId, { state: 'scheduled', reminderId: matches[0].reminderId, lastError: '' });
+        const recovered = store.get(task.taskId);
+        if (recovered !== undefined && recovered.state === 'scheduled' &&
+          recovered.reminderId === matches[0].reminderId) return { error: '', task: recovered };
+      } catch (_error) {}
+      const error = '已找到系统提醒，但本地恢复失败，请重试。';
+      task.lastError = error;
+      return { error: error, task: task };
+    }
+    const error = matches.length === 0 ? (task.lastError.length > 0 ? task.lastError :
+      '未找到已发布的系统提醒，请重试创建或清除预留。') :
+      (matches.length > 1 ? '发现多个对应的系统提醒，已停止自动恢复，请手动清理。' :
+        '对应的系统提醒编号无效，已停止自动恢复，请手动清理。');
+    try { store.update(task.taskId, { lastError: error }); } catch (_error) {}
+    task.lastError = error;
+    return { error: error, task: task };
+  }
   if (task.state !== 'scheduled') {
     return { error: task.lastError, task: task };
   }
