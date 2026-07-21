@@ -5,6 +5,7 @@
 - Base commit: `51fc93691c46d123a07d59e5b7f919d3c610c940`.
 - Implementation commit: `aa19032dc1b475e818d23024eb488312e9106a67` (`feat: structure maps media and social data`).
 - Review-fix commit: `b3fc8e96` (`fix: enforce dynamic read and source truth`).
+- Strict selected-slug fix commit: `5cde2943` (`fix: reject compound dynamic read slugs`).
 - Migrated `maps.place.search`, `maps.place.details`, `media.video.search`, `media.aggregate.search`, `youtube.video.search`, `x.post.search`, `social.feed.search`, and the virtual safe-read `dynamic.search` path to structured `DataResult` payloads.
 - Preserved the current renderers, media playback actions, SocialHub item/thread IDs, Maps place IDs and empty-query context, and provider-facing errors.
 - Did not change the fixed tool registry, action execution, provider configuration, host page, signing, device state, or worktree layout.
@@ -32,6 +33,8 @@ This proved that a fixed `Composio X` result was being classified by an overly e
 
 The requested review fixes received a second RED cycle before production changes. The authoritative suite first failed behaviorally because limited-only SocialHub input returned `empty` with invented sources, mixed real plus limited input returned `success`, and supported-empty plus limited input exposed the limited platform as a provider source. After the complete adversarial tests were added, `UnitTestArkTS` failed because the selected-slug executor seam, distinct input/output registration schemas, genuine receipt extractor, provider phase, and X post adapter did not yet exist. The test seam records every executor invocation, so rejected selected slugs prove zero calls rather than only checking a helper predicate.
 
+The strict selected-slug review received a third RED cycle at the actual search-selection/executor seam. Compound reads such as `GITHUB_GET_AND_MERGE_PULL_REQUEST`, punctuation and camel variants, compact `GITHUB_GETANDTRIGGERWORKFLOW`, and `GITHUB_GETAWAY` initially executed and returned `success`; the recorder proved that the executor had been reached. After the strict grammar was introduced, checkout-backed compatibility tests separately exposed rejected `GOOGLEDOCS_SEARCH_DOCUMENTS`, `TIKTOK_SEARCH_VIDEOS`, Gmail people/contact reads, and GitHub pull-request listing. A final multi-candidate RED proved that the shared compact safety scan left `TWITTER_SEARCH_POSTS` in discovery when a write candidate was also present. Each RED result was **953/954**, with the failure in the real selected-slug test, before the corresponding minimal production fix.
+
 ### GREEN
 
 Command:
@@ -42,13 +45,13 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22 02:15:49`:
+Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22 02:32:59`:
 
 ```text
 Tests run: 954, Failure: 0, Error: 0, Pass: 954, Ignore: 0
 ```
 
-The suite covers all four allowed dynamic verbs (`read`, `search`, `list`, and `get`), rejects write/create/update/delete/send/execute/append/upload/publish plus unknown and ambiguous selected operations, and proves unsafe requests make zero executor calls. Selected-slug cases cover uppercase, punctuation, camel case, compact names, provider prefixes, safe-looking substrings in unknown words, and a caller-claimed fixed-tool ID.
+The suite covers all four allowed dynamic verbs (`read`, `search`, `list`, and `get`), rejects a centralized mutation/action vocabulary, compound controls, unknown and ambiguous selected operations, and proves unsafe requests make zero executor calls. Selected-slug cases cover uppercase, punctuation, camel/acronym boundaries, compact names, provider prefixes, safe-looking substrings in unknown words, compact `GETAWAY`, and a caller-claimed fixed-tool ID. Legitimate `SEARCH_POSTS`, `LIST_CHANNELS`, `GET_MESSAGE`, and `READ_FILE` variants execute, as do the known Google Docs, TikTok, Gmail, and GitHub reads above; a mixed read/write discovery selects only the plural read.
 
 ## Implementation
 
@@ -75,7 +78,8 @@ No adapter parses A2UI or JSONL back into domain data, and no renderer invokes a
 ### Turn-scoped dynamic safety
 
 - `dynamic.search` remains virtual and is handled before fixed-registry lookup; it was not added to the 44 fixed definitions and no second registry was created.
-- Only normalized `read`, `search`, `list`, and `get` selected Composio operations are admitted immediately before each executor invocation. Write-like, ambiguous, or unknown selected slugs return `unsafe_action_blocked` without an executor call. Explicit fixed registry routes use a separate internal trusted entrypoint, so a dynamic caller cannot authorize a write merely by claiming a fixed-tool ID.
+- Selected Composio slugs are normalized across separators plus camel/acronym boundaries, leading provider prefixes are consumed, and the first semantic operation must be exactly `read`, `search`, `list`, or `get`. Every trailing token must be a controlled read noun/qualifier; compound controls and the centralized mutation/action vocabulary are rejected in separated and compact forms. Compact reads are segmented through the same grammar, so `GETAWAY` and safe-prefix compounds fail closed while genuine compact reads remain usable.
+- This authorization runs immediately before every executor invocation. Rejected slugs return `unsafe_action_blocked` without an executor call. Explicit fixed registry routes use a separate internal trusted entrypoint, so a dynamic caller cannot authorize a write merely by claiming a fixed-tool ID. Descriptions and schemas do not create read-only authority.
 - A discovered execution carries provider, qualified name, actual provider `inputSchema`, actual provider `outputSchema`, and a bounded receipt in the current `DynamicStructuredData` and `DataSource`. Receipts are accepted only from explicit request, execution, trace, or tool-call ID fields; raw payloads, previews, row IDs, bodies, and secrets are never promoted. Empty receipts are omitted from `DataSource`. The next execution gets a fresh object; tests prove earlier receipt metadata does not leak.
 - ModelScope registrations are ephemeral execution records. The existing dynamic registry remains only for the pre-existing non-virtual dynamic aliases.
 
@@ -98,6 +102,7 @@ No adapter parses A2UI or JSONL back into domain data, and no renderer invokes a
 - `agent_core/src/main/ets/agent/message/DataResult.ets`
 - `agent_core/src/main/ets/agent/message/DataResultFactory.ets`
 - `agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`
+- `agent_core/src/main/ets/aiphone/runtime/DynamicToolRegistry.ets`
 - `agent_core/src/main/ets/aiphone/runtime/DynamicToolTypes.ets`
 - `agent_core/src/main/ets/aiphone/runtime/MapsApiClient.ets`
 - `agent_core/src/main/ets/aiphone/runtime/MediaVideoToolA2ui.ets`
@@ -106,6 +111,7 @@ No adapter parses A2UI or JSONL back into domain data, and no renderer invokes a
 - `agent_core/src/main/ets/composio/ComposioSessionClient.ets`
 - `entry/src/test/AggregateSearchA2ui.test.ets`
 - `entry/src/test/DynamicToolDiscovery.test.ets`
+- `entry/src/test/ComposioDynamicBackend.test.ets`
 - `entry/src/test/MapsApiClient.test.ets`
 - `entry/src/test/MediaVideoToolA2ui.test.ets`
 - `entry/src/test/SocialHubA2ui.test.ets`
