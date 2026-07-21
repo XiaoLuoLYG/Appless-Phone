@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  A2uiAction,
   ActionArgsValidator,
   ActionCatalog,
   ActionOffer,
@@ -12,6 +13,7 @@ import {
   ClientActionAuthorizer,
   CreateUiTaskPayload,
   DataResult,
+  DynamicGenericToolResult,
   HotelDetailResult,
   HotelSearchResult,
   McpToolResultPayload,
@@ -24,12 +26,18 @@ import {
   normalizeHotelDetailResult,
   normalizeHotelSearchResult,
   parseA2uiJsonl,
+  rideResultsFromMcpPayloadsForTest,
   toolDefinitionForToolId
 } from '@loop/agent-core';
 import { RegisteredActionOfferResolver } from '../main/ets/pages/A2uiHome/agent/RegisteredActionOfferResolver';
 import { StructuredToolUiRenderer } from '../main/ets/pages/A2uiHome/agent/StructuredToolUiRenderer';
 
 type TestValue = Object | string | number | boolean | null | undefined;
+type TestRecord = Record<string, TestValue>;
+
+interface GenericResultsFixture {
+  results: DynamicGenericToolResult[];
+}
 
 class RegistryLookup implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
@@ -244,6 +252,73 @@ function actionById(offers: ActionOffer[], actionId: string): ActionOffer | null
 
 function field(args: Object, key: string): TestValue {
   return (args as Record<string, TestValue>)[key];
+}
+
+function exactRideEstimateResult(): DataResult {
+  const estimatePayload = object(
+    '{"structuredContent":{"items":[{"productName":"快车","productCategory":"express",' +
+    '"priceText":"约 48 元"},{"productName":"专车","productCategory":"premium",' +
+    '"priceText":"约 88 元"}],"traceId":"trace-exact"}}'
+  );
+  const results = rideResultsFromMcpPayloadsForTest(
+    '华为坂田基地',
+    '秋港花园',
+    estimatePayload,
+    object('{"structuredContent":{"url":"diditaxi://ride?traceId=trace-exact"}}'),
+    object('{"structuredContent":{"url":"amapuri://drive/takeTaxi?traceId=trace-exact"}}'),
+    '114.066231,22.657805',
+    '114.060432,22.548829'
+  );
+  const data: GenericResultsFixture = { results };
+  return dataResult('ride.estimate', 'genericToolResults', data as Object);
+}
+
+function rideConfirmAction(result: DataResult, actionIndex: number = 0): A2uiAction {
+  const generic = result.data as GenericResultsFixture;
+  const actions = generic.results[0].actions;
+  if (actions === undefined || actions.length <= actionIndex) {
+    throw new Error('ride confirm fixture action is missing');
+  }
+  return actions[actionIndex];
+}
+
+function mutatedRideConfirm(key: string, value: TestValue): DataResult {
+  const result = JSON.parse(JSON.stringify(exactRideEstimateResult())) as DataResult;
+  const action = rideConfirmAction(result);
+  if (action.args === undefined) {
+    throw new Error('ride confirm fixture args are missing');
+  }
+  (action.args as TestRecord)[key] = value;
+  return result;
+}
+
+function nestedEstimateCacheMutation(): DataResult {
+  const result = JSON.parse(JSON.stringify(exactRideEstimateResult())) as DataResult;
+  const action = rideConfirmAction(result);
+  if (action.args === undefined) {
+    throw new Error('ride confirm fixture args are missing');
+  }
+  const args = action.args as TestRecord;
+  const cache = JSON.parse(args['estimateCacheJson'] as string) as TestRecord;
+  const products = cache['products'] as Object[];
+  (products[0] as TestRecord)['priceText'] = '约 999 元';
+  args['estimateCacheJson'] = JSON.stringify(cache);
+  return result;
+}
+
+function crossItemRideConfirm(): DataResult {
+  const result = JSON.parse(JSON.stringify(exactRideEstimateResult())) as DataResult;
+  const first = rideConfirmAction(result, 0);
+  const second = rideConfirmAction(result, 1);
+  if (first.args === undefined || second.args === undefined) {
+    throw new Error('ride confirm fixture args are missing');
+  }
+  const firstArgs = first.args as TestRecord;
+  const secondArgs = second.args as TestRecord;
+  firstArgs['productName'] = secondArgs['productName'];
+  firstArgs['productCategory'] = secondArgs['productCategory'];
+  firstArgs['product_category'] = secondArgs['product_category'];
+  return result;
 }
 
 function layoutCandidate(surfaceId: string, offerId: string): string {
@@ -620,7 +695,7 @@ export default function structuredToolUiRendererTest() {
       expect(planner.prompt.indexOf('trace-client')).assertEqual(-1);
     });
 
-    it('deduplicates reordered nested args and rejects prototype-shaped args', 0, async () => {
+    it('rejects client actions relabeled as prompt and preserves them only in canonical data', 0, async () => {
       const rows = '[{"label":"Trace","value":"trace-dedupe"},' +
         '{"label":"URL","value":"diditaxi://ride?traceId=trace-dedupe"}]';
       const actions = '[{"id":"ride.open.didi","label":"First","prompt":"first",' +
@@ -645,10 +720,127 @@ export default function structuredToolUiRendererTest() {
 
       const duplicateOffers = await resolver.resolve(duplicateResult, offerContext('dedupe-data'));
       const prototypeOffers = await resolver.resolve(prototypeResult, offerContext('prototype-data'));
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [duplicateResult], duplicateOffers, 'surface-relabelled-client'
+      );
 
-      expect(duplicateOffers.length).assertEqual(1);
-      expect(JSON.stringify(duplicateOffers[0].args).indexOf('"order":[2,1]')).assertLarger(-1);
+      expect(duplicateOffers.length).assertEqual(0);
       expect(prototypeOffers.length).assertEqual(0);
+      expect(rendered.jsonl.indexOf('"id":"ride.open.didi"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"kind":"prompt"')).assertLarger(-1);
+    });
+
+    it('removes duplicate offers reconstructed from the same exact normalized item', 0, async () => {
+      const duplicateMail = dataResult('mail.search', 'mailThreads', object(
+        '{"threads":[{"provider":"qq","accountLabel":"work","threadId":"thread-duplicate",' +
+        '"messageId":"message-duplicate","subject":"Duplicate","from":"alice@example.com",' +
+        '"to":[],"participants":[],"snippet":"summary","receivedAt":"2026-07-22","unread":true,' +
+        '"important":false,"sourceUrl":"","rawProviderRef":"ref","requestKey":"qq:duplicate"},' +
+        '{"provider":"qq","accountLabel":"work","threadId":"thread-duplicate",' +
+        '"messageId":"message-duplicate","subject":"Duplicate","from":"alice@example.com",' +
+        '"to":[],"participants":[],"snippet":"summary","receivedAt":"2026-07-22","unread":true,' +
+        '"important":false,"sourceUrl":"","rawProviderRef":"ref","requestKey":"qq:duplicate"}],' +
+        '"statuses":[],"extras":[]}'
+      ));
+
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        duplicateMail, offerContext('duplicate-mail-data')
+      );
+
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('does not promote even an exact ride confirm action without an independent deterministic builder', 0, async () => {
+      const result = exactRideEstimateResult();
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-exact-data')
+      );
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], offers, 'surface-ride-exact'
+      );
+
+      expect(offers.length).assertEqual(0);
+      expect(rendered.jsonl.indexOf('"id":"ride.order.confirm"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"traceId":"trace-exact"')).assertLarger(-1);
+    });
+
+    it('rejects a ride confirm product mutation while preserving trace identity', 0, async () => {
+      const result = mutatedRideConfirm('productName', '伪造车型');
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-product-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a ride confirm route mutation while preserving trace identity', 0, async () => {
+      const result = mutatedRideConfirm('routeText', '伪造起点 → 伪造终点');
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-route-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a ride confirm price mutation while preserving trace identity', 0, async () => {
+      const result = mutatedRideConfirm('priceText', '约 1 元');
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-price-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a ride confirm provider mutation while preserving trace identity', 0, async () => {
+      const result = mutatedRideConfirm('provider', 'forged-provider');
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-provider-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a ride confirm deep-link mutation while preserving trace identity', 0, async () => {
+      const result = mutatedRideConfirm('deepLink', 'diditaxi://ride?traceId=forged');
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-link-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a nested ride estimate-cache mutation while preserving trace identity', 0, async () => {
+      const result = nestedEstimateCacheMutation();
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-cache-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(offers.length).assertEqual(0);
+    });
+
+    it('rejects a cross-item ride product mix while preserving trace identity', 0, async () => {
+      const result = crossItemRideConfirm();
+      const args = rideConfirmAction(result).args as Object;
+      const offers = await new RegisteredActionOfferResolver(catalog()).resolve(
+        result, offerContext('ride-cross-item-mutation')
+      );
+
+      expect(field(args, 'traceId')).assertEqual('trace-exact');
+      expect(field(args, 'productName')).assertEqual('专车');
+      expect(field(args, 'priceText')).assertEqual('约 48 元');
+      expect(offers.length).assertEqual(0);
     });
 
     it('keeps mail and Gmail offer identity scoped to the exact data item and task', 0, async () => {
@@ -828,24 +1020,50 @@ export default function structuredToolUiRendererTest() {
       expect(planner.prompt.indexOf('mailThread')).assertLarger(-1);
     });
 
-    it('renders YouTube account authorization with exact YouTube manifest URLs and actions', 0, async () => {
+    it('preserves the existing handled dynamic registration action for YouTube authorization', 0, async () => {
       const result = dataResult('youtube.mine.playlists', 'youtubePlaylists', genericResult(
-        'youtube.mine.playlists', 'YouTube', '[]'
+        'youtube.mine.playlists', 'YouTube 授权',
+        '[{"label":"授权说明","value":"请在 Composio 完成 YouTube OAuth 后重试。"}]',
+        '[{"id":"dynamic_open_registration","label":"打开授权页",' +
+        '"prompt":"https://app.composio.dev/connections","variant":"primary","kind":"client"}]',
+        '',
+        'YouTube 尚未授权；请先完成真实账号授权。'
       ));
       result.status = 'error';
       result.error = { code: 'AUTH_REQUIRED', message: 'YouTube account authorization required' };
 
       const rendered = await new StructuredToolUiRenderer().result(uiTask(), [result], [], 'surface-youtube-auth');
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const serialized = JSON.stringify(parsed.envelopes);
 
-      expect(rendered.jsonl.indexOf('"manifestId":"composio.youtube"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"displayName":"YouTube"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"title":"YouTube"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"sourceUrl":"https://www.youtube.com/"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"registrationUrl":"https://platform.composio.dev"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"id":"youtube.authorize"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"id":"youtube.open.web"')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('"manifestId":"google.gmail"')).assertEqual(-1);
-      expect(rendered.jsonl.indexOf('"id":"gmail.authorize"')).assertEqual(-1);
+      expect(parsed.error).assertEqual('');
+      expect(serialized.indexOf('"id":"dynamic_open_registration"')).assertLarger(-1);
+      expect(serialized.indexOf('https://app.composio.dev/connections')).assertLarger(-1);
+      expect(serialized.indexOf('YouTube 尚未授权；请先完成真实账号授权。')).assertLarger(-1);
+      expect(serialized.indexOf('"id":"youtube.authorize"')).assertEqual(-1);
+      expect(serialized.indexOf('"id":"youtube.open.web"')).assertEqual(-1);
+      expect(serialized.indexOf('"id":"gmail.authorize"')).assertEqual(-1);
+    });
+
+    it('renders truthful YouTube authorization instructions without inventing a button when no link exists', 0, async () => {
+      const result = dataResult('youtube.mine.subscriptions', 'youtubeSubscriptions', genericResult(
+        'youtube.mine.subscriptions', 'YouTube 授权',
+        '[{"label":"下一步","value":"请配置 Composio 并完成 YouTube OAuth，然后重试。"}]',
+        '[]',
+        '',
+        '当前没有可用授权链接；不会伪造 YouTube 账号结果。'
+      ));
+      result.status = 'error';
+      result.error = { code: 'AUTH_REQUIRED', message: 'YouTube account authorization required' };
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], [], 'surface-youtube-auth-no-link'
+      );
+
+      expect(rendered.jsonl.indexOf('当前没有可用授权链接；不会伪造 YouTube 账号结果。')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('"id":"dynamic_open_registration"')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('"id":"youtube.authorize"')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('"id":"youtube.open.web"')).assertEqual(-1);
     });
 
     it('keeps valid hotel provider failures canonical while malformed payloads fail closed', 0, async () => {

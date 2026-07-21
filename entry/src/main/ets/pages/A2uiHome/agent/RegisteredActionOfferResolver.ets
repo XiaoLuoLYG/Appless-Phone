@@ -4,7 +4,6 @@ import {
   ActionOffer,
   ActionOfferContext,
   DataResult,
-  DynamicGenericToolResult,
   HotelDetailResult,
   HotelSearchResult,
   MailThreadSummary,
@@ -18,10 +17,6 @@ import {
 type OfferValue = Object | string | number | boolean | null | undefined;
 type OfferRecord = Record<string, OfferValue>;
 
-const IDENTITY_KEYS: string[] = [
-  'bookingUrl', 'eventId', 'hotelId', 'itemId', 'messageId',
-  'orderId', 'requestKey', 'threadId', 'traceId', 'url'
-];
 const MAX_ACTION_OFFERS: number = 64;
 const MAX_ACTION_CANDIDATES: number = 256;
 const MAX_ACTION_ARGS_LENGTH: number = 8192;
@@ -31,8 +26,6 @@ const DANGEROUS_ARG_KEYS: string[] = ['__proto__', 'constructor', 'prototype'];
 
 interface CandidateOffer {
   action: A2uiAction;
-  trusted: boolean;
-  sourceValues: Set<string>;
 }
 
 interface MailReadArgs {
@@ -118,43 +111,6 @@ function canonicalArgs(args: Object): string | null {
   }
 }
 
-function primitiveText(value: OfferValue): string {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return value.toString();
-  }
-  return '';
-}
-
-function sourceValues(result: DynamicGenericToolResult): Set<string> {
-  const values: Set<string> = new Set<string>();
-  result.rows.forEach((row) => {
-    const value = row.value.trim();
-    if (value.length > 0) {
-      values.add(value);
-    }
-  });
-  return values;
-}
-
-function argsBelongToSource(args: Object, values: Set<string>): boolean {
-  const record = args as OfferRecord;
-  let identityCount = 0;
-  for (let index = 0; index < IDENTITY_KEYS.length; index++) {
-    const value = primitiveText(record[IDENTITY_KEYS[index]]);
-    if (value.length === 0) {
-      continue;
-    }
-    identityCount++;
-    if (!values.has(value)) {
-      return false;
-    }
-  }
-  return identityCount === 0 || values.size > 0;
-}
-
 function action(
   id: string,
   label: string,
@@ -180,9 +136,7 @@ function mailReadCandidate(toolId: string, thread: MailThreadSummary): Candidate
     subject: thread.subject
   };
   return {
-    action: action(toolId, '加载正文', 'secondary', args),
-    trusted: true,
-    sourceValues: new Set<string>()
+    action: action(toolId, '加载正文', 'secondary', args)
   };
 }
 
@@ -193,37 +147,8 @@ function socialDraftCandidate(item: SocialHubItemData): CandidateOffer {
     instruction: '生成一条简洁、可审核的回复草稿'
   };
   return {
-    action: action('social.reply.draft', '生成草稿', 'primary', args),
-    trusted: true,
-    sourceValues: new Set<string>()
+    action: action('social.reply.draft', '生成草稿', 'primary', args)
   };
-}
-
-function embeddedCandidates(data: DataResult): CandidateOffer[] {
-  const record = recordOf(data.data);
-  if (record === null || !Array.isArray(record['results'])) {
-    return [];
-  }
-  const results = record['results'] as DynamicGenericToolResult[];
-  const candidates: CandidateOffer[] = [];
-  for (let resultIndex = 0; resultIndex < results.length; resultIndex++) {
-    const result = results[resultIndex];
-    if (!Array.isArray(result.actions)) {
-      continue;
-    }
-    const values = sourceValues(result);
-    for (let actionIndex = 0; actionIndex < result.actions.length; actionIndex++) {
-      if (result.actions[actionIndex].kind === 'client') {
-        continue;
-      }
-      candidates.push({
-        action: result.actions[actionIndex],
-        trusted: false,
-        sourceValues: values
-      });
-    }
-  }
-  return candidates;
 }
 
 function candidatesFor(data: DataResult): CandidateOffer[] {
@@ -235,11 +160,7 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
     for (let index = 0; index < result.hotels.length; index++) {
       const actions = hotelActionsFor(result.hotels[index], result.query, (_action: A2uiAction): boolean => true);
       actions.forEach((item: A2uiAction) => {
-        candidates.push({
-          action: item,
-          trusted: true,
-          sourceValues: new Set<string>()
-        });
+        candidates.push({ action: item });
       });
     }
     return candidates;
@@ -248,9 +169,7 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
     Array.isArray(record['rates'])) {
     const detail = data.data as HotelDetailResult;
     return [{
-      action: hotelBookingOpenAction(detail),
-      trusted: true,
-      sourceValues: new Set<string>()
+      action: hotelBookingOpenAction(detail)
     }];
   }
   if ((data.toolId === 'mail.search' || data.toolId === 'gmail.mail.search') &&
@@ -261,7 +180,7 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
     for (let index = 0; index < threads.length; index++) {
       candidates.push(mailReadCandidate(readId, threads[index]));
     }
-    return candidates.concat(embeddedCandidates(data));
+    return candidates;
   }
   if (data.toolId === 'social.feed.search' && record !== null && Array.isArray(record['items'])) {
     const items = record['items'] as SocialHubItemData[];
@@ -273,7 +192,7 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
     }
     return candidates;
   }
-  return embeddedCandidates(data);
+  return [];
 }
 
 export class RegisteredActionOfferResolver {
@@ -307,7 +226,7 @@ export class RegisteredActionOfferResolver {
         continue;
       }
       const args = JSON.parse(serializedArgs) as Object;
-      if (!candidate.trusted && !argsBelongToSource(args, candidate.sourceValues) ||
+      if (!this.catalog.validateRegisteredAction(candidate.action.id).ok ||
         !this.catalog.validatePlacement(data.toolId, candidate.action.id, args).ok) {
         continue;
       }

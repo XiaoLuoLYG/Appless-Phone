@@ -5,11 +5,9 @@ import {
   A2UI_COMPONENT_ROW,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
-  A2UI_COMPONENT_TOOL_CONNECT_CARD,
   A2UI_VERSION,
   A2uiAction,
   A2uiComponent,
-  A2uiDynamicToolConnectData,
   A2uiEnvelope,
   A2uiLabelValueData,
   A2uiSummaryData,
@@ -63,8 +61,6 @@ const MAX_LAYOUT_OUTPUT_LENGTH: number = 32768;
 const ACTION_TARGET_KEYS: string[] = [
   'requestKey', 'threadId', 'messageId', 'hotelId', 'itemId', 'eventId', 'orderId', 'traceId', 'bookingUrl', 'url'
 ];
-const YOUTUBE_WEB_URL: string = 'https://www.youtube.com/';
-const YOUTUBE_AUTH_URL: string = 'https://platform.composio.dev';
 
 interface PromptOffer {
   offerId: string;
@@ -343,69 +339,12 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
   }
 }
 
-function youtubeAuthRequiredA2ui(surfaceId: string, toolId: string, message: string): string {
-  const connectData: A2uiDynamicToolConnectData = {
-    toolId,
-    prompt: '',
-    manifestId: 'composio.youtube',
-    displayName: 'YouTube',
-    sourceUrl: YOUTUBE_WEB_URL,
-    status: 'needs_auth',
-    message,
-    credentialName: 'Composio YouTube OAuth',
-    credentialRef: '',
-    registrationUrl: YOUTUBE_AUTH_URL,
-    actions: [
-      {
-        id: 'youtube.authorize', label: '授权 YouTube', prompt: YOUTUBE_AUTH_URL,
-        variant: 'primary', kind: 'client'
-      },
-      {
-        id: 'youtube.open.web', label: '打开 YouTube', prompt: YOUTUBE_WEB_URL,
-        variant: 'secondary', kind: 'client'
-      }
-    ]
-  };
-  const envelopes: A2uiEnvelope[] = [
-    {
-      version: A2UI_VERSION,
-      createSurface: {
-        surfaceId, root: 'root', title: 'YouTube', intent: 'youtube', status: 'needs_input', sendDataModel: true
-      }
-    },
-    {
-      version: A2UI_VERSION,
-      updateComponents: {
-        surfaceId,
-        components: [
-          {
-            id: 'root', component: A2UI_COMPONENT_SURFACE_ROOT, child: 'youtube_connect',
-            title: 'YouTube', status: 'needs_auth'
-          },
-          {
-            id: 'youtube_connect', component: A2UI_COMPONENT_TOOL_CONNECT_CARD,
-            title: 'YouTube', dataPath: '/dynamicToolConnect', status: 'needs_auth'
-          }
-        ]
-      }
-    },
-    {
-      version: A2UI_VERSION,
-      updateDataModel: { surfaceId, path: '/dynamicToolConnect', value: connectData }
-    }
-  ];
-  return envelopes.map((envelope: A2uiEnvelope): string => JSON.stringify(envelope)).join('\n') + '\n';
-}
-
 function authJsonl(data: DataResult, surfaceId: string): string | null {
   if (data.error === undefined || data.error.code !== 'AUTH_REQUIRED') {
     return null;
   }
   if (data.toolId.indexOf('gmail.') === 0) {
     return gmailAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
-  }
-  if (data.toolId.indexOf('youtube.') === 0) {
-    return youtubeAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
   }
   if (data.toolId.indexOf('calendar.') === 0) {
     return calendarAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
