@@ -43,6 +43,7 @@ function task(taskId: string = 'task-1'): TrainPresaleTask {
     saleAt: '2026-07-22T12:45:30+08:00',
     passengerNames: ['张三'],
     seatPriority: '二等座',
+    unpaidOrderAuthorized: true,
     bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init',
     reminderId: 0,
     createdAt: '2026-07-21T10:00:00+08:00',
@@ -77,6 +78,15 @@ export default function trainPresaleTaskStoreTest() {
     it('recovers from malformed persisted JSON', 0, () => {
       expect(parseTrainPresaleTaskList('{').length).assertEqual(0);
       expect(parseTrainPresaleTaskList('{"tasks":[]}').length).assertEqual(0);
+    });
+
+    it('requires the explicit durable unpaid-order authorization field', 0, () => {
+      const missing = JSON.stringify(task()).replace(',"unpaidOrderAuthorized":true', '');
+      const wrongType = JSON.stringify(task()).replace('"unpaidOrderAuthorized":true',
+        '"unpaidOrderAuthorized":"true"');
+      expect(parseTrainPresaleTaskList(missing).length).assertEqual(0);
+      expect(parseTrainPresaleTaskList(wrongType).length).assertEqual(0);
+      expect(parseTrainPresaleTaskList(JSON.stringify([task()]))[0].unpaidOrderAuthorized).assertTrue();
     });
 
     it('updates only allowed task state transitions and cancels scheduled work', 0, () => {

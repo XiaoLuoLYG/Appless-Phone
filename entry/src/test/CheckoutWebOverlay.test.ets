@@ -4,9 +4,11 @@ import {
   checkoutWebMobileReadable,
   checkoutWebNavigationDecision,
   isAllowed12306BookingUrl,
+  isOfficial12306PaymentUrl,
   webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
-import { shouldRunOneShotPageScript } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
+import { boundedPageScriptRetryLimit, isBoundedPageScriptRetryExhausted,
+  shouldRunOneShotPageScript } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
 
 export default function checkoutWebOverlayTest() {
   describe('checkoutWebOverlay', () => {
@@ -112,6 +114,26 @@ export default function checkoutWebOverlayTest() {
       expect(shouldRunOneShotPageScript('assist()', 3, 3)).assertFalse();
       expect(shouldRunOneShotPageScript('assist()', 4, 3)).assertTrue();
       expect(shouldRunOneShotPageScript('', 4, 3)).assertFalse();
+    });
+
+    it('bounds only exact native retry protocol and verifies payment callback URL', 0, () => {
+      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"query","progress":"clicked"}'))
+        .assertEqual(20);
+      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"passenger","progress":"submitted"}'))
+        .assertEqual(40);
+      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"query","progress":"x","raw":"secret"}'))
+        .assertEqual(0);
+      expect(isBoundedPageScriptRetryExhausted(
+        '{"state":"retry","stage":"query","progress":"clicked"}', 19)).assertFalse();
+      expect(isBoundedPageScriptRetryExhausted(
+        '{"state":"retry","stage":"query","progress":"clicked"}', 20)).assertTrue();
+      expect(isBoundedPageScriptRetryExhausted(
+        '{"state":"retry","stage":"passenger","progress":"submitted"}', 40)).assertTrue();
+      expect(isOfficial12306PaymentUrl('https://epay.12306.cn/pay/webBusiness')).assertTrue();
+      expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/payOrder/init')).assertTrue();
+      expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertFalse();
+      expect(isOfficial12306PaymentUrl('https://epay.12306.cn.evil.example/pay')).assertFalse();
+      expect(isOfficial12306PaymentUrl('http://epay.12306.cn/pay')).assertFalse();
     });
   });
 }

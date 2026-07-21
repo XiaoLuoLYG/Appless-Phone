@@ -80,6 +80,7 @@ function task(state: TrainPresaleTaskState = 'scheduled'): TrainPresaleTask {
     saleAt: '2026-07-22T12:45:00+08:00',
     passengerNames: ['张三'],
     seatPriority: '二等座',
+    unpaidOrderAuthorized: true,
     bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?date=2026-08-06',
     reminderId: 73,
     createdAt: '2026-07-21T10:00:00+08:00',

@@ -19,6 +19,7 @@ export interface TrainPresaleTask {
   saleAt: string;
   passengerNames: string[];
   seatPriority: string;
+  unpaidOrderAuthorized: boolean;
   bookingUrl: string;
   reminderId: number;
   createdAt: string;
@@ -77,6 +78,7 @@ function isTask(value: TrainPresaleTask | null | undefined): boolean {
     Array.isArray(value.passengerNames) &&
     hasPassengerNames(value.passengerNames) &&
     typeof value.seatPriority === 'string' &&
+    typeof value.unpaidOrderAuthorized === 'boolean' &&
     typeof value.bookingUrl === 'string' && isAllowed12306BookingUrl(value.bookingUrl) &&
     typeof value.reminderId === 'number' &&
     typeof value.createdAt === 'string' && isParseableTimestamp(value.createdAt) &&
@@ -97,6 +99,7 @@ function copyTask(value: TrainPresaleTask): TrainPresaleTask {
     saleAt: value.saleAt,
     passengerNames: value.passengerNames.map((name: string): string => name.trim()),
     seatPriority: value.seatPriority,
+    unpaidOrderAuthorized: value.unpaidOrderAuthorized,
     bookingUrl: value.bookingUrl,
     reminderId: value.reminderId,
     createdAt: value.createdAt,

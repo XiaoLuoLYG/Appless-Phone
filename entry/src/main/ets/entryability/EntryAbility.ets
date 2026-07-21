@@ -313,6 +313,10 @@ export function transitionTrainPresaleHandoff(
   tasks[index] = updated;
   store.putSync(TRAIN_PRESALE_TASKS_KEY, serializeTrainPresaleTaskList(tasks));
   store.flushSync();
+  const pendingAfterTaskFlush = preferenceText(store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '')).trim();
+  if (pendingAfterTaskFlush !== taskId) {
+    return { task: tasks[index], cleared: false };
+  }
   store.deleteSync(TRAIN_PRESALE_PENDING_TASK_KEY);
   store.flushSync();
   return { task: tasks[index], cleared: true };

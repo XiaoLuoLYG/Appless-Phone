@@ -251,6 +251,7 @@ export function validateTrainPresaleConfirmation(
       saleAt: trip.saleAt,
       passengerNames: passengerNames,
       seatPriority: seatPriority,
+      unpaidOrderAuthorized: input.unpaidOrderAuthorized,
       bookingUrl: build12306BookingUrl(
         trip.travelDate,
         trip.fromName,

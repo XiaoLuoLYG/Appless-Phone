@@ -5,10 +5,12 @@ import { webview } from '@kit.ArkWeb';
 import { url as arkUrl } from '@kit.ArkTS';
 import {
   transitionTrainPresaleHandoff,
+  TRAIN_PRESALE_PENDING_TASK_KEY,
   TRAIN_PRESALE_HANDOFF_EVENT,
   TrainPresaleHandoffTransitionResult
 } from '../../../entryability/EntryAbility';
 import {
+  buildTrainPresaleFinalConfirmScript,
   parseTrainWebAssistOutcome,
   trainPresaleWebAssistScriptForCheckout,
   trainWebAssistReasonText,
@@ -60,6 +62,32 @@ export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): st
 
 export function checkoutWebMobileReadable(kind: CheckoutWebKind): boolean {
   return kind === 'train';
+}
+
+export function isOfficial12306PaymentUrl(value: string): boolean {
+  try {
+    const parsed = new arkUrl.URL(value.trim());
+    if (parsed.protocol.length > 0) {
+      return parsed.protocol.toLowerCase() === 'https:' && parsed.port.length === 0 &&
+        parsed.username.length === 0 && parsed.password.length === 0 &&
+        (parsed.hostname.toLowerCase() === 'epay.12306.cn' ||
+          (parsed.hostname.toLowerCase() === 'kyfw.12306.cn' && parsed.pathname.indexOf('/payOrder/') === 0));
+    }
+  } catch (_error) {}
+  // ponytail: local Hypium URL stubs do not parse absolute URLs, so retain a small exact fallback.
+  const normalized = value.trim().toLowerCase();
+  if (!normalized.startsWith('https://')) return false;
+  const afterScheme = normalized.substring(8);
+  let authorityEnd = afterScheme.length;
+  const slash = afterScheme.indexOf('/');
+  const query = afterScheme.indexOf('?');
+  const fragment = afterScheme.indexOf('#');
+  if (slash >= 0 && slash < authorityEnd) authorityEnd = slash;
+  if (query >= 0 && query < authorityEnd) authorityEnd = query;
+  if (fragment >= 0 && fragment < authorityEnd) authorityEnd = fragment;
+  const authority = afterScheme.substring(0, authorityEnd);
+  const path = slash >= 0 ? afterScheme.substring(slash) : '';
+  return authority === 'epay.12306.cn' || (authority === 'kyfw.12306.cn' && path.indexOf('/payorder/') === 0);
 }
 
 export function checkoutWebNavigationDecision(
@@ -133,6 +161,7 @@ export struct CheckoutWebOverlay {
   @State blockedNavigation: string = '';
   @State currentUrl: string = '';
   @State assistScript: string = '';
+  @State assistScriptSession: number = 0;
 
   aboutToAppear(): void {
     this.assistScript = this.trainAssistScript();
@@ -175,11 +204,36 @@ export struct CheckoutWebOverlay {
     this.onClose(this.taskId);
   }
 
-  private handleAssistResult(raw: string): void {
+  private handleAssistResult(raw: string, sourceUrl: string): void {
     if (this.assistScript.length === 0 || this.taskId.length === 0) {
       return;
     }
     const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
+    if (outcome.state === 'retry') {
+      return;
+    }
+    if (outcome.state === 'ready_to_confirm') {
+      const nativeStore = this.trainPreferences();
+      if (nativeStore === null) {
+        this.assistScript = '';
+        return;
+      }
+      const pendingValue = nativeStore.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '');
+      const pending = typeof pendingValue === 'string' ? pendingValue.trim() : '';
+      const current = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+      if (pending !== this.taskId || current === undefined || current.taskId !== this.taskId ||
+        current.state !== 'executing' || !current.unpaidOrderAuthorized) {
+        this.handleAssistResult('{"state":"needs_user","reason":"not_authorized"}', sourceUrl);
+        return;
+      }
+      this.assistScript = buildTrainPresaleFinalConfirmScript(current);
+      this.assistScriptSession += 1;
+      return;
+    }
+    if (outcome.state === 'awaiting_payment' && !isOfficial12306PaymentUrl(sourceUrl)) {
+      this.handleAssistResult('{"state":"needs_user","reason":"page_mismatch"}', sourceUrl);
+      return;
+    }
     const targetState: TrainPresaleTaskState | undefined = trainWebAssistTargetState(outcome);
     if (targetState === undefined) {
       return;
@@ -289,11 +343,15 @@ export struct CheckoutWebOverlay {
         javaScriptEnabled: true,
         domStorageEnabled: true,
         pageScript: this.assistScript,
-        onPageScriptResult: (result: string): void => this.handleAssistResult(result),
+        pageScriptSession: this.assistScriptSession,
+        onPageScriptResult: (result: string, sourceUrl: string): void =>
+          this.handleAssistResult(result, sourceUrl),
         onUrlIntercept: (url: string, isMainFrame: boolean): boolean => this.intercept(url, isMainFrame),
         onLoadEnd: (url: string): void => {
           this.currentUrl = url;
-          this.saveTrainCookies();
+          if (this.kind === 'train' && url.trim().toLowerCase().startsWith('https://kyfw.12306.cn/')) {
+            this.saveTrainCookies();
+          }
           aiLogInfo('[AIPhone][CheckoutWebLoadEnd] kind=' + this.kind + ' chars=' + url.length.toString());
         }
       }).layoutWeight(1)

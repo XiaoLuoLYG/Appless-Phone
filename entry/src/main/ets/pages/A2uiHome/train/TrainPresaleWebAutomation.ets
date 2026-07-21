@@ -1,19 +1,10 @@
 import { TrainPresaleTask, TrainPresaleTaskState } from './TrainPresaleTaskStore';
 
-export interface TrainWebAssistContinuingOutcome {
-  state: 'continuing';
-}
-
-export interface TrainWebAssistAwaitingPaymentOutcome {
-  state: 'awaiting_payment';
-}
-
-export interface TrainWebAssistNeedsUserOutcome {
-  state: 'needs_user';
-  reason: string;
-}
-
-export type TrainWebAssistOutcome = TrainWebAssistContinuingOutcome |
+export interface TrainWebAssistRetryOutcome { state: 'retry'; stage: 'query' | 'passenger' | 'confirm'; progress: string; }
+export interface TrainWebAssistReadyOutcome { state: 'ready_to_confirm'; }
+export interface TrainWebAssistAwaitingPaymentOutcome { state: 'awaiting_payment'; }
+export interface TrainWebAssistNeedsUserOutcome { state: 'needs_user'; reason: string; }
+export type TrainWebAssistOutcome = TrainWebAssistRetryOutcome | TrainWebAssistReadyOutcome |
   TrainWebAssistAwaitingPaymentOutcome | TrainWebAssistNeedsUserOutcome;
 
 interface TrainWebAssistConfig {
@@ -23,181 +14,167 @@ interface TrainWebAssistConfig {
   unpaidOrderAuthorized: boolean;
 }
 
-interface TrainWebAssistProtocol {
-  state?: string;
-  reason?: string;
+export interface TrainWebAssistFixtureRow { cells: string[]; visible: boolean; width: number; height: number; }
+export interface TrainWebAssistFixture {
+  trainCells: string[];
+  passengerRows: TrainWebAssistFixtureRow[];
+  loginVisible: boolean;
+  captchaVisible: boolean;
 }
 
 const SANITIZED_REASONS: string[] = [
-  'login_required',
-  'captcha_required',
-  'page_mismatch',
-  'train_mismatch',
-  'missing_passenger',
-  'passenger_mismatch',
-  'missing_seat',
-  'confirmation_mismatch',
-  'not_authorized',
-  'timeout',
-  'script_error',
-  'invalid_result'
+  'login_required', 'captcha_required', 'page_mismatch', 'train_mismatch', 'missing_passenger',
+  'passenger_mismatch', 'missing_seat', 'confirmation_mismatch', 'not_authorized', 'timeout',
+  'no_navigation', 'script_error', 'invalid_result'
 ];
 
 function scriptJson(value: TrainWebAssistConfig): string {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
-    .replace(/>/g, '\\u003e')
-    .replace(/&/g, '\\u0026')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029');
+  return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+function exactKeys(value: Object, expected: string[]): boolean {
+  const keys = Object.keys(value).sort();
+  const wanted = expected.slice().sort();
+  return JSON.stringify(keys) === JSON.stringify(wanted);
 }
 
 function sanitizedReason(value: string): string {
   return SANITIZED_REASONS.indexOf(value) >= 0 ? value : 'invalid_result';
 }
 
-export function buildTrainPresaleWebAssistScript(task: TrainPresaleTask): string {
-  const config: TrainWebAssistConfig = {
-    trainCode: task.trainCode,
-    passengerNames: task.passengerNames,
-    seatPriority: task.seatPriority,
-    unpaidOrderAuthorized: true
-  };
-  return `(function(){'use strict';const cfg=${scriptJson(config)};` +
-    `const QUERY_POLL_LIMIT=20;const PASSENGER_POLL_LIMIT=40;const POLL_MS=250;` +
-    `return new Promise(function(resolve){let done=false;let timer=-1;let queryPolls=0;` +
-    `let passengerPolls=0;let submitted=false;` +
-    `function finish(state,reason){if(done){return;}done=true;if(timer>=0){clearInterval(timer);}` +
-    `resolve(JSON.stringify(reason?{state:state,reason:reason}:{state:state}));}` +
-    `function text(node){return node&&node.textContent?node.textContent.trim():'';}` +
-    `function paymentPage(){const protocol=location.protocol.toLowerCase();` +
-    `const hostname=location.hostname.toLowerCase();const pathname=location.pathname;` +
-    `return protocol==='https:'&&(hostname==='epay.12306.cn'||` +
-    `(hostname==='kyfw.12306.cn'&&pathname.indexOf('/payOrder/')>=0));}` +
-    `function associatedLabel(box,labels){for(let i=0;i<labels.length;i+=1){` +
-    `if(labels[i].htmlFor===box.id){return labels[i];}}return null;}` +
-    `function queryStep(table){queryPolls+=1;if(!table){` +
-    `if(queryPolls>=QUERY_POLL_LIMIT){finish('needs_user','page_mismatch');}return;}` +
-    `const rows=table.querySelectorAll('tr');let sawTrain=false;` +
-    `for(let i=0;i<rows.length;i+=1){const link=rows[i].querySelector('a.number');` +
-    `if(!link){continue;}sawTrain=true;if(text(link)===cfg.trainCode){` +
-    `const booking=rows[i].querySelector('a.btn72');if(!booking){` +
-    `if(queryPolls>=QUERY_POLL_LIMIT){finish('needs_user','page_mismatch');}return;}` +
-    `booking.click();finish('continuing');return;}}` +
-    `if(queryPolls>=QUERY_POLL_LIMIT){finish('needs_user',sawTrain?'train_mismatch':'timeout');}}` +
-    `function passengerStep(){passengerPolls+=1;const passengerRoot=document.querySelector('#normal_passenger_id');` +
-    `const submit=document.querySelector('#submitOrder_id');` +
-    `if(!passengerRoot||!submit){if(passengerPolls>=PASSENGER_POLL_LIMIT){` +
-    `finish('needs_user','page_mismatch');}return;}` +
-    `if(new Set(cfg.passengerNames).size!==cfg.passengerNames.length){` +
-    `finish('needs_user','passenger_mismatch');return;}` +
-    `if(submitted){const modal=document.querySelector('#checkticketinfo_id');` +
-    `const confirm=document.querySelector('#qr_submit_id');` +
-    `if(!modal||!confirm){if(passengerPolls>=PASSENGER_POLL_LIMIT){finish('needs_user','timeout');}return;}` +
-    `const modalText=text(modal);if(modalText.indexOf(cfg.trainCode)<0){` +
-    `finish('needs_user','confirmation_mismatch');return;}` +
-    `for(let nameIndex=0;nameIndex<cfg.passengerNames.length;nameIndex+=1){const name=cfg.passengerNames[nameIndex];` +
-    `if(modalText.indexOf(name)<0){finish('needs_user','confirmation_mismatch');return;}}` +
-    `if(!cfg.unpaidOrderAuthorized){finish('needs_user','not_authorized');return;}` +
-    `confirm.click();finish('continuing');return;}` +
-    `const boxes=passengerRoot.querySelectorAll('input[type=checkbox]');` +
-    `const labels=passengerRoot.querySelectorAll('label');let missingPassenger=false;let clickedPassenger=false;` +
-    `for(let nameIndex=0;nameIndex<cfg.passengerNames.length;nameIndex+=1){` +
-    `const name=cfg.passengerNames[nameIndex];let exactBox=null;` +
-    `for(let boxIndex=0;boxIndex<boxes.length;boxIndex+=1){const label=associatedLabel(boxes[boxIndex],labels);` +
-    `if(label&&text(label)===name){exactBox=boxes[boxIndex];break;}}` +
-    `if(!exactBox){missingPassenger=true;break;}if(!exactBox.checked){exactBox.click();clickedPassenger=true;}}` +
-    `if(missingPassenger){if(passengerPolls>=PASSENGER_POLL_LIMIT){` +
-    `finish('needs_user','missing_passenger');}return;}` +
-    `for(let boxIndex=0;boxIndex<boxes.length;boxIndex+=1){const label=associatedLabel(boxes[boxIndex],labels);` +
-    `if(boxes[boxIndex].checked&&(!label||cfg.passengerNames.indexOf(text(label))<0)){` +
-    `finish('needs_user','passenger_mismatch');return;}}if(clickedPassenger){return;}` +
-    `const firstSeat=document.querySelector('#seatType_1');` +
-    `const seatNodes=document.querySelectorAll('select[id^=seatType_]');` +
-    `if(!firstSeat||seatNodes.length<cfg.passengerNames.length){` +
-    `if(passengerPolls>=PASSENGER_POLL_LIMIT){finish('needs_user','missing_seat');}return;}` +
-    `for(let seatIndex=0;seatIndex<cfg.passengerNames.length;seatIndex+=1){const options=seatNodes[seatIndex].options;` +
-    `let exactOption=null;for(let optionIndex=0;optionIndex<options.length;optionIndex+=1){` +
-    `if(text(options[optionIndex]).indexOf(cfg.seatPriority)===0){exactOption=options[optionIndex];break;}}` +
-    `if(!exactOption){if(passengerPolls>=PASSENGER_POLL_LIMIT){finish('needs_user','missing_seat');}return;}` +
-    `seatNodes[seatIndex].value=exactOption.value;seatNodes[seatIndex].dispatchEvent(new Event('change',{bubbles:true}));}` +
-    `submitted=true;submit.click();}` +
-    `function step(){if(paymentPage()){finish('awaiting_payment');return;}` +
-    `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn'){` +
-    `finish('needs_user','page_mismatch');return;}` +
-    `const pathname=location.pathname.toLowerCase();const bodyText=document.body?text(document.body):'';` +
-    `if(pathname.indexOf('login')>=0){finish('needs_user','login_required');return;}` +
-    `if(bodyText.indexOf('验证码')>=0){finish('needs_user','captcha_required');return;}` +
-    `const table=document.querySelector('#queryLeftTable');` +
-    `if(table||location.pathname==='/otn/leftTicket/init'){queryStep(table);return;}` +
-    `passengerStep();}` +
-    `step();if(!done){timer=setInterval(step,POLL_MS);}});})()`;
+export function exactTrainWebAssistMultiset(expected: string[], actual: string[]): boolean {
+  if (expected.length !== actual.length) return false;
+  const left = expected.slice().sort();
+  const right = actual.slice().sort();
+  for (let index = 0; index < left.length; index++) if (left[index] !== right[index]) return false;
+  return true;
 }
 
-export function trainPresaleWebAssistScriptForCheckout(
-  kind: string,
-  boundTaskId: string,
-  task: TrainPresaleTask | undefined
-): string {
-  if (kind !== 'train' || boundTaskId.length === 0 || task === undefined ||
-    task.taskId !== boundTaskId || task.state !== 'executing') {
-    return '';
+export function evaluateTrainWebAssistFixture(task: TrainPresaleTask, fixture: TrainWebAssistFixture): string {
+  if (fixture.loginVisible) return 'login_required';
+  if (fixture.captchaVisible) return 'captcha_required';
+  if (fixture.trainCells.filter((cell: string): boolean => cell === task.trainCode).length !== 1) {
+    return 'confirmation_mismatch';
   }
+  const names: string[] = [];
+  for (let index = 0; index < fixture.passengerRows.length; index++) {
+    const row = fixture.passengerRows[index];
+    if (!row.visible || row.width <= 0 || row.height <= 0) continue;
+    let matched = '';
+    for (let nameIndex = 0; nameIndex < task.passengerNames.length; nameIndex++) {
+      if (row.cells.indexOf(task.passengerNames[nameIndex]) >= 0) matched = task.passengerNames[nameIndex];
+    }
+    if (matched.length === 0 || row.cells.filter((cell: string): boolean => cell === matched).length !== 1 ||
+      row.cells.filter((cell: string): boolean => cell.startsWith(task.seatPriority)).length !== 1) {
+      return 'confirmation_mismatch';
+    }
+    names.push(matched);
+  }
+  return exactTrainWebAssistMultiset(task.passengerNames, names) ? '' : 'confirmation_mismatch';
+}
+
+function commonScript(config: TrainWebAssistConfig): string {
+  return `'use strict';const cfg=${scriptJson(config)};` +
+    `const out=(v)=>JSON.stringify(v);const txt=(n)=>n&&n.textContent?n.textContent.trim():'';` +
+    `const visible=(n)=>{if(!n)return false;const s=getComputedStyle(n),r=n.getBoundingClientRect();` +
+    `return s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&r.width>0&&r.height>0;};` +
+    `const shown=(q)=>Array.from(document.querySelectorAll(q)).some(visible);` +
+    `const payment=()=>location.protocol.toLowerCase()==='https:'&&` +
+    `(location.hostname.toLowerCase()==='epay.12306.cn'||` +
+    `(location.hostname.toLowerCase()==='kyfw.12306.cn'&&location.pathname.indexOf('/payOrder/')===0));` +
+    `const labelFor=(box,labels)=>Array.from(labels).filter((label)=>label.htmlFor===box.id);` +
+    `const marker=window.__aiphoneTrainAssist||(window.__aiphoneTrainAssist={});` +
+    `const retry=(stage,progress)=>out({state:'retry',stage:stage,progress:progress});` +
+    `const stop=(reason)=>out({state:'needs_user',reason:reason});` +
+    `const modalRows=(modal)=>Array.from(modal.querySelectorAll('.passenger-info tbody tr,#orderTable tbody tr')).filter(visible);` +
+    `const verifyModal=()=>{const modal=document.querySelector('#checkticketinfo_id');` +
+    `if(!visible(modal))return 'wait';const cells=Array.from(modal.querySelectorAll('td,th,span')).filter(visible).map(txt);` +
+    `if(cells.filter((v)=>v===cfg.trainCode).length!==1)return 'confirmation_mismatch';` +
+    `const rows=modalRows(modal);if(rows.length!==cfg.passengerNames.length)return 'confirmation_mismatch';` +
+    `const names=[];for(const row of rows){const rc=Array.from(row.querySelectorAll('td,span')).filter(visible).map(txt);` +
+    `const found=cfg.passengerNames.filter((name)=>rc.filter((v)=>v===name).length===1);` +
+    `if(found.length!==1||rc.filter((v)=>v.indexOf(cfg.seatPriority)===0).length!==1)return 'confirmation_mismatch';names.push(found[0]);}` +
+    `if(names.slice().sort().join('\\u0000')!==cfg.passengerNames.slice().sort().join('\\u0000'))return 'confirmation_mismatch';return '';};`;
+}
+
+export function buildTrainPresaleWebAssistScript(task: TrainPresaleTask): string {
+  const config: TrainWebAssistConfig = { trainCode: task.trainCode, passengerNames: task.passengerNames,
+    seatPriority: task.seatPriority, unpaidOrderAuthorized: task.unpaidOrderAuthorized };
+  return `(function(){${commonScript(config)}` +
+    `if(payment())return out({state:'awaiting_payment'});` +
+    `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn')return stop('page_mismatch');` +
+    `if(shown('#login_user,.login-hd-account,#J-login'))return stop('login_required');` +
+    `if(shown('#J-loginImg,.touclick-wrapper,#floatTable'))return stop('captcha_required');` +
+    `const table=document.querySelector('#queryLeftTable');if(table){const rows=Array.from(table.querySelectorAll('tr'));` +
+    `const matches=rows.filter((row)=>{const link=row.querySelector('a.number');return visible(link)&&txt(link)===cfg.trainCode;});` +
+    `if(matches.length!==1)return stop('train_mismatch');const booking=matches[0].querySelector('a.btn72');` +
+    `if(!visible(booking))return retry('query','waiting_booking');if(!marker.bookingClicked){marker.bookingClicked=true;booking.click();}` +
+    `return retry('query','booking_clicked');}` +
+    `if(location.pathname==='/otn/leftTicket/init')return retry('query','waiting_query');` +
+    `const root=document.querySelector('#normal_passenger_id'),submit=document.querySelector('#submitOrder_id');` +
+    `if(!root||!visible(submit))return retry('passenger','waiting_form');` +
+    `if(new Set(cfg.passengerNames).size!==cfg.passengerNames.length)return stop('passenger_mismatch');` +
+    `const boxes=Array.from(root.querySelectorAll('input[type=checkbox]')),labels=root.querySelectorAll('label');let changed=false;` +
+    `for(const name of cfg.passengerNames){const found=boxes.filter((box)=>{const ls=labelFor(box,labels);return ls.length===1&&txt(ls[0])===name;});` +
+    `if(found.length!==1)return stop('missing_passenger');if(!found[0].checked){found[0].click();changed=true;}}` +
+    `if(changed)return retry('passenger','passengers_clicked');const selected=boxes.filter((box)=>box.checked);` +
+    `const selectedNames=[];for(const box of selected){const ls=labelFor(box,labels);if(ls.length!==1)return stop('passenger_mismatch');selectedNames.push(txt(ls[0]));}` +
+    `if(selectedNames.slice().sort().join('\\u0000')!==cfg.passengerNames.slice().sort().join('\\u0000'))return stop('passenger_mismatch');` +
+    `let seatChanged=false;for(let i=0;i<selected.length;i+=1){const name=selectedNames[i],seat=document.querySelector('#seatType_'+(i+1));` +
+    `if(!seat||cfg.passengerNames.indexOf(name)<0)return stop('missing_seat');const options=Array.from(seat.options);` +
+    `const exact=options.filter((option)=>txt(option).indexOf(cfg.seatPriority)===0);if(exact.length!==1)return stop('missing_seat');` +
+    `if(seat.value!==exact[0].value){seat.value=exact[0].value;seat.dispatchEvent(new Event('change',{bubbles:true}));seatChanged=true;}` +
+    `marker['seat_'+i]=name;}if(seatChanged)return retry('passenger','seats_selected');` +
+    `const modalCheck=verifyModal();if(modalCheck===''){return out({state:'ready_to_confirm'});}` +
+    `if(modalCheck!=='wait')return stop(modalCheck);if(!marker.submitted){marker.submitted=true;submit.click();}` +
+    `return retry('passenger','order_submitted');})()`;
+}
+
+export function buildTrainPresaleFinalConfirmScript(task: TrainPresaleTask): string {
+  const config: TrainWebAssistConfig = { trainCode: task.trainCode, passengerNames: task.passengerNames,
+    seatPriority: task.seatPriority, unpaidOrderAuthorized: task.unpaidOrderAuthorized };
+  return `(function(){${commonScript(config)}if(payment())return out({state:'awaiting_payment'});` +
+    `if(!cfg.unpaidOrderAuthorized)return stop('not_authorized');` +
+    `const checked=verifyModal();if(checked==='wait')return stop('confirmation_mismatch');if(checked!=='')return stop(checked);` +
+    `const confirm=document.querySelector('#qr_submit_id');if(!visible(confirm))return stop('confirmation_mismatch');` +
+    `if(!marker.finalConfirmed){marker.finalConfirmed=true;confirm.click();}return retry('confirm','confirm_clicked');})()`;
+}
+
+export function trainPresaleWebAssistScriptForCheckout(kind: string, boundTaskId: string,
+  task: TrainPresaleTask | undefined): string {
+  if (kind !== 'train' || boundTaskId.length === 0 || task === undefined || task.taskId !== boundTaskId ||
+    task.state !== 'executing' || !task.unpaidOrderAuthorized) return '';
   return buildTrainPresaleWebAssistScript(task);
 }
 
 export function parseTrainWebAssistOutcome(raw: string): TrainWebAssistOutcome {
   try {
-    const value = JSON.parse(raw) as TrainWebAssistProtocol;
-    if (value.state === 'continuing') {
-      const outcome: TrainWebAssistContinuingOutcome = { state: 'continuing' };
-      return outcome;
+    const value = JSON.parse(raw) as Object;
+    const state = (value as Record<string, string>).state;
+    if (state === 'retry' && exactKeys(value, ['state', 'stage', 'progress'])) {
+      const stage = (value as Record<string, string>).stage;
+      const progress = (value as Record<string, string>).progress;
+      if ((stage === 'query' || stage === 'passenger' || stage === 'confirm') && typeof progress === 'string' &&
+        progress.length > 0 && progress.length <= 40) return { state: 'retry', stage: stage, progress: progress };
     }
-    if (value.state === 'awaiting_payment') {
-      const outcome: TrainWebAssistAwaitingPaymentOutcome = { state: 'awaiting_payment' };
-      return outcome;
+    if (state === 'ready_to_confirm' && exactKeys(value, ['state'])) return { state: 'ready_to_confirm' };
+    if (state === 'awaiting_payment' && exactKeys(value, ['state'])) return { state: 'awaiting_payment' };
+    if (state === 'needs_user' && exactKeys(value, ['state', 'reason'])) {
+      const reason = (value as Record<string, string>).reason;
+      return { state: 'needs_user', reason: sanitizedReason(typeof reason === 'string' ? reason : '') };
     }
-    if (value.state === 'needs_user') {
-      const outcome: TrainWebAssistNeedsUserOutcome = {
-        state: 'needs_user',
-        reason: sanitizedReason(value.reason === undefined ? '' : value.reason)
-      };
-      return outcome;
-    }
-  } catch (_error) {
-  }
-  const invalid: TrainWebAssistNeedsUserOutcome = { state: 'needs_user', reason: 'invalid_result' };
-  return invalid;
+  } catch (_error) {}
+  return { state: 'needs_user', reason: 'invalid_result' };
 }
 
 export function trainWebAssistTargetState(outcome: TrainWebAssistOutcome): TrainPresaleTaskState | undefined {
-  return outcome.state === 'continuing' ? undefined : outcome.state;
+  return outcome.state === 'awaiting_payment' || outcome.state === 'needs_user' ? outcome.state : undefined;
 }
 
 export function trainWebAssistReasonText(reason: string): string {
-  if (reason === 'login_required') {
-    return '请在 12306 官方页面登录后手动继续。';
-  }
-  if (reason === 'captcha_required') {
-    return '请在 12306 官方页面完成验证后手动继续。';
-  }
-  if (reason === 'train_mismatch') {
-    return '官方页面未找到预定车次，请手动核对。';
-  }
-  if (reason === 'missing_passenger') {
-    return '官方页面未找到预定乘车人，请手动处理。';
-  }
-  if (reason === 'passenger_mismatch') {
-    return '官方页面已选乘车人与授权名单不一致，已停止协助。';
-  }
-  if (reason === 'missing_seat') {
-    return '官方页面未找到预定席别，请手动处理。';
-  }
-  if (reason === 'confirmation_mismatch') {
-    return '订单确认页的车次或乘车人不匹配，已停止协助。';
-  }
-  if (reason === 'timeout') {
-    return '12306 官方页面等待超时，请手动继续。';
-  }
+  if (reason === 'login_required') return '请在 12306 官方页面登录后手动继续。';
+  if (reason === 'captcha_required') return '请在 12306 官方页面完成验证后手动继续。';
+  if (reason === 'no_navigation' || reason === 'timeout') return '12306 官方页面未按预期前进，请手动继续。';
   return '12306 官方页面与预期不一致，已停止协助；页面可手动继续。';
 }
