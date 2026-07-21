@@ -4,8 +4,10 @@ import {
   AgentMessageType,
   ConversationTurnMessage,
   CurrentSurfaceSummary,
+  LegacyHandoffPayload,
   ObservationDigest,
-  TaskErrorPayload
+  TaskErrorPayload,
+  TurnResultPayload
 } from '../message/AgentMessage';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
@@ -26,6 +28,7 @@ import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
 import { ToolDefinition } from '../../aiphone/runtime/ToolDefinitionTypes';
+import { ActionPlanRequestPayload } from '../action/ActionAgentTypes';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -55,7 +58,7 @@ interface LeaderPendingDataTask {
 export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly planner: LeaderPlanner;
-  private readonly planningContext: LeaderPlanningContext;
+  private planningContext: LeaderPlanningContext;
   private readonly timeoutMs: number;
   private readonly dataToolIds: Set<string>;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
@@ -86,6 +89,10 @@ export class LeaderAgent extends MessageDrivenAgent {
     this.turns.clear();
     this.terminalTurns.clear();
     super.stop();
+  }
+
+  updatePlanningContext(context: LeaderPlanningContext): void {
+    this.planningContext = this.copyPlanningContext(context);
   }
 
   protected accepts(message: AgentMessage): boolean {
@@ -292,12 +299,33 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     state.semantic = true;
     state.skillId = decision.skillId;
-    if (decision.roundAction !== 'execute') {
+    if (decision.roundAction === 'legacy_handoff') {
+      this.publishHandoff(message, decision);
       this.finishTurn(state);
       return;
     }
+    if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
+      this.publishTurnResult(message, state, decision.answer as string);
+      this.finishTurn(state);
+      return;
+    }
+    const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
+    let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
+    if (dataTaskIds.length > 0) {
+      uiTaskId = state.inputTaskId + ':round-' + state.round.toString() + ':ui';
+      this.publishDecisionUiTask(message, state, decision, uiTaskId, dataTaskIds);
+    }
     for (let index = 0; index < decision.dataTasks.length; index++) {
       this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
+    }
+    if (decision.actionIntent !== undefined) {
+      this.publishActionPlanRequest(
+        message,
+        decision,
+        uiTaskId,
+        dataTaskIds,
+        dataTaskIds.length === 0
+      );
     }
   }
 
@@ -542,7 +570,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       !Array.isArray(decision.dataTasks) || !this.validUiIntent(decision.uiIntent)) {
       return false;
     }
-    if ((decision.roundAction === 'execute' && decision.dataTasks.length === 0) ||
+    if ((decision.roundAction === 'execute' && decision.dataTasks.length === 0 &&
+      decision.actionIntent === undefined) ||
       (decision.roundAction !== 'execute' && decision.dataTasks.length !== 0)) {
       return false;
     }
@@ -818,6 +847,111 @@ export class LeaderAgent extends MessageDrivenAgent {
       conversationId: input.conversationId,
       turnId: input.turnId,
       taskId,
+      payload
+    });
+  }
+
+  private decisionDataTaskIds(
+    state: LeaderTurnState,
+    tasks: LeaderDecisionDataTask[]
+  ): string[] {
+    const ids: string[] = [];
+    for (let index = 0; index < tasks.length; index++) {
+      ids.push(
+        state.inputTaskId + ':round-' + state.round.toString() + ':' + tasks[index].localId
+      );
+    }
+    return ids;
+  }
+
+  private publishDecisionUiTask(
+    input: AgentMessage,
+    state: LeaderTurnState,
+    decision: LeaderDecision,
+    taskId: string,
+    dataTaskIds: string[]
+  ): void {
+    const first: LeaderDecisionDataTask = decision.dataTasks[0];
+    const definition: LeaderToolMetadata = this.toolMetadata(first.toolId) as LeaderToolMetadata;
+    const payload: CreateUiTaskPayload = {
+      taskId,
+      dataTaskIds: dataTaskIds.slice(),
+      skillId: state.skillId,
+      intent: decision.uiIntent.purpose,
+      expectedOutputSchema: definition.outputSchema
+    };
+    state.uiTaskId = taskId;
+    this.bus.publish({
+      type: AgentMessageType.TASK_CREATE_UI,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId,
+      payload
+    });
+  }
+
+  private publishActionPlanRequest(
+    input: AgentMessage,
+    decision: LeaderDecision,
+    uiTaskId: string,
+    dataTaskIds: string[],
+    virtual: boolean
+  ): void {
+    const intent = decision.actionIntent as Object as Record<string, Object | string[]>;
+    const payload: ActionPlanRequestPayload = {
+      uiTaskId,
+      dataTaskIds: dataTaskIds.slice(),
+      goal: intent['goal'] as string,
+      allowedActionIds: (intent['allowedActionIds'] as string[]).slice(),
+      personaId: decision.personaId,
+      inputText: (input.payload as InputUserPayload).text
+    };
+    if (virtual) {
+      payload.virtual = true;
+    }
+    this.bus.publish({
+      type: AgentMessageType.ACTION_PLAN_REQUEST,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: uiTaskId,
+      payload
+    });
+  }
+
+  private publishTurnResult(
+    input: AgentMessage,
+    state: LeaderTurnState,
+    answer: string
+  ): void {
+    const payload: TurnResultPayload = {
+      status: 'success',
+      roundCount: state.round,
+      message: answer
+    };
+    const surfaceId: string = state.input.currentSurfaceSummary?.surfaceId as string;
+    if (typeof surfaceId === 'string' && surfaceId.length > 0) {
+      payload.surfaceId = surfaceId;
+    }
+    this.bus.publish({
+      type: AgentMessageType.TURN_RESULT,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: state.inputTaskId,
+      payload
+    });
+  }
+
+  private publishHandoff(input: AgentMessage, decision: LeaderDecision): void {
+    const payload: LegacyHandoffPayload = {
+      reasonCode: decision.reasonCode,
+      personaId: decision.personaId,
+      skillId: decision.skillId
+    };
+    this.bus.publish({
+      type: AgentMessageType.TURN_HANDOFF,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: input.taskId,
       payload
     });
   }

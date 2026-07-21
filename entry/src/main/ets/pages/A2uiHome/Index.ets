@@ -1,11 +1,14 @@
 import {
   A2uiAgentRunner,
+  ConversationTurnMessage,
+  CurrentSurfaceSummary,
   LlmProvider,
   LocalModelSettings,
   OpenAiA2uiModel,
   OpenAiCompatibleModel,
   PaymentAccount,
   StripeReceivingAccountCardData,
+  UserInputPayload,
   defaultLocalModelSettings
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
@@ -107,11 +110,16 @@ import {
 } from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
 import {
-  HotelAgentRuntime,
-  HotelAgentRuntimeOptions,
-  HotelTurnOutcome,
   HotelTurnStatus
 } from './agent/HotelAgentRuntime';
+import {
+  MultiAgentCanaryOptions,
+  MultiAgentCanaryRuntime
+} from './agent/MultiAgentCanaryRuntime';
+import {
+  MultiAgentSettledOutcome,
+  MultiAgentTurnOutcome
+} from './agent/MultiAgentRuntimeTypes';
 import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
@@ -162,51 +170,6 @@ const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
-
-export function shouldRouteToHotelAgent(prompt: string): boolean {
-  const value = prompt.trim().toLowerCase();
-  if (value.length === 0 ||
-    /(酒店行业|酒店管理|酒店新闻|酒店股票|酒店股价|酒店研报|翻译|是什么意思|邮件|邮箱|工作场所|办公住宿|住宿政策)/.test(value) ||
-    /\b(hotel industry|hotel management|hotel news|hotel stocks?|hotel shares?|translate|translation|meaning|workplace accommodation|office accommodation|accommodation policy|accommodation email|meeting rooms?|classrooms?|newsrooms?)\b/.test(value) ||
-    /\brooms?\s+(to improve|to maneuver|to manoeuvre|for growth|for improvement|for maneuver|for manoeuvre|layout|design|dimensions?|floor plan|for a meeting)\b/.test(value) ||
-    /\brooms?\s+in\s+(this|the)\s+(paragraph|document|email)\b/.test(value)) {
-    return false;
-  }
-  const hasChineseHotel = /(酒店|住宿|旅馆|宾馆|客房)/.test(value);
-  if (hasChineseHotel &&
-    /(找|查|搜|订|预订|入住|想住|要住|推荐|附近|今晚|明晚|明天|后天|一晚|两晚|几晚)/.test(value)) {
-    return true;
-  }
-  if (/^[\u4e00-\u9fffA-Za-z0-9·]{1,12}(酒店|住宿|旅馆|宾馆|客房)$/.test(value)) {
-    return true;
-  }
-  const hasEnglishHotel =
-    /(^|[^a-z])(hotel|hotels|lodging|accommodation)([^a-z]|$)/.test(value);
-  if (hasEnglishHotel &&
-    /\b(find|search|book|reserve|stay|need|want|available|availability|recommend|looking)\b/.test(value)) {
-    return true;
-  }
-  const hasRoomTerm = /\b(guest\s+)?rooms?\b/.test(value);
-  const hasRoomBooking =
-    /\b(book|reserve)\s+(a|an|one|some)?\s*(guest\s+)?rooms?\b/.test(value);
-  const hasRoomLocation =
-    /\b(guest\s+)?rooms?\s+(in|near|at)\s+(?!this\b)(?!the\s+(paragraph|document|email)\b)[a-z0-9]/.test(value);
-  const hasRoomSearch = /\b(find|search|look|looking)\b/.test(value);
-  const hasLodgingContext =
-    /\b(tonight|tomorrow|nights?|guests?|check-?in|check-?out|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(value) ||
-    /\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b/.test(value);
-  if (hasRoomBooking ||
-    hasRoomLocation ||
-    (hasRoomTerm && hasRoomSearch && hasLodgingContext)) {
-    return true;
-  }
-  if (/^[a-z][a-z .'-]{1,32}\s+(hotel|hotels|lodging|accommodation)$/.test(value) ||
-    /^(hotel|hotels|lodging|accommodation)\s+(in|near|at)\s+[a-z]/.test(value) ||
-    /\bstay\s+(in|near|at)\s+[a-z]/.test(value)) {
-    return true;
-  }
-  return false;
-}
 
 function fingerprintPart(value: string): string {
   return value.length.toString() + ':' + value;
@@ -597,7 +560,7 @@ struct Index {
   private voiceCompletionHandled: boolean = false;
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
-  private hotelAgentRuntime: HotelAgentRuntime | null = null;
+  private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
   private hotelAgentRuntimeFingerprint: string = '';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
@@ -1201,12 +1164,12 @@ struct Index {
     return now.getFullYear().toString() + '-' + month + '-' + day;
   }
 
-  private hotelRuntime(): HotelAgentRuntime {
+  private canaryRuntime(): MultiAgentCanaryRuntime {
     const settings = this.getSettings();
     const fingerprint = hotelModelSettingsFingerprint(settings);
-    if (this.hotelAgentRuntime !== null &&
+    if (this.multiAgentRuntime !== null &&
       this.hotelAgentRuntimeFingerprint === fingerprint) {
-      return this.hotelAgentRuntime;
+      return this.multiAgentRuntime;
     }
     this.disposeHotelRuntime();
     const provider = new LlmProvider(
@@ -1230,27 +1193,31 @@ struct Index {
       aiLogInfo('[AIPhone][HotelBookingOpen] host=rollinggo.cn');
       return Promise.resolve(true);
     });
-    const options: HotelAgentRuntimeOptions = {
+    const options: MultiAgentCanaryOptions = {
       model: model,
-      currentLocalDate: (): string => this.currentLocalDate(),
+      selectedPersonaId: (): string => this.selectedPersonaId,
       opener: opener,
       onSurface: (surface: A2uiSurfaceState): void => {
         this.isAwaitingFirstSurface = false;
         this.applySurface(surface);
-      }
+      },
+      onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
+        this.applyPersonaMemoryUpdate(update);
+      },
+      settingsFingerprint: fingerprint
     };
     if (provider.isConfigured()) {
       options.uiLayoutPlanner = new A2uiAgentRunner(new OpenAiA2uiModel(provider));
     }
-    this.hotelAgentRuntime = new HotelAgentRuntime(options);
+    this.multiAgentRuntime = new MultiAgentCanaryRuntime(options);
     this.hotelAgentRuntimeFingerprint = fingerprint;
-    return this.hotelAgentRuntime;
+    return this.multiAgentRuntime;
   }
 
   private disposeHotelRuntime(): void {
-    if (this.hotelAgentRuntime !== null) {
-      this.hotelAgentRuntime.dispose();
-      this.hotelAgentRuntime = null;
+    if (this.multiAgentRuntime !== null) {
+      this.multiAgentRuntime.dispose();
+      this.multiAgentRuntime = null;
     }
     this.hotelAgentRuntimeFingerprint = '';
   }
@@ -1854,6 +1821,34 @@ struct Index {
     return this.messages.slice(this.messages.length - 8);
   }
 
+  private multiAgentInput(text: string): UserInputPayload {
+    const recentMessages: ConversationTurnMessage[] = [];
+    const pageMessages = this.recentMessages();
+    for (let index = 0; index < pageMessages.length; index++) {
+      const role = pageMessages[index].role;
+      if (role === 'user' || role === 'assistant') {
+        recentMessages.push({
+          role: role === 'user' ? 'user' : 'assistant',
+          content: pageMessages[index].content
+        });
+      }
+    }
+    const surface: CurrentSurfaceSummary = {
+      surfaceId: this.currentSurface.surfaceId,
+      kind: this.currentSurface.intent,
+      status: this.currentSurface.status,
+      entityRefs: [],
+      actionOfferIds: []
+    };
+    return {
+      text,
+      recentMessages,
+      previousPersonaId: this.selectedPersonaId,
+      currentSurfaceSummary: surface,
+      recentObservations: []
+    };
+  }
+
   private appendMessage(role: string, content: string): void {
     const next = this.messages.slice();
     next.push({
@@ -1961,31 +1956,33 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
-      const routeToHotel = actionId.length === 0 && shouldRouteToHotelAgent(trimmed);
-      if (!routeToHotel && this.hotelAgentRuntime !== null) {
-        this.hotelAgentRuntime.cancelActiveTurn('non_hotel_prompt');
-      }
-      if (routeToHotel) {
-        const hotelOutcome: HotelTurnOutcome = await this.hotelRuntime().submit(trimmed);
-        if (!hotelOutcome.ok) {
-          throw new Error(hotelOutcome.message.length > 0 ?
-            hotelOutcome.message : '酒店四 Agent 运行时未能完成当前查询。');
-        }
-        this.isAwaitingFirstSurface = false;
-        const readyMessage = hotelTurnReadyMessage(
-          hotelOutcome.status,
-          this.currentSurface.title
+      if (actionId.length === 0) {
+        const canaryOutcome: MultiAgentTurnOutcome = await this.canaryRuntime().submit(
+          trimmed,
+          this.multiAgentInput(trimmed)
         );
-        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-          ok: true,
-          status: 'ready',
-          message: readyMessage,
-          requestDebug: 'hotel-agent-runtime',
-          assistantDebug: this.currentSurface.title,
-          error: ''
-        }));
-        this.appendMessage('assistant', readyMessage);
-        return;
+        if (canaryOutcome.kind === 'settled') {
+          const result: MultiAgentSettledOutcome = canaryOutcome as MultiAgentSettledOutcome;
+          if (!result.ok) {
+            throw new Error(result.message.length > 0 ?
+              result.message : 'Multi-agent runtime failed to complete the turn.');
+          }
+          this.isAwaitingFirstSurface = false;
+          const readyMessage: string = result.message.length > 0 ?
+            result.message : this.currentSurface.title;
+          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+            ok: true,
+            status: 'ready',
+            message: readyMessage,
+            requestDebug: 'multi-agent-runtime',
+            assistantDebug: readyMessage,
+            error: ''
+          }));
+          this.appendMessage('assistant', readyMessage);
+          return;
+        }
+        aiLogInfo('[AIPhone][MultiAgentHandoff] reason=' + canaryOutcome.reasonCode +
+          ' personaId=' + canaryOutcome.personaId);
       }
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
@@ -3457,8 +3454,8 @@ struct Index {
       return;
     }
     if (action.id === 'hotel.search.restore') {
-      if (this.hotelAgentRuntime !== null) {
-        const restored = this.hotelAgentRuntime.restoreSearchSurface();
+      if (this.multiAgentRuntime !== null) {
+        const restored = this.multiAgentRuntime.restoreSearchSurface();
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: restored,
           status: restored ? 'ready' : 'error',
@@ -3815,9 +3812,9 @@ struct Index {
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
-    if (this.hotelAgentRuntime !== null &&
+    if (this.multiAgentRuntime !== null &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
-      const runtime = this.hotelAgentRuntime;
+      const runtime = this.multiAgentRuntime;
       const context = runtime.currentActionContext();
       const document = this.currentHtmlHomeDocument();
       if (context === null || !isHtmlHomeActionAllowed(document, action)) {
@@ -3826,7 +3823,7 @@ struct Index {
       }
       this.isBusy = true;
       try {
-        const ok = await runtime.runAction(action, context, document);
+        const ok = await runtime.runAction(action, context);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: ok,
           status: ok ? 'ready' : 'error',

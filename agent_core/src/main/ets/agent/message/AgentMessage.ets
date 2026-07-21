@@ -13,7 +13,8 @@ export enum AgentMessageType {
   ACTION_RESULT = 'ACTION.RESULT',
   TURN_CANCEL = 'TURN.CANCEL',
   ACTION_PLAN_REQUEST = 'ACTION.PLAN.REQUEST',
-  TURN_RESULT = 'TURN.RESULT'
+  TURN_RESULT = 'TURN.RESULT',
+  TURN_HANDOFF = 'TURN.HANDOFF'
 }
 
 export interface AgentMessage {
@@ -62,6 +63,12 @@ export interface TurnResultPayload {
   surfaceId?: string;
   roundCount: number;
   message: string;
+}
+
+export interface LegacyHandoffPayload {
+  reasonCode: string;
+  personaId: string;
+  skillId: string;
 }
 
 export interface UiTaskPayload {

@@ -17,6 +17,8 @@ import {
   ActionRunPayload,
   PausedActionRun,
   RegisteredActionExecutor,
+  VirtualActionIntent,
+  VirtualActionIntentResolver,
   WorkflowRunArgs
 } from './ActionAgentTypes';
 import {
@@ -214,6 +216,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly offerResolver: ActionOfferResolver;
   private readonly registeredExecutor: RegisteredActionExecutor;
   private readonly compiler: ActionPlanCompiler | null;
+  private readonly virtualResolver: VirtualActionIntentResolver | null;
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -245,7 +248,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     catalog: ActionCatalog,
     offerResolver: ActionOfferResolver,
     executor: RegisteredActionExecutor,
-    compiler?: ActionPlanCompiler
+    compiler?: ActionPlanCompiler,
+    virtualResolver?: VirtualActionIntentResolver
   ) {
     super(bus);
     this.bus = bus;
@@ -253,6 +257,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.offerResolver = offerResolver;
     this.registeredExecutor = executor;
     this.compiler = compiler === undefined ? null : compiler;
+    this.virtualResolver = virtualResolver === undefined ? null : virtualResolver;
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -649,6 +654,15 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       goal: parsed.goal,
       allowedActionIds: parsed.allowedActionIds.slice()
     };
+    if (parsed.personaId !== undefined) {
+      request.personaId = parsed.personaId;
+    }
+    if (parsed.inputText !== undefined) {
+      request.inputText = parsed.inputText;
+    }
+    if (parsed.virtual !== undefined) {
+      request.virtual = parsed.virtual;
+    }
     const key = this.planRequestKey(
       message.conversationId,
       message.turnId,
@@ -658,14 +672,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       this.publishInputError(
         message, '', '', '', 'ACTION_PLAN_REQUEST_DUPLICATE',
         'Action plan request identity already exists.'
-      );
-      return;
-    }
-    if (this.compiler === null) {
-      this.rememberTerminalPlanRequest(key);
-      this.publishInputError(
-        message, '', '', '', 'ACTION_PLAN_COMPILER_UNAVAILABLE',
-        'Action plan compiler is unavailable.'
       );
       return;
     }
@@ -698,7 +704,86 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       generation: this.generation
     };
     this.pendingPlanRequests.set(key, stored);
+    if (request.dataTaskIds.length === 0) {
+      if (this.virtualResolver === null) {
+        this.pendingPlanRequests.delete(key);
+        this.rememberTerminalPlanRequest(key);
+        this.publishInputError(
+          message, '', '', '', 'ACTION_VIRTUAL_INTENT_UNAVAILABLE',
+          'No virtual Action resolver owns this request.'
+        );
+        return;
+      }
+      this.startVirtualResolution(key, stored);
+      return;
+    }
+    if (this.compiler === null) {
+      this.pendingPlanRequests.delete(key);
+      this.rememberTerminalPlanRequest(key);
+      this.publishInputError(
+        message, '', '', '', 'ACTION_PLAN_COMPILER_UNAVAILABLE',
+        'Action plan compiler is unavailable.'
+      );
+      return;
+    }
     this.startCompilation(key, stored);
+  }
+
+  private startVirtualResolution(key: string, stored: StoredPlanRequest): void {
+    const resolver: VirtualActionIntentResolver | null = this.virtualResolver;
+    if (resolver === null || stored.compiling || !this.compilationIsActive(key, stored)) {
+      return;
+    }
+    stored.compiling = true;
+    try {
+      resolver.resolve(stored.request).then((intent: VirtualActionIntent | null) => {
+        this.finishVirtualResolution(key, stored, intent);
+      }).catch((_error: Object) => {
+        this.finishVirtualResolution(key, stored, null);
+      });
+    } catch (_error) {
+      this.finishVirtualResolution(key, stored, null);
+    }
+  }
+
+  private finishVirtualResolution(
+    key: string,
+    stored: StoredPlanRequest,
+    intent: VirtualActionIntent | null
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'autoRun,offer,sourceToolId' ||
+      intent.autoRun !== true || !nonempty(intent.sourceToolId) ||
+      intent.offer === null || typeof intent.offer !== 'object' || Array.isArray(intent.offer) ||
+      stored.request.allowedActionIds.indexOf(intent.offer.actionId) < 0) {
+      this.publishInputError(
+        stored.message, '', '', '', 'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an invalid intent.'
+      );
+      return;
+    }
+    const offers: ActionOffer[] = this.sanitizeOffers(intent.sourceToolId, [intent.offer]);
+    if (offers.length !== 1) {
+      this.publishInputError(
+        stored.message, '', '', '', 'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an unauthorized offer.'
+      );
+      return;
+    }
+    const offer: ActionOffer = offers[0];
+    const payload: ActionRunPayload = {
+      surfaceId: 'virtual:' + stored.message.taskId,
+      runId: 'virtual:' + stored.message.taskId,
+      sourceToolId: intent.sourceToolId,
+      actionId: offer.actionId,
+      args: offer.args
+    };
+    this.startDirectRun(stored.message, payload);
   }
 
   private compileReadyRequests(conversationId: string, turnId: string): void {
@@ -1747,13 +1832,23 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return null;
     }
     const current = payload as ActionPlanRequestPayload;
-    if (Object.keys(payload).sort().join(',') !==
-      'allowedActionIds,dataTaskIds,goal,uiTaskId' ||
+    const keys: string = Object.keys(payload).sort().join(',');
+    if (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual') {
+      return null;
+    }
+    const virtual: boolean = current.virtual === true;
+    const hasContext: boolean = nonempty(current.personaId) && nonempty(current.inputText);
+    if (
       !nonempty(current.uiTaskId) || !nonempty(current.goal) ||
-      !Array.isArray(current.dataTaskIds) || current.dataTaskIds.length === 0 ||
+      !Array.isArray(current.dataTaskIds) ||
       !Array.isArray(current.allowedActionIds) || current.allowedActionIds.length === 0 ||
       !this.validUniqueIds(current.dataTaskIds, current.uiTaskId) ||
-      !this.validUniqueIds(current.allowedActionIds, '')) {
+      !this.validUniqueIds(current.allowedActionIds, '') ||
+      (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' && !hasContext) ||
+      (virtual && current.dataTaskIds.length !== 0) ||
+      (!virtual && current.dataTaskIds.length === 0)) {
       return null;
     }
     return current;

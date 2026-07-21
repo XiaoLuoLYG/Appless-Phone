@@ -162,7 +162,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const selectedAction: LeaderRoundAction = roundAction as LeaderRoundAction;
     const tasks: LeaderDecisionDataTask[] = this.dataTasks(rawTasks as Object[], context);
-    if ((selectedAction === 'execute' && tasks.length === 0) ||
+    const actionValue = values['actionIntent'];
+    const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
+      this.actionIntent(actionValue, context);
+    if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
     }
@@ -176,9 +179,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       typeof answerValue !== 'string') {
       throw new Error('Leader answer and clarify decisions require answer text.');
     }
-    const actionValue = values['actionIntent'];
-    const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
-      this.actionIntent(actionValue, context);
     const decision: LeaderDecision = {
       personaId,
       skillId,

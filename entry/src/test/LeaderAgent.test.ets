@@ -3,6 +3,7 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  ActionPlanRequestPayload,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
@@ -11,13 +12,15 @@ import {
   LeaderDataTask,
   LeaderDecision,
   LeaderDecisionDataTask,
+  LegacyHandoffPayload,
   LeaderPlan,
   LeaderPlanner,
   LeaderPlannerResult,
   LeaderPlanningContext,
   LeaderUiTask,
   LinkedMessageBus,
-  TaskErrorPayload
+  TaskErrorPayload,
+  TurnResultPayload
 } from '@loop/agent-core';
 import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
 import { routePersonaForPrompt } from '../main/ets/model/PersonaRouter';
@@ -462,6 +465,7 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const semanticTask = await receive(observer);
       bus.publish(dataResultMessage(semanticTask));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
@@ -614,32 +618,194 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('publishes every independent semantic Data task before observing results', 0, async () => {
+    it('publishes one semantic UI, ordered Data tasks, then the optional Action request', 0, async () => {
       const bus = new LinkedMessageBus();
-      const planner = new RoundScriptedPlanner([
-        semanticDecision([semanticDataTask('flight'), semanticDataTask('train')])
-      ]);
+      const decision = semanticDecision([semanticDataTask('flight'), semanticDataTask('train')]);
+      decision.actionIntent = {
+        goal: 'Navigate after results',
+        allowedActionIds: ['hotel.navigate']
+      };
+      const planner = new RoundScriptedPlanner([decision]);
       const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
       bus.publish(inputMessage());
       await receive(observer);
+      const uiMessage = await receive(observer);
       const first = await receive(observer);
       const second = await receive(observer);
+      const actionMessage = await receive(observer);
+      const ui = uiMessage.payload as CreateUiTaskPayload;
       const firstPayload = first.payload as CreateDataTaskPayload;
       const secondPayload = second.payload as CreateDataTaskPayload;
+      const action = actionMessage.payload as ActionPlanRequestPayload;
 
+      expect(uiMessage.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       expect(first.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       expect(second.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect(actionMessage.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect(uiMessage.taskId).assertEqual('input-1:round-1:ui');
+      expect(ui.dataTaskIds.join(',')).assertEqual(
+        'input-1:round-1:flight,input-1:round-1:train'
+      );
+      expect(ui.intent).assertEqual('Show real data');
+      expect(ui.expectedOutputSchema).assertEqual('hotelSearchResults');
       expect(first.taskId === second.taskId).assertFalse();
       expect(firstPayload.roundId).assertEqual(secondPayload.roundId);
       expect(firstPayload.goal).assertEqual('Read real data for flight');
       expect(secondPayload.goal).assertEqual('Read real data for train');
+      expect(action.uiTaskId).assertEqual(uiMessage.taskId);
+      expect(action.dataTaskIds.join(',')).assertEqual(ui.dataTaskIds.join(','));
+      expect(action.goal).assertEqual('Navigate after results');
+      expect(action.allowedActionIds.join(',')).assertEqual('hotel.navigate');
+      expect(action.personaId).assertEqual('travel_companion');
+      expect(action.inputText).assertEqual('Find a Shenzhen hotel');
       expect(planner.calls).assertEqual(1);
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes a correlated semantic answer result without Data, UI, or Action tasks', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([semanticDecision([], 'answer')]);
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+      const input = inputMessage();
+      const payload = input.payload as InputUserPayload;
+      payload.currentSurfaceSummary = {
+        surfaceId: 'surface-previous',
+        kind: 'hotelSearchResults',
+        status: 'result',
+        entityRefs: ['hotel-101'],
+        actionOfferIds: []
+      };
+
+      bus.publish(input);
+      await settle();
+      bus.publish(inputMessage(
+        'marker-conversation',
+        'marker-turn',
+        'marker-task',
+        'marker'
+      ));
+      const beforeMarker: AgentMessage[] = [];
+      let next = await receive(observer);
+      while (next.taskId !== 'marker-task') {
+        beforeMarker.push(next);
+        next = await receive(observer);
+      }
+      const turnResults = beforeMarker.filter(
+        (message: AgentMessage): boolean => message.type === AgentMessageType.TURN_RESULT
+      );
+
+      expect(turnResults.length).assertEqual(1);
+      expect(turnResults[0].conversationId).assertEqual('conversation-hotel');
+      expect(turnResults[0].turnId).assertEqual('turn-1');
+      expect(turnResults[0].taskId).assertEqual('input-1');
+      const result = turnResults[0].payload as TurnResultPayload;
+      expect(result.status).assertEqual('success');
+      expect(result.surfaceId).assertEqual('surface-previous');
+      expect(result.roundCount).assertEqual(1);
+      expect(result.message).assertEqual('Enough observations');
+      expect(beforeMarker.filter(
+        (message: AgentMessage): boolean => message.type === AgentMessageType.TASK_CREATE_DATA ||
+          message.type === AgentMessageType.TASK_CREATE_UI ||
+          message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      ).length).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes only a virtual Action request for a zero-Data semantic execute decision', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Remember the explicit user statement',
+        allowedActionIds: ['memory.update']
+      };
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'memory.update',
+        intent: 'memory.update',
+        riskLevel: 'draft',
+        inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult',
+        actions: ['memory.update']
+      });
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage(
+        'conversation-hotel',
+        'turn-1',
+        'input-1',
+        '我在北京'
+      ));
+      await settle();
+      bus.publish(inputMessage('marker-conversation', 'marker-turn', 'marker-task', 'marker'));
+      const beforeMarker: AgentMessage[] = [];
+      let next = await receive(observer);
+      while (next.taskId !== 'marker-task') {
+        beforeMarker.push(next);
+        next = await receive(observer);
+      }
+      const requests = beforeMarker.filter(
+        (message: AgentMessage): boolean => message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      );
+
+      expect(requests.length).assertEqual(1);
+      expect(beforeMarker.filter(
+        (message: AgentMessage): boolean => message.type === AgentMessageType.TASK_CREATE_DATA ||
+          message.type === AgentMessageType.TASK_CREATE_UI
+      ).length).assertEqual(0);
+      const request = requests[0].payload as ActionPlanRequestPayload;
+      expect(request.uiTaskId).assertEqual('input-1:round-1:virtual');
+      expect(request.dataTaskIds.length).assertEqual(0);
+      expect(request.goal).assertEqual('Remember the explicit user statement');
+      expect(request.allowedActionIds.join(',')).assertEqual('memory.update');
+      expect(request.personaId).assertEqual('travel_companion');
+      expect(request.inputText).assertEqual('我在北京');
+      expect(request.virtual).assertTrue();
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes a typed semantic legacy handoff before any execution message', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.roundAction = 'legacy_handoff';
+      decision.reasonCode = 'outside_canary';
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await settle();
+      bus.publish(inputMessage('marker-conversation', 'marker-turn', 'marker-task', 'marker'));
+      const beforeMarker: AgentMessage[] = [];
+      let next = await receive(observer);
+      while (next.taskId !== 'marker-task') {
+        beforeMarker.push(next);
+        next = await receive(observer);
+      }
+
+      expect(beforeMarker.length).assertEqual(2);
+      expect(beforeMarker[0].type).assertEqual(AgentMessageType.INPUT_USER);
+      expect(beforeMarker[1].type).assertEqual(AgentMessageType.TURN_HANDOFF);
+      const handoff = beforeMarker[1].payload as LegacyHandoffPayload;
+      expect(handoff.reasonCode).assertEqual('outside_canary');
+      expect(handoff.personaId).assertEqual('travel_companion');
+      expect(handoff.skillId).assertEqual('');
       leader.stop();
       observer.close();
     });
@@ -656,6 +822,7 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const task = await receive(observer);
       bus.publish(dataResultMessage(task));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
@@ -689,6 +856,7 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const malformedTask = await receive(observer);
       const wrongSchemaTask = await receive(observer);
       const nullPayloadTask = await receive(observer);
@@ -753,6 +921,7 @@ export default function leaderAgentTest() {
       bus.publish(inputMessage());
       await receive(observer);
       for (let round = 1; round <= 3; round++) {
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
         const task = await receive(observer);
         expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
         expect((task.payload as CreateDataTaskPayload).roundId.indexOf(round.toString()) >= 0).assertTrue();
@@ -780,6 +949,7 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const task = await receive(observer);
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-semantic'));
       bus.publish(dataResultMessage(task));
@@ -803,6 +973,7 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       const timeout = await receive(observer);
 

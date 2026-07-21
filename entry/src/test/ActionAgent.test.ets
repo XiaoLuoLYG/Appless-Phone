@@ -36,6 +36,8 @@ import {
   ToolDefinitionLookup,
   ToolRiskLevel,
   UiRenderResultPayload,
+  VirtualActionIntent,
+  VirtualActionIntentResolver,
   WorkflowRunArgs
 } from '@loop/agent-core';
 
@@ -70,6 +72,9 @@ class ActionLookup implements ToolDefinitionLookup {
     }
     if (toolId === 'social.reply.draft' || toolId === 'gmail.draft.create') {
       return definition(toolId, 'draft', []);
+    }
+    if (toolId === 'memory.update') {
+      return definition(toolId, 'draft', ['memory.update']);
     }
     return null;
   }
@@ -110,7 +115,10 @@ class ExactActionSurface implements SurfaceActionAuthorizer {
     const secondary = conversationId === 'conversation-2' &&
       turnId === 'turn-2' &&
       surfaceId === 'surface-2';
-    if (!this.allowed || (!primary && !secondary)) {
+    const virtual = conversationId === 'conversation-1' &&
+      turnId === 'turn-1' &&
+      surfaceId === 'virtual:virtual-request';
+    if (!this.allowed || (!primary && !secondary && !virtual)) {
       return false;
     }
     if (actionId === 'hotel.detail') {
@@ -125,6 +133,15 @@ class ExactActionSurface implements SurfaceActionAuthorizer {
     }
     if (actionId === 'social.reply.draft') {
       return JSON.stringify(args) === '{}';
+    }
+    if (actionId === 'memory.update') {
+      return conversationId === 'conversation-1' &&
+        turnId === 'turn-1' &&
+        surfaceId === 'virtual:virtual-request' &&
+        JSON.stringify(args) ===
+          '{"personaId":"travel_companion","summary":"我在北京",' +
+          '"memoryText":"No saved preference. 我在北京",' +
+          '"reason":"User explicitly stated a stable location."}';
     }
     return false;
   }
@@ -285,6 +302,33 @@ class ScriptedActionPlanCompiler implements ActionPlanCompiler {
       this.allowedIds.push(allowedActionIds[index]);
     }
     return this.draft;
+  }
+}
+
+class MemoryVirtualIntentResolver implements VirtualActionIntentResolver {
+  calls: number = 0;
+
+  async resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
+    this.calls++;
+    if (request.virtual !== true || request.personaId !== 'travel_companion' ||
+      request.inputText !== '我在北京') {
+      return null;
+    }
+    return {
+      sourceToolId: 'memory.update',
+      offer: {
+        offerId: 'memory-update',
+        actionId: 'memory.update',
+        label: '更新记忆',
+        variant: 'primary',
+        args: JSON.parse(
+          '{"personaId":"travel_companion","summary":"我在北京",' +
+          '"memoryText":"No saved preference. 我在北京",' +
+          '"reason":"User explicitly stated a stable location."}'
+        ) as Object
+      },
+      autoRun: true
+    };
   }
 }
 
@@ -614,6 +658,96 @@ function messagesOfType(
 
 export default function actionAgentTest() {
   describe('actionAgent', () => {
+    it('auto-runs one exact zero-Data virtual Action without compiler or UI', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(compiledPlan());
+      const virtualResolver = new MemoryVirtualIntentResolver();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        executor,
+        compiler,
+        virtualResolver
+      );
+      const observer = bus.openReader();
+      agent.start();
+      const request: ActionPlanRequestPayload = {
+        uiTaskId: 'input-1:round-1:virtual',
+        dataTaskIds: [],
+        goal: 'Remember the explicit user statement',
+        allowedActionIds: ['memory.update'],
+        personaId: 'travel_companion',
+        inputText: '我在北京',
+        virtual: true
+      };
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        request,
+        'turn-1',
+        'virtual-request'
+      ));
+      const observed = await receiveUntilResult(observer);
+      const result = observed[observed.length - 1].payload as ActionResultPayload;
+
+      expect(result.status).assertEqual('success');
+      expect(result.surfaceId).assertEqual('virtual:virtual-request');
+      expect(virtualResolver.calls).assertEqual(1);
+      expect(compiler.goals.length).assertEqual(0);
+      expect(executor.actionIds.join(',')).assertEqual('memory.update');
+      expect(executor.serializedArgs.join(',')).assertEqual(
+        '{"personaId":"travel_companion","summary":"我在北京",' +
+        '"memoryText":"No saved preference. 我在北京",' +
+        '"reason":"User explicitly stated a stable location."}'
+      );
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_DRAFT).length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_READY).length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.TASK_CREATE_UI).length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects a zero-Data Action request when no virtual resolver owns it', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        executor,
+        new ScriptedActionPlanCompiler(compiledPlan())
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        {
+          uiTaskId: 'input-1:round-1:virtual',
+          dataTaskIds: [],
+          goal: 'Unowned virtual request',
+          allowedActionIds: ['memory.update'],
+          personaId: 'travel_companion',
+          inputText: '我在北京',
+          virtual: true
+        } as ActionPlanRequestPayload,
+        'turn-1',
+        'unowned-virtual-request'
+      ));
+      const result = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(result.status).assertEqual('error');
+      expect(result.errorCode).assertEqual('ACTION_VIRTUAL_INTENT_UNAVAILABLE');
+      expect(executor.actionIds.length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
     it('compiles a composed request from ordered current offers before READY', 0, async () => {
       const bus = new LinkedMessageBus();
       const compiler = new ScriptedActionPlanCompiler(compiledPlan());

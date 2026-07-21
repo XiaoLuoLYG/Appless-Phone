@@ -8,6 +8,7 @@ import {
   ActionPlanStepOutput,
   JsonValue
 } from './ActionPlanTypes';
+import { ActionOffer } from './ActionOfferTypes';
 
 export interface WorkflowRunArgs {
   planId: string;
@@ -26,6 +27,19 @@ export interface ActionPlanRequestPayload {
   dataTaskIds: string[];
   goal: string;
   allowedActionIds: string[];
+  personaId?: string;
+  inputText?: string;
+  virtual?: boolean;
+}
+
+export interface VirtualActionIntent {
+  sourceToolId: string;
+  offer: ActionOffer;
+  autoRun: boolean;
+}
+
+export interface VirtualActionIntentResolver {
+  resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null>;
 }
 
 export interface ActionPlanReadyPayload {

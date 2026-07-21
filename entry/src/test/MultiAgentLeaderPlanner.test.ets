@@ -68,6 +68,13 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'hotelNavigateResult',
       actions: []
     }, {
+      toolId: 'memory.update',
+      intent: 'Update persona memory',
+      riskLevel: 'draft',
+      inputSchema: 'memoryUpdateRequest',
+      outputSchema: 'memoryUpdateResult',
+      actions: ['memory.update']
+    }, {
       toolId: 'payment.create',
       intent: 'Create a payment',
       riskLevel: 'confirm_required',
@@ -175,6 +182,21 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails(extraTask)).assertTrue();
       expect(await fails(duplicateNested)).assertTrue();
       expect(await failsAtRound(PARALLEL_DECISION, 4)).assertTrue();
+    });
+
+    it('accepts zero Data only for an explicit registered Action intent', 0, async () => {
+      const output: string = '{"personaId":"travel_companion","skillId":"",' +
+        '"roundAction":"execute","dataTasks":[],' +
+        '"uiIntent":{"purpose":"remember","preferredDensity":"comfortable",' +
+        '"requiredSections":[]},"actionIntent":{"goal":"remember explicit text",' +
+        '"allowedActionIds":["memory.update"]},"reasonCode":"stable_preference"}';
+      const planner = new MultiAgentLeaderPlanner(new QueueLocalModel([output]));
+      const input: InputUserPayload = { text: '我在北京' };
+
+      const decision = await planner.plan(inputMessage(), input, planningContext(), 1);
+
+      expect(decision.dataTasks.length).assertEqual(0);
+      expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('memory.update');
     });
   });
 }

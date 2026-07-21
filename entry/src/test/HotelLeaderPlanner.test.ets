@@ -14,8 +14,7 @@ import {
 } from '../main/ets/pages/A2uiHome/agent/HotelLeaderPlanner';
 import {
   hotelModelSettingsFingerprint,
-  hotelTurnReadyMessage,
-  shouldRouteToHotelAgent
+  hotelTurnReadyMessage
 } from '../main/ets/pages/A2uiHome/Index';
 
 const SEARCH_JSON: string = '{' +
@@ -185,45 +184,6 @@ export default function hotelLeaderPlannerTest() {
     it('rejects invented or changed origin query instead of silently replacing it', 0, async () => {
       const invented = SEARCH_JSON.replace('8月15日深圳住两晚的酒店', '默认曼谷酒店');
       expect(await rejected('8月15日深圳住两晚的酒店', invented)).assertTrue();
-    });
-
-    it('routes only explicit Chinese or English hotel requests', 0, () => {
-      expect(shouldRouteToHotelAgent('帮我预订深圳酒店')).assertTrue();
-      expect(shouldRouteToHotelAgent('找一个杭州住宿')).assertTrue();
-      expect(shouldRouteToHotelAgent('Book a hotel in Shanghai')).assertTrue();
-      expect(shouldRouteToHotelAgent('find lodging near the airport')).assertTrue();
-      expect(shouldRouteToHotelAgent('深圳酒店')).assertTrue();
-      expect(shouldRouteToHotelAgent('Shanghai hotel')).assertTrue();
-      expect(shouldRouteToHotelAgent('stay in Beijing for two nights')).assertTrue();
-      expect(shouldRouteToHotelAgent('rooms near Shanghai airport')).assertTrue();
-      expect(shouldRouteToHotelAgent('find a room in Shanghai')).assertTrue();
-      expect(shouldRouteToHotelAgent('book a room near the airport')).assertTrue();
-      expect(shouldRouteToHotelAgent('reserve a room for August 15')).assertTrue();
-      expect(shouldRouteToHotelAgent('search for a room for two nights')).assertTrue();
-      expect(shouldRouteToHotelAgent('find a guest room for 2 guests tonight')).assertTrue();
-      expect(shouldRouteToHotelAgent('帮我订明天的高铁票')).assertFalse();
-      expect(shouldRouteToHotelAgent('打开 Gmail')).assertFalse();
-      expect(shouldRouteToHotelAgent('预订')).assertFalse();
-      expect(shouldRouteToHotelAgent('酒店行业新闻')).assertFalse();
-      expect(shouldRouteToHotelAgent('酒店股票走势')).assertFalse();
-      expect(shouldRouteToHotelAgent('翻译 hotel')).assertFalse();
-      expect(shouldRouteToHotelAgent('hotel industry news')).assertFalse();
-      expect(shouldRouteToHotelAgent('hotel stock analysis')).assertFalse();
-      expect(shouldRouteToHotelAgent('translate hotel into Chinese')).assertFalse();
-      expect(shouldRouteToHotelAgent('workplace accommodation policy')).assertFalse();
-      expect(shouldRouteToHotelAgent('send an accommodation email')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a meeting room in Shanghai')).assertFalse();
-      expect(shouldRouteToHotelAgent('need room to improve performance')).assertFalse();
-      expect(shouldRouteToHotelAgent('I need room for growth')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a room for growth')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a room for improvement')).assertFalse();
-      expect(shouldRouteToHotelAgent('search for room to maneuver')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a room in this paragraph')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a room in this document')).assertFalse();
-      expect(shouldRouteToHotelAgent('find a room in this email')).assertFalse();
-      expect(shouldRouteToHotelAgent('room layout ideas')).assertFalse();
-      expect(shouldRouteToHotelAgent('search classroom layout')).assertFalse();
-      expect(shouldRouteToHotelAgent('send a newsroom email')).assertFalse();
     });
 
     it('fingerprints every live model setting without exposing it in a status message', 0, () => {
