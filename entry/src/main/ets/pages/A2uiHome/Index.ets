@@ -123,6 +123,10 @@ import {
   MultiAgentTurnOutcome
 } from './agent/MultiAgentRuntimeTypes';
 import { SystemUriOpener } from './agent/AiphoneRegisteredActionExecutor';
+import {
+  registeredPageSourceToolId,
+  resolveRegisteredPageAction
+} from './agent/RegisteredPageActionRoute';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
@@ -3844,11 +3848,38 @@ struct Index {
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'dispatch');
     }
+    const document = this.currentHtmlHomeDocument();
+    const registeredAction = resolveRegisteredPageAction(
+      registeredPageSourceToolId(this.currentSurface),
+      action
+    );
+    if (registeredAction !== null) {
+      const runtime = this.canaryRuntime();
+      this.isBusy = true;
+      try {
+        const ok = await runtime.runPageAction(
+          action,
+          this.currentSurface,
+          document,
+          this.surfaceRenderTick + this.luckinInlinePatchTick
+        );
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok,
+          status: ok ? 'ready' : 'error',
+          message: ok ? '操作已处理。' : '操作已被当前页面权限拒绝。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: ok ? '' : 'registered action 与当前 surface/document 不匹配'
+        }));
+      } finally {
+        this.isBusy = false;
+      }
+      return;
+    }
     if (this.multiAgentRuntime !== null &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
       const runtime = this.multiAgentRuntime;
       const context = runtime.currentActionContext();
-      const document = this.currentHtmlHomeDocument();
       if (context === null || !isHtmlHomeActionAllowed(document, action)) {
         this.logHtmlHomeActionError(action, 'hotel_context_not_current');
         return;
@@ -4003,9 +4034,13 @@ struct Index {
       };
     }
     const observation: A2uiCallObservation = {};
+    const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+    const originalQuery = values['originalQuery'];
+    const prompt = typeof originalQuery === 'string' && originalQuery.trim().length > 0 ?
+      originalQuery : actionId;
     const ok = await this.callToolById(
       actionId,
-      actionId,
+      prompt,
       actionId,
       args,
       (result: A2uiCallResult): void => {

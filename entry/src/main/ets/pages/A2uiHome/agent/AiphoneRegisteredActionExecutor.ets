@@ -37,6 +37,8 @@ interface HotelSystemIntentOpened {
   message: string;
 }
 
+const REPLAY_IDENTITY_LIMIT: number = 128;
+
 function nonempty(value: string): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -72,6 +74,7 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
   private readonly ids: HotelActionIdFactory;
   private readonly pageAction: RegisteredPageAction;
   private readonly runs: Set<string> = new Set<string>();
+  private activeScopeKey: string = '';
 
   constructor(
     catalog: ActionCatalog,
@@ -127,6 +130,19 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         message: current.message
       };
     }
+    const scopeKey = this.scopeKey(context);
+    if (context.isSurfaceEntry === false) {
+      if (this.activeScopeKey.length === 0 || this.activeScopeKey !== scopeKey) {
+        return {
+          status: 'error',
+          errorCode: 'ACTION_EXECUTION_SCOPE_STALE',
+          message: 'Action execution scope is not current.'
+        };
+      }
+    } else if (this.activeScopeKey !== scopeKey) {
+      this.runs.clear();
+      this.activeScopeKey = scopeKey;
+    }
     if (actionId !== 'hotel.detail' &&
       actionId !== 'hotel.navigate' &&
       actionId !== 'hotel.booking.open' &&
@@ -143,6 +159,13 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         status: 'error',
         errorCode: 'ACTION_RUN_DUPLICATE',
         message: 'Action run identity already exists.'
+      };
+    }
+    if (this.runs.size >= REPLAY_IDENTITY_LIMIT) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_REPLAY_CAPACITY',
+        message: 'Action replay capacity is exhausted for the current surface.'
       };
     }
     this.runs.add(runKey);
@@ -164,6 +187,11 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
       );
     }
     return this.executePageAction(actionId, args, context);
+  }
+
+  dispose(): void {
+    this.runs.clear();
+    this.activeScopeKey = '';
   }
 
   private async executePageAction(
@@ -199,6 +227,13 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
       context.planId.length.toString() + ':' + context.planId +
       context.runId.length.toString() + ':' + context.runId +
       context.stepId.length.toString() + ':' + context.stepId;
+  }
+
+  private scopeKey(context: ActionExecutionContext): string {
+    return context.conversationId.length.toString() + ':' + context.conversationId +
+      context.turnId.length.toString() + ':' + context.turnId +
+      context.surfaceId.length.toString() + ':' + context.surfaceId +
+      context.sourceToolId.length.toString() + ':' + context.sourceToolId;
   }
 
   private detail(args: Object): ActionExecutionResult {

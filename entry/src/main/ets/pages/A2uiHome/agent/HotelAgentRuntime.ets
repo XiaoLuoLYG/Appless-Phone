@@ -80,6 +80,10 @@ import {
   HotelLocalDateProvider,
   HotelPlannerIdFactory
 } from './HotelLeaderPlanner';
+import {
+  registeredPageSourceToolId,
+  resolveRegisteredPageAction
+} from './RegisteredPageActionRoute';
 
 const DEFAULT_SUBMIT_TIMEOUT_MS: number = 30000;
 const DEFAULT_ACTION_TIMEOUT_MS: number = 15000;
@@ -925,12 +929,7 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
 
   private collect(document: HtmlHomeDocument, actions: HtmlHomeAction[]): void {
     actions.forEach((candidate: HtmlHomeAction) => {
-      if (candidate.id !== 'hotel.detail' &&
-        candidate.id !== 'hotel.navigate' &&
-        candidate.id !== 'hotel.booking.open') {
-        return;
-      }
-      const action: A2uiAction = {
+      const clicked: A2uiAction = {
         id: candidate.id,
         label: candidate.label,
         prompt: candidate.prompt,
@@ -938,10 +937,22 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
         kind: candidate.kind
       };
       if (candidate.args !== undefined) {
-        action.args = candidate.args;
+        clicked.args = candidate.args;
       }
-      if (action.args !== undefined && isHtmlHomeActionAllowed(document, action)) {
-        this.allowed.add(this.actionKey(action.id, action.args));
+      if (clicked.args === undefined || !isHtmlHomeActionAllowed(document, clicked)) {
+        return;
+      }
+      let execution: A2uiAction | null = null;
+      if ((clicked.id === 'hotel.detail' || clicked.id === 'hotel.navigate') &&
+        this.sourceToolId === 'hotel.search') {
+        execution = clicked;
+      } else if (clicked.id === 'hotel.booking.open' && this.sourceToolId === 'hotel.detail') {
+        execution = clicked;
+      } else {
+        execution = resolveRegisteredPageAction(this.sourceToolId, clicked);
+      }
+      if (execution !== null && execution.args !== undefined) {
+        this.allowed.add(this.actionKey(execution.id, execution.args));
       }
     });
   }
@@ -1241,7 +1252,7 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       isAwaitingFirstSurface: false
     });
     const detected = this.sourceToolId(record.surface);
-    if (detected === 'hotel.search' || detected === 'hotel.detail') {
+    if (detected.length > 0) {
       record.sourceToolId = detected;
     }
     const revision = record.revision;
@@ -1454,7 +1465,7 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       if (model.summary.dataLabel === 'actionStatus') {
         return '';
       }
-      return model.summary.toolName.indexOf('hotel.') === 0 ? model.summary.toolName : '';
+      return registeredPageSourceToolId(surface);
     } catch (_error) {
       return '';
     }
@@ -1471,6 +1482,7 @@ export class HotelAgentRuntime {
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
+  private readonly registered: AiphoneRegisteredActionExecutor;
   private readonly catalog: ActionCatalog;
   private readonly authority: HotelSurfaceAuthority;
   private readonly visibility: HotelVisibility;
@@ -1522,6 +1534,7 @@ export class HotelAgentRuntime {
       this.followUpIds,
       rejectNonHotelPageAction
     );
+    this.registered = registered;
     this.leader = new LeaderAgent(this.bus, planner, hotelLeaderPlanningContext());
     this.data = new DataAgent(this.bus, authorizeHotelDataTask, executor);
     this.ui = new UiAgent(
@@ -1694,6 +1707,16 @@ export class HotelAgentRuntime {
       actionId: action.id,
       args: action.args
     };
+    const runMessage: AgentMessage = {
+      type: AgentMessageType.ACTION_RUN,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId: taskId,
+      payload: payload
+    };
+    if (!this.action.authorizeDirectSurfaceRun(runMessage)) {
+      return Promise.resolve(false);
+    }
     return new Promise<boolean>((resolve: (ok: boolean) => void) => {
       const pending: PendingAction = {
         conversationId: context.conversationId,
@@ -1725,13 +1748,7 @@ export class HotelAgentRuntime {
         this.timeoutAction(taskId, runId);
       }, this.actionTimeoutMs);
       this.pendingActions.set(taskId, pending);
-      this.bus.publish({
-        type: AgentMessageType.ACTION_RUN,
-        conversationId: context.conversationId,
-        turnId: context.turnId,
-        taskId: taskId,
-        payload: payload
-      });
+      this.bus.publish(runMessage);
     });
   }
 
@@ -1782,6 +1799,7 @@ export class HotelAgentRuntime {
     this.data.stop();
     this.ui.stop();
     this.action.stop();
+    this.registered.dispose();
     this.pendingTurns.forEach((pending: PendingTurn) => {
       if (pending.timerId >= 0) {
         clearTimeout(pending.timerId);

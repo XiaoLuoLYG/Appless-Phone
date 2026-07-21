@@ -870,6 +870,91 @@ export default function actionAgentTest() {
       observer.close();
     });
 
+    it('treats only an internally authorized exact confirm-required surface click as direct confirmation', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const lookup = new ActionLookup();
+      lookup.confirmCall = true;
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
+      const observer = bus.openReader();
+      agent.start();
+      const args = JSON.parse(
+        '{"hotelId":101,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=101&' +
+          'checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0"}'
+      ) as Object;
+      const exact = message(
+        AgentMessageType.ACTION_RUN,
+        directRun('run-exact-click', 'hotel.booking.open', args, 'surface-1', 'hotel.detail'),
+        'turn-1',
+        'exact-click'
+      );
+
+      expect(agent.authorizeDirectSurfaceRun(exact)).assertTrue();
+      const forgedArgs = message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'run-exact-click',
+          'hotel.booking.open',
+          JSON.parse(
+            '{"hotelId":999,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?id=999"}'
+          ) as Object,
+          'surface-1',
+          'hotel.detail'
+        ),
+        'turn-1',
+        'exact-click'
+      );
+      bus.publish(forgedArgs);
+      const forged = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(forged.status).assertEqual('error');
+      expect(executor.actionIds.length).assertEqual(0);
+
+      bus.publish(exact);
+      const completed = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(completed.status).assertEqual('success');
+      expect(executor.actionIds.join(',')).assertEqual('hotel.booking.open');
+
+      const unconfirmed = message(
+        AgentMessageType.ACTION_RUN,
+        directRun('run-unconfirmed', 'hotel.booking.open', args, 'surface-1', 'hotel.detail'),
+        'turn-1',
+        'unconfirmed-click'
+      );
+      bus.publish(unconfirmed);
+      const paused = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(paused.status).assertEqual('paused');
+      expect(executor.actionIds.length).assertEqual(1);
+
+      const stopped = message(
+        AgentMessageType.ACTION_RUN,
+        directRun('run-stopped-proof', 'hotel.booking.open', args, 'surface-1', 'hotel.detail'),
+        'turn-1',
+        'stopped-proof'
+      );
+      expect(agent.authorizeDirectSurfaceRun(stopped)).assertTrue();
+      agent.stop();
+      agent.start();
+      bus.publish(stopped);
+      const stoppedResult = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(stoppedResult.status).assertEqual('paused');
+      expect(executor.actionIds.length).assertEqual(1);
+
+      agent.stop();
+      observer.close();
+    });
+
     it('does not let a pending offer resolver block cancellation or later Actions', 0, async () => {
       const bus = new LinkedMessageBus();
       const deferred = new DeferredOfferResolver();

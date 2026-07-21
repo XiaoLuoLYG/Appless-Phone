@@ -153,6 +153,7 @@ export class MultiAgentRuntime {
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
+  private readonly ownedActionExecutor: AiphoneRegisteredActionExecutor | null;
   private pendingTurn: PendingTurn | null = null;
   private readonly pendingActions: Map<string, PendingAction> = new Map<string, PendingAction>();
   private generation: number = 0;
@@ -196,13 +197,20 @@ export class MultiAgentRuntime {
     const actionOfferResolver = options.actionOfferResolver === undefined ?
       async (dataResult: DataResult, context: ActionOfferContext): Promise<ActionOffer[]> =>
         registeredOfferResolver.resolve(dataResult, context) : options.actionOfferResolver;
-    const actionExecutor: RegisteredActionExecutor = options.actionExecutor === undefined ?
-      new AiphoneRegisteredActionExecutor(
+    let actionExecutor: RegisteredActionExecutor;
+    if (options.actionExecutor === undefined) {
+      const ownedActionExecutor = new AiphoneRegisteredActionExecutor(
         options.actionCatalog,
         options.systemUriOpener === undefined ? new RejectSystemUriOpener() : options.systemUriOpener,
         options.actionIdFactory === undefined ? new RuntimeActionIds() : options.actionIdFactory,
         options.registeredPageAction === undefined ? rejectPageAction : options.registeredPageAction
-      ) : options.actionExecutor;
+      );
+      this.ownedActionExecutor = ownedActionExecutor;
+      actionExecutor = ownedActionExecutor;
+    } else {
+      this.ownedActionExecutor = null;
+      actionExecutor = options.actionExecutor;
+    }
     this.ui = new UiAgent(this.bus, uiRenderer, options.surfaceWriter);
     this.action = new ActionAgent(
       this.bus,
@@ -288,6 +296,16 @@ export class MultiAgentRuntime {
       actionId: action.id,
       args: action.args
     };
+    const message: AgentMessage = {
+      type: AgentMessageType.ACTION_RUN,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      taskId,
+      payload
+    };
+    if (!this.action.authorizeDirectSurfaceRun(message)) {
+      return Promise.resolve(false);
+    }
     return new Promise<boolean>((resolve: (ok: boolean) => void) => {
       const pending: PendingAction = {
         conversationId: context.conversationId,
@@ -313,13 +331,7 @@ export class MultiAgentRuntime {
         this.timeoutAction(pending);
       }, this.actionTimeoutMs);
       this.pendingActions.set(taskId, pending);
-      this.bus.publish({
-        type: AgentMessageType.ACTION_RUN,
-        conversationId: pending.conversationId,
-        turnId: pending.turnId,
-        taskId: pending.taskId,
-        payload
-      });
+      this.bus.publish(message);
     });
   }
 
@@ -351,6 +363,9 @@ export class MultiAgentRuntime {
     this.data.stop();
     this.ui.stop();
     this.action.stop();
+    if (this.ownedActionExecutor !== null) {
+      this.ownedActionExecutor.dispose();
+    }
     const pending: PendingTurn | null = this.pendingTurn;
     if (pending !== null) {
       this.settleTurn(pending, settled('canceled', 'Multi-agent runtime disposed.'));

@@ -1,7 +1,10 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   A2uiAction,
+  A2uiRuntimeDataModel,
   A2uiSurfaceState,
+  ActionExecutionContext,
+  ActionExecutionResult,
   AgentMessage,
   AgentMessageType,
   CreateDataTaskPayload,
@@ -18,6 +21,7 @@ import {
   TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
+  createSeedA2uiSurface,
   hotelSearchDataResult,
   parseHotelSearchRequest
 } from '@loop/agent-core';
@@ -64,6 +68,16 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
+const WORLDCUP_ACTION_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
+  '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"actionIntent":{"goal":"open the World Cup page",' +
+  '"allowedActionIds":["worldcup.open"]},"reasonCode":"worldcup_action"}';
+const MAPS_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["maps.route.open"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"actionIntent":{"goal":"open the requested map route",' +
+  '"allowedActionIds":["maps.route.open"]},"reasonCode":"maps_action"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"mail-search",' +
@@ -362,6 +376,36 @@ function renderedAction(surface: A2uiSurfaceState, actionId: string): A2uiAction
   return null;
 }
 
+interface RecordedPageAction {
+  actionId: string;
+  args: Object;
+  context: ActionExecutionContext;
+}
+
+function pageSurface(
+  sourceToolId: string,
+  action: A2uiAction,
+  sequence: number
+): A2uiSurfaceState {
+  const surface = createSeedA2uiSurface();
+  const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+  model.summary.toolName = sourceToolId;
+  model.summary.dataLabel = 'result';
+  surface.surfaceId = 'page-surface-' + sequence.toString();
+  surface.rootId = 'root';
+  surface.title = sourceToolId;
+  surface.intent = sourceToolId;
+  surface.status = 'ready';
+  surface.sequence = sequence;
+  surface.components = [{
+    id: 'root',
+    component: 'SurfaceRoot',
+    actions: [action]
+  }];
+  surface.dataModelJson = JSON.stringify(model);
+  return surface;
+}
+
 export default function multiAgentCanaryRuntimeTest() {
   describe('multiAgentCanaryRuntime', () => {
     it('owns C01 greeting without a tool surface', 0, async () => {
@@ -553,6 +597,48 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('owns initial fixed Actions through the real Leader actionIntent path', 0, async () => {
+      const calls: RecordedPageAction[] = [];
+      const bus = new TrackingBus();
+      const options = canaryOptions(
+        new QueueModel([WORLDCUP_ACTION_DECISION, MAPS_ACTION_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"route":"pages/A2uiHome/AnythingDemo","status":"opened"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit('打开世界杯页面', { text: '' }) as MultiAgentSettledOutcome;
+      const mapsOutcome = await runtime.submit('打开深圳北到香港西九龙的路线', { text: '' }) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(mapsOutcome.status).assertEqual('success');
+      expect(calls.length).assertEqual(2);
+      expect(calls[0].actionId).assertEqual('worldcup.open');
+      expect(JSON.stringify(calls[0].args)).assertEqual('{"originalQuery":"打开世界杯页面"}');
+      expect(calls[0].context.sourceToolId).assertEqual('worldcup.open');
+      expect(calls[1].actionId).assertEqual('maps.route.open');
+      expect(JSON.stringify(calls[1].args)).assertEqual('{"originalQuery":"打开深圳北到香港西九龙的路线"}');
+      expect(calls[1].context.sourceToolId).assertEqual('maps.route.open');
+      expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(2);
+      expect(bus.count(AgentMessageType.ACTION_RESULT)).assertEqual(2);
+      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+      runtime.dispose();
+    });
+
     it('refreshes second-turn planning from the updated C11 persona memory', 0, async () => {
       configureDefaultPersonaStoreForTests();
       const updates: PersonaMemoryUpdateRequest[] = [];
@@ -648,6 +734,145 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(runtime.restoreSearchSurface()).assertTrue();
       expect(runtime.currentActionContext()?.sourceToolId).assertEqual('hotel.search');
+      runtime.dispose();
+    });
+
+    it('routes exact declared and existing adapted product buttons through one ActionAgent run', 0, async () => {
+      const calls: RecordedPageAction[] = [];
+      const bus = new TrackingBus();
+      const options = canaryOptions(
+        new QueueModel([]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"providerStatus":"exact"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const routes: Array<[string, string, string, Object, string]> = [
+        ['social.feed.search', 'social.reply.draft', 'social.reply.draft',
+          JSON.parse('{"itemId":"post-1","platform":"x","instruction":"draft"}') as Object, 'prompt'],
+        ['mail.search', 'mail.draft.create', 'mail.draft.create',
+          JSON.parse('{"to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
+        ['gmail.thread.read', 'gmail.draft.create', 'gmail.draft.create',
+          JSON.parse('{"to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
+        ['gmail.draft.create', 'gmail.draft.apply', 'gmail.draft.apply',
+          JSON.parse('{"draftId":"draft-1","body":"exact"}') as Object, 'prompt'],
+        ['gmail.draft.apply', 'gmail.open.web', 'gmail.open.web',
+          JSON.parse('{"url":"https://mail.google.com/"}') as Object, 'client'],
+        ['luckin.order.preview', 'luckin.order.preview', 'luckin.order.preview',
+          JSON.parse('{"deptId":"shop-1","location":"114.0,22.5"}') as Object, 'prompt'],
+        ['payment.send', 'payment.confirm', 'payment.send',
+          JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object, 'prompt'],
+        ['payment.account.setup', 'stripe.account.create', 'payment.account.setup',
+          JSON.parse('{"country":"US","businessType":"individual"}') as Object, 'client']
+      ];
+
+      for (let index = 0; index < routes.length; index++) {
+        const route = routes[index];
+        const clicked: A2uiAction = {
+          id: route[1],
+          label: route[1],
+          prompt: route[1],
+          variant: 'primary',
+          kind: route[4],
+          args: route[3]
+        };
+        const surface = pageSurface(route[0], clicked, index + 1);
+        const document = createHtmlHomeDocument({
+          surface,
+          messages: [],
+          isBusy: false,
+          isAwaitingFirstSurface: false
+        });
+        expect(await runtime.runPageAction(clicked, surface, document, index + 1)).assertTrue();
+        expect(calls[index].actionId).assertEqual(route[2]);
+        expect(JSON.stringify(calls[index].args)).assertEqual(JSON.stringify(route[3]));
+      }
+      expect(calls.length).assertEqual(routes.length);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_RESULT &&
+          JSON.stringify(message.payload).indexOf('"status":"paused"') >= 0
+      ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('rejects stale mutated client-only and deferred page actions before callback', 0, async () => {
+      const calls: string[] = [];
+      const options = canaryOptions(
+        new QueueModel([]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.pageAction = async (
+        actionId: string,
+        _args: Object,
+        _context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push(actionId);
+        return { status: 'success', output: new Object() };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const args = JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object;
+      const clicked: A2uiAction = {
+        id: 'payment.confirm',
+        label: 'payment.confirm',
+        prompt: 'payment.confirm',
+        variant: 'primary',
+        kind: 'prompt',
+        args
+      };
+      const surface = pageSurface('payment.send', clicked, 10);
+      const document = createHtmlHomeDocument({
+        surface,
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const mutated: A2uiAction = {
+        id: clicked.id,
+        label: clicked.label,
+        prompt: clicked.prompt,
+        variant: clicked.variant,
+        kind: clicked.kind,
+        args: JSON.parse('{"recipient":"mallory","amountText":"5000","currency":"USD","phase":"confirm"}') as Object
+      };
+      const clientOnly: A2uiAction = {
+        id: 'payment.cancel',
+        label: 'payment.cancel',
+        prompt: 'payment.cancel',
+        variant: 'secondary',
+        kind: 'client',
+        args
+      };
+      const deferred: A2uiAction = {
+        id: 'gmail.message.send',
+        label: 'gmail.message.send',
+        prompt: 'gmail.message.send',
+        variant: 'primary',
+        kind: 'prompt',
+        args
+      };
+
+      expect(await runtime.runPageAction(clicked, surface, document, 10)).assertTrue();
+      expect(await runtime.runPageAction(mutated, surface, document, 10)).assertFalse();
+      expect(await runtime.runPageAction(clientOnly, surface, document, 10)).assertFalse();
+      expect(await runtime.runPageAction(deferred, surface, document, 10)).assertFalse();
+      expect(await runtime.runPageAction(clicked, surface, document, 9)).assertFalse();
+      expect(calls.length).assertEqual(1);
       runtime.dispose();
     });
 

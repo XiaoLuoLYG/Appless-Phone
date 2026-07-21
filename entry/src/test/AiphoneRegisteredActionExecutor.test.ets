@@ -41,12 +41,7 @@ function definition(toolId: string): ToolDefinition {
 }
 
 class RegisteredDefinitions implements ToolDefinitionLookup {
-  private readonly sourceToolId: string;
-  private readonly actionId: string;
-
-  constructor(sourceToolId: string = '', actionId: string = '') {
-    this.sourceToolId = sourceToolId;
-    this.actionId = actionId;
+  constructor(_sourceToolId: string = '', _actionId: string = '') {
   }
 
   find(toolId: string): ToolDefinition | null {
@@ -65,9 +60,6 @@ class RegisteredDefinitions implements ToolDefinitionLookup {
     const registered = toolDefinitionForToolId(toolId);
     if (registered === null) {
       return null;
-    }
-    if (toolId === this.sourceToolId && registered.actions.indexOf(this.actionId) < 0) {
-      registered.actions.push(this.actionId);
     }
     return registered;
   }
@@ -92,6 +84,33 @@ class ExactSurface implements SurfaceActionAuthorizer {
     return conversationId === 'conversation-1' &&
       turnId === 'turn-1' &&
       surfaceId === 'surface-1' &&
+      actionId === this.actionId &&
+      JSON.stringify(args) === this.serializedArgs;
+  }
+}
+
+class MutableExactSurface implements SurfaceActionAuthorizer {
+  conversationId: string = 'conversation-1';
+  turnId: string = 'turn-1';
+  surfaceId: string = 'surface-1';
+  actionId: string;
+  serializedArgs: string;
+
+  constructor(actionId: string, args: Object) {
+    this.actionId = actionId;
+    this.serializedArgs = JSON.stringify(args);
+  }
+
+  allows(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    args: Object
+  ): boolean {
+    return conversationId === this.conversationId &&
+      turnId === this.turnId &&
+      surfaceId === this.surfaceId &&
       actionId === this.actionId &&
       JSON.stringify(args) === this.serializedArgs;
   }
@@ -323,14 +342,20 @@ export default function aiphoneRegisteredActionExecutorTest() {
         pageCallback(new RecordingPageAction())
       );
 
+      const entry = context('hotel.detail');
+      const entryResult = await executor.execute('hotel.booking.open', args, entry);
+      const later = context('hotel.search', false);
+      later.sourceToolId = 'hotel.detail';
+      later.stepId = 'step-2';
       const result = await executor.execute(
         'hotel.booking.open',
         args,
-        context('hotel.search', false)
+        later
       );
 
+      expect(entryResult.status).assertEqual('success');
       expect(result.status).assertEqual('success');
-      expect(opener.uris.join(',')).assertEqual(args.bookingUrl);
+      expect(opener.uris.length).assertEqual(2);
     });
 
     it('rejects tampered booking URL and hotel ID before opening', 0, async () => {
@@ -643,6 +668,89 @@ export default function aiphoneRegisteredActionExecutorTest() {
 
       expect(firstResult.status).assertEqual('success');
       expect(secondResult.status).assertEqual('success');
+      expect(recorder.calls.length).assertEqual(2);
+    });
+
+    it('bounds replay identities without evicting any live-scope execution', 0, async () => {
+      const args = object('{"to":"alice@example.com","subject":"QA","body":"Exact"}');
+      const recorder = new RecordingPageAction();
+      const executor = pageExecutor(
+        'gmail.draft.create', args, recorder, new FakeUriOpener(), 'gmail.thread.read'
+      );
+
+      for (let index = 0; index < 128; index++) {
+        const current = context('gmail.thread.read');
+        current.stepId = 'step-' + index.toString();
+        expect((await executor.execute('gmail.draft.create', args, current)).status)
+          .assertEqual('success');
+      }
+      const overflow = context('gmail.thread.read');
+      overflow.stepId = 'step-overflow';
+      const overflowResult = await executor.execute('gmail.draft.create', args, overflow);
+      const firstReplay = context('gmail.thread.read');
+      firstReplay.stepId = 'step-0';
+      const replayResult = await executor.execute('gmail.draft.create', args, firstReplay);
+
+      expect(overflowResult.status).assertEqual('error');
+      expect(JSON.stringify(overflowResult).indexOf('CAPACITY')).assertLarger(-1);
+      expect(replayResult.status).assertEqual('error');
+      expect(JSON.stringify(replayResult).indexOf('DUPLICATE')).assertLarger(-1);
+      expect(recorder.calls.length).assertEqual(128);
+    });
+
+    it('changes replay scope only after current surface authority validates the transition', 0, async () => {
+      const args = object('{"to":"alice@example.com","subject":"QA","body":"Exact"}');
+      const authority = new MutableExactSurface('gmail.draft.create', args);
+      const actionCatalog = new ActionCatalog(
+        new RegisteredDefinitions(),
+        authority,
+        new NoClientAction(),
+        new RegisteredArgsValidator()
+      );
+      const recorder = new RecordingPageAction();
+      const executor = new AiphoneRegisteredActionExecutor(
+        actionCatalog,
+        new FakeUriOpener(),
+        new DeterministicIds(),
+        pageCallback(recorder)
+      );
+      const first = context('gmail.thread.read');
+      expect((await executor.execute('gmail.draft.create', args, first)).status)
+        .assertEqual('success');
+
+      const forged = context('gmail.thread.read');
+      forged.turnId = 'turn-forged';
+      forged.surfaceId = 'surface-forged';
+      expect((await executor.execute('gmail.draft.create', args, forged)).status)
+        .assertEqual('error');
+      expect((await executor.execute('gmail.draft.create', args, first)).status)
+        .assertEqual('error');
+
+      authority.turnId = 'turn-2';
+      authority.surfaceId = 'surface-2';
+      const second = context('gmail.thread.read');
+      second.turnId = 'turn-2';
+      second.surfaceId = 'surface-2';
+      expect((await executor.execute('gmail.draft.create', args, second)).status)
+        .assertEqual('success');
+      expect((await executor.execute('gmail.draft.create', args, first)).status)
+        .assertEqual('error');
+      expect(recorder.calls.length).assertEqual(2);
+    });
+
+    it('clears replay state only when the executor is disposed', 0, async () => {
+      const args = object('{"to":"alice@example.com","subject":"QA","body":"Exact"}');
+      const recorder = new RecordingPageAction();
+      const executor = pageExecutor(
+        'gmail.draft.create', args, recorder, new FakeUriOpener(), 'gmail.thread.read'
+      );
+      const current = context('gmail.thread.read');
+
+      expect((await executor.execute('gmail.draft.create', args, current)).status)
+        .assertEqual('success');
+      executor.dispose();
+      expect((await executor.execute('gmail.draft.create', args, current)).status)
+        .assertEqual('success');
       expect(recorder.calls.length).assertEqual(2);
     });
 

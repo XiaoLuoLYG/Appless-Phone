@@ -117,6 +117,18 @@ interface MatchedActionOffer {
   offer: ActionOffer;
 }
 
+interface DirectSurfaceAuthorization {
+  conversationId: string;
+  turnId: string;
+  taskId: string;
+  surfaceId: string;
+  sourceToolId: string;
+  runId: string;
+  actionId: string;
+  args: Object;
+  generation: number;
+}
+
 function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -239,6 +251,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly terminalPlanRequests: Set<string> = new Set<string>();
   private readonly terminalPlanRequestOrder: string[] = [];
   private readonly uiSurfaces: Map<string, string> = new Map<string, string>();
+  private readonly directSurfaceAuthorizations: Map<string, DirectSurfaceAuthorization> =
+    new Map<string, DirectSurfaceAuthorization>();
   private generation: number = 0;
   private observationSequence: number = 0;
   private active: boolean = false;
@@ -286,6 +300,59 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.terminalPlanRequests.clear();
     this.terminalPlanRequestOrder.splice(0, this.terminalPlanRequestOrder.length);
     this.uiSurfaces.clear();
+    this.directSurfaceAuthorizations.clear();
+  }
+
+  authorizeDirectSurfaceRun(message: AgentMessage): boolean {
+    if (!this.active || message.type !== AgentMessageType.ACTION_RUN) {
+      return false;
+    }
+    const payload = this.actionRunPayload(message.payload);
+    if (payload === null || payload.actionId === WORKFLOW_RUN_ACTION_ID ||
+      payload.confirmedStepId !== undefined || !nonempty(payload.sourceToolId)) {
+      return false;
+    }
+    const current = this.catalog.validateSurfaceExecution(
+      message.conversationId,
+      message.turnId,
+      payload.surfaceId,
+      payload.sourceToolId as string,
+      payload.actionId,
+      payload.args
+    );
+    if (!current.ok || current.definition === null) {
+      return false;
+    }
+    if (current.definition.riskLevel !== 'confirm_required') {
+      return true;
+    }
+    const key = this.runKey(
+      message.conversationId,
+      message.turnId,
+      payload.surfaceId,
+      payload.runId
+    );
+    if (this.runExists(key) || this.directSurfaceAuthorizations.has(key) ||
+      this.directSurfaceAuthorizations.size >= LIVE_RUN_LIMIT) {
+      return false;
+    }
+    const cloned = cloneJsonValue(payload.args as Object);
+    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+      Array.isArray(cloned.value)) {
+      return false;
+    }
+    this.directSurfaceAuthorizations.set(key, {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: message.taskId,
+      surfaceId: payload.surfaceId,
+      sourceToolId: payload.sourceToolId as string,
+      runId: payload.runId,
+      actionId: payload.actionId,
+      args: cloned.value as Object,
+      generation: this.generation
+    });
+    return true;
   }
 
   inspectPausedRun(
@@ -1234,6 +1301,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
+    const directlyConfirmed = this.consumeDirectSurfaceAuthorization(message, payload, key);
     this.executeStored({
       planId: plan.planId,
       runId: payload.runId,
@@ -1241,7 +1309,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       context,
       taskId: message.taskId,
       followUpPublished: false
-    }, null);
+    }, null, directlyConfirmed ? 'step-1' : '');
   }
 
   private startStoredRun(message: AgentMessage, payload: ActionRunPayload): void {
@@ -1325,7 +1393,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.executeStored(current, null);
   }
 
-  private executeStored(stored: StoredActionRun, paused: PausedActionRun | null): void {
+  private executeStored(
+    stored: StoredActionRun,
+    paused: PausedActionRun | null,
+    directConfirmedStepId: string = ''
+  ): void {
     const priorOutputs = paused === null ? [] : cloneOutputs(paused.outputs);
     if (priorOutputs === null) {
       this.rememberTerminal(this.storedRunKey(stored));
@@ -1352,15 +1424,23 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     };
     this.activeRuns.set(this.storedRunKey(stored), active);
     let execution: Promise<ActionPlanOutcome>;
-    if (paused === null) {
+    if (paused === null && directConfirmedStepId.length === 0) {
       execution = this.runner.run(stored.plan, stored.context);
-    } else {
+    } else if (paused !== null) {
       execution = this.runner.resume(
         stored.plan,
         stored.context,
         paused.nextStepIndex,
         paused.outputs,
         paused.stepId
+      );
+    } else {
+      execution = this.runner.resume(
+        stored.plan,
+        stored.context,
+        0,
+        [],
+        directConfirmedStepId
       );
     }
     execution
@@ -1441,6 +1521,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
     });
     const prefix = this.turnPrefix(message.conversationId, message.turnId);
+    this.directSurfaceAuthorizations.forEach(
+      (authorization: DirectSurfaceAuthorization, key: string) => {
+        if (authorization.conversationId === message.conversationId &&
+          authorization.turnId === message.turnId) {
+          this.directSurfaceAuthorizations.delete(key);
+        }
+      }
+    );
     this.availableOffers.forEach((_offers: StoredAvailableOffers, key: string) => {
       if (key.startsWith(prefix)) {
         this.availableOffers.delete(key);
@@ -1790,6 +1878,27 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.context.conversationId === message.conversationId &&
       stored.context.turnId === message.turnId &&
       stored.context.surfaceId === payload.surfaceId;
+  }
+
+  private consumeDirectSurfaceAuthorization(
+    message: AgentMessage,
+    payload: ActionRunPayload,
+    key: string
+  ): boolean {
+    const authorization = this.directSurfaceAuthorizations.get(key);
+    if (authorization === undefined || authorization.generation !== this.generation ||
+      authorization.conversationId !== message.conversationId ||
+      authorization.turnId !== message.turnId ||
+      authorization.taskId !== message.taskId ||
+      authorization.surfaceId !== payload.surfaceId ||
+      authorization.sourceToolId !== payload.sourceToolId ||
+      authorization.runId !== payload.runId ||
+      authorization.actionId !== payload.actionId ||
+      !sameJson(authorization.args as JsonValue, payload.args as JsonValue)) {
+      return false;
+    }
+    this.directSurfaceAuthorizations.delete(key);
+    return true;
   }
 
   private matchesPaused(
