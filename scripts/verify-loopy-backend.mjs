@@ -72,7 +72,7 @@ function readAgentRuntimeSources() {
       }
     }
   }
-  sources.push(read('agent_core/src/main/ets/agent/StructuredMessageDrivenAgent.ets'));
+  sources.push(read('agent_core/src/main/ets/agent/MessageDrivenAgent.ets'));
   for (const name of ['action', 'data', 'leader', 'message', 'ui']) {
     visit(resolve(repoRoot, 'agent_core/src/main/ets/agent', name));
   }
@@ -467,6 +467,10 @@ function verifySourceContracts() {
   const actionPlanRunner = stripComments(read('agent_core/src/main/ets/agent/action/ActionPlanRunner.ets'));
   const jsonPointer = stripComments(read('agent_core/src/main/ets/agent/action/JsonPointer.ets'));
   const actionAgent = stripComments(read('agent_core/src/main/ets/agent/action/ActionAgent.ets'));
+  const messageDrivenAgent = stripComments(read('agent_core/src/main/ets/agent/MessageDrivenAgent.ets'));
+  const layoutMerger = stripComments(read('agent_core/src/main/ets/a2ui/A2uiLayoutMerger.ets'));
+  const a2uiRunner = stripComments(read('agent_core/src/main/ets/a2ui/A2uiAgentRunner.ets'));
+  const a2uiModel = stripComments(read('agent_core/src/main/ets/a2ui/OpenAiA2uiModel.ets'));
   const conversationStore = read('agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
@@ -664,10 +668,7 @@ function verifySourceContracts() {
     ['./src/main/ets/agent/message/AgentMessage', ['*'], 'message contract exports'],
     ['./src/main/ets/agent/message/DataResult', ['*'], 'data result exports'],
     ['./src/main/ets/agent/message/LinkedMessageBus', ['AgentMessageReader', 'LinkedMessageBus'], 'message bus exports'],
-    ['./src/main/ets/agent/StructuredMessageDrivenAgent', [
-      'StructuredMessageDrivenAgent',
-      'StructuredMessageDrivenAgent as MessageDrivenAgent'
-    ], 'structured message-driven base exports'],
+    ['./src/main/ets/agent/MessageDrivenAgent', ['MessageDrivenAgent'], 'message-driven base exports'],
     ['./src/main/ets/agent/leader/LeaderAgent', ['LeaderAgent'], 'Leader Agent exports'],
     ['./src/main/ets/agent/leader/LeaderTypes', ['*'], 'Leader Agent types export'],
     ['./src/main/ets/agent/data/DataAgent', ['DataAgent'], 'Data Agent exports'],
@@ -676,6 +677,7 @@ function verifySourceContracts() {
     ['./src/main/ets/agent/ui/UiAgentTypes', ['*'], 'UI Agent types export'],
     ['./src/main/ets/agent/action/ActionCatalog', ['ActionCatalog'], 'Action catalog exports'],
     ['./src/main/ets/agent/action/ActionCatalogTypes', ['*'], 'Action catalog types export'],
+    ['./src/main/ets/agent/action/ActionOfferTypes', ['*'], 'Action offer types export'],
     ['./src/main/ets/agent/action/ActionPlanTypes', ['*'], 'Action plan types export'],
     ['./src/main/ets/agent/action/JsonPointer', [
       'JsonPointerResult',
@@ -705,9 +707,38 @@ function verifySourceContracts() {
   assert(/export\s+class\s+AgentMessageReader\b/.test(messageBus), 'message bus reader is public');
   assert(/export\s+class\s+LinkedMessageBus\b/.test(messageBus), 'linked message bus is public');
   assert(/export\s+class\s+ActionCatalog\b/.test(actionCatalog), 'action catalog is public');
-  assertContains(index, 'ReactLinkedMessageBus', 'public API keeps the Loopy ReAct bus under an explicit alias');
-  assertContains(index, 'ReactLeaderAgent', 'public API keeps the Loopy ReAct leader under an explicit alias');
+  assert(/export\s+abstract\s+class\s+MessageDrivenAgent\b/.test(messageDrivenAgent), 'single subscriber base is public');
+  assert(!index.includes('ReactLinkedMessageBus'), 'public API has no second ReAct message bus');
+  assert(!index.includes('ReactLeaderAgent'), 'public API has no second ReAct leader');
+  assert(!index.includes('UIMakerAgent'), 'public API has no UIMaker compatibility agent');
   assertContains(index, 'ReActRunOptions', 'public API exposes role-specific ReAct options');
+
+  const obsoleteAgentFiles = [
+    'AgentMessageTypes.ets',
+    'CreateUiTaskTool.ets',
+    'LeaderAgent.ets',
+    'LeaderAgentPrompt.ets',
+    'LeaderToolRegistry.ets',
+    'LoopAgentPrompt.ets',
+    'MessageBus.ets',
+    'ReActAgent.ets',
+    'StructuredMessageDrivenAgent.ets',
+    'UIMakerAgent.ets',
+    'UIMakerAgentPrompt.ets',
+    'UIMakerToolRegistry.ets'
+  ];
+  assert(
+    obsoleteAgentFiles.every((name) => !existsSync(resolve(repoRoot, 'agent_core/src/main/ets/agent', name))),
+    'obsolete second agent runtime files are absent'
+  );
+  for (const [role, source] of [
+    ['LeaderAgent', leaderAgent],
+    ['DataAgent', dataAgent],
+    ['UiAgent', uiAgent],
+    ['ActionAgent', actionAgent]
+  ]) {
+    assertContains(source, `class ${role} extends MessageDrivenAgent`, `${role} uses the single subscriber base`);
+  }
 
   const agentMessageEnum = declarationBody(agentMessage, 'export enum AgentMessageType');
   const agentEnvelope = declarationBody(agentMessage, 'export interface AgentMessage');
@@ -718,7 +749,8 @@ function verifySourceContracts() {
     ['TASK_RESULT_UI', 'TASK.RESULT.UI'],
     ['TASK_RESULT_DATA', 'TASK.RESULT.DATA'],
     ['TASK_ERROR', 'TASK.ERROR'],
-    ['ACTION_PLAN_CREATE', 'ACTION.PLAN.CREATE'],
+    ['ACTION_PLAN_DRAFT', 'ACTION.PLAN.DRAFT'],
+    ['ACTION_OFFERS_READY', 'ACTION.OFFERS.READY'],
     ['ACTION_PLAN_READY', 'ACTION.PLAN.READY'],
     ['ACTION_RUN', 'ACTION.RUN'],
     ['ACTION_PROGRESS', 'ACTION.PROGRESS'],
@@ -752,6 +784,26 @@ function verifySourceContracts() {
     hasRegisteredActionExecutorDependency(actionAgent),
     'Action Agent injects and stores RegisteredActionExecutor'
   );
+  assertContains(dataAgent, 'authorizer(task)', 'Data Agent authorizes exact tasks before execution');
+  assertContains(dataAgent, 'result.toolId === task.toolId && result.outputSchema === task.outputSchema',
+    'Data Agent validates result identity and schema');
+  assertContains(actionAgent, 'this.catalog.validatePlacement(sourceToolId, candidate.actionId, args)',
+    'Action Agent derives only catalog-approved offers');
+  assertContains(actionAgent, 'type: AgentMessageType.ACTION_OFFERS_READY',
+    'Action Agent publishes immutable offers');
+  assertContains(actionAgent, 'type: AgentMessageType.ACTION_PLAN_DRAFT',
+    'Action Agent binds Leader action plan drafts');
+  assertContains(uiAgent, 'message.type === AgentMessageType.ACTION_OFFERS_READY',
+    'UI Agent joins data with Action Agent offers');
+  assertContains(hotelRuntime, 'mergeA2uiLayout(baseline, candidate, surfaceId, offers)',
+    'hotel UI keeps deterministic output as the constrained layout baseline');
+  assertContains(layoutMerger, 'return baselineJsonl', 'invalid model layouts fall back exactly');
+  assertContains(layoutMerger, "exactKeys(reference, ['offerId'])",
+    'model layout actions can reference only immutable offer ids');
+  assertContains(a2uiRunner, 'implements UiLayoutPlanner', 'existing A2UI runner is reused as the layout planner');
+  assertContains(a2uiModel, 'Output exactly one compact JSON line', 'A2UI model is constrained to one layout envelope');
+  assertContains(backend, 'new ReActAgentRunner', 'legacy scene backend remains a real ReAct runner caller');
+  assert(!agentRuntimeSources.includes('ReActAgentRunner'), 'four-agent runtime does not create a second ReAct execution loop');
   assert(!hasLiveToken(agentRuntimeSources, 'BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
   assert(!hasLiveClass(agentRuntimeSources, 'Coordinator'), 'agent runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
