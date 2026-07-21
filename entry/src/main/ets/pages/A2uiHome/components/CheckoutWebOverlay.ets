@@ -37,6 +37,10 @@ export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): st
   return kind === 'train' && !isAllowed12306BookingUrl(url) ? '' : url;
 }
 
+export function checkoutWebMobileReadable(kind: CheckoutWebKind): boolean {
+  return kind === 'train';
+}
+
 export function checkoutWebNavigationDecision(
   kind: CheckoutWebKind,
   url: string,
@@ -186,6 +190,7 @@ export struct CheckoutWebOverlay {
       A2uiWebSurfaceView({
         mode: 'url',
         url: checkoutWebInitialSource(this.kind, this.url),
+        mobileReadable: checkoutWebMobileReadable(this.kind),
         allowPopup: true,
         javaScriptEnabled: true,
         domStorageEnabled: true,

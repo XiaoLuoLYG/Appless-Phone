@@ -13,6 +13,7 @@ export struct A2uiWebSurfaceView {
   @Prop baseUrl: string = 'https://aiphone.local/';
   @Prop bridgeName: string = 'A2uiWeb';
   @Prop allowPopup: boolean = false;
+  @Prop mobileReadable: boolean = false;
   @Prop javaScriptEnabled: boolean = true;
   @Prop domStorageEnabled: boolean = true;
   @Prop showLoading: boolean = true;
@@ -125,6 +126,8 @@ export struct A2uiWebSurfaceView {
       Web({ src: this.startSrc(), controller: this.controller })
         .javaScriptAccess(this.javaScriptEnabled)
         .domStorageAccess(this.domStorageEnabled)
+        .overviewModeAccess(!this.mobileReadable)
+        .textZoomRatio(this.mobileReadable ? 130 : 100)
         .multiWindowAccess(this.allowPopup)
         .allowWindowOpenMethod(this.allowPopup)
         .javaScriptProxy({
@@ -197,6 +200,8 @@ export struct A2uiWebSurfaceView {
           Web({ src: 'about:blank', controller: this.popupController })
             .javaScriptAccess(this.javaScriptEnabled)
             .domStorageAccess(this.domStorageEnabled)
+            .overviewModeAccess(!this.mobileReadable)
+            .textZoomRatio(this.mobileReadable ? 130 : 100)
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)

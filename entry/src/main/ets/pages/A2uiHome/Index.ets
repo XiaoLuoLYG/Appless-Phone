@@ -4241,6 +4241,7 @@ struct Index {
               assistantDebug: this.lastModelOutput,
               error: ''
             }));
+            this.getUIContext().getPromptAction().showToast({ message: '订单与支付结果请以 12306 为准。' });
           }
         },
         onCheckoutWebReturn: (url: string) => {

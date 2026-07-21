@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   checkoutWebInitialSource,
+  checkoutWebMobileReadable,
   checkoutWebNavigationDecision,
   isAllowed12306BookingUrl,
   webHostForDisplay
@@ -55,6 +56,12 @@ export default function checkoutWebOverlayTest() {
       expect(checkoutWebInitialSource('hotel', 'https://rollinggo.cn/hotel')).assertEqual(
         'https://rollinggo.cn/hotel'
       );
+    });
+
+    it('uses mobile-readable WebView presentation only for train booking', 0, () => {
+      expect(checkoutWebMobileReadable('train')).assertTrue();
+      expect(checkoutWebMobileReadable('payment')).assertFalse();
+      expect(checkoutWebMobileReadable('hotel')).assertFalse();
     });
 
     it('shows only the parsed hostname for loaded pages', 0, () => {
