@@ -15,6 +15,8 @@ import {
   LinkedMessageBus,
   TaskErrorPayload
 } from '@loop/agent-core';
+import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
+import { routePersonaForPrompt } from '../main/ets/model/PersonaRouter';
 
 interface HotelSearchArgs {
   city: string;
@@ -64,7 +66,7 @@ class CapturingLeaderPlanner implements LeaderPlanner {
   }
 }
 
-class ExplicitWorkPersonaPlanner implements LeaderPlanner {
+class RoutedPersonaPlanner implements LeaderPlanner {
   lastInput: InputUserPayload | null = null;
   lastContext: LeaderPlanningContext | null = null;
   lastPlan: LeaderPlan | null = null;
@@ -76,9 +78,11 @@ class ExplicitWorkPersonaPlanner implements LeaderPlanner {
   ): Promise<LeaderPlan> {
     this.lastInput = input;
     this.lastContext = context;
-    const plan = hotelPlan('work-ui', 'work-data');
-    plan.personaId = 'work_companion';
-    plan.skillId = 'work-search';
+    const personaId = routePersonaForPrompt(input.text).personaId;
+    const persona = context.personas.filter((item): boolean => item.personaId === personaId)[0];
+    const plan = hotelPlan('persona-ui', 'persona-data');
+    plan.personaId = personaId;
+    plan.skillId = persona.activeSkills.length === 0 ? '' : persona.activeSkills[0].skillId;
     this.lastPlan = plan;
     return plan;
   }
@@ -201,35 +205,10 @@ function planningContext(): LeaderPlanningContext {
   };
 }
 
-function personaPlanningContext(): LeaderPlanningContext {
-  const tools = planningContext().tools;
+function realPersonaPlanningContext(): LeaderPlanningContext {
   return {
-    tools,
-    personas: [{
-      personaId: 'food_companion',
-      name: 'Food',
-      soul: '',
-      memory: '',
-      previous: true,
-      activeSkills: [{
-        skillId: 'food-search',
-        description: 'Search food.',
-        instructions: 'Use food.search.',
-        status: 'active'
-      }]
-    }, {
-      personaId: 'work_companion',
-      name: 'Work',
-      soul: '',
-      memory: '',
-      previous: false,
-      activeSkills: [{
-        skillId: 'work-search',
-        description: 'Search work.',
-        instructions: 'Use mail.search.',
-        status: 'active'
-      }]
-    }]
+    tools: planningContext().tools,
+    personas: leaderPersonaContext('food_companion')
   };
 }
 
@@ -418,7 +397,7 @@ export default function leaderAgentTest() {
       plan.personaId = 'work_companion';
       plan.skillId = 'food-search';
       const bus = new LinkedMessageBus();
-      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), personaPlanningContext());
+      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), realPersonaPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
@@ -436,7 +415,7 @@ export default function leaderAgentTest() {
       const plan = hotelPlan();
       plan.skillId = 'food-search';
       const bus = new LinkedMessageBus();
-      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), personaPlanningContext());
+      const leader = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), realPersonaPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
@@ -452,39 +431,44 @@ export default function leaderAgentTest() {
 
     it('accepts matching work persona skill for explicit work wording', 0, async () => {
       const bus = new LinkedMessageBus();
-      const planner = new ExplicitWorkPersonaPlanner();
-      const leader = new LeaderAgent(bus, planner, personaPlanningContext());
+      const planner = new RoutedPersonaPlanner();
+      const leader = new LeaderAgent(bus, planner, realPersonaPlanningContext());
       const observer = bus.openReader();
       leader.start();
       const payload: InputUserPayload = {
         text: '用工作分身',
         previousPersonaId: 'food_companion'
       };
-      const inputMessage: AgentMessage = {
+      const workMessage: AgentMessage = {
         type: AgentMessageType.INPUT_USER,
         conversationId: 'conversation-work',
         turnId: 'turn-work',
         taskId: 'input-work',
         payload: payload
       };
-      bus.publish(inputMessage);
+      bus.publish(workMessage);
       await receive(observer);
       const ui = await receive(observer);
       const data = await receive(observer);
       const plan = planner.lastPlan as LeaderPlan;
       const context = planner.lastContext as LeaderPlanningContext;
       const input = planner.lastInput as InputUserPayload;
+      const selected = context.personas.filter((item): boolean => item.personaId === plan.personaId)[0];
+      const controlInput: InputUserPayload = { text: '点一杯咖啡' };
+      const controlPlan = await new RoutedPersonaPlanner().plan(
+        inputMessage('conversation-food', 'turn-food', 'input-food', controlInput.text),
+        controlInput,
+        context
+      );
 
       expect(input.text).assertEqual('用工作分身');
       expect(input.previousPersonaId).assertEqual('food_companion');
       expect(plan.personaId).assertEqual('work_companion');
-      expect(plan.skillId).assertEqual('work-search');
-      expect(context.personas[0].previous).assertTrue();
-      expect(context.personas[1].personaId).assertEqual(plan.personaId);
-      expect(context.personas[1].activeSkills[0].skillId).assertEqual(plan.skillId);
-      expect(context.personas[0].activeSkills[0].skillId === plan.skillId).assertFalse();
-      expect((ui.payload as CreateUiTaskPayload).skillId).assertEqual('work-search');
-      expect((data.payload as CreateDataTaskPayload).skillId).assertEqual('work-search');
+      expect(selected.activeSkills[0].skillId).assertEqual(plan.skillId);
+      expect((ui.payload as CreateUiTaskPayload).skillId).assertEqual(plan.skillId);
+      expect((data.payload as CreateDataTaskPayload).skillId).assertEqual(plan.skillId);
+      expect(controlPlan.personaId).assertEqual('food_companion');
+      expect(controlPlan.personaId === plan.personaId).assertFalse();
       leader.stop();
       observer.close();
     });
