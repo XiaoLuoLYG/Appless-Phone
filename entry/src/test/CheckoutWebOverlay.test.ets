@@ -7,8 +7,9 @@ import {
   isOfficial12306PaymentUrl,
   webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
-import { boundedPageScriptRetryLimit, isBoundedPageScriptRetryExhausted,
-  shouldRunOneShotPageScript } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
+import { a2uiWebExecutionTokenForRequest, a2uiWebOwnershipAfterPopupClose, a2uiWebOwnershipAfterPopupOpen,
+  A2uiWebExecutionToken, initialA2uiWebExecutionOwnership, invalidateA2uiWebExecutionOwnership,
+  isCurrentA2uiWebExecutionToken } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
 
 export default function checkoutWebOverlayTest() {
   describe('checkoutWebOverlay', () => {
@@ -109,26 +110,33 @@ export default function checkoutWebOverlayTest() {
       )).assertEqual('block');
     });
 
-    it('runs a page script once per real navigation only', 0, () => {
-      expect(shouldRunOneShotPageScript('assist()', 3, -1)).assertTrue();
-      expect(shouldRunOneShotPageScript('assist()', 3, 3)).assertFalse();
-      expect(shouldRunOneShotPageScript('assist()', 4, 3)).assertTrue();
-      expect(shouldRunOneShotPageScript('', 4, 3)).assertFalse();
+    it('gives script ownership to only one active controller across popup handoff', 0, () => {
+      const main = initialA2uiWebExecutionOwnership();
+      const mainToken: A2uiWebExecutionToken = { controller: 'main', generation: 0, session: 1 };
+      expect(isCurrentA2uiWebExecutionToken(main, mainToken)).assertTrue();
+      const popup = a2uiWebOwnershipAfterPopupOpen(main);
+      const popupToken: A2uiWebExecutionToken = {
+        controller: 'popup', generation: popup.popupGeneration, session: 2
+      };
+      expect(isCurrentA2uiWebExecutionToken(popup, mainToken)).assertFalse();
+      expect(isCurrentA2uiWebExecutionToken(popup, popupToken)).assertTrue();
+      expect(a2uiWebExecutionTokenForRequest(popup, 'main', popup.mainGeneration, 3,
+        'assist()', true, true)).assertEqual(undefined);
+      expect(a2uiWebExecutionTokenForRequest(popup, 'popup', popup.popupGeneration, 3,
+        'assist()', true, true)?.controller).assertEqual('popup');
+      const returned = a2uiWebOwnershipAfterPopupClose(popup);
+      expect(isCurrentA2uiWebExecutionToken(returned, popupToken)).assertFalse();
+      expect(returned.active).assertEqual('main');
     });
 
-    it('bounds only exact native retry protocol and verifies payment callback URL', 0, () => {
-      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"query","progress":"clicked"}'))
-        .assertEqual(20);
-      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"passenger","progress":"submitted"}'))
-        .assertEqual(40);
-      expect(boundedPageScriptRetryLimit('{"state":"retry","stage":"query","progress":"x","raw":"secret"}'))
-        .assertEqual(0);
-      expect(isBoundedPageScriptRetryExhausted(
-        '{"state":"retry","stage":"query","progress":"clicked"}', 19)).assertFalse();
-      expect(isBoundedPageScriptRetryExhausted(
-        '{"state":"retry","stage":"query","progress":"clicked"}', 20)).assertTrue();
-      expect(isBoundedPageScriptRetryExhausted(
-        '{"state":"retry","stage":"passenger","progress":"submitted"}', 40)).assertTrue();
+    it('invalidates late controller results on cancel and unmount and verifies payment callback URL', 0, () => {
+      const state = initialA2uiWebExecutionOwnership();
+      const token: A2uiWebExecutionToken = { controller: 'main', generation: 0, session: 1 };
+      expect(isCurrentA2uiWebExecutionToken(invalidateA2uiWebExecutionOwnership(state), token)).assertFalse();
+      const disposed = invalidateA2uiWebExecutionOwnership(state, true);
+      expect(disposed.active).assertEqual('none');
+      expect(isCurrentA2uiWebExecutionToken(disposed, token)).assertFalse();
+      expect(a2uiWebExecutionTokenForRequest(state, 'main', 0, 2, '', true, false)).assertEqual(undefined);
       expect(isOfficial12306PaymentUrl('https://epay.12306.cn/pay/webBusiness')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/payOrder/init')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertFalse();

@@ -10,22 +10,27 @@ import {
   TrainPresaleHandoffTransitionResult
 } from '../../../entryability/EntryAbility';
 import {
-  buildTrainPresaleFinalConfirmScript,
+  buildTrainWebAssistExecutionRequest,
+  isCurrentTrainWebAssistExecution,
+  isCurrentTrainWebAssistTimer,
+  nextTrainWebAssistEpoch,
   parseTrainWebAssistOutcome,
-  trainPresaleWebAssistScriptForCheckout,
+  trainWebAssistFinalClickMayHaveRun,
   trainWebAssistReasonText,
+  trainWebAssistRetryExhausted,
   trainWebAssistTargetState,
+  TrainWebAssistExecutionBinding,
+  TrainWebAssistExecutionRequest,
   TrainWebAssistOutcome
 } from '../train/TrainPresaleWebAutomation';
 import {
   TRAIN_PRESALE_TASK_STORE_NAME,
-  TrainPresaleTask,
   TrainPresaleTaskState,
   TrainPresaleTaskStore
 } from '../train/TrainPresaleTaskStore';
 import { COLOR_CARD, COLOR_CARD_EDGE, COLOR_ERROR, COLOR_ERROR_SOFT, COLOR_INK, COLOR_MUTED, COLOR_PAGE } from '../style/A2uiHomeTheme';
 import { A2uiButtonView } from './common/A2uiButtonView';
-import { A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
+import { A2uiWebControllerIdentity, A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
 
 export type CheckoutWebKind = 'payment' | 'hotel' | 'train';
 export type CheckoutNavigationDecision = 'allow' | 'payment_return' | 'block';
@@ -162,10 +167,28 @@ export struct CheckoutWebOverlay {
   @State currentUrl: string = '';
   @State assistScript: string = '';
   @State assistScriptSession: number = 0;
+  @State assistScriptTarget: A2uiWebControllerIdentity = 'none';
+  @State assistScriptGeneration: number = -1;
+  @State assistCancelToken: number = 0;
+  private assistStage: 'initial' | 'final' | 'stopped' = 'initial';
+  private assistAttempts: number = 0;
+  private assistRetryStage: string = '';
+  private assistTimer: number = -1;
+  private assistEpoch: number = 0;
+  private activeController: A2uiWebControllerIdentity = 'none';
+  private activeGeneration: number = -1;
+  private activeUrl: string = '';
+  private requestBinding: TrainWebAssistExecutionBinding | undefined = undefined;
+  private assistDisposed: boolean = false;
+  private finalClickMayHaveRun: boolean = false;
 
   aboutToAppear(): void {
-    this.assistScript = this.trainAssistScript();
+    this.assistStage = 'initial';
+    this.assistDisposed = false;
+    this.finalClickMayHaveRun = false;
   }
+
+  aboutToDisappear(): void { this.cancelTrainAssist(true); }
 
   private trainPreferences(): preferences.Preferences | null {
     if (this.kind !== 'train' || this.taskId.length === 0) {
@@ -180,13 +203,109 @@ export struct CheckoutWebOverlay {
     }
   }
 
-  private trainAssistScript(): string {
+  private clearPendingTrainAssist(): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    this.assistTimer = -1;
+    this.assistScriptTarget = 'none';
+    this.assistScriptGeneration = -1;
+    this.requestBinding = undefined;
+    this.assistEpoch = nextTrainWebAssistEpoch(this.assistEpoch);
+  }
+
+  private cancelTrainAssist(stop: boolean): void {
+    this.clearPendingTrainAssist();
+    this.assistScript = '';
+    this.assistCancelToken += 1;
+    if (stop) {
+      this.assistStage = 'stopped';
+      this.assistDisposed = true;
+    }
+  }
+
+  private pendingTaskId(store: preferences.Preferences): string {
+    const value = store.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '');
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private requestTrainAssist(): void {
+    if (this.kind !== 'train' || this.taskId.length === 0 || this.assistDisposed || this.assistStage === 'stopped' ||
+      (this.activeController !== 'main' && this.activeController !== 'popup') || this.activeUrl.length === 0) return;
+    if (isOfficial12306PaymentUrl(this.activeUrl)) {
+      this.handleTerminalAssist({ state: 'awaiting_payment' }, this.activeUrl);
+      return;
+    }
+    if (this.assistStage === 'final' && this.finalClickMayHaveRun) {
+      this.assistAttempts += 1;
+      if (this.assistAttempts >= 40) {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, this.activeUrl);
+      } else {
+        this.scheduleTrainAssistRetry();
+      }
+      return;
+    }
     const nativeStore = this.trainPreferences();
     if (nativeStore === null) {
-      return '';
+      this.handleTerminalAssist({ state: 'needs_user', reason: 'not_authorized' }, this.activeUrl);
+      return;
     }
-    const task: TrainPresaleTask | undefined = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
-    return trainPresaleWebAssistScriptForCheckout(this.kind, this.taskId, task);
+    const task = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+    const request: TrainWebAssistExecutionRequest = buildTrainWebAssistExecutionRequest(
+      this.assistStage === 'final' ? 'final' : 'initial', this.kind, this.taskId,
+      this.pendingTaskId(nativeStore), task, this.activeUrl);
+    if (request.reason.length > 0 || request.script.length === 0) {
+      this.handleTerminalAssist({ state: 'needs_user', reason: request.reason }, this.activeUrl);
+      return;
+    }
+    this.assistAttempts += 1;
+    this.assistScriptTarget = this.activeController;
+    this.assistScriptGeneration = this.activeGeneration;
+    this.assistScript = request.script;
+    const nextSession = this.assistScriptSession + 1;
+    this.requestBinding = { controller: this.activeController, generation: this.activeGeneration,
+      session: nextSession } as TrainWebAssistExecutionBinding;
+    this.assistScriptSession = nextSession;
+  }
+
+  private scheduleTrainAssistRetry(): void {
+    if (this.assistTimer >= 0) clearTimeout(this.assistTimer);
+    const epoch = this.assistEpoch;
+    this.assistTimer = setTimeout(() => {
+      this.assistTimer = -1;
+      if (isCurrentTrainWebAssistTimer(epoch, this.assistEpoch, this.assistDisposed)) this.requestTrainAssist();
+    }, 250);
+  }
+
+  private trainAssistPreflight(sourceUrl: string, controller: 'main' | 'popup', generation: number,
+    session: number): string {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.requestBinding === undefined || !isCurrentTrainWebAssistExecution(this.requestBinding, actual)) {
+      return '{"state":"needs_user","reason":"invalid_result"}';
+    }
+    const nativeStore = this.trainPreferences();
+    if (nativeStore === null) return '{"state":"needs_user","reason":"not_authorized"}';
+    const task = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
+    const request = buildTrainWebAssistExecutionRequest(this.assistStage === 'final' ? 'final' : 'initial',
+      this.kind, this.taskId, this.pendingTaskId(nativeStore), task, sourceUrl);
+    return request.reason.length === 0 ? '' :
+      '{"state":"needs_user","reason":"' + request.reason + '"}';
+  }
+
+  private activateTrainAssist(controller: A2uiWebControllerIdentity, url: string, generation: number): void {
+    if (trainWebAssistFinalClickMayHaveRun(this.assistStage === 'final' ? 'final' : 'initial',
+      this.requestBinding !== undefined, undefined)) {
+      // A stale final execution may already have clicked before its result is invalidated. Never issue another click.
+      this.finalClickMayHaveRun = true;
+    }
+    this.clearPendingTrainAssist();
+    this.activeController = controller;
+    this.activeGeneration = generation;
+    this.activeUrl = url;
+    this.currentUrl = url;
+    if (!this.finalClickMayHaveRun) this.assistAttempts = 0;
+    this.assistRetryStage = '';
+    if (this.kind === 'train' && this.taskId.length > 0 && controller !== 'none' && url.length > 0) {
+      this.requestTrainAssist();
+    }
   }
 
   private saveTrainCookies(): void {
@@ -200,45 +319,57 @@ export struct CheckoutWebOverlay {
   }
 
   private close(): void {
+    this.cancelTrainAssist(true);
     this.saveTrainCookies();
     this.onClose(this.taskId);
   }
 
-  private handleAssistResult(raw: string, sourceUrl: string): void {
-    if (this.assistScript.length === 0 || this.taskId.length === 0) {
-      return;
-    }
+  private handleAssistResult(raw: string, sourceUrl: string, controller: 'main' | 'popup',
+    generation: number, session: number): void {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.requestBinding === undefined || this.assistDisposed ||
+      !isCurrentTrainWebAssistExecution(this.requestBinding, actual)) return;
+    this.clearPendingTrainAssist();
     const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
     if (outcome.state === 'retry') {
+      if (this.assistRetryStage !== outcome.stage) {
+        this.assistRetryStage = outcome.stage;
+        this.assistAttempts = 1;
+      }
+      if (trainWebAssistRetryExhausted(this.assistStage === 'final' ? 'final' : 'initial',
+        outcome, this.assistAttempts)) {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, sourceUrl);
+      } else {
+        if (trainWebAssistFinalClickMayHaveRun(this.assistStage === 'final' ? 'final' : 'initial',
+          false, outcome)) this.finalClickMayHaveRun = true;
+        this.scheduleTrainAssistRetry();
+      }
       return;
     }
     if (outcome.state === 'ready_to_confirm') {
-      const nativeStore = this.trainPreferences();
-      if (nativeStore === null) {
-        this.assistScript = '';
+      if (this.assistStage !== 'initial') {
+        this.handleTerminalAssist({ state: 'needs_user', reason: 'invalid_result' }, sourceUrl);
         return;
       }
-      const pendingValue = nativeStore.getSync(TRAIN_PRESALE_PENDING_TASK_KEY, '');
-      const pending = typeof pendingValue === 'string' ? pendingValue.trim() : '';
-      const current = new TrainPresaleTaskStore(nativeStore).get(this.taskId);
-      if (pending !== this.taskId || current === undefined || current.taskId !== this.taskId ||
-        current.state !== 'executing' || !current.unpaidOrderAuthorized) {
-        this.handleAssistResult('{"state":"needs_user","reason":"not_authorized"}', sourceUrl);
-        return;
-      }
-      this.assistScript = buildTrainPresaleFinalConfirmScript(current);
-      this.assistScriptSession += 1;
+      this.assistStage = 'final';
+      this.assistAttempts = 0;
+      this.assistRetryStage = '';
+      this.requestTrainAssist();
       return;
     }
     if (outcome.state === 'awaiting_payment' && !isOfficial12306PaymentUrl(sourceUrl)) {
-      this.handleAssistResult('{"state":"needs_user","reason":"page_mismatch"}', sourceUrl);
+      this.handleTerminalAssist({ state: 'needs_user', reason: 'page_mismatch' }, sourceUrl);
       return;
     }
+    this.handleTerminalAssist(outcome, sourceUrl);
+  }
+
+  private handleTerminalAssist(outcome: TrainWebAssistOutcome, _sourceUrl: string): void {
     const targetState: TrainPresaleTaskState | undefined = trainWebAssistTargetState(outcome);
     if (targetState === undefined) {
       return;
     }
-    this.assistScript = '';
+    this.cancelTrainAssist(true);
     const nativeStore = this.trainPreferences();
     if (nativeStore === null) {
       return;
@@ -344,11 +475,18 @@ export struct CheckoutWebOverlay {
         domStorageEnabled: true,
         pageScript: this.assistScript,
         pageScriptSession: this.assistScriptSession,
-        onPageScriptResult: (result: string, sourceUrl: string): void =>
-          this.handleAssistResult(result, sourceUrl),
+        pageScriptTarget: this.assistScriptTarget,
+        pageScriptTargetGeneration: this.assistScriptGeneration,
+        pageScriptCancelToken: this.assistCancelToken,
+        onActiveControllerChange: (controller: A2uiWebControllerIdentity, activeUrl: string,
+          generation: number): void => this.activateTrainAssist(controller, activeUrl, generation),
+        onPageScriptWillExecute: (sourceUrl: string, controller: 'main' | 'popup', generation: number,
+          session: number): string => this.trainAssistPreflight(sourceUrl, controller, generation, session),
+        onPageScriptResult: (result: string, sourceUrl: string, controller: 'main' | 'popup',
+          generation: number, session: number): void =>
+          this.handleAssistResult(result, sourceUrl, controller, generation, session),
         onUrlIntercept: (url: string, isMainFrame: boolean): boolean => this.intercept(url, isMainFrame),
-        onLoadEnd: (url: string): void => {
-          this.currentUrl = url;
+        onLoadEnd: (url: string, _controller: 'main' | 'popup'): void => {
           if (this.kind === 'train' && url.trim().toLowerCase().startsWith('https://kyfw.12306.cn/')) {
             this.saveTrainCookies();
           }

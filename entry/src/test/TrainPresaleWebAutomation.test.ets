@@ -2,9 +2,12 @@ import { describe, it, expect } from '@ohos/hypium';
 import { preferences } from '@kit.ArkData';
 import {
   buildTrainPresaleFinalConfirmScript, buildTrainPresaleWebAssistScript,
-  evaluateTrainWebAssistFixture, exactTrainWebAssistMultiset, parseTrainWebAssistOutcome,
-  trainPresaleWebAssistScriptForCheckout, trainWebAssistTargetState, TrainWebAssistFixture,
-  TrainWebAssistOutcome
+  buildTrainWebAssistExecutionRequest,
+  isCurrentTrainWebAssistExecution, isCurrentTrainWebAssistTimer, nextTrainWebAssistEpoch,
+  parseTrainWebAssistOutcome, trainWebAssistDurableGateReason,
+  trainWebAssistFinalClickMayHaveRun, trainWebAssistRetryExhausted, trainWebAssistTargetState,
+  TrainWebAssistExecutionBinding,
+  TrainWebAssistOutcome, TrainWebAssistRetryOutcome
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleWebAutomation';
 import { TrainPresaleTask, TrainPresaleTaskState } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
 import { transitionTrainPresaleHandoff, TRAIN_PRESALE_PENDING_TASK_KEY,
@@ -41,13 +44,6 @@ function task(state: TrainPresaleTaskState = 'executing'): TrainPresaleTask {
     createdAt: '2026-07-22T12:00:00+08:00', lastError: '' };
 }
 
-function fixture(train: string = 'G10'): TrainWebAssistFixture {
-  return { trainCells: [train], loginVisible: false, captchaVisible: false, passengerRows: [
-    { cells: ['张三', '二等座'], visible: true, width: 100, height: 20 },
-    { cells: ['李四', '二等座'], visible: true, width: 100, height: 20 }
-  ] };
-}
-
 export default function trainPresaleWebAutomationTest() {
   describe('trainPresaleWebAutomation', () => {
     it('emits immediate synchronous scripts and separates final confirmation', 0, () => {
@@ -63,40 +59,55 @@ export default function trainPresaleWebAutomationTest() {
       expect(initial.indexOf("'#seatType_'+(i+1)") >= 0).assertTrue();
     });
 
-    it('checks exact modal identity multiplicity visibility and seat alignment', 0, () => {
-      expect(evaluateTrainWebAssistFixture(task(), fixture())).assertEqual('');
-      expect(evaluateTrainWebAssistFixture(task(), fixture('G100'))).assertEqual('confirmation_mismatch');
-      const extra = fixture(); extra.passengerRows.push(
-        { cells: ['王五', '二等座'], visible: true, width: 100, height: 20 });
-      expect(evaluateTrainWebAssistFixture(task(), extra)).assertEqual('confirmation_mismatch');
-      const duplicate = fixture(); duplicate.passengerRows[1].cells = ['张三', '二等座'];
-      expect(evaluateTrainWebAssistFixture(task(), duplicate)).assertEqual('confirmation_mismatch');
-      const wrongSeat = fixture(); wrongSeat.passengerRows[1].cells = ['李四', '一等座'];
-      expect(evaluateTrainWebAssistFixture(task(), wrongSeat)).assertEqual('confirmation_mismatch');
-      const hiddenExtra = fixture(); hiddenExtra.passengerRows.push(
-        { cells: ['王五', '二等座'], visible: false, width: 100, height: 20 });
-      expect(evaluateTrainWebAssistFixture(task(), hiddenExtra)).assertEqual('');
-      expect(exactTrainWebAssistMultiset(['张三', '李四'], ['李四', '张三'])).assertTrue();
+    it('production script snapshot enforces exact visible modal multiplicity and seat-row alignment', 0, () => {
+      const script = buildTrainPresaleFinalConfirmScript(task());
+      expect(script.indexOf("cells.filter((v)=>v===cfg.trainCode).length!==1") >= 0).assertTrue();
+      expect(script.indexOf('rows.length!==cfg.passengerNames.length') >= 0).assertTrue();
+      expect(script.indexOf("rc.filter((v)=>v===name).length===1") >= 0).assertTrue();
+      expect(script.indexOf("rc.filter((v)=>v.indexOf(cfg.seatPriority)===0).length!==1") >= 0).assertTrue();
+      expect(script.indexOf("names.slice().sort().join('\\u0000')") >= 0).assertTrue();
+      expect(script.indexOf("s.display!=='none'") >= 0).assertTrue();
+      expect(script.indexOf('r.width>0&&r.height>0') >= 0).assertTrue();
     });
 
     it('uses visible fixed login captcha selectors and no body text heuristic', 0, () => {
       const script = buildTrainPresaleWebAssistScript(task());
       expect(script.indexOf("shown('#login_user,.login-hd-account,#J-login')") >= 0).assertTrue();
-      expect(script.indexOf("shown('#J-loginImg,.touclick-wrapper,#floatTable')") >= 0).assertTrue();
+      expect(script.indexOf("shown('#J-loginImg,.touclick-wrapper')") >= 0).assertTrue();
+      expect(script.indexOf('#floatTable')).assertEqual(-1);
       expect(script.indexOf('bodyText')).assertEqual(-1);
-      const login = fixture(); login.loginVisible = true;
-      expect(evaluateTrainWebAssistFixture(task(), login)).assertEqual('login_required');
-      const captcha = fixture(); captcha.captchaVisible = true;
-      expect(evaluateTrainWebAssistFixture(task(), captcha)).assertEqual('captcha_required');
+      const finalScript = buildTrainPresaleFinalConfirmScript(task());
+      expect(finalScript.indexOf("hostname.toLowerCase()!=='kyfw.12306.cn'") >= 0).assertTrue();
+      expect(finalScript.indexOf("shown('#login_user,.login-hd-account,#J-login')") >= 0).assertTrue();
+      expect(finalScript.indexOf("shown('#J-loginImg,.touclick-wrapper')") >= 0).assertTrue();
+      expect(finalScript.indexOf("retry('confirm','waiting_modal')") >= 0).assertTrue();
+      expect(finalScript.indexOf("retry('confirm','waiting_confirm')") >= 0).assertTrue();
     });
 
-    it('requires durable authorization and exact bound executing task', 0, () => {
+    it('requires durable authorization pending binding state and official active URL before every request', 0, () => {
       const value = task();
-      expect(trainPresaleWebAssistScriptForCheckout('train', 'task-7', value).length > 0).assertTrue();
+      expect(trainWebAssistDurableGateReason('train', 'task-7', 'task-7', value,
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertEqual('');
       value.unpaidOrderAuthorized = false;
-      expect(trainPresaleWebAssistScriptForCheckout('train', 'task-7', value)).assertEqual('');
-      expect(trainPresaleWebAssistScriptForCheckout('train', 'other', task())).assertEqual('');
-      expect(trainPresaleWebAssistScriptForCheckout('train', 'task-7', task('scheduled'))).assertEqual('');
+      expect(trainWebAssistDurableGateReason('train', 'task-7', 'task-7', value,
+        'https://kyfw.12306.cn/')).assertEqual('not_authorized');
+      expect(trainWebAssistDurableGateReason('train', 'task-7', 'replacement', task(),
+        'https://kyfw.12306.cn/')).assertEqual('not_authorized');
+      expect(trainWebAssistDurableGateReason('train', 'task-7', 'task-7', task(),
+        'https://kyfw.12306.cn.evil.example/')).assertEqual('page_mismatch');
+      expect(buildTrainWebAssistExecutionRequest('final', 'train', 'task-7', 'task-7', task(),
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc').script.indexOf("confirm.click()") >= 0).assertTrue();
+      expect(buildTrainWebAssistExecutionRequest('final', 'train', 'task-7', 'replacement', task(),
+        'https://kyfw.12306.cn/otn/confirmPassenger/initDc').script).assertEqual('');
+      const expected: TrainWebAssistExecutionBinding = { controller: 'popup', generation: 4, session: 7 };
+      expect(isCurrentTrainWebAssistExecution(expected,
+        { controller: 'popup', generation: 4, session: 7 })).assertTrue();
+      expect(isCurrentTrainWebAssistExecution(expected,
+        { controller: 'main', generation: 4, session: 7 })).assertFalse();
+      expect(isCurrentTrainWebAssistExecution(expected,
+        { controller: 'popup', generation: 5, session: 7 })).assertFalse();
+      expect(isCurrentTrainWebAssistExecution(expected,
+        { controller: 'popup', generation: 4, session: 8 })).assertFalse();
     });
 
     it('accepts only exact allowlisted protocol shapes', 0, () => {
@@ -115,6 +126,18 @@ export default function trainPresaleWebAutomationTest() {
       expect(trainWebAssistTargetState(retry)).assertEqual(undefined);
       expect(trainWebAssistTargetState({ state: 'ready_to_confirm' })).assertEqual(undefined);
       expect(trainWebAssistTargetState({ state: 'awaiting_payment' })).assertEqual('awaiting_payment');
+      const query: TrainWebAssistRetryOutcome = { state: 'retry', stage: 'query', progress: 'waiting' };
+      const finalWait: TrainWebAssistRetryOutcome = { state: 'retry', stage: 'confirm', progress: 'waiting_modal' };
+      expect(trainWebAssistRetryExhausted('initial', query, 19)).assertFalse();
+      expect(trainWebAssistRetryExhausted('initial', query, 20)).assertTrue();
+      expect(trainWebAssistRetryExhausted('final', finalWait, 39)).assertFalse();
+      expect(trainWebAssistRetryExhausted('final', finalWait, 40)).assertTrue();
+      const cancelledEpoch = nextTrainWebAssistEpoch(4);
+      expect(isCurrentTrainWebAssistTimer(4, cancelledEpoch, false)).assertFalse();
+      expect(isCurrentTrainWebAssistTimer(cancelledEpoch, cancelledEpoch, true)).assertFalse();
+      expect(trainWebAssistFinalClickMayHaveRun('final', false,
+        { state: 'retry', stage: 'confirm', progress: 'confirm_clicked' })).assertTrue();
+      expect(trainWebAssistFinalClickMayHaveRun('final', true, undefined)).assertTrue();
     });
 
     it('flushes terminal task before compare-and-clearing matching handoff', 0, () => {

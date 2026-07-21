@@ -4,32 +4,56 @@ import { COLOR_CARD, COLOR_ERROR, COLOR_ERROR_SOFT, COLOR_INK, COLOR_MUTED, COLO
 import { A2uiWebBridge, A2uiWebMessage } from './A2uiWebBridge';
 
 export type A2uiWebSurfaceMode = 'html' | 'url';
+export type A2uiWebControllerIdentity = 'none' | 'main' | 'popup';
 
-export function shouldRunOneShotPageScript(
-  pageScript: string,
-  navigationId: number,
-  completedNavigationId: number
-): boolean {
-  return pageScript.length > 0 && navigationId !== completedNavigationId;
+export interface A2uiWebExecutionOwnership {
+  active: A2uiWebControllerIdentity;
+  mainGeneration: number;
+  popupGeneration: number;
+  disposed: boolean;
 }
 
-interface PageScriptRetryProtocol { state?: string; stage?: string; progress?: string; }
-
-export function boundedPageScriptRetryLimit(raw: string): number {
-  try {
-    const value = JSON.parse(raw) as PageScriptRetryProtocol;
-    const keys = Object.keys(value).sort();
-    if (JSON.stringify(keys) !== JSON.stringify(['progress', 'stage', 'state']) || value.state !== 'retry' ||
-      typeof value.progress !== 'string' || value.progress.length === 0 || value.progress.length > 40) return 0;
-    if (value.stage === 'query') return 20;
-    if (value.stage === 'passenger' || value.stage === 'confirm') return 40;
-  } catch (_error) {}
-  return 0;
+export interface A2uiWebExecutionToken {
+  controller: 'main' | 'popup';
+  generation: number;
+  session: number;
 }
 
-export function isBoundedPageScriptRetryExhausted(raw: string, attempts: number): boolean {
-  const limit = boundedPageScriptRetryLimit(raw);
-  return limit > 0 && attempts >= limit;
+export function initialA2uiWebExecutionOwnership(): A2uiWebExecutionOwnership {
+  return { active: 'main', mainGeneration: 0, popupGeneration: 0, disposed: false };
+}
+
+export function a2uiWebOwnershipAfterPopupOpen(state: A2uiWebExecutionOwnership): A2uiWebExecutionOwnership {
+  return { active: 'popup', mainGeneration: state.mainGeneration + 1,
+    popupGeneration: state.popupGeneration + 1, disposed: state.disposed };
+}
+
+export function a2uiWebOwnershipAfterPopupClose(state: A2uiWebExecutionOwnership): A2uiWebExecutionOwnership {
+  return { active: 'main', mainGeneration: state.mainGeneration + 1,
+    popupGeneration: state.popupGeneration + 1, disposed: state.disposed };
+}
+
+export function invalidateA2uiWebExecutionOwnership(state: A2uiWebExecutionOwnership,
+  disposed: boolean = false): A2uiWebExecutionOwnership {
+  return { active: disposed ? 'none' : state.active, mainGeneration: state.mainGeneration + 1,
+    popupGeneration: state.popupGeneration + 1, disposed: disposed || state.disposed };
+}
+
+export function isCurrentA2uiWebExecutionToken(state: A2uiWebExecutionOwnership,
+  token: A2uiWebExecutionToken): boolean {
+  return !state.disposed && state.active === token.controller &&
+    (token.controller === 'main' ? state.mainGeneration : state.popupGeneration) === token.generation;
+}
+
+export function a2uiWebExecutionTokenForRequest(state: A2uiWebExecutionOwnership,
+  target: A2uiWebControllerIdentity, targetGeneration: number, session: number, script: string,
+  mainReady: boolean, popupReady: boolean): A2uiWebExecutionToken | undefined {
+  if (script.length === 0 || state.disposed || (state.active !== 'main' && state.active !== 'popup') ||
+    state.active !== target) return undefined;
+  const ready = state.active === 'main' ? mainReady : popupReady;
+  const generation = state.active === 'main' ? state.mainGeneration : state.popupGeneration;
+  return ready && generation === targetGeneration ?
+    { controller: state.active, generation, session } as A2uiWebExecutionToken : undefined;
 }
 
 @Component
@@ -44,39 +68,47 @@ export struct A2uiWebSurfaceView {
   @Prop javaScriptEnabled: boolean = true;
   @Prop domStorageEnabled: boolean = true;
   @Prop showLoading: boolean = true;
-  @Prop @Watch('onPageScriptChange') pageScript: string = '';
-  @Prop @Watch('onPageScriptChange') pageScriptSession: number = 0;
+  @Prop @Watch('onPageScriptValueChange') pageScript: string = '';
+  @Prop @Watch('onPageScriptRequest') pageScriptSession: number = 0;
+  @Prop pageScriptTarget: A2uiWebControllerIdentity = 'none';
+  @Prop pageScriptTargetGeneration: number = -1;
+  @Prop @Watch('onPageScriptCancel') pageScriptCancelToken: number = 0;
   onMessage: (message: A2uiWebMessage) => void = (_message: A2uiWebMessage): void => {};
   onUrlIntercept: (url: string, isMainFrame: boolean) => boolean =
     (_url: string, _isMainFrame: boolean): boolean => false;
-  onLoadEnd: (url: string) => void = (_url: string): void => {};
+  onLoadEnd: (url: string, controller: 'main' | 'popup') => void =
+    (_url: string, _controller: 'main' | 'popup'): void => {};
   onLoadError: (message: string) => void = (_message: string): void => {};
-  onPageScriptResult: (result: string, sourceUrl: string) => void =
-    (_result: string, _sourceUrl: string): void => {};
+  onActiveControllerChange: (controller: A2uiWebControllerIdentity, url: string, generation: number) => void =
+    (_controller: A2uiWebControllerIdentity, _url: string, _generation: number): void => {};
+  onPageScriptWillExecute: (sourceUrl: string, controller: 'main' | 'popup', generation: number,
+    session: number) => string = (_sourceUrl: string, _controller: 'main' | 'popup',
+      _generation: number, _session: number): string => '';
+  onPageScriptResult: (result: string, sourceUrl: string, controller: 'main' | 'popup',
+    generation: number, session: number) => void =
+    (_result: string, _sourceUrl: string, _controller: 'main' | 'popup',
+      _generation: number, _session: number): void => {};
   private controller: webview.WebviewController = new webview.WebviewController();
   private popupController: webview.WebviewController = new webview.WebviewController();
   private bridge: A2uiWebBridge = new A2uiWebBridge();
   private webReady: boolean = false;
   private popupReady: boolean = false;
   private loadedHtml: string = '';
-  private mainNavigationId: number = 0;
-  private popupNavigationId: number = 0;
-  private mainScriptNavigationId: number = -1;
-  private popupScriptNavigationId: number = -1;
-  private mainScriptSession: number = -1;
-  private popupScriptSession: number = -1;
-  private mainScriptAttempts: number = 0;
-  private popupScriptAttempts: number = 0;
-  private mainRetryTimer: number = -1;
-  private popupRetryTimer: number = -1;
+  private ownership: A2uiWebExecutionOwnership = initialA2uiWebExecutionOwnership();
+  private completedExecutionKey: string = '';
   @State private loading: boolean = true;
   @State private errorText: string = '';
   @State private popupVisible: boolean = false;
 
   aboutToAppear(): void {
+    this.ownership = initialA2uiWebExecutionOwnership();
     this.bridge.onMessage = (message: A2uiWebMessage): void => {
       this.onMessage(message);
     };
+  }
+
+  aboutToDisappear(): void {
+    this.invalidateAllExecutions(true);
   }
 
   private startSrc(): string {
@@ -113,91 +145,70 @@ export struct A2uiWebSurfaceView {
     }
   }
 
-  onPageScriptChange(): void {
-    if (this.webReady) {
-      this.startPageScript(this.controller, this.mainNavigationId, false);
-    }
-    if (this.popupVisible && this.popupReady) {
-      this.startPageScript(this.popupController, this.popupNavigationId, true);
-    }
+  onPageScriptRequest(): void {
+    this.executeActiveRequest();
   }
 
-  private cancelRetry(popup: boolean): void {
-    const timer = popup ? this.popupRetryTimer : this.mainRetryTimer;
-    if (timer >= 0) clearTimeout(timer);
-    if (popup) this.popupRetryTimer = -1; else this.mainRetryTimer = -1;
+  onPageScriptValueChange(): void {
+    if (this.pageScript.length === 0) this.invalidateAllExecutions(false);
+  }
+
+  onPageScriptCancel(): void {
+    this.invalidateAllExecutions(false);
   }
 
   private currentUrl(controller: webview.WebviewController): string {
     try { return controller.getUrl(); } catch (_error) { return ''; }
   }
 
-  private startPageScript(
-    controller: webview.WebviewController,
-    navigationId: number,
-    popup: boolean
-  ): void {
-    const completedNavigationId = popup ? this.popupScriptNavigationId : this.mainScriptNavigationId;
-    const completedSession = popup ? this.popupScriptSession : this.mainScriptSession;
-    if (this.pageScript.length === 0 || (navigationId === completedNavigationId &&
-      completedSession === this.pageScriptSession)) {
-      return;
-    }
-    this.cancelRetry(popup);
-    if (popup) {
-      this.popupScriptNavigationId = navigationId;
-      this.popupScriptSession = this.pageScriptSession;
-      this.popupScriptAttempts = 0;
-    } else {
-      this.mainScriptNavigationId = navigationId;
-      this.mainScriptSession = this.pageScriptSession;
-      this.mainScriptAttempts = 0;
-    }
-    this.runPageScript(controller, navigationId, this.pageScriptSession, popup);
+  private invalidateAllExecutions(disposed: boolean): void {
+    this.ownership = invalidateA2uiWebExecutionOwnership(this.ownership, disposed);
+    this.completedExecutionKey = '';
   }
 
-  private runPageScript(controller: webview.WebviewController, navigationId: number,
-    session: number, popup: boolean): void {
-    const attempts = (popup ? this.popupScriptAttempts : this.mainScriptAttempts) + 1;
-    if (popup) this.popupScriptAttempts = attempts; else this.mainScriptAttempts = attempts;
+  private executeActiveRequest(): void {
+    if (this.pageScript.length === 0) {
+      this.invalidateAllExecutions(false);
+      return;
+    }
+    const token = a2uiWebExecutionTokenForRequest(this.ownership, this.pageScriptTarget,
+      this.pageScriptTargetGeneration, this.pageScriptSession, this.pageScript, this.webReady, this.popupReady);
+    if (token === undefined) return;
+    const key = token.controller + ':' + token.generation.toString() + ':' + token.session.toString();
+    if (key === this.completedExecutionKey) return;
+    this.completedExecutionKey = key;
+    const controller = token.controller === 'main' ? this.controller : this.popupController;
+    const sourceUrl = this.currentUrl(controller);
+    const blockedResult = this.onPageScriptWillExecute(sourceUrl, token.controller,
+      token.generation, token.session);
+    if (blockedResult.length > 0) {
+      if (isCurrentA2uiWebExecutionToken(this.ownership, token)) {
+        this.onPageScriptResult(blockedResult, sourceUrl, token.controller, token.generation, token.session);
+      }
+      return;
+    }
     let execution: Promise<string>;
     try {
       execution = controller.runJavaScript(this.pageScript);
     } catch (_error) {
-      this.onPageScriptResult('{"state":"needs_user","reason":"script_error"}', this.currentUrl(controller));
+      if (isCurrentA2uiWebExecutionToken(this.ownership, token)) {
+        this.onPageScriptResult('{"state":"needs_user","reason":"script_error"}', this.currentUrl(controller),
+          token.controller, token.generation, token.session);
+      }
       return;
     }
     execution
       .then((result: string) => {
-        const currentNavigationId = popup ? this.popupNavigationId : this.mainNavigationId;
-        const currentSession = popup ? this.popupScriptSession : this.mainScriptSession;
-        if (currentNavigationId !== navigationId || currentSession !== session) return;
-        const limit = boundedPageScriptRetryLimit(result);
-        if (limit === 0) {
-          this.onPageScriptResult(result, this.currentUrl(controller));
-          return;
-        }
-        if (isBoundedPageScriptRetryExhausted(result, attempts)) {
-          this.onPageScriptResult('{"state":"needs_user","reason":"no_navigation"}',
-            this.currentUrl(controller));
-          return;
-        }
-        const timer = setTimeout(() => {
-          const generationNow = popup ? this.popupNavigationId : this.mainNavigationId;
-          const sessionNow = popup ? this.popupScriptSession : this.mainScriptSession;
-          if (generationNow === navigationId && sessionNow === session) {
-            this.runPageScript(controller, navigationId, session, popup);
-          }
-        }, 250);
-        if (popup) this.popupRetryTimer = timer; else this.mainRetryTimer = timer;
+        if (!isCurrentA2uiWebExecutionToken(this.ownership, token) ||
+          this.pageScriptSession !== token.session) return;
+        this.onPageScriptResult(result, this.currentUrl(controller), token.controller,
+          token.generation, token.session);
       })
       .catch((_error: Error) => {
-        const currentNavigationId = popup ? this.popupNavigationId : this.mainNavigationId;
-        const currentSession = popup ? this.popupScriptSession : this.mainScriptSession;
-        if (currentNavigationId === navigationId && currentSession === session) {
+        if (isCurrentA2uiWebExecutionToken(this.ownership, token) && this.pageScriptSession === token.session) {
           aiLogError('[AIPhone][A2uiWebSurfacePageScriptError]');
           this.onPageScriptResult('{"state":"needs_user","reason":"script_error"}',
-            this.currentUrl(controller));
+            this.currentUrl(controller), token.controller, token.generation, token.session);
         }
       });
   }
@@ -212,10 +223,11 @@ export struct A2uiWebSurfaceView {
   }
 
   private closePopup(): void {
-    this.cancelRetry(true);
-    this.popupNavigationId += 1;
+    this.ownership = a2uiWebOwnershipAfterPopupClose(this.ownership);
     this.popupReady = false;
     this.popupVisible = false;
+    this.onActiveControllerChange('main', this.webReady ? this.currentUrl(this.controller) : '',
+      this.ownership.mainGeneration);
   }
 
   @Builder
@@ -278,8 +290,9 @@ export struct A2uiWebSurfaceView {
         .height('100%')
         .backgroundColor(COLOR_PAGE)
         .onPageBegin(() => {
-          this.cancelRetry(false);
-          this.mainNavigationId += 1;
+          this.ownership = { active: this.ownership.active,
+            mainGeneration: this.ownership.mainGeneration + 1,
+            popupGeneration: this.ownership.popupGeneration, disposed: this.ownership.disposed };
           this.loading = true;
           this.errorText = '';
         })
@@ -288,8 +301,10 @@ export struct A2uiWebSurfaceView {
           this.webReady = true;
           this.loading = false;
           this.loadHtmlIfNeeded();
-          this.onLoadEnd(pageUrl);
-          this.startPageScript(this.controller, this.mainNavigationId, false);
+          this.onLoadEnd(pageUrl, 'main');
+          if (this.ownership.active === 'main') {
+            this.onActiveControllerChange('main', pageUrl, this.ownership.mainGeneration);
+          }
         })
         .onErrorReceive((event) => {
           if (event !== undefined && event !== null && this.mainFrameError(event)) {
@@ -308,7 +323,10 @@ export struct A2uiWebSurfaceView {
           if (!this.allowPopup) {
             return;
           }
+          this.ownership = a2uiWebOwnershipAfterPopupOpen(this.ownership);
           this.popupVisible = true;
+          this.popupReady = false;
+          this.onActiveControllerChange('popup', '', this.ownership.popupGeneration);
           event.handler.setWebController(this.popupController);
         })
 
@@ -347,15 +365,18 @@ export struct A2uiWebSurfaceView {
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
             .onPageBegin(() => {
-              this.cancelRetry(true);
-              this.popupNavigationId += 1;
+              this.ownership = { active: this.ownership.active,
+                mainGeneration: this.ownership.mainGeneration,
+                popupGeneration: this.ownership.popupGeneration + 1, disposed: this.ownership.disposed };
               this.popupReady = false;
             })
             .onPageEnd((event) => {
               const pageUrl = event === undefined || event === null ? '' : event.url;
               this.popupReady = true;
-              this.onLoadEnd(pageUrl);
-              this.startPageScript(this.popupController, this.popupNavigationId, true);
+              this.onLoadEnd(pageUrl, 'popup');
+              if (this.ownership.active === 'popup') {
+                this.onActiveControllerChange('popup', pageUrl, this.ownership.popupGeneration);
+              }
             })
             .onLoadIntercept((event) => {
               const request = event === undefined || event === null ? null : event.data;

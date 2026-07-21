@@ -14,12 +14,11 @@ interface TrainWebAssistConfig {
   unpaidOrderAuthorized: boolean;
 }
 
-export interface TrainWebAssistFixtureRow { cells: string[]; visible: boolean; width: number; height: number; }
-export interface TrainWebAssistFixture {
-  trainCells: string[];
-  passengerRows: TrainWebAssistFixtureRow[];
-  loginVisible: boolean;
-  captchaVisible: boolean;
+export type TrainWebAssistRunStage = 'initial' | 'final';
+export interface TrainWebAssistExecutionBinding {
+  controller: 'main' | 'popup';
+  generation: number;
+  session: number;
 }
 
 const SANITIZED_REASONS: string[] = [
@@ -43,35 +42,69 @@ function sanitizedReason(value: string): string {
   return SANITIZED_REASONS.indexOf(value) >= 0 ? value : 'invalid_result';
 }
 
-export function exactTrainWebAssistMultiset(expected: string[], actual: string[]): boolean {
-  if (expected.length !== actual.length) return false;
-  const left = expected.slice().sort();
-  const right = actual.slice().sort();
-  for (let index = 0; index < left.length; index++) if (left[index] !== right[index]) return false;
-  return true;
+export function trainWebAssistRetryLimit(stage: 'query' | 'passenger' | 'confirm'): number {
+  return stage === 'query' ? 20 : 40;
 }
 
-export function evaluateTrainWebAssistFixture(task: TrainPresaleTask, fixture: TrainWebAssistFixture): string {
-  if (fixture.loginVisible) return 'login_required';
-  if (fixture.captchaVisible) return 'captcha_required';
-  if (fixture.trainCells.filter((cell: string): boolean => cell === task.trainCode).length !== 1) {
-    return 'confirmation_mismatch';
+export function trainWebAssistRetryExhausted(stage: TrainWebAssistRunStage,
+  outcome: TrainWebAssistRetryOutcome, attempts: number): boolean {
+  if ((stage === 'final' && outcome.stage !== 'confirm') ||
+    (stage === 'initial' && outcome.stage === 'confirm')) return true;
+  return attempts >= trainWebAssistRetryLimit(outcome.stage);
+}
+
+export function isCurrentTrainWebAssistExecution(expected: TrainWebAssistExecutionBinding,
+  actual: TrainWebAssistExecutionBinding): boolean {
+  return expected.controller === actual.controller && expected.generation === actual.generation &&
+    expected.session === actual.session;
+}
+
+export function nextTrainWebAssistEpoch(current: number): number { return current + 1; }
+
+export function isCurrentTrainWebAssistTimer(capturedEpoch: number, currentEpoch: number,
+  disposed: boolean): boolean {
+  return !disposed && capturedEpoch === currentEpoch;
+}
+
+export function trainWebAssistFinalClickMayHaveRun(stage: TrainWebAssistRunStage,
+  finalRequestWasInFlight: boolean, outcome: TrainWebAssistOutcome | undefined): boolean {
+  return stage === 'final' && (finalRequestWasInFlight || (outcome !== undefined && outcome.state === 'retry' &&
+    outcome.stage === 'confirm' && outcome.progress === 'confirm_clicked'));
+}
+
+export function isOfficialTrainAssistUrl(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized.startsWith('https://')) return false;
+  const remainder = normalized.substring(8);
+  let end = remainder.length;
+  const separators: number[] = [remainder.indexOf('/'), remainder.indexOf('?'), remainder.indexOf('#')];
+  for (let index = 0; index < separators.length; index++) {
+    if (separators[index] >= 0 && separators[index] < end) end = separators[index];
   }
-  const names: string[] = [];
-  for (let index = 0; index < fixture.passengerRows.length; index++) {
-    const row = fixture.passengerRows[index];
-    if (!row.visible || row.width <= 0 || row.height <= 0) continue;
-    let matched = '';
-    for (let nameIndex = 0; nameIndex < task.passengerNames.length; nameIndex++) {
-      if (row.cells.indexOf(task.passengerNames[nameIndex]) >= 0) matched = task.passengerNames[nameIndex];
-    }
-    if (matched.length === 0 || row.cells.filter((cell: string): boolean => cell === matched).length !== 1 ||
-      row.cells.filter((cell: string): boolean => cell.startsWith(task.seatPriority)).length !== 1) {
-      return 'confirmation_mismatch';
-    }
-    names.push(matched);
+  return remainder.substring(0, end) === 'kyfw.12306.cn';
+}
+
+export function trainWebAssistDurableGateReason(kind: string, boundTaskId: string, pendingTaskId: string,
+  task: TrainPresaleTask | undefined, activeUrl: string): string {
+  if (kind !== 'train' || boundTaskId.length === 0 || pendingTaskId !== boundTaskId || task === undefined ||
+    task.taskId !== boundTaskId || task.state !== 'executing' || !task.unpaidOrderAuthorized) {
+    return 'not_authorized';
   }
-  return exactTrainWebAssistMultiset(task.passengerNames, names) ? '' : 'confirmation_mismatch';
+  return isOfficialTrainAssistUrl(activeUrl) ? '' : 'page_mismatch';
+}
+
+export interface TrainWebAssistExecutionRequest {
+  script: string;
+  reason: string;
+}
+
+export function buildTrainWebAssistExecutionRequest(stage: TrainWebAssistRunStage, kind: string,
+  boundTaskId: string, pendingTaskId: string, task: TrainPresaleTask | undefined,
+  activeUrl: string): TrainWebAssistExecutionRequest {
+  const reason = trainWebAssistDurableGateReason(kind, boundTaskId, pendingTaskId, task, activeUrl);
+  if (reason.length > 0 || task === undefined) return { script: '', reason: reason };
+  return { script: stage === 'final' ? buildTrainPresaleFinalConfirmScript(task) :
+    buildTrainPresaleWebAssistScript(task), reason: '' };
 }
 
 function commonScript(config: TrainWebAssistConfig): string {
@@ -105,7 +138,7 @@ export function buildTrainPresaleWebAssistScript(task: TrainPresaleTask): string
     `if(payment())return out({state:'awaiting_payment'});` +
     `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn')return stop('page_mismatch');` +
     `if(shown('#login_user,.login-hd-account,#J-login'))return stop('login_required');` +
-    `if(shown('#J-loginImg,.touclick-wrapper,#floatTable'))return stop('captcha_required');` +
+    `if(shown('#J-loginImg,.touclick-wrapper'))return stop('captcha_required');` +
     `const table=document.querySelector('#queryLeftTable');if(table){const rows=Array.from(table.querySelectorAll('tr'));` +
     `const matches=rows.filter((row)=>{const link=row.querySelector('a.number');return visible(link)&&txt(link)===cfg.trainCode;});` +
     `if(matches.length!==1)return stop('train_mismatch');const booking=matches[0].querySelector('a.btn72');` +
@@ -135,17 +168,13 @@ export function buildTrainPresaleFinalConfirmScript(task: TrainPresaleTask): str
   const config: TrainWebAssistConfig = { trainCode: task.trainCode, passengerNames: task.passengerNames,
     seatPriority: task.seatPriority, unpaidOrderAuthorized: task.unpaidOrderAuthorized };
   return `(function(){${commonScript(config)}if(payment())return out({state:'awaiting_payment'});` +
+    `if(location.protocol.toLowerCase()!=='https:'||location.hostname.toLowerCase()!=='kyfw.12306.cn')return stop('page_mismatch');` +
+    `if(shown('#login_user,.login-hd-account,#J-login'))return stop('login_required');` +
+    `if(shown('#J-loginImg,.touclick-wrapper'))return stop('captcha_required');` +
     `if(!cfg.unpaidOrderAuthorized)return stop('not_authorized');` +
-    `const checked=verifyModal();if(checked==='wait')return stop('confirmation_mismatch');if(checked!=='')return stop(checked);` +
-    `const confirm=document.querySelector('#qr_submit_id');if(!visible(confirm))return stop('confirmation_mismatch');` +
+    `const checked=verifyModal();if(checked==='wait')return retry('confirm','waiting_modal');if(checked!=='')return stop(checked);` +
+    `const confirm=document.querySelector('#qr_submit_id');if(!visible(confirm))return retry('confirm','waiting_confirm');` +
     `if(!marker.finalConfirmed){marker.finalConfirmed=true;confirm.click();}return retry('confirm','confirm_clicked');})()`;
-}
-
-export function trainPresaleWebAssistScriptForCheckout(kind: string, boundTaskId: string,
-  task: TrainPresaleTask | undefined): string {
-  if (kind !== 'train' || boundTaskId.length === 0 || task === undefined || task.taskId !== boundTaskId ||
-    task.state !== 'executing' || !task.unpaidOrderAuthorized) return '';
-  return buildTrainPresaleWebAssistScript(task);
 }
 
 export function parseTrainWebAssistOutcome(raw: string): TrainWebAssistOutcome {
