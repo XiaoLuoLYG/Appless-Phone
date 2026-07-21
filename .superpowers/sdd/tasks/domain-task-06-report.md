@@ -5,6 +5,7 @@
 - Base commit: `15c49cd7215de2f03e267d2f073fd9d557b41436`.
 - Initial implementation: `ad17f649735c698127f104ed29a0ff8f2607d805` (`feat: register product action execution`).
 - Review fix: `78211438` (`fix: enforce registered action authority`).
+- Second review fix: `2a898473ccbb65d2ea7ee77e54a5b3e52cc0e7fb` (`fix: close registered action review gaps`).
 - Renamed the hotel-only registered executor to the product-level `AiphoneRegisteredActionExecutor` and kept one narrow `RegisteredPageAction(actionId, args, context)` product callback seam.
 - Added executor support for the ten Wave 3 routes: `luckin.order.preview`, `social.reply.draft`, `mail.draft.create`, `gmail.draft.create`, `gmail.draft.apply`, `gmail.open.web`, `worldcup.open`, `payment.send`, `payment.account.setup`, and `maps.route.open`.
 - Kept Task 7 `gmail.message.send` and the remaining Task 8 external writes fail-closed.
@@ -13,15 +14,17 @@
 
 ### Real reachability authority
 
-- `RegisteredPageActionRoute.ets` resolves page actions only from the current surface's real registered `summary.toolName`, exact surface document action, and exact action arguments.
-- A direct same-ID Action definition may authorize its own fixed action. Otherwise the source definition must declare the action. The only cross-ID adapters are the two existing explicit UI relationships: `payment.confirm` to `payment.send`, and Stripe account actions to `payment.account.setup`.
-- `Index.ets` now routes a valid registered click through `MultiAgentCanaryRuntime.runPageAction` and the normal Action Agent lifecycle exactly once. Client-only, deferred, unknown, mutated, and stale-generation actions reject before the product callback.
-- The canary's initial Leader `actionIntent` path is limited to fixed, non-confirm-required Actions. Confirm-required routes remain exact-button flows, so an initial prompt cannot wait for a confirmation UI that does not exist.
+- `RegisteredPageActionRoute.ets` resolves page actions only from an injected clone of the actual rendered surface/document snapshot, its real registered `summary.toolName`, exact document action, exact arguments, and monotonic generation.
+- The broad catalog self-source exception is gone. Page execution uses a dedicated internal page authority after exact rendered-snapshot resolution. The only cross-ID adapters are the two existing explicit UI relationships: `payment.confirm` to `payment.send`, and each immutable Stripe account operation to `payment.account.setup`.
+- `Index.ets` sends every explicit registered-page candidate through a terminal dispatcher. Missing source, mutated args, stale or constructed same-generation snapshots, handler `false`, and handler throws cannot fall through to payment, Luckin, client-action, or `submitPrompt` legacy paths.
+- The canary's dedicated Leader `actionIntent` authority accepts only `worldcup.open` and `maps.route.open`. Maps input is parsed and normalized into exact `origin`, `destination`, `travelMode`, and `navigate` fields; ambiguous input rejects before the handler. The pre-existing `memory.update` virtual path remains on declared-source and exact virtual-surface checks.
+- `RegisteredPageActionHandler.ets` is the product handler boundary. It invokes the existing real page tool gateway, propagates real transport/surface/provider errors, and never manufactures provider success. World Cup arguments are validated before invocation.
+- Stripe `create`, `onboard`, and `refresh` keep the original clicked page operation as immutable `pageActionId` through Action Agent context, handler callback context, and the existing `callToolById` action-ID parameter, while the registered target remains `payment.account.setup`.
 - The reachability tests cover all ten fixed executor routes: eight through actual current-button surface paths and two (`worldcup.open`, `maps.route.open`) through a real Leader `actionIntent` / `ACTION.PLAN.REQUEST` / Action Agent path. Test callbacks are controlled seams; this is routing evidence, not live-provider or device evidence.
 
 ### Exact confirmation
 
-- A confirm-required direct click is authorized only after current `ActionCatalog.validateSurfaceExecution` succeeds for the exact conversation, turn, task, surface, source tool, run, action, arguments, and surface generation.
+- A confirm-required direct click is authorized only after the injected rendered snapshot and current catalog succeed for the exact conversation, turn, task, surface, source tool, run, action, arguments, and page operation.
 - The proof is stored internally by `ActionAgent`, consumed once, and resumed through `ActionPlanRunner` so immediately-before-invoke catalog validation still runs.
 - Forged args, wrong correlation identity, a second use, cancel, and stop cannot execute. An unconfirmed bus message still pauses/rejects rather than inheriting a page click's authority.
 - No timeout, overlay, bus protocol field, second lifecycle, or automatic confirmation path was added.
@@ -47,6 +50,14 @@ A later replay-correlation RED reported 1015 tests with one failure: a valid sec
 - Exact-button confirmation tests were written before the new API and failed compilation because `ActionAgent.authorizeDirectSurfaceRun()` did not exist. The implementation added internal one-shot authorization and resume-through-runner behavior.
 - Reachability tests exercise the real canary/Leader boundaries. They cover all ten supported routes and prove client/deferred/mutated/stale actions cannot invoke the callback.
 
+### Second review RED/GREEN
+
+- A tests-only migration suite first failed ArkTS compilation because the rendered-snapshot store/resolver, explicit candidate dispatcher, immutable page-operation context, registered page handler/invoker, and narrow virtual resolver APIs did not exist.
+- After the first production pass compiled, the strict suite exposed old self-source fixtures and optional internal fields copied as `undefined`; those were corrected without restoring the removed authority exception or changing one-shot confirmation/replay behavior.
+- Self-review added another RED compile for a dedicated `validateActionIntentExecution` API and a behavioral handler assertion. The final catalog hard-limits action-intent execution to World Cup and Maps, and invalid World Cup args make zero invoker calls.
+- The real handler spy proves all three Stripe operations reach the existing gateway with their original page action ID. The third operation returns a recorded real handler error, and the terminal result contains no fake success.
+- The dispatcher tests prove missing source, mutated args, constructed same-generation state, and a real handler error make zero legacy calls. Snapshot tests also prove unchanged exact reuse, a genuine higher generation, stale generation, and same-generation mutation behavior.
+
 ## Final Verification
 
 Authoritative command:
@@ -57,13 +68,13 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T05:46:36+0800`:
+Fresh authoritative `entry/.test/default/intermediates/test/coverage_data/test_result.txt` at `2026-07-22T06:20:47+0800` for the exact implementation tree committed as `2a898473ccbb65d2ea7ee77e54a5b3e52cc0e7fb`:
 
 ```text
-Tests run: 1022, Failure: 0, Error: 0, Pass: 1022, Ignore: 0
+Tests run: 1028, Failure: 0, Error: 0, Pass: 1028, Ignore: 0
 ```
 
-- Full Hypium: **1022/1022 passed**, zero failures and zero errors.
+- Full Hypium: **1028/1028 passed**, zero failures and zero errors.
 - `node scripts/verify-loopy-backend.mjs`: **237 checks passed**, including a successful `agent_core` HAR build, on the exact committed implementation tree.
 - Capability audit: 44 registry tools, 36 actions, 69 capabilities; no missing matrix entries, missing docs, registry-only tools, model-only tools, or excluded smoke queries. The ten existing `reviewRequired` future capabilities remain unchanged.
 - `git diff --check`: passed.
@@ -79,13 +90,21 @@ Tests run: 1022, Failure: 0, Error: 0, Pass: 1022, Ignore: 0
 ## Review-Fix Files
 
 - `agent_core/src/main/ets/agent/action/ActionAgent.ets`
+- `agent_core/src/main/ets/agent/action/ActionAgentTypes.ets`
 - `agent_core/src/main/ets/agent/action/ActionCatalog.ets`
+- `agent_core/src/main/ets/agent/action/ActionPlanRunner.ets`
+- `agent_core/src/main/ets/agent/action/ActionPlanTypes.ets`
+- `agent_core/src/main/ets/aiphone/runtime/MapsApiClient.ets`
 - `entry/src/main/ets/pages/A2uiHome/Index.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/HotelAgentRuntime.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`
 - `entry/src/main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute.ets`
+- `entry/src/main/ets/pages/A2uiHome/agent/RegisteredPageActionHandler.ets`
 - `entry/src/test/ActionAgent.test.ets`
+- `entry/src/test/ActionCatalog.test.ets`
 - `entry/src/test/AiphoneRegisteredActionExecutor.test.ets`
+- `entry/src/test/List.test.ets`
 - `entry/src/test/MultiAgentCanaryRuntime.test.ets`
+- `entry/src/test/RegisteredPageActionMigration.test.ets`
