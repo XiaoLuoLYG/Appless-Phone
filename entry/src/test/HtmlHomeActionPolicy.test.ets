@@ -7,6 +7,10 @@ interface ThreadOnlyArgsFixture {
   threadId: string;
 }
 
+interface BookingUrlArgsFixture {
+  bookingUrl: string;
+}
+
 interface StripeOnboardingArgsFixture {
   onboardingUrl: string;
 }
@@ -182,6 +186,42 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('gmail.open.web', 'https://evil.example/'))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":0,"name":"Coffee"}'))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('html_open_food_map', '{"index":99,"name":"Other"}'))).assertFalse();
+    });
+
+    it('allows only the visible 12306 booking action arguments', 0, () => {
+      const doc = documentFixture();
+      const bookingUrl =
+        'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-07-22&flag=N,N,Y';
+      const visibleArgs: BookingUrlArgsFixture = { bookingUrl: bookingUrl };
+      const forgedArgs: BookingUrlArgsFixture = { bookingUrl: 'https://evil.example/' };
+      const visible: HtmlHomeAction = {
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        args: visibleArgs
+      };
+      doc.blocks[0].actions = [visible];
+      const allowed: A2uiAction = {
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        args: visibleArgs
+      };
+      const forged: A2uiAction = {
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        args: forgedArgs
+      };
+
+      expect(isHtmlHomeActionAllowed(doc, allowed)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, forged)).assertFalse();
     });
 
     it('allows Calendar delete only for a visible real event after confirmation', 0, () => {

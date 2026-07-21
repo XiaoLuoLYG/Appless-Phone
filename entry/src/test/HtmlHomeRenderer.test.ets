@@ -24,6 +24,10 @@ interface GooglePayCheckoutArgsFixture {
   paypalMerchantId: string;
 }
 
+interface BookingUrlArgsFixture {
+  bookingUrl: string;
+}
+
 function documentFixture(): HtmlHomeDocument {
   return {
     version: 1,
@@ -294,6 +298,9 @@ function aggregateSearchDocumentFixture(): HtmlHomeDocument {
 
 function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
+  const bookingArgs: BookingUrlArgsFixture = {
+    bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-07-22&flag=N,N,Y'
+  };
   doc.kind = 'travel';
   doc.title = '深圳北到上海虹桥';
   doc.subtitle = 'Travel and food results';
@@ -306,6 +313,7 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
     source: '12306',
     metrics: [
       { label: 'duration', value: '6h30m' },
+      { label: 'price', value: '553' },
       { label: 'source', value: 'train' }
     ],
     rows: [
@@ -313,7 +321,20 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
       { label: 'arrive', value: '15:30' },
       { label: 'seats', value: '二等座有票' }
     ],
-    actions: [{ id: 'html_pin_travel', label: '收藏行程', prompt: 'pin train', variant: 'secondary', kind: 'client' }]
+    actions: [{
+      id: 'train.booking.open',
+      label: '去购票',
+      prompt: '',
+      variant: 'primary',
+      kind: 'client',
+      args: bookingArgs
+    }, {
+      id: 'html_pin_travel',
+      label: '收藏行程',
+      prompt: 'pin train',
+      variant: 'secondary',
+      kind: 'client'
+    }]
   }, {
     id: 'food-amap-1',
     kind: 'food-result',
@@ -1468,6 +1489,11 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('renderPersonaBanner(hero)')).assertLarger(-1);
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
+      expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
+      expect(html.indexOf("'¥' + price + '起'")).assertLarger(-1);
+      expect(html.indexOf('去购票')).assertLarger(-1);
+      expect(html.indexOf('二等座起')).assertEqual(-1);
+      expect(html.indexOf('train.booking.open')).assertLess(html.indexOf('html_pin_travel'));
       expect(html.indexOf('html_pin_travel')).assertLarger(-1);
       expect(html.indexOf('html_open_food_map')).assertLarger(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);

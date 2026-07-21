@@ -96,6 +96,10 @@ interface StripeOnboardingActionArgs {
   onboardingUrl: string;
 }
 
+interface TrainBookingActionArgs {
+  bookingUrl: string;
+}
+
 interface MailDetailActionArgs {
   requestKey: string;
   provider: string;
@@ -335,6 +339,7 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.metrics, 'depart', item.depart);
     appendMetric(block.metrics, 'arrive', item.arrive);
     appendMetric(block.metrics, 'duration', item.duration);
+    appendMetric(block.metrics, 'price', item.price);
     appendMetric(block.rows, 'seats', item.seats);
     appendMetric(block.rows, 'business', item.business);
     appendMetric(block.rows, 'first', item.first);
@@ -342,6 +347,20 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.rows, 'noSeat', item.noSeat);
     appendMetric(block.rows, 'hardSeat', item.hardSeat);
     appendMetric(block.rows, 'sleeperSoft', item.sleeperSoft);
+    if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
+      const bookingArgs: TrainBookingActionArgs = {
+        bookingUrl: item.bookingUrl.trim()
+      };
+      block.actions.push({
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        sourceComponentId: component.id,
+        args: bookingArgs
+      });
+    }
     block.actions.push(clientAction('html_pin_train', '固定到桌面', JSON.stringify({
       index: index,
       trainCode: textOf(item.trainCode),

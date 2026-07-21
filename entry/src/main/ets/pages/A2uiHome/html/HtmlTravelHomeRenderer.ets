@@ -951,11 +951,18 @@ const TRAVEL_HOME_JS: string = `
     add(right, 'b', '', displayTime(metric(block, ['arrive', 'arrTime'])) || '--');
     add(right, 'span', '', metric(block, ['to', 'arr']) || '到达');
     var metrics = add(card, 'div', 'journey-metrics');
-    [
+    var summaryMetrics = [
       ['耗时', metric(block, ['duration']) || '待确认']
-    ].forEach(function (item) {
+    ];
+    var price = metric(block, ['price']);
+    if (source === 'train' && price.length > 0) {
+      summaryMetrics.push(['', '¥' + price + '起']);
+    }
+    summaryMetrics.forEach(function (item) {
       var box = add(metrics, 'div', 'journey-metric');
-      add(box, 'span', '', item[0]);
+      if (item[0].length > 0) {
+        add(box, 'span', '', item[0]);
+      }
       add(box, 'b', '', item[1]);
     });
     var detail = add(card, 'div', 'journey-detail');
