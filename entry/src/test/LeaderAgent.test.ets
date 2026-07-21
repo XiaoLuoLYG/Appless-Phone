@@ -685,14 +685,32 @@ export default function leaderAgentTest() {
 
     it('publishes one semantic UI, ordered Data tasks, then the optional Action request', 0, async () => {
       const bus = new LinkedMessageBus();
-      const decision = semanticDecision([semanticDataTask('flight'), semanticDataTask('train')]);
+      const flightTask = semanticDataTask('flight', 'flight.search');
+      flightTask.allowedToolIds.push('train.search');
+      const decision = semanticDecision([flightTask, semanticDataTask('train', 'train.search')]);
       decision.actionIntent = {
         goal: 'Navigate after results',
         allowedActionIds: ['hotel.navigate']
       };
       decision.requestedCapabilityIds.push('hotel.navigate');
       const planner = new RoundScriptedPlanner([decision]);
-      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'flight.search',
+        intent: 'flight.search',
+        riskLevel: 'read',
+        inputSchema: 'flightSearchRequest',
+        outputSchema: 'flights',
+        actions: []
+      }, {
+        toolId: 'train.search',
+        intent: 'train.search',
+        riskLevel: 'read',
+        inputSchema: 'trainSearchRequest',
+        outputSchema: 'trains',
+        actions: []
+      });
+      const leader = new LeaderAgent(bus, planner, context);
       const observer = bus.openReader();
       leader.start();
 
@@ -716,7 +734,7 @@ export default function leaderAgentTest() {
         'input-1:round-1:flight,input-1:round-1:train'
       );
       expect(ui.intent).assertEqual('Show real data');
-      expect(ui.expectedOutputSchema).assertEqual('hotelSearchResults');
+      expect(ui.expectedOutputSchema).assertEqual('flights');
       expect(first.taskId === second.taskId).assertFalse();
       expect(firstPayload.roundId).assertEqual(secondPayload.roundId);
       expect(firstPayload.goal).assertEqual('Read real data for flight');
@@ -731,6 +749,35 @@ export default function leaderAgentTest() {
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects an owned requested capability outside the exact execution union', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([semanticDataTask('hotel')]);
+      decision.requestedCapabilityIds.push('memory.update');
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'memory.update',
+        intent: 'memory.update',
+        riskLevel: 'draft',
+        inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult',
+        actions: ['memory.update']
+      });
+      context.runtimeOwnedToolIds = ['hotel.search', 'memory.update'];
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const error = await receive(observer);
+
+      expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect(error.taskId).assertEqual('input-1');
+      expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
       leader.stop();
       observer.close();
     });

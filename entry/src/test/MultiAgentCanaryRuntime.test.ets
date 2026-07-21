@@ -15,6 +15,7 @@ import {
   HotelSearchResult,
   LocalModel,
   LinkedMessageBus,
+  TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   hotelSearchDataResult,
@@ -457,6 +458,43 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(model.prompts[0].indexOf('unavailable or not runtime-owned') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Runtime-owned tool IDs:') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('mail.search') >= 0).assertTrue();
+      runtime.dispose();
+    });
+
+    it('fails inside the canary instead of handing off after owned provider execution', 0, async () => {
+      const model = new QueueModel([HOTEL_DECISION, MAIL_DECISION]);
+      const executor = new CanaryHotelExecutor();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+      const input = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.INPUT_USER
+      )[0];
+      const errors = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_ERROR &&
+          message.conversationId === input.conversationId &&
+          message.turnId === input.turnId &&
+          message.taskId === input.taskId
+      );
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(outcome.status).assertEqual('error');
+      expect(outcome.message).assertEqual('Leader cannot hand off after runtime execution has started');
+      expect(executor.calls.join(',')).assertEqual('hotel.search');
+      expect(model.prompts.length).assertEqual(2);
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
+      expect(errors.length).assertEqual(1);
+      expect((errors[0].payload as TaskErrorPayload).code)
+        .assertEqual('LEADER_RUNTIME_OWNERSHIP_VIOLATION');
       runtime.dispose();
     });
 

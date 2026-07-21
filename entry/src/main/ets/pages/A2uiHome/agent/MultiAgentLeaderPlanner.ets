@@ -146,8 +146,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'requestedCapabilityIds is mandatory, unique, and contains exact registered tool/action IDs. ' +
         'Use [] only for ordinary direct conversation that needs no tool-backed fact.',
       'Mail, weather, travel, and other capability-backed answer or clarify decisions must name ' +
-        'their requested registered capability. Every execute decision must include every selected ' +
-        'Data tool, allowed tool, and Action ID.',
+        'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
+        'the unique union of every selected Data tool, allowed tool, and Action ID.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
@@ -203,8 +203,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('Leader round action does not match its Data tasks.');
     }
     if (selectedAction === 'execute' &&
-      !this.requestedCapabilitiesCoverExecution(requestedCapabilityIds, tasks, actionIntent)) {
-      throw new Error('Leader requested capabilities do not cover its execution plan.');
+      !this.requestedCapabilitiesMatchExecution(requestedCapabilityIds, tasks, actionIntent)) {
+      throw new Error('Leader requested capabilities do not exactly match its execution plan.');
     }
     const uiIntent: LeaderUiIntent = this.uiIntent(rawUiIntent);
     const answerValue = values['answer'];
@@ -257,26 +257,29 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     return false;
   }
 
-  private requestedCapabilitiesCoverExecution(
+  private requestedCapabilitiesMatchExecution(
     requested: string[],
     tasks: LeaderDecisionDataTask[],
     actionIntent: LeaderActionIntent | null
   ): boolean {
+    const required: Set<string> = new Set<string>();
     for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
-      if (requested.indexOf(tasks[taskIndex].toolId) < 0) {
-        return false;
-      }
+      required.add(tasks[taskIndex].toolId);
       for (let allowedIndex = 0; allowedIndex < tasks[taskIndex].allowedToolIds.length; allowedIndex++) {
-        if (requested.indexOf(tasks[taskIndex].allowedToolIds[allowedIndex]) < 0) {
-          return false;
-        }
+        required.add(tasks[taskIndex].allowedToolIds[allowedIndex]);
       }
     }
     if (actionIntent !== null) {
       for (let index = 0; index < actionIntent.allowedActionIds.length; index++) {
-        if (requested.indexOf(actionIntent.allowedActionIds[index]) < 0) {
-          return false;
-        }
+        required.add(actionIntent.allowedActionIds[index]);
+      }
+    }
+    if (requested.length !== required.size) {
+      return false;
+    }
+    for (let index = 0; index < requested.length; index++) {
+      if (!required.has(requested[index])) {
+        return false;
       }
     }
     return true;

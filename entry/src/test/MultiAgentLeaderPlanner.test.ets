@@ -16,6 +16,26 @@ const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",
   '{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],"toolId":"train.search","input":{},"required":false}' +
   '],"uiIntent":{"purpose":"比较出行方案","preferredDensity":"comfortable","requiredSections":["flight","train"]},' +
   '"reasonCode":"parallel_reads"}';
+const EXACT_MULTI_TOOL_ACTION_DECISION: string = PARALLEL_DECISION
+  .replace(
+    '"requestedCapabilityIds":["flight.search","train.search"]',
+    '"requestedCapabilityIds":["flight.search","train.search","memory.update"]'
+  )
+  .replace(
+    '"allowedToolIds":["flight.search"]',
+    '"allowedToolIds":["flight.search","train.search"]'
+  )
+  .replace(
+    ',"reasonCode":"parallel_reads"}',
+    ',"actionIntent":{"goal":"remember selection","allowedActionIds":["memory.update"]},' +
+      '"reasonCode":"parallel_reads"}'
+  );
+const HOTEL_WITH_EXTRA_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["hotel.search","memory.update"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"hotel","goal":"查酒店","allowedToolIds":["hotel.search"],' +
+  '"toolId":"hotel.search","input":{},"required":true}],' +
+  '"uiIntent":{"purpose":"展示酒店","preferredDensity":"comfortable",' +
+  '"requiredSections":["hotel"]},"reasonCode":"hotel_search"}';
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -60,6 +80,13 @@ function planningContext(): LeaderPlanningContext {
       riskLevel: 'read',
       inputSchema: 'trainSearchRequest',
       outputSchema: 'trainSearchResults',
+      actions: []
+    }, {
+      toolId: 'hotel.search',
+      intent: 'Search real hotels',
+      riskLevel: 'read',
+      inputSchema: 'hotelSearchRequest',
+      outputSchema: 'hotelSearchResults',
       actions: []
     }, {
       toolId: 'hotel.navigate',
@@ -235,10 +262,12 @@ export default function multiAgentLeaderPlannerTest() {
       );
 
       expect(await fails(PARALLEL_DECISION)).assertFalse();
+      expect(await fails(EXACT_MULTI_TOOL_ACTION_DECISION)).assertFalse();
       expect(await fails(missing)).assertTrue();
       expect(await fails(duplicate)).assertTrue();
       expect(await fails(unregistered)).assertTrue();
       expect(await fails(incomplete)).assertTrue();
+      expect(await fails(HOTEL_WITH_EXTRA_DECISION)).assertTrue();
     });
   });
 }

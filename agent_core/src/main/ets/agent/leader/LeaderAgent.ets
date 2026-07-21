@@ -304,8 +304,44 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
     }
+    const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
     if (!this.runtimeOwnsDecision(decision)) {
-      this.publishHandoff(message, decision);
+      if (executionStarted) {
+        this.publishError(
+          message,
+          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
+          'Leader cannot hand off after runtime execution has started'
+        );
+      } else {
+        this.publishHandoff(message, decision);
+      }
+      this.finishTurn(state);
+      return;
+    }
+    if (decision.roundAction === 'legacy_handoff') {
+      if (executionStarted) {
+        this.publishError(
+          message,
+          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
+          'Leader cannot hand off after runtime execution has started'
+        );
+      } else {
+        this.publishHandoff(message, decision);
+      }
+      this.finishTurn(state);
+      return;
+    }
+    if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
+      state.turnObservations.length === 0 && decision.requestedCapabilityIds.length > 0) {
+      if (executionStarted) {
+        this.publishError(
+          message,
+          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
+          'Leader cannot hand off after runtime execution has started'
+        );
+      } else {
+        this.publishHandoff(message, decision);
+      }
       this.finishTurn(state);
       return;
     }
@@ -319,17 +355,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     state.semantic = true;
     state.skillId = decision.skillId;
-    if (decision.roundAction === 'legacy_handoff') {
-      this.publishHandoff(message, decision);
-      this.finishTurn(state);
-      return;
-    }
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
-      if (state.turnObservations.length === 0 && decision.requestedCapabilityIds.length > 0) {
-        this.publishHandoff(message, decision);
-        this.finishTurn(state);
-        return;
-      }
       this.publishTurnResult(message, state, decision.answer as string);
       this.finishTurn(state);
       return;
@@ -615,7 +641,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const actionIntent = decision.actionIntent;
     return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
-      this.requestedCapabilitiesCoverExecution(decision);
+      this.requestedCapabilitiesMatchExecution(decision);
   }
 
   private runtimeOwnsDecision(decision: LeaderDecision): boolean {
@@ -657,27 +683,30 @@ export class LeaderAgent extends MessageDrivenAgent {
     return false;
   }
 
-  private requestedCapabilitiesCoverExecution(decision: LeaderDecision): boolean {
+  private requestedCapabilitiesMatchExecution(decision: LeaderDecision): boolean {
     if (decision.roundAction !== 'execute') {
       return true;
     }
-    const requested: string[] = decision.requestedCapabilityIds;
+    const required: Set<string> = new Set<string>();
     for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
       const task = decision.dataTasks[taskIndex];
-      if (requested.indexOf(task.toolId) < 0) {
-        return false;
-      }
+      required.add(task.toolId);
       for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
-        if (requested.indexOf(task.allowedToolIds[allowedIndex]) < 0) {
-          return false;
-        }
+        required.add(task.allowedToolIds[allowedIndex]);
       }
     }
     if (decision.actionIntent !== undefined) {
       for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
-        if (requested.indexOf(decision.actionIntent.allowedActionIds[index]) < 0) {
-          return false;
-        }
+        required.add(decision.actionIntent.allowedActionIds[index]);
+      }
+    }
+    const requested: string[] = decision.requestedCapabilityIds;
+    if (requested.length !== required.size) {
+      return false;
+    }
+    for (let index = 0; index < requested.length; index++) {
+      if (!required.has(requested[index])) {
+        return false;
       }
     }
     return true;
