@@ -4,8 +4,10 @@ import {
   aiphoneToolDefinitionCount,
   allAiphoneToolDefinitions,
   aiphoneToolDescriptionForModel,
+  actionAgentToolDefinitions,
   allToolDefinitions,
   backendLabel,
+  dataAgentToolDefinitions,
   isCalendarToolId,
   isGmailToolId,
   isHotelToolId,
@@ -449,6 +451,28 @@ export default function toolDefinitionRegistryTest() {
       expect(backendLabel('web_session')).assertEqual('Web session');
       expect(backendLabel('system_intent')).assertEqual('System intent');
       expect(backendLabel('mcp_remote')).assertEqual('Remote MCP');
+    });
+
+    it('derives disjoint cloned Data and Action capability views from the registry', 0, () => {
+      const all: ToolDefinition[] = allToolDefinitions();
+      const data: ToolDefinition[] = dataAgentToolDefinitions();
+      const action: ToolDefinition[] = actionAgentToolDefinitions();
+      const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
+
+      expect(all.length).assertEqual(44);
+      expect(data.length).assertEqual(24);
+      expect(action.length).assertEqual(20);
+      expect(new Set<string>(ids).size).assertEqual(44);
+      expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();
+      expect(data.map((item: ToolDefinition): string => item.toolId).indexOf('hotel.navigate')).assertEqual(-1);
+      expect(ids.indexOf('dynamic.search')).assertEqual(-1);
+      expect(ids.indexOf('memory.update')).assertEqual(-1);
+
+      data[0].toolId = 'mutated.tool';
+      data[0].backendPriority.push('web_session');
+      const laterData: ToolDefinition[] = dataAgentToolDefinitions();
+      expect(laterData[0].toolId).assertEqual('travel.search');
+      expect(laterData[0].backendPriority.join(',')).assertEqual('local_adapter');
     });
   });
 }

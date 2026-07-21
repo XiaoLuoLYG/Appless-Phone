@@ -558,6 +558,23 @@ export function allToolDefinitions(): ToolDefinition[] {
   return definitions;
 }
 
+function isExternalActionBackend(definition: ToolDefinition): boolean {
+  return definition.backendPriority.indexOf('system_intent') >= 0;
+}
+
+function isDataAgentDefinition(definition: ToolDefinition): boolean {
+  return definition.riskLevel === 'read' && !isExternalActionBackend(definition);
+}
+
+export function dataAgentToolDefinitions(): ToolDefinition[] {
+  return allToolDefinitions().filter(isDataAgentDefinition);
+}
+
+export function actionAgentToolDefinitions(): ToolDefinition[] {
+  return allToolDefinitions().filter((definition: ToolDefinition): boolean =>
+    !isDataAgentDefinition(definition));
+}
+
 export function toolDefinitionForToolId(toolId: string): ToolDefinition | null {
   for (let index = 0; index < TOOL_DEFINITIONS.length; index++) {
     const definition = TOOL_DEFINITIONS[index];
