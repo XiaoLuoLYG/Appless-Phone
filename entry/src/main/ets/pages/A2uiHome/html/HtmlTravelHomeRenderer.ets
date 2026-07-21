@@ -427,6 +427,19 @@ button:disabled { cursor: default; opacity: 0.52; }
   align-items: center;
   margin-top: 10px;
 }
+.journey-price {
+  grid-column: 4;
+  justify-self: end;
+  align-self: center;
+  color: var(--source);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.journey-price b {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 850;
+}
 .time-block {
   min-width: 0;
 }
@@ -563,6 +576,8 @@ button:disabled { cursor: default; opacity: 0.52; }
   .route-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .route-stat { padding: 8px 7px; }
   .route-stat b { font-size: 13px; }
+  .journey-mainline { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .journey-price { grid-column: 3; }
   .journey-metrics { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -950,14 +965,15 @@ const TRAVEL_HOME_JS: string = `
     var right = add(mainline, 'div', 'time-block');
     add(right, 'b', '', displayTime(metric(block, ['arrive', 'arrTime'])) || '--');
     add(right, 'span', '', metric(block, ['to', 'arr']) || '到达');
+    var price = metric(block, ['price']);
+    if (source === 'train' && price.length > 0) {
+      var priceBlock = add(mainline, 'div', 'journey-price');
+      add(priceBlock, 'b', '', '¥' + price + '起');
+    }
     var metrics = add(card, 'div', 'journey-metrics');
     var summaryMetrics = [
       ['耗时', metric(block, ['duration']) || '待确认']
     ];
-    var price = metric(block, ['price']);
-    if (source === 'train' && price.length > 0) {
-      summaryMetrics.push(['', '¥' + price + '起']);
-    }
     summaryMetrics.forEach(function (item) {
       var box = add(metrics, 'div', 'journey-metric');
       if (item[0].length > 0) {

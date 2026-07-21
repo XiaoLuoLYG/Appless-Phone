@@ -1491,6 +1491,9 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
       expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
       expect(html.indexOf("'¥' + price + '起'")).assertLarger(-1);
+      expect(html.indexOf("add(mainline, 'div', 'journey-price')")).assertLarger(-1);
+      expect(html.indexOf("summaryMetrics.push(['', '¥' + price + '起'])")).assertEqual(-1);
+      expect(html.indexOf('grid-column: 4')).assertLarger(-1);
       expect(html.indexOf('去购票')).assertLarger(-1);
       expect(html.indexOf('二等座起')).assertEqual(-1);
       expect(html.indexOf('train.booking.open')).assertLess(html.indexOf('html_pin_travel'));
