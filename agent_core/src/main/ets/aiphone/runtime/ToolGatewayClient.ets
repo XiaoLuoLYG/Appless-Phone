@@ -4376,7 +4376,9 @@ function lowestAvailable12306Price(fields: string[]): string {
   let minimumJiao = -1;
   for (let offset = 0; offset < ypInfoNew.length; offset += 10) {
     const chunk = ypInfoNew.substring(offset, offset + 10);
-    const availability = trainSeatAvailabilityForPriceCode(chunk.substring(0, 1), fields);
+    const inventoryText = chunk.substring(6, 10);
+    const availability = /^\d{4}$/.test(inventoryText) && Number.parseInt(inventoryText, 10) >= 3000 ?
+      trainField(fields, 26) : trainSeatAvailabilityForPriceCode(chunk.substring(0, 1), fields);
     const priceText = chunk.substring(1, 6);
     if (!isAvailableTrainSeat(availability) || !/^\d{5}$/.test(priceText)) {
       continue;

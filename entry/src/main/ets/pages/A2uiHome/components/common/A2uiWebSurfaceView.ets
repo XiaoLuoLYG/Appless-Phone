@@ -205,6 +205,10 @@ export struct A2uiWebSurfaceView {
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
+            .onPageEnd((event) => {
+              const pageUrl = event === undefined || event === null ? '' : event.url;
+              this.onLoadEnd(pageUrl);
+            })
             .onLoadIntercept((event) => {
               const request = event === undefined || event === null ? null : event.data;
               const pageUrl = request === null ? '' : request.getRequestUrl();

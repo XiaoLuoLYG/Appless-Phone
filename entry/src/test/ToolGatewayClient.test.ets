@@ -301,6 +301,39 @@ export default function toolGatewayClientTest() {
       expect(trainLowestAvailablePriceForTest(row)).assertEqual('553');
     });
 
+    it('uses no-seat availability for 12306 inventory price chunks', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067203065',
+        '2',
+        '无',
+        '无',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('672');
+    });
+
+    it('ignores unavailable no-seat inventory price chunks', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067203065',
+        '2',
+        '无',
+        '无',
+        '无'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('2350');
+    });
+
+    it('formats no-seat prices with non-zero jiao', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067253065',
+        '2',
+        '无',
+        '无',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('672.5');
+    });
+
     it('ignores cheaper unavailable, waitlist, and malformed train prices', 0, () => {
       expect(trainLowestAvailablePriceForTest(
         trainRowForPrice('O040000000M055300000', '', '3', '无')
