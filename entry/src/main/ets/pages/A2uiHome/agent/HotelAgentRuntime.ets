@@ -479,10 +479,10 @@ function hotelDataAssessment(data: DataResult, expectedToolId: string): HotelDat
 function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'dataTaskId,expectedOutputSchema,intent,skillId,taskId') ||
+    !hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,skillId,taskId') ||
     payload['taskId'] !== message.taskId ||
-    !nonempty(payload['dataTaskId']) ||
-    payload['dataTaskId'] === message.taskId ||
+    !Array.isArray(payload['dataTaskIds']) || payload['dataTaskIds'].length !== 1 ||
+    !nonempty(payload['dataTaskIds'][0]) || payload['dataTaskIds'][0] === message.taskId ||
     typeof payload['skillId'] !== 'string' ||
     !nonempty(payload['intent']) ||
     !nonempty(payload['expectedOutputSchema'])) {
@@ -494,12 +494,16 @@ function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
 function dataTaskPayload(message: AgentMessage): CreateDataTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'args,outputSchema,skillId,taskId,toolId') ||
+    !hasOnlyKeys(payload, 'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId') ||
     payload['taskId'] !== message.taskId ||
+    !nonempty(payload['roundId']) ||
     typeof payload['skillId'] !== 'string' ||
+    !nonempty(payload['goal']) ||
+    !Array.isArray(payload['allowedToolIds']) || payload['allowedToolIds'].length === 0 ||
     !nonempty(payload['toolId']) ||
     !nonempty(payload['outputSchema']) ||
-    recordOf(payload['args']) === null) {
+    recordOf(payload['args']) === null ||
+    typeof payload['required'] !== 'boolean') {
     return null;
   }
   return message.payload as CreateDataTaskPayload;
@@ -1802,7 +1806,7 @@ export class HotelAgentRuntime {
       task.intent === 'hotel.search' &&
       task.expectedOutputSchema === 'hotelSearchResults') {
       pending.uiTaskId = message.taskId;
-      pending.dataTaskId = task.dataTaskId;
+      pending.dataTaskId = task.dataTaskIds[0];
       pending.expectedSchema = task.expectedOutputSchema;
       pending.uiCreated = true;
       this.tryPairTurn(pending);
@@ -1812,7 +1816,7 @@ export class HotelAgentRuntime {
       if (action.actionId !== 'hotel.detail' ||
         action.expectedFollowUpUiTaskId !== message.taskId ||
         task.taskId !== action.expectedFollowUpUiTaskId ||
-        task.dataTaskId !== action.expectedFollowUpDataTaskId ||
+        task.dataTaskIds[0] !== action.expectedFollowUpDataTaskId ||
         task.intent !== 'hotel.detail' ||
         task.expectedOutputSchema !== 'hotelRatePlans' ||
         message.turnId === action.turnId ||

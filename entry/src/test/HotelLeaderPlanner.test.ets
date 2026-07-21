@@ -118,13 +118,13 @@ export default function hotelLeaderPlannerTest() {
         payload,
         planningContext()
       );
-      const args = plan.data.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const args = plan.dataTasks[0].args as Record<string, Object | string | number | boolean | null | undefined>;
 
-      expect(plan.data.toolId).assertEqual('hotel.search');
+      expect(plan.dataTasks[0].toolId).assertEqual('hotel.search');
       expect(plan.ui.intent).assertEqual('hotel.search');
       expect(plan.ui.expectedOutputSchema).assertEqual('hotelSearchResults');
-      expect(plan.data.outputSchema).assertEqual(plan.ui.expectedOutputSchema);
-      expect(plan.ui.taskId === plan.data.taskId).assertFalse();
+      expect(plan.dataTasks[0].outputSchema).assertEqual(plan.ui.expectedOutputSchema);
+      expect(plan.ui.taskId === plan.dataTasks[0].taskId).assertFalse();
       expect(args.originQuery).assertEqual('8月15日深圳住两晚的酒店');
       expect(args.place).assertEqual('深圳');
       expect(args.checkInDate).assertEqual('2026-08-15');
@@ -152,8 +152,8 @@ export default function hotelLeaderPlannerTest() {
         englishJson
       );
 
-      expect(chinese.data.toolId).assertEqual('hotel.search');
-      expect(english.data.toolId).assertEqual('hotel.search');
+      expect(chinese.dataTasks[0].toolId).assertEqual('hotel.search');
+      expect(english.dataTasks[0].toolId).assertEqual('hotel.search');
       expect(JSON.stringify(chinese).indexOf('hotel.book')).assertEqual(-1);
       expect(JSON.stringify(english).indexOf('hotel.book')).assertEqual(-1);
     });
@@ -163,7 +163,7 @@ export default function hotelLeaderPlannerTest() {
         .replace('"currency":"CNY"', '"currency":""')
         .replace('"size":10', '"size":0');
       const plan = await planFor('8月15日深圳住两晚的酒店', withoutModelDefaults);
-      const args = plan.data.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const args = plan.dataTasks[0].args as Record<string, Object | string | number | boolean | null | undefined>;
 
       expect(args.originQuery).assertEqual('8月15日深圳住两晚的酒店');
       expect(args.currency).assertEqual('CNY');

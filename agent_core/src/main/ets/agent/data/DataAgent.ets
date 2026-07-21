@@ -160,15 +160,23 @@ export class DataAgent extends MessageDrivenAgent {
     }
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const payloadTaskId = values['taskId'];
+    const roundId = values['roundId'];
     const skillId = values['skillId'];
+    const goal = values['goal'];
+    const allowedToolIds = values['allowedToolIds'];
     const toolId = values['toolId'];
     const outputSchema = values['outputSchema'];
     const args = values['args'];
+    const required = values['required'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
+      typeof roundId !== 'string' || roundId.trim().length === 0 ||
       typeof skillId !== 'string' ||
+      typeof goal !== 'string' || goal.trim().length === 0 ||
+      !Array.isArray(allowedToolIds) || allowedToolIds.length === 0 ||
       typeof toolId !== 'string' || toolId.trim().length === 0 ||
       typeof outputSchema !== 'string' || outputSchema.trim().length === 0 ||
-      args === null || typeof args !== 'object' || Array.isArray(args)) {
+      args === null || typeof args !== 'object' || Array.isArray(args) ||
+      typeof required !== 'boolean') {
       return null;
     }
     return payload as CreateDataTaskPayload;

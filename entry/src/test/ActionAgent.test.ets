@@ -438,10 +438,14 @@ export default function actionAgentTest() {
       agent.start();
       const dataTask: CreateDataTaskPayload = {
         taskId: 'data-offers',
+        roundId: 'turn-offers',
         skillId: '',
+        goal: 'hotel.search',
+        allowedToolIds: ['hotel.search'],
         toolId: 'hotel.search',
         outputSchema: 'hotelSearchResults',
-        args: JSON.parse('{"place":"深圳"}') as Object
+        args: JSON.parse('{"place":"深圳"}') as Object,
+        required: true
       };
       bus.publish(message(
         AgentMessageType.TASK_CREATE_DATA,
@@ -833,17 +837,21 @@ export default function actionAgentTest() {
       const executor = new RecordingRegisteredExecutor();
       const uiTask: CreateUiTaskPayload = {
         taskId: 'ui-follow',
-        dataTaskId: 'data-follow',
+        dataTaskIds: ['data-follow'],
         skillId: '',
         intent: 'Show the exact hotel detail',
         expectedOutputSchema: 'hotelDetail'
       };
       const dataTask: CreateDataTaskPayload = {
         taskId: 'data-follow',
+        roundId: 'turn-follow',
         skillId: '',
+        goal: 'hotel.detail',
+        allowedToolIds: ['hotel.detail'],
         toolId: 'hotel.detail',
         outputSchema: 'hotelDetail',
-        args: JSON.parse('{"hotelId":101}') as Object
+        args: JSON.parse('{"hotelId":101}') as Object,
+        required: true
       };
       const followUp: ActionFollowUp = {
         uiTask,
@@ -920,17 +928,19 @@ export default function actionAgentTest() {
       const executor = new RecordingRegisteredExecutor();
       const firstArgs = JSON.parse('{"hotelId":101,"marker":"original"}') as Object;
       const firstFollowUp = JSON.parse(
-        '{"uiTask":{"taskId":"ui-first","dataTaskId":"data-first",' +
+        '{"uiTask":{"taskId":"ui-first","dataTaskIds":["data-first"],' +
           '"skillId":"","intent":"Show detail","expectedOutputSchema":"hotelDetail"},' +
-          '"dataTask":{"taskId":"data-first","skillId":"","toolId":"hotel.detail",' +
-          '"outputSchema":"hotelDetail","args":{"hotelId":101,"marker":"original"}}}'
+          '"dataTask":{"taskId":"data-first","roundId":"round-first","skillId":"","goal":"hotel.detail",' +
+          '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail","outputSchema":"hotelDetail",' +
+          '"args":{"hotelId":101,"marker":"original"},"required":true}}'
       ) as ActionFollowUp;
       firstFollowUp.dataTask.args = firstArgs;
       const secondFollowUp = JSON.parse(
-        '{"uiTask":{"taskId":"ui-second","dataTaskId":"data-second",' +
+        '{"uiTask":{"taskId":"ui-second","dataTaskIds":["data-second"],' +
           '"skillId":"","intent":"Must not publish","expectedOutputSchema":"hotelDetail"},' +
-          '"dataTask":{"taskId":"data-second","skillId":"","toolId":"hotel.detail",' +
-          '"outputSchema":"hotelDetail","args":{"hotelId":202}}}'
+          '"dataTask":{"taskId":"data-second","roundId":"round-second","skillId":"","goal":"hotel.detail",' +
+          '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail","outputSchema":"hotelDetail",' +
+          '"args":{"hotelId":202},"required":true}}'
       ) as ActionFollowUp;
       executor.results = [
         success('{"hotelId":101}', firstFollowUp),

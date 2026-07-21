@@ -102,18 +102,21 @@ export class HotelLeaderPlanner implements LeaderPlanner {
       throw new Error('Hotel planner task IDs must be non-empty and unique.');
     }
     return {
+      personaId: '',
       skillId: '',
+      roundAction: 'execute',
       ui: {
         taskId: uiTaskId,
         intent: definition.intent,
         expectedOutputSchema: definition.outputSchema
       },
-      data: {
+      dataTasks: [{
         taskId: dataTaskId,
         toolId: definition.toolId,
         outputSchema: definition.outputSchema,
         args: request
-      }
+      }],
+      reasonCode: 'hotel_search'
     };
   }
 

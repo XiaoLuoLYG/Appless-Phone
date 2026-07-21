@@ -2,10 +2,14 @@ import { DataResult } from '../message/DataResult';
 
 export interface CreateDataTaskPayload {
   taskId: string;
+  roundId: string;
   skillId: string;
+  goal: string;
+  allowedToolIds: string[];
   toolId: string;
   outputSchema: string;
   args: Object;
+  required: boolean;
 }
 
 export interface DataTaskAuthorizationResult {

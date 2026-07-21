@@ -262,7 +262,7 @@ export class UiAgent extends MessageDrivenAgent {
     }
     context.skeletonWritten = true;
     this.publishUiResult(context, 'skeleton');
-    const pending: PendingDataEntry | undefined = context.pendingDataByTaskId.get(task.dataTaskId);
+    const pending: PendingDataEntry | undefined = context.pendingDataByTaskId.get(task.dataTaskIds[0]);
     if (pending !== undefined && pending.invalidCode.length > 0) {
       this.publishOwnedDataError(context, pending.invalidCode, pending.invalidMessage);
       return;
@@ -271,7 +271,7 @@ export class UiAgent extends MessageDrivenAgent {
   }
 
   private async handleDataResult(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
-    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskId) {
+    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskIds[0]) {
       return;
     }
     if (context.canceled || context.resultWritten || context.terminalRenderStarted ||
@@ -304,7 +304,7 @@ export class UiAgent extends MessageDrivenAgent {
     key: string,
     context: UiTurnContext
   ): Promise<void> {
-    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskId) {
+    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskIds[0]) {
       return;
     }
     const ready = this.offersReady(message.payload, message.taskId);
@@ -325,7 +325,7 @@ export class UiAgent extends MessageDrivenAgent {
     if (task === undefined || !context.skeletonWritten) {
       return;
     }
-    const pending = context.pendingDataByTaskId.get(task.dataTaskId);
+    const pending = context.pendingDataByTaskId.get(task.dataTaskIds[0]);
     if (pending === undefined || pending.data === undefined || pending.offers === undefined ||
       pending.offerSourceToolId !== pending.data.toolId) {
       return;
@@ -372,7 +372,7 @@ export class UiAgent extends MessageDrivenAgent {
   private async handleTaskError(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
     if (context.canceled || context.resultWritten ||
       context.terminalRenderStarted || context.uiTask === undefined ||
-      message.taskId !== context.uiTask.dataTaskId) {
+      message.taskId !== context.uiTask.dataTaskIds[0]) {
       return;
     }
     const errorMessage: string | null = this.taskErrorMessage(message.payload);
@@ -512,7 +512,7 @@ export class UiAgent extends MessageDrivenAgent {
       type: AgentMessageType.TASK_ERROR,
       conversationId: context.conversationId,
       turnId: context.turnId,
-      taskId: task.dataTaskId,
+      taskId: task.dataTaskIds[0],
       payload
     });
   }
@@ -587,12 +587,13 @@ export class UiAgent extends MessageDrivenAgent {
     }
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const payloadTaskId = values['taskId'];
-    const dataTaskId = values['dataTaskId'];
+    const dataTaskIds = values['dataTaskIds'];
     const skillId = values['skillId'];
     const intent = values['intent'];
     const expectedOutputSchema = values['expectedOutputSchema'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
-      typeof dataTaskId !== 'string' || dataTaskId.trim().length === 0 || dataTaskId === taskId ||
+      !Array.isArray(dataTaskIds) || dataTaskIds.length !== 1 ||
+      typeof dataTaskIds[0] !== 'string' || dataTaskIds[0].trim().length === 0 || dataTaskIds[0] === taskId ||
       typeof skillId !== 'string' ||
       typeof intent !== 'string' || intent.trim().length === 0 ||
       typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {

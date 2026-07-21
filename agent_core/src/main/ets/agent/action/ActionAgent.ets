@@ -1156,23 +1156,27 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       typeof followUp.dataTask !== 'object' ||
       Array.isArray(followUp.dataTask) ||
       Object.keys(followUp.uiTask).sort().join(',') !==
-        'dataTaskId,expectedOutputSchema,intent,skillId,taskId' ||
+        'dataTaskIds,expectedOutputSchema,intent,skillId,taskId' ||
       Object.keys(followUp.dataTask).sort().join(',') !==
-        'args,outputSchema,skillId,taskId,toolId') {
+        'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId') {
       return null;
     }
     const ui: CreateUiTaskPayload = followUp.uiTask;
     const data: CreateDataTaskPayload = followUp.dataTask;
     if (!nonempty(ui.taskId) ||
-      !nonempty(ui.dataTaskId) ||
+      !Array.isArray(ui.dataTaskIds) || ui.dataTaskIds.length !== 1 ||
+      !nonempty(ui.dataTaskIds[0]) ||
       !nonempty(ui.intent) ||
       !nonempty(ui.expectedOutputSchema) ||
       typeof ui.skillId !== 'string' || ui.skillId !== data.skillId ||
       !nonempty(data.taskId) ||
+      !nonempty(data.roundId) ||
+      !nonempty(data.goal) ||
+      !Array.isArray(data.allowedToolIds) || data.allowedToolIds.length === 0 ||
       !nonempty(data.toolId) ||
       !nonempty(data.outputSchema) ||
       ui.taskId === data.taskId ||
-      ui.dataTaskId !== data.taskId ||
+      ui.dataTaskIds[0] !== data.taskId ||
       ui.expectedOutputSchema !== data.outputSchema ||
       data.args === null ||
       typeof data.args !== 'object' ||
@@ -1189,17 +1193,21 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     return {
       uiTask: {
         taskId: ui.taskId,
-        dataTaskId: ui.dataTaskId,
+        dataTaskIds: [ui.dataTaskIds[0]],
         skillId: ui.skillId,
         intent: ui.intent,
         expectedOutputSchema: ui.expectedOutputSchema
       },
       dataTask: {
         taskId: data.taskId,
+        roundId: data.roundId,
         skillId: data.skillId,
+        goal: data.goal,
+        allowedToolIds: data.allowedToolIds.slice(),
         toolId: data.toolId,
         outputSchema: data.outputSchema,
-        args: argsClone.value as Object
+        args: argsClone.value as Object,
+        required: data.required
       }
     };
   }
@@ -1354,10 +1362,13 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return null;
     }
     const task = payload as CreateDataTaskPayload;
-    if (Object.keys(payload).sort().join(',') !== 'args,outputSchema,skillId,taskId,toolId' ||
+    if (Object.keys(payload).sort().join(',') !== 'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId' ||
       task.taskId !== taskId || typeof task.skillId !== 'string' ||
+      !nonempty(task.roundId) || !nonempty(task.goal) ||
+      !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
       !nonempty(task.toolId) || !nonempty(task.outputSchema) ||
-      task.args === null || typeof task.args !== 'object' || Array.isArray(task.args)) {
+      task.args === null || typeof task.args !== 'object' || Array.isArray(task.args) ||
+      typeof task.required !== 'boolean') {
       return null;
     }
     return task;

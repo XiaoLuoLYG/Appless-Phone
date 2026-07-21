@@ -320,7 +320,7 @@ function uiTaskMessage(
     skillId: '',
     intent: 'Show hotel results',
     expectedOutputSchema,
-    dataTaskId
+    dataTaskIds: [dataTaskId]
   };
   return {
     type: AgentMessageType.TASK_CREATE_UI,

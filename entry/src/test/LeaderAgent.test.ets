@@ -144,7 +144,14 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
     outputSchema: 'hotelSearchResults',
     args
   };
-  return { skillId: 'hotel-search', ui, data };
+  return {
+    personaId: '',
+    skillId: 'hotel-search',
+    roundAction: 'execute',
+    ui,
+    dataTasks: [data],
+    reasonCode: 'hotel_search'
+  };
 }
 
 function planningContext(): LeaderPlanningContext {
@@ -176,9 +183,12 @@ function hotelPlanWithUnexpectedFields(): LeaderPlan {
       '"providerOutput":{"secret":"must-not-leak"},"jsonl":"forbidden"}'
   ) as Object;
   return {
+    personaId: '',
     skillId: 'hotel-search',
+    roundAction: 'execute',
     ui: uiObject as LeaderUiTask,
-    data: dataObject as LeaderDataTask
+    dataTasks: [dataObject as LeaderDataTask],
+    reasonCode: 'hotel_search'
   };
 }
 
@@ -253,7 +263,7 @@ export default function leaderAgentTest() {
       expect(dataMessage.taskId.length > 0).assertTrue();
       expect(uiMessage.taskId === dataMessage.taskId).assertFalse();
       expect(ui.taskId).assertEqual(uiMessage.taskId);
-      expect(ui.dataTaskId).assertEqual(dataMessage.taskId);
+      expect(ui.dataTaskIds[0]).assertEqual(dataMessage.taskId);
       expect(data.taskId).assertEqual(dataMessage.taskId);
       expect(data.toolId).assertEqual('hotel.search');
       expect(data.outputSchema).assertEqual('hotelSearchResults');
@@ -261,8 +271,8 @@ export default function leaderAgentTest() {
       expect(data.skillId).assertEqual('hotel-search');
       expect(args.city).assertEqual('Shenzhen');
       expect(args.guests).assertEqual(2);
-      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskId,expectedOutputSchema,intent,skillId,taskId');
-      expect(Object.keys(data).sort().join(',')).assertEqual('args,outputSchema,skillId,taskId,toolId');
+      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskIds,expectedOutputSchema,intent,skillId,taskId');
+      expect(Object.keys(data).sort().join(',')).assertEqual('allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId');
       expect(JSON.stringify(ui).indexOf('provider')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('jsonl')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('createSurface')).assertEqual(-1);

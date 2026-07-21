@@ -105,14 +105,18 @@ export class HotelRegisteredActionExecutor implements RegisteredActionExecutor {
     const followUp: ActionFollowUp = {
       dataTask: {
         taskId: dataTaskId,
+        roundId: dataTaskId,
         skillId: '',
+        goal: 'hotel.detail',
+        allowedToolIds: ['hotel.detail'],
         toolId: 'hotel.detail',
         outputSchema: 'hotelRatePlans',
-        args: args
+        args: args,
+        required: true
       },
       uiTask: {
         taskId: uiTaskId,
-        dataTaskId: dataTaskId,
+        dataTaskIds: [dataTaskId],
         skillId: '',
         intent: 'hotel.detail',
         expectedOutputSchema: 'hotelRatePlans'

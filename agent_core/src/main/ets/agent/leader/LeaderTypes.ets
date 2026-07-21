@@ -1,5 +1,4 @@
 import { AgentMessage, UserInputPayload } from '../message/AgentMessage';
-import { ActionPlanDraft } from '../action/ActionPlanTypes';
 import { ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
 
 export type InputUserPayload = UserInputPayload;
@@ -17,11 +16,22 @@ export interface LeaderDataTask {
   args: Object;
 }
 
+export type LeaderRoundAction = 'execute' | 'answer' | 'clarify' | 'legacy_handoff';
+
+export interface LeaderActionIntent {
+  goal: string;
+  allowedActionIds: string[];
+}
+
 export interface LeaderPlan {
+  personaId: string;
   skillId: string;
+  roundAction: LeaderRoundAction;
   ui: LeaderUiTask;
-  data: LeaderDataTask;
-  actionPlan?: ActionPlanDraft;
+  dataTasks: LeaderDataTask[];
+  actionIntent?: LeaderActionIntent;
+  answer?: string;
+  reasonCode: string;
 }
 
 export interface LeaderToolMetadata {

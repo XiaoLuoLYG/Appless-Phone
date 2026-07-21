@@ -176,10 +176,14 @@ function dataTaskMessage(
   };
   const payload: CreateDataTaskPayload = {
     taskId,
+    roundId: turnId,
     skillId: 'hotel-search',
+    goal: 'hotel.search',
+    allowedToolIds: ['hotel.search'],
     toolId: 'hotel.search',
     outputSchema: 'hotelSearchResults',
-    args
+    args,
+    required: true
   };
   return {
     type: AgentMessageType.TASK_CREATE_DATA,

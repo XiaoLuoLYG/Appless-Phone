@@ -290,7 +290,7 @@ export default function hotelRegisteredActionExecutorTest() {
       expect(opener.uris.length).assertEqual(0);
       expect(serialized.indexOf('"taskId":"hotel-detail-data-1"')).assertLarger(-1);
       expect(serialized.indexOf('"taskId":"hotel-detail-ui-2"')).assertLarger(-1);
-      expect(serialized.indexOf('"dataTaskId":"hotel-detail-data-1"')).assertLarger(-1);
+      expect(serialized.indexOf('"dataTaskIds":["hotel-detail-data-1"]')).assertLarger(-1);
       expect(serialized.indexOf('"toolId":"hotel.detail"')).assertLarger(-1);
       expect(serialized.indexOf('"outputSchema":"hotelRatePlans"')).assertLarger(-1);
       expect(serialized.indexOf(JSON.stringify(args))).assertLarger(-1);

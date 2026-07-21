@@ -3,7 +3,7 @@ import { ActionOffer } from '../action/ActionOfferTypes';
 
 export interface CreateUiTaskPayload {
   taskId: string;
-  dataTaskId: string;
+  dataTaskIds: string[];
   skillId: string;
   intent: string;
   expectedOutputSchema: string;

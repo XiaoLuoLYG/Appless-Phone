@@ -17,9 +17,6 @@ import {
 } from './LeaderTypes';
 import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { ActionPlanDraftPayload } from '../action/ActionAgentTypes';
-import { ActionPlanDraft, ActionPlanStep } from '../action/ActionPlanTypes';
-import { cloneJsonValue } from '../action/JsonPointer';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -190,13 +187,11 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     state.uiTaskId = plan.ui.taskId;
-    state.dataTaskId = plan.data.taskId;
+    const dataTask: LeaderDataTask = plan.dataTasks[0];
+    state.dataTaskId = dataTask.taskId;
     state.skillId = plan.skillId;
-    this.publishUiTask(message, plan.ui, plan.data.taskId);
-    this.publishDataTask(message, plan.data);
-    if (plan.actionPlan !== undefined) {
-      this.publishActionPlanDraft(message, plan);
-    }
+    this.publishUiTask(message, plan.ui, dataTask.taskId);
+    this.publishDataTask(message, dataTask);
   }
 
   private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {
@@ -223,26 +218,24 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (plan === undefined || plan === null ||
       typeof plan.skillId !== 'string' ||
       !this.validSelectedSkill(plan.skillId) ||
-      plan.ui === undefined || plan.data === undefined) {
+      plan.ui === undefined || !Array.isArray(plan.dataTasks) || plan.dataTasks.length !== 1) {
       return false;
     }
-    const tool: LeaderToolMetadata | null = this.toolMetadata(plan.data.toolId);
+    const dataTask: LeaderDataTask = plan.dataTasks[0];
+    const tool: LeaderToolMetadata | null = this.toolMetadata(dataTask.toolId);
     if (tool === null || tool.riskLevel !== 'read' ||
-      tool.outputSchema !== plan.data.outputSchema ||
+      tool.outputSchema !== dataTask.outputSchema ||
       tool.outputSchema !== plan.ui.expectedOutputSchema) {
       return false;
     }
-    if (plan.actionPlan !== undefined && !this.validDraft(plan.actionPlan, plan)) {
-      return false;
-    }
     return plan.ui.taskId.trim().length > 0 &&
-      plan.data.taskId.trim().length > 0 &&
-      plan.ui.taskId !== plan.data.taskId &&
+      dataTask.taskId.trim().length > 0 &&
+      plan.ui.taskId !== dataTask.taskId &&
       plan.ui.intent.trim().length > 0 &&
       plan.ui.expectedOutputSchema.trim().length > 0 &&
-      plan.ui.expectedOutputSchema === plan.data.outputSchema &&
-      plan.data.toolId.trim().length > 0 &&
-      plan.data.outputSchema.trim().length > 0;
+      plan.ui.expectedOutputSchema === dataTask.outputSchema &&
+      dataTask.toolId.trim().length > 0 &&
+      dataTask.outputSchema.trim().length > 0;
   }
 
   private validSelectedSkill(skillId: string): boolean {
@@ -267,27 +260,6 @@ export class LeaderAgent extends MessageDrivenAgent {
     return null;
   }
 
-  private validDraft(draft: ActionPlanDraft, plan: LeaderPlan): boolean {
-    if (draft.planId.trim().length === 0 || draft.runId.trim().length === 0 ||
-      draft.label.trim().length === 0 || !Array.isArray(draft.steps) ||
-      draft.steps.length === 0 || draft.steps.length > 5 ||
-      draft.planId === draft.runId || draft.planId === plan.ui.taskId ||
-      draft.planId === plan.data.taskId || draft.runId === plan.ui.taskId ||
-      draft.runId === plan.data.taskId) {
-      return false;
-    }
-    const stepIds: Set<string> = new Set<string>();
-    for (let index = 0; index < draft.steps.length; index++) {
-      const step: ActionPlanStep = draft.steps[index];
-      if (step === undefined || step.stepId.trim().length === 0 ||
-        step.actionId.trim().length === 0 || stepIds.has(step.stepId)) {
-        return false;
-      }
-      stepIds.add(step.stepId);
-    }
-    return true;
-  }
-
   private turnKey(message: AgentMessage): string {
     return this.turnKeyFor(message.conversationId, message.turnId);
   }
@@ -295,7 +267,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
     const payload: CreateUiTaskPayload = {
       taskId: task.taskId,
-      dataTaskId,
+      dataTaskIds: [dataTaskId],
       skillId: this.currentSkillId(input),
       intent: task.intent,
       expectedOutputSchema: task.expectedOutputSchema
@@ -312,10 +284,14 @@ export class LeaderAgent extends MessageDrivenAgent {
   private publishDataTask(input: AgentMessage, task: LeaderDataTask): void {
     const payload: CreateDataTaskPayload = {
       taskId: task.taskId,
+      roundId: input.turnId,
       skillId: this.currentSkillId(input),
+      goal: task.toolId,
+      allowedToolIds: [task.toolId],
       toolId: task.toolId,
       outputSchema: task.outputSchema,
-      args: task.args
+      args: task.args,
+      required: true
     };
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_DATA,
@@ -326,41 +302,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     });
   }
 
-  private publishActionPlanDraft(input: AgentMessage, plan: LeaderPlan): void {
-    const draft: ActionPlanDraft | null = this.cloneDraft(plan.actionPlan as ActionPlanDraft);
-    if (draft === null) {
-      return;
-    }
-    const payload: ActionPlanDraftPayload = {
-      uiTaskId: plan.ui.taskId,
-      dataTaskId: plan.data.taskId,
-      sourceToolId: plan.data.toolId,
-      draft
-    };
-    this.bus.publish({
-      type: AgentMessageType.ACTION_PLAN_DRAFT,
-      conversationId: input.conversationId,
-      turnId: input.turnId,
-      taskId: `action-draft:${draft.runId}`,
-      payload
-    });
-  }
-
   private currentSkillId(input: AgentMessage): string {
     const state: LeaderTurnState | undefined = this.turns.get(this.turnKey(input));
     if (state === undefined) {
       return '';
     }
     return state.skillId;
-  }
-
-  private cloneDraft(draft: ActionPlanDraft): ActionPlanDraft | null {
-    const cloned = cloneJsonValue(draft as Object);
-    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
-      Array.isArray(cloned.value)) {
-      return null;
-    }
-    return cloned.value as ActionPlanDraft;
   }
 
   private copyPlanningContext(context: LeaderPlanningContext): LeaderPlanningContext {
