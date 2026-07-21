@@ -14,7 +14,11 @@ import {
   A2uiSurfaceState,
   A2uiTravelOptionData,
   A2uiTrainData,
+  FlightStructuredData,
+  FoodStructuredData,
   StripeReceivingAccountCardData,
+  TrainStructuredData,
+  TravelStructuredData,
   defaultA2uiCapabilities,
   emptyA2uiSurface
 } from './A2uiTypes';
@@ -65,7 +69,11 @@ import {
 } from './GmailOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
-import { errorDataResult } from '../../agent/message/DataResultFactory';
+import {
+  errorDataResult,
+  partialDataResult,
+  successfulDataResult
+} from '../../agent/message/DataResultFactory';
 import { ActionCatalog } from '../../agent/action/ActionCatalog';
 import {
   ActionArgsValidator,
@@ -682,6 +690,7 @@ export interface FoodProviderResult {
   provider: string;
   foods: A2uiFoodData[];
   error: string;
+  attempted?: boolean;
 }
 
 export interface FoodAggregationResult {
@@ -1167,15 +1176,6 @@ interface AmapLocationResolution {
 interface FoodQuery {
   place: string;
   keyword: string;
-}
-
-interface ToolA2uiSnapshot {
-  title: string;
-  summary: string;
-  error: string;
-  trains: A2uiTrainData[];
-  flights: A2uiFlightData[];
-  rows: A2uiLabelValueData[];
 }
 
 const LOCAL_TOOL_GATEWAY_URL: string = 'local://aiphone-tools';
@@ -4563,6 +4563,57 @@ function dataLabelForTool(toolId: string): string {
   return 'rows';
 }
 
+function structuredCollectionResult(
+  toolId: string,
+  outputSchema: string,
+  data: Object,
+  itemCount: number,
+  sources: DataSource[],
+  warnings: string[]
+): DataResult {
+  if (itemCount > 0) {
+    return warnings.length > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  const result = successfulDataResult(toolId, outputSchema, data, sources);
+  result.status = 'empty';
+  result.warnings = warnings.slice();
+  return result;
+}
+
+export function travelStructuredDataResult(
+  data: TravelStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('travel.search', 'travelOptions', data, data.options.length, sources, warnings);
+}
+
+export function trainStructuredDataResult(
+  data: TrainStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('train.search', 'trains', data, data.trains.length, sources, warnings);
+}
+
+export function flightStructuredDataResult(
+  data: FlightStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('flight.search', 'flights', data, data.flights.length, sources, warnings);
+}
+
+export function foodStructuredDataResult(
+  data: FoodStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('food.search', 'foodChoices', data, data.foods.length, sources, warnings);
+}
+
 function titleForTool(toolId: string): string {
   if (toolId === 'travel.search') {
     return '出行方案查询';
@@ -4949,6 +5000,18 @@ function travelResultA2ui(surfaceId: string, title: string, body: string, summar
   ]);
 }
 
+export function travelStructuredDataA2ui(surfaceId: string, data: TravelStructuredData): string {
+  return travelResultA2ui(surfaceId, data.title, data.body, data.summary, data.options, data.rows);
+}
+
+export function trainStructuredDataA2ui(surfaceId: string, data: TrainStructuredData): string {
+  return trainResultA2ui(surfaceId, data.title, data.body, data.summary, data.trains);
+}
+
+export function flightStructuredDataA2ui(surfaceId: string, data: FlightStructuredData): string {
+  return flightResultA2ui(surfaceId, data.title, data.body, data.summary, data.flights);
+}
+
 function compactTime(value: string): string {
   const text = value.trim();
   const match = /(\d{1,2}):(\d{2})/.exec(text);
@@ -5071,120 +5134,87 @@ function flightToTravelOption(item: A2uiFlightData, index: number): A2uiTravelOp
   };
 }
 
-function snapshotFromToolA2ui(raw: string): ToolA2uiSnapshot {
-  const parsed = parseA2uiJsonl(raw);
-  const snapshot: ToolA2uiSnapshot = {
-    title: '',
-    summary: '',
-    error: parsed.error,
-    trains: [],
-    flights: [],
-    rows: []
-  };
-  parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
-    if (envelope.createSurface !== undefined && envelope.createSurface !== null) {
-      snapshot.title = envelope.createSurface.title === undefined ? snapshot.title : envelope.createSurface.title;
-    }
-    if (envelope.updateComponents !== undefined && envelope.updateComponents !== null) {
-      envelope.updateComponents.components.forEach((component: A2uiComponent) => {
-        if (component.component === 'ErrorNotice') {
-          const title = component.title === undefined ? '' : component.title;
-          const body = component.body === undefined ? '' : component.body;
-          snapshot.error = (title + ' ' + body).trim();
-        }
-      });
-    }
-    if (envelope.updateDataModel !== undefined && envelope.updateDataModel !== null) {
-      const update = envelope.updateDataModel;
-      if (update.path === '/trains' && Array.isArray(update.value)) {
-        snapshot.trains = update.value as A2uiTrainData[];
-      } else if (update.path === '/flights' && Array.isArray(update.value)) {
-        snapshot.flights = update.value as A2uiFlightData[];
-      } else if (update.path === '/rows' && Array.isArray(update.value)) {
-        snapshot.rows = update.value as A2uiLabelValueData[];
-      } else if (update.path === '/summary') {
-        const summary = update.value as A2uiSummaryData;
-        snapshot.summary = summary.text === undefined ? '' : summary.text;
-      }
-    }
-  });
-  return snapshot;
-}
-
-function issueRow(label: string, snapshot: ToolA2uiSnapshot, emptyText: string): A2uiLabelValueData | null {
-  if (snapshot.error.length > 0) {
-    return {
-      label: label,
-      value: snapshot.error
-    };
+function travelIssueRow(label: string, result: DataResult, emptyText: string): A2uiLabelValueData {
+  if (result.error !== undefined && result.error.message.length > 0) {
+    return { label: label, value: result.error.message };
   }
-  const message = snapshot.summary.length > 0 ? snapshot.summary : emptyText;
-  return {
-    label: label,
-    value: message
-  };
+  if (result.toolId === 'train.search') {
+    const data = result.data as TrainStructuredData;
+    return { label: label, value: data.summary.length > 0 ? data.summary : emptyText };
+  }
+  const data = result.data as FlightStructuredData;
+  return { label: label, value: data.summary.length > 0 ? data.summary : emptyText };
 }
 
-async function callLocalTravelSearch(prompt: string, surfaceId: string): Promise<string> {
+async function callStructuredTravelTool(prompt: string): Promise<DataResult> {
   const trainPrompt = /高铁|动车|\bG\d+|\bD\d+/i.test(prompt) ? prompt : prompt + ' 高铁';
   const flightPrompt = /航班|机票|飞机/.test(prompt) ? prompt : prompt + ' 航班';
   const results = await Promise.all([
-    callLocalTrainSearch(trainPrompt, surfaceId + '_train'),
-    callLocalFlightSearch(flightPrompt, surfaceId + '_flight')
+    callStructuredTrainTool(trainPrompt),
+    callStructuredFlightTool(flightPrompt)
   ]);
-  const trainSnapshot = snapshotFromToolA2ui(results[0]);
-  const flightSnapshot = snapshotFromToolA2ui(results[1]);
+  const trainResult = results[0];
+  const flightResult = results[1];
+  const trainData = trainResult.data as TrainStructuredData;
+  const flightData = flightResult.data as FlightStructuredData;
   let options: A2uiTravelOptionData[] = [];
-  trainSnapshot.trains.forEach((item: A2uiTrainData, index: number) => {
+  trainData.trains.forEach((item: A2uiTrainData, index: number) => {
     options.push(trainToTravelOption(item, index));
   });
-  flightSnapshot.flights.forEach((item: A2uiFlightData, index: number) => {
+  flightData.flights.forEach((item: A2uiFlightData, index: number) => {
     options.push(flightToTravelOption(item, index));
   });
   options = sortTravelOptionsByDeparture(options);
 
   const rows: A2uiLabelValueData[] = [];
-  if (trainSnapshot.error.length > 0 || trainSnapshot.trains.length === 0) {
-    const row = issueRow('高铁 · 12306', trainSnapshot, '12306 没有返回可展示车次。');
-    if (row !== null) {
-      rows.push(row);
-    }
+  if (trainResult.status === 'error' || trainData.trains.length === 0) {
+    rows.push(travelIssueRow('高铁 · 12306', trainResult, '12306 没有返回可展示车次。'));
   }
-  if (flightSnapshot.error.length > 0 || flightSnapshot.flights.length === 0) {
-    const row = issueRow('飞机 · 飞常准', flightSnapshot, '飞常准没有返回可展示航班。');
-    if (row !== null) {
-      rows.push(row);
-    }
+  if (flightResult.status === 'error' || flightData.flights.length === 0) {
+    rows.push(travelIssueRow('飞机 · 飞常准', flightResult, '飞常准没有返回可展示航班。'));
   }
 
-  aiLogInfo('[AIPhone][LocalToolTravelResult] trains=' + trainSnapshot.trains.length.toString() +
-    ' flights=' + flightSnapshot.flights.length.toString() +
+  aiLogInfo('[AIPhone][LocalToolTravelResult] trains=' + trainData.trains.length.toString() +
+    ' flights=' + flightData.flights.length.toString() +
     ' options=' + options.length.toString() +
     ' issues=' + rows.length.toString());
 
-  if (options.length === 0) {
-    const messages: string[] = [];
-    rows.forEach((row: A2uiLabelValueData) => {
-      messages.push(row.label + '：' + row.value);
-    });
-    return errorA2ui(
-      surfaceId,
-      'travel.search',
-      '出行方案查询失败',
+  const data: TravelStructuredData = {
+    title: options.length > 0 ? '出行方案查询' : '出行方案查询失败',
+    body: options.length > 0 ? '用户请求：' + prompt :
       '高铁和航班工具都没有返回可展示结果。为避免编造行程，当前只展示真实错误或空结果说明。',
-      messages.length > 0 ? messages : ['12306 和飞常准都没有返回可展示结果。'],
+    summary: options.length > 0 ? '已查询高铁和航班，共 ' + options.length.toString() + ' 个可展示方案。' :
+      '12306 和飞常准都没有返回可展示结果。',
+    options: options,
+    rows: rows
+  };
+  const sources = trainResult.sources.concat(flightResult.sources);
+  const warnings: string[] = [];
+  rows.forEach((row: A2uiLabelValueData) => warnings.push(row.label + '：' + row.value));
+  if (options.length === 0) {
+    const result = structuredErrorWithData(
+      'travel.search', 'travelOptions', data, 'TRAVEL_PROVIDERS_UNAVAILABLE', data.body, sources.length > 0, sources
+    );
+    result.warnings = warnings;
+    return result;
+  }
+  return travelStructuredDataResult(data, sources, warnings);
+}
+
+function travelDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as TravelStructuredData;
+  if (result.status === 'error') {
+    return errorA2ui(
+      surfaceId, 'travel.search', data.title, data.body,
+      result.warnings.length > 0 ? result.warnings : [data.summary],
       ['换日期或城市', '只查高铁', '只查飞机']
     );
   }
+  return travelStructuredDataA2ui(surfaceId, data);
+}
 
-  return travelResultA2ui(
-    surfaceId,
-    '出行方案查询',
-    '用户请求：' + prompt,
-    '已查询高铁和航班，共 ' + options.length.toString() + ' 个可展示方案。',
-    options,
-    rows
-  );
+async function callLocalTravelSearch(prompt: string, surfaceId: string): Promise<string> {
+  return travelDataResultA2ui(surfaceId, await callStructuredTravelTool(prompt));
 }
 
 function foodDataSignature(foods: A2uiFoodData[]): string {
@@ -5279,6 +5309,12 @@ export function foodA2uiRenderState(surfaceId: string, title: string, body: stri
     componentsSignature: 'food-result-v1|rows=' + (rows.length > 0 ? '1' : '0') + '|status=' + status,
     dataPatches: dataPatches
   };
+}
+
+export function foodStructuredDataA2ui(surfaceId: string, data: FoodStructuredData): string {
+  return planA2uiPartialUpdate(null, foodA2uiRenderState(
+    surfaceId, data.title, data.body, data.summary, data.foods, data.rows, 'ready'
+  )).jsonl;
 }
 
 function missingConfigA2ui(surfaceId: string, toolId: string): string {
@@ -5460,10 +5496,43 @@ function flightRecordHasData(item: A2uiFlightData): boolean {
     item.arrTime.length > 0;
 }
 
-async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise<string> {
+function localAdapterSource(provider: string, operation: string): DataSource {
+  return {
+    provider: provider,
+    backend: 'local_adapter',
+    operation: operation,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+function structuredErrorWithData(
+  toolId: string,
+  outputSchema: string,
+  data: Object,
+  code: string,
+  message: string,
+  retryable: boolean = false,
+  sources: DataSource[] = []
+): DataResult {
+  const result = errorDataResult(toolId, outputSchema, code, message, retryable, sources);
+  result.data = data;
+  return result;
+}
+
+function flightErrorData(title: string, body: string): FlightStructuredData {
+  return { title: title, body: body, summary: body, flights: [] };
+}
+
+async function callStructuredFlightTool(prompt: string): Promise<DataResult> {
   const apiKey = localProviderConfig.flightMcpKey;
   if (apiKey.length === 0) {
-    return missingConfigA2ui(surfaceId, 'flight.search');
+    return structuredErrorWithData(
+      'flight.search',
+      'flights',
+      flightErrorData('飞常准未配置', '缺少 FLIGHT_MCP_KEY。'),
+      'FLIGHT_CONFIG_MISSING',
+      '缺少 FLIGHT_MCP_KEY。'
+    );
   }
 
   const source = prompt;
@@ -5472,29 +5541,32 @@ async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise
   const flightRoute = extractFlightCityCodes(source);
   const wantsPrice = /票价|价格|多少钱|最低价|机票/.test(source);
   if (date.length === 0 || (flightNumber.length === 0 && (flightRoute.depCode.length === 0 || flightRoute.arrCode.length === 0))) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准查询参数不足',
+    const message = '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准查询参数不足', message),
+      'FLIGHT_INVALID_ARGUMENTS',
       '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。',
-      ['示例：明天北京到上海航班', '示例：2026-06-10 深圳到杭州机票价格', '示例：明天 MU2157 航班'],
-      ['补充日期', '补充城市']
+      false
     );
   }
 
   let requestBody = '';
   let routeText = '';
+  let operation = '';
   if (flightNumber.length > 0) {
+    operation = 'flight';
     requestBody = '{"endpoint":"flight","params":{"fnum":' + JSON.stringify(flightNumber) +
       ',"date":' + JSON.stringify(date) + '}}';
     routeText = flightNumber + ' ' + date;
   } else if (wantsPrice) {
+    operation = 'getFlightPriceByCities';
     requestBody = '{"endpoint":"getFlightPriceByCities","params":{"dep_city":' + JSON.stringify(flightRoute.depCode) +
       ',"arr_city":' + JSON.stringify(flightRoute.arrCode) +
       ',"dep_date":' + JSON.stringify(date) +
       ',"price_mode":"lowest"}}';
     routeText = flightRoute.routeNames[0] + ' 到 ' + flightRoute.routeNames[1] + ' ' + date;
   } else {
+    operation = 'flights';
     requestBody = '{"endpoint":"flights","params":{"depcity":' + JSON.stringify(flightRoute.depCode) +
       ',"arrcity":' + JSON.stringify(flightRoute.arrCode) +
       ',"date":' + JSON.stringify(date) + '}}';
@@ -5503,45 +5575,45 @@ async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise
 
   const endpoint = localProviderConfig.variflightApiUrl.length > 0 ? localProviderConfig.variflightApiUrl : DEFAULT_VARIFLIGHT_API_URL;
   aiLogInfo('[AIPhone][LocalToolFlightRequest] endpoint=' + endpoint + ' keyChars=' + apiKey.length.toString() + ' bodyChars=' + requestBody.length.toString());
-  const response = await postJsonText(endpoint, {
-    'Content-Type': 'application/json',
-    'X-VARIFLIGHT-KEY': apiKey
-  }, requestBody);
+  let response: HttpTextResponse;
+  try {
+    response = await postJsonText(endpoint, {
+      'Content-Type': 'application/json',
+      'X-VARIFLIGHT-KEY': apiKey
+    }, requestBody);
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准航班查询失败', message),
+      'FLIGHT_TRANSPORT_EXCEPTION', message, true
+    );
+  }
+  const sources: DataSource[] = [localAdapterSource('飞常准', operation)];
 
   let payload: FlightProviderPayload = {};
   try {
     payload = JSON.parse(response.text) as FlightProviderPayload;
   } catch (_error) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准返回格式异常',
-      '飞常准返回的内容不是 JSON。为避免编造航班信息，当前只展示原始返回摘要。',
-      [response.text.substring(0, 700)],
-      ['重新查询', '检查供应商返回']
+    const message = '飞常准返回的内容不是 JSON。为避免编造航班信息，当前只展示原始返回摘要。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准返回格式异常', message),
+      'FLIGHT_INVALID_RESPONSE', message, false, sources
     );
   }
 
   if (response.code < 200 || response.code >= 300) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准航班查询失败',
-      '飞常准返回 HTTP ' + response.code.toString() + '。当前只展示供应商返回的真实错误。',
-      [response.text.substring(0, 700)],
-      ['重新查询', '检查飞常准 Key']
+    const message = '飞常准返回 HTTP ' + response.code.toString() + '。当前只展示供应商返回的真实错误。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准航班查询失败', message),
+      'FLIGHT_PROVIDER_HTTP_ERROR', message, response.code >= 500, sources
     );
   }
 
   const providerError = extractProviderError(payload);
   if (providerError.length > 0) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准 Key 或参数需要检查',
-      providerError,
-      [requestBody.substring(0, 240)],
-      ['检查 Key', '换日期或城市']
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准 Key 或参数需要检查', providerError),
+      'FLIGHT_PROVIDER_ERROR', providerError, false, sources
     );
   }
 
@@ -5560,23 +5632,36 @@ async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise
 
   aiLogInfo('[AIPhone][LocalToolFlightResult] providerCode=' + response.code.toString() + ' rows=' + results.length.toString() + ' returned=' + flights.length.toString());
   if (flights.length === 0) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准未返回航班列表',
-      '供应商请求成功，但返回体里没有可渲染的航班列表。为避免编造航班信息，当前只展示原始返回摘要。',
-      [response.text.substring(0, 700)],
-      ['换日期或城市', '检查供应商返回结构']
+    const message = '供应商请求成功，但返回体里没有可渲染的航班列表。为避免编造航班信息，当前只展示原始返回摘要。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准未返回航班列表', message),
+      'FLIGHT_EMPTY_RESPONSE', message, false, sources
     );
   }
 
-  return flightResultA2ui(
-    surfaceId,
-    wantsPrice ? '飞常准航班价格查询' : '飞常准航班查询',
-    '以下为飞常准返回的查询结果。',
-    '已通过飞常准查询到 ' + routeText + ' 的航班信息。',
-    flights
-  );
+  return flightStructuredDataResult({
+    title: wantsPrice ? '飞常准航班价格查询' : '飞常准航班查询',
+    body: '以下为飞常准返回的查询结果。',
+    summary: '已通过飞常准查询到 ' + routeText + ' 的航班信息。',
+    flights: flights
+  }, sources);
+}
+
+function flightDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as FlightStructuredData;
+  if (result.status === 'error') {
+    if (result.error?.code === 'FLIGHT_CONFIG_MISSING') {
+      return missingConfigA2ui(surfaceId, 'flight.search');
+    }
+    return errorA2ui(
+      surfaceId, 'flight.search', data.title, data.body, [data.summary], ['重新查询', '换日期或城市']
+    );
+  }
+  return flightStructuredDataA2ui(surfaceId, data);
+}
+
+async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise<string> {
+  return flightDataResultA2ui(surfaceId, await callStructuredFlightTool(prompt));
 }
 
 function parseCoordinatePair(text: string): string {
@@ -8193,11 +8278,12 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
   };
 }
 
-function emptyProviderResult(provider: string, error: string): FoodProviderResult {
+function emptyProviderResult(provider: string, error: string, attempted: boolean = false): FoodProviderResult {
   return {
     provider: provider,
     foods: [],
-    error: error
+    error: error,
+    attempted: attempted
   };
 }
 
@@ -8296,7 +8382,7 @@ async function safeFoodProviderSearch(adapter: FoodProviderAdapter, prompt: stri
   try {
     return await adapter.search(prompt, query, keyword, location, locationSource);
   } catch (error) {
-    return emptyProviderResult(adapter.name, describeThrown(error));
+    return emptyProviderResult(adapter.name, describeThrown(error), true);
   }
 }
 
@@ -8354,7 +8440,8 @@ class AmapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : '高德没有返回可展示餐饮 POI。')
+      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : '高德没有返回可展示餐饮 POI。'),
+      attempted: true
     };
   }
 }
@@ -8384,12 +8471,12 @@ class TencentMapFoodProvider implements FoodProviderAdapter {
       [key, keyword, boundary, '10', '1', '_distance']
     ), userAgentHeaders());
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as TencentMapPayload;
     if (textOf(payload.status) !== '0') {
       const message = firstText([payload.message, payload.status]);
-      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300));
+      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300), true);
     }
     const places = payload.data === undefined ? [] : payload.data;
     const foods: A2uiFoodData[] = [];
@@ -8403,7 +8490,8 @@ class TencentMapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '腾讯地图没有返回可展示餐饮 POI。'
+      error: foods.length > 0 ? '' : '腾讯地图没有返回可展示餐饮 POI。',
+      attempted: true
     };
   }
 }
@@ -8432,12 +8520,12 @@ class BaiduMapFoodProvider implements FoodProviderAdapter {
       [ak, keyword, latitude + ',' + longitude, localProviderConfig.amapRadius, 'json', '2', '2', 'gcj02ll', '10', '0']
     ), userAgentHeaders());
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as BaiduPlacePayload;
     if (textOf(payload.status) !== '0') {
       const message = firstText([payload.message, payload.status]);
-      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300));
+      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300), true);
     }
     const places = payload.results === undefined ? [] : payload.results;
     const foods: A2uiFoodData[] = [];
@@ -8451,7 +8539,8 @@ class BaiduMapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '百度地图没有返回可展示餐饮 POI。'
+      error: foods.length > 0 ? '' : '百度地图没有返回可展示餐饮 POI。',
+      attempted: true
     };
   }
 }
@@ -8481,7 +8570,8 @@ class GoogleMapsFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : 'Google Maps 没有返回可展示餐饮 POI。')
+      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : 'Google Maps 没有返回可展示餐饮 POI。'),
+      attempted: true
     };
   }
 }
@@ -8523,12 +8613,12 @@ class MeituanUnionFoodProvider implements FoodProviderAdapter {
       'S-Ca-Signature': signature
     }, body);
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as MeituanUnionPayload;
     const providerError = meituanProviderError(payload);
     if (providerError.length > 0) {
-      return emptyProviderResult(this.name, providerError);
+      return emptyProviderResult(this.name, providerError, true);
     }
     const records = meituanRecordsFromContainer(payload.data).length > 0 ?
       meituanRecordsFromContainer(payload.data) :
@@ -8544,7 +8634,8 @@ class MeituanUnionFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '美团联盟没有返回可展示外卖商品券。'
+      error: foods.length > 0 ? '' : '美团联盟没有返回可展示外卖商品券。',
+      attempted: true
     };
   }
 }
@@ -8593,12 +8684,12 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
       'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
     }, body);
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as TaobaoFlashPayload;
     const providerError = taobaoProviderError(payload);
     if (providerError.length > 0) {
-      return emptyProviderResult(this.name, providerError);
+      return emptyProviderResult(this.name, providerError, true);
     }
     const result = taobaoResponseResult(payload);
     const records = taobaoRecordsFromResult(result);
@@ -8613,7 +8704,8 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '淘宝闪购没有返回可展示店铺推广结果。'
+      error: foods.length > 0 ? '' : '淘宝闪购没有返回可展示店铺推广结果。',
+      attempted: true
     };
   }
 }
@@ -8697,7 +8789,8 @@ class McDonaldsMcpFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '麦当劳 MCP 没有返回可展示的门店或菜单结果。'
+      error: foods.length > 0 ? '' : '麦当劳 MCP 没有返回可展示的门店或菜单结果。',
+      attempted: true
     };
   }
 }
@@ -8739,12 +8832,21 @@ class LuckinMcpFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '瑞幸 MCP 没有返回可展示的门店或商品结果。'
+      error: foods.length > 0 ? '' : '瑞幸 MCP 没有返回可展示的门店或商品结果。',
+      attempted: true
     };
   }
 }
 
-async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+type FoodStructuredPartialObserver = (
+  providerNames: string[], snapshot: FoodProviderPartialSnapshot
+) => void;
+
+async function callStructuredFoodTool(
+  prompt: string,
+  args: Object | null,
+  onPartial: FoodStructuredPartialObserver | null = null
+): Promise<DataResult> {
   const key = localProviderConfig.amapKey;
   const preferences = foodPreferenceArgs(args);
 
@@ -8760,7 +8862,7 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
       location = resolved.location;
       locationSource = resolved.locationSource;
     } catch (error) {
-      preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error)));
+      preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error), true));
       locationSource = 'geocode_error';
     }
   }
@@ -8811,19 +8913,13 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
   for (let index = 0; index < adapters.length; index++) {
     tasks.push(safeFoodProviderSearch(adapters[index], prompt, query, keyword, location, locationSource));
   }
-  let foodPartialCache: A2uiPartialUpdateCache | null = null;
   const streamed = await streamFoodProviderResultsWithPartials(tasks, providerResults, (snapshot: FoodProviderPartialSnapshot) => {
     aiLogInfo('[AIPhone][LocalToolFoodPartial] provider=' + snapshot.provider +
       ' completed=' + snapshot.completed.toString() + '/' + snapshot.total.toString() +
       ' foods=' + snapshot.foods.length.toString() +
       ' issues=' + snapshot.issues.length.toString());
-    if (emitJsonl !== null) {
-      const planned = foodPartialA2ui(surfaceId, prompt, providerNames, snapshot, foodPartialCache);
-      foodPartialCache = planned.cache;
-      aiLogInfo('[AIPhone][LocalToolFoodPartialEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
-        ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
-        ' dataPaths=' + planned.updatedDataPaths.join(','));
-      emitJsonl(planned.jsonl);
+    if (onPartial !== null) {
+      onPartial(providerNames, snapshot);
     }
   }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0, preferences);
   const aggregated = streamed.aggregation;
@@ -8836,42 +8932,100 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
     ' foods=' + aggregated.foods.length.toString() +
     ' issues=' + rows.length.toString());
 
-  const finalState = foodA2uiRenderState(
-    surfaceId,
-    '外卖聚合搜索',
-    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
-    aggregated.foods.length > 0 ?
+  const data: FoodStructuredData = {
+    title: '外卖聚合搜索',
+    body: '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
+    summary: aggregated.foods.length > 0 ?
       '已聚合 ' + aggregated.foods.length.toString() + ' 个可展示结果；' + rows.length.toString() + ' 个来源状态见下方。' :
       '所有来源都没有可展示外卖结果；下面只列出真实 provider 状态。',
-    aggregated.foods,
-    rows,
-    'ready'
-  );
-  if (emitJsonl !== null) {
-    const planned = planA2uiPartialUpdate(foodPartialCache, finalState);
-    foodPartialCache = planned.cache;
-    aiLogInfo('[AIPhone][LocalToolFoodFinalEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
-      ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
-      ' dataPaths=' + planned.updatedDataPaths.join(','));
-    return planned.jsonl;
+    foods: aggregated.foods,
+    rows: rows
+  };
+  const sources: DataSource[] = [];
+  streamed.results.forEach((providerResult: FoodProviderResult) => {
+    if (providerResult.attempted === true || providerResult.foods.length > 0) {
+      sources.push(localAdapterSource(providerResult.provider, 'search'));
+    }
+  });
+  const warnings: string[] = [];
+  aggregated.issues.forEach((issue: FoodProviderResult) => {
+    warnings.push(issue.provider + '：' + issue.error);
+  });
+  if (data.foods.length === 0 && warnings.length > 0) {
+    const attempted = sources.length > 0;
+    const error = structuredErrorWithData(
+      'food.search',
+      'foodChoices',
+      data,
+      attempted ? 'FOOD_PROVIDER_ERROR' : 'FOOD_CONFIG_MISSING',
+      data.summary,
+      attempted,
+      sources
+    );
+    error.warnings = warnings;
+    return error;
   }
-  return planA2uiPartialUpdate(null, finalState).jsonl;
+  return foodStructuredDataResult(data, sources, warnings);
 }
 
-async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<string> {
+async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  let foodPartialCache: A2uiPartialUpdateCache | null = null;
+  const result = await callStructuredFoodTool(prompt, args, (providerNames: string[], snapshot: FoodProviderPartialSnapshot) => {
+    if (emitJsonl === null) {
+      return;
+    }
+    const planned = foodPartialA2ui(surfaceId, prompt, providerNames, snapshot, foodPartialCache);
+    foodPartialCache = planned.cache;
+    aiLogInfo('[AIPhone][LocalToolFoodPartialEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
+      ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
+      ' dataPaths=' + planned.updatedDataPaths.join(','));
+    emitJsonl(planned.jsonl);
+  });
+  const data = result.data as FoodStructuredData;
+  if (emitJsonl === null) {
+    return foodStructuredDataA2ui(surfaceId, data);
+  }
+  const finalState = foodA2uiRenderState(
+    surfaceId, data.title, data.body, data.summary, data.foods, data.rows, 'ready'
+  );
+  const planned = planA2uiPartialUpdate(foodPartialCache, finalState);
+  aiLogInfo('[AIPhone][LocalToolFoodFinalEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
+    ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
+    ' dataPaths=' + planned.updatedDataPaths.join(','));
+  return planned.jsonl;
+}
+
+function trainErrorData(title: string, body: string): TrainStructuredData {
+  return { title: title, body: body, summary: body, trains: [] };
+}
+
+async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
   const source = prompt;
-  const stations = await load12306Stations();
-  const routeNames = extractRouteNames(source, stations.names);
   const date = parseTravelDate(source);
+  if (date.length === 0) {
+    const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询参数不足', message),
+      'TRAIN_INVALID_ARGUMENTS', message
+    );
+  }
+  let stations: StationCache;
+  try {
+    stations = await load12306Stations();
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 车站数据加载失败', message),
+      'TRAIN_STATION_LOAD_ERROR', message, true
+    );
+  }
+  const routeNames = extractRouteNames(source, stations.names);
   const departAfter = parseDepartAfter(source);
-  if (routeNames.length < 2 || date.length === 0) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '12306 查询参数不足',
-      '查询 12306 余票需要明确的出发地、目的地和日期。',
-      ['示例：明天北京到上海高铁票', '示例：2026-06-10 北京南到上海虹桥'],
-      ['补充日期', '补充城市']
+  if (routeNames.length < 2) {
+    const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询参数不足', message),
+      'TRAIN_INVALID_ARGUMENTS', message
     );
   }
 
@@ -8880,34 +9034,48 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const fromCode = stationCodeFor(fromName, stations).length > 0 ? stationCodeFor(fromName, stations) : stationCodeFor(routeNames[0], stations);
   const toCode = stationCodeFor(toName, stations).length > 0 ? stationCodeFor(toName, stations) : stationCodeFor(routeNames[1], stations);
   if (fromCode.length === 0 || toCode.length === 0) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '车站识别失败',
-      '请使用更完整的车站名，例如北京南、上海虹桥、广州南、深圳北。',
-      routeNames,
-      ['补充车站名']
+    const message = '请使用更完整的车站名，例如北京南、上海虹桥、广州南、深圳北。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('车站识别失败', message),
+      'TRAIN_STATION_NOT_FOUND', message
     );
   }
 
   const bookingUrl = build12306BookingUrl(date, fromName, fromCode, toName, toCode);
 
-  const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
-  const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
-  aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
-  const response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
+  let init: HttpTextResponse;
+  let response: HttpTextResponse;
+  try {
+    init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
+    response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询失败', message),
+      'TRAIN_TRANSPORT_EXCEPTION', message, true
+    );
+  }
+  const sources: DataSource[] = [localAdapterSource('12306', 'leftTicket')];
   if (response.code < 200 || response.code >= 300) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '12306 查询失败',
-      '12306 返回 HTTP ' + response.code.toString() + '。这是供应商或网络返回，不是 Mac gateway 连接失败。',
-      [response.text.substring(0, 500)],
-      ['重新查询', '换日期或车站']
+    const message = '12306 返回 HTTP ' + response.code.toString() + '。这是供应商或网络返回，不是 Mac gateway 连接失败。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询失败', message),
+      'TRAIN_PROVIDER_HTTP_ERROR', message, response.code >= 500, sources
     );
   }
 
-  const payload = JSON.parse(response.text) as LeftTicketPayload;
+  let payload: LeftTicketPayload;
+  try {
+    payload = JSON.parse(response.text) as LeftTicketPayload;
+  } catch (_error) {
+    const message = '12306 返回的内容不是有效 JSON。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 返回格式异常', message),
+      'TRAIN_INVALID_RESPONSE', message, false, sources
+    );
+  }
   const result = payload.data === undefined ? [] : payload.data.result;
   const rows = Array.isArray(result) ? result : [];
   let parsed: A2uiTrainData[] = [];
@@ -8928,7 +9096,9 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
     const emptyBody = timeSummary.length > 0
       ? date + ' ' + fromName + ' 到 ' + toName + ' ' + timeSummary + '暂时没有查询到可展示车次，可尝试调整时段或日期。'
       : date + ' ' + fromName + ' 到 ' + toName + ' 暂时没有查询到可展示车次，可能是日期未开售、线路调整或接口限制。';
-    return trainResultA2ui(surfaceId, '12306 查询结果为空', emptyBody, '12306 暂无可展示车次。', []);
+    return trainStructuredDataResult({
+      title: '12306 查询结果为空', body: emptyBody, summary: '12306 暂无可展示车次。', trains: []
+    }, sources, ['12306 暂无可展示车次。']);
   }
 
   const summaryText = timeSummary.length > 0
@@ -8938,7 +9108,23 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
     ? '以下为 ' + timeSummary + '出发的 12306 实时查询结果，默认先展示 ' + TRAIN_INITIAL_VISIBLE.toString() + ' 趟。'
     : '以下为 12306 实时查询结果摘要，默认先展示 ' + TRAIN_INITIAL_VISIBLE.toString() + ' 趟。';
   aiLogInfo('[AIPhone][LocalTool12306Result] rows=' + rows.length.toString() + ' filtered=' + parsed.length.toString() + ' returned=' + top.length.toString());
-  return trainResultA2ui(surfaceId, '12306 余票查询', body, summaryText, top);
+  return trainStructuredDataResult({
+    title: '12306 余票查询', body: body, summary: summaryText, trains: top
+  }, sources);
+}
+
+function trainDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as TrainStructuredData;
+  if (result.status === 'error') {
+    return errorA2ui(
+      surfaceId, 'train.search', data.title, data.body, [data.summary], ['重新查询', '换日期或车站']
+    );
+  }
+  return trainStructuredDataA2ui(surfaceId, data);
+}
+
+async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<string> {
+  return trainDataResultA2ui(surfaceId, await callStructuredTrainTool(prompt));
 }
 
 interface DynamicPromptArgs {
@@ -12180,7 +12366,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
 
 export async function callStructuredTool(
   toolId: string,
-  _prompt: string,
+  prompt: string,
   args: Object | null
 ): Promise<DataResult> {
   const definition = toolDefinitionForToolId(toolId);
@@ -12197,6 +12383,18 @@ export async function callStructuredTool(
   }
   if (toolId === 'hotel.search' || toolId === 'hotel.detail') {
     return callStructuredHotelTool(toolId, args);
+  }
+  if (toolId === 'travel.search') {
+    return callStructuredTravelTool(prompt);
+  }
+  if (toolId === 'train.search') {
+    return callStructuredTrainTool(prompt);
+  }
+  if (toolId === 'flight.search') {
+    return callStructuredFlightTool(prompt);
+  }
+  if (toolId === 'food.search') {
+    return callStructuredFoodTool(prompt, args);
   }
   return errorDataResult(
     toolId,

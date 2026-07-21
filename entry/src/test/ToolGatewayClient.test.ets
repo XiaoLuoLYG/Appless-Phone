@@ -1,12 +1,19 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   A2uiCallResult,
+  A2uiFlightData,
   A2uiFoodData,
   A2uiLabelValueData,
   A2uiSurfaceState,
+  A2uiTrainData,
   A2uiTravelOptionData,
+  DataResult,
   DataSource,
-  HotelSearchResult
+  FlightStructuredData,
+  FoodStructuredData,
+  HotelSearchResult,
+  TrainStructuredData,
+  TravelStructuredData
 } from '@loop/agent-core';
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
@@ -33,7 +40,11 @@ import {
   defaultToolGatewayUrl,
   emptyDataResult,
   errorDataResult,
+  flightStructuredDataA2ui,
+  flightStructuredDataResult,
   foodA2uiRenderState,
+  foodStructuredDataA2ui,
+  foodStructuredDataResult,
   foodDistanceMeters,
   foodProviderProgressRows,
   foodRecordFromBaiduPlace,
@@ -80,6 +91,10 @@ import {
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
   successfulDataResult,
+  trainStructuredDataA2ui,
+  trainStructuredDataResult,
+  travelStructuredDataA2ui,
+  travelStructuredDataResult,
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '@loop/agent-core';
@@ -613,7 +628,6 @@ export default function toolGatewayClientTest() {
 
         const actionOwned = await callStructuredTool('hotel.navigate', '', detailArgsForGateway());
         const unknown = await callStructuredTool('unknown.tool', '', new Object());
-        const missingAdapter = await callStructuredTool('travel.search', '深圳到香港', new Object());
 
         expect(actionOwned.status).assertEqual('error');
         expect(actionOwned.outputSchema).assertEqual('systemIntentResult');
@@ -621,14 +635,116 @@ export default function toolGatewayClientTest() {
         expect(unknown.status).assertEqual('error');
         expect(unknown.outputSchema).assertEqual('');
         expect(unknown.error?.code).assertEqual('TOOL_NOT_ALLOWED');
-        expect(missingAdapter.status).assertEqual('error');
-        expect(missingAdapter.outputSchema).assertEqual('travelOptions');
-        expect(missingAdapter.error?.code).assertEqual('STRUCTURED_ADAPTER_MISSING');
         expect(client.callCount).assertEqual(0);
       } finally {
         configureHotelMcpClientForTests(null);
         configureLocalProviderConfigFromRawJson('{}');
       }
+    });
+
+    it('dispatches travel train flight and food to structured adapters without A2UI payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const results = await Promise.all([
+          callStructuredTool('travel.search', '', new Object()),
+          callStructuredTool('train.search', '', new Object()),
+          callStructuredTool('flight.search', '', new Object()),
+          callStructuredTool('food.search', '', new Object())
+        ]);
+
+        expect(results.length).assertEqual(4);
+        results.forEach((result) => {
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('createSurface')).assertEqual(-1);
+        });
+        expect(results[0].outputSchema).assertEqual('travelOptions');
+        expect(results[1].outputSchema).assertEqual('trains');
+        expect(results[2].outputSchema).assertEqual('flights');
+        expect(results[3].outputSchema).assertEqual('foodChoices');
+        expect(results[0].error?.code).assertEqual('TRAVEL_PROVIDERS_UNAVAILABLE');
+        expect(results[1].error?.code).assertEqual('TRAIN_INVALID_ARGUMENTS');
+        expect(results[2].error?.code).assertEqual('FLIGHT_CONFIG_MISSING');
+        expect(results[3].error?.code).assertEqual('FOOD_CONFIG_MISSING');
+        expect(results[3].error?.retryable).assertFalse();
+        expect(results[3].warnings.length).assertLarger(0);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps normalized travel and food records intact in structured DataResults', 0, () => {
+      const sources: DataSource[] = [{
+        provider: 'fixture',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      }];
+      const train: A2uiTrainData = {
+        trainCode: 'G5612', from: '深圳北', to: '香港西九龙', depart: '18:05', arrive: '18:23',
+        duration: '18分', seats: '二等座有票', status: '可预订', business: '--', first: '--',
+        second: '有', noSeat: '--', hardSeat: '--', sleeperSoft: '--', price: '¥75',
+        bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?real=1'
+      };
+      const flight: A2uiFlightData = {
+        flightNo: 'CZ355', airline: '南方航空', dep: 'SZX', arr: 'SHA', depTime: '2026-07-23 08:00',
+        arrTime: '2026-07-23 10:20', status: '计划', price: '¥680'
+      };
+      const option: A2uiTravelOptionData = {
+        id: 'train-G5612-18:05', source: 'train', sourceTag: '高铁 · 12306', title: 'G5612',
+        from: '深圳北', to: '香港西九龙', depart: '18:05', arrive: '18:23', duration: '18分',
+        price: '¥75', availability: '二等座有票', status: '可预订', detail: ''
+      };
+      const food: A2uiFoodData = {
+        name: '瑞幸咖啡 科技园店', category: '咖啡', address: '深圳科技园', distance: '320米',
+        location: '113.9500,22.5400', sourceTags: ['高德', '瑞幸']
+      };
+      const travelData: TravelStructuredData = {
+        title: '出行方案查询', body: '用户请求', summary: '1 个方案', options: [option], rows: []
+      };
+      const trainData: TrainStructuredData = {
+        title: '12306 余票查询', body: '实时结果', summary: '1 趟车次', trains: [train]
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准航班查询', body: '实时结果', summary: '1 个航班', flights: [flight]
+      };
+      const foodData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '1 个结果', foods: [food], rows: []
+      };
+      const results: DataResult[] = [
+        travelStructuredDataResult(travelData, sources),
+        trainStructuredDataResult(trainData, sources),
+        flightStructuredDataResult(flightData, sources),
+        foodStructuredDataResult(foodData, sources)
+      ];
+
+      expect(JSON.stringify(results[0].data)).assertEqual(JSON.stringify(travelData));
+      expect(JSON.stringify(results[1].data)).assertEqual(JSON.stringify(trainData));
+      expect(JSON.stringify(results[2].data)).assertEqual(JSON.stringify(flightData));
+      expect(JSON.stringify(results[3].data)).assertEqual(JSON.stringify(foodData));
+      results.forEach((result: DataResult) => {
+        expect(result.status).assertEqual('success');
+        expect(result.sources[0].provider).assertEqual('fixture');
+        expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+      });
+      const legacyJsonl: string[] = [
+        travelStructuredDataA2ui('travel_fixture', travelData),
+        trainStructuredDataA2ui('train_fixture', trainData),
+        flightStructuredDataA2ui('flight_fixture', flightData),
+        foodStructuredDataA2ui('food_fixture', foodData)
+      ];
+      expect(legacyJsonl[0].indexOf('"id":"train-G5612-18:05"')).assertLarger(-1);
+      expect(legacyJsonl[1].indexOf('"trainCode":"G5612"')).assertLarger(-1);
+      expect(legacyJsonl[2].indexOf('"flightNo":"CZ355"')).assertLarger(-1);
+      expect(legacyJsonl[3].indexOf('"name":"瑞幸咖啡 科技园店"')).assertLarger(-1);
+      legacyJsonl.forEach((jsonl: string) => {
+        expect(jsonl.indexOf('updateComponents')).assertLarger(-1);
+      });
+      expect(foodStructuredDataResult(foodData, sources, ['百度地图超时']).status).assertEqual('partial');
+      const emptyTrain: TrainStructuredData = {
+        title: '12306 查询结果为空', body: '没有车次', summary: '暂无车次', trains: []
+      };
+      expect(trainStructuredDataResult(emptyTrain, sources, ['暂无车次']).status).assertEqual('empty');
     });
 
     it('delegates structured hotel reads without rewriting sources or errors', 0, async () => {

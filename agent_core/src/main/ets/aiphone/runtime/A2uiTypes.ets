@@ -101,6 +101,36 @@ export interface A2uiFoodData {
   sourceTags?: string[];
 }
 
+export interface TravelStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  options: A2uiTravelOptionData[];
+  rows: A2uiLabelValueData[];
+}
+
+export interface TrainStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  trains: A2uiTrainData[];
+}
+
+export interface FlightStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  flights: A2uiFlightData[];
+}
+
+export interface FoodStructuredData {
+  title: string;
+  body: string;
+  summary: string;
+  foods: A2uiFoodData[];
+  rows: A2uiLabelValueData[];
+}
+
 export interface A2uiSummaryData {
   text: string;
   toolName: string;
