@@ -59,6 +59,8 @@ export interface A2uiTrainData {
   noSeat: string;
   hardSeat: string;
   sleeperSoft: string;
+  price?: string;
+  bookingUrl?: string;
 }
 
 export interface A2uiFlightData {

@@ -4186,6 +4186,20 @@ function build12306LeftTicketUrl(path: string, date: string, fromCode: string, t
     '&purpose_codes=ADULT';
 }
 
+export function build12306BookingUrl(
+  date: string,
+  fromName: string,
+  fromCode: string,
+  toName: string,
+  toCode: string
+): string {
+  return 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
+    '&fs=' + encodeURIComponent(fromName + ',' + fromCode) +
+    '&ts=' + encodeURIComponent(toName + ',' + toCode) +
+    '&date=' + encodeURIComponent(date) +
+    '&flag=N,N,Y';
+}
+
 function redirected12306Url(text: string, date: string, fromCode: string, toCode: string): string {
   const match = /"c_url"\s*:\s*"([^"]+)"/.exec(text);
   if (match === null || match[1].length === 0) {
@@ -4308,6 +4322,85 @@ async function load12306Stations(): Promise<StationCache> {
   return stationCache;
 }
 
+function trainField(fields: string[], index: number): string {
+  return fields.length > index ? fields[index].trim() : '';
+}
+
+function isAvailableTrainSeat(value: string): boolean {
+  const text = value.trim();
+  return text === '有' || /^[1-9]\d*$/.test(text);
+}
+
+function trainSeatAvailabilityForPriceCode(code: string, fields: string[]): string {
+  if (code === '9') {
+    return trainField(fields, 32);
+  }
+  if (code === 'P') {
+    return trainField(fields, 25);
+  }
+  if (code === 'M') {
+    return trainField(fields, 31);
+  }
+  if (code === 'O' || code === 'S') {
+    return trainField(fields, 30);
+  }
+  if (code === '6' || code === 'A') {
+    return trainField(fields, 21);
+  }
+  if (code === '4' || code === 'I') {
+    return trainField(fields, 23);
+  }
+  if (code === 'F') {
+    return trainField(fields, 33);
+  }
+  if (code === '3' || code === 'J') {
+    return trainField(fields, 28);
+  }
+  if (code === '2') {
+    return trainField(fields, 24);
+  }
+  if (code === '1') {
+    return trainField(fields, 29);
+  }
+  if (code === 'W') {
+    return trainField(fields, 26);
+  }
+  return '';
+}
+
+function lowestAvailable12306Price(fields: string[]): string {
+  const ypInfoNew = trainField(fields, 39);
+  if (ypInfoNew.length === 0 || ypInfoNew.length % 10 !== 0) {
+    return '';
+  }
+  let minimumJiao = -1;
+  for (let offset = 0; offset < ypInfoNew.length; offset += 10) {
+    const chunk = ypInfoNew.substring(offset, offset + 10);
+    const availability = trainSeatAvailabilityForPriceCode(chunk.substring(0, 1), fields);
+    const priceText = chunk.substring(1, 6);
+    if (!isAvailableTrainSeat(availability) || !/^\d{5}$/.test(priceText)) {
+      continue;
+    }
+    const priceJiao = Number.parseInt(priceText, 10);
+    if (priceJiao <= 0) {
+      continue;
+    }
+    if (minimumJiao < 0 || priceJiao < minimumJiao) {
+      minimumJiao = priceJiao;
+    }
+  }
+  if (minimumJiao < 0) {
+    return '';
+  }
+  const yuan = Math.floor(minimumJiao / 10);
+  const jiao = minimumJiao % 10;
+  return jiao === 0 ? yuan.toString() : yuan.toString() + '.' + jiao.toString();
+}
+
+export function trainLowestAvailablePriceForTest(row: string): string {
+  return lowestAvailable12306Price(row.split('|'));
+}
+
 function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
   const fields = row.split('|');
   const trainCode = fields.length > 3 ? fields[3] : '';
@@ -4325,7 +4418,8 @@ function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
     second: fields.length > 30 ? fields[30] : '',
     noSeat: fields.length > 26 ? fields[26] : '',
     hardSeat: fields.length > 29 ? fields[29] : '',
-    sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : '')
+    sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : ''),
+    price: lowestAvailable12306Price(fields)
   };
 }
 
@@ -4352,7 +4446,7 @@ function formatTrainSeatsSummary(item: A2uiTrainData): string {
   return seats.join(' / ');
 }
 
-function normalizeTrainRecord(item: A2uiTrainData): A2uiTrainData {
+function normalizeTrainRecord(item: A2uiTrainData, bookingUrl: string = ''): A2uiTrainData {
   return {
     trainCode: item.trainCode,
     from: item.from,
@@ -4368,7 +4462,9 @@ function normalizeTrainRecord(item: A2uiTrainData): A2uiTrainData {
     second: item.second,
     noSeat: item.noSeat,
     hardSeat: item.hardSeat,
-    sleeperSoft: item.sleeperSoft
+    sleeperSoft: item.sleeperSoft,
+    price: item.price === undefined ? '' : item.price,
+    bookingUrl: bookingUrl
   };
 }
 
@@ -4945,7 +5041,7 @@ function trainToTravelOption(item: A2uiTrainData, index: number): A2uiTravelOpti
     depart: compactTime(item.depart),
     arrive: compactTime(item.arrive),
     duration: item.duration,
-    price: '',
+    price: item.price === undefined ? '' : item.price,
     availability: item.seats,
     status: item.status.length > 0 ? item.status : '可查',
     detail: ''
@@ -8791,6 +8887,8 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
     );
   }
 
+  const bookingUrl = build12306BookingUrl(date, fromName, fromCode, toName, toCode);
+
   const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
   const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
   aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
@@ -8819,7 +8917,7 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const top: A2uiTrainData[] = [];
   const count = parsed.length > TRAIN_RESULT_LIMIT ? TRAIN_RESULT_LIMIT : parsed.length;
   for (let index = 0; index < count; index++) {
-    top.push(normalizeTrainRecord(parsed[index]));
+    top.push(normalizeTrainRecord(parsed[index], bookingUrl));
   }
 
   const timeSummary = departAfter.length > 0 ? departAfter + ' 后' : '';

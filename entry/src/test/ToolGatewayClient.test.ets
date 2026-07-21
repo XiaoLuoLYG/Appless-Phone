@@ -10,6 +10,7 @@ import {
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
+import { build12306BookingUrl, trainLowestAvailablePriceForTest } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
 import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
@@ -265,8 +266,75 @@ interface LuckinProductsPayloadFixture {
   data: LuckinProductFixture[];
 }
 
+function trainRowForPrice(
+  ypInfoNew: string,
+  business: string,
+  first: string,
+  second: string,
+  noSeat: string = '',
+  hardSeat: string = '',
+  softSleeper: string = ''
+): string {
+  const fields: string[] = [];
+  for (let index = 0; index < 40; index++) {
+    fields.push('');
+  }
+  fields[23] = softSleeper;
+  fields[26] = noSeat;
+  fields[29] = hardSeat;
+  fields[30] = second;
+  fields[31] = first;
+  fields[32] = business;
+  fields[39] = ypInfoNew;
+  return fields.join('|');
+}
+
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
+    it('uses the lowest priced seat that is currently available', 0, () => {
+      const row = trainRowForPrice(
+        '9174800000M093300000O055300000',
+        '有',
+        '2',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('553');
+    });
+
+    it('ignores cheaper unavailable, waitlist, and malformed train prices', 0, () => {
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O040000000M055300000', '', '3', '无')
+      )).assertEqual('553');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O040000000', '', '', '候补')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O0553', '', '', '有')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('OABCDE0000', '', '', '有')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('', '', '', '有')
+      )).assertEqual('');
+    });
+
+    it('builds the official route-level 12306 booking URL', 0, () => {
+      const url = build12306BookingUrl(
+        '2026-07-22',
+        '深圳北',
+        'IOQ',
+        '香港西九龙',
+        'XJA'
+      );
+      expect(url).assertEqual(
+        'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
+        '&fs=%E6%B7%B1%E5%9C%B3%E5%8C%97%2CIOQ' +
+        '&ts=%E9%A6%99%E6%B8%AF%E8%A5%BF%E4%B9%9D%E9%BE%99%2CXJA' +
+        '&date=2026-07-22&flag=N,N,Y'
+      );
+    });
+
     it('falls back to the configured location for Luckin preview', 0, () => {
       expect(resolveLuckinLocationForTest('', '点一杯咖啡', '114.029506,22.609878'))
         .assertEqual('114.029506,22.609878');
