@@ -79,6 +79,7 @@ import linkedMessageBusTest from './LinkedMessageBus.test';
 import leaderAgentTest from './LeaderAgent.test';
 import multiAgentLeaderPlannerTest from './MultiAgentLeaderPlanner.test';
 import dataAgentTest from './DataAgent.test';
+import readOnlyDataPlannerTest from './ReadOnlyDataPlanner.test';
 import uiAgentTest from './UiAgent.test';
 import actionCatalogTest from './ActionCatalog.test';
 import actionPlanRunnerTest from './ActionPlanRunner.test';
@@ -160,6 +161,7 @@ export default function testsuite() {
   leaderAgentTest();
   multiAgentLeaderPlannerTest();
   dataAgentTest();
+  readOnlyDataPlannerTest();
   uiAgentTest();
   actionCatalogTest();
   actionPlanRunnerTest();
