@@ -866,6 +866,25 @@ export default function toolGatewayClientTest() {
       expect(error.sources.length).assertEqual(1);
     });
 
+    it('classifies an attempted geocode-only failure as a retryable provider error', 0, () => {
+      const emptyData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '地点解析失败', foods: [], rows: []
+      };
+      const geocodeFailure: FoodProviderResult = {
+        provider: '高德', foods: [], error: '地点解析失败：Operation timeout',
+        attempted: true, succeeded: false, operation: 'geocode'
+      };
+
+      const result = foodStructuredDataResultFromProviders(emptyData, [geocodeFailure]);
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('FOOD_PROVIDER_ERROR');
+      expect(result.error?.retryable).assertTrue();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('高德');
+      expect(result.sources[0].operation).assertEqual('geocode');
+    });
+
     it('preserves code-specific flight error details and actions in legacy A2UI', 0, () => {
       const invalid = errorDataResult(
         'flight.search', 'flights', 'FLIGHT_INVALID_ARGUMENTS', '参数不足'
@@ -902,6 +921,24 @@ export default function toolGatewayClientTest() {
       expect(providerJsonl.indexOf('换日期或城市')).assertLarger(-1);
     });
 
+    it('restores the legacy outer error surface for a thrown flight transport failure', 0, () => {
+      const transport = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_TRANSPORT_EXCEPTION', 'socket timeout', true
+      );
+      transport.data = {
+        title: '飞常准航班查询失败', body: 'socket timeout', summary: 'socket timeout', flights: []
+      } as FlightStructuredData;
+
+      const jsonl = flightDataResultA2ui('flight_transport', transport);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或城市')).assertEqual(-1);
+    });
+
     it('preserves code-specific train error details and actions in legacy A2UI', 0, () => {
       const invalid = errorDataResult(
         'train.search', 'trains', 'TRAIN_INVALID_ARGUMENTS', '参数不足'
@@ -925,6 +962,46 @@ export default function toolGatewayClientTest() {
       expect(stationJsonl.indexOf('深圳科技园')).assertLarger(-1);
       expect(stationJsonl.indexOf('香港')).assertLarger(-1);
       expect(stationJsonl.indexOf('补充车站名')).assertLarger(-1);
+    });
+
+    it('restores the legacy outer error surface for a thrown train station-load failure', 0, () => {
+      const stationLoad = errorDataResult(
+        'train.search', 'trains', 'TRAIN_STATION_LOAD_ERROR', 'station file unavailable', true
+      );
+      stationLoad.data = {
+        title: '12306 车站数据加载失败', body: 'station file unavailable',
+        summary: 'station file unavailable', trains: []
+      } as TrainStructuredData;
+
+      const jsonl = trainDataResultA2ui('train_station_load', stationLoad);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或车站')).assertEqual(-1);
+    });
+
+    it('restores the legacy outer error surface for a 12306 JSON parse failure', 0, () => {
+      const invalidResponse = errorDataResult(
+        'train.search', 'trains', 'TRAIN_INVALID_RESPONSE', '12306 返回的内容不是有效 JSON。', false
+      );
+      invalidResponse.data = {
+        title: '12306 返回格式异常', body: '12306 返回的内容不是有效 JSON。',
+        summary: '12306 返回的内容不是有效 JSON。', trains: []
+      } as TrainStructuredData;
+      invalidResponse.warnings = ['not-json-provider-body'];
+
+      const jsonl = trainDataResultA2ui('train_invalid_response', invalidResponse);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('检查供应商返回')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或车站')).assertEqual(-1);
     });
 
     it('delegates structured hotel reads without rewriting sources or errors', 0, async () => {

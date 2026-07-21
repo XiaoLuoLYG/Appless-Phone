@@ -4799,6 +4799,17 @@ function errorA2ui(surfaceId: string, toolId: string, title: string, body: strin
   ]);
 }
 
+function legacyToolExceptionA2ui(surfaceId: string, toolId: string, message: string): string {
+  return errorA2ui(
+    surfaceId,
+    toolId,
+    '工具供应商调用异常',
+    message,
+    ['本机工具已运行，但真实供应商调用失败。', '请检查设备网络、供应商 TLS/接口状态，或稍后重试。'],
+    ['重新查询']
+  );
+}
+
 function trainResultA2ui(surfaceId: string, title: string, body: string, summaryText: string, trains: A2uiTrainData[]): string {
   return a2uiJsonl([
     {
@@ -5692,6 +5703,9 @@ export function flightDataResultA2ui(surfaceId: string, result: DataResult): str
         ['示例：明天北京到上海航班', '示例：2026-06-10 深圳到杭州机票价格', '示例：明天 MU2157 航班'],
         ['补充日期', '补充城市']
       );
+    }
+    if (code === 'FLIGHT_TRANSPORT_EXCEPTION') {
+      return legacyToolExceptionA2ui(surfaceId, 'flight.search', data.body);
     }
     const details = result.warnings.length > 0 ? result.warnings : [data.summary];
     if (code === 'FLIGHT_INVALID_RESPONSE') {
@@ -8933,18 +8947,16 @@ export function foodStructuredDataResultFromProviders(
   const sourceKeys: string[] = [];
   const warnings: string[] = [];
   let searchSucceeded = false;
-  let searchAttempted = false;
+  let operationAttempted = false;
   providerResults.forEach((providerResult: FoodProviderResult) => {
     const operation = providerResult.operation === undefined || providerResult.operation.length === 0 ?
       'search' : providerResult.operation;
     if (providerResult.attempted === true) {
+      operationAttempted = true;
       const key = providerResult.provider + '\nlocal_adapter\n' + operation;
       if (sourceKeys.indexOf(key) < 0) {
         sourceKeys.push(key);
         sources.push(localAdapterSource(providerResult.provider, operation));
-      }
-      if (operation === 'search') {
-        searchAttempted = true;
       }
     }
     if (operation === 'search' && (providerResult.succeeded === true || providerResult.foods.length > 0)) {
@@ -8962,9 +8974,9 @@ export function foodStructuredDataResultFromProviders(
     'food.search',
     'foodChoices',
     data,
-    searchAttempted ? 'FOOD_PROVIDER_ERROR' : 'FOOD_CONFIG_MISSING',
+    operationAttempted ? 'FOOD_PROVIDER_ERROR' : 'FOOD_CONFIG_MISSING',
     data.summary,
-    searchAttempted,
+    operationAttempted,
     sources,
     warnings
   );
@@ -9233,6 +9245,11 @@ export function trainDataResultA2ui(surfaceId: string, result: DataResult): stri
         ['补充日期', '补充城市']
       );
     }
+    if (code === 'TRAIN_STATION_LOAD_ERROR' ||
+      code === 'TRAIN_TRANSPORT_EXCEPTION' ||
+      code === 'TRAIN_INVALID_RESPONSE') {
+      return legacyToolExceptionA2ui(surfaceId, 'train.search', data.body);
+    }
     const details = result.warnings.length > 0 ? result.warnings : [data.summary];
     if (code === 'TRAIN_STATION_NOT_FOUND') {
       return errorA2ui(
@@ -9242,11 +9259,6 @@ export function trainDataResultA2ui(surfaceId: string, result: DataResult): stri
     if (code === 'TRAIN_PROVIDER_HTTP_ERROR') {
       return errorA2ui(
         surfaceId, 'train.search', data.title, data.body, details, ['重新查询', '换日期或车站']
-      );
-    }
-    if (code === 'TRAIN_INVALID_RESPONSE') {
-      return errorA2ui(
-        surfaceId, 'train.search', data.title, data.body, details, ['重新查询', '检查供应商返回']
       );
     }
     return errorA2ui(
@@ -12738,14 +12750,7 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
     aiLogError('[AIPhone][LocalToolException] ' + message);
-    const exceptionJsonl = errorA2ui(
-      surfaceId,
-      toolId,
-      '工具供应商调用异常',
-      message,
-      ['本机工具已运行，但真实供应商调用失败。', '请检查设备网络、供应商 TLS/接口状态，或稍后重试。'],
-      ['重新查询']
-    );
+    const exceptionJsonl = legacyToolExceptionA2ui(surfaceId, toolId, message);
     rawResponse += exceptionJsonl;
     parsed = parseA2uiJsonl(exceptionJsonl);
     streamError = parsed.error.length > 0 ? parsed.error : applyEnvelopes(store, parsed.envelopes);
