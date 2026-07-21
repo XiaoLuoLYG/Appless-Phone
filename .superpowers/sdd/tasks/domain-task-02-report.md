@@ -162,3 +162,44 @@ Additional gates:
 - `git diff --check`: passed.
 - A2UI snapshot roundtrip search: zero matches.
 - The known post-test coverage reporter `00507008` noise remains separate from the authoritative zero-failure result.
+
+## Second Independent Review Fix
+
+The same reviewer found two remaining compatibility gaps after the first fix: a failed attempted geocode was still classified as missing configuration, and exceptions that historically reached the outer legacy error surface had acquired new error cards during structured migration.
+
+Fix commit: `3e1ef63b` (`fix: preserve travel exception surfaces`).
+
+### Second Review RED
+
+Four focused behavioral tests were added before production changes. The full Hypium run compiled and failed only on the expected assertions:
+
+- an attempted Amap geocode-only failure returned `FOOD_CONFIG_MISSING` instead of `FOOD_PROVIDER_ERROR`;
+- a thrown VariFlight transport failure omitted the legacy title and diagnostics;
+- a thrown 12306 station-data load failure omitted the legacy title and diagnostics;
+- a 12306 JSON parse failure rendered the newer provider-format card instead of the legacy outer exception surface.
+
+This was a behavioral RED. No unrelated test or ArkTS compilation failure was introduced.
+
+### Second Review Fixes
+
+- Food failure classification now asks whether any real provider operation was attempted, rather than considering only `operation=search`. A failed geocode therefore retains its real `geocode` source, is `FOOD_PROVIDER_ERROR`, and is retryable. `FOOD_CONFIG_MISSING` remains reserved for runs where no provider operation was attempted.
+- The existing outer exception A2UI was extracted into one local helper and reused by both the outer legacy catch and the structured adapters. No new error hierarchy or provider call was added.
+- `FLIGHT_TRANSPORT_EXCEPTION`, `TRAIN_STATION_LOAD_ERROR`, `TRAIN_TRANSPORT_EXCEPTION`, and the historically thrown 12306 `TRAIN_INVALID_RESPONSE` now render:
+  - title `工具供应商调用异常`;
+  - the two established network/provider diagnostic rows;
+  - exactly one `重新查询` action.
+- Structured `DataResult` codes, retryability, warnings, sources, and one-call provider semantics remain intact for Agent consumers.
+
+### Second Review GREEN
+
+Authoritative result:
+
+```text
+Tests run: 934, Failure: 0, Error: 0, Pass: 934, Ignore: 0
+```
+
+Additional gates:
+
+- `node scripts/verify-loopy-backend.mjs`: **236 checks passed**, including `agent_core` HAR build.
+- `git diff --check`: passed.
+- The known post-test coverage reporter `00507008` noise remains separate from the authoritative zero-failure result.
