@@ -162,7 +162,8 @@ export default function trainPresaleConfirmationTest() {
       expect(validateTrainPresaleConfirmation(input).task).assertEqual(undefined);
 
       input.debugEnabled = true;
-      expect(validateTrainPresaleConfirmation(input).error).assertEqual('请再次确认这是调试测试。');
+      expect(validateTrainPresaleConfirmation(input).error)
+        .assertEqual('请再次确认将创建真实未支付订单，支付仍需手动完成。');
 
       input.debugConfirmed = true;
       expect(validateTrainPresaleConfirmation(input).task === undefined).assertFalse();

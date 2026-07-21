@@ -68,6 +68,7 @@ import {
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
   recheck12306TrainAvailability,
+  select12306DebugTrain,
   sendLocalSocialHubReply,
   shortComposioUserId,
   TrainPresaleAvailabilityCheck,
@@ -111,10 +112,12 @@ import {
   cancelScheduledTrainPresaleTask,
   emptyTrainPresaleTrip,
   findMatchingTrainPresaleTask,
+  prepareTrainPresaleDebugConfirmation,
   reconcileTrainPresaleTask,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
   TrainPresaleConfirmationResult,
+  TrainPresaleDebugConfirmationInput,
   TrainPresalePanelSubmission,
   TrainPresaleTrip,
   validateTrainPresaleConfirmation,
@@ -3265,14 +3268,27 @@ struct Index {
       taskId: 'train-presale-' + now.getTime().toString(),
       createdAt: now.toISOString()
     };
-    const result: TrainPresaleConfirmationResult = validateTrainPresaleConfirmation(input);
+    let result: TrainPresaleConfirmationResult;
+    if (submission.source === 'debug') {
+      const debugInput: TrainPresaleDebugConfirmationInput = {
+        debugEnabled: this.isDebugBuild,
+        debugConfirmed: submission.debugConfirmed,
+        fromName: this.trainPresaleTrip.fromName,
+        fromCode: this.trainPresaleTrip.fromCode,
+        toName: this.trainPresaleTrip.toName,
+        toCode: this.trainPresaleTrip.toCode,
+        passengerNames: submission.passengerNames,
+        seatPriority: submission.seatPriority,
+        unpaidOrderAuthorized: submission.unpaidOrderAuthorized,
+        taskId: input.taskId,
+        createdAt: input.createdAt
+      };
+      result = await prepareTrainPresaleDebugConfirmation(debugInput, select12306DebugTrain);
+    } else {
+      result = validateTrainPresaleConfirmation(input);
+    }
     if (result.task === undefined) {
       this.trainPresaleError = result.error;
-      this.trainPresaleWorking = false;
-      return;
-    }
-    if (result.task.source === 'debug') {
-      this.trainPresaleError = '10秒测试尚未接通；本次没有创建或调度任务。';
       this.trainPresaleWorking = false;
       return;
     }
@@ -3289,6 +3305,17 @@ struct Index {
           ' error=' + scheduleResult.error.substring(0, 240));
       } else {
         this.trainPresaleTask = scheduleResult.task;
+        if (scheduleResult.task.source === 'debug') {
+          this.trainPresaleTrip = {
+            trainCode: scheduleResult.task.trainCode,
+            travelDate: scheduleResult.task.travelDate,
+            fromName: scheduleResult.task.fromName,
+            fromCode: scheduleResult.task.fromCode,
+            toName: scheduleResult.task.toName,
+            toCode: scheduleResult.task.toCode,
+            saleAt: scheduleResult.task.saleAt
+          };
+        }
         this.trainPresaleTaskState = scheduleResult.task.state;
         this.trainPresaleError = scheduleResult.error;
         if (scheduleResult.task.state === 'scheduled') {

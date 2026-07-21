@@ -1,4 +1,9 @@
-import { build12306BookingUrl, extractExactTrainCode } from '@loop/agent-core';
+import {
+  build12306BookingUrl,
+  extractExactTrainCode,
+  TrainPresaleDebugSelection,
+  TrainPresaleDebugSelectionRequest
+} from '@loop/agent-core';
 import {
   COLOR_ACCENT,
   COLOR_ACCENT_SOFT,
@@ -45,6 +50,20 @@ export interface TrainPresaleConfirmationInput extends TrainPresaleTrip, TrainPr
   createdAt: string;
 }
 
+export interface TrainPresaleDebugConfirmationInput {
+  debugEnabled: boolean;
+  debugConfirmed: boolean;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  passengerNames: string[];
+  seatPriority: string;
+  unpaidOrderAuthorized: boolean;
+  taskId: string;
+  createdAt: string;
+}
+
 export interface TrainPresaleConfirmationResult {
   error: string;
   task: TrainPresaleTask | undefined;
@@ -87,6 +106,10 @@ export function emptyTrainPresaleTrip(): TrainPresaleTrip {
 
 function validationError(message: string): TrainPresaleConfirmationResult {
   return { error: message, task: undefined };
+}
+
+export function trainPresaleDebugActionVisible(debugEnabled: boolean): boolean {
+  return debugEnabled;
 }
 
 function isValidDate(value: string): boolean {
@@ -234,7 +257,7 @@ export function validateTrainPresaleConfirmation(
     return validationError('当前版本不允许调试测试。');
   }
   if (input.source === 'debug' && !input.debugConfirmed) {
-    return validationError('请再次确认这是调试测试。');
+    return validationError('请再次确认将创建真实未支付订单，支付仍需手动完成。');
   }
   return {
     error: '',
@@ -264,6 +287,81 @@ export function validateTrainPresaleConfirmation(
       lastError: ''
     }
   };
+}
+
+function trainPresaleDebugFireAt(createdAt: string): string {
+  const now = new Date(createdAt);
+  if (isNaN(now.getTime())) {
+    return '';
+  }
+  const china = new Date(now.getTime() + 10 * 1000 + 8 * 60 * 60 * 1000);
+  return china.getUTCFullYear().toString() + '-' +
+    (china.getUTCMonth() + 1 < 10 ? '0' : '') + (china.getUTCMonth() + 1).toString() + '-' +
+    (china.getUTCDate() < 10 ? '0' : '') + china.getUTCDate().toString() + 'T' +
+    (china.getUTCHours() < 10 ? '0' : '') + china.getUTCHours().toString() + ':' +
+    (china.getUTCMinutes() < 10 ? '0' : '') + china.getUTCMinutes().toString() + ':' +
+    (china.getUTCSeconds() < 10 ? '0' : '') + china.getUTCSeconds().toString() + '+08:00';
+}
+
+export async function prepareTrainPresaleDebugConfirmation(
+  input: TrainPresaleDebugConfirmationInput,
+  selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>
+): Promise<TrainPresaleConfirmationResult> {
+  if (!input.debugEnabled) {
+    return validationError('当前版本不允许调试测试。');
+  }
+  if (!input.debugConfirmed) {
+    return validationError('请再次确认将创建真实未支付订单，支付仍需手动完成。');
+  }
+  let selection: TrainPresaleDebugSelection;
+  try {
+    selection = await selector({
+      fromName: input.fromName,
+      fromCode: input.fromCode,
+      toName: input.toName,
+      toCode: input.toCode,
+      seatPriority: input.seatPriority
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    return validationError('12306 调试车次查询失败：' + message);
+  }
+  if (selection.status !== 'verified') {
+    return validationError(selection.reason.length > 0 ? selection.reason : '12306 当前没有可验证的在售高铁余票。');
+  }
+  const fireAt = trainPresaleDebugFireAt(input.createdAt);
+  const expectedUrl = build12306BookingUrl(
+    selection.travelDate,
+    selection.fromName,
+    selection.fromCode,
+    selection.toName,
+    selection.toCode
+  );
+  if (fireAt.length === 0 || fireAt.substring(0, 10) !== selection.travelDate ||
+    selection.fromName !== input.fromName.trim() ||
+    selection.fromCode !== input.fromCode.trim().toUpperCase() ||
+    selection.toName !== input.toName.trim() ||
+    selection.toCode !== input.toCode.trim().toUpperCase() ||
+    selection.seatPriority !== input.seatPriority.trim() || selection.bookingUrl !== expectedUrl) {
+    return validationError('12306 返回的调试车次、日期、路线或席别无法精确验证。');
+  }
+  return validateTrainPresaleConfirmation({
+    source: 'debug',
+    trainCode: selection.trainCode,
+    travelDate: selection.travelDate,
+    fromName: selection.fromName,
+    fromCode: selection.fromCode,
+    toName: selection.toName,
+    toCode: selection.toCode,
+    saleAt: fireAt,
+    passengerNames: input.passengerNames,
+    seatPriority: input.seatPriority,
+    unpaidOrderAuthorized: input.unpaidOrderAuthorized,
+    debugEnabled: input.debugEnabled,
+    debugConfirmed: input.debugConfirmed,
+    taskId: input.taskId,
+    createdAt: input.createdAt
+  });
 }
 
 export async function scheduleTrainPresaleTask(
@@ -768,7 +866,7 @@ export struct TrainPresalePanel {
           .border({ width: 1, color: COLOR_CARD_EDGE })
           .margin({ top: 16 })
 
-          if (this.isDebugBuild) {
+          if (trainPresaleDebugActionVisible(this.isDebugBuild)) {
             Row() {
               A2uiButtonView({
                 label: '10秒测试',
@@ -783,7 +881,7 @@ export struct TrainPresalePanel {
                   this.debugConfirmed = false;
                 })
               if (this.debugMode) {
-                Text('调试模式 · 需再次确认')
+                Text('调试模式 · 将查询真实在售车次')
                   .fontSize(11)
                   .fontColor(COLOR_MUTED)
                   .margin({ left: 10 })
@@ -796,12 +894,12 @@ export struct TrainPresalePanel {
 
             if (this.debugMode) {
               Row() {
-                Text('再次确认这是调试测试')
+                Text('确认创建真实未支付订单，支付仍需手动完成')
                   .fontSize(13)
                   .fontColor(COLOR_TEXT)
                   .layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.debugConfirmed })
-                  .accessibilityText('再次确认这是调试测试')
+                  .accessibilityText('确认创建真实未支付订单，支付仍需手动完成')
                   .selectedColor(COLOR_ACCENT)
                   .enabled(!this.isWorking)
                   .onChange((isOn: boolean) => {

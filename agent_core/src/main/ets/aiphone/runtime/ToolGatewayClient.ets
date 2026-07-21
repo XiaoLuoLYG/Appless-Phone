@@ -273,6 +273,27 @@ export interface TrainPresaleAvailabilityCheck {
   bookingUrl: string;
 }
 
+export interface TrainPresaleDebugSelectionRequest {
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+}
+
+export interface TrainPresaleDebugSelection {
+  status: TrainPresaleAvailabilityStatus;
+  reason: string;
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  seatPriority: string;
+  bookingUrl: string;
+}
+
 export interface TrainPresaleExecutionTask {
   state: 'scheduled' | 'executing' | 'awaiting_payment' | 'needs_user' | 'cancelled';
   trainCode: string;
@@ -5101,6 +5122,153 @@ export async function recheck12306TrainAvailabilityWithStationPayloadForTest(
       return loaded;
     }
   );
+}
+
+function emptyTrainPresaleDebugSelection(
+  status: TrainPresaleAvailabilityStatus,
+  reason: string
+): TrainPresaleDebugSelection {
+  return {
+    status: status,
+    reason: reason,
+    trainCode: '',
+    travelDate: '',
+    fromName: '',
+    fromCode: '',
+    toName: '',
+    toCode: '',
+    seatPriority: '',
+    bookingUrl: ''
+  };
+}
+
+function trainPresaleDebugSelectionFromOfficialPayload(
+  request: TrainPresaleDebugSelectionRequest,
+  travelDate: string,
+  stations: StationCache,
+  payloadText: string
+): TrainPresaleDebugSelection {
+  const date = normalizeOfficialDate(travelDate);
+  const fromName = request.fromName.trim();
+  const fromCode = request.fromCode.trim().toUpperCase();
+  const toName = request.toName.trim();
+  const toCode = request.toCode.trim().toUpperCase();
+  const seatPriority = request.seatPriority.trim();
+  const seatColumn = trainSeatColumnForPreference(seatPriority);
+  if (date.length === 0 || fromName.length === 0 || toName.length === 0 ||
+    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) || fromCode === toCode) {
+    return emptyTrainPresaleDebugSelection('mismatch', '调试查询中的日期或路线无效，请重新查询。');
+  }
+  if (seatColumn < 0) {
+    return emptyTrainPresaleDebugSelection('unsupported_seat', '当前不支持核验席别：' + seatPriority + '。');
+  }
+  if (!hasValid12306StationSchema(stations)) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 车站数据格式无效或为空。');
+  }
+  if (stationCodeFor(fromName, stations) !== fromCode || stationNameForCode(fromCode, stations) !== fromName ||
+    stationCodeFor(toName, stations) !== toCode || stationNameForCode(toCode, stations) !== toName) {
+    return emptyTrainPresaleDebugSelection('mismatch', '调试查询中的车站名称与官方车站代码不匹配，请重新查询。');
+  }
+  let payload: LeftTicketPayload;
+  try {
+    payload = JSON.parse(payloadText) as LeftTicketPayload;
+  } catch (_error) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 余票响应不是可解析的官方数据。');
+  }
+  if (payload.status !== true || payload.data === undefined || !Array.isArray(payload.data.result)) {
+    return emptyTrainPresaleDebugSelection('provider_error', '12306 余票响应缺少有效结果。');
+  }
+  const rows = payload.data.result;
+  let exactHighSpeedFound = false;
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    if (typeof row !== 'string') {
+      return emptyTrainPresaleDebugSelection('provider_error', '12306 余票结果行不是文本。');
+    }
+    const fields = row.split('|');
+    if (fields.length <= 11 || fields.length <= seatColumn || trainField(fields, 3).length === 0 ||
+      trainField(fields, 6).length === 0 || trainField(fields, 7).length === 0) {
+      return emptyTrainPresaleDebugSelection('provider_error', '12306 余票结果行格式已变化或不完整。');
+    }
+    const item = parse12306Row(row, stations);
+    const trainCode = item.trainCode.trim().toUpperCase();
+    if ((!trainCode.startsWith('G') && !trainCode.startsWith('D')) ||
+      extractExactTrainCode(trainCode) !== trainCode) {
+      continue;
+    }
+    if (item.fromCode !== fromCode || item.toCode !== toCode || item.from !== fromName || item.to !== toName) {
+      return emptyTrainPresaleDebugSelection('mismatch', '12306 返回的在售高铁与调试路线不匹配。');
+    }
+    exactHighSpeedFound = true;
+    if (trainField(fields, 11) !== 'Y' || !isAvailableTrainSeat(trainSeatForPreference(item, seatPriority))) {
+      continue;
+    }
+    return {
+      status: 'verified',
+      reason: '',
+      trainCode: trainCode,
+      travelDate: date,
+      fromName: fromName,
+      fromCode: fromCode,
+      toName: toName,
+      toCode: toCode,
+      seatPriority: seatPriority,
+      bookingUrl: build12306BookingUrl(date, fromName, fromCode, toName, toCode)
+    };
+  }
+  return exactHighSpeedFound ?
+    emptyTrainPresaleDebugSelection('sold_out', '12306 当前没有符合所选席别的在售高铁余票。') :
+    emptyTrainPresaleDebugSelection('mismatch', '12306 当前结果没有可验证的在售高铁车次。');
+}
+
+export function trainPresaleDebugSelectionFromOfficialPayloadForTest(
+  request: TrainPresaleDebugSelectionRequest,
+  travelDate: string,
+  stationPayload: string,
+  payloadText: string
+): TrainPresaleDebugSelection {
+  return trainPresaleDebugSelectionFromOfficialPayload(
+    request, travelDate, parse12306Stations(stationPayload), payloadText);
+}
+
+export async function select12306DebugTrain(
+  request: TrainPresaleDebugSelectionRequest
+): Promise<TrainPresaleDebugSelection> {
+  try {
+    const stations = await load12306Stations();
+    const fromCode = request.fromCode.trim().toUpperCase();
+    const toCode = request.toCode.trim().toUpperCase();
+    if (stationCodeFor(request.fromName.trim(), stations) !== fromCode ||
+      stationCodeFor(request.toName.trim(), stations) !== toCode) {
+      return emptyTrainPresaleDebugSelection(
+        'mismatch', '调试查询中的车站名称与官方车站代码不匹配，请重新查询。');
+    }
+    const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
+    if (presaleResponse.code < 200 || presaleResponse.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 预售范围查询返回 HTTP ' + presaleResponse.code.toString() + '。');
+    }
+    const range = parsePresaleRange(presaleResponse.text);
+    if (range === undefined || range.today !== formatDate(new Date()) || range.today > range.lastSaleDate) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 未返回可验证的当前在售日期。');
+    }
+    const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    if (init.code < 200 || init.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 初始化返回 HTTP ' + init.code.toString() + '。');
+    }
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    const response = await request12306LeftTicket(range.today, fromCode, toCode, leftTicketHeaders(cookieHeader));
+    if (response.code < 200 || response.code >= 300) {
+      return emptyTrainPresaleDebugSelection(
+        'provider_error', '12306 余票查询返回 HTTP ' + response.code.toString() + '。');
+    }
+    return trainPresaleDebugSelectionFromOfficialPayload(request, range.today, stations, response.text);
+  } catch (error) {
+    return emptyTrainPresaleDebugSelection(
+      'provider_error', '12306 调试车次查询失败：' + describeThrown(error).substring(0, 240));
+  }
 }
 
 function formatTrainSeatsSummary(item: A2uiTrainData): string {
