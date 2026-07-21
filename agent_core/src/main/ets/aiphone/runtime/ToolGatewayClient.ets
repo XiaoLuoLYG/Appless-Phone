@@ -383,7 +383,7 @@ interface StationSaleTimePayload {
   data?: StationSaleTimeItem[];
 }
 
-type TrainPriceValue = string | number;
+type TrainPriceValue = Object | string | number | boolean | null | undefined;
 
 interface TrainPriceData {
   WZ?: TrainPriceValue;
@@ -401,7 +401,7 @@ interface TrainPriceData {
 
 interface TrainPricePayload {
   status?: boolean;
-  data?: TrainPriceData;
+  data?: TrainPriceValue;
 }
 
 interface StationDefault {
@@ -4630,24 +4630,41 @@ export function presaleSaleAt(travelDate: string, saleTime: string): string {
   return date.length > 0 && isOfficialTime(saleTime) ? date + 'T' + saleTime + ':00+08:00' : '';
 }
 
+export function parseOfficialTrainPriceValue(value: TrainPriceValue): number | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return undefined;
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    return undefined;
+  }
+  const text = typeof value === 'string' ? value.trim() : value.toString();
+  const match = (typeof value === 'string' ? /^[¥￥]?(\d+)(?:\.(\d{1,2}))?$/ : /^(\d+)(?:\.(\d{1,2}))?$/).exec(text);
+  if (match === null) {
+    return undefined;
+  }
+  const fraction = match[2] === undefined ? '00' : (match[2].length === 1 ? match[2] + '0' : match[2]);
+  const cents = Number(match[1] + fraction);
+  const price = Number(match[1] + (match[2] === undefined ? '' : '.' + match[2]));
+  return Number.isSafeInteger(cents) && cents > 0 && Number.isFinite(price) && price > 0 ? price : undefined;
+}
+
 export function parseLowestTrainPrice(payload: string): number | undefined {
   try {
     const parsed = JSON.parse(payload) as TrainPricePayload;
-    if (parsed.status !== true || parsed.data === undefined) {
+    if (parsed.status !== true || parsed.data === undefined || parsed.data === null ||
+      typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
       return undefined;
     }
+    const data = parsed.data as TrainPriceData;
     let lowest: number | undefined = undefined;
-    const values: (TrainPriceValue | undefined)[] = [parsed.data.WZ, parsed.data.A1, parsed.data.A2,
-      parsed.data.A3, parsed.data.A4, parsed.data.A6, parsed.data.A9, parsed.data.F, parsed.data.M,
-      parsed.data.O, parsed.data.P];
+    const values: TrainPriceValue[] = [data.WZ, data.A1, data.A2, data.A3, data.A4, data.A6, data.A9,
+      data.F, data.M, data.O, data.P];
     for (let index = 0; index < values.length; index++) {
-      const value = values[index];
-      const match = value === undefined ? null : /^[¥￥]?(\d+(?:\.\d{1,2})?)$/.exec(value.toString().trim());
-      if (match === null) {
+      const price = parseOfficialTrainPriceValue(values[index]);
+      if (price === undefined) {
         continue;
       }
-      const price = Number(match[1]);
-      if (price > 0 && (lowest === undefined || price < lowest)) {
+      if (lowest === undefined || price < lowest) {
         lowest = price;
       }
     }

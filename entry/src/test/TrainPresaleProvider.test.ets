@@ -4,6 +4,7 @@ import {
   parseFutureTrainForTravelDate,
   parseFutureTrainMetadata,
   parseLowestTrainPrice,
+  parseOfficialTrainPriceValue,
   parsePresaleRange,
   parseStationSaleTime,
   presaleSaleAt
@@ -97,6 +98,34 @@ export default function trainPresaleProviderTest() {
       expect(parseLowestTrainPrice('{"status":true,"data":{"O":"6610"}}')).assertEqual(6610);
       expect(parseLowestTrainPrice('{"status":true,"data":{"A4":"1.234","A6":"-1","A9":"0","M":"NaN","O":"6610x","X":"1","9":1}}'))
         .assertEqual(undefined);
+    });
+
+    it('ignores runtime-invalid seat fields without poisoning another official fare', 0, () => {
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A1":["661"],"A2":null,"A3":{},"A4":true,"O":"661"}}'))
+        .assertEqual(661);
+      const overflow = '9'.repeat(400);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A1":"1e2","A2":"' + overflow + '","O":"661"}}'))
+        .assertEqual(661);
+    });
+
+    it('accepts finite direct numeric fares and fails closed for malformed-only fields', 0, () => {
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A1":653.25}}')).assertEqual(653.25);
+      expect(parseLowestTrainPrice('{"status":true,"data":{"A1":1e309,"A2":"1e2","A3":false,"A4":null,"O":[]}}'))
+        .assertEqual(undefined);
+    });
+
+    it('validates each runtime price value before numeric conversion', 0, () => {
+      expect(parseOfficialTrainPriceValue(['661'])).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(null)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(new Object())).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(true)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue('1e2')).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(Number.NaN)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(Number.POSITIVE_INFINITY)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(Number.MAX_VALUE)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(653.251)).assertEqual(undefined);
+      expect(parseOfficialTrainPriceValue(653.25)).assertEqual(653.25);
+      expect(parseOfficialTrainPriceValue(1e2)).assertEqual(100);
     });
 
     it('fails closed for malformed or non-matching provider responses', 0, () => {
