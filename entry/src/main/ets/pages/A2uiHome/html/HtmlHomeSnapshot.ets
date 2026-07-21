@@ -100,6 +100,18 @@ interface TrainBookingActionArgs {
   bookingUrl: string;
 }
 
+interface TrainPresaleScheduleActionArgs {
+  trainCode: string;
+  travelDate: string;
+  from: string;
+  fromCode: string;
+  to: string;
+  toCode: string;
+  depart: string;
+  arrive: string;
+  saleAt: string;
+}
+
 interface MailDetailActionArgs {
   requestKey: string;
   provider: string;
@@ -347,7 +359,28 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.rows, 'noSeat', item.noSeat);
     appendMetric(block.rows, 'hardSeat', item.hardSeat);
     appendMetric(block.rows, 'sleeperSoft', item.sleeperSoft);
-    if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
+    if (item.saleState === 'presale') {
+      const scheduleArgs: TrainPresaleScheduleActionArgs = {
+        trainCode: item.trainCode,
+        travelDate: textOf(item.travelDate),
+        from: item.from,
+        fromCode: textOf(item.fromCode),
+        to: item.to,
+        toCode: textOf(item.toCode),
+        depart: item.depart,
+        arrive: item.arrive,
+        saleAt: textOf(item.saleAt)
+      };
+      block.actions.push({
+        id: 'train.presale.schedule',
+        label: '开售抢票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        sourceComponentId: component.id,
+        args: scheduleArgs
+      });
+    } else if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
       const bookingArgs: TrainBookingActionArgs = {
         bookingUrl: item.bookingUrl.trim()
       };
