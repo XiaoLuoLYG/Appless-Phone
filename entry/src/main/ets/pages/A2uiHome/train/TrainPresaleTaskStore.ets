@@ -58,6 +58,10 @@ function isAllowed12306BookingUrl(value: string): boolean {
   return tail.length === 0 || tail.startsWith('?') || tail.startsWith('#');
 }
 
+function isParseableTimestamp(value: string): boolean {
+  return !isNaN(new Date(value).getTime());
+}
+
 function isTask(value: TrainPresaleTask | null | undefined): boolean {
   return value !== null && value !== undefined &&
     typeof value.taskId === 'string' &&
@@ -69,13 +73,13 @@ function isTask(value: TrainPresaleTask | null | undefined): boolean {
     typeof value.fromCode === 'string' &&
     typeof value.toName === 'string' &&
     typeof value.toCode === 'string' &&
-    typeof value.saleAt === 'string' &&
+    typeof value.saleAt === 'string' && isParseableTimestamp(value.saleAt) &&
     Array.isArray(value.passengerNames) &&
     hasPassengerNames(value.passengerNames) &&
     typeof value.seatPriority === 'string' &&
     typeof value.bookingUrl === 'string' && isAllowed12306BookingUrl(value.bookingUrl) &&
     typeof value.reminderId === 'number' &&
-    typeof value.createdAt === 'string' &&
+    typeof value.createdAt === 'string' && isParseableTimestamp(value.createdAt) &&
     typeof value.lastError === 'string';
 }
 
@@ -187,6 +191,9 @@ export class TrainPresaleTaskStore {
   }
 
   create(task: TrainPresaleTask): void {
+    if (!isTask(task)) {
+      return;
+    }
     const tasks = this.tasks();
     for (let index = 0; index < tasks.length; index++) {
       if (tasks[index].taskId === task.taskId) {

@@ -111,6 +111,35 @@ export default function trainPresaleTaskStoreTest() {
       expect(store.claimDue('2026-07-22T12:45:30+08:00', 'due')).assertEqual(undefined);
     });
 
+    it('rejects malformed runtime passengers without changing stored tasks', 0, () => {
+      const native = nativePreferences();
+      const store = new TrainPresaleTaskStore(native);
+      store.create(task());
+      const malformed = task('malformed-passenger') as Object as TrainPresaleTask;
+      malformed.passengerNames = [null] as Object as string[];
+
+      store.create(malformed);
+
+      expect(store.list().length).assertEqual(1);
+      expect(store.get('task-1') === undefined).assertFalse();
+      expect(store.get('malformed-passenger')).assertEqual(undefined);
+    });
+
+    it('rejects unparseable task timestamps on create and reload', 0, () => {
+      const native = nativePreferences();
+      const store = new TrainPresaleTaskStore(native);
+      const invalidSaleAt = task('invalid-sale-at');
+      invalidSaleAt.saleAt = 'not-a-date';
+      const invalidCreatedAt = task('invalid-created-at');
+      invalidCreatedAt.createdAt = 'not-a-date';
+
+      store.create(invalidSaleAt);
+      store.create(invalidCreatedAt);
+
+      expect(store.list().length).assertEqual(0);
+      expect(parseTrainPresaleTaskList(JSON.stringify([invalidSaleAt, invalidCreatedAt])).length).assertEqual(0);
+    });
+
     it('persists the reminder ID after scheduler orchestration updates the task', 0, async () => {
       const native = nativePreferences();
       const store = new TrainPresaleTaskStore(native);
