@@ -1,5 +1,6 @@
+import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { describe, expect, it } from '@ohos/hypium';
-import { buildReminderRequest } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
+import { buildReminderRequest, SystemOneShotScheduler } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
 import { TrainPresaleTask } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
 
 const TASK: TrainPresaleTask = {
@@ -24,16 +25,18 @@ const TASK: TrainPresaleTask = {
 export default function systemOneShotSchedulerTest() {
   describe('systemOneShotScheduler', () => {
     it('builds a one-shot calendar reminder with only its task ID', 0, () => {
-      const request = buildReminderRequest(TASK, '2026-07-22T12:45:30+08:00');
+      const fireAt = '2026-07-22T04:45:30.000Z';
+      const expected = new Date(fireAt);
+      const request = buildReminderRequest(TASK, fireAt);
       const parameters = request.wantAgent === undefined ? undefined : request.wantAgent.parameters;
 
-      expect(request.reminderType).assertEqual(1);
-      expect(request.dateTime.year).assertEqual(2026);
-      expect(request.dateTime.month).assertEqual(7);
-      expect(request.dateTime.day).assertEqual(22);
-      expect(request.dateTime.hour).assertEqual(12);
-      expect(request.dateTime.minute).assertEqual(45);
-      expect(request.dateTime.second).assertEqual(30);
+      expect(request.reminderType).assertEqual(reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR);
+      expect(request.dateTime.year).assertEqual(expected.getFullYear());
+      expect(request.dateTime.month).assertEqual(expected.getMonth() + 1);
+      expect(request.dateTime.day).assertEqual(expected.getDate());
+      expect(request.dateTime.hour).assertEqual(expected.getHours());
+      expect(request.dateTime.minute).assertEqual(expected.getMinutes());
+      expect(request.dateTime.second).assertEqual(expected.getSeconds());
       expect(request.wantAgent === undefined).assertFalse();
       if (request.wantAgent !== undefined) {
         expect(request.wantAgent.pkgName).assertEqual('com.example.aiphonedemo');
@@ -56,6 +59,30 @@ export default function systemOneShotSchedulerTest() {
       expect(Object.keys(request).indexOf('repeatDays')).assertEqual(-1);
       expect(Object.keys(request).indexOf('daysOfWeek')).assertEqual(-1);
       expect(JSON.stringify(request).indexOf('张三')).assertEqual(-1);
+    });
+
+    it('delegates schedule cancel and list through injected platform functions', 0, async () => {
+      let published: reminderAgentManager.ReminderRequestCalendar | undefined;
+      let cancelledId: number = 0;
+      const scheduler = new SystemOneShotScheduler(
+        async (request: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+          published = request;
+          return 73;
+        },
+        async (reminderId: number): Promise<void> => {
+          cancelledId = reminderId;
+        },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => [buildReminderRequest(TASK, TASK.saleAt)]
+      );
+      const scheduled: TrainPresaleTask = TASK;
+      scheduled.reminderId = 0;
+
+      expect(await scheduler.schedule(scheduled, scheduled.saleAt)).assertEqual(73);
+      expect(scheduled.reminderId).assertEqual(73);
+      expect(published === undefined).assertFalse();
+      await scheduler.cancel(73);
+      expect(cancelledId).assertEqual(73);
+      expect((await scheduler.list()).length).assertEqual(1);
     });
   });
 }

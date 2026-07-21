@@ -1,7 +1,6 @@
-import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
-const STORE_NAME: string = 'aiphone_train_presale_tasks';
+export const TRAIN_PRESALE_TASK_STORE_NAME: string = 'aiphone_train_presale_tasks';
 const STORE_KEY: string = 'tasks';
 
 export type TrainPresaleTaskState =
@@ -40,8 +39,28 @@ function isState(value: TrainPresaleTaskState): boolean {
     value === 'needs_user' || value === 'cancelled';
 }
 
-function isTask(value: TrainPresaleTask): boolean {
-  return typeof value.taskId === 'string' &&
+function hasPassengerNames(value: string[]): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (typeof value[index] !== 'string' || value[index].trim().length === 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isAllowed12306BookingUrl(value: string): boolean {
+  const url = value.trim();
+  const base = 'https://kyfw.12306.cn/otn/leftTicket/init';
+  if (!url.startsWith(base)) {
+    return false;
+  }
+  const tail = url.substring(base.length);
+  return tail.length === 0 || tail.startsWith('?') || tail.startsWith('#');
+}
+
+function isTask(value: TrainPresaleTask | null | undefined): boolean {
+  return value !== null && value !== undefined &&
+    typeof value.taskId === 'string' &&
     (value.source === 'presale' || value.source === 'debug') &&
     isState(value.state) &&
     typeof value.trainCode === 'string' &&
@@ -52,8 +71,9 @@ function isTask(value: TrainPresaleTask): boolean {
     typeof value.toCode === 'string' &&
     typeof value.saleAt === 'string' &&
     Array.isArray(value.passengerNames) &&
+    hasPassengerNames(value.passengerNames) &&
     typeof value.seatPriority === 'string' &&
-    typeof value.bookingUrl === 'string' &&
+    typeof value.bookingUrl === 'string' && isAllowed12306BookingUrl(value.bookingUrl) &&
     typeof value.reminderId === 'number' &&
     typeof value.createdAt === 'string' &&
     typeof value.lastError === 'string';
@@ -71,7 +91,7 @@ function copyTask(value: TrainPresaleTask): TrainPresaleTask {
     toName: value.toName,
     toCode: value.toCode,
     saleAt: value.saleAt,
-    passengerNames: value.passengerNames.slice(),
+    passengerNames: value.passengerNames.map((name: string): string => name.trim()),
     seatPriority: value.seatPriority,
     bookingUrl: value.bookingUrl,
     reminderId: value.reminderId,
@@ -98,14 +118,15 @@ export function serializeTrainPresaleTaskList(tasks: TrainPresaleTask[]): string
 
 export function parseTrainPresaleTaskList(raw: string): TrainPresaleTask[] {
   try {
-    const parsed = JSON.parse(raw) as TrainPresaleTask[];
+    const parsed = JSON.parse(raw) as Array<TrainPresaleTask | null>;
     if (!Array.isArray(parsed)) {
       return [];
     }
     const tasks: TrainPresaleTask[] = [];
     for (let index = 0; index < parsed.length; index++) {
-      if (isTask(parsed[index])) {
-        tasks.push(copyTask(parsed[index]));
+      const candidate = parsed[index];
+      if (candidate !== null && isTask(candidate)) {
+        tasks.push(copyTask(candidate));
       }
     }
     return tasks;
@@ -150,24 +171,19 @@ export function claimDueTrainPresaleTask(
 }
 
 export class TrainPresaleTaskStore {
-  private context: common.Context;
+  private store: preferences.Preferences;
 
-  constructor(context: common.Context) {
-    this.context = context;
-  }
-
-  private preferences(): preferences.Preferences {
-    return preferences.getPreferencesSync(this.context, { name: STORE_NAME });
+  constructor(store: preferences.Preferences) {
+    this.store = store;
   }
 
   private tasks(): TrainPresaleTask[] {
-    return parseTrainPresaleTaskList(text(this.preferences().getSync(STORE_KEY, '')));
+    return parseTrainPresaleTaskList(text(this.store.getSync(STORE_KEY, '')));
   }
 
   private save(tasks: TrainPresaleTask[]): void {
-    const store = this.preferences();
-    store.putSync(STORE_KEY, serializeTrainPresaleTaskList(tasks));
-    store.flushSync();
+    this.store.putSync(STORE_KEY, serializeTrainPresaleTaskList(tasks));
+    this.store.flushSync();
   }
 
   create(task: TrainPresaleTask): void {

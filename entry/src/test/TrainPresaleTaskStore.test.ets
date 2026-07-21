@@ -1,11 +1,33 @@
+import { preferences } from '@kit.ArkData';
+import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { describe, expect, it } from '@ohos/hypium';
 import {
   claimDueTrainPresaleTask,
   parseTrainPresaleTaskList,
   serializeTrainPresaleTaskList,
   TrainPresaleTask,
+  TrainPresaleTaskStore,
   updateTrainPresaleTask
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
+import { SystemOneShotScheduler } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
+
+class MemoryPreferences {
+  private values: Map<string, preferences.ValueType> = new Map();
+
+  getSync(key: string, defaultValue: preferences.ValueType): preferences.ValueType {
+    return this.values.has(key) ? this.values.get(key) as preferences.ValueType : defaultValue;
+  }
+
+  putSync(key: string, value: preferences.ValueType): void {
+    this.values.set(key, value);
+  }
+
+  flushSync(): void {}
+}
+
+function nativePreferences(): preferences.Preferences {
+  return new MemoryPreferences() as Object as preferences.Preferences;
+}
 
 function task(taskId: string = 'task-1'): TrainPresaleTask {
   return {
@@ -30,14 +52,26 @@ function task(taskId: string = 'task-1'): TrainPresaleTask {
 
 export default function trainPresaleTaskStoreTest() {
   describe('trainPresaleTaskStore', () => {
-    it('serializes and recovers the minimal task list without sensitive fields', 0, () => {
-      const raw = serializeTrainPresaleTaskList([task()]);
+    it('serializes and recovers only valid task records without sensitive fields', 0, () => {
+      const valid = task();
+      valid.passengerNames = [' 张三 '];
+      const invalidUrl = task('unsafe-url');
+      invalidUrl.bookingUrl = 'javascript:alert(1)';
+      const invalidPassenger = task('unsafe-passenger');
+      const nestedPassenger = JSON.stringify(invalidPassenger)
+        .replace('"张三"', '{"identityNumber":"110101199001010000"}');
+      const raw = '[null,' + serializeTrainPresaleTaskList([valid]).slice(1, -1) + ',' +
+        JSON.stringify(invalidUrl) + ',' + nestedPassenger + ']';
+      const tasks = parseTrainPresaleTaskList(raw);
 
-      expect(parseTrainPresaleTaskList(raw)[0].taskId).assertEqual('task-1');
-      expect(raw.indexOf('password')).assertEqual(-1);
-      expect(raw.indexOf('identity')).assertEqual(-1);
-      expect(raw.indexOf('payment')).assertEqual(-1);
-      expect(raw.indexOf('cookie')).assertEqual(-1);
+      expect(tasks.length).assertEqual(1);
+      expect(tasks[0].taskId).assertEqual('task-1');
+      expect(tasks[0].passengerNames[0]).assertEqual('张三');
+      const saved = serializeTrainPresaleTaskList(tasks);
+      expect(saved.indexOf('password')).assertEqual(-1);
+      expect(saved.indexOf('identity')).assertEqual(-1);
+      expect(saved.indexOf('payment')).assertEqual(-1);
+      expect(saved.indexOf('cookie')).assertEqual(-1);
     });
 
     it('recovers from malformed persisted JSON', 0, () => {
@@ -57,17 +91,42 @@ export default function trainPresaleTaskStoreTest() {
       expect(updateTrainPresaleTask(scheduled, { state: 'cancelled' }).state).assertEqual('cancelled');
     });
 
-    it('claims one due scheduled task exactly once', 0, () => {
-      const result = claimDueTrainPresaleTask([task('later'), task('due')], '2026-07-22T12:45:30+08:00', 'due');
+    it('persists actual create get list update cancel and idempotent claims', 0, () => {
+      const native = nativePreferences();
+      const store = new TrainPresaleTaskStore(native);
+      store.create(task());
+      store.create(task('due'));
+      const invalid = task('unsafe');
+      invalid.bookingUrl = 'javascript:alert(1)';
+      store.create(invalid);
 
-      expect(result.task === undefined).assertFalse();
-      if (result.task !== undefined) {
-        expect(result.task.taskId).assertEqual('due');
-        expect(result.task.state).assertEqual('executing');
+      expect(store.get('task-1') === undefined).assertFalse();
+      expect(store.list().length).assertEqual(2);
+      expect(store.get('unsafe')).assertEqual(undefined);
+      store.update('task-1', { lastError: 'retry later' });
+      expect(store.get('task-1')?.lastError).assertEqual('retry later');
+      store.cancel('task-1');
+      expect(store.get('task-1')?.state).assertEqual('cancelled');
+      expect(store.claimDue('2026-07-22T12:45:30+08:00', 'due')?.state).assertEqual('executing');
+      expect(store.claimDue('2026-07-22T12:45:30+08:00', 'due')).assertEqual(undefined);
+    });
+
+    it('persists the reminder ID after scheduler orchestration updates the task', 0, async () => {
+      const native = nativePreferences();
+      const store = new TrainPresaleTaskStore(native);
+      store.create(task());
+      const scheduled = store.get('task-1');
+      expect(scheduled === undefined).assertFalse();
+      if (scheduled !== undefined) {
+        const scheduler = new SystemOneShotScheduler(
+          async (): Promise<number> => 73,
+          async (): Promise<void> => {},
+          async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+        );
+        store.update(scheduled.taskId, { reminderId: await scheduler.schedule(scheduled, scheduled.saleAt) });
       }
-      expect(result.tasks[0].state).assertEqual('scheduled');
-      expect(claimDueTrainPresaleTask(result.tasks, '2026-07-22T12:45:30+08:00', 'due').task)
-        .assertEqual(undefined);
+
+      expect(new TrainPresaleTaskStore(native).get('task-1')?.reminderId).assertEqual(73);
     });
 
     it('claims a due task when now uses a different ISO offset', 0, () => {

@@ -38,17 +38,33 @@ export function buildReminderRequest(
 }
 
 export class SystemOneShotScheduler {
+  private publishReminder: (request: reminderAgentManager.ReminderRequestCalendar) => Promise<number>;
+  private cancelReminder: (reminderId: number) => Promise<void>;
+  private getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]>;
+
+  constructor(
+    publishReminder: (request: reminderAgentManager.ReminderRequestCalendar) => Promise<number> =
+      reminderAgentManager.publishReminder,
+    cancelReminder: (reminderId: number) => Promise<void> = reminderAgentManager.cancelReminder,
+    getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]> =
+      reminderAgentManager.getValidReminders
+  ) {
+    this.publishReminder = publishReminder;
+    this.cancelReminder = cancelReminder;
+    this.getValidReminders = getValidReminders;
+  }
+
   async schedule(task: TrainPresaleTask, fireAt: string): Promise<number> {
-    const reminderId = await reminderAgentManager.publishReminder(buildReminderRequest(task, fireAt));
+    const reminderId = await this.publishReminder(buildReminderRequest(task, fireAt));
     task.reminderId = reminderId;
     return reminderId;
   }
 
   async cancel(reminderId: number): Promise<void> {
-    await reminderAgentManager.cancelReminder(reminderId);
+    await this.cancelReminder(reminderId);
   }
 
   async list(): Promise<reminderAgentManager.ReminderRequest[]> {
-    return reminderAgentManager.getValidReminders();
+    return this.getValidReminders();
   }
 }
