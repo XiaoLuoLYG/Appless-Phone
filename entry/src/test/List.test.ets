@@ -82,6 +82,7 @@ import uiAgentTest from './UiAgent.test';
 import actionCatalogTest from './ActionCatalog.test';
 import actionPlanRunnerTest from './ActionPlanRunner.test';
 import actionAgentTest from './ActionAgent.test';
+import a2uiLayoutMergerTest from './A2uiLayoutMerger.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -160,6 +161,7 @@ export default function testsuite() {
   actionCatalogTest();
   actionPlanRunnerTest();
   actionAgentTest();
+  a2uiLayoutMergerTest();
   personaStoreTest();
   personaRouterTest();
   personaPromptTest();

@@ -1,6 +1,8 @@
 import {
+  A2uiAgentRunner,
   LlmProvider,
   LocalModelSettings,
+  OpenAiA2uiModel,
   OpenAiCompatibleModel,
   PaymentAccount,
   StripeReceivingAccountCardData,
@@ -1230,6 +1232,9 @@ struct Index {
         this.applySurface(surface);
       }
     };
+    if (provider.isConfigured()) {
+      options.uiLayoutPlanner = new A2uiAgentRunner(new OpenAiA2uiModel(provider));
+    }
     this.hotelAgentRuntime = new HotelAgentRuntime(options);
     this.hotelAgentRuntimeFingerprint = fingerprint;
     return this.hotelAgentRuntime;

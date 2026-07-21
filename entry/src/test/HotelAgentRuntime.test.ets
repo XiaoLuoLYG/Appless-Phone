@@ -21,6 +21,7 @@ import {
   HotelSearchResult,
   LinkedMessageBus,
   LocalModel,
+  UiLayoutPlanner,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   UiRenderResultPayload,
@@ -232,6 +233,38 @@ class RecordingWriter implements UiSurfaceWriter {
     if (lease.isActive()) {
       this.writes.push({ turnId: turnId, surfaceId: surfaceId, jsonl: jsonl });
     }
+  }
+}
+
+class FixedLayoutPlanner implements UiLayoutPlanner {
+  readonly mode: string;
+  calls: number = 0;
+  lastTask: string = '';
+
+  constructor(mode: string) {
+    this.mode = mode;
+  }
+
+  async plan(task: string, surfaceId: string): Promise<string | null> {
+    this.calls += 1;
+    this.lastTask = task;
+    if (this.mode === 'throw') {
+      throw new Error('layout failed');
+    }
+    if (this.mode === 'hang') {
+      return new Promise<string | null>((_resolve: (value: string | null) => void) => {});
+    }
+    if (this.mode === 'invalid') {
+      return '{"version":"v0.9.1","updateComponents":{"surfaceId":"' + surfaceId +
+        '","components":[{"id":"root","component":"UnsafeWebView"}]}}';
+    }
+    return '{"version":"v0.9.1","updateComponents":{"surfaceId":"' + surfaceId +
+      '","components":[' +
+      '{"id":"root","component":"SurfaceRoot","child":"column"},' +
+      '{"id":"column","component":"Column","children":["layoutTitle","results"]},' +
+      '{"id":"layoutTitle","component":"Text","text":"AI 实时布局","variant":"h3"},' +
+      '{"id":"results","component":"GenericToolResults","dataPath":"/genericToolResults"}' +
+      ']}}';
   }
 }
 
@@ -592,6 +625,50 @@ export default function hotelAgentRuntimeTest() {
       expect(ui.dataTaskId).assertEqual(data.taskId);
       expect(ui.expectedOutputSchema).assertEqual(data.outputSchema);
       runtime.stop();
+    });
+
+    it('uses a constrained layout planner after the deterministic hotel renderer', 0, async () => {
+      const writer = new RecordingWriter();
+      const planner = new FixedLayoutPlanner('valid');
+      const runtimeOptions = options(
+        new TrackingBus(),
+        new FakeHotelProvider(),
+        writer,
+        new RecordingOpener()
+      );
+      runtimeOptions.uiLayoutPlanner = planner;
+      const runtime = new HotelAgentRuntime(runtimeOptions);
+
+      expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+      expect(planner.calls).assertEqual(1);
+      expect(planner.lastTask.indexOf('allowedDataPaths=/genericToolResults,/summary')).assertLarger(-1);
+      expect(planner.lastTask.indexOf('hotelId')).assertEqual(-1);
+      expect(lastWriteContains(writer, '"id":"layoutTitle"')).assertTrue();
+      expect(lastWriteContains(writer, '"toolName":"hotel.search"')).assertTrue();
+      runtime.dispose();
+    });
+
+    it('falls back to the deterministic hotel renderer on invalid, thrown, or timed-out layouts', 0, async () => {
+      const modes: string[] = ['invalid', 'throw', 'hang'];
+      for (let index = 0; index < modes.length; index++) {
+        const writer = new RecordingWriter();
+        const planner = new FixedLayoutPlanner(modes[index]);
+        const runtimeOptions = options(
+          new TrackingBus(),
+          new FakeHotelProvider(),
+          writer,
+          new RecordingOpener()
+        );
+        runtimeOptions.uiLayoutPlanner = planner;
+        runtimeOptions.uiLayoutTimeoutMs = 5;
+        const runtime = new HotelAgentRuntime(runtimeOptions);
+
+        expect((await runtime.submit(SEARCH_QUERY)).ok).assertTrue();
+        expect(planner.calls).assertEqual(1);
+        expect(lastWriteContains(writer, '"component":"GenericToolResults"')).assertTrue();
+        expect(lastWriteContains(writer, 'UnsafeWebView')).assertFalse();
+        runtime.dispose();
+      }
     });
 
     it('buffers a data-first result while the skeleton writer is delayed', 0, async () => {

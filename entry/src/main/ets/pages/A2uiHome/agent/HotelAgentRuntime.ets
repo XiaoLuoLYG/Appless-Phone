@@ -40,6 +40,7 @@ import {
   TaskErrorPayload,
   ToolDefinition,
   ToolDefinitionLookup,
+  UiLayoutPlanner,
   UiAgent,
   UiRenderResult,
   UiRenderResultPayload,
@@ -55,6 +56,7 @@ import {
   hotelNavigationUri,
   hotelPendingA2ui,
   hotelSearchA2uiFromOffers,
+  mergeA2uiLayout,
   parseA2uiJsonl,
   parseHotelDetailRequest,
   parseHotelSearchRequest,
@@ -77,6 +79,7 @@ import {
 
 const DEFAULT_SUBMIT_TIMEOUT_MS: number = 30000;
 const DEFAULT_ACTION_TIMEOUT_MS: number = 15000;
+const DEFAULT_LAYOUT_TIMEOUT_MS: number = 6000;
 const MAX_DEADLINE_MS: number = 120000;
 const SURFACE_HISTORY_LIMIT: number = 20;
 
@@ -103,6 +106,8 @@ export interface HotelAgentRuntimeOptions {
   conversationId?: string;
   submitTimeoutMs?: number;
   actionTimeoutMs?: number;
+  uiLayoutPlanner?: UiLayoutPlanner;
+  uiLayoutTimeoutMs?: number;
 }
 
 export interface HotelActionContext {
@@ -929,6 +934,14 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
 }
 
 class HotelUiRenderer implements UiTaskRenderer {
+  private readonly layoutPlanner: UiLayoutPlanner | null;
+  private readonly layoutTimeoutMs: number;
+
+  constructor(layoutPlanner: UiLayoutPlanner | null = null, layoutTimeoutMs: number = DEFAULT_LAYOUT_TIMEOUT_MS) {
+    this.layoutPlanner = layoutPlanner;
+    this.layoutTimeoutMs = boundedDeadline(layoutTimeoutMs, DEFAULT_LAYOUT_TIMEOUT_MS);
+  }
+
   async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     const prompt = task.intent === 'hotel.detail' ?
       '正在等待 RollingGo 返回实时房型、价格与取消政策。' :
@@ -949,24 +962,24 @@ class HotelUiRenderer implements UiTaskRenderer {
     }
     try {
       if (data.toolId === 'hotel.search') {
-        return this.rendered(
-          hotelSearchA2uiFromOffers(
-            surfaceId,
-            data.data as HotelSearchResult,
-            offers,
-            data.warnings
-          )
+        const result = data.data as HotelSearchResult;
+        const baseline = hotelSearchA2uiFromOffers(
+          surfaceId,
+          result,
+          offers,
+          data.warnings
         );
+        return this.rendered(await this.layout(task, data, offers, surfaceId, baseline, result.hotels.length));
       }
       if (data.toolId === 'hotel.detail') {
-        return this.rendered(
-          hotelDetailA2uiFromOffers(
-            surfaceId,
-            data.data as HotelDetailResult,
-            offers,
-            data.warnings
-          )
+        const result = data.data as HotelDetailResult;
+        const baseline = hotelDetailA2uiFromOffers(
+          surfaceId,
+          result,
+          offers,
+          data.warnings
         );
+        return this.rendered(await this.layout(task, data, offers, surfaceId, baseline, result.rates.length));
       }
     } catch (_error) {
       return this.rendered(
@@ -1017,6 +1030,56 @@ class HotelUiRenderer implements UiTaskRenderer {
 
   private rendered(jsonl: string): UiRenderResult {
     return { jsonl: jsonl };
+  }
+
+  private async layout(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    offers: ActionOffer[],
+    surfaceId: string,
+    baseline: string,
+    itemCount: number
+  ): Promise<string> {
+    if (this.layoutPlanner === null || itemCount <= 0 ||
+      (data.status !== 'success' && data.status !== 'partial')) {
+      return baseline;
+    }
+    const prompt = this.layoutPrompt(task, data, offers, itemCount);
+    let timerId: number = -1;
+    const timeout = new Promise<string | null>((resolve: (value: string | null) => void) => {
+      timerId = setTimeout(() => resolve(null), this.layoutTimeoutMs);
+    });
+    try {
+      const candidate = await Promise.race<string | null>([
+        this.layoutPlanner.plan(prompt, surfaceId),
+        timeout
+      ]);
+      return candidate === null ? baseline : mergeA2uiLayout(baseline, candidate, surfaceId, offers);
+    } catch (_error) {
+      return baseline;
+    } finally {
+      if (timerId >= 0) {
+        clearTimeout(timerId);
+      }
+    }
+  }
+
+  private layoutPrompt(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    offers: ActionOffer[],
+    itemCount: number
+  ): string {
+    const offerIds: string[] = [];
+    for (let index = 0; index < offers.length; index++) {
+      offerIds.push(offers[index].offerId);
+    }
+    return 'Arrange the existing hotel result without inventing facts.\n' +
+      'intent=' + task.intent + '\n' +
+      'toolId=' + data.toolId + '\n' +
+      'itemCount=' + itemCount.toString() + '\n' +
+      'allowedDataPaths=/genericToolResults,/summary\n' +
+      'offerIds=' + offerIds.join(',');
   }
 }
 
@@ -1389,7 +1452,10 @@ export class HotelAgentRuntime {
     const planner = new HotelLeaderPlanner(options.model, options.currentLocalDate, this.ids);
     const executor = options.dataExecutor === undefined ?
       new StructuredHotelDataExecutor() : options.dataExecutor;
-    const renderer = new HotelUiRenderer();
+    const renderer = new HotelUiRenderer(
+      options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
+      boundedDeadline(options.uiLayoutTimeoutMs, DEFAULT_LAYOUT_TIMEOUT_MS)
+    );
     const registered = new HotelRegisteredActionExecutor(
       this.catalog,
       options.opener,
