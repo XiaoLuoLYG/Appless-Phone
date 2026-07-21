@@ -112,13 +112,15 @@ import {
   cancelScheduledTrainPresaleTask,
   emptyTrainPresaleTrip,
   findMatchingTrainPresaleTask,
-  prepareTrainPresaleDebugConfirmation,
+  readTrainPresaleDebugBuildState,
   reconcileTrainPresaleTask,
+  runTrainPresaleDebugConfirmation,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
   TrainPresaleConfirmationResult,
-  TrainPresaleDebugConfirmationInput,
+  TrainPresaleDebugRunInput,
   TrainPresalePanelSubmission,
+  TrainPresaleScheduleResult,
   TrainPresaleTrip,
   validateTrainPresaleConfirmation,
   validateTrainPresaleTrip
@@ -770,15 +772,10 @@ struct Index {
   }
 
   private readDebugBuildState(): void {
-    try {
-      this.isDebugBuild = bundleManager.getBundleInfoForSelfSync(
+    this.isDebugBuild = readTrainPresaleDebugBuildState(
+      (): boolean | undefined => bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION
-      ).appInfo.debug;
-    } catch (error) {
-      this.isDebugBuild = false;
-      const message = error instanceof Error ? error.message : JSON.stringify(error);
-      aiLogError('[AIPhone][DebugBuildState] error=' + message.substring(0, 240));
-    }
+      ).appInfo.debug);
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -3268,40 +3265,37 @@ struct Index {
       taskId: 'train-presale-' + now.getTime().toString(),
       createdAt: now.toISOString()
     };
-    let result: TrainPresaleConfirmationResult;
-    if (submission.source === 'debug') {
-      const debugInput: TrainPresaleDebugConfirmationInput = {
-        debugEnabled: this.isDebugBuild,
-        debugConfirmed: submission.debugConfirmed,
-        fromName: this.trainPresaleTrip.fromName,
-        fromCode: this.trainPresaleTrip.fromCode,
-        toName: this.trainPresaleTrip.toName,
-        toCode: this.trainPresaleTrip.toCode,
-        passengerNames: submission.passengerNames,
-        seatPriority: submission.seatPriority,
-        unpaidOrderAuthorized: submission.unpaidOrderAuthorized,
-        taskId: input.taskId,
-        createdAt: input.createdAt
-      };
-      result = await prepareTrainPresaleDebugConfirmation(debugInput, select12306DebugTrain);
-    } else {
-      result = validateTrainPresaleConfirmation(input);
-    }
-    if (result.task === undefined) {
-      this.trainPresaleError = result.error;
-      this.trainPresaleWorking = false;
-      return;
-    }
-    const task = result.task;
     try {
       const store = this.trainPresaleStore();
       if (store === null) {
         throw new Error('缺少应用上下文');
       }
-      const scheduleResult = await scheduleTrainPresaleTask(task, store, new SystemOneShotScheduler());
+      let scheduleResult: TrainPresaleScheduleResult;
+      if (submission.source === 'debug') {
+        const debugInput: TrainPresaleDebugRunInput = {
+          debugEnabled: this.isDebugBuild,
+          debugConfirmed: submission.debugConfirmed,
+          fromName: this.trainPresaleTrip.fromName,
+          fromCode: this.trainPresaleTrip.fromCode,
+          toName: this.trainPresaleTrip.toName,
+          toCode: this.trainPresaleTrip.toCode,
+          passengerNames: submission.passengerNames,
+          seatPriority: submission.seatPriority,
+          unpaidOrderAuthorized: submission.unpaidOrderAuthorized
+        };
+        scheduleResult = await runTrainPresaleDebugConfirmation(
+          debugInput, store, new SystemOneShotScheduler(), select12306DebugTrain);
+      } else {
+        const result: TrainPresaleConfirmationResult = validateTrainPresaleConfirmation(input);
+        if (result.task === undefined) {
+          this.trainPresaleError = result.error;
+          return;
+        }
+        scheduleResult = await scheduleTrainPresaleTask(result.task, store, new SystemOneShotScheduler());
+      }
       if (scheduleResult.task === undefined) {
         this.trainPresaleError = scheduleResult.error;
-        aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+        aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + input.taskId +
           ' error=' + scheduleResult.error.substring(0, 240));
       } else {
         this.trainPresaleTask = scheduleResult.task;
@@ -3319,19 +3313,20 @@ struct Index {
         this.trainPresaleTaskState = scheduleResult.task.state;
         this.trainPresaleError = scheduleResult.error;
         if (scheduleResult.task.state === 'scheduled') {
-          aiLogInfo('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+          aiLogInfo('[AIPhone][TrainPresaleSchedule] taskId=' + scheduleResult.task.taskId +
             ' reminderId=' + scheduleResult.task.reminderId.toString());
         } else {
-          aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+          aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + scheduleResult.task.taskId +
             ' state=' + scheduleResult.task.state + ' error=' + scheduleResult.error.substring(0, 240));
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       this.trainPresaleError = '提醒创建失败：' + message;
-      aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId + ' error=' + message.substring(0, 240));
+      aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + input.taskId + ' error=' + message.substring(0, 240));
+    } finally {
+      this.trainPresaleWorking = false;
     }
-    this.trainPresaleWorking = false;
   }
 
   private async cancelTrainPresaleTask(): Promise<void> {

@@ -2,18 +2,60 @@ import { describe, expect, it } from '@ohos/hypium';
 import { preferences } from '@kit.ArkData';
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import {
+  current12306BeijingDate,
   TrainPresaleDebugSelection,
   TrainPresaleDebugSelectionRequest,
   trainPresaleDebugSelectionFromOfficialPayloadForTest
 } from '@loop/agent-core';
 import {
   prepareTrainPresaleDebugConfirmation,
+  readTrainPresaleDebugBuildState,
+  runTrainPresaleDebugConfirmation,
   scheduleTrainPresaleTask,
   trainPresaleDebugActionVisible,
-  TrainPresaleDebugConfirmationInput
+  TrainPresaleDebugConfirmationInput,
+  TrainPresaleDebugRunInput
 } from '../main/ets/pages/A2uiHome/components/TrainPresalePanel';
 import { SystemOneShotScheduler } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
-import { TrainPresaleTaskStore } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
+import {
+  TrainPresaleTask,
+  TrainPresaleTaskState,
+  TrainPresaleTaskStore
+} from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
+
+class TestGate {
+  readonly promise: Promise<void>;
+  private resolvePromise: (() => void) | null = null;
+
+  constructor() {
+    this.promise = new Promise<void>((resolve: () => void) => {
+      this.resolvePromise = resolve;
+    });
+  }
+
+  open(): void {
+    const resolve = this.resolvePromise;
+    this.resolvePromise = null;
+    if (resolve !== null) {
+      resolve();
+    }
+  }
+}
+
+class EpochSequence {
+  private values: number[];
+  private index: number = 0;
+
+  constructor(values: number[]) {
+    this.values = values;
+  }
+
+  now(): number {
+    const offset = this.index < this.values.length ? this.index : this.values.length - 1;
+    this.index++;
+    return this.values[offset];
+  }
+}
 
 class MemoryPreferences {
   private value: preferences.ValueType = '';
@@ -55,6 +97,53 @@ function confirmation(): TrainPresaleDebugConfirmationInput {
   };
 }
 
+function runInput(): TrainPresaleDebugRunInput {
+  return {
+    debugEnabled: true,
+    debugConfirmed: true,
+    fromName: '北京南',
+    fromCode: 'VNP',
+    toName: '上海虹桥',
+    toCode: 'AOH',
+    passengerNames: ['张三'],
+    seatPriority: '二等座',
+    unpaidOrderAuthorized: true
+  };
+}
+
+function activeDebugTask(state: TrainPresaleTaskState = 'scheduled'): TrainPresaleTask {
+  return {
+    taskId: 'debug-existing',
+    source: 'debug',
+    state: state,
+    trainCode: 'G1',
+    travelDate: '2026-07-22',
+    fromName: '北京南',
+    fromCode: 'VNP',
+    toName: '上海虹桥',
+    toCode: 'AOH',
+    saleAt: '2026-07-22T12:00:10+08:00',
+    passengerNames: ['张三'],
+    seatPriority: '二等座',
+    unpaidOrderAuthorized: true,
+    bookingUrl: verifiedSelection().bookingUrl,
+    reminderId: state === 'scheduled' ? 88 : -1,
+    createdAt: '2026-07-22T04:00:00.000Z',
+    lastError: state === 'needs_user' ? '需要用户处理' : ''
+  };
+}
+
+function testScheduler(onPublish: () => void): SystemOneShotScheduler {
+  return new SystemOneShotScheduler(
+    async (_reminder: reminderAgentManager.ReminderRequestCalendar): Promise<number> => {
+      onPublish();
+      return 88;
+    },
+    async (_reminderId: number): Promise<void> => {},
+    async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+  );
+}
+
 function verifiedSelection(): TrainPresaleDebugSelection {
   return {
     status: 'verified',
@@ -89,6 +178,22 @@ function trainRow(trainCode: string, fromCode: string, toCode: string, second: s
 
 export default function trainPresaleDebugTest() {
   describe('trainPresaleDebug', () => {
+    it('reads the real runtime debug seam as true only for an explicit appInfo debug flag', 0, () => {
+      expect(readTrainPresaleDebugBuildState((): boolean | undefined => true)).assertTrue();
+      expect(readTrainPresaleDebugBuildState((): boolean | undefined => false)).assertFalse();
+      expect(readTrainPresaleDebugBuildState((): boolean | undefined => undefined)).assertFalse();
+      expect(readTrainPresaleDebugBuildState((): boolean | undefined => {
+        throw new Error('bundle unavailable');
+      })).assertFalse();
+    });
+
+    it('uses fixed Beijing dates across UTC midnight and the Beijing day boundary', 0, () => {
+      expect(current12306BeijingDate(
+        (): number => new Date('2026-07-22T15:59:59.000Z').getTime())).assertEqual('2026-07-22');
+      expect(current12306BeijingDate(
+        (): number => new Date('2026-07-22T16:00:00.000Z').getTime())).assertEqual('2026-07-23');
+    });
+
     it('hides the action and rejects the handler before provider access outside debug builds', 0, async () => {
       expect(trainPresaleDebugActionVisible(false)).assertFalse();
       expect(trainPresaleDebugActionVisible(true)).assertTrue();
@@ -121,6 +226,48 @@ export default function trainPresaleDebugTest() {
       expect(result.task).assertEqual(undefined);
       expect(result.error).assertEqual('请再次确认将创建真实未支付订单，支付仍需手动完成。');
       expect(providerCalls).assertEqual(0);
+    });
+
+    it('keeps production orchestration closed before provider and scheduler without debug confirmation', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const input = runInput();
+      input.debugEnabled = false;
+      let providerCalls = 0;
+      let publishCalls = 0;
+
+      const nonDebug = await runTrainPresaleDebugConfirmation(
+        input,
+        store,
+        testScheduler((): void => { publishCalls++; }),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+          providerCalls++;
+          return verifiedSelection();
+        },
+        (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
+      );
+
+      expect(nonDebug.task).assertEqual(undefined);
+      expect(providerCalls).assertEqual(0);
+      expect(publishCalls).assertEqual(0);
+
+      input.debugEnabled = true;
+      input.debugConfirmed = false;
+      const result = await runTrainPresaleDebugConfirmation(
+        input,
+        store,
+        testScheduler((): void => { publishCalls++; }),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+          providerCalls++;
+          return verifiedSelection();
+        },
+        (): number => new Date('2026-07-22T04:00:00.000Z').getTime()
+      );
+
+      expect(result.task).assertEqual(undefined);
+      expect(providerCalls).assertEqual(0);
+      expect(publishCalls).assertEqual(0);
+      expect(store.list().length).assertEqual(0);
     });
 
     it('selects only a real bookable high-speed train with exact official identity and seat inventory', 0, () => {
@@ -179,6 +326,171 @@ export default function trainPresaleDebugTest() {
 
       expect(result.task).assertEqual(undefined);
       expect(result.error).assertEqual('12306 调试车次查询失败：network unavailable');
+    });
+
+    it('computes the ten-second fire time from fresh provider success time', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const clock = new EpochSequence([
+        new Date('2026-07-22T04:00:00.000Z').getTime(),
+        new Date('2026-07-22T04:00:30.000Z').getTime(),
+        new Date('2026-07-22T04:00:30.100Z').getTime()
+      ]);
+      const events: string[] = [];
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, testScheduler((): void => { events.push('schedule'); }),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+          events.push('provider');
+          return verifiedSelection();
+        },
+        (): number => clock.now());
+
+      expect(result.task?.createdAt).assertEqual('2026-07-22T04:00:30.000Z');
+      expect(result.task?.saleAt).assertEqual('2026-07-22T12:00:40+08:00');
+      expect(result.task?.source).assertEqual('debug');
+      expect(events.join(',')).assertEqual('provider,schedule');
+    });
+
+    it('fails closed before persistence when the fresh fire time has expired', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const clock = new EpochSequence([
+        new Date('2026-07-22T04:00:00.000Z').getTime(),
+        new Date('2026-07-22T04:00:30.000Z').getTime(),
+        new Date('2026-07-22T04:00:40.000Z').getTime()
+      ]);
+      let publishCalls = 0;
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, testScheduler((): void => { publishCalls++; }),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => verifiedSelection(),
+        (): number => clock.now());
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error).assertEqual('10秒测试触发时间已过，请重新确认。');
+      expect(store.list().length).assertEqual(0);
+      expect(publishCalls).assertEqual(0);
+    });
+
+    it('fails closed on an invalid epoch before provider access', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      let providerCalls = 0;
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, testScheduler((): void => {}),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+          providerCalls++;
+          return verifiedSelection();
+        },
+        (): number => Number.NaN);
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error).assertEqual('无法读取10秒测试时间，请重试。');
+      expect(providerCalls).assertEqual(0);
+      expect(store.list().length).assertEqual(0);
+    });
+
+    it('fails closed when a provider result crosses the Beijing travel-date boundary', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const clock = new EpochSequence([
+        new Date('2026-07-22T15:59:59.000Z').getTime(),
+        new Date('2026-07-22T16:00:01.000Z').getTime()
+      ]);
+
+      const result = await runTrainPresaleDebugConfirmation(
+        runInput(), store, testScheduler((): void => {}),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => verifiedSelection(),
+        (): number => clock.now());
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error).assertEqual('12306 返回的调试车次日期已不是当前北京时间日期，请重新确认。');
+      expect(store.list().length).assertEqual(0);
+    });
+
+    it('reuses every active debug state after reopen without provider or reminder publication', 0, async () => {
+      const states: TrainPresaleTaskState[] = ['scheduled', 'executing', 'awaiting_payment', 'needs_user'];
+      for (let index = 0; index < states.length; index++) {
+        const native = new MemoryPreferences();
+        new TrainPresaleTaskStore(native as Object as preferences.Preferences).create(activeDebugTask(states[index]));
+        const reopened = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+        let providerCalls = 0;
+        let publishCalls = 0;
+
+        const result = await runTrainPresaleDebugConfirmation(
+          runInput(), reopened, testScheduler((): void => { publishCalls++; }),
+          async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+            providerCalls++;
+            return verifiedSelection();
+          },
+          (): number => new Date('2026-07-22T04:01:00.000Z').getTime());
+
+        expect(result.task?.taskId).assertEqual('debug-existing');
+        expect(result.task?.state).assertEqual(states[index]);
+        expect(result.error.indexOf('已有10秒测试任务')).assertLarger(-1);
+        expect(providerCalls).assertEqual(0);
+        expect(publishCalls).assertEqual(0);
+        expect(reopened.list().length).assertEqual(1);
+      }
+    });
+
+    it('allows a new demo after cancellation but not a duplicate with a different fire time', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      store.create(activeDebugTask('cancelled'));
+      let publishCalls = 0;
+
+      const created = await runTrainPresaleDebugConfirmation(
+        runInput(), store, testScheduler((): void => { publishCalls++; }),
+        async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => verifiedSelection(),
+        (): number => new Date('2026-07-22T04:02:00.000Z').getTime());
+
+      expect(created.task?.state).assertEqual('scheduled');
+      expect(store.list().length).assertEqual(2);
+      expect(publishCalls).assertEqual(1);
+
+      const duplicate = activeDebugTask('scheduled');
+      duplicate.taskId = 'debug-later';
+      duplicate.saleAt = '2026-07-22T12:09:10+08:00';
+      duplicate.createdAt = '2026-07-22T04:09:00.000Z';
+      duplicate.reminderId = -1;
+      const duplicateResult = await scheduleTrainPresaleTask(
+        duplicate, store, testScheduler((): void => { publishCalls++; }));
+
+      expect(duplicateResult.task?.taskId).assertEqual(created.task?.taskId);
+      expect(duplicateResult.error.indexOf('已有')).assertLarger(-1);
+      expect(publishCalls).assertEqual(1);
+      expect(store.list().length).assertEqual(2);
+    });
+
+    it('serializes two slow-provider confirmations into one durable task and one reminder', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const gate = new TestGate();
+      let providerCalls = 0;
+      let publishCalls = 0;
+      const selector = async (_request: TrainPresaleDebugSelectionRequest): Promise<TrainPresaleDebugSelection> => {
+        providerCalls++;
+        await gate.promise;
+        return verifiedSelection();
+      };
+      const scheduler = testScheduler((): void => { publishCalls++; });
+      const clock = (): number => new Date('2026-07-22T04:03:00.000Z').getTime();
+
+      const firstPromise = runTrainPresaleDebugConfirmation(runInput(), store, scheduler, selector, clock);
+      const secondPromise = runTrainPresaleDebugConfirmation(runInput(), store, scheduler, selector, clock);
+      gate.open();
+      const first = await firstPromise;
+      const second = await secondPromise;
+
+      expect(providerCalls).assertEqual(2);
+      expect(publishCalls).assertEqual(1);
+      expect(store.list().length).assertEqual(1);
+      expect(first.task?.taskId).assertEqual(second.task?.taskId);
+      expect(first.task?.state).assertEqual('scheduled');
+      expect(second.error.indexOf('已有')).assertLarger(-1);
     });
 
     it('creates a durable debug task for ten seconds later through the production scheduler seam', 0, async () => {

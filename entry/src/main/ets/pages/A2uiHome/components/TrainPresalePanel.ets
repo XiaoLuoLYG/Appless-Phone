@@ -1,6 +1,8 @@
 import {
   build12306BookingUrl,
+  current12306BeijingDate,
   extractExactTrainCode,
+  format12306BeijingTimestamp,
   TrainPresaleDebugSelection,
   TrainPresaleDebugSelectionRequest
 } from '@loop/agent-core';
@@ -64,6 +66,18 @@ export interface TrainPresaleDebugConfirmationInput {
   createdAt: string;
 }
 
+export interface TrainPresaleDebugRunInput {
+  debugEnabled: boolean;
+  debugConfirmed: boolean;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  passengerNames: string[];
+  seatPriority: string;
+  unpaidOrderAuthorized: boolean;
+}
+
 export interface TrainPresaleConfirmationResult {
   error: string;
   task: TrainPresaleTask | undefined;
@@ -110,6 +124,14 @@ function validationError(message: string): TrainPresaleConfirmationResult {
 
 export function trainPresaleDebugActionVisible(debugEnabled: boolean): boolean {
   return debugEnabled;
+}
+
+export function readTrainPresaleDebugBuildState(reader: () => boolean | undefined): boolean {
+  try {
+    return reader() === true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function isValidDate(value: string): boolean {
@@ -215,6 +237,73 @@ function matchesTrainPresaleTask(task: TrainPresaleTask, trip: TrainPresaleTrip)
     task.toName.trim() === toName && task.toCode.trim().toUpperCase() === toCode && task.saleAt.trim() === saleAt;
 }
 
+function samePassengerNames(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index++) {
+    if (left[index].trim() !== right[index].trim()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isActiveTrainPresaleTask(task: TrainPresaleTask): boolean {
+  return task.state === 'scheduled' || task.state === 'executing' ||
+    task.state === 'awaiting_payment' || task.state === 'needs_user';
+}
+
+function preferredActiveTask(current: TrainPresaleTask | undefined, candidate: TrainPresaleTask): TrainPresaleTask {
+  if (current === undefined) {
+    return candidate;
+  }
+  const states: TrainPresaleTaskState[] = ['needs_user', 'scheduled', 'executing', 'awaiting_payment'];
+  return states.indexOf(candidate.state) > states.indexOf(current.state) ? candidate : current;
+}
+
+function findActiveDebugTaskForContext(
+  tasks: TrainPresaleTask[],
+  input: TrainPresaleDebugRunInput,
+  travelDate: string
+): TrainPresaleTask | undefined {
+  const passengers = input.passengerNames.map((name: string): string => name.trim())
+    .filter((name: string): boolean => name.length > 0);
+  let found: TrainPresaleTask | undefined = undefined;
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    if (task.source === 'debug' && isActiveTrainPresaleTask(task) && task.travelDate === travelDate &&
+      task.fromName === input.fromName.trim() && task.fromCode === input.fromCode.trim().toUpperCase() &&
+      task.toName === input.toName.trim() && task.toCode === input.toCode.trim().toUpperCase() &&
+      task.seatPriority === input.seatPriority.trim() && samePassengerNames(task.passengerNames, passengers)) {
+      found = preferredActiveTask(found, task);
+    }
+  }
+  return found;
+}
+
+function findMatchingTrainPresaleTaskForTask(
+  tasks: TrainPresaleTask[],
+  candidate: TrainPresaleTask
+): TrainPresaleTask | undefined {
+  if (candidate.source !== 'debug') {
+    return findMatchingTrainPresaleTask(tasks, tripFromTrainPresaleTask(candidate));
+  }
+  let found: TrainPresaleTask | undefined = undefined;
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    if (task.source === 'debug' && isActiveTrainPresaleTask(task) &&
+      task.trainCode === candidate.trainCode && task.travelDate === candidate.travelDate &&
+      task.fromName === candidate.fromName && task.fromCode === candidate.fromCode &&
+      task.toName === candidate.toName && task.toCode === candidate.toCode &&
+      task.seatPriority === candidate.seatPriority &&
+      samePassengerNames(task.passengerNames, candidate.passengerNames)) {
+      found = preferredActiveTask(found, task);
+    }
+  }
+  return found;
+}
+
 function tripFromTrainPresaleTask(task: TrainPresaleTask): TrainPresaleTrip {
   return {
     trainCode: task.trainCode,
@@ -289,23 +378,10 @@ export function validateTrainPresaleConfirmation(
   };
 }
 
-function trainPresaleDebugFireAt(createdAt: string): string {
-  const now = new Date(createdAt);
-  if (isNaN(now.getTime())) {
-    return '';
-  }
-  const china = new Date(now.getTime() + 10 * 1000 + 8 * 60 * 60 * 1000);
-  return china.getUTCFullYear().toString() + '-' +
-    (china.getUTCMonth() + 1 < 10 ? '0' : '') + (china.getUTCMonth() + 1).toString() + '-' +
-    (china.getUTCDate() < 10 ? '0' : '') + china.getUTCDate().toString() + 'T' +
-    (china.getUTCHours() < 10 ? '0' : '') + china.getUTCHours().toString() + ':' +
-    (china.getUTCMinutes() < 10 ? '0' : '') + china.getUTCMinutes().toString() + ':' +
-    (china.getUTCSeconds() < 10 ? '0' : '') + china.getUTCSeconds().toString() + '+08:00';
-}
-
 export async function prepareTrainPresaleDebugConfirmation(
   input: TrainPresaleDebugConfirmationInput,
-  selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>
+  selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>,
+  clock: () => number = (): number => new Date(input.createdAt).getTime()
 ): Promise<TrainPresaleConfirmationResult> {
   if (!input.debugEnabled) {
     return validationError('当前版本不允许调试测试。');
@@ -329,7 +405,15 @@ export async function prepareTrainPresaleDebugConfirmation(
   if (selection.status !== 'verified') {
     return validationError(selection.reason.length > 0 ? selection.reason : '12306 当前没有可验证的在售高铁余票。');
   }
-  const fireAt = trainPresaleDebugFireAt(input.createdAt);
+  const providerSucceededAt = clock();
+  if (!Number.isFinite(providerSucceededAt)) {
+    return validationError('无法读取10秒测试时间，请重试。');
+  }
+  const createdAt = new Date(providerSucceededAt).toISOString();
+  const fireAt = format12306BeijingTimestamp(providerSucceededAt + 10 * 1000);
+  if (selection.travelDate !== current12306BeijingDate((): number => providerSucceededAt)) {
+    return validationError('12306 返回的调试车次日期已不是当前北京时间日期，请重新确认。');
+  }
   const expectedUrl = build12306BookingUrl(
     selection.travelDate,
     selection.fromName,
@@ -360,8 +444,64 @@ export async function prepareTrainPresaleDebugConfirmation(
     debugEnabled: input.debugEnabled,
     debugConfirmed: input.debugConfirmed,
     taskId: input.taskId,
-    createdAt: input.createdAt
+    createdAt: createdAt
   });
+}
+
+function existingDebugTaskResult(task: TrainPresaleTask): TrainPresaleScheduleResult {
+  return {
+    error: '已有10秒测试任务（' + task.state + '），未创建新任务。',
+    task: task
+  };
+}
+
+export async function runTrainPresaleDebugConfirmation(
+  input: TrainPresaleDebugRunInput,
+  store: TrainPresaleTaskStore,
+  scheduler: SystemOneShotScheduler,
+  selector: (request: TrainPresaleDebugSelectionRequest) => Promise<TrainPresaleDebugSelection>,
+  clock: () => number = (): number => Date.now()
+): Promise<TrainPresaleScheduleResult> {
+  if (!input.debugEnabled) {
+    return { error: '当前版本不允许调试测试。', task: undefined };
+  }
+  if (!input.debugConfirmed) {
+    return { error: '请再次确认将创建真实未支付订单，支付仍需手动完成。', task: undefined };
+  }
+  const startedAt = clock();
+  if (!Number.isFinite(startedAt)) {
+    return { error: '无法读取10秒测试时间，请重试。', task: undefined };
+  }
+  const existing = findActiveDebugTaskForContext(
+    store.list(), input, current12306BeijingDate((): number => startedAt));
+  if (existing !== undefined) {
+    return existingDebugTaskResult(existing);
+  }
+  const prepared = await prepareTrainPresaleDebugConfirmation({
+    debugEnabled: input.debugEnabled,
+    debugConfirmed: input.debugConfirmed,
+    fromName: input.fromName,
+    fromCode: input.fromCode,
+    toName: input.toName,
+    toCode: input.toCode,
+    passengerNames: input.passengerNames,
+    seatPriority: input.seatPriority,
+    unpaidOrderAuthorized: input.unpaidOrderAuthorized,
+    taskId: 'train-debug-' + startedAt.toString(),
+    createdAt: new Date(startedAt).toISOString()
+  }, selector, clock);
+  if (prepared.task === undefined) {
+    return prepared;
+  }
+  const exactExisting = findMatchingTrainPresaleTaskForTask(store.list(), prepared.task);
+  if (exactExisting !== undefined) {
+    return existingDebugTaskResult(exactExisting);
+  }
+  const beforeSchedule = clock();
+  if (!Number.isFinite(beforeSchedule) || new Date(prepared.task.saleAt).getTime() <= beforeSchedule) {
+    return { error: '10秒测试触发时间已过，请重新确认。', task: undefined };
+  }
+  return scheduleTrainPresaleTask(prepared.task, store, scheduler);
 }
 
 export async function scheduleTrainPresaleTask(
@@ -370,7 +510,7 @@ export async function scheduleTrainPresaleTask(
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleScheduleResult> {
   const trip = tripFromTrainPresaleTask(task);
-  const duplicate = findMatchingTrainPresaleTask(store.list(), trip);
+  const duplicate = findMatchingTrainPresaleTaskForTask(store.list(), task);
   if (duplicate !== undefined) {
     const reconciled = await reconcileTrainPresaleTask(duplicate, store, scheduler);
     return {
@@ -390,7 +530,7 @@ export async function scheduleTrainPresaleTask(
       !matchesTrainPresaleTask(reservation, trip)) {
       throw new Error('任务预留保存失败');
     }
-    const beforePublish = findMatchingTrainPresaleTask(store.list(), trip);
+    const beforePublish = findMatchingTrainPresaleTaskForTask(store.list(), task);
     if (beforePublish === undefined || beforePublish.taskId !== task.taskId) {
       try {
         store.cancel(task.taskId);

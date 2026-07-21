@@ -2079,6 +2079,22 @@ function formatDate(date: Date): string {
   return date.getFullYear().toString() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
 }
 
+export function format12306BeijingTimestamp(epochMillis: number): string {
+  if (!Number.isFinite(epochMillis)) {
+    return '';
+  }
+  const china = new Date(epochMillis + 8 * 60 * 60 * 1000);
+  return china.getUTCFullYear().toString() + '-' + pad2(china.getUTCMonth() + 1) + '-' +
+    pad2(china.getUTCDate()) + 'T' + pad2(china.getUTCHours()) + ':' + pad2(china.getUTCMinutes()) + ':' +
+    pad2(china.getUTCSeconds()) + '+08:00';
+}
+
+export function current12306BeijingDate(
+  clock: () => number = (): number => Date.now()
+): string {
+  return format12306BeijingTimestamp(clock()).substring(0, 10);
+}
+
 function parseTravelDate(source: string): string {
   const now = new Date();
   if (/后天/.test(source)) {
@@ -5249,7 +5265,7 @@ export async function select12306DebugTrain(
         'provider_error', '12306 预售范围查询返回 HTTP ' + presaleResponse.code.toString() + '。');
     }
     const range = parsePresaleRange(presaleResponse.text);
-    if (range === undefined || range.today !== formatDate(new Date()) || range.today > range.lastSaleDate) {
+    if (range === undefined || range.today !== current12306BeijingDate() || range.today > range.lastSaleDate) {
       return emptyTrainPresaleDebugSelection(
         'provider_error', '12306 未返回可验证的当前在售日期。');
     }
