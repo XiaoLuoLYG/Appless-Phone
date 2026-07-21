@@ -11,7 +11,7 @@
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 出行 | `travel.search` | `我明天要从北京去上海，帮我搜索出行方案` | 综合高铁/航班候选；不造假，缺 provider 显示真实失败 | `read` | 无；航班源可能要 `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于 12306/飞常准网络 | 否 | 默认 smoke |
-| 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306/铁路结果或真实 provider 错误 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
+| 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306 真实余票与最低可售价格；展开后可在 App 内打开 12306 官网继续购票，指定车次需在官网重选，订单与支付结果以 12306 为准 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
 | 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
 | 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |
 | 酒店 | `hotel.search` | `帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房` | RollingGo 真实酒店结果、地址、语义标签和带口径的参考价；不伪造库存 | `read` | `ROLLINGGO_HOTEL_MCP_KEY` / `ROLLINGGO_HOTEL_MCP_URL` | 取决于 RollingGo 网络 | 否 | core C20 |
