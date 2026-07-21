@@ -4347,7 +4347,10 @@ export function selectTrainSearchPath(source: string, travelDate: string, range:
     return 'leftTicket';
   }
   if (range === undefined) {
-    return date > formatDate(new Date()) && extractExactTrainCode(source).length > 0 ? 'presaleRangeUnavailable' : 'leftTicket';
+    if (date > formatDate(new Date())) {
+      return extractExactTrainCode(source).length > 0 ? 'presaleRangeUnavailable' : 'presaleRangeUnavailableRouteOnly';
+    }
+    return 'leftTicket';
   }
   if (date <= range.lastSaleDate) {
     return 'leftTicket';
@@ -9291,15 +9294,17 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
   const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ? parsePresaleRange(presaleResponse.text) : undefined;
   const searchPath = selectTrainSearchPath(source, date, range);
-  if (searchPath === 'presaleRangeUnavailable') {
+  if (searchPath === 'presaleRangeUnavailable' || searchPath === 'presaleRangeUnavailableRouteOnly') {
     const trainCode = extractExactTrainCode(source);
     return errorA2ui(
       surfaceId,
       'train.search',
       '12306 预售范围未验证',
-      '12306 未返回可用的预售期信息，无法确认 ' + trainCode + ' 是否开售；未展示候选车次。',
+      searchPath === 'presaleRangeUnavailable' ?
+        '12306 未返回可用的预售期信息，无法确认 ' + trainCode + ' 是否开售；未展示候选车次。' :
+        '12306 未返回可用的预售期信息，无法确认该未来路线是否开售；当前版本不按路线展示预售车次。',
       [date + ' ' + fromName + ' 到 ' + toName],
-      ['重新查询', '换车次或日期']
+      searchPath === 'presaleRangeUnavailable' ? ['重新查询', '换车次或日期'] : ['重新查询', '补充车次号']
     );
   }
   if (searchPath === 'futureTrainCodeRequired') {

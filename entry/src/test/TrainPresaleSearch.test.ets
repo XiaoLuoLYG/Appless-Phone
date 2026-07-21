@@ -29,6 +29,11 @@ export default function trainPresaleSearchTest() {
       expect(selectTrainSearchPath('2099-08-06 北京南到上海虹桥 G1次', '2099-08-06', range)).assertEqual('presaleRangeUnavailable');
     });
 
+    it('routes a future route-only query to a provider error when the presale range is unavailable', 0, () => {
+      const range = parsePresaleRange('{');
+      expect(selectTrainSearchPath('2099-08-06 北京南到上海虹桥高铁', '2099-08-06', range)).assertEqual('presaleRangeUnavailableRouteOnly');
+    });
+
     it('builds a verified presale card with booking details', 0, () => {
       const train = buildPresaleTrainData(
         'G1',
