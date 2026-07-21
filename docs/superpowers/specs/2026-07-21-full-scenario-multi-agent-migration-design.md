@@ -623,6 +623,7 @@ TASK.CREATE.DATA
 TASK.RESULT.UI
 TASK.RESULT.DATA
 TASK.ERROR
+ACTION.PLAN.REQUEST
 ACTION.PLAN.DRAFT
 ACTION.OFFERS.READY
 ACTION.PLAN.READY
@@ -631,6 +632,8 @@ ACTION.PROGRESS
 ACTION.RESULT
 TURN.CANCEL
 ```
+
+`ACTION.PLAN.REQUEST` 由 Leader 发布受限 `goal/allowedActionIds`，是 Action Agent Prompt 的输入；`ACTION.PLAN.DRAFT` 只能由 Action Agent 在编译后发布。这样不会让 Leader 越权生成步骤，也不会把“请求”和“草案”复用成同一种 payload。
 
 最小扩展：
 
