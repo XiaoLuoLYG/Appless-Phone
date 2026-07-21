@@ -1,4 +1,5 @@
 import { aiLogInfo, isAllowedHotelBookingNavigationUrl } from '@loop/agent-core';
+import { url as arkUrl } from '@kit.ArkTS';
 import { COLOR_CARD, COLOR_CARD_EDGE, COLOR_ERROR, COLOR_ERROR_SOFT, COLOR_INK, COLOR_MUTED, COLOR_PAGE } from '../style/A2uiHomeTheme';
 import { A2uiButtonView } from './common/A2uiButtonView';
 import { A2uiWebSurfaceView } from './common/A2uiWebSurfaceView';
@@ -7,10 +8,20 @@ export type CheckoutWebKind = 'payment' | 'hotel' | 'train';
 export type CheckoutNavigationDecision = 'allow' | 'payment_return' | 'block';
 
 export function isAllowed12306BookingUrl(url: string): boolean {
+  try {
+    const parsed = new arkUrl.URL(url.trim());
+    if (parsed.protocol.length > 0) {
+      return parsed.protocol.toLowerCase() === 'https:' &&
+        parsed.hostname.toLowerCase() === 'kyfw.12306.cn' &&
+        parsed.port.length === 0 &&
+        parsed.username.length === 0 &&
+        parsed.password.length === 0 &&
+        parsed.pathname === '/otn/leftTicket/init';
+    }
+  } catch (_error) {}
   const value = url.trim();
   const authority = 'https://kyfw.12306.cn';
-  const lower = value.toLowerCase();
-  if (!lower.startsWith(authority)) {
+  if (!value.toLowerCase().startsWith(authority)) {
     return false;
   }
   const suffix = value.substring(authority.length);
@@ -20,6 +31,10 @@ export function isAllowed12306BookingUrl(url: string): boolean {
   }
   const tail = suffix.substring(path.length);
   return tail.length === 0 || tail.startsWith('?') || tail.startsWith('#');
+}
+
+export function checkoutWebInitialSource(kind: CheckoutWebKind, url: string): string {
+  return kind === 'train' && !isAllowed12306BookingUrl(url) ? '' : url;
 }
 
 export function checkoutWebNavigationDecision(
@@ -43,26 +58,43 @@ export function checkoutWebNavigationDecision(
   return 'allow';
 }
 
-function webHostForDisplay(url: string): string {
+export function webHostForDisplay(url: string): string {
+  try {
+    const hostname = new arkUrl.URL(url.trim()).hostname;
+    if (hostname.length > 0) {
+      return hostname;
+    }
+  } catch (_error) {}
+  // ponytail: local Hypium stubs return an empty native URL; remove this fallback when they parse absolute URLs.
   const value = url.trim();
   const schemeEnd = value.indexOf('://');
-  if (schemeEnd < 0) {
+  if (schemeEnd <= 0) {
     return '';
   }
   const start = schemeEnd + 3;
-  let end = value.indexOf('/', start);
-  if (end < 0) {
-    end = value.length;
-  }
+  let end = value.length;
+  const path = value.indexOf('/', start);
   const query = value.indexOf('?', start);
+  const fragment = value.indexOf('#', start);
+  if (path >= 0 && path < end) {
+    end = path;
+  }
   if (query >= 0 && query < end) {
     end = query;
   }
-  const fragment = value.indexOf('#', start);
   if (fragment >= 0 && fragment < end) {
     end = fragment;
   }
-  return value.substring(start, end);
+  const authority = value.substring(start, end);
+  const userInfoEnd = authority.lastIndexOf('@');
+  const hostAndPort = authority.substring(userInfoEnd + 1);
+  if (hostAndPort.startsWith('[')) {
+    const bracketEnd = hostAndPort.indexOf(']');
+    return bracketEnd > 1 ? hostAndPort.substring(0, bracketEnd + 1).toLowerCase() : '';
+  }
+  const portStart = hostAndPort.lastIndexOf(':');
+  const hostname = portStart >= 0 ? hostAndPort.substring(0, portStart) : hostAndPort;
+  return hostname.length > 0 && hostname.indexOf(' ') < 0 && hostname.indexOf('\\') < 0 ? hostname.toLowerCase() : '';
 }
 
 @Component
@@ -93,7 +125,7 @@ export struct CheckoutWebOverlay {
       return 'rollinggo.cn';
     }
     if (this.kind === 'train') {
-      const activeUrl = this.currentUrl.length > 0 ? this.currentUrl : this.url;
+      const activeUrl = this.currentUrl.length > 0 ? this.currentUrl : checkoutWebInitialSource(this.kind, this.url);
       const host = webHostForDisplay(activeUrl);
       return host.length > 0 ? host : 'kyfw.12306.cn';
     }
@@ -153,7 +185,7 @@ export struct CheckoutWebOverlay {
 
       A2uiWebSurfaceView({
         mode: 'url',
-        url: this.url,
+        url: checkoutWebInitialSource(this.kind, this.url),
         allowPopup: true,
         javaScriptEnabled: true,
         domStorageEnabled: true,

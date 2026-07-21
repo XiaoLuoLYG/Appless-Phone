@@ -1,7 +1,9 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  checkoutWebInitialSource,
   checkoutWebNavigationDecision,
-  isAllowed12306BookingUrl
+  isAllowed12306BookingUrl,
+  webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
 
 export default function checkoutWebOverlayTest() {
@@ -22,6 +24,46 @@ export default function checkoutWebOverlayTest() {
       expect(isAllowed12306BookingUrl(
         'https://kyfw.12306.cn/otn/leftTicket/init.evil'
       )).assertFalse();
+      expect(isAllowed12306BookingUrl(
+        'https://user:secret@kyfw.12306.cn/otn/leftTicket/init'
+      )).assertFalse();
+      expect(isAllowed12306BookingUrl(
+        'https://kyfw.12306.cn:8443/otn/leftTicket/init'
+      )).assertFalse();
+      expect(isAllowed12306BookingUrl(
+        'https://KYFW.12306.CN/otn/leftTicket/init'
+      )).assertTrue();
+      expect(isAllowed12306BookingUrl(
+        'https://kyfw.12306.cn/otn/leftticket/init'
+      )).assertFalse();
+    });
+
+    it('filters the initial train source before handing it to WebView', 0, () => {
+      const official = 'https://kyfw.12306.cn/otn/leftTicket/init?date=2026-07-22';
+      expect(checkoutWebInitialSource('train', official)).assertEqual(official);
+      expect(checkoutWebInitialSource(
+        'train',
+        'https://kyfw.12306.cn.evil.example/otn/leftTicket/init'
+      )).assertEqual('');
+      expect(checkoutWebInitialSource(
+        'train',
+        'https://kyfw.12306.cn@evil.example/otn/leftTicket/init'
+      )).assertEqual('');
+      expect(checkoutWebInitialSource('payment', 'https://checkout.stripe.com/pay')).assertEqual(
+        'https://checkout.stripe.com/pay'
+      );
+      expect(checkoutWebInitialSource('hotel', 'https://rollinggo.cn/hotel')).assertEqual(
+        'https://rollinggo.cn/hotel'
+      );
+    });
+
+    it('shows only the parsed hostname for loaded pages', 0, () => {
+      expect(webHostForDisplay(
+        'https://kyfw.12306.cn:user-secret@evil.example/otn/leftTicket/init'
+      )).assertEqual('evil.example');
+      expect(webHostForDisplay('https://epay.12306.cn:8443/pay/webBusiness')).assertEqual('epay.12306.cn');
+      expect(webHostForDisplay('https://cashier.example.com/payment/return')).assertEqual('cashier.example.com');
+      expect(webHostForDisplay('not a URL')).assertEqual('');
     });
 
     it('keeps HTTPS train navigation in WebView and blocks unverified schemes', 0, () => {
