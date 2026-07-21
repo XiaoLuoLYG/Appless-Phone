@@ -4341,6 +4341,58 @@ export function extractExactTrainCode(text: string): string {
   return /^\d{1,5}$/.test(exact) ? exact : '';
 }
 
+export function selectTrainSearchPath(source: string, travelDate: string, range: PresaleRange | undefined): string {
+  const date = normalizeOfficialDate(travelDate);
+  if (range === undefined || date.length === 0 || date <= range.lastSaleDate) {
+    return 'leftTicket';
+  }
+  return extractExactTrainCode(source).length > 0 ? 'presale' : 'futureTrainCodeRequired';
+}
+
+export function buildPresaleTrainData(
+  trainCode: string,
+  travelDate: string,
+  from: string,
+  fromCode: string,
+  to: string,
+  toCode: string,
+  depart: string,
+  arrive: string,
+  saleAt: string,
+  price: number
+): A2uiTrainData | undefined {
+  const date = normalizeOfficialDate(travelDate);
+  const code = extractExactTrainCode(trainCode);
+  if (date.length === 0 || code.length === 0 || from.length === 0 || fromCode.length === 0 || to.length === 0 || toCode.length === 0 ||
+    !isOfficialTime(depart) || !isOfficialTime(arrive) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(saleAt) ||
+    saleAt.substring(0, 10) !== date || price <= 0) {
+    return undefined;
+  }
+  return {
+    trainCode: code,
+    from: from,
+    to: to,
+    depart: depart,
+    arrive: arrive,
+    duration: '',
+    seats: '',
+    status: '待开售',
+    business: '',
+    first: '',
+    second: '',
+    noSeat: '',
+    hardSeat: '',
+    sleeperSoft: '',
+    price: price.toString(),
+    bookingUrl: build12306BookingUrl(date, from, fromCode, to, toCode),
+    travelDate: date,
+    saleState: 'presale',
+    saleAt: saleAt,
+    fromCode: fromCode,
+    toCode: toCode
+  };
+}
+
 function emptyFutureTrainMetadata(trainCode: string): FutureTrainMetadata {
   return {
     trainCode: trainCode,
@@ -4582,22 +4634,13 @@ async function request12306LeftTicket(date: string, fromCode: string, toCode: st
 
 async function resolveFuturePresaleTrain(
   date: string,
-  source: string,
+  trainCode: string,
   fromName: string,
   fromCode: string,
   toName: string,
   toCode: string,
   cookieHeader: string
 ): Promise<A2uiTrainData | undefined> {
-  const trainCode = extractExactTrainCode(source);
-  if (trainCode.length === 0) {
-    return undefined;
-  }
-  const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
-  const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ? parsePresaleRange(presaleResponse.text) : undefined;
-  if (range === undefined || date <= range.lastSaleDate) {
-    return undefined;
-  }
   const trainResponse = await requestText(build12306FutureTrainSearchUrl(date, trainCode), userAgentHeaders());
   const searched = trainResponse.code >= 200 && trainResponse.code < 300 ? parseFutureTrainForTravelDate(trainResponse.text, trainCode, date) : undefined;
   if (searched === undefined || searched.from !== fromName || searched.to !== toName) {
@@ -4629,29 +4672,7 @@ async function resolveFuturePresaleTrain(
   if (price === undefined) {
     return undefined;
   }
-  return {
-    trainCode: trainCode,
-    from: fromName,
-    to: toName,
-    depart: stops.depart,
-    arrive: stops.arrive,
-    duration: '',
-    seats: '',
-    status: '待开售',
-    business: '',
-    first: '',
-    second: '',
-    noSeat: '',
-    hardSeat: '',
-    sleeperSoft: '',
-    price: price.toString(),
-    bookingUrl: build12306BookingUrl(date, fromName, fromCode, toName, toCode),
-    travelDate: date,
-    saleState: 'presale',
-    saleAt: saleAt,
-    fromCode: fromCode,
-    toCode: toCode
-  };
+  return buildPresaleTrainData(trainCode, date, fromName, fromCode, toName, toCode, stops.depart, stops.arrive, saleAt, price);
 }
 
 async function load12306Stations(): Promise<StationCache> {
@@ -9261,8 +9282,32 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
   const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
   aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
-  const presaleTrain = await resolveFuturePresaleTrain(date, source, fromName, fromCode, toName, toCode, cookieHeader);
-  if (presaleTrain !== undefined) {
+  const presaleResponse = await requestText('https://hzfw.12306.cn/zgzfw/zgzfw/init', userAgentHeaders());
+  const range = presaleResponse.code >= 200 && presaleResponse.code < 300 ? parsePresaleRange(presaleResponse.text) : undefined;
+  const searchPath = selectTrainSearchPath(source, date, range);
+  if (searchPath === 'futureTrainCodeRequired') {
+    return errorA2ui(
+      surfaceId,
+      'train.search',
+      '未来日期需明确车次',
+      '当前版本仅支持查询指定车次的预售信息；请补充车次号，例如 G1。',
+      [date + ' ' + fromName + ' 到 ' + toName],
+      ['补充车次号']
+    );
+  }
+  if (searchPath === 'presale') {
+    const trainCode = extractExactTrainCode(source);
+    const presaleTrain = await resolveFuturePresaleTrain(date, trainCode, fromName, fromCode, toName, toCode, cookieHeader);
+    if (presaleTrain === undefined) {
+      return errorA2ui(
+        surfaceId,
+        'train.search',
+        '12306 预售信息未验证',
+        '12306 未能验证 ' + trainCode + ' 的日期、车站、起售时间或票价；未展示候选车次。',
+        [date + ' ' + fromName + ' 到 ' + toName],
+        ['重新查询', '换车次或日期']
+      );
+    }
     return trainResultA2ui(
       surfaceId,
       '12306 预售车次',
