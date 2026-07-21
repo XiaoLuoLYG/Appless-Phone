@@ -5,6 +5,8 @@ import {
   InputUserPayload,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPlanningContext,
+  LeaderToolMetadata,
   LocalModel,
   extractJsonObjects,
   parseHotelSearchRequest
@@ -61,11 +63,16 @@ export class HotelLeaderPlanner implements LeaderPlanner {
     this.ids = ids;
   }
 
-  async plan(_message: AgentMessage, input: InputUserPayload): Promise<LeaderPlan> {
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
     const query = input.text.trim();
     if (query.length === 0) {
       throw new Error('Hotel query must not be empty.');
     }
+    const definition = this.hotelSearchDefinition(context);
     const output = await this.model.complete(this.prompt(query));
     const objects = extractJsonObjects(output);
     if (objects.length !== 1) {
@@ -85,28 +92,39 @@ export class HotelLeaderPlanner implements LeaderPlanner {
     if (!parsed.ok || parsed.value === null) {
       throw new Error(parsed.error.length > 0 ? parsed.error : 'Invalid hotel search request.');
     }
-    return this.pairedPlan(parsed.value);
+    return this.pairedPlan(parsed.value, definition);
   }
 
-  private pairedPlan(request: HotelSearchRequest): LeaderPlan {
+  private pairedPlan(request: HotelSearchRequest, definition: LeaderToolMetadata): LeaderPlan {
     const uiTaskId = this.ids.nextId('hotel-search-ui');
     const dataTaskId = this.ids.nextId('hotel-search-data');
     if (uiTaskId.length === 0 || dataTaskId.length === 0 || uiTaskId === dataTaskId) {
       throw new Error('Hotel planner task IDs must be non-empty and unique.');
     }
     return {
+      skillId: '',
       ui: {
         taskId: uiTaskId,
-        intent: 'hotel',
-        expectedOutputSchema: 'hotelSearchResults'
+        intent: definition.intent,
+        expectedOutputSchema: definition.outputSchema
       },
       data: {
         taskId: dataTaskId,
-        toolId: 'hotel.search',
-        outputSchema: 'hotelSearchResults',
+        toolId: definition.toolId,
+        outputSchema: definition.outputSchema,
         args: request
       }
     };
+  }
+
+  private hotelSearchDefinition(context: LeaderPlanningContext): LeaderToolMetadata {
+    for (let index = 0; index < context.tools.length; index++) {
+      const definition = context.tools[index];
+      if (definition.toolId === 'hotel.search' && definition.riskLevel === 'read') {
+        return definition;
+      }
+    }
+    throw new Error('hotel.search is not available to the Leader.');
   }
 
   private prompt(query: string): string {

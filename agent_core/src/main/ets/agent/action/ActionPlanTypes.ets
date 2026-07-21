@@ -13,6 +13,13 @@ export interface ActionPlanStep {
   inputFrom?: ActionInputBinding[];
 }
 
+export interface ActionPlanDraft {
+  planId: string;
+  runId: string;
+  label: string;
+  steps: ActionPlanStep[];
+}
+
 export interface ActionPlan {
   planId: string;
   turnId: string;

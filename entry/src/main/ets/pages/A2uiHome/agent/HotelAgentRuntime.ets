@@ -2,6 +2,9 @@ import {
   ActionAgent,
   ActionArgsValidator,
   ActionCatalog,
+  ActionOffer,
+  ActionOfferContext,
+  ActionOfferResolver,
   ActionPlanStepOutput,
   ActionProgressPayload,
   ActionResultPayload,
@@ -21,6 +24,7 @@ import {
   CreateUiTaskPayload,
   DataAgent,
   DataResult,
+  DataTaskAuthorizationResult,
   DataTaskExecutor,
   HotelBookingOpenArgs,
   HotelDetailResult,
@@ -29,6 +33,7 @@ import {
   HotelSearchItem,
   HotelSearchResult,
   LeaderAgent,
+  LeaderPlanningContext,
   LinkedMessageBus,
   LocalModel,
   SurfaceActionAuthorizer,
@@ -43,11 +48,13 @@ import {
   UiTaskRenderer,
   UserInputPayload,
   callStructuredHotelTool,
-  hotelDetailA2ui,
+  hotelActionsFor,
+  hotelBookingOpenAction,
+  hotelDetailA2uiFromOffers,
   hotelFailureA2ui,
   hotelNavigationUri,
   hotelPendingA2ui,
-  hotelSearchA2ui,
+  hotelSearchA2uiFromOffers,
   parseA2uiJsonl,
   parseHotelDetailRequest,
   parseHotelSearchRequest,
@@ -467,10 +474,11 @@ function hotelDataAssessment(data: DataResult, expectedToolId: string): HotelDat
 function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'dataTaskId,expectedOutputSchema,intent,taskId') ||
+    !hasOnlyKeys(payload, 'dataTaskId,expectedOutputSchema,intent,skillId,taskId') ||
     payload['taskId'] !== message.taskId ||
     !nonempty(payload['dataTaskId']) ||
     payload['dataTaskId'] === message.taskId ||
+    typeof payload['skillId'] !== 'string' ||
     !nonempty(payload['intent']) ||
     !nonempty(payload['expectedOutputSchema'])) {
     return null;
@@ -481,8 +489,9 @@ function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
 function dataTaskPayload(message: AgentMessage): CreateDataTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'args,outputSchema,taskId,toolId') ||
+    !hasOnlyKeys(payload, 'args,outputSchema,skillId,taskId,toolId') ||
     payload['taskId'] !== message.taskId ||
+    typeof payload['skillId'] !== 'string' ||
     !nonempty(payload['toolId']) ||
     !nonempty(payload['outputSchema']) ||
     recordOf(payload['args']) === null) {
@@ -706,6 +715,122 @@ class StructuredHotelDataExecutor implements DataTaskExecutor {
   }
 }
 
+function authorizeHotelDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  const definition = toolDefinitionForToolId(task.toolId);
+  if (definition === null || definition.riskLevel !== 'read' ||
+    definition.outputSchema !== task.outputSchema) {
+    return {
+      ok: false,
+      code: 'DATA_TASK_UNAUTHORIZED',
+      message: 'Hotel data task is not a registered read capability.'
+    };
+  }
+  const dataBackends: Set<string> = new Set<string>([
+    'local_adapter',
+    'oauth_api',
+    'imap',
+    'workspace_mcp',
+    'web_session',
+    'mcp_remote'
+  ]);
+  for (let index = 0; index < definition.backendPriority.length; index++) {
+    if (!dataBackends.has(definition.backendPriority[index])) {
+      return {
+        ok: false,
+        code: 'DATA_TASK_BACKEND_FORBIDDEN',
+        message: 'Hotel data task cannot execute a system action backend.'
+      };
+    }
+  }
+  const parsed = task.toolId === 'hotel.search' ?
+    parseHotelSearchRequest(task.args) :
+    task.toolId === 'hotel.detail' ? parseHotelDetailRequest(task.args) : null;
+  if (parsed === null || !parsed.ok || parsed.value === null) {
+    return {
+      ok: false,
+      code: 'DATA_TASK_ARGS_INVALID',
+      message: 'Hotel data task arguments are invalid.'
+    };
+  }
+  return { ok: true, code: '', message: '' };
+}
+
+function hotelLeaderPlanningContext(): LeaderPlanningContext {
+  const definition = toolDefinitionForToolId('hotel.search');
+  if (definition === null) {
+    return { tools: [], skills: [] };
+  }
+  return {
+    tools: [{
+      toolId: definition.toolId,
+      intent: definition.intent,
+      riskLevel: definition.riskLevel,
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
+      actions: definition.actions.slice()
+    }],
+    skills: []
+  };
+}
+
+function actionOffer(action: A2uiAction, suffix: string): ActionOffer | null {
+  if (action.args === undefined) {
+    return null;
+  }
+  return {
+    offerId: action.id + ':' + suffix,
+    actionId: action.id,
+    label: action.label,
+    variant: action.variant,
+    args: action.args
+  };
+}
+
+async function resolveHotelActionOffers(
+  catalog: ActionCatalog,
+  data: DataResult,
+  _context: ActionOfferContext
+): Promise<ActionOffer[]> {
+  const offers: ActionOffer[] = [];
+  if (data.toolId === 'hotel.search' && validSearchResult(data.data)) {
+    const result = data.data as HotelSearchResult;
+    for (let hotelIndex = 0; hotelIndex < result.hotels.length; hotelIndex++) {
+      const hotel = result.hotels[hotelIndex];
+      const actions = hotelActionsFor(
+        hotel,
+        result.query,
+        (candidate: A2uiAction): boolean => candidate.args !== undefined &&
+          catalog.validatePlacement('hotel.search', candidate.id, candidate.args).ok
+      );
+      for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        const offer = actionOffer(actions[actionIndex], hotel.hotelId.toString());
+        if (offer !== null) {
+          offers.push(offer);
+        }
+      }
+    }
+    return offers;
+  }
+  if (data.toolId === 'hotel.detail' && validDetailResult(data.data)) {
+    const result = data.data as HotelDetailResult;
+    const booking = hotelBookingOpenAction(result);
+    if (booking.args !== undefined &&
+      catalog.validatePlacement('hotel.detail', booking.id, booking.args).ok) {
+      const offer = actionOffer(booking, result.hotelId.toString());
+      if (offer !== null) {
+        offers.push(offer);
+      }
+    }
+  }
+  return offers;
+}
+
+function hotelOfferResolver(catalog: ActionCatalog): ActionOfferResolver {
+  return async (data: DataResult, context: ActionOfferContext): Promise<ActionOffer[]> => {
+    return resolveHotelActionOffers(catalog, data, context);
+  };
+}
+
 class IgnoreHotelSurfaceWriter implements UiSurfaceWriter {
   async write(
     _turnId: string,
@@ -804,12 +929,6 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
 }
 
 class HotelUiRenderer implements UiTaskRenderer {
-  private readonly catalog: ActionCatalog;
-
-  constructor(catalog: ActionCatalog) {
-    this.catalog = catalog;
-  }
-
   async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     const prompt = task.intent === 'hotel.detail' ?
       '正在等待 RollingGo 返回实时房型、价格与取消政策。' :
@@ -820,6 +939,7 @@ class HotelUiRenderer implements UiTaskRenderer {
   async result(
     task: CreateUiTaskPayload,
     data: DataResult,
+    offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
     const expectedToolId = task.intent === 'hotel.detail' ? 'hotel.detail' : 'hotel.search';
@@ -829,26 +949,23 @@ class HotelUiRenderer implements UiTaskRenderer {
     }
     try {
       if (data.toolId === 'hotel.search') {
-        const canPlace = (action: A2uiAction): boolean => {
-          return action.args !== undefined &&
-            this.catalog.validatePlacement('hotel.search', action.id, action.args).ok;
-        };
         return this.rendered(
-          hotelSearchA2ui(
+          hotelSearchA2uiFromOffers(
             surfaceId,
             data.data as HotelSearchResult,
-            canPlace,
+            offers,
             data.warnings
           )
         );
       }
       if (data.toolId === 'hotel.detail') {
-        const canPlace = (action: A2uiAction): boolean => {
-          return action.args !== undefined &&
-            this.catalog.validatePlacement('hotel.detail', action.id, action.args).ok;
-        };
         return this.rendered(
-          hotelDetailA2ui(surfaceId, data.data as HotelDetailResult, canPlace, data.warnings)
+          hotelDetailA2uiFromOffers(
+            surfaceId,
+            data.data as HotelDetailResult,
+            offers,
+            data.warnings
+          )
         );
       }
     } catch (_error) {
@@ -899,7 +1016,7 @@ class HotelUiRenderer implements UiTaskRenderer {
   }
 
   private rendered(jsonl: string): UiRenderResult {
-    return { jsonl: jsonl, proposals: [] };
+    return { jsonl: jsonl };
   }
 }
 
@@ -1272,16 +1389,21 @@ export class HotelAgentRuntime {
     const planner = new HotelLeaderPlanner(options.model, options.currentLocalDate, this.ids);
     const executor = options.dataExecutor === undefined ?
       new StructuredHotelDataExecutor() : options.dataExecutor;
-    const renderer = new HotelUiRenderer(this.catalog);
+    const renderer = new HotelUiRenderer();
     const registered = new HotelRegisteredActionExecutor(
       this.catalog,
       options.opener,
       this.followUpIds
     );
-    this.leader = new LeaderAgent(this.bus, planner);
-    this.data = new DataAgent(this.bus, executor);
+    this.leader = new LeaderAgent(this.bus, planner, hotelLeaderPlanningContext());
+    this.data = new DataAgent(this.bus, authorizeHotelDataTask, executor);
     this.ui = new UiAgent(this.bus, renderer, this.surfaceWriter);
-    this.action = new ActionAgent(this.bus, this.catalog, registered);
+    this.action = new ActionAgent(
+      this.bus,
+      this.catalog,
+      hotelOfferResolver(this.catalog),
+      registered
+    );
     this.reader = this.bus.openReader();
     this.leader.start();
     this.data.start();
@@ -1611,7 +1733,7 @@ export class HotelAgentRuntime {
     }
     const pending = this.pendingTurns.get(message.turnId);
     if (pending !== undefined && pending.uiTaskId.length === 0 &&
-      task.intent === 'hotel' &&
+      task.intent === 'hotel.search' &&
       task.expectedOutputSchema === 'hotelSearchResults') {
       pending.uiTaskId = message.taskId;
       pending.dataTaskId = task.dataTaskId;

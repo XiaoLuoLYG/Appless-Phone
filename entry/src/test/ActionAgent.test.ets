@@ -6,8 +6,12 @@ import {
   ActionExecutionContext,
   ActionExecutionResult,
   ActionFollowUp,
+  ActionOffer,
+  ActionOfferContext,
+  ActionOffersReadyPayload,
   ActionPlan,
-  ActionPlanCreatePayload,
+  ActionPlanDraft,
+  ActionPlanDraftPayload,
   ActionPlanReadyPayload,
   ActionPlanStepOutput,
   ActionProgressPayload,
@@ -20,6 +24,7 @@ import {
   ClientActionAuthorizer,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
+  DataResult,
   JsonValue,
   LinkedMessageBus,
   PausedActionRun,
@@ -28,6 +33,7 @@ import {
   ToolDefinition,
   ToolDefinitionLookup,
   ToolRiskLevel,
+  UiRenderResultPayload,
   WorkflowRunArgs
 } from '@loop/agent-core';
 
@@ -208,6 +214,13 @@ function catalog(
   return new ActionCatalog(lookup, surface, new NoClientAction(), validator);
 }
 
+async function noOffers(
+  _data: DataResult,
+  _context: ActionOfferContext
+): Promise<ActionOffer[]> {
+  return [];
+}
+
 function compositePlan(
   planId: string = 'plan-1',
   turnId: string = 'turn-1',
@@ -232,11 +245,18 @@ function followUpThenConfirmPlan(planId: string): ActionPlan {
   ) as ActionPlan;
 }
 
-function planCreate(runId: string, candidate: ActionPlan): ActionPlanCreatePayload {
+function planCreate(runId: string, candidate: ActionPlan): ActionPlanDraftPayload {
+  const draft: ActionPlanDraft = {
+    planId: candidate.planId,
+    runId: runId,
+    label: candidate.label,
+    steps: candidate.steps
+  };
   return {
-    runId,
+    uiTaskId: 'ui-1',
+    dataTaskId: 'data-1',
     sourceToolId: 'hotel.search',
-    plan: candidate
+    draft
   };
 }
 
@@ -254,6 +274,31 @@ function message(
     taskId,
     payload
   };
+}
+
+function publishPlan(
+  bus: LinkedMessageBus,
+  payload: ActionPlanDraftPayload,
+  turnId: string = 'turn-1',
+  taskId: string = 'action-task-1',
+  conversationId: string = 'conversation-1',
+  surfaceId: string = 'surface-1'
+): void {
+  const uiResult: UiRenderResultPayload = { surfaceId: surfaceId, state: 'result' };
+  bus.publish(message(
+    AgentMessageType.ACTION_PLAN_DRAFT,
+    payload,
+    turnId,
+    taskId,
+    conversationId
+  ));
+  bus.publish(message(
+    AgentMessageType.TASK_RESULT_UI,
+    uiResult,
+    turnId,
+    payload.uiTaskId,
+    conversationId
+  ));
 }
 
 function workflowRun(
@@ -286,6 +331,7 @@ function readyIdentity(
     runId
   };
   return {
+    uiTaskId: 'ui-1',
     surfaceId,
     planId,
     runId,
@@ -332,10 +378,9 @@ async function receiveType(
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 12; index++) {
+    await Promise.resolve();
+  }
 }
 
 async function receiveUntilResult(reader: AgentMessageReader): Promise<AgentMessage[]> {
@@ -360,18 +405,86 @@ function messagesOfType(
 
 export default function actionAgentTest() {
   describe('actionAgent', () => {
+    it('publishes only catalog-approved immutable Action offers for an observed Data result', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const navigateArgs = JSON.parse(
+        '{"hotelId":101,"latitude":22.5,"longitude":114}'
+      ) as Object;
+      const resolveOffers = async (
+        _data: DataResult,
+        _context: ActionOfferContext
+      ): Promise<ActionOffer[]> => {
+        return [{
+          offerId: 'navigate-101',
+          actionId: 'hotel.navigate',
+          label: '导航到酒店',
+          variant: 'secondary',
+          args: navigateArgs
+        }, {
+          offerId: 'booking-101',
+          actionId: 'hotel.booking.open',
+          label: '越权预订',
+          variant: 'primary',
+          args: JSON.parse('{"hotelId":101,"bookingUrl":"https://evil.example"}') as Object
+        }];
+      };
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        resolveOffers,
+        new RecordingRegisteredExecutor()
+      );
+      const observer = bus.openReader();
+      agent.start();
+      const dataTask: CreateDataTaskPayload = {
+        taskId: 'data-offers',
+        skillId: '',
+        toolId: 'hotel.search',
+        outputSchema: 'hotelSearchResults',
+        args: JSON.parse('{"place":"深圳"}') as Object
+      };
+      bus.publish(message(
+        AgentMessageType.TASK_CREATE_DATA,
+        dataTask,
+        'turn-offers',
+        'data-offers'
+      ));
+      const data: DataResult = {
+        toolId: 'hotel.search',
+        outputSchema: 'hotelSearchResults',
+        status: 'success',
+        sources: [],
+        data: JSON.parse('{"hotels":[]}') as Object,
+        warnings: []
+      };
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_DATA,
+        data,
+        'turn-offers',
+        'data-offers'
+      ));
+      const readyMessage = await receiveType(observer, AgentMessageType.ACTION_OFFERS_READY);
+      const ready = readyMessage.payload as ActionOffersReadyPayload;
+      const original = navigateArgs as JsonRecord;
+      original['hotelId'] = 999;
+
+      expect(ready.sourceToolId).assertEqual('hotel.search');
+      expect(ready.offers.length).assertEqual(1);
+      expect(ready.offers[0].actionId).assertEqual('hotel.navigate');
+      expect((ready.offers[0].args as JsonRecord)['hotelId'] as number).assertEqual(101);
+      agent.stop();
+      observer.close();
+    });
+
     it('publishes ready only after preflight and returns a correlated invalid-plan error', 0, async () => {
       const bus = new LinkedMessageBus();
       const lookup = new ActionLookup();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(lookup), executor);
+      const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-ready', compositePlan())
-      ));
+      publishPlan(bus, planCreate('run-ready', compositePlan()));
       const readyMessage = await receiveType(observer, AgentMessageType.ACTION_PLAN_READY);
       const ready = readyMessage.payload as ActionPlanReadyPayload;
 
@@ -382,14 +495,24 @@ export default function actionAgentTest() {
       expect(ready.actionId).assertEqual('workflow.run');
       expect(Object.keys(ready.args).sort().join(',')).assertEqual('planId,runId');
 
+      const surfaceDraft = planCreate('run-surface-draft', compositePlan('plan-surface-draft'));
+      const draftRecord = surfaceDraft.draft as Object as JsonRecord;
+      draftRecord['surfaceId'] = 'surface-must-not-come-from-leader';
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_DRAFT,
+        surfaceDraft,
+        'turn-1',
+        'surface-draft'
+      ));
+      const rejectedDraft = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(rejectedDraft.errorCode).assertEqual('ACTION_PLAN_MALFORMED');
+
       const invalid = compositePlan('plan-invalid');
       (invalid.steps[0].args as JsonRecord)['eval'] = 'payload is data, never code';
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-invalid', invalid),
-        'turn-1',
-        'create-invalid'
-      ));
+      publishPlan(bus, planCreate('run-invalid', invalid), 'turn-1', 'create-invalid');
       const errorMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
       const error = errorMessage.payload as ActionResultPayload;
 
@@ -407,14 +530,11 @@ export default function actionAgentTest() {
     it('selects the stored workflow by exact identity and rejects replacement steps', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-tamper', compositePlan())
-      ));
+      publishPlan(bus, planCreate('run-tamper', compositePlan()));
       const ready = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -432,10 +552,7 @@ export default function actionAgentTest() {
       expect(rejected.status).assertEqual('error');
       expect(executor.actionIds.length).assertEqual(0);
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-exact', compositePlan('plan-exact'))
-      ));
+      publishPlan(bus, planCreate('run-exact', compositePlan('plan-exact')));
       const exactReady = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -461,7 +578,7 @@ export default function actionAgentTest() {
       const lookup = new ActionLookup();
       lookup.confirmCall = true;
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(lookup), executor);
+      const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -569,7 +686,7 @@ export default function actionAgentTest() {
       const surface = new ExactActionSurface();
       const validator = new ExactArgs();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(lookup, surface, validator), executor);
+      const agent = new ActionAgent(bus, catalog(lookup, surface, validator), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -617,7 +734,7 @@ export default function actionAgentTest() {
       const lookup = new ActionLookup();
       lookup.confirmCall = true;
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(lookup), executor);
+      const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -632,10 +749,7 @@ export default function actionAgentTest() {
         )
       ));
       await receiveType(observer, AgentMessageType.ACTION_RESULT);
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-ready-cancel', compositePlan('plan-ready-cancel'))
-      ));
+      publishPlan(bus, planCreate('run-ready-cancel', compositePlan('plan-ready-cancel')));
       const readyCanceled = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -720,11 +834,13 @@ export default function actionAgentTest() {
       const uiTask: CreateUiTaskPayload = {
         taskId: 'ui-follow',
         dataTaskId: 'data-follow',
+        skillId: '',
         intent: 'Show the exact hotel detail',
         expectedOutputSchema: 'hotelDetail'
       };
       const dataTask: CreateDataTaskPayload = {
         taskId: 'data-follow',
+        skillId: '',
         toolId: 'hotel.detail',
         outputSchema: 'hotelDetail',
         args: JSON.parse('{"hotelId":101}') as Object
@@ -737,14 +853,11 @@ export default function actionAgentTest() {
         success('{"hotelId":101,"latitude":22.5}', followUp),
         success('{"opened":true}')
       ];
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('run-follow', compositePlan())
-      ));
+      publishPlan(bus, planCreate('run-follow', compositePlan()));
       const ready = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -808,29 +921,29 @@ export default function actionAgentTest() {
       const firstArgs = JSON.parse('{"hotelId":101,"marker":"original"}') as Object;
       const firstFollowUp = JSON.parse(
         '{"uiTask":{"taskId":"ui-first","dataTaskId":"data-first",' +
-          '"intent":"Show detail","expectedOutputSchema":"hotelDetail"},' +
-          '"dataTask":{"taskId":"data-first","toolId":"hotel.detail",' +
+          '"skillId":"","intent":"Show detail","expectedOutputSchema":"hotelDetail"},' +
+          '"dataTask":{"taskId":"data-first","skillId":"","toolId":"hotel.detail",' +
           '"outputSchema":"hotelDetail","args":{"hotelId":101,"marker":"original"}}}'
       ) as ActionFollowUp;
       firstFollowUp.dataTask.args = firstArgs;
       const secondFollowUp = JSON.parse(
         '{"uiTask":{"taskId":"ui-second","dataTaskId":"data-second",' +
-          '"intent":"Must not publish","expectedOutputSchema":"hotelDetail"},' +
-          '"dataTask":{"taskId":"data-second","toolId":"hotel.detail",' +
+          '"skillId":"","intent":"Must not publish","expectedOutputSchema":"hotelDetail"},' +
+          '"dataTask":{"taskId":"data-second","skillId":"","toolId":"hotel.detail",' +
           '"outputSchema":"hotelDetail","args":{"hotelId":202}}}'
       ) as ActionFollowUp;
       executor.results = [
         success('{"hotelId":101}', firstFollowUp),
         success('{"called":true}', secondFollowUp)
       ];
-      const agent = new ActionAgent(bus, catalog(lookup), executor);
+      const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        bus,
         planCreate('run-follow-confirm', followUpThenConfirmPlan('plan-follow-confirm'))
-      ));
+      );
       const ready = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -896,7 +1009,7 @@ export default function actionAgentTest() {
         success('{"hotelId":101}', topLevelExtra),
         success('{"hotelId":101}', descriptorExtra)
       ];
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -925,24 +1038,22 @@ export default function actionAgentTest() {
     it('isolates identical run ids by exact conversation turn and surface key', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('shared-run', compositePlan('plan-a'))
-      ));
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(bus, planCreate('shared-run', compositePlan('plan-a')));
+      publishPlan(
+        bus,
         planCreate(
           'shared-run',
           compositePlan('plan-b', 'turn-2', 'surface-2')
         ),
         'turn-2',
         'create-b',
-        'conversation-2'
-      ));
+        'conversation-2',
+        'surface-2'
+      );
       await settle();
       bus.publish(message(
         AgentMessageType.INPUT_USER,
@@ -1001,25 +1112,25 @@ export default function actionAgentTest() {
     it('bounds live payload state and retains old terminal identities', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
       for (let index = 0; index < 128; index++) {
-        bus.publish(message(
-          AgentMessageType.ACTION_PLAN_CREATE,
+        publishPlan(
+          bus,
           planCreate(`capacity-run-${index}`, compositePlan(`capacity-plan-${index}`)),
           'turn-1',
           `capacity-task-${index}`
-        ));
+        );
         await receiveType(observer, AgentMessageType.ACTION_PLAN_READY);
       }
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        bus,
         planCreate('capacity-overflow', compositePlan('capacity-overflow-plan')),
         'turn-1',
         'capacity-overflow-task'
-      ));
+      );
       await settle();
       bus.publish(message(
         AgentMessageType.INPUT_USER,
@@ -1052,12 +1163,12 @@ export default function actionAgentTest() {
       }
       agent.stop();
       agent.start();
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        bus,
         planCreate('after-capacity', compositePlan('after-capacity-plan')),
         'turn-1',
         'after-capacity-task'
-      ));
+      );
       await settle();
       bus.publish(message(
         AgentMessageType.INPUT_USER,
@@ -1082,6 +1193,7 @@ export default function actionAgentTest() {
       const tombstoneAgent = new ActionAgent(
         tombstoneBus,
         catalog(new ActionLookup()),
+        noOffers,
         tombstoneExecutor
       );
       const tombstoneObserver = tombstoneBus.openReader();
@@ -1124,7 +1236,7 @@ export default function actionAgentTest() {
     it('retains canceled turn identities for the Action Agent session', 1000, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -1174,7 +1286,7 @@ export default function actionAgentTest() {
     it('retains an old workflow identity after many terminals', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
@@ -1182,7 +1294,7 @@ export default function actionAgentTest() {
         'original-workflow-run',
         compositePlan('original-workflow-plan')
       );
-      bus.publish(message(AgentMessageType.ACTION_PLAN_CREATE, originalCreate));
+      publishPlan(bus, originalCreate);
       const originalReady = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
@@ -1204,12 +1316,12 @@ export default function actionAgentTest() {
       }
       const executorCount = executor.actionIds.length;
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        bus,
         originalCreate,
         'turn-1',
         'original-plan-replay'
-      ));
+      );
       await settle();
       bus.publish(message(
         AgentMessageType.INPUT_USER,
@@ -1261,14 +1373,15 @@ export default function actionAgentTest() {
       const pausedAgent = new ActionAgent(
         pausedBus,
         catalog(pausedLookup),
+        noOffers,
         pausedExecutor
       );
       const pausedObserver = pausedBus.openReader();
       pausedAgent.start();
-      pausedBus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        pausedBus,
         planCreate('cancel-paused-output', followUpThenConfirmPlan('cancel-paused-plan'))
-      ));
+      );
       const pausedReady = (await receiveType(
         pausedObserver,
         AgentMessageType.ACTION_PLAN_READY
@@ -1299,14 +1412,15 @@ export default function actionAgentTest() {
       const activeAgent = new ActionAgent(
         activeBus,
         catalog(new ActionLookup()),
+        noOffers,
         activeExecutor
       );
       const activeObserver = activeBus.openReader();
       activeAgent.start();
-      activeBus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        activeBus,
         planCreate('cancel-active-output', compositePlan('cancel-active-plan'))
-      ));
+      );
       const activeReady = (await receiveType(
         activeObserver,
         AgentMessageType.ACTION_PLAN_READY
@@ -1340,7 +1454,7 @@ export default function actionAgentTest() {
       const executor = new RecordingRegisteredExecutor();
       executor.gate = new TestGate();
       executor.gateActionId = 'hotel.navigate';
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
       bus.publish(message(
@@ -1391,12 +1505,12 @@ export default function actionAgentTest() {
     it('survives malformed payloads, rejects duplicates, and ignores its own result messages', 0, async () => {
       const bus = new LinkedMessageBus();
       const executor = new RecordingRegisteredExecutor();
-      const agent = new ActionAgent(bus, catalog(new ActionLookup()), executor);
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
       bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+        AgentMessageType.ACTION_PLAN_DRAFT,
         JSON.parse('null') as Object,
         'turn-1',
         'malformed-plan'
@@ -1444,18 +1558,12 @@ export default function actionAgentTest() {
       while (ownMessage.type !== AgentMessageType.INPUT_USER) {
         ownMessage = await receive(observer);
       }
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('duplicate-run', compositePlan('duplicate-plan'))
-      ));
+      publishPlan(bus, planCreate('duplicate-run', compositePlan('duplicate-plan')));
       const ready = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY
       )).payload as ActionPlanReadyPayload;
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
-        planCreate('duplicate-run', compositePlan('duplicate-plan'))
-      ));
+      publishPlan(bus, planCreate('duplicate-run', compositePlan('duplicate-plan')));
       const duplicate = (await receiveType(
         observer,
         AgentMessageType.ACTION_RESULT
@@ -1480,14 +1588,14 @@ export default function actionAgentTest() {
       const validator = new ExactArgs();
       const executor = new RecordingRegisteredExecutor();
       executor.results = [success('{"hotelId":101}')];
-      const agent = new ActionAgent(bus, catalog(lookup, surface, validator), executor);
+      const agent = new ActionAgent(bus, catalog(lookup, surface, validator), noOffers, executor);
       const observer = bus.openReader();
       agent.start();
 
-      bus.publish(message(
-        AgentMessageType.ACTION_PLAN_CREATE,
+      publishPlan(
+        bus,
         planCreate('later-confirm', followUpThenConfirmPlan('later-confirm-plan'))
-      ));
+      );
       const ready = (await receiveType(
         observer,
         AgentMessageType.ACTION_PLAN_READY

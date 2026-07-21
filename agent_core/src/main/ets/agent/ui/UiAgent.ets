@@ -1,10 +1,11 @@
 import { newSurfaceId } from '../../a2ui/A2uiProtocol';
 import {
-  ActionPlanCreatePayload,
   ActionPlanReadyPayload,
   WorkflowRunArgs
 } from '../action/ActionAgentTypes';
-import { ActionPlan, JsonValue } from '../action/ActionPlanTypes';
+import { ActionOffer, ActionOffersReadyPayload } from '../action/ActionOfferTypes';
+import { JsonValue } from '../action/ActionPlanTypes';
+import { cloneJsonValue } from '../action/JsonPointer';
 import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
 import {
   AgentMessage,
@@ -27,7 +28,6 @@ import {
 const TERMINATED_TURN_LIMIT: number = 128;
 // Retain only a tiny pre-UI window, keyed by exact Data task ownership.
 const PENDING_DATA_LIMIT: number = 5;
-const PENDING_PLAN_LIMIT: number = 5;
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 
 function containsWorkflowRun(value: JsonValue): boolean {
@@ -59,16 +59,10 @@ function containsWorkflowRun(value: JsonValue): boolean {
 
 interface PendingDataEntry {
   data?: DataResult;
+  offers?: ActionOffer[];
+  offerSourceToolId?: string;
   invalidCode: string;
   invalidMessage: string;
-}
-
-interface PendingPlanCorrelation {
-  planId: string;
-  runId: string;
-  surfaceId: string;
-  taskId: string;
-  label: string;
 }
 
 interface UiTurnContext {
@@ -79,7 +73,6 @@ interface UiTurnContext {
   uiTask?: CreateUiTaskPayload;
   pendingDataByTaskId: Map<string, PendingDataEntry>;
   pendingDataOrder: string[];
-  pendingPlans: Map<string, PendingPlanCorrelation>;
   dataErrorPending: boolean;
   canceled: boolean;
   generation: number;
@@ -113,7 +106,6 @@ export class UiAgent extends StructuredMessageDrivenAgent {
   private readonly terminated: Set<string> = new Set<string>();
   private readonly terminatedOrder: string[] = [];
   private surfaceSuffix: number = 0;
-  private actionRunSuffix: number = 0;
 
   constructor(bus: LinkedMessageBus, renderer: UiTaskRenderer, writer: UiSurfaceWriter) {
     super(bus);
@@ -146,6 +138,7 @@ export class UiAgent extends StructuredMessageDrivenAgent {
   protected accepts(message: AgentMessage): boolean {
     return message.type === AgentMessageType.TASK_CREATE_UI ||
       message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.ACTION_OFFERS_READY ||
       message.type === AgentMessageType.TASK_ERROR ||
       message.type === AgentMessageType.ACTION_PLAN_READY ||
       message.type === AgentMessageType.ACTION_PROGRESS ||
@@ -177,7 +170,8 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       this.enqueue(message, key, context);
       return;
     }
-    if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+    if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.ACTION_OFFERS_READY) {
       const current: UiTurnContext | undefined = this.contexts.get(key);
       const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
       this.enqueue(message, key, context);
@@ -230,6 +224,10 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       await this.handleDataResult(message, key, context);
       return;
     }
+    if (message.type === AgentMessageType.ACTION_OFFERS_READY) {
+      await this.handleOffersReady(message, key, context);
+      return;
+    }
     if (message.type === AgentMessageType.TASK_ERROR) {
       await this.handleTaskError(message, key, context);
       return;
@@ -265,14 +263,11 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     context.skeletonWritten = true;
     this.publishUiResult(context, 'skeleton');
     const pending: PendingDataEntry | undefined = context.pendingDataByTaskId.get(task.dataTaskId);
-    this.clearPendingData(context);
     if (pending !== undefined && pending.invalidCode.length > 0) {
       this.publishOwnedDataError(context, pending.invalidCode, pending.invalidMessage);
       return;
     }
-    if (pending !== undefined && pending.data !== undefined) {
-      await this.renderData(context, key, pending.data);
-    }
+    await this.maybeRenderData(context, key);
   }
 
   private async handleDataResult(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
@@ -284,31 +279,66 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       return;
     }
     const data: DataResult | null = this.dataResult(message.payload);
-    if (context.uiTask === undefined) {
-      if (data === null) {
-        this.rememberPendingInvalidData(
-          context,
-          message.taskId,
-          'UI_DATA_INVALID',
-          'Data result payload is malformed'
-        );
-      } else {
-        this.rememberPendingData(context, message.taskId, data);
+    if (data === null) {
+      this.rememberPendingInvalidData(
+        context,
+        message.taskId,
+        'UI_DATA_INVALID',
+        'Data result payload is malformed'
+      );
+      if (context.uiTask !== undefined) {
+        this.publishOwnedDataError(context, 'UI_DATA_INVALID', 'Data result payload is malformed');
       }
       return;
     }
-    if (data === null) {
-      this.publishOwnedDataError(context, 'UI_DATA_INVALID', 'Data result payload is malformed');
-      return;
-    }
-    if (data.outputSchema !== context.uiTask.expectedOutputSchema) {
+    if (context.uiTask !== undefined && data.outputSchema !== context.uiTask.expectedOutputSchema) {
       this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
       return;
     }
-    await this.renderData(context, key, data);
+    this.rememberPendingData(context, message.taskId, data);
+    await this.maybeRenderData(context, key);
   }
 
-  private async renderData(context: UiTurnContext, key: string, data: DataResult): Promise<void> {
+  private async handleOffersReady(
+    message: AgentMessage,
+    key: string,
+    context: UiTurnContext
+  ): Promise<void> {
+    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskId) {
+      return;
+    }
+    const ready = this.offersReady(message.payload, message.taskId);
+    if (ready === null) {
+      return;
+    }
+    this.rememberPendingOffers(
+      context,
+      message.taskId,
+      ready.sourceToolId,
+      ready.offers
+    );
+    await this.maybeRenderData(context, key);
+  }
+
+  private async maybeRenderData(context: UiTurnContext, key: string): Promise<void> {
+    const task = context.uiTask;
+    if (task === undefined || !context.skeletonWritten) {
+      return;
+    }
+    const pending = context.pendingDataByTaskId.get(task.dataTaskId);
+    if (pending === undefined || pending.data === undefined || pending.offers === undefined ||
+      pending.offerSourceToolId !== pending.data.toolId) {
+      return;
+    }
+    await this.renderData(context, key, pending.data, pending.offers);
+  }
+
+  private async renderData(
+    context: UiTurnContext,
+    key: string,
+    data: DataResult,
+    offers: ActionOffer[]
+  ): Promise<void> {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
     if (task === undefined || !context.skeletonWritten || context.resultWritten ||
       context.terminalRenderStarted) {
@@ -320,12 +350,11 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     }
     context.terminalRenderStarted = true;
     const rendered: UiRenderResult =
-      await this.renderer.result(task, data, context.surfaceId);
+      await this.renderer.result(task, data, offers, context.surfaceId);
     if (!this.isActive(key, context)) {
       return;
     }
     this.validateRenderedJsonl(rendered, false);
-    this.validateProposalCapacity(context, rendered.proposals);
     await this.writer.write(
       context.turnId,
       context.surfaceId,
@@ -336,7 +365,6 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       return;
     }
     context.resultWritten = true;
-    this.publishActionPlans(context, data.toolId, rendered.proposals);
     this.publishUiResult(context, 'result');
     this.clearPendingPayloads(context);
   }
@@ -392,8 +420,6 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       if (ready === null) {
         return;
       }
-    } else if (message.type === AgentMessageType.ACTION_RESULT) {
-      this.clearTerminalPlanCorrelation(message, context);
     }
     const statusPayload: Object = ready === null ? message.payload : ready;
     const rendered: UiRenderResult =
@@ -411,15 +437,15 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     if (!this.isActive(key, context)) {
       return;
     }
-    if (ready !== null) {
-      context.pendingPlans.delete(ready.runId);
-    }
     this.publishUiResult(context, 'action');
   }
 
   private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
     const entry: PendingDataEntry = {
       data,
+      offers: current === undefined ? undefined : current.offers,
+      offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
       invalidCode: '',
       invalidMessage: ''
     };
@@ -437,8 +463,27 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       return;
     }
     const entry: PendingDataEntry = {
+      offers: current === undefined ? undefined : current.offers,
+      offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
       invalidCode: code,
       invalidMessage: message
+    };
+    this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingOffers(
+    context: UiTurnContext,
+    taskId: string,
+    sourceToolId: string,
+    offers: ActionOffer[]
+  ): void {
+    const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    const entry: PendingDataEntry = {
+      data: current === undefined ? undefined : current.data,
+      offers: offers.slice(),
+      offerSourceToolId: sourceToolId,
+      invalidCode: current === undefined ? '' : current.invalidCode,
+      invalidMessage: current === undefined ? '' : current.invalidMessage
     };
     this.rememberPendingEntry(context, taskId, entry);
   }
@@ -484,7 +529,6 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       uiTaskId: '',
       pendingDataByTaskId: new Map<string, PendingDataEntry>(),
       pendingDataOrder: [],
-      pendingPlans: new Map<string, PendingPlanCorrelation>(),
       dataErrorPending: false,
       canceled: false,
       generation: 0,
@@ -544,15 +588,51 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const payloadTaskId = values['taskId'];
     const dataTaskId = values['dataTaskId'];
+    const skillId = values['skillId'];
     const intent = values['intent'];
     const expectedOutputSchema = values['expectedOutputSchema'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
       typeof dataTaskId !== 'string' || dataTaskId.trim().length === 0 || dataTaskId === taskId ||
+      typeof skillId !== 'string' ||
       typeof intent !== 'string' || intent.trim().length === 0 ||
       typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {
       return null;
     }
     return payload as CreateUiTaskPayload;
+  }
+
+  private offersReady(payload: Object, taskId: string): ActionOffersReadyPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const ready = payload as ActionOffersReadyPayload;
+    if (Object.keys(payload).sort().join(',') !== 'dataTaskId,offers,sourceToolId' ||
+      ready.dataTaskId !== taskId || typeof ready.sourceToolId !== 'string' ||
+      ready.sourceToolId.trim().length === 0 || !Array.isArray(ready.offers)) {
+      return null;
+    }
+    const cloned = cloneJsonValue(ready.offers as Object);
+    if (!cloned.ok || !Array.isArray(cloned.value)) {
+      return null;
+    }
+    const offers = cloned.value as ActionOffer[];
+    for (let index = 0; index < offers.length; index++) {
+      const offer = offers[index];
+      if (offer === null || typeof offer !== 'object' ||
+        Object.keys(offer).sort().join(',') !== 'actionId,args,label,offerId,variant' ||
+        typeof offer.offerId !== 'string' || offer.offerId.trim().length === 0 ||
+        typeof offer.actionId !== 'string' || offer.actionId.trim().length === 0 ||
+        typeof offer.label !== 'string' || offer.label.trim().length === 0 ||
+        typeof offer.variant !== 'string' || offer.variant.trim().length === 0 ||
+        offer.args === null || typeof offer.args !== 'object' || Array.isArray(offer.args)) {
+        return null;
+      }
+    }
+    return {
+      dataTaskId: ready.dataTaskId,
+      sourceToolId: ready.sourceToolId,
+      offers
+    };
   }
 
   private dataResult(payload: Object): DataResult | null {
@@ -659,45 +739,10 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     context.uiTask = undefined;
     this.clearPendingData(context);
     context.queuedMessages.clear();
-    context.pendingPlans.clear();
   }
 
   private turnKey(conversationId: string, turnId: string): string {
     return `${conversationId.length}:${conversationId}${turnId}`;
-  }
-
-  private publishActionPlans(
-    context: UiTurnContext,
-    sourceToolId: string,
-    proposals: ActionPlan[]
-  ): void {
-    this.validateProposalCapacity(context, proposals);
-    for (let index = 0; index < proposals.length; index++) {
-      const plan = proposals[index];
-      this.actionRunSuffix++;
-      const runId = `${plan.planId}:${this.actionRunSuffix}`;
-      const taskId = `action-plan:${runId}`;
-      const correlation: PendingPlanCorrelation = {
-        planId: plan.planId,
-        runId,
-        surfaceId: context.surfaceId,
-        taskId,
-        label: plan.label
-      };
-      context.pendingPlans.set(runId, correlation);
-      const payload: ActionPlanCreatePayload = {
-        runId,
-        sourceToolId,
-        plan
-      };
-      this.bus.publish({
-        type: AgentMessageType.ACTION_PLAN_CREATE,
-        conversationId: context.conversationId,
-        turnId: context.turnId,
-        taskId,
-        payload
-      });
-    }
   }
 
   private actionPlanReady(
@@ -709,16 +754,14 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     }
     const ready = message.payload as ActionPlanReadyPayload;
     if (Object.keys(message.payload).sort().join(',') !==
-      'actionId,args,label,planId,runId,surfaceId') {
+      'actionId,args,label,planId,runId,surfaceId,uiTaskId') {
       return null;
     }
-    const correlation = context.pendingPlans.get(ready.runId);
-    if (correlation === undefined ||
-      message.taskId !== correlation.taskId ||
-      ready.planId !== correlation.planId ||
-      ready.surfaceId !== correlation.surfaceId ||
+    if (ready.uiTaskId !== context.uiTaskId ||
+      ready.planId.trim().length === 0 || ready.runId.trim().length === 0 ||
+      ready.surfaceId !== context.surfaceId ||
       ready.actionId !== 'workflow.run' ||
-      ready.label !== correlation.label) {
+      ready.label.trim().length === 0) {
       return null;
     }
     const args = ready.args as WorkflowRunArgs;
@@ -735,6 +778,7 @@ export class UiAgent extends StructuredMessageDrivenAgent {
       runId: args.runId
     };
     return {
+      uiTaskId: ready.uiTaskId,
       surfaceId: ready.surfaceId,
       planId: ready.planId,
       runId: ready.runId,
@@ -748,9 +792,6 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     rendered: UiRenderResult,
     allowWorkflowRun: boolean
   ): void {
-    if (!Array.isArray(rendered.proposals)) {
-      throw new Error('UI renderer action proposals are malformed');
-    }
     if (typeof rendered.jsonl !== 'string') {
       throw new Error('UI renderer JSONL is malformed');
     }
@@ -772,46 +813,4 @@ export class UiAgent extends StructuredMessageDrivenAgent {
     }
   }
 
-  private validateProposalCapacity(
-    context: UiTurnContext,
-    proposals: ActionPlan[]
-  ): void {
-    if (!Array.isArray(proposals)) {
-      throw new Error('UI renderer action proposals are malformed');
-    }
-    if (proposals.length > PENDING_PLAN_LIMIT ||
-      context.pendingPlans.size + proposals.length > PENDING_PLAN_LIMIT) {
-      throw new Error('UI renderer action proposal capacity is exhausted');
-    }
-  }
-
-  private clearTerminalPlanCorrelation(
-    message: AgentMessage,
-    context: UiTurnContext
-  ): void {
-    if (message.payload === null ||
-      typeof message.payload !== 'object' ||
-      Array.isArray(message.payload)) {
-      return;
-    }
-    const values =
-      message.payload as Record<string, Object | string | number | boolean | null | undefined>;
-    const runId = values['runId'];
-    const planId = values['planId'];
-    const surfaceId = values['surfaceId'];
-    const status = values['status'];
-    if (typeof runId !== 'string' ||
-      typeof planId !== 'string' ||
-      surfaceId !== context.surfaceId ||
-      (status !== 'success' && status !== 'canceled' && status !== 'error')) {
-      return;
-    }
-    const correlation = context.pendingPlans.get(runId);
-    if (correlation !== undefined &&
-      correlation.planId === planId &&
-      correlation.surfaceId === surfaceId &&
-      correlation.taskId === message.taskId) {
-      context.pendingPlans.delete(runId);
-    }
-  }
 }

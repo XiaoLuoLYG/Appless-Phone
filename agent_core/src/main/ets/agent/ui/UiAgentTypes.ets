@@ -1,9 +1,10 @@
 import { DataResult } from '../message/DataResult';
-import { ActionPlan } from '../action/ActionPlanTypes';
+import { ActionOffer } from '../action/ActionOfferTypes';
 
 export interface CreateUiTaskPayload {
   taskId: string;
   dataTaskId: string;
+  skillId: string;
   intent: string;
   expectedOutputSchema: string;
 }
@@ -17,12 +18,16 @@ export interface UiRenderResultPayload {
 
 export interface UiRenderResult {
   jsonl: string;
-  proposals: ActionPlan[];
 }
 
 export interface UiTaskRenderer {
   skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult>;
-  result(task: CreateUiTaskPayload, data: DataResult, surfaceId: string): Promise<UiRenderResult>;
+  result(
+    task: CreateUiTaskPayload,
+    data: DataResult,
+    offers: ActionOffer[],
+    surfaceId: string
+  ): Promise<UiRenderResult>;
   error(task: CreateUiTaskPayload, message: string, surfaceId: string): Promise<UiRenderResult>;
   actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult>;
 }

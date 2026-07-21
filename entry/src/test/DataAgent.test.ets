@@ -7,6 +7,7 @@ import {
   DataAgent,
   DataResult,
   DataSource,
+  DataTaskAuthorizationResult,
   DataTaskExecutor,
   LinkedMessageBus,
   TaskErrorPayload
@@ -175,6 +176,7 @@ function dataTaskMessage(
   };
   const payload: CreateDataTaskPayload = {
     taskId,
+    skillId: 'hotel-search',
     toolId: 'hotel.search',
     outputSchema: 'hotelSearchResults',
     args
@@ -185,6 +187,18 @@ function dataTaskMessage(
     turnId,
     taskId,
     payload
+  };
+}
+
+function allowDataTask(_task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  return { ok: true, code: '', message: '' };
+}
+
+function denyDataTask(_task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  return {
+    ok: false,
+    code: 'DATA_TASK_READ_ONLY_REQUIRED',
+    message: 'Only registered read tools can run in Data Agent.'
   };
 }
 
@@ -225,7 +239,7 @@ export default function dataAgentTest() {
     it('accepts only Data tasks and preserves the full structured result with correlation', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult());
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -257,7 +271,7 @@ export default function dataAgentTest() {
     it('publishes a correlated Data task error without retrying', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ThrowingDataExecutor = new ThrowingDataExecutor();
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -279,7 +293,7 @@ export default function dataAgentTest() {
     it('keeps cancellation terminal across two later successful completions', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: TwoControlledDataExecutor = new TwoControlledDataExecutor();
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -302,7 +316,7 @@ export default function dataAgentTest() {
     it('keeps cancellation terminal when rejection precedes another completion', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: TwoControlledDataExecutor = new TwoControlledDataExecutor();
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -325,7 +339,7 @@ export default function dataAgentTest() {
     it('rejects a valid Data task replay after turn cancellation', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -353,7 +367,7 @@ export default function dataAgentTest() {
     it('silently rejects a malformed Data task replay after turn cancellation', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -387,7 +401,7 @@ export default function dataAgentTest() {
     it('retains canceled turn identities during a long session', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -421,7 +435,7 @@ export default function dataAgentTest() {
     it('suppresses a detached executor completion after stop', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -439,14 +453,18 @@ export default function dataAgentTest() {
     it('does not let an old stopped agent publish into a restarted bus lifecycle', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const oldExecutor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
-      const oldAgent: DataAgent = new DataAgent(bus, oldExecutor);
+      const oldAgent: DataAgent = new DataAgent(bus, allowDataTask, oldExecutor);
       const observer: AgentMessageReader = bus.openReader();
       oldAgent.start();
 
       bus.publish(dataTaskMessage('conversation-old', 'turn-old', 'data-old'));
       await oldExecutor.started.promise;
       oldAgent.stop();
-      const newAgent: DataAgent = new DataAgent(bus, new ScriptedDataExecutor(hotelDataResult('success')));
+      const newAgent: DataAgent = new DataAgent(
+        bus,
+        allowDataTask,
+        new ScriptedDataExecutor(hotelDataResult('success'))
+      );
       newAgent.start();
       bus.publish(dataTaskMessage('conversation-new', 'turn-new', 'data-new'));
       const currentResult: AgentMessage = await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
@@ -463,7 +481,7 @@ export default function dataAgentTest() {
     it('rejects malformed Data tasks and keeps the pump available', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult('success'));
-      const agent: DataAgent = new DataAgent(bus, executor);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor);
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
@@ -482,6 +500,23 @@ export default function dataAgentTest() {
 
       expect(valid.taskId).assertEqual('data-valid');
       expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('does not call the executor when the exact Data task is not authorized', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new ScriptedDataExecutor(hotelDataResult('success'));
+      const agent = new DataAgent(bus, denyDataTask, executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(dataTaskMessage('conversation-denied', 'turn-denied', 'data-denied'));
+      const denied = await receiveType(observer, AgentMessageType.TASK_ERROR);
+      const error = denied.payload as TaskErrorPayload;
+
+      expect(error.code).assertEqual('DATA_TASK_READ_ONLY_REQUIRED');
+      expect(executor.calls).assertEqual(0);
       agent.stop();
       observer.close();
     });

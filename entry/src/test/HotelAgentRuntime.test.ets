@@ -531,6 +531,26 @@ function lastWriteContains(writer: RecordingWriter, value: string): boolean {
   return false;
 }
 
+function documentAction(document: HtmlHomeDocument, actionId: string): A2uiAction | null {
+  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
+    const actions = document.blocks[blockIndex].actions;
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      const candidate = actions[actionIndex];
+      if (candidate.id === actionId && candidate.args !== undefined) {
+        return {
+          id: candidate.id,
+          label: candidate.label,
+          prompt: candidate.prompt,
+          variant: candidate.variant,
+          kind: candidate.kind,
+          args: candidate.args
+        };
+      }
+    }
+  }
+  return null;
+}
+
 export default function hotelAgentRuntimeTest() {
   describe('hotelAgentRuntime', () => {
     it('opens every role before one input and renders skeleton then result on one surface', 0, async () => {
@@ -550,6 +570,11 @@ export default function hotelAgentRuntimeTest() {
       expect(writer.writes[0].jsonl.indexOf('pending')).assertLarger(-1);
       expect(writer.writes[0].jsonl.indexOf('hotel.detail')).assertEqual(-1);
       gate.open();
+      await flush();
+      expect(messagesOf(bus, AgentMessageType.TASK_RESULT_DATA).length).assertEqual(1);
+      expect(messagesOf(bus, AgentMessageType.ACTION_OFFERS_READY).length).assertEqual(1);
+      expect(writer.writes.length >= 2).assertTrue();
+      expect(messagesOf(bus, AgentMessageType.TASK_RESULT_UI).length >= 2).assertTrue();
       const outcome: HotelTurnOutcome = await submitted;
       expect(outcome.ok).assertTrue();
       expect(outcome.status).assertEqual('success');
@@ -1220,6 +1245,11 @@ export default function hotelAgentRuntimeTest() {
         runtime.dispose();
         return;
       }
+      const navigate = documentAction(current, 'hotel.navigate');
+      if (navigate === null) {
+        runtime.dispose();
+        return;
+      }
 
       const changedTurn: HotelActionContext = {
         conversationId: context.conversationId,
@@ -1233,11 +1263,11 @@ export default function hotelAgentRuntimeTest() {
         surfaceId: context.surfaceId + '-old',
         sourceToolId: context.sourceToolId
       };
-      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), changedTurn, current)).assertFalse();
-      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), changedSurface, current)).assertFalse();
-      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), context, absent)).assertFalse();
+      expect(await runtime.runAction(navigate, changedTurn, current)).assertFalse();
+      expect(await runtime.runAction(navigate, changedSurface, current)).assertFalse();
+      expect(await runtime.runAction(navigate, context, absent)).assertFalse();
       expect(opener.uris.length).assertEqual(0);
-      expect(await runtime.runAction(hotelNavigateAction(searchHotel()), context, current)).assertTrue();
+      expect(await runtime.runAction(navigate, context, current)).assertTrue();
       expect(opener.uris.length).assertEqual(1);
       runtime.dispose();
     });

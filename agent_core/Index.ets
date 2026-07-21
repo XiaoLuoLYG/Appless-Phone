@@ -42,6 +42,7 @@ export { UiAgent } from './src/main/ets/agent/ui/UiAgent';
 export * from './src/main/ets/agent/ui/UiAgentTypes';
 export { ActionCatalog } from './src/main/ets/agent/action/ActionCatalog';
 export * from './src/main/ets/agent/action/ActionCatalogTypes';
+export * from './src/main/ets/agent/action/ActionOfferTypes';
 export * from './src/main/ets/agent/action/ActionPlanTypes';
 export {
   JsonPointerResult,

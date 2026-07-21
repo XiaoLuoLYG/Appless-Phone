@@ -1,14 +1,15 @@
 import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { AgentMessage, AgentMessageType } from '../message/AgentMessage';
+import { DataResult } from '../message/DataResult';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
-import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
+import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { ActionCatalog } from './ActionCatalog';
 import { ActionCatalogResult } from './ActionCatalogTypes';
 import {
   ActionExecutionResult,
   ActionFollowUp,
-  ActionPlanCreatePayload,
+  ActionPlanDraftPayload,
   ActionPlanReadyPayload,
   ActionProgressPayload,
   ActionResultPayload,
@@ -17,10 +18,17 @@ import {
   RegisteredActionExecutor,
   WorkflowRunArgs
 } from './ActionAgentTypes';
+import {
+  ActionOffer,
+  ActionOfferContext,
+  ActionOfferResolver,
+  ActionOffersReadyPayload
+} from './ActionOfferTypes';
 import { ActionPlanRunner } from './ActionPlanRunner';
 import {
   ActionExecutionContext,
   ActionPlan,
+  ActionPlanDraft,
   ActionPlanOutcome,
   ActionPlanPausedOutcome,
   ActionPlanRunContext,
@@ -66,6 +74,24 @@ interface SanitizedFollowUp {
   dataTask: CreateDataTaskPayload;
 }
 
+interface ObservedDataTask {
+  conversationId: string;
+  turnId: string;
+  taskId: string;
+  toolId: string;
+  outputSchema: string;
+}
+
+interface StoredActionDraft {
+  conversationId: string;
+  turnId: string;
+  taskId: string;
+  uiTaskId: string;
+  dataTaskId: string;
+  sourceToolId: string;
+  draft: ActionPlanDraft;
+}
+
 function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -90,6 +116,15 @@ function clonePlan(plan: ActionPlan): ActionPlan | null {
     return null;
   }
   return cloned.value as ActionPlan;
+}
+
+function cloneDraft(draft: ActionPlanDraft): ActionPlanDraft | null {
+  const cloned = cloneJsonValue(draft as Object);
+  if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+    Array.isArray(cloned.value)) {
+    return null;
+  }
+  return cloned.value as ActionPlanDraft;
 }
 
 function cloneOutputs(outputs: ActionPlanStepOutput[]): ActionPlanStepOutput[] | null {
@@ -120,6 +155,7 @@ function directPlan(
 export class ActionAgent extends StructuredMessageDrivenAgent implements ActionStepExecutor {
   private readonly bus: LinkedMessageBus;
   private readonly catalog: ActionCatalog;
+  private readonly offerResolver: ActionOfferResolver;
   private readonly registeredExecutor: RegisteredActionExecutor;
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
@@ -132,17 +168,23 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
   // them would allow an old write or confirmed workflow to execute twice.
   private readonly terminalRuns: Set<string> = new Set<string>();
   private readonly canceledTurns: Set<string> = new Set<string>();
+  private readonly observedDataTasks: Map<string, ObservedDataTask> =
+    new Map<string, ObservedDataTask>();
+  private readonly pendingDrafts: Map<string, StoredActionDraft> =
+    new Map<string, StoredActionDraft>();
   private generation: number = 0;
   private active: boolean = false;
 
   constructor(
     bus: LinkedMessageBus,
     catalog: ActionCatalog,
+    offerResolver: ActionOfferResolver,
     executor: RegisteredActionExecutor
   ) {
     super(bus);
     this.bus = bus;
     this.catalog = catalog;
+    this.offerResolver = offerResolver;
     this.registeredExecutor = executor;
     this.runner = new ActionPlanRunner(catalog, this);
   }
@@ -165,6 +207,8 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
     this.activeRuns.clear();
     this.terminalRuns.clear();
     this.canceledTurns.clear();
+    this.observedDataTasks.clear();
+    this.pendingDrafts.clear();
   }
 
   inspectPausedRun(
@@ -190,7 +234,11 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
   }
 
   protected accepts(message: AgentMessage): boolean {
-    return message.type === AgentMessageType.ACTION_PLAN_CREATE ||
+    return message.type === AgentMessageType.ACTION_PLAN_DRAFT ||
+      message.type === AgentMessageType.TASK_CREATE_DATA ||
+      message.type === AgentMessageType.TASK_RESULT_UI ||
+      message.type === AgentMessageType.TASK_RESULT_DATA ||
+      message.type === AgentMessageType.TASK_ERROR ||
       message.type === AgentMessageType.ACTION_RUN ||
       message.type === AgentMessageType.TURN_CANCEL;
   }
@@ -204,8 +252,21 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
       if (this.canceledTurns.has(this.turnKey(message.conversationId, message.turnId))) {
         return;
       }
-      if (message.type === AgentMessageType.ACTION_PLAN_CREATE) {
-        this.createPlan(message);
+      if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+        this.observeDataTask(message);
+        return;
+      }
+      if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+        message.type === AgentMessageType.TASK_ERROR) {
+        await this.resolveOffers(message);
+        return;
+      }
+      if (message.type === AgentMessageType.ACTION_PLAN_DRAFT) {
+        this.storeDraft(message);
+        return;
+      }
+      if (message.type === AgentMessageType.TASK_RESULT_UI) {
+        this.bindDrafts(message);
         return;
       }
       this.startRun(message);
@@ -337,48 +398,213 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
     };
   }
 
-  private createPlan(message: AgentMessage): void {
-    const payload = this.planCreatePayload(message.payload);
+  private observeDataTask(message: AgentMessage): void {
+    const task = this.dataTask(message.payload, message.taskId);
+    if (task === null || this.observedDataTasks.size >= LIVE_RUN_LIMIT) {
+      return;
+    }
+    const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
+    if (!this.observedDataTasks.has(key)) {
+      this.observedDataTasks.set(key, {
+        conversationId: message.conversationId,
+        turnId: message.turnId,
+        taskId: message.taskId,
+        toolId: task.toolId,
+        outputSchema: task.outputSchema
+      });
+    }
+  }
+
+  private async resolveOffers(message: AgentMessage): Promise<void> {
+    const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
+    const observed = this.observedDataTasks.get(key);
+    if (observed === undefined) {
+      return;
+    }
+    this.observedDataTasks.delete(key);
+    if (message.type === AgentMessageType.TASK_ERROR) {
+      this.publishOffers(message, observed, []);
+      return;
+    }
+    const data = this.dataResult(message.payload, observed);
+    if (data === null) {
+      this.publishOffers(message, observed, []);
+      return;
+    }
+    const context: ActionOfferContext = {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      dataTaskId: message.taskId
+    };
+    let resolved: ActionOffer[];
+    try {
+      resolved = await this.offerResolver(data, context);
+    } catch (_error) {
+      resolved = [];
+    }
+    this.publishOffers(message, observed, this.sanitizeOffers(data.toolId, resolved));
+  }
+
+  private publishOffers(
+    message: AgentMessage,
+    observed: ObservedDataTask,
+    offers: ActionOffer[]
+  ): void {
+    const payload: ActionOffersReadyPayload = {
+      dataTaskId: observed.taskId,
+      sourceToolId: observed.toolId,
+      offers
+    };
+    this.bus.publish({
+      type: AgentMessageType.ACTION_OFFERS_READY,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: observed.taskId,
+      payload
+    });
+  }
+
+  private sanitizeOffers(sourceToolId: string, candidates: ActionOffer[]): ActionOffer[] {
+    if (!Array.isArray(candidates)) {
+      return [];
+    }
+    const safe: ActionOffer[] = [];
+    const ids: Set<string> = new Set<string>();
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate = candidates[index];
+      if (candidate === null || typeof candidate !== 'object' ||
+        !nonempty(candidate.offerId) || ids.has(candidate.offerId) ||
+        !nonempty(candidate.actionId) || !nonempty(candidate.label) ||
+        !nonempty(candidate.variant) || candidate.args === null ||
+        typeof candidate.args !== 'object' || Array.isArray(candidate.args)) {
+        continue;
+      }
+      const cloned = cloneJsonValue(candidate.args);
+      if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+        Array.isArray(cloned.value)) {
+        continue;
+      }
+      const args = cloned.value as Object;
+      if (!this.catalog.validatePlacement(sourceToolId, candidate.actionId, args).ok) {
+        continue;
+      }
+      ids.add(candidate.offerId);
+      safe.push({
+        offerId: candidate.offerId,
+        actionId: candidate.actionId,
+        label: candidate.label,
+        variant: candidate.variant,
+        args
+      });
+    }
+    return safe;
+  }
+
+  private storeDraft(message: AgentMessage): void {
+    const payload = this.planDraftPayload(message.payload);
     if (payload === null) {
       this.publishInputError(
         message,
-        this.nestedPayloadString(message.payload, 'plan', 'planId'),
-        this.payloadString(message.payload, 'runId'),
-        this.nestedPayloadString(message.payload, 'plan', 'surfaceId'),
-        'ACTION_PLAN_CREATE_INVALID',
-        'Action plan create payload is malformed.'
+        this.nestedPayloadString(message.payload, 'draft', 'planId'),
+        this.nestedPayloadString(message.payload, 'draft', 'runId'),
+        '',
+        'ACTION_PLAN_DRAFT_INVALID',
+        'Action plan draft payload is malformed.'
       );
       return;
     }
-    const plan = clonePlan(payload.plan);
-    if (plan === null) {
+    const draft = cloneDraft(payload.draft);
+    if (draft === null || !this.validDraft(draft)) {
       this.publishInputError(
         message,
-        this.payloadString(payload.plan as Object, 'planId'),
-        payload.runId,
-        this.payloadString(payload.plan as Object, 'surfaceId'),
+        this.payloadString(payload.draft as Object, 'planId'),
+        this.payloadString(payload.draft as Object, 'runId'),
+        '',
         'ACTION_PLAN_MALFORMED',
-        'Action plan is not valid JSON data.'
+        'Action plan draft is not valid JSON data.'
       );
       return;
     }
-    const safePlanId = typeof plan.planId === 'string' ? plan.planId : '';
-    const safeSurfaceId = typeof plan.surfaceId === 'string' ? plan.surfaceId : '';
-    const context: ActionPlanRunContext = {
+    const key = this.draftKey(message.conversationId, message.turnId, payload.uiTaskId, draft.runId);
+    if (this.pendingDrafts.has(key)) {
+      this.publishInputError(
+        message,
+        draft.planId,
+        draft.runId,
+        '',
+        'ACTION_RUN_DUPLICATE',
+        'Action run identity already exists.'
+      );
+      return;
+    }
+    if (this.pendingDrafts.size >= LIVE_RUN_LIMIT) {
+      this.publishInputError(
+        message,
+        draft.planId,
+        draft.runId,
+        '',
+        'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
+      return;
+    }
+    this.pendingDrafts.set(key, {
       conversationId: message.conversationId,
       turnId: message.turnId,
-      surfaceId: safeSurfaceId,
+      taskId: message.taskId,
+      uiTaskId: payload.uiTaskId,
+      dataTaskId: payload.dataTaskId,
       sourceToolId: payload.sourceToolId,
-      planId: safePlanId,
-      runId: payload.runId
+      draft
+    });
+  }
+
+  private bindDrafts(message: AgentMessage): void {
+    const ui = this.uiResult(message.payload);
+    if (ui === null || ui.state !== 'result') {
+      return;
+    }
+    const matches: StoredActionDraft[] = [];
+    this.pendingDrafts.forEach((stored: StoredActionDraft) => {
+      if (stored.conversationId === message.conversationId &&
+        stored.turnId === message.turnId && stored.uiTaskId === message.taskId) {
+        matches.push(stored);
+      }
+    });
+    for (let index = 0; index < matches.length; index++) {
+      this.bindDraft(matches[index], ui.surfaceId);
+    }
+  }
+
+  private bindDraft(storedDraft: StoredActionDraft, surfaceId: string): void {
+    this.pendingDrafts.delete(this.draftKey(
+      storedDraft.conversationId,
+      storedDraft.turnId,
+      storedDraft.uiTaskId,
+      storedDraft.draft.runId
+    ));
+    const plan: ActionPlan = {
+      planId: storedDraft.draft.planId,
+      turnId: storedDraft.turnId,
+      surfaceId,
+      label: storedDraft.draft.label,
+      steps: storedDraft.draft.steps
+    };
+    const context: ActionPlanRunContext = {
+      conversationId: storedDraft.conversationId,
+      turnId: storedDraft.turnId,
+      surfaceId,
+      sourceToolId: storedDraft.sourceToolId,
+      planId: plan.planId,
+      runId: storedDraft.draft.runId
     };
     const validation = this.runner.validate(plan, context);
     if (!validation.ok) {
       this.publishInputError(
-        message,
-        safePlanId,
-        payload.runId,
-        safeSurfaceId,
+        this.draftMessage(storedDraft),
+        plan.planId,
+        storedDraft.draft.runId,
+        surfaceId,
         validation.errorCode,
         validation.message,
         validation.failedStepId
@@ -388,10 +614,10 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
     const key = this.contextRunKey(context);
     if (this.runExists(key)) {
       this.publishInputError(
-        message,
-        safePlanId,
-        payload.runId,
-        safeSurfaceId,
+        this.draftMessage(storedDraft),
+        plan.planId,
+        storedDraft.draft.runId,
+        surfaceId,
         'ACTION_RUN_DUPLICATE',
         'Action run identity already exists.'
       );
@@ -399,41 +625,42 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
     }
     if (!this.hasLiveCapacity()) {
       this.publishInputError(
-        message,
-        safePlanId,
-        payload.runId,
-        safeSurfaceId,
+        this.draftMessage(storedDraft),
+        plan.planId,
+        storedDraft.draft.runId,
+        surfaceId,
         'ACTION_STATE_CAPACITY',
         'Action agent live state capacity is exhausted.'
       );
       return;
     }
     const stored: StoredActionRun = {
-      planId: safePlanId,
-      runId: payload.runId,
+      planId: plan.planId,
+      runId: storedDraft.draft.runId,
       plan,
       context: copyContext(context),
-      taskId: message.taskId,
+      taskId: storedDraft.taskId,
       followUpPublished: false
     };
     this.readyRuns.set(key, stored);
     const args: WorkflowRunArgs = {
-      planId: safePlanId,
-      runId: payload.runId
+      planId: plan.planId,
+      runId: storedDraft.draft.runId
     };
     const ready: ActionPlanReadyPayload = {
-      surfaceId: safeSurfaceId,
-      planId: safePlanId,
-      runId: payload.runId,
+      uiTaskId: storedDraft.uiTaskId,
+      surfaceId,
+      planId: plan.planId,
+      runId: storedDraft.draft.runId,
       label: plan.label,
       actionId: 'workflow.run',
       args
     };
     this.bus.publish({
       type: AgentMessageType.ACTION_PLAN_READY,
-      conversationId: message.conversationId,
-      turnId: message.turnId,
-      taskId: message.taskId,
+      conversationId: storedDraft.conversationId,
+      turnId: storedDraft.turnId,
+      taskId: storedDraft.taskId,
       payload: ready
     });
   }
@@ -711,6 +938,16 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
 
   private cancelTurn(message: AgentMessage): void {
     this.rememberCanceledTurn(message.conversationId, message.turnId);
+    this.observedDataTasks.forEach((task: ObservedDataTask, key: string) => {
+      if (task.conversationId === message.conversationId && task.turnId === message.turnId) {
+        this.observedDataTasks.delete(key);
+      }
+    });
+    this.pendingDrafts.forEach((draft: StoredActionDraft, key: string) => {
+      if (draft.conversationId === message.conversationId && draft.turnId === message.turnId) {
+        this.pendingDrafts.delete(key);
+      }
+    });
     const canceled: Set<string> = new Set<string>();
     this.readyRuns.forEach((stored: StoredActionRun, key: string) => {
       if (this.sameTurn(stored.context, message)) {
@@ -919,9 +1156,9 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
       typeof followUp.dataTask !== 'object' ||
       Array.isArray(followUp.dataTask) ||
       Object.keys(followUp.uiTask).sort().join(',') !==
-        'dataTaskId,expectedOutputSchema,intent,taskId' ||
+        'dataTaskId,expectedOutputSchema,intent,skillId,taskId' ||
       Object.keys(followUp.dataTask).sort().join(',') !==
-        'args,outputSchema,taskId,toolId') {
+        'args,outputSchema,skillId,taskId,toolId') {
       return null;
     }
     const ui: CreateUiTaskPayload = followUp.uiTask;
@@ -930,6 +1167,7 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
       !nonempty(ui.dataTaskId) ||
       !nonempty(ui.intent) ||
       !nonempty(ui.expectedOutputSchema) ||
+      typeof ui.skillId !== 'string' || ui.skillId !== data.skillId ||
       !nonempty(data.taskId) ||
       !nonempty(data.toolId) ||
       !nonempty(data.outputSchema) ||
@@ -952,11 +1190,13 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
       uiTask: {
         taskId: ui.taskId,
         dataTaskId: ui.dataTaskId,
+        skillId: ui.skillId,
         intent: ui.intent,
         expectedOutputSchema: ui.expectedOutputSchema
       },
       dataTask: {
         taskId: data.taskId,
+        skillId: data.skillId,
         toolId: data.toolId,
         outputSchema: data.outputSchema,
         args: argsClone.value as Object
@@ -1060,20 +1300,91 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
       context.turnId === message.turnId;
   }
 
-  private planCreatePayload(payload: Object): ActionPlanCreatePayload | null {
+  private planDraftPayload(payload: Object): ActionPlanDraftPayload | null {
     if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
       return null;
     }
-    const current = payload as ActionPlanCreatePayload;
-    if (Object.keys(payload).sort().join(',') !== 'plan,runId,sourceToolId' ||
-      !nonempty(current.runId) ||
+    const current = payload as ActionPlanDraftPayload;
+    if (Object.keys(payload).sort().join(',') !== 'dataTaskId,draft,sourceToolId,uiTaskId' ||
+      !nonempty(current.uiTaskId) || !nonempty(current.dataTaskId) ||
+      current.uiTaskId === current.dataTaskId ||
       !nonempty(current.sourceToolId) ||
-      current.plan === null ||
-      typeof current.plan !== 'object' ||
-      Array.isArray(current.plan)) {
+      current.draft === null || typeof current.draft !== 'object' ||
+      Array.isArray(current.draft)) {
       return null;
     }
     return current;
+  }
+
+  private validDraft(draft: ActionPlanDraft): boolean {
+    if (Object.keys(draft).sort().join(',') !== 'label,planId,runId,steps' ||
+      !nonempty(draft.planId) || !nonempty(draft.runId) ||
+      !nonempty(draft.label) || !Array.isArray(draft.steps) ||
+      draft.steps.length === 0 || draft.steps.length > 5) {
+      return false;
+    }
+    const stepIds: Set<string> = new Set<string>();
+    for (let index = 0; index < draft.steps.length; index++) {
+      const step = draft.steps[index];
+      if (step === undefined || !nonempty(step.stepId) ||
+        !nonempty(step.actionId) || stepIds.has(step.stepId)) {
+        return false;
+      }
+      stepIds.add(step.stepId);
+    }
+    return true;
+  }
+
+  private uiResult(payload: Object): UiRenderResultPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const result = payload as UiRenderResultPayload;
+    if (Object.keys(payload).sort().join(',') !== 'state,surfaceId' ||
+      !nonempty(result.surfaceId) ||
+      (result.state !== 'skeleton' && result.state !== 'result' &&
+        result.state !== 'error' && result.state !== 'action')) {
+      return null;
+    }
+    return result;
+  }
+
+  private dataTask(payload: Object, taskId: string): CreateDataTaskPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const task = payload as CreateDataTaskPayload;
+    if (Object.keys(payload).sort().join(',') !== 'args,outputSchema,skillId,taskId,toolId' ||
+      task.taskId !== taskId || typeof task.skillId !== 'string' ||
+      !nonempty(task.toolId) || !nonempty(task.outputSchema) ||
+      task.args === null || typeof task.args !== 'object' || Array.isArray(task.args)) {
+      return null;
+    }
+    return task;
+  }
+
+  private dataResult(payload: Object, task: ObservedDataTask): DataResult | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const data = payload as DataResult;
+    if (data.toolId !== task.toolId || data.outputSchema !== task.outputSchema ||
+      !Array.isArray(data.sources) || !Array.isArray(data.warnings) ||
+      (data.status !== 'success' && data.status !== 'partial' &&
+        data.status !== 'empty' && data.status !== 'error')) {
+      return null;
+    }
+    return data;
+  }
+
+  private draftMessage(stored: StoredActionDraft): AgentMessage {
+    return {
+      type: AgentMessageType.ACTION_PLAN_DRAFT,
+      conversationId: stored.conversationId,
+      turnId: stored.turnId,
+      taskId: stored.taskId,
+      payload: stored.draft
+    };
   }
 
   private actionRunPayload(payload: Object): ActionRunPayload | null {
@@ -1195,6 +1506,21 @@ export class ActionAgent extends StructuredMessageDrivenAgent implements ActionS
 
   private turnKey(conversationId: string, turnId: string): string {
     return `${conversationId.length}:${conversationId}${turnId}`;
+  }
+
+  private dataTaskKey(conversationId: string, turnId: string, taskId: string): string {
+    return `${conversationId.length}:${conversationId}` +
+      `${turnId.length}:${turnId}${taskId.length}:${taskId}`;
+  }
+
+  private draftKey(
+    conversationId: string,
+    turnId: string,
+    uiTaskId: string,
+    runId: string
+  ): string {
+    return `${conversationId.length}:${conversationId}` +
+      `${turnId.length}:${turnId}${uiTaskId.length}:${uiTaskId}${runId.length}:${runId}`;
   }
 
   private contextRunKey(context: ActionPlanRunContext): string {

@@ -1,10 +1,19 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  ActionOffer,
+  ActionPlanDraft,
   AgentMessage,
   AgentMessageType,
+  CreateDataTaskPayload,
+  CreateUiTaskPayload,
   DataResult,
   DataResultStatus,
   DataSource,
+  LeaderPlan,
+  LeaderDataTask,
+  LeaderPlanningContext,
+  LeaderUiTask,
+  UiRenderResult,
   UserInputPayload
 } from '@loop/agent-core';
 
@@ -50,7 +59,8 @@ export default function agentMessageTest() {
         AgentMessageType.TASK_RESULT_UI,
         AgentMessageType.TASK_RESULT_DATA,
         AgentMessageType.TASK_ERROR,
-        AgentMessageType.ACTION_PLAN_CREATE,
+        AgentMessageType.ACTION_PLAN_DRAFT,
+        AgentMessageType.ACTION_OFFERS_READY,
         AgentMessageType.ACTION_PLAN_READY,
         AgentMessageType.ACTION_RUN,
         AgentMessageType.ACTION_PROGRESS,
@@ -58,8 +68,78 @@ export default function agentMessageTest() {
         AgentMessageType.TURN_CANCEL
       ];
 
-      expect(Object.keys(AgentMessageType).length).assertEqual(12);
-      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.CREATE,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL');
+      expect(Object.keys(AgentMessageType).length).assertEqual(13);
+      expect(types.join(',')).assertEqual('INPUT.USER,TASK.CREATE.UI,TASK.CREATE.DATA,TASK.RESULT.UI,TASK.RESULT.DATA,TASK.ERROR,ACTION.PLAN.DRAFT,ACTION.OFFERS.READY,ACTION.PLAN.READY,ACTION.RUN,ACTION.PROGRESS,ACTION.RESULT,TURN.CANCEL');
+    });
+
+    it('exposes the canonical planning offer and task contracts', 0, () => {
+      const draft: ActionPlanDraft = {
+        planId: 'plan-1',
+        runId: 'run-1',
+        label: '查看详情后导航',
+        steps: []
+      };
+      const planningContext: LeaderPlanningContext = {
+        tools: [{
+          toolId: 'hotel.search',
+          intent: 'hotel.search',
+          riskLevel: 'read',
+          inputSchema: 'hotelSearchRequest',
+          outputSchema: 'hotelSearchResults',
+          actions: ['hotel.detail', 'hotel.navigate']
+        }],
+        skills: [{
+          skillId: 'hotel-search',
+          description: 'Search real hotel inventory.',
+          instructions: 'Use hotel.search and do not claim booking.'
+        }]
+      };
+      const ui: CreateUiTaskPayload = {
+        taskId: 'ui-1',
+        dataTaskId: 'data-1',
+        skillId: 'hotel-search',
+        intent: 'hotel.search.results',
+        expectedOutputSchema: 'hotelSearchResults'
+      };
+      const data: CreateDataTaskPayload = {
+        taskId: 'data-1',
+        skillId: 'hotel-search',
+        toolId: 'hotel.search',
+        outputSchema: 'hotelSearchResults',
+        args: new Object()
+      };
+      const leaderUi: LeaderUiTask = {
+        taskId: ui.taskId,
+        intent: ui.intent,
+        expectedOutputSchema: ui.expectedOutputSchema
+      };
+      const leaderData: LeaderDataTask = {
+        taskId: data.taskId,
+        toolId: data.toolId,
+        outputSchema: data.outputSchema,
+        args: data.args
+      };
+      const plan: LeaderPlan = {
+        skillId: 'hotel-search',
+        ui: leaderUi,
+        data: leaderData,
+        actionPlan: draft
+      };
+      const offer: ActionOffer = {
+        offerId: 'offer-1',
+        actionId: 'hotel.navigate',
+        label: '一键导航',
+        variant: 'secondary',
+        args: new Object()
+      };
+      const render: UiRenderResult = { jsonl: '{}' };
+
+      expect(planningContext.tools[0].riskLevel).assertEqual('read');
+      expect(plan.skillId).assertEqual(ui.skillId);
+      expect(data.skillId).assertEqual(ui.skillId);
+      expect(plan.actionPlan?.runId).assertEqual('run-1');
+      expect(offer.actionId).assertEqual('hotel.navigate');
+      expect(Object.keys(render).join(',')).assertEqual('jsonl');
     });
 
     it('retains each structured data result status', 0, () => {

@@ -3,6 +3,7 @@ import {
   AgentMessage,
   AgentMessageType,
   LeaderPlan,
+  LeaderPlanningContext,
   LocalModelSettings,
   LocalModel,
   UserInputPayload
@@ -66,6 +67,20 @@ function input(text: string): AgentMessage {
   };
 }
 
+function planningContext(): LeaderPlanningContext {
+  return {
+    tools: [{
+      toolId: 'hotel.search',
+      intent: 'hotel.search',
+      riskLevel: 'read',
+      inputSchema: 'hotelSearchRequest',
+      outputSchema: 'hotelSearchResults',
+      actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
+    }],
+    skills: []
+  };
+}
+
 async function planFor(text: string, response: string): Promise<LeaderPlan> {
   const model = new FakeHotelModel(response);
   const planner = new HotelLeaderPlanner(
@@ -74,7 +89,7 @@ async function planFor(text: string, response: string): Promise<LeaderPlan> {
     new SequentialPlannerIds()
   );
   const payload: UserInputPayload = { text: text };
-  return planner.plan(input(text), payload);
+  return planner.plan(input(text), payload, planningContext());
 }
 
 async function rejected(text: string, response: string): Promise<boolean> {
@@ -100,12 +115,13 @@ export default function hotelLeaderPlannerTest() {
       const payload: UserInputPayload = { text: '8月15日深圳住两晚的酒店' };
       const plan = await planner.plan(
         input('8月15日深圳住两晚的酒店'),
-        payload
+        payload,
+        planningContext()
       );
       const args = plan.data.args as Record<string, Object | string | number | boolean | null | undefined>;
 
       expect(plan.data.toolId).assertEqual('hotel.search');
-      expect(plan.ui.intent).assertEqual('hotel');
+      expect(plan.ui.intent).assertEqual('hotel.search');
       expect(plan.ui.expectedOutputSchema).assertEqual('hotelSearchResults');
       expect(plan.data.outputSchema).assertEqual(plan.ui.expectedOutputSchema);
       expect(plan.ui.taskId === plan.data.taskId).assertFalse();

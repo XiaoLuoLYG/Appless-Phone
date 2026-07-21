@@ -3,12 +3,14 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  CreateDataTaskPayload,
   CreateUiTaskPayload,
   InputUserPayload,
   LeaderAgent,
   LeaderDataTask,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPlanningContext,
   LeaderUiTask,
   LinkedMessageBus,
   TaskErrorPayload
@@ -29,14 +31,22 @@ class ScriptedLeaderPlanner implements LeaderPlanner {
     this.scriptedPlan = scriptedPlan;
   }
 
-  async plan(_message: AgentMessage, _input: InputUserPayload): Promise<LeaderPlan> {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
     this.calls++;
     return this.scriptedPlan;
   }
 }
 
 class ThrowingLeaderPlanner implements LeaderPlanner {
-  async plan(_message: AgentMessage, _input: InputUserPayload): Promise<LeaderPlan> {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
     throw new Error('planner unavailable');
   }
 }
@@ -49,7 +59,11 @@ class FirstCallHangingPlanner implements LeaderPlanner {
     this.scriptedPlan = scriptedPlan;
   }
 
-  async plan(_message: AgentMessage, _input: InputUserPayload): Promise<LeaderPlan> {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
     this.calls++;
     if (this.calls === 1) {
       return new Promise<LeaderPlan>((_resolve: (plan: LeaderPlan) => void) => {
@@ -88,7 +102,11 @@ class ControlledFirstPlanner implements LeaderPlanner {
     this.nextPlan = nextPlan;
   }
 
-  async plan(_message: AgentMessage, _input: InputUserPayload): Promise<LeaderPlan> {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext
+  ): Promise<LeaderPlan> {
     this.calls++;
     if (this.calls === 1) {
       return new Promise<LeaderPlan>((resolve: (plan: LeaderPlan) => void) => {
@@ -126,7 +144,25 @@ function hotelPlan(uiTaskId: string = 'ui-1', dataTaskId: string = 'data-1'): Le
     outputSchema: 'hotelSearchResults',
     args
   };
-  return { ui, data };
+  return { skillId: 'hotel-search', ui, data };
+}
+
+function planningContext(): LeaderPlanningContext {
+  return {
+    tools: [{
+      toolId: 'hotel.search',
+      intent: 'hotel.search',
+      riskLevel: 'read',
+      inputSchema: 'hotelSearchRequest',
+      outputSchema: 'hotelSearchResults',
+      actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
+    }],
+    skills: [{
+      skillId: 'hotel-search',
+      description: 'Search real hotel inventory.',
+      instructions: 'Use hotel.search and do not claim booking.'
+    }]
+  };
 }
 
 function hotelPlanWithUnexpectedFields(): LeaderPlan {
@@ -140,6 +176,7 @@ function hotelPlanWithUnexpectedFields(): LeaderPlan {
       '"providerOutput":{"secret":"must-not-leak"},"jsonl":"forbidden"}'
   ) as Object;
   return {
+    skillId: 'hotel-search',
     ui: uiObject as LeaderUiTask,
     data: dataObject as LeaderDataTask
   };
@@ -190,7 +227,11 @@ export default function leaderAgentTest() {
   describe('leaderAgent', () => {
     it('publishes sanitized correlated UI then Data tasks and no fourth output', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlanWithUnexpectedFields()));
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlanWithUnexpectedFields()),
+        planningContext()
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -199,7 +240,7 @@ export default function leaderAgentTest() {
       const uiMessage: AgentMessage = await receive(observer);
       const dataMessage: AgentMessage = await receive(observer);
       const ui: CreateUiTaskPayload = uiMessage.payload as CreateUiTaskPayload;
-      const data: LeaderDataTask = dataMessage.payload as LeaderDataTask;
+      const data: CreateDataTaskPayload = dataMessage.payload as CreateDataTaskPayload;
       const args: HotelSearchArgs = data.args as HotelSearchArgs;
 
       expect(uiMessage.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
@@ -216,10 +257,12 @@ export default function leaderAgentTest() {
       expect(data.taskId).assertEqual(dataMessage.taskId);
       expect(data.toolId).assertEqual('hotel.search');
       expect(data.outputSchema).assertEqual('hotelSearchResults');
+      expect(ui.skillId).assertEqual('hotel-search');
+      expect(data.skillId).assertEqual('hotel-search');
       expect(args.city).assertEqual('Shenzhen');
       expect(args.guests).assertEqual(2);
-      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskId,expectedOutputSchema,intent,taskId');
-      expect(Object.keys(data).sort().join(',')).assertEqual('args,outputSchema,taskId,toolId');
+      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskId,expectedOutputSchema,intent,skillId,taskId');
+      expect(Object.keys(data).sort().join(',')).assertEqual('args,outputSchema,skillId,taskId,toolId');
       expect(JSON.stringify(ui).indexOf('provider')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('jsonl')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('createSurface')).assertEqual(-1);
@@ -236,7 +279,7 @@ export default function leaderAgentTest() {
       const plan: LeaderPlan = hotelPlan();
       plan.ui.expectedOutputSchema = 'differentSchema';
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan));
+      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(plan), planningContext());
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -252,7 +295,7 @@ export default function leaderAgentTest() {
 
     it('publishes one correlated error when planning throws', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ThrowingLeaderPlanner());
+      const leader: LeaderAgent = new LeaderAgent(bus, new ThrowingLeaderPlanner(), planningContext());
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -276,7 +319,7 @@ export default function leaderAgentTest() {
     it('rejects malformed text without stopping the next valid input', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const planner: ScriptedLeaderPlanner = new ScriptedLeaderPlanner(hotelPlan());
-      const leader: LeaderAgent = new LeaderAgent(bus, planner);
+      const leader: LeaderAgent = new LeaderAgent(bus, planner, planningContext());
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -312,7 +355,7 @@ export default function leaderAgentTest() {
     it('bounds planner latency and processes the next input after timeout', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const planner: FirstCallHangingPlanner = new FirstCallHangingPlanner(hotelPlan('ui-2', 'data-2'));
-      const leader: LeaderAgent = new LeaderAgent(bus, planner, 10);
+      const leader: LeaderAgent = new LeaderAgent(bus, planner, planningContext(), 10);
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -342,7 +385,7 @@ export default function leaderAgentTest() {
     it('cancels an in-flight planner before timeout and keeps the pump available', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const planner: ControlledFirstPlanner = new ControlledFirstPlanner(hotelPlan('ui-2', 'data-2'));
-      const leader: LeaderAgent = new LeaderAgent(bus, planner, 200);
+      const leader: LeaderAgent = new LeaderAgent(bus, planner, planningContext(), 200);
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -379,7 +422,12 @@ export default function leaderAgentTest() {
 
     it('times out once and ignores late UI and Data results', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlan()), 10);
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlan()),
+        planningContext(),
+        10
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -413,7 +461,11 @@ export default function leaderAgentTest() {
 
     it('keeps a canceled turn terminal when late results arrive', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlan()));
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlan()),
+        planningContext()
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -442,7 +494,12 @@ export default function leaderAgentTest() {
 
     it('ignores Action results and downstream errors with the wrong task id', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlan()), 10);
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlan()),
+        planningContext(),
+        10
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -467,7 +524,12 @@ export default function leaderAgentTest() {
 
     it('treats a matching downstream error as terminal for only that task', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlan()), 10);
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlan()),
+        planningContext(),
+        10
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -490,7 +552,12 @@ export default function leaderAgentTest() {
 
     it('keeps normal completion terminal when a late result arrives', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const leader: LeaderAgent = new LeaderAgent(bus, new ScriptedLeaderPlanner(hotelPlan()), 10);
+      const leader: LeaderAgent = new LeaderAgent(
+        bus,
+        new ScriptedLeaderPlanner(hotelPlan()),
+        planningContext(),
+        10
+      );
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 
@@ -516,7 +583,7 @@ export default function leaderAgentTest() {
     it('retains exact terminal turn identities during a long conversation', 1000, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const planner: ScriptedLeaderPlanner = new ScriptedLeaderPlanner(hotelPlan());
-      const leader: LeaderAgent = new LeaderAgent(bus, planner);
+      const leader: LeaderAgent = new LeaderAgent(bus, planner, planningContext());
       const observer: AgentMessageReader = bus.openReader();
       leader.start();
 

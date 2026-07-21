@@ -3,10 +3,9 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
-  ActionPlan,
-  ActionPlanCreatePayload,
+  ActionOffer,
+  ActionOffersReadyPayload,
   ActionPlanReadyPayload,
-  ActionResultPayload,
   CreateUiTaskPayload,
   DataResult,
   DataSource,
@@ -59,6 +58,8 @@ class TestGate {
 class RecordingRenderer implements UiTaskRenderer {
   readonly calls: string[] = [];
   readonly resultHotelIds: number[] = [];
+  readonly resultOfferIds: string[] = [];
+  readonly resultOfferHotelIds: number[] = [];
 
   async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     this.calls.push(`skeleton:${task.taskId}:${surfaceId}`);
@@ -68,11 +69,23 @@ class RecordingRenderer implements UiTaskRenderer {
   async result(
     task: CreateUiTaskPayload,
     data: DataResult,
+    offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
     const hotel: HotelResult = data.data as HotelResult;
     this.calls.push(`result:${task.taskId}:${surfaceId}`);
     this.resultHotelIds.push(hotel.hotelId);
+    for (let index = 0; index < offers.length; index++) {
+      this.resultOfferIds.push(offers[index].offerId);
+      const args = offers[index].args as Record<
+        string,
+        Object | string | number | boolean | null | undefined
+      >;
+      const offeredHotelId = args['hotelId'];
+      if (typeof offeredHotelId === 'number') {
+        this.resultOfferHotelIds.push(offeredHotelId);
+      }
+    }
     return render(`result:${hotel.hotelId}`);
   }
 
@@ -100,21 +113,12 @@ class ProposalRenderer extends RecordingRenderer {
   async result(
     task: CreateUiTaskPayload,
     data: DataResult,
+    offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
-    const base = await super.result(task, data, surfaceId);
+    const base = await super.result(task, data, offers, surfaceId);
     this.proposalSurfaceId = surfaceId;
-    const proposal: ActionPlan = JSON.parse(
-      '{"planId":"plan-ui-1","turnId":"turn-1","surfaceId":"' + surfaceId + '",' +
-        '"label":"Open detail and navigate","steps":[' +
-        '{"stepId":"detail","actionId":"hotel.detail","args":{"hotelId":101}},' +
-        '{"stepId":"navigate","actionId":"hotel.navigate","args":{},' +
-        '"inputFrom":[{"target":"/latitude","stepId":"detail","path":"/latitude"}]}]}'
-    ) as ActionPlan;
-    return {
-      jsonl: base.jsonl,
-      proposals: [proposal]
-    };
+    return base;
   }
 
   async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
@@ -124,8 +128,7 @@ class ProposalRenderer extends RecordingRenderer {
     this.calls.push(`ready:${ready.runId}:${surfaceId}`);
     return {
       jsonl: `{"workflow":{"name":"${ready.actionId}",` +
-        `"args":${JSON.stringify(ready.args)}}}`,
-      proposals: []
+        `"args":${JSON.stringify(ready.args)}}}`
     };
   }
 }
@@ -134,9 +137,10 @@ class EarlyWorkflowRenderer extends ProposalRenderer {
   async result(
     task: CreateUiTaskPayload,
     data: DataResult,
+    offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
-    const proposed = await super.result(task, data, surfaceId);
+    const proposed = await super.result(task, data, offers, surfaceId);
     proposed.jsonl =
       '{"surfaceUpdate":{"actions":[{"name":"workflow.run","args":{"planId":"early"}}]}}';
     return proposed;
@@ -161,9 +165,10 @@ class JsonlProbeRenderer extends RecordingRenderer {
   async result(
     task: CreateUiTaskPayload,
     data: DataResult,
+    offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
-    const rendered = await super.result(task, data, surfaceId);
+    const rendered = await super.result(task, data, offers, surfaceId);
     rendered.jsonl = this.resultJsonl;
     return rendered;
   }
@@ -181,34 +186,6 @@ class JsonlProbeRenderer extends RecordingRenderer {
   async actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
     const rendered = await super.actionStatus(payload, surfaceId);
     rendered.jsonl = this.actionJsonl;
-    return rendered;
-  }
-}
-
-class ManyProposalRenderer extends RecordingRenderer {
-  private readonly proposalCount: number;
-
-  constructor(proposalCount: number) {
-    super();
-    this.proposalCount = proposalCount;
-  }
-
-  async result(
-    task: CreateUiTaskPayload,
-    data: DataResult,
-    surfaceId: string
-  ): Promise<UiRenderResult> {
-    const rendered = await super.result(task, data, surfaceId);
-    const proposals: ActionPlan[] = [];
-    for (let index = 0; index < this.proposalCount; index++) {
-      proposals.push(JSON.parse(
-        `{"planId":"plan-cap-${index}","turnId":"turn-1",` +
-          `"surfaceId":"${surfaceId}","label":"Proposal ${index}",` +
-          '"steps":[{"stepId":"detail","actionId":"hotel.detail",' +
-          '"args":{"hotelId":101}}]}'
-      ) as ActionPlan);
-    }
-    rendered.proposals = proposals;
     return rendered;
   }
 }
@@ -273,6 +250,7 @@ class DeferredSkeletonRenderer implements UiTaskRenderer {
   async result(
     _task: CreateUiTaskPayload,
     _data: DataResult,
+    _offers: ActionOffer[],
     _surfaceId: string
   ): Promise<UiRenderResult> {
     return render('result');
@@ -339,6 +317,7 @@ function uiTaskMessage(
 ): AgentMessage {
   const payload: CreateUiTaskPayload = {
     taskId,
+    skillId: '',
     intent: 'Show hotel results',
     expectedOutputSchema,
     dataTaskId
@@ -391,6 +370,40 @@ function dataResultMessage(
   };
 }
 
+function offersReadyMessage(
+  conversationId: string,
+  turnId: string,
+  taskId: string,
+  offers: ActionOffer[] = [],
+  sourceToolId: string = 'hotel.search'
+): AgentMessage {
+  const payload: ActionOffersReadyPayload = {
+    dataTaskId: taskId,
+    sourceToolId,
+    offers
+  };
+  return {
+    type: AgentMessageType.ACTION_OFFERS_READY,
+    conversationId,
+    turnId,
+    taskId,
+    payload
+  };
+}
+
+function publishData(
+  bus: LinkedMessageBus,
+  conversationId: string,
+  turnId: string,
+  taskId: string,
+  hotelId: number,
+  outputSchema: string = 'hotelSearchResults',
+  offers: ActionOffer[] = []
+): void {
+  bus.publish(dataResultMessage(conversationId, turnId, taskId, hotelId, outputSchema));
+  bus.publish(offersReadyMessage(conversationId, turnId, taskId, offers));
+}
+
 function turnMessage(
   type: AgentMessageType,
   conversationId: string,
@@ -413,8 +426,7 @@ function actionPayload(surfaceId: string, runId: string, status: string): Action
 
 function render(jsonl: string): UiRenderResult {
   return {
-    jsonl: JSON.stringify(jsonl),
-    proposals: []
+    jsonl: JSON.stringify(jsonl)
   };
 }
 
@@ -475,7 +487,7 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       const skeletonMessage: AgentMessage = await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 101);
       const resultMessage: AgentMessage = await receiveUiState(observer, 'result');
       const skeleton: UiRenderResultPayload = skeletonMessage.payload as UiRenderResultPayload;
       const result: UiRenderResultPayload = resultMessage.payload as UiRenderResultPayload;
@@ -500,11 +512,11 @@ export default function uiAgentTest() {
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 202));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 202);
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
       await receiveUiState(observer, 'result');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 202));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 202);
       bus.publish(turnMessage(
         AgentMessageType.ACTION_PROGRESS,
         'conversation-a',
@@ -532,11 +544,11 @@ export default function uiAgentTest() {
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 301));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 301);
       bus.publish(uiTaskMessage('conversation-a', 'turn-2', 'ui-2', 'data-2'));
       await receiveUiState(observer, 'skeleton');
       expect(renderer.resultHotelIds.length).assertEqual(0);
-      bus.publish(dataResultMessage('conversation-a', 'turn-2', 'data-2', 302));
+      publishData(bus, 'conversation-a', 'turn-2', 'data-2', 302);
       await receiveUiState(observer, 'result');
 
       expect(renderer.resultHotelIds.join(',')).assertEqual('302');
@@ -561,9 +573,9 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-wrong', 901));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-wrong', 901);
       bus.publish(turnMessage(AgentMessageType.TASK_ERROR, 'conversation-a', 'turn-1', 'data-wrong', wrongError));
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 902));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 902);
       await receiveUiState(observer, 'result');
 
       expect(renderer.resultHotelIds.join(',')).assertEqual('902');
@@ -580,8 +592,8 @@ export default function uiAgentTest() {
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-wrong', 911));
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 912));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-wrong', 911);
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 912);
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
       await receiveUiState(observer, 'result');
@@ -599,7 +611,7 @@ export default function uiAgentTest() {
       const observer: AgentMessageReader = bus.openReader();
       agent.start();
 
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 913));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 913);
       bus.publish(turnMessage(
         AgentMessageType.TASK_RESULT_DATA,
         'conversation-a',
@@ -626,7 +638,7 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 921, 'wrongSchema'));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 921, 'wrongSchema');
       const errorMessage: AgentMessage = await receiveType(observer, AgentMessageType.TASK_ERROR);
 
       expect(errorMessage.taskId).assertEqual('data-1');
@@ -668,11 +680,11 @@ export default function uiAgentTest() {
       await receiveUiState(observer, 'skeleton');
       const oldSurface: string = writer.writes[0].surfaceId;
       agent.surfaceReplaced('conversation-a', 'turn-old', oldSurface);
-      bus.publish(dataResultMessage('conversation-a', 'turn-old', 'data-old', 401));
+      publishData(bus, 'conversation-a', 'turn-old', 'data-old', 401);
       bus.publish(uiTaskMessage('conversation-a', 'turn-cancel', 'ui-cancel'));
       await receiveUiState(observer, 'skeleton');
       bus.publish(turnMessage(AgentMessageType.TURN_CANCEL, 'conversation-a', 'turn-cancel', 'cancel-1'));
-      bus.publish(dataResultMessage('conversation-a', 'turn-cancel', 'data-cancel', 402));
+      publishData(bus, 'conversation-a', 'turn-cancel', 'data-cancel', 402);
       await settle();
       bus.publish(turnMessage(AgentMessageType.INPUT_USER, 'marker', 'marker', 'marker'));
       while ((await receive(observer)).type !== AgentMessageType.INPUT_USER) {
@@ -852,7 +864,7 @@ export default function uiAgentTest() {
       observer.close();
     });
 
-    it('publishes composite proposals and renders only the exact ready workflow identity', 0, async () => {
+    it('waits for immutable Action offers and renders only exact workflow READY', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const renderer: ProposalRenderer = new ProposalRenderer();
       const writer: RecordingSurfaceWriter = new RecordingSurfaceWriter();
@@ -862,35 +874,50 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
+      const offer: ActionOffer = {
+        offerId: 'offer-detail-101',
+        actionId: 'hotel.detail',
+        label: '查看实时房型',
+        variant: 'primary',
+        args: JSON.parse('{"hotelId":101}') as Object
+      };
+      bus.publish(offersReadyMessage('conversation-a', 'turn-1', 'data-1', [offer]));
+      await settle();
+      const offeredArgs = offer.args as Record<
+        string,
+        Object | string | number | boolean | null | undefined
+      >;
+      offeredArgs['hotelId'] = 999;
+      expect(writer.writes.length).assertEqual(1);
       bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
-      const createMessage = await receiveType(observer, AgentMessageType.ACTION_PLAN_CREATE);
-      const create = createMessage.payload as ActionPlanCreatePayload;
+      await receiveUiState(observer, 'result');
 
       expect(writer.writes.length).assertEqual(2);
       expect(writer.writes[1].jsonl).assertEqual(JSON.stringify('result:101'));
-      expect(create.sourceToolId).assertEqual('hotel.search');
-      expect(create.plan.planId).assertEqual('plan-ui-1');
-      expect(create.plan.surfaceId).assertEqual(renderer.proposalSurfaceId);
+      expect(renderer.resultOfferIds.join(',')).assertEqual('offer-detail-101');
+      expect(renderer.resultOfferHotelIds.join(',')).assertEqual('101');
 
       const ready: ActionPlanReadyPayload = {
-        surfaceId: create.plan.surfaceId,
-        planId: create.plan.planId,
-        runId: create.runId,
-        label: create.plan.label,
+        uiTaskId: 'ui-1',
+        surfaceId: writer.writes[1].surfaceId,
+        planId: 'plan-ui-1',
+        runId: 'run-ui-1',
+        label: 'Open detail and navigate',
         actionId: 'workflow.run',
         args: {
-          planId: create.plan.planId,
-          runId: create.runId
+          planId: 'plan-ui-1',
+          runId: 'run-ui-1'
         }
       };
       bus.publish(turnMessage(
         AgentMessageType.ACTION_PLAN_READY,
         'conversation-a',
         'turn-wrong',
-        createMessage.taskId,
+        'action-draft:run-ui-1',
         ready
       ));
       const wrongSurface: ActionPlanReadyPayload = {
+        uiTaskId: ready.uiTaskId,
         surfaceId: 'surface-wrong',
         planId: ready.planId,
         runId: ready.runId,
@@ -902,14 +929,15 @@ export default function uiAgentTest() {
         AgentMessageType.ACTION_PLAN_READY,
         'conversation-a',
         'turn-1',
-        createMessage.taskId,
+        'action-draft:run-ui-1',
         wrongSurface
       ));
-      const wrongLabel: ActionPlanReadyPayload = {
+      const wrongUiTask: ActionPlanReadyPayload = {
+        uiTaskId: 'ui-wrong',
         surfaceId: ready.surfaceId,
         planId: ready.planId,
         runId: ready.runId,
-        label: 'Tampered workflow label',
+        label: ready.label,
         actionId: ready.actionId,
         args: ready.args
       };
@@ -917,8 +945,8 @@ export default function uiAgentTest() {
         AgentMessageType.ACTION_PLAN_READY,
         'conversation-a',
         'turn-1',
-        createMessage.taskId,
-        wrongLabel
+        'action-draft:run-ui-1',
+        wrongUiTask
       ));
       const extraReady = JSON.parse(JSON.stringify(ready)) as Object;
       const extraRecord =
@@ -928,7 +956,7 @@ export default function uiAgentTest() {
         AgentMessageType.ACTION_PLAN_READY,
         'conversation-a',
         'turn-1',
-        createMessage.taskId,
+        'action-draft:run-ui-1',
         extraReady
       ));
       await settle();
@@ -938,7 +966,7 @@ export default function uiAgentTest() {
         AgentMessageType.ACTION_PLAN_READY,
         'conversation-a',
         'turn-1',
-        createMessage.taskId,
+        'action-draft:run-ui-1',
         ready
       ));
       await receiveUiState(observer, 'action');
@@ -946,11 +974,11 @@ export default function uiAgentTest() {
       expect(writer.writes.length).assertEqual(3);
       expect(writer.writes[2].jsonl).assertEqual(
         `{"workflow":{"name":"workflow.run","args":` +
-          `{"planId":"plan-ui-1","runId":"${create.runId}"}}}`
+          `{"planId":"plan-ui-1","runId":"run-ui-1"}}}`
       );
       expect(Object.keys(ready.args).sort().join(',')).assertEqual('planId,runId');
       expect(renderer.readyKeys).assertEqual(
-        'actionId,args,label,planId,runId,surfaceId'
+        'actionId,args,label,planId,runId,surfaceId,uiTaskId'
       );
       expect(renderer.readyLabel).assertEqual('Open detail and navigate');
 
@@ -968,7 +996,7 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 101);
       const failed = await receiveType(observer, AgentMessageType.TASK_ERROR);
       await settle();
 
@@ -1011,7 +1039,7 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
+      publishData(bus, 'conversation-a', 'turn-1', 'data-1', 101);
       await receiveTaskErrorCode(observer, 'UI_RENDER_FAILED');
 
       expect(writer.writes.length).assertEqual(1);
@@ -1078,9 +1106,9 @@ export default function uiAgentTest() {
       progressObserver.close();
     });
 
-    it('rejects more than five proposals before result write or publication', 0, async () => {
+    it('ignores Action offers for another Data task and never creates plans', 0, async () => {
       const bus = new LinkedMessageBus();
-      const renderer = new ManyProposalRenderer(6);
+      const renderer = new RecordingRenderer();
       const writer = new RecordingSurfaceWriter();
       const agent = new UiAgent(bus, renderer, writer);
       const observer = bus.openReader();
@@ -1089,134 +1117,35 @@ export default function uiAgentTest() {
       bus.publish(uiTaskMessage());
       await receiveUiState(observer, 'skeleton');
       bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
-      let createCount = 0;
-      let resultCount = 0;
-      while (true) {
-        const current = await receive(observer);
-        if (current.type === AgentMessageType.ACTION_PLAN_CREATE) {
-          createCount++;
-        }
-        if (current.type === AgentMessageType.TASK_RESULT_UI &&
-          (current.payload as UiRenderResultPayload).state === 'result') {
-          resultCount++;
-        }
-        if (current.type === AgentMessageType.TASK_ERROR &&
-          (current.payload as TaskErrorPayload).code === 'UI_RENDER_FAILED') {
-          break;
-        }
-      }
+      bus.publish(offersReadyMessage('conversation-a', 'turn-1', 'data-wrong'));
+      bus.publish(offersReadyMessage(
+        'conversation-a',
+        'turn-1',
+        'data-1',
+        [],
+        'hotel.detail'
+      ));
       await settle();
-      bus.publish(turnMessage(
-        AgentMessageType.INPUT_USER,
-        'marker',
-        'marker',
-        'proposal-cap-marker'
-      ));
-      let observed = await receive(observer);
-      while (observed.type !== AgentMessageType.INPUT_USER) {
-        if (observed.type === AgentMessageType.ACTION_PLAN_CREATE) {
-          createCount++;
-        }
-        if (observed.type === AgentMessageType.TASK_RESULT_UI &&
-          (observed.payload as UiRenderResultPayload).state === 'result') {
-          resultCount++;
-        }
-        observed = await receive(observer);
-      }
-
-      expect(createCount).assertEqual(0);
-      expect(resultCount).assertEqual(0);
       expect(writer.writes.length).assertEqual(1);
-      agent.stop();
-      observer.close();
-    });
+      bus.publish(offersReadyMessage('conversation-a', 'turn-1', 'data-1'));
+      await receiveUiState(observer, 'result');
+      expect(writer.writes.length).assertEqual(2);
 
-    it('clears exact proposal correlations on invalid and capacity results', 0, async () => {
-      const bus = new LinkedMessageBus();
-      const renderer = new ManyProposalRenderer(2);
-      const writer = new RecordingSurfaceWriter();
-      const agent = new UiAgent(bus, renderer, writer);
-      const observer = bus.openReader();
-      agent.start();
-
-      bus.publish(uiTaskMessage());
-      await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-a', 'turn-1', 'data-1', 101));
-      const firstCreateMessage = await receiveType(
-        observer,
-        AgentMessageType.ACTION_PLAN_CREATE
-      );
-      const secondCreateMessage = await receiveType(
-        observer,
-        AgentMessageType.ACTION_PLAN_CREATE
-      );
-      const firstCreate = firstCreateMessage.payload as ActionPlanCreatePayload;
-      const secondCreate = secondCreateMessage.payload as ActionPlanCreatePayload;
-      const firstFailure: ActionResultPayload = {
-        surfaceId: firstCreate.plan.surfaceId,
-        planId: firstCreate.plan.planId,
-        runId: firstCreate.runId,
-        status: 'error',
-        completedStepIds: [],
-        errorCode: 'ACTION_PLAN_CREATE_INVALID',
-        message: 'Invalid proposal.'
-      };
-      const secondFailure: ActionResultPayload = {
-        surfaceId: secondCreate.plan.surfaceId,
-        planId: secondCreate.plan.planId,
-        runId: secondCreate.runId,
-        status: 'error',
-        completedStepIds: [],
-        errorCode: 'ACTION_STATE_CAPACITY',
-        message: 'Capacity exhausted.'
-      };
-      bus.publish(turnMessage(
-        AgentMessageType.ACTION_RESULT,
-        'conversation-a',
-        'turn-1',
-        firstCreateMessage.taskId,
-        firstFailure
-      ));
-      bus.publish(turnMessage(
-        AgentMessageType.ACTION_RESULT,
-        'conversation-a',
-        'turn-1',
-        secondCreateMessage.taskId,
-        secondFailure
-      ));
-      await receiveUiState(observer, 'action');
-      await receiveUiState(observer, 'action');
-      const writesBeforeReady = writer.writes.length;
-      const replayReady: ActionPlanReadyPayload = {
-        surfaceId: firstCreate.plan.surfaceId,
-        planId: firstCreate.plan.planId,
-        runId: firstCreate.runId,
-        label: firstCreate.plan.label,
-        actionId: 'workflow.run',
-        args: {
-          planId: firstCreate.plan.planId,
-          runId: firstCreate.runId
-        }
-      };
-      bus.publish(turnMessage(
-        AgentMessageType.ACTION_PLAN_READY,
-        'conversation-a',
-        'turn-1',
-        firstCreateMessage.taskId,
-        replayReady
-      ));
       bus.publish(turnMessage(
         AgentMessageType.INPUT_USER,
         'marker',
         'marker',
-        'proposal-clear-marker'
+        'offer-marker'
       ));
+      let planMessages = 0;
       let observed = await receive(observer);
       while (observed.type !== AgentMessageType.INPUT_USER) {
+        if (observed.type === AgentMessageType.ACTION_PLAN_DRAFT) {
+          planMessages++;
+        }
         observed = await receive(observer);
       }
-
-      expect(writer.writes.length).assertEqual(writesBeforeReady);
+      expect(planMessages).assertEqual(0);
       agent.stop();
       observer.close();
     });
@@ -1393,7 +1322,7 @@ export default function uiAgentTest() {
 
       bus.publish(uiTaskMessage('conversation-next', 'turn-next', 'ui-next', 'data-next'));
       await receiveUiState(observer, 'skeleton');
-      bus.publish(dataResultMessage('conversation-next', 'turn-next', 'data-next', 931));
+      publishData(bus, 'conversation-next', 'turn-next', 'data-next', 931);
       await receiveUiState(observer, 'result');
 
       expect(renderer.resultHotelIds.join(',')).assertEqual('931');

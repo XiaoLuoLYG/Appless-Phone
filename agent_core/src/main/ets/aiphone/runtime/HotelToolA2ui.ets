@@ -9,6 +9,7 @@ import {
 } from './A2uiTypes';
 import { genericToolResultsA2ui } from './DynamicToolA2ui';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
+import { ActionOffer } from '../../agent/action/ActionOfferTypes';
 import {
   hotelActionsFor,
   hotelBookingOpenAction,
@@ -172,6 +173,18 @@ function searchResultFor(
   request: HotelSearchRequest,
   canPlace: (action: A2uiAction) => boolean
 ): DynamicGenericToolResult {
+  return searchResultWithActions(
+    hotel,
+    request,
+    hotelActionsFor(hotel, request, canPlace)
+  );
+}
+
+function searchResultWithActions(
+  hotel: HotelSearchItem,
+  request: HotelSearchRequest,
+  actions: A2uiAction[]
+): DynamicGenericToolResult {
   const price = hotel.price.hasPrice ? numberText(hotel.price.lowestPrice) + ' ' + hotel.price.currency : '暂无价格';
   const summaryParts: string[] = [price];
   if (hotel.address.length > 0) {
@@ -185,8 +198,31 @@ function searchResultFor(
     summary: summaryParts.join(' · '),
     rows: searchRows(hotel, request),
     rawPreview: '',
-    actions: hotelActionsFor(hotel, request, canPlace)
+    actions
   };
+}
+
+function offerAction(offer: ActionOffer): A2uiAction {
+  return {
+    id: offer.actionId,
+    label: offer.label,
+    prompt: offer.label,
+    kind: 'prompt',
+    variant: offer.variant,
+    args: offer.args
+  };
+}
+
+function offersForHotel(offers: ActionOffer[], hotelId: number): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  for (let index = 0; index < offers.length; index++) {
+    const args = offers[index].args as Record<string, Object | string | number | boolean | null | undefined>;
+    if (args !== null && typeof args === 'object' && !Array.isArray(args) &&
+      args['hotelId'] === hotelId) {
+      actions.push(offerAction(offers[index]));
+    }
+  }
+  return actions;
 }
 
 function rateRows(result: HotelDetailResult, rate: HotelRatePlan): A2uiLabelValueData[] {
@@ -272,6 +308,44 @@ export function hotelSearchA2ui(
   return genericToolResultsA2ui(surfaceId, 'hotel.search', items, 'hotel', '酒店搜索');
 }
 
+export function hotelSearchA2uiFromOffers(
+  surfaceId: string,
+  result: HotelSearchResult,
+  offers: ActionOffer[],
+  warnings: string[] = []
+): string {
+  const items: DynamicGenericToolResult[] = [];
+  if (!result.ok) {
+    items.push(searchErrorResult(result));
+  } else {
+    result.hotels.forEach((hotel: HotelSearchItem) => {
+      items.push(searchResultWithActions(
+        hotel,
+        result.query,
+        offersForHotel(offers, hotel.hotelId)
+      ));
+    });
+    if (items.length === 0) {
+      items.push({
+        sourceTag: HOTEL_SOURCE,
+        toolName: 'hotel.search',
+        title: '没有找到符合条件的酒店',
+        status: 'empty',
+        summary: result.message,
+        rows: [
+          row('目的地', result.query.place),
+          row('入住', result.query.checkInDate + ' → ' + result.query.checkOutDate),
+          row('客人', occupancyText(result.query.adultCount, result.query.childCount, result.query.roomCount)),
+          row('能力边界', HOTEL_LIMITATION)
+        ],
+        rawPreview: ''
+      });
+    }
+  }
+  appendWarnings(items, warnings);
+  return genericToolResultsA2ui(surfaceId, 'hotel.search', items, 'hotel', '酒店搜索');
+}
+
 export function hotelDetailA2ui(
   surfaceId: string,
   result: HotelDetailResult,
@@ -313,6 +387,55 @@ export function hotelDetailA2ui(
   }
   appendWarnings(items, warnings);
   return genericToolResultsA2ui(surfaceId, 'hotel.detail', items, 'hotel', result.name.length > 0 ? result.name : '实时房型与报价');
+}
+
+export function hotelDetailA2uiFromOffers(
+  surfaceId: string,
+  result: HotelDetailResult,
+  offers: ActionOffer[],
+  warnings: string[] = []
+): string {
+  const items: DynamicGenericToolResult[] = [];
+  if (!result.ok) {
+    items.push(detailErrorResult(result));
+  } else {
+    result.rates.forEach((rate: HotelRatePlan) => items.push(rateResultFor(result, rate)));
+    if (items.length === 0) {
+      items.push({
+        sourceTag: HOTEL_SOURCE,
+        toolName: 'hotel.detail',
+        title: result.name,
+        status: 'empty',
+        summary: '供应商没有返回可展示的实时房型。',
+        rows: [
+          row('酒店 ID', result.hotelId.toString()),
+          row('入住', result.checkIn + ' → ' + result.checkOut),
+          row('客人', occupancyText(result.query.adultCount, result.query.childCount, result.query.roomCount)),
+          row('能力边界', HOTEL_LIMITATION)
+        ],
+        rawPreview: ''
+      });
+    }
+  }
+  if (items.length > 0) {
+    const actions: A2uiAction[] = [restoreSearchAction()];
+    const offered = offersForHotel(offers, result.hotelId);
+    for (let index = 0; index < offered.length; index++) {
+      actions.push(offered[index]);
+      if (offered[index].id === 'hotel.booking.open') {
+        items[0].rows.push(row('预订说明', HOTEL_BOOKING_NOTE));
+      }
+    }
+    items[0].actions = actions;
+  }
+  appendWarnings(items, warnings);
+  return genericToolResultsA2ui(
+    surfaceId,
+    'hotel.detail',
+    items,
+    'hotel',
+    result.name.length > 0 ? result.name : '实时房型与报价'
+  );
 }
 
 export function hotelFailureA2ui(surfaceId: string, toolId: string, message: string): string {

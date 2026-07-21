@@ -3,6 +3,7 @@ import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 import {
   ActionExecutionContext,
   ActionPlan,
+  ActionPlanDraft,
   ActionPlanRunContext,
   ActionPlanStepOutput,
   JsonValue
@@ -13,13 +14,15 @@ export interface WorkflowRunArgs {
   runId: string;
 }
 
-export interface ActionPlanCreatePayload {
-  runId: string;
+export interface ActionPlanDraftPayload {
+  uiTaskId: string;
+  dataTaskId: string;
   sourceToolId: string;
-  plan: ActionPlan;
+  draft: ActionPlanDraft;
 }
 
 export interface ActionPlanReadyPayload {
+  uiTaskId: string;
   surfaceId: string;
   planId: string;
   runId: string;

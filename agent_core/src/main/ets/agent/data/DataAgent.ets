@@ -6,18 +6,29 @@ import {
 } from '../message/AgentMessage';
 import { DataResult } from '../message/DataResult';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
-import { CreateDataTaskPayload, DataTaskExecutor } from './DataAgentTypes';
+import {
+  CreateDataTaskPayload,
+  DataTaskAuthorizationResult,
+  DataTaskAuthorizer,
+  DataTaskExecutor
+} from './DataAgentTypes';
 
 export class DataAgent extends StructuredMessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
+  private readonly authorizer: DataTaskAuthorizer;
   private readonly executor: DataTaskExecutor;
   private readonly canceled: Set<string> = new Set<string>();
   private active: boolean = false;
   private generation: number = 0;
 
-  constructor(bus: LinkedMessageBus, executor: DataTaskExecutor) {
+  constructor(
+    bus: LinkedMessageBus,
+    authorizer: DataTaskAuthorizer,
+    executor: DataTaskExecutor
+  ) {
     super(bus);
     this.bus = bus;
+    this.authorizer = authorizer;
     this.executor = executor;
   }
 
@@ -56,6 +67,21 @@ export class DataAgent extends StructuredMessageDrivenAgent {
       this.publishInputError(message, 'DATA_TASK_INVALID', 'Data task payload is malformed');
       return;
     }
+    let authorization: DataTaskAuthorizationResult;
+    try {
+      authorization = this.authorizer(task);
+    } catch (_error) {
+      this.publishInputError(message, 'DATA_TASK_UNAUTHORIZED', 'Data task authorization failed');
+      return;
+    }
+    if (!authorization.ok) {
+      this.publishInputError(
+        message,
+        authorization.code.length === 0 ? 'DATA_TASK_UNAUTHORIZED' : authorization.code,
+        authorization.message.length === 0 ? 'Data task is not authorized' : authorization.message
+      );
+      return;
+    }
     this.execute(message, task, key);
   }
 
@@ -65,7 +91,15 @@ export class DataAgent extends StructuredMessageDrivenAgent {
       this.executor.execute(task)
         .then((result: DataResult) => {
           if (this.canPublish(key, generation)) {
-            this.publishResult(message, result);
+            if (this.validResult(task, result)) {
+              this.publishResult(message, result);
+            } else {
+              this.publishInputError(
+                message,
+                'DATA_TASK_OUTPUT_INVALID',
+                'Data task output does not match the authorized task'
+              );
+            }
           }
         })
         .catch((error: Object) => {
@@ -126,16 +160,26 @@ export class DataAgent extends StructuredMessageDrivenAgent {
     }
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const payloadTaskId = values['taskId'];
+    const skillId = values['skillId'];
     const toolId = values['toolId'];
     const outputSchema = values['outputSchema'];
     const args = values['args'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
+      typeof skillId !== 'string' ||
       typeof toolId !== 'string' || toolId.trim().length === 0 ||
       typeof outputSchema !== 'string' || outputSchema.trim().length === 0 ||
       args === null || typeof args !== 'object' || Array.isArray(args)) {
       return null;
     }
     return payload as CreateDataTaskPayload;
+  }
+
+  private validResult(task: CreateDataTaskPayload, result: DataResult): boolean {
+    return result !== null && typeof result === 'object' &&
+      result.toolId === task.toolId && result.outputSchema === task.outputSchema &&
+      Array.isArray(result.sources) && Array.isArray(result.warnings) &&
+      (result.status === 'success' || result.status === 'partial' ||
+        result.status === 'empty' || result.status === 'error');
   }
 
   private turnKey(message: AgentMessage): string {
