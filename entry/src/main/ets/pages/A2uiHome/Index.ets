@@ -10,7 +10,7 @@ import {
 } from '@loop/agent-core';
 import { isRollingGoHotelBookingUrl } from '@loop/agent-core';
 import router from '@ohos.router';
-import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
@@ -102,6 +102,15 @@ import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import {
+  emptyTrainPresaleTrip,
+  scheduleTrainPresaleTask,
+  TrainPresaleConfirmationInput,
+  TrainPresaleConfirmationResult,
+  TrainPresalePanelSubmission,
+  TrainPresaleTrip,
+  validateTrainPresaleConfirmation
+} from './components/TrainPresalePanel';
+import {
   CheckoutWebKind,
   isAllowed12306BookingUrl
 } from './components/CheckoutWebOverlay';
@@ -118,6 +127,12 @@ import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
+import { SystemOneShotScheduler } from './train/SystemOneShotScheduler';
+import {
+  TRAIN_PRESALE_TASK_STORE_NAME,
+  TrainPresaleTask,
+  TrainPresaleTaskStore
+} from './train/TrainPresaleTaskStore';
 import {
   A2UI_FOOD_PARTIAL_THROTTLE_DEFAULT_MS,
   HTML_HOME_DEBUG_EXPORT_FILE_NAME,
@@ -387,6 +402,16 @@ interface TrainBookingActionPayload {
   bookingUrl?: HtmlActionValue;
 }
 
+interface TrainPresaleScheduleActionPayload {
+  trainCode?: HtmlActionValue;
+  travelDate?: HtmlActionValue;
+  from?: HtmlActionValue;
+  fromCode?: HtmlActionValue;
+  to?: HtmlActionValue;
+  toCode?: HtmlActionValue;
+  saleAt?: HtmlActionValue;
+}
+
 interface StripeOnboardingActionPayload {
   onboardingUrl?: HtmlActionValue;
 }
@@ -566,6 +591,12 @@ struct Index {
   @State showCheckoutWeb: boolean = false;
   @State checkoutWebKind: CheckoutWebKind = 'payment';
   @State checkoutWebUrl: string = '';
+  @State showTrainPresalePanel: boolean = false;
+  @State trainPresaleTrip: TrainPresaleTrip = emptyTrainPresaleTrip();
+  @State trainPresaleTaskState: string = '';
+  @State trainPresaleError: string = '';
+  @State trainPresaleWorking: boolean = false;
+  @State isDebugBuild: boolean = false;
   @State paymentCheckoutProvider: string = '';
   @State paymentCheckoutProviderSessionId: string = '';
   @State paymentCheckoutRecipient: string = '';
@@ -602,6 +633,7 @@ struct Index {
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
+  private trainPresaleTask: TrainPresaleTask | null = null;
 
   private isLuckinOptionSwitchArgs(args: Object | null): boolean {
     if (args === null) {
@@ -683,6 +715,7 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    this.readDebugBuildState();
     this.configureDidiMcpSandboxRuntime(true);
     this.configureComposioRuntimeForCurrentUser();
     this.loadPersonaOverrides();
@@ -693,6 +726,18 @@ struct Index {
 
   aboutToDisappear(): void {
     this.disposeHotelRuntime();
+  }
+
+  private readDebugBuildState(): void {
+    try {
+      this.isDebugBuild = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION
+      ).appInfo.debug;
+    } catch (error) {
+      this.isDebugBuild = false;
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[AIPhone][DebugBuildState] error=' + message.substring(0, 240));
+    }
   }
 
   private personaPackStore(): PreferencesPersonaPackStore | null {
@@ -2886,6 +2931,141 @@ struct Index {
     return this.actionText(payload.bookingUrl).trim();
   }
 
+  private trainPresaleTripForAction(action: A2uiAction): TrainPresaleTrip | null {
+    if (action.args === undefined) {
+      return null;
+    }
+    const payload = action.args as TrainPresaleScheduleActionPayload;
+    const trip: TrainPresaleTrip = {
+      trainCode: this.actionText(payload.trainCode).trim(),
+      travelDate: this.actionText(payload.travelDate).trim(),
+      fromName: this.actionText(payload.from).trim(),
+      fromCode: this.actionText(payload.fromCode).trim(),
+      toName: this.actionText(payload.to).trim(),
+      toCode: this.actionText(payload.toCode).trim(),
+      saleAt: this.actionText(payload.saleAt).trim()
+    };
+    return trip.trainCode.length > 0 && trip.travelDate.length > 0 && trip.fromName.length > 0 &&
+      trip.fromCode.length > 0 && trip.toName.length > 0 && trip.toCode.length > 0 && trip.saleAt.length > 0 ? trip : null;
+  }
+
+  private openTrainPresalePanel(action: A2uiAction): void {
+    const trip = this.trainPresaleTripForAction(action);
+    if (trip === null) {
+      this.logHtmlHomeActionError(action, 'invalid_train_presale_args');
+      return;
+    }
+    this.trainPresaleTrip = trip;
+    this.trainPresaleTask = null;
+    this.trainPresaleTaskState = '';
+    this.trainPresaleError = '';
+    this.trainPresaleWorking = false;
+    this.showCheckoutWeb = false;
+    this.showTrainPresalePanel = true;
+    aiLogInfo('[AIPhone][TrainPresalePanel] train=' + trip.trainCode + ' open=true');
+  }
+
+  private trainPresaleStore(): TrainPresaleTaskStore | null {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    if (context === null) {
+      return null;
+    }
+    return new TrainPresaleTaskStore(preferences.getPreferencesSync(context, {
+      name: TRAIN_PRESALE_TASK_STORE_NAME
+    }));
+  }
+
+  private async confirmTrainPresale(submission: TrainPresalePanelSubmission): Promise<void> {
+    if (this.trainPresaleWorking) {
+      return;
+    }
+    this.trainPresaleWorking = true;
+    this.trainPresaleError = '';
+    const now = new Date();
+    const input: TrainPresaleConfirmationInput = {
+      source: submission.source,
+      trainCode: this.trainPresaleTrip.trainCode,
+      travelDate: this.trainPresaleTrip.travelDate,
+      fromName: this.trainPresaleTrip.fromName,
+      fromCode: this.trainPresaleTrip.fromCode,
+      toName: this.trainPresaleTrip.toName,
+      toCode: this.trainPresaleTrip.toCode,
+      saleAt: this.trainPresaleTrip.saleAt,
+      passengerNames: submission.passengerNames,
+      seatPriority: submission.seatPriority,
+      unpaidOrderAuthorized: submission.unpaidOrderAuthorized,
+      debugEnabled: this.isDebugBuild,
+      debugConfirmed: submission.debugConfirmed,
+      taskId: 'train-presale-' + now.getTime().toString(),
+      createdAt: now.toISOString()
+    };
+    const result: TrainPresaleConfirmationResult = validateTrainPresaleConfirmation(input);
+    if (result.task === undefined) {
+      this.trainPresaleError = result.error;
+      this.trainPresaleWorking = false;
+      return;
+    }
+    if (result.task.source === 'debug') {
+      this.trainPresaleError = '10秒测试尚未接通；本次没有创建或调度任务。';
+      this.trainPresaleWorking = false;
+      return;
+    }
+    const task = result.task;
+    try {
+      const store = this.trainPresaleStore();
+      if (store === null) {
+        throw new Error('缺少应用上下文');
+      }
+      const scheduleResult = await scheduleTrainPresaleTask(task, store, new SystemOneShotScheduler());
+      if (scheduleResult.task === undefined) {
+        this.trainPresaleError = scheduleResult.error;
+        aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+          ' error=' + scheduleResult.error.substring(0, 240));
+      } else {
+        this.trainPresaleTask = scheduleResult.task;
+        this.trainPresaleTaskState = 'scheduled';
+        aiLogInfo('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+          ' reminderId=' + scheduleResult.task.reminderId.toString());
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.trainPresaleError = '提醒创建失败：' + message;
+      aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId + ' error=' + message.substring(0, 240));
+    }
+    this.trainPresaleWorking = false;
+  }
+
+  private async cancelTrainPresaleTask(): Promise<void> {
+    const task = this.trainPresaleTask;
+    if (task === null || task.state !== 'scheduled' || this.trainPresaleWorking) {
+      return;
+    }
+    this.trainPresaleWorking = true;
+    this.trainPresaleError = '';
+    try {
+      const store = this.trainPresaleStore();
+      if (store === null) {
+        throw new Error('缺少应用上下文');
+      }
+      if (task.reminderId >= 0) {
+        await new SystemOneShotScheduler().cancel(task.reminderId);
+      }
+      store.cancel(task.taskId);
+      const persisted = store.get(task.taskId);
+      if (persisted === undefined || persisted.state !== 'cancelled') {
+        throw new Error('任务取消状态保存失败');
+      }
+      this.trainPresaleTask = persisted;
+      this.trainPresaleTaskState = 'cancelled';
+      aiLogInfo('[AIPhone][TrainPresaleCancel] taskId=' + task.taskId + ' ok=true');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.trainPresaleError = '取消任务失败：' + message;
+      aiLogError('[AIPhone][TrainPresaleCancel] taskId=' + task.taskId + ' error=' + message.substring(0, 240));
+    }
+    this.trainPresaleWorking = false;
+  }
+
   private luckinPayUrlForAction(action: A2uiAction): string {
     if (action.args !== undefined) {
       const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
@@ -3532,6 +3712,10 @@ struct Index {
       this.checkoutWebKind = 'payment';
       this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
+      return;
+    }
+    if (action.id === 'train.presale.schedule') {
+      this.openTrainPresalePanel(action);
       return;
     }
     if (action.id === 'train.booking.open') {
@@ -4206,6 +4390,12 @@ struct Index {
         showCheckoutWeb: this.showCheckoutWeb,
         checkoutWebKind: this.checkoutWebKind,
         checkoutWebUrl: this.checkoutWebUrl,
+        showTrainPresalePanel: this.showTrainPresalePanel,
+        trainPresaleTrip: this.trainPresaleTrip,
+        trainPresaleTaskState: this.trainPresaleTaskState,
+        trainPresaleError: this.trainPresaleError,
+        trainPresaleWorking: this.trainPresaleWorking,
+        isDebugBuild: this.isDebugBuild,
         onToggleHistory: () => {
           this.showHistory = !this.showHistory;
         },
@@ -4246,6 +4436,17 @@ struct Index {
         },
         onCheckoutWebReturn: (url: string) => {
           this.handlePaymentCheckoutReturn(url);
+        },
+        onTrainPresaleConfirm: (submission: TrainPresalePanelSubmission) => {
+          void this.confirmTrainPresale(submission);
+        },
+        onCloseTrainPresale: () => {
+          if (!this.trainPresaleWorking) {
+            this.showTrainPresalePanel = false;
+          }
+        },
+        onCancelTrainPresaleTask: () => {
+          void this.cancelTrainPresaleTask();
         },
         onAction: (action: A2uiAction) => {
           this.sendAction(action);
