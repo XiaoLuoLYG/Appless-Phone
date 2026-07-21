@@ -41,38 +41,60 @@ const SEARCH_INPUT: string = '{"originQuery":"帮我找深圳酒店","place":"�
   '"stayNights":2,"adultCount":2,"childCount":0,"childAgeDetails":[],' +
   '"roomCount":1,"currency":"CNY","size":10}';
 const ANSWER_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"conversation",' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"conversation",' +
   '"preferredDensity":"comfortable","requiredSections":[]},"answer":"你好",' +
   '"reasonCode":"greeting"}';
 const MEMORY_DECISION: string = '{"personaId":"food_companion","skillId":"",' +
-  '"roundAction":"execute","dataTasks":[],"uiIntent":{"purpose":"memory.update",' +
+  '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"memory.update",' +
   '"preferredDensity":"comfortable","requiredSections":[]},"actionIntent":{' +
   '"goal":"remember explicit preference","allowedActionIds":["memory.update"]},' +
   '"reasonCode":"stable_preference"}';
 const HOTEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"roundAction":"execute","dataTasks":[{"localId":"hotel-search",' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"hotel-search",' +
   '"goal":"search real hotels","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":' + SEARCH_INPUT + ',"required":true}],' +
   '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
   '"requiredSections":["hotels"]},"reasonCode":"hotel_search"}';
 const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"hotel.search",' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
-  '"roundAction":"execute","dataTasks":[{"localId":"mail-search",' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"mail-search",' +
   '"goal":"search real mail","allowedToolIds":["mail.search"],' +
   '"toolId":"mail.search","input":{"query":"酒店确认"},"required":true}],' +
   '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]},"reasonCode":"mail_search"}';
 const WEATHER_HANDOFF_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"roundAction":"legacy_handoff","dataTasks":[],' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"legacy_handoff","dataTasks":[],' +
   '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"reasonCode":"capability_unavailable"}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
-  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"conversation",' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"conversation",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"已按更新后的瑞幸偏好继续","reasonCode":"memory_context_routed"}';
+const MAIL_DIRECT_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"你有一封酒店确认邮件","reasonCode":"mail_search"}';
+const WEATHER_DIRECT_CLARIFY: string = '{"personaId":"default_companion","skillId":"",' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"clarify","dataTasks":[],' +
+  '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"请确认天气地点","reasonCode":"weather_missing_location"}';
+const MISLEADING_HOTEL_DIRECT_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"按邮件能力回答","reasonCode":"mail_search"}';
+const UNOBSERVED_HOTEL_DIRECT_ANSWER: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["hotel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"酒店价格是 500 元","reasonCode":"hotel_ready"}';
 
 class QueueModel implements LocalModel {
   readonly prompts: string[] = [];
@@ -356,6 +378,47 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(outcome.message).assertEqual('你好');
       expect(surfaces.length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('gates initial direct terminals from exact requested capabilities', 0, async () => {
+      const model = new QueueModel([
+        ANSWER_DECISION,
+        MAIL_DIRECT_ANSWER,
+        WEATHER_DIRECT_CLARIFY,
+        MISLEADING_HOTEL_DIRECT_ANSWER,
+        UNOBSERVED_HOTEL_DIRECT_ANSWER
+      ]);
+      const executor = new CanaryHotelExecutor();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const greeting = await runtime.submit('你好', { text: '' });
+      const mail = await runtime.submit('查一下酒店确认邮件', { text: '' });
+      const weather = await runtime.submit('查询天气', { text: '' });
+      const misleadingHotel = await runtime.submit('酒店两个字不要误导，查我的邮件', { text: '' });
+      const unobservedHotel = await runtime.submit('深圳酒店多少钱', { text: '' });
+
+      expect(greeting.kind).assertEqual('settled');
+      expect((greeting as MultiAgentSettledOutcome).message).assertEqual('你好');
+      expect(mail.kind).assertEqual('handoff');
+      expect(weather.kind).assertEqual('handoff');
+      expect(misleadingHotel.kind).assertEqual('handoff');
+      expect(unobservedHotel.kind).assertEqual('handoff');
+      expect(executor.calls.length).assertEqual(0);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA ||
+          message.type === AgentMessageType.TASK_CREATE_UI ||
+          message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      ).length).assertEqual(0);
+      expect(model.prompts[0].indexOf('"requestedCapabilityIds"') >= 0).assertTrue();
       runtime.dispose();
     });
 

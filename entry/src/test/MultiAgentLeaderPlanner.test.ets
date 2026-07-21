@@ -9,7 +9,8 @@ import {
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 
-const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"","roundAction":"execute",' +
+const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
   '"dataTasks":[' +
   '{"localId":"flight","goal":"查航班","allowedToolIds":["flight.search"],"toolId":"flight.search","input":{},"required":false},' +
   '{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],"toolId":"train.search","input":{},"required":false}' +
@@ -202,7 +203,7 @@ export default function multiAgentLeaderPlannerTest() {
 
     it('accepts zero Data only for an explicit registered Action intent', 0, async () => {
       const output: string = '{"personaId":"travel_companion","skillId":"",' +
-        '"roundAction":"execute","dataTasks":[],' +
+        '"requestedCapabilityIds":["memory.update"],"roundAction":"execute","dataTasks":[],' +
         '"uiIntent":{"purpose":"remember","preferredDensity":"comfortable",' +
         '"requiredSections":[]},"actionIntent":{"goal":"remember explicit text",' +
         '"allowedActionIds":["memory.update"]},"reasonCode":"stable_preference"}';
@@ -213,6 +214,31 @@ export default function multiAgentLeaderPlannerTest() {
 
       expect(decision.dataTasks.length).assertEqual(0);
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('memory.update');
+    });
+
+    it('requires unique registered requested capabilities covering every executed capability', 0, async () => {
+      const missing: string = PARALLEL_DECISION.replace(
+        '"requestedCapabilityIds":["flight.search","train.search"],',
+        ''
+      );
+      const duplicate: string = PARALLEL_DECISION.replace(
+        '"flight.search","train.search"',
+        '"flight.search","flight.search","train.search"'
+      );
+      const unregistered: string = PARALLEL_DECISION.replace(
+        '"flight.search","train.search"',
+        '"flight.search","missing.search","train.search"'
+      );
+      const incomplete: string = PARALLEL_DECISION.replace(
+        '"flight.search","train.search"',
+        '"flight.search"'
+      );
+
+      expect(await fails(PARALLEL_DECISION)).assertFalse();
+      expect(await fails(missing)).assertTrue();
+      expect(await fails(duplicate)).assertTrue();
+      expect(await fails(unregistered)).assertTrue();
+      expect(await fails(incomplete)).assertTrue();
     });
   });
 }

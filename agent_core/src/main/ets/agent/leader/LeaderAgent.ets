@@ -325,6 +325,11 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
+      if (state.turnObservations.length === 0 && decision.requestedCapabilityIds.length > 0) {
+        this.publishHandoff(message, decision);
+        this.finishTurn(state);
+        return;
+      }
       this.publishTurnResult(message, state, decision.answer as string);
       this.finishTurn(state);
       return;
@@ -577,10 +582,10 @@ export class LeaderAgent extends MessageDrivenAgent {
       return false;
     }
     const keys: string = Object.keys(decision).sort().join(',');
-    if (keys !== 'dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
-      keys !== 'answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
-      keys !== 'actionIntent,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent' &&
-      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent') {
+    if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent') {
       return false;
     }
     if (typeof decision.personaId !== 'string' || decision.personaId.trim().length === 0 ||
@@ -588,7 +593,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       !this.validDecisionPersonaSkill(decision.personaId, decision.skillId) ||
       !this.validRoundAction(decision.roundAction) ||
       typeof decision.reasonCode !== 'string' || decision.reasonCode.trim().length === 0 ||
-      !Array.isArray(decision.dataTasks) || !this.validUiIntent(decision.uiIntent)) {
+      !Array.isArray(decision.dataTasks) || !this.validUiIntent(decision.uiIntent) ||
+      !this.validRequestedCapabilityIds(decision.requestedCapabilityIds)) {
       return false;
     }
     if ((decision.roundAction === 'execute' && decision.dataTasks.length === 0 &&
@@ -608,7 +614,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       return false;
     }
     const actionIntent = decision.actionIntent;
-    return actionIntent === undefined || this.validActionIntent(actionIntent);
+    return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
+      this.requestedCapabilitiesCoverExecution(decision);
   }
 
   private runtimeOwnsDecision(decision: LeaderDecision): boolean {
@@ -616,32 +623,61 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (ownedIds === undefined) {
       return true;
     }
+    for (let index = 0; index < decision.requestedCapabilityIds.length; index++) {
+      if (ownedIds.indexOf(decision.requestedCapabilityIds[index]) < 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private validRequestedCapabilityIds(ids: string[]): boolean {
+    if (!Array.isArray(ids)) {
+      return false;
+    }
+    const unique: Set<string> = new Set<string>();
+    for (let index = 0; index < ids.length; index++) {
+      const id: string = ids[index];
+      if (typeof id !== 'string' || id.trim().length === 0 || unique.has(id) ||
+        !this.registeredCapability(id)) {
+        return false;
+      }
+      unique.add(id);
+    }
+    return true;
+  }
+
+  private registeredCapability(id: string): boolean {
+    for (let index = 0; index < this.planningContext.tools.length; index++) {
+      const tool = this.planningContext.tools[index];
+      if (tool.toolId === id || tool.actions.indexOf(id) >= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private requestedCapabilitiesCoverExecution(decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute') {
+      return true;
+    }
+    const requested: string[] = decision.requestedCapabilityIds;
     for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
       const task = decision.dataTasks[taskIndex];
-      if (ownedIds.indexOf(task.toolId) < 0) {
+      if (requested.indexOf(task.toolId) < 0) {
         return false;
       }
       for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
-        if (ownedIds.indexOf(task.allowedToolIds[allowedIndex]) < 0) {
+        if (requested.indexOf(task.allowedToolIds[allowedIndex]) < 0) {
           return false;
         }
       }
     }
-    if (decision.actionIntent === undefined) {
-      return true;
-    }
-    for (let actionIndex = 0; actionIndex < decision.actionIntent.allowedActionIds.length; actionIndex++) {
-      const actionId: string = decision.actionIntent.allowedActionIds[actionIndex];
-      let owned: boolean = false;
-      for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
-        const tool = this.planningContext.tools[toolIndex];
-        if (ownedIds.indexOf(tool.toolId) >= 0 && tool.actions.indexOf(actionId) >= 0) {
-          owned = true;
-          break;
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        if (requested.indexOf(decision.actionIntent.allowedActionIds[index]) < 0) {
+          return false;
         }
-      }
-      if (!owned) {
-        return false;
       }
     }
     return true;
@@ -1012,26 +1048,21 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state.turnObservations.length === 0) {
       return 'success';
     }
-    let allError: boolean = true;
-    let allEmpty: boolean = true;
-    const firstStatus: string = state.turnObservations[0].status;
-    let mixed: boolean = false;
+    let hasSuccess: boolean = false;
+    let hasError: boolean = false;
     for (let index = 0; index < state.turnObservations.length; index++) {
       const status: string = state.turnObservations[index].status;
-      allError = allError && status === 'error';
-      allEmpty = allEmpty && status === 'empty';
-      mixed = mixed || status !== firstStatus;
       if (status === 'partial') {
         return 'partial';
       }
+      hasSuccess = hasSuccess || status === 'success';
+      hasError = hasError || status === 'error';
     }
-    if (allError) {
-      return 'error';
+    if (hasSuccess) {
+      return state.turnObservations.every((item: ObservationDigest): boolean =>
+        item.status === 'success') ? 'success' : 'partial';
     }
-    if (mixed) {
-      return 'partial';
-    }
-    return allEmpty ? 'empty' : 'success';
+    return hasError ? 'error' : 'empty';
   }
 
   private publishHandoff(input: AgentMessage, decision: LeaderDecision): void {

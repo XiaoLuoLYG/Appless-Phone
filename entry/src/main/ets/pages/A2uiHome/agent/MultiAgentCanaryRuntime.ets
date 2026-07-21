@@ -268,6 +268,14 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
   );
   const memory = memoryDefinition();
   tools.push({
+    toolId: 'dynamic.search',
+    intent: 'dynamic.search',
+    riskLevel: 'read',
+    inputSchema: 'dynamicToolSearchQuery',
+    outputSchema: 'dynamicToolConnect',
+    actions: []
+  });
+  tools.push({
     toolId: memory.toolId,
     intent: memory.intent,
     riskLevel: memory.riskLevel,

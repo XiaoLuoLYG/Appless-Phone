@@ -41,6 +41,7 @@ export interface LeaderUiIntent {
 export interface LeaderDecision {
   personaId: string;
   skillId: string;
+  requestedCapabilityIds: string[];
   roundAction: LeaderRoundAction;
   dataTasks: LeaderDecisionDataTask[];
   uiIntent: LeaderUiIntent;

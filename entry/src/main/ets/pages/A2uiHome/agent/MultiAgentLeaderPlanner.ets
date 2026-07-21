@@ -18,10 +18,10 @@ import {
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
 const DECISION_KEYS: string[] = [
-  'dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent',
-  'answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent',
-  'actionIntent,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent',
-  'actionIntent,answer,dataTasks,personaId,reasonCode,roundAction,skillId,uiIntent'
+  'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'actionIntent,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'actionIntent,answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent'
 ];
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
@@ -135,6 +135,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
+        '"requestedCapabilityIds":["registered tool or action ID"],' +
         '"roundAction":"execute|answer|clarify|legacy_handoff","dataTasks":[' +
         '{"localId":"string","goal":"string","allowedToolIds":["string"],' +
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
@@ -142,6 +143,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
         '"answer":"string" optional,"reasonCode":"string"}.',
       'Select one persona and at most one active skill.',
+      'requestedCapabilityIds is mandatory, unique, and contains exact registered tool/action IDs. ' +
+        'Use [] only for ordinary direct conversation that needs no tool-backed fact.',
+      'Mail, weather, travel, and other capability-backed answer or clarify decisions must name ' +
+        'their requested registered capability. Every execute decision must include every selected ' +
+        'Data tool, allowed tool, and Action ID.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
@@ -170,10 +176,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const rawTasks = values['dataTasks'];
     const rawUiIntent = values['uiIntent'];
     const reasonCode = values['reasonCode'];
+    const rawRequestedCapabilities = values['requestedCapabilityIds'];
     if (typeof personaId !== 'string' || personaId.trim().length === 0 ||
       typeof skillId !== 'string' ||
       !this.validRoundAction(roundAction) ||
       !Array.isArray(rawTasks) ||
+      !Array.isArray(rawRequestedCapabilities) ||
       rawUiIntent === null || typeof rawUiIntent !== 'object' || Array.isArray(rawUiIntent) ||
       typeof reasonCode !== 'string' || reasonCode.trim().length === 0) {
       throw new Error('Leader decision fields are malformed.');
@@ -183,12 +191,20 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const selectedAction: LeaderRoundAction = roundAction as LeaderRoundAction;
     const tasks: LeaderDecisionDataTask[] = this.dataTasks(rawTasks as Object[], context);
+    const requestedCapabilityIds: string[] = this.requestedCapabilities(
+      rawRequestedCapabilities as Object[],
+      context
+    );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
       this.actionIntent(actionValue, context);
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
+    }
+    if (selectedAction === 'execute' &&
+      !this.requestedCapabilitiesCoverExecution(requestedCapabilityIds, tasks, actionIntent)) {
+      throw new Error('Leader requested capabilities do not cover its execution plan.');
     }
     const uiIntent: LeaderUiIntent = this.uiIntent(rawUiIntent);
     const answerValue = values['answer'];
@@ -203,6 +219,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const decision: LeaderDecision = {
       personaId,
       skillId,
+      requestedCapabilityIds,
       roundAction: selectedAction,
       dataTasks: tasks,
       uiIntent,
@@ -215,6 +232,54 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.actionIntent = actionIntent;
     }
     return decision;
+  }
+
+  private requestedCapabilities(raw: Object[], context: LeaderPlanningContext): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < raw.length; index++) {
+      const value = raw[index];
+      if (typeof value !== 'string' || value.trim().length === 0 ||
+        result.indexOf(value) >= 0 || !this.registeredCapability(context, value)) {
+        throw new Error('Leader requested capabilities must be unique registered IDs.');
+      }
+      result.push(value);
+    }
+    return result;
+  }
+
+  private registeredCapability(context: LeaderPlanningContext, id: string): boolean {
+    for (let index = 0; index < context.tools.length; index++) {
+      const tool = context.tools[index];
+      if (tool.toolId === id || tool.actions.indexOf(id) >= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private requestedCapabilitiesCoverExecution(
+    requested: string[],
+    tasks: LeaderDecisionDataTask[],
+    actionIntent: LeaderActionIntent | null
+  ): boolean {
+    for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+      if (requested.indexOf(tasks[taskIndex].toolId) < 0) {
+        return false;
+      }
+      for (let allowedIndex = 0; allowedIndex < tasks[taskIndex].allowedToolIds.length; allowedIndex++) {
+        if (requested.indexOf(tasks[taskIndex].allowedToolIds[allowedIndex]) < 0) {
+          return false;
+        }
+      }
+    }
+    if (actionIntent !== null) {
+      for (let index = 0; index < actionIntent.allowedActionIds.length; index++) {
+        if (requested.indexOf(actionIntent.allowedActionIds[index]) < 0) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   private dataTasks(rawTasks: Object[], context: LeaderPlanningContext): LeaderDecisionDataTask[] {

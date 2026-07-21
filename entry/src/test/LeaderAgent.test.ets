@@ -259,9 +259,22 @@ function semanticDataTask(localId: string, toolId: string = 'hotel.search'): Lea
 }
 
 function semanticDecision(tasks: LeaderDecisionDataTask[], action: string = 'execute'): LeaderDecision {
+  const requestedCapabilityIds: string[] = [];
+  for (let index = 0; index < tasks.length; index++) {
+    for (let allowedIndex = 0; allowedIndex < tasks[index].allowedToolIds.length; allowedIndex++) {
+      const toolId: string = tasks[index].allowedToolIds[allowedIndex];
+      if (requestedCapabilityIds.indexOf(toolId) < 0) {
+        requestedCapabilityIds.push(toolId);
+      }
+    }
+  }
+  if (action === 'answer') {
+    requestedCapabilityIds.push('hotel.search');
+  }
   const decision: LeaderDecision = {
     personaId: 'travel_companion',
     skillId: '',
+    requestedCapabilityIds,
     roundAction: action === 'answer' ? 'answer' : 'execute',
     dataTasks: tasks,
     uiIntent: {
@@ -677,6 +690,7 @@ export default function leaderAgentTest() {
         goal: 'Navigate after results',
         allowedActionIds: ['hotel.navigate']
       };
+      decision.requestedCapabilityIds.push('hotel.navigate');
       const planner = new RoundScriptedPlanner([decision]);
       const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
       const observer = bus.openReader();
@@ -723,7 +737,9 @@ export default function leaderAgentTest() {
 
     it('publishes a correlated semantic answer result without Data, UI, or Action tasks', 0, async () => {
       const bus = new LinkedMessageBus();
-      const planner = new RoundScriptedPlanner([semanticDecision([], 'answer')]);
+      const direct = semanticDecision([], 'answer');
+      direct.requestedCapabilityIds = [];
+      const planner = new RoundScriptedPlanner([direct]);
       const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
       const observer = bus.openReader();
       leader.start();
@@ -780,6 +796,7 @@ export default function leaderAgentTest() {
         goal: 'Remember the explicit user statement',
         allowedActionIds: ['memory.update']
       };
+      decision.requestedCapabilityIds = ['memory.update'];
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'memory.update',
@@ -894,10 +911,16 @@ export default function leaderAgentTest() {
 
     it('derives data-backed terminal status from only this turn observations', 0, async () => {
       expect(await semanticTerminalStatus(['error', 'error'])).assertEqual('error');
+      expect(await semanticTerminalStatus(['error', 'empty'])).assertEqual('error');
+      expect(await semanticTerminalStatus(['empty', 'error'])).assertEqual('error');
       expect(await semanticTerminalStatus(['success', 'error'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['success', 'empty'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['success', 'error', 'empty'])).assertEqual('partial');
       expect(await semanticTerminalStatus(['partial'])).assertEqual('partial');
-      expect(await semanticTerminalStatus(['empty'])).assertEqual('empty');
-      expect(await semanticTerminalStatus(['success'])).assertEqual('success');
+      expect(await semanticTerminalStatus(['partial', 'error'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['partial', 'empty'])).assertEqual('partial');
+      expect(await semanticTerminalStatus(['empty', 'empty'])).assertEqual('empty');
+      expect(await semanticTerminalStatus(['success', 'success'])).assertEqual('success');
     });
 
     it('turns malformed results and wrong schemas into bounded digests without stopping the pump', 0, async () => {

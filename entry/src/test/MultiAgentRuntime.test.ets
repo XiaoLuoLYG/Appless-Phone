@@ -112,6 +112,7 @@ class HandoffPlanner implements LeaderPlanner {
     return {
       personaId: 'travel_companion',
       skillId: '',
+      requestedCapabilityIds: [],
       roundAction: 'legacy_handoff',
       dataTasks: [],
       uiIntent: {
@@ -132,7 +133,7 @@ class HotelRoundPlanner implements LeaderPlanner {
     _round: number = 1
   ): Promise<LeaderDecision> {
     if (input.recentObservations !== undefined && input.recentObservations.length > 0) {
-      return answerDecision('酒店结果已就绪');
+      return answerDecision('酒店结果已就绪', ['hotel.search']);
     }
     const task: LeaderDecisionDataTask = {
       localId: 'hotel-search',
@@ -147,6 +148,7 @@ class HotelRoundPlanner implements LeaderPlanner {
     return {
       personaId: 'travel_companion',
       skillId: '',
+      requestedCapabilityIds: ['hotel.search'],
       roundAction: 'execute',
       dataTasks: [task],
       uiIntent: {
@@ -317,6 +319,7 @@ class VirtualMemoryPlanner implements LeaderPlanner {
     return {
       personaId: 'travel_companion',
       skillId: '',
+      requestedCapabilityIds: ['memory.update'],
       roundAction: 'execute',
       dataTasks: [],
       uiIntent: {
@@ -364,10 +367,11 @@ class BlockingVirtualExecutor implements RegisteredActionExecutor {
   }
 }
 
-function answerDecision(answer: string): LeaderDecision {
+function answerDecision(answer: string, requestedCapabilityIds: string[] = []): LeaderDecision {
   return {
     personaId: 'travel_companion',
     skillId: '',
+    requestedCapabilityIds: requestedCapabilityIds.slice(),
     roundAction: 'answer',
     dataTasks: [],
     uiIntent: {
