@@ -1,6 +1,7 @@
 import {
   ActionAgent,
   ActionExecutionContext,
+  ActionExecutionResult,
   ActionPlanRequestPayload,
   ActionResultPayload,
   ActionRunPayload,
@@ -10,6 +11,7 @@ import {
   AgentMessageReader,
   AgentMessageType,
   A2uiAction,
+  RegisteredActionExecutor,
   ConversationTurnMessage,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
@@ -34,6 +36,12 @@ import {
   MultiAgentSettledOutcome,
   MultiAgentTurnOutcome
 } from './MultiAgentRuntimeTypes';
+import {
+  AiphoneRegisteredActionExecutor,
+  HotelActionIdFactory,
+  RegisteredPageAction,
+  SystemUriOpener
+} from './AiphoneRegisteredActionExecutor';
 import { RegisteredActionOfferResolver } from './RegisteredActionOfferResolver';
 import { StructuredToolUiRenderer } from './StructuredToolUiRenderer';
 
@@ -111,6 +119,27 @@ function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+class RuntimeActionIds implements HotelActionIdFactory {
+  private sequence: number = 0;
+
+  nextId(prefix: string): string {
+    this.sequence++;
+    return prefix + '-' + this.sequence.toString();
+  }
+}
+
+class RejectSystemUriOpener implements SystemUriOpener {
+  async open(_uri: string): Promise<boolean> {
+    return false;
+  }
+}
+
+const rejectPageAction: RegisteredPageAction = async (): Promise<ActionExecutionResult> => ({
+  status: 'error',
+  errorCode: 'ACTION_PAGE_ROUTE_UNAVAILABLE',
+  message: 'Registered page action is unavailable.'
+});
+
 export class MultiAgentRuntime {
   private readonly bus: LinkedMessageBus;
   private readonly reader: AgentMessageReader;
@@ -167,12 +196,19 @@ export class MultiAgentRuntime {
     const actionOfferResolver = options.actionOfferResolver === undefined ?
       async (dataResult: DataResult, context: ActionOfferContext): Promise<ActionOffer[]> =>
         registeredOfferResolver.resolve(dataResult, context) : options.actionOfferResolver;
+    const actionExecutor: RegisteredActionExecutor = options.actionExecutor === undefined ?
+      new AiphoneRegisteredActionExecutor(
+        options.actionCatalog,
+        options.systemUriOpener === undefined ? new RejectSystemUriOpener() : options.systemUriOpener,
+        options.actionIdFactory === undefined ? new RuntimeActionIds() : options.actionIdFactory,
+        options.registeredPageAction === undefined ? rejectPageAction : options.registeredPageAction
+      ) : options.actionExecutor;
     this.ui = new UiAgent(this.bus, uiRenderer, options.surfaceWriter);
     this.action = new ActionAgent(
       this.bus,
       options.actionCatalog,
       actionOfferResolver,
-      options.actionExecutor,
+      actionExecutor,
       options.actionCompiler,
       options.virtualActionResolver
     );

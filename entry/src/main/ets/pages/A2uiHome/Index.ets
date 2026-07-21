@@ -1,5 +1,7 @@
 import {
   A2uiAgentRunner,
+  ActionExecutionContext,
+  ActionExecutionResult,
   ConversationTurnMessage,
   CurrentSurfaceSummary,
   LlmProvider,
@@ -120,7 +122,7 @@ import {
   MultiAgentSettledOutcome,
   MultiAgentTurnOutcome
 } from './agent/MultiAgentRuntimeTypes';
-import { SystemUriOpener } from './agent/HotelRegisteredActionExecutor';
+import { SystemUriOpener } from './agent/AiphoneRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
 import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
@@ -170,6 +172,25 @@ const READ_CALENDAR_PERMISSION: Permissions = 'ohos.permission.READ_CALENDAR';
 const WRITE_CALENDAR_PERMISSION: Permissions = 'ohos.permission.WRITE_CALENDAR';
 const APPROX_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMATELY_LOCATION';
 const PRECISE_LOCATION_PERMISSION: Permissions = 'ohos.permission.LOCATION';
+
+interface A2uiCallObservation {
+  result?: A2uiCallResult;
+}
+
+interface WorldCupPageActionOutput {
+  actionId: string;
+  route: string;
+  status: string;
+}
+
+interface RegisteredToolPageActionOutput {
+  actionId: string;
+  conversationId: string;
+  turnId: string;
+  surfaceId: string;
+  status: string;
+  data: A2uiRuntimeDataModel;
+}
 
 function fingerprintPart(value: string): string {
   return value.length.toString() + ':' + value;
@@ -1204,6 +1225,11 @@ struct Index {
       onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
         this.applyPersonaMemoryUpdate(update);
       },
+      pageAction: (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => this.executeRegisteredPageAction(actionId, args, context),
       currentLocalDate: (): string => this.currentLocalDate(),
       settingsFingerprint: fingerprint
     };
@@ -1915,11 +1941,16 @@ struct Index {
     }
   }
 
-  private openAnythingDemo(): void {
-    router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
-      if (error) {
-        aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
-      }
+  private openAnythingDemo(): Promise<boolean> {
+    return new Promise<boolean>((resolve: (value: boolean) => void): void => {
+      router.pushUrl({ url: ANYTHING_DEMO_ROUTE_URL }, (error) => {
+        if (error) {
+          aiLogError('[AIPhone][AnythingDemoRouteFailed] ' + JSON.stringify(error));
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      });
     });
   }
 
@@ -3910,7 +3941,133 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeDidiMcpSandboxToggle] enabled=' + (isSandbox ? 'true' : 'false'));
   }
 
-  private async callToolById(toolId: string, prompt: string, actionId: string, args: Object | null = null): Promise<boolean> {
+  private isRegisteredGatewayPageAction(actionId: string): boolean {
+    return actionId === 'luckin.order.preview' ||
+      actionId === 'social.reply.draft' ||
+      actionId === 'mail.draft.create' ||
+      actionId === 'gmail.draft.create' ||
+      actionId === 'gmail.draft.apply' ||
+      actionId === 'gmail.open.web' ||
+      actionId === 'payment.send' ||
+      actionId === 'payment.account.setup' ||
+      actionId === 'maps.route.open';
+  }
+
+  private registeredPageProviderError(model: A2uiRuntimeDataModel): string {
+    for (let index = 0; index < model.genericToolResults.length; index++) {
+      const result = model.genericToolResults[index];
+      if (result.status === 'error' || result.status === 'blocked') {
+        return result.summary.length > 0 ? result.summary : result.title;
+      }
+    }
+    if (model.socialHub.draft.status === 'error') {
+      return model.socialHub.draft.error;
+    }
+    if (model.stripeReceivingAccount !== undefined &&
+      (model.stripeReceivingAccount.status === 'error' ||
+        model.stripeReceivingAccount.status === 'blocked')) {
+      return model.stripeReceivingAccount.message;
+    }
+    return '';
+  }
+
+  private async executeRegisteredPageAction(
+    actionId: string,
+    args: Object,
+    context: ActionExecutionContext
+  ): Promise<ActionExecutionResult> {
+    if (actionId === 'worldcup.open') {
+      const opened = await this.callToolById(actionId, actionId, actionId, args);
+      if (!opened) {
+        return {
+          status: 'error',
+          errorCode: 'ACTION_PAGE_NAVIGATION_FAILED',
+          message: 'World Cup page could not be opened.'
+        };
+      }
+      const output: WorldCupPageActionOutput = {
+        actionId: actionId,
+        route: ANYTHING_DEMO_ROUTE_URL,
+        status: 'opened'
+      };
+      return {
+        status: 'success',
+        output: output
+      };
+    }
+    if (!this.isRegisteredGatewayPageAction(actionId)) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_ROUTE_UNSUPPORTED',
+        message: 'Registered page action route is unsupported.'
+      };
+    }
+    const observation: A2uiCallObservation = {};
+    const ok = await this.callToolById(
+      actionId,
+      actionId,
+      actionId,
+      args,
+      (result: A2uiCallResult): void => {
+        observation.result = result;
+      }
+    );
+    if (!ok || observation.result === undefined) {
+      const message = observation.result === undefined ?
+        'Registered page tool returned no result.' : observation.result.error;
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_TOOL_FAILED',
+        message: message.length > 0 ? message : 'Registered page tool failed.'
+      };
+    }
+    const result: A2uiCallResult = observation.result;
+    if (result.surface.status === 'error' || result.surface.error.length > 0) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_PROVIDER_ERROR',
+        message: result.surface.error.length > 0 ? result.surface.error : result.surface.title
+      };
+    }
+    let model: A2uiRuntimeDataModel;
+    try {
+      model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    } catch (_error) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_TOOL_RESULT_INVALID',
+        message: 'Registered page tool returned an invalid data model.'
+      };
+    }
+    const providerError = this.registeredPageProviderError(model);
+    if (providerError.length > 0) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_PROVIDER_ERROR',
+        message: providerError
+      };
+    }
+    const output: RegisteredToolPageActionOutput = {
+      actionId: actionId,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      surfaceId: result.surface.surfaceId,
+      status: result.surface.status,
+      data: model
+    };
+    return {
+      status: 'success',
+      output: output
+    };
+  }
+
+  private async callToolById(
+    toolId: string,
+    prompt: string,
+    actionId: string,
+    args: Object | null = null,
+    resultObserver?: (result: A2uiCallResult) => void
+  ): Promise<boolean> {
     if (!isRegisteredToolId(toolId)) {
       const message = '模型请求了未注册工具：' + toolId;
       aiLogError('[AIPhone][A2uiHomeToolRequestInvalid] toolId=' + toolId);
@@ -3933,6 +4090,18 @@ struct Index {
       aiLogInfo('[AIPhone][AnythingDemoRouteByTool] actionId=' + actionId +
         ' promptChars=' + prompt.length.toString());
       this.markChecking('正在打开世界杯界面...');
+      const opened = await this.openAnythingDemo();
+      if (!opened) {
+        this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+          ok: false,
+          status: 'error',
+          message: '无法打开世界杯界面。',
+          requestDebug: this.lastModelRequest,
+          assistantDebug: this.lastModelOutput,
+          error: 'Anything demo route could not be opened.'
+        }));
+        return false;
+      }
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok: true,
         status: 'ready',
@@ -3942,7 +4111,6 @@ struct Index {
         error: ''
       }));
       this.appendMessage('assistant', '已打开世界杯界面。');
-      this.openAnythingDemo();
       return true;
     }
     configureDidiMcpSandboxForRuntime(this.didiMcpSandboxEnabled);
@@ -3993,6 +4161,9 @@ struct Index {
       ' errorChars=' + result.error.length.toString() +
       ' rawChars=' + result.raw.length.toString());
     aiLogInfo('[AIPhone][A2uiHomeToolOutput] ' + logSnippet(result.raw));
+    if (resultObserver !== undefined) {
+      resultObserver(result);
+    }
     const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
     if (inlineLuckinSwitch) {
       if (result.ok && this.applyLuckinInlineConfirmPatch(resultSurface)) {
@@ -4030,7 +4201,7 @@ struct Index {
       this.appendMessage('assistant', resultSurface.title + ' 已返回 A2UI 结果。');
     }
     if (toolId === 'gmail.open.web') {
-      await this.openExternalUrl(GMAIL_WEB_URL);
+      return this.openExternalUrl(GMAIL_WEB_URL);
     }
     return true;
   }

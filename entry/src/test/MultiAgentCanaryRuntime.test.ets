@@ -31,7 +31,7 @@ import {
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
-import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/HotelRegisteredActionExecutor';
+import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 import { MultiAgentSettledOutcome } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';

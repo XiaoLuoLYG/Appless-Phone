@@ -58,9 +58,10 @@ import {
   hotelOfferResolver
 } from './HotelAgentRuntime';
 import {
-  HotelRegisteredActionExecutor,
+  AiphoneRegisteredActionExecutor,
+  RegisteredPageAction,
   SystemUriOpener
-} from './HotelRegisteredActionExecutor';
+} from './AiphoneRegisteredActionExecutor';
 
 const MEMORY_ACTION_ID: string = 'memory.update';
 const MEMORY_SUMMARY_LIMIT: number = 240;
@@ -69,6 +70,7 @@ export interface MultiAgentCanaryOptions {
   model: LocalModel;
   selectedPersonaId: () => string;
   opener: SystemUriOpener;
+  pageAction?: RegisteredPageAction;
   onSurface: HotelSurfaceCallback;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void;
   downstreamWriter?: UiSurfaceWriter;
@@ -207,18 +209,28 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
   }
 }
 
+const rejectPageAction: RegisteredPageAction = async (
+  _actionId: string,
+  _args: Object,
+  _context: ActionExecutionContext
+): Promise<ActionExecutionResult> => ({
+  status: 'error',
+  errorCode: 'ACTION_PAGE_ROUTE_UNAVAILABLE',
+  message: 'Registered page action is unavailable.'
+});
+
 class CanaryRegisteredExecutor implements RegisteredActionExecutor {
-  private readonly hotel: HotelRegisteredActionExecutor;
+  private readonly aiphone: AiphoneRegisteredActionExecutor;
   private readonly onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void;
   private readonly onSurface: HotelSurfaceCallback;
   private sequence: number = 0;
 
   constructor(
-    hotel: HotelRegisteredActionExecutor,
+    aiphone: AiphoneRegisteredActionExecutor,
     onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void,
     onSurface: HotelSurfaceCallback
   ) {
-    this.hotel = hotel;
+    this.aiphone = aiphone;
     this.onMemoryUpdate = onMemoryUpdate;
     this.onSurface = onSurface;
   }
@@ -229,7 +241,7 @@ class CanaryRegisteredExecutor implements RegisteredActionExecutor {
     context: ActionExecutionContext
   ): Promise<ActionExecutionResult> {
     if (actionId !== MEMORY_ACTION_ID) {
-      return this.hotel.execute(actionId, args, context);
+      return this.aiphone.execute(actionId, args, context);
     }
     const update = memoryRequest(args);
     if (update === null) {
@@ -325,10 +337,11 @@ export class MultiAgentCanaryRuntime {
       true
     );
     this.surfaceWriter = writer;
-    const hotelExecutor = new HotelRegisteredActionExecutor(
+    const aiphoneExecutor = new AiphoneRegisteredActionExecutor(
       catalog,
       options.opener,
-      followUpIds
+      followUpIds,
+      options.pageAction === undefined ? rejectPageAction : options.pageAction
     );
     const initialContext = canaryPlanningContext(options.selectedPersonaId());
     this.runtime = new MultiAgentRuntime({
@@ -353,7 +366,7 @@ export class MultiAgentCanaryRuntime {
         context: ActionOfferContext
       ): Promise<ActionOffer[]> => hotelOfferResolver(catalog)(data, context),
       actionExecutor: new CanaryRegisteredExecutor(
-        hotelExecutor,
+        aiphoneExecutor,
         options.onMemoryUpdate,
         options.onSurface
       ),

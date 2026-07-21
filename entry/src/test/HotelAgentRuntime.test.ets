@@ -37,7 +37,7 @@ import {
   HotelAgentRuntimeOptions,
   HotelTurnOutcome
 } from '../main/ets/pages/A2uiHome/agent/HotelAgentRuntime';
-import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/HotelRegisteredActionExecutor';
+import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 

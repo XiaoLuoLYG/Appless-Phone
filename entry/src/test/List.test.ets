@@ -16,7 +16,7 @@ import hotelToolTypesTest from './HotelToolTypes.test';
 import hotelToolA2uiTest from './HotelToolA2ui.test';
 import hotelDataResultTest from './HotelDataResult.test';
 import hotelSystemIntentTest from './HotelSystemIntent.test';
-import hotelRegisteredActionExecutorTest from './HotelRegisteredActionExecutor.test';
+import aiphoneRegisteredActionExecutorTest from './AiphoneRegisteredActionExecutor.test';
 import hotelLeaderPlannerTest from './HotelLeaderPlanner.test';
 import hotelAgentRuntimeTest from './HotelAgentRuntime.test';
 import multiAgentRuntimeTest from './MultiAgentRuntime.test';
@@ -109,7 +109,7 @@ export default function testsuite() {
   hotelToolA2uiTest();
   hotelDataResultTest();
   hotelSystemIntentTest();
-  hotelRegisteredActionExecutorTest();
+  aiphoneRegisteredActionExecutorTest();
   hotelLeaderPlannerTest();
   hotelAgentRuntimeTest();
   multiAgentRuntimeTest();

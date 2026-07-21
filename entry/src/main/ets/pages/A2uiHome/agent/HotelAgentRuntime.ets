@@ -2,6 +2,8 @@ import {
   ActionAgent,
   ActionArgsValidator,
   ActionCatalog,
+  ActionExecutionContext,
+  ActionExecutionResult,
   ActionOffer,
   ActionOfferContext,
   ActionOfferResolver,
@@ -68,10 +70,11 @@ import { createHtmlHomeDocument } from '../html/HtmlHomeSnapshot';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeDocument } from '../html/HtmlHomeTypes';
 import {
+  AiphoneRegisteredActionExecutor,
   HotelActionIdFactory,
-  HotelRegisteredActionExecutor,
+  RegisteredPageAction,
   SystemUriOpener
-} from './HotelRegisteredActionExecutor';
+} from './AiphoneRegisteredActionExecutor';
 import {
   HotelLeaderPlanner,
   HotelLocalDateProvider,
@@ -88,6 +91,16 @@ type HotelValue = Object | string | number | boolean | null | undefined;
 
 export type HotelSurfaceCallback = (surface: A2uiSurfaceState) => void;
 export type HotelTurnStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled' | 'timeout';
+
+const rejectNonHotelPageAction: RegisteredPageAction = async (
+  _actionId: string,
+  _args: Object,
+  _context: ActionExecutionContext
+): Promise<ActionExecutionResult> => ({
+  status: 'error',
+  errorCode: 'ACTION_PAGE_ROUTE_UNAVAILABLE',
+  message: 'Page action is unavailable in the hotel-only runtime.'
+});
 
 export interface HotelTurnOutcome {
   ok: boolean;
@@ -1503,10 +1516,11 @@ export class HotelAgentRuntime {
       options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
       boundedDeadline(options.uiLayoutTimeoutMs, DEFAULT_LAYOUT_TIMEOUT_MS)
     );
-    const registered = new HotelRegisteredActionExecutor(
+    const registered = new AiphoneRegisteredActionExecutor(
       this.catalog,
       options.opener,
-      this.followUpIds
+      this.followUpIds,
+      rejectNonHotelPageAction
     );
     this.leader = new LeaderAgent(this.bus, planner, hotelLeaderPlanningContext());
     this.data = new DataAgent(this.bus, authorizeHotelDataTask, executor);

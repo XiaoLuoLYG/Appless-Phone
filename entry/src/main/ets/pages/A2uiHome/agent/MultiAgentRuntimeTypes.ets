@@ -17,6 +17,11 @@ import {
   UiTaskRenderer,
   VirtualActionIntentResolver
 } from '@loop/agent-core';
+import {
+  HotelActionIdFactory,
+  RegisteredPageAction,
+  SystemUriOpener
+} from './AiphoneRegisteredActionExecutor';
 
 export interface MultiAgentSettledOutcome {
   kind: 'settled';
@@ -48,7 +53,10 @@ export interface MultiAgentRuntimeOptions {
   surfaceWriter: UiSurfaceWriter;
   actionCatalog: ActionCatalog;
   actionOfferResolver?: ActionOfferResolver;
-  actionExecutor: RegisteredActionExecutor;
+  actionExecutor?: RegisteredActionExecutor;
+  registeredPageAction?: RegisteredPageAction;
+  systemUriOpener?: SystemUriOpener;
+  actionIdFactory?: HotelActionIdFactory;
   bus?: LinkedMessageBus;
   conversationId?: string;
   dataPlanner?: DataTaskPlanner;
