@@ -175,9 +175,11 @@ export default function gmailToolA2uiTest() {
         status: 'success',
         summary: 'one result',
         rows: [{ label: '结果数量', value: '1' }],
-        rawPreview: '{"messages":[{"threadId":"thread-structured-1","messageId":"message-structured-1",' +
+        rawPreview: '{"messages":[{"provider":"gmail","accountLabel":"work@example.com",' +
+          '"threadId":"thread-structured-1","messageId":"message-structured-1",' +
           '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
-          '"subject":"Structured Gmail","snippet":"Same normalized summary"}]}'
+          '"subject":"Structured Gmail","snippet":"Same normalized summary",' +
+          '"unread":true,"important":true,"rawProviderRef":"structured-provider-ref"}]}'
       };
       const structured = gmailSearchStructuredDataFromResults([composio]);
       const oldRows = genericToolResults(surfaceFromJsonl(
@@ -192,11 +194,19 @@ export default function gmailToolA2uiTest() {
       expect(rowValue(newRows[0], 'Thread ID')).assertEqual('thread-structured-1');
       expect(rowValue(newRows[0], 'Message ID')).assertEqual('message-structured-1');
       expect(rowValue(newRows[0], 'To')).assertEqual('Me <me@example.com>');
+      expect(structured.threads[0].accountLabel).assertEqual('work@example.com');
+      expect(structured.threads[0].unread).assertTrue();
+      expect(structured.threads[0].important).assertTrue();
+      expect(structured.threads[0].rawProviderRef).assertEqual('structured-provider-ref');
       const action = gmailReplyDraftAction(newRows[0]);
       expect(action !== null).assertTrue();
       if (action !== null) {
-        expect(JSON.stringify(action.args).indexOf('thread-structured-1')).assertLarger(-1);
-        expect(JSON.stringify(action.args).indexOf('alice@example.com')).assertLarger(-1);
+        expect(action.id).assertEqual('gmail.ai.reply.draft');
+        expect(action.id === 'mail.ai.reply.draft').assertFalse();
+        expect(JSON.stringify(action.args)).assertEqual(
+          '{"threadId":"thread-structured-1","to":["alice@example.com"],' +
+            '"subject":"Re: Structured Gmail","replyMode":"reply","contextSummary":"Same normalized summary"}'
+        );
       }
     });
 

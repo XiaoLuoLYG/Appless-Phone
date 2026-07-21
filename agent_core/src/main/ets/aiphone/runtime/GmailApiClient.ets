@@ -422,13 +422,22 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
   const first = firstMessage(thread);
   const subject = firstHeader(first, 'Subject').length > 0 ? decodeGmailText(firstHeader(first, 'Subject')) : '(no subject)';
   const from = decodeGmailText(firstHeader(newest, 'From'));
+  const to = decodeGmailText(firstHeader(newest, 'To'));
   const date = decodeGmailText(firstHeader(newest, 'Date'));
+  const threadId = textOf(thread.id);
+  const messageId = textOf(newest.id);
+  const unread = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('UNREAD') >= 0;
+  const important = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('IMPORTANT') >= 0;
   const snippet = decodeGmailText(textOf(newest.snippet).length > 0 ? textOf(newest.snippet) : textOf(first.snippet));
   const rows: A2uiLabelValueData[] = [
     { label: 'From', value: from.length > 0 ? from : 'Unknown sender' },
+    { label: 'To', value: to },
     { label: 'Date', value: date.length > 0 ? date : textOf(newest.internalDate) },
     { label: 'Messages', value: messageCount(thread).toString() },
-    { label: 'Thread ID', value: textOf(thread.id) }
+    { label: 'Thread ID', value: threadId },
+    { label: 'Message ID', value: messageId },
+    { label: 'Unread', value: unread ? 'true' : 'false' },
+    { label: 'Important', value: important ? 'true' : 'false' }
   ];
   const labels = labelsText(newest);
   if (labels.length > 0) {
@@ -441,7 +450,21 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
     status: 'success',
     summary: snippet.length > 0 ? snippet.substring(0, 240) : 'Gmail thread retrieved.',
     rows: rows,
-    rawPreview: 'threadId=' + textOf(thread.id) + ' subject=' + subject.substring(0, 160)
+    rawPreview: JSON.stringify({
+      provider: 'gmail',
+      accountLabel: '',
+      threadId: threadId,
+      messageId: messageId,
+      from: from,
+      to: to,
+      subject: subject.substring(0, 120),
+      snippet: snippet.length > 0 ? snippet.substring(0, 240) : '',
+      receivedAt: date.length > 0 ? date : textOf(newest.internalDate),
+      unread: unread,
+      important: important,
+      sourceUrl: '',
+      rawProviderRef: JSON.stringify({ threadId: threadId, messageId: messageId, historyId: textOf(thread.historyId) })
+    })
   };
 }
 
@@ -496,6 +519,8 @@ async function getThread(accessToken: string, threadId: string): Promise<GmailTh
     ['format', 'metadata'],
     ['metadataHeaders', 'Subject'],
     ['metadataHeaders', 'From'],
+    ['metadataHeaders', 'To'],
+    ['metadataHeaders', 'Message-ID'],
     ['metadataHeaders', 'Date']
   ]);
   return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;

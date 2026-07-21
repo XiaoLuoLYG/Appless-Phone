@@ -451,6 +451,11 @@ function verifySourceContracts() {
   const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const gmailNormalizer = read('agent_core/src/main/ets/aiphone/runtime/GmailToolNormalizer.ets');
+  const gmailStructuredNormalizer = liveDeclarationBody(
+    gmailNormalizer,
+    'export function gmailSearchStructuredDataFromResults'
+  );
   const hotelA2ui = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelToolA2ui.ets'));
   const hotelActions = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelActions.ets'));
   const hotelRuntime = stripComments(read('entry/src/main/ets/pages/A2uiHome/agent/HotelAgentRuntime.ets'));
@@ -628,6 +633,12 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalFoodSearch', 'runtime includes food execution');
   assertContains(runtimeGateway, 'async function callLocalMailTool', 'runtime includes aggregate mail execution');
   assertContains(runtimeGateway, 'async function callLocalGmailTool', 'runtime includes Gmail execution');
+  assert(
+    gmailStructuredNormalizer.length > 0 &&
+      !/A2ui|gmailComposioThreadResults|Card/.test(gmailStructuredNormalizer) &&
+      !gmailNormalizer.includes("from './GmailToolA2ui'"),
+    'Gmail structured normalization has no A2UI or card round trip'
+  );
   assertContains(runtimeGateway, 'async function callLocalMediaTool', 'runtime includes media video execution');
   assertContains(runtimeGateway, 'async function callLocalYouTubeTool', 'runtime includes YouTube execution');
   assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');

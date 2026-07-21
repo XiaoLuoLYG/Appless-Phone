@@ -38,11 +38,13 @@ import {
   gmailDraftPreviewA2ui,
   gmailOpenWebA2ui,
   gmailSearchStructuredDataA2ui,
-  gmailSearchStructuredDataFromResults,
-  GmailSearchStructuredData,
-  GmailThreadSummary,
   gmailThreadResultsA2ui
 } from './GmailToolA2ui';
+import {
+  gmailSearchStructuredDataFromResults,
+  GmailSearchStructuredData,
+  GmailThreadSummary
+} from './GmailToolNormalizer';
 import {
   mailDraftPreviewA2ui,
   mailResultsFromDynamicA2ui,
@@ -9685,6 +9687,7 @@ const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
 let dynamicReadExecutor: DynamicReadExecutor = defaultDynamicReadExecutor;
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
+let gmailComposioResultForTests: DynamicGenericToolResult | null = null;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
 export type HotelTimestampProvider = () => string;
@@ -9693,6 +9696,10 @@ let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvid
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureGmailComposioResultForTests(result: DynamicGenericToolResult | null): void {
+  gmailComposioResultForTests = result;
 }
 
 export function configureDynamicReadExecutorForTests(executor: DynamicReadExecutor | null): void {
@@ -10958,40 +10965,164 @@ function mailProviderError(provider: string, message: string): MailProviderStatu
   };
 }
 
+type MailEntityJsonValue = Object | string | number | boolean | null | undefined;
+
+function mailEntityRecord(record: Record<string, MailEntityJsonValue>): boolean {
+  const threadId = textOf(record['threadId']).trim();
+  const messageId = textOf(record['messageId']).trim();
+  const internetMessageId = textOf(record['internetMessageId']).trim();
+  if (threadId.length > 0 || messageId.length > 0 || internetMessageId.length > 0) {
+    return true;
+  }
+  const id = textOf(record['id']).trim();
+  const subject = textOf(record['subject']).trim();
+  const sender = textOf(record['from']).trim() + textOf(record['sender']).trim() + textOf(record['to']).trim();
+  return id.length > 0 && (subject.length > 0 || sender.length > 0);
+}
+
+function mailRawHasEntity(value: MailEntityJsonValue, depth: number = 0): boolean {
+  if (depth > 6 || value === undefined || value === null || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const item = value[index] as MailEntityJsonValue;
+      if (item !== undefined && item !== null && typeof item === 'object' &&
+        (mailEntityRecord(item as Record<string, MailEntityJsonValue>) || mailRawHasEntity(item, depth + 1))) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as Record<string, MailEntityJsonValue>;
+  if (mailEntityRecord(record)) {
+    return true;
+  }
+  const nested = ['threads', 'messages', 'emails', 'mails', 'items', 'results', 'data', 'result', 'response'];
+  for (let index = 0; index < nested.length; index++) {
+    if (mailRawHasEntity(record[nested[index]], depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mailExtraHasEntity(result: DynamicGenericToolResult): boolean {
+  if (result.status !== 'success') {
+    return false;
+  }
+  for (let index = 0; index < result.rows.length; index++) {
+    const label = result.rows[index].label.trim().toLowerCase();
+    const value = result.rows[index].value.trim();
+    if (value.length > 0 &&
+      (label === 'message id' || label === 'messageid' || label === 'thread id' || label === 'threadid' ||
+        label === 'internet message id' || label === 'internetmessageid' || label.indexOf('结果 ') === 0)) {
+      return true;
+    }
+  }
+  if (result.rawPreview.trim().length === 0) {
+    return false;
+  }
+  try {
+    return mailRawHasEntity(JSON.parse(result.rawPreview) as MailEntityJsonValue);
+  } catch (_error) {
+    return false;
+  }
+}
+
 function mailSearchDataResult(
   data: MailSearchStructuredData,
   sources: DataSource[]
 ): DataResult {
+  const actualSources = sources.slice();
   const warnings: string[] = [];
+  let failureCount = 0;
+  let authFailureCount = 0;
+  let retryable = false;
+  let successfulResponse = data.threads.length > 0;
+  let entityCount = data.threads.length;
+  let failureMessage = '';
   data.statuses.forEach((status: MailProviderStatus) => {
-    if (status.status !== 'success') {
-      warnings.push(status.title + '：' + status.message);
+    if (status.status === 'success' || status.status === 'empty') {
+      successfulResponse = true;
+      return;
+    }
+    const evidence: DynamicGenericToolResult = {
+      sourceTag: status.provider,
+      toolName: 'mail.search',
+      title: status.title,
+      status: status.status,
+      summary: status.message,
+      rows: [],
+      rawPreview: ''
+    };
+    failureCount += 1;
+    if (remainingReadAuthFailure(evidence)) {
+      authFailureCount += 1;
+    }
+    if (remainingReadRetryable(evidence)) {
+      retryable = true;
+    }
+    const warning = status.title + '：' + status.message;
+    if (warnings.indexOf(warning) < 0) {
+      warnings.push(warning);
+    }
+    if (failureMessage.length === 0) {
+      failureMessage = status.message.length > 0 ? status.message : status.title;
     }
   });
   data.extras.forEach((result: DynamicGenericToolResult) => {
+    if (mailExtraHasEntity(result)) {
+      entityCount += 1;
+    }
+    if (result.status === 'success' || result.status === 'empty') {
+      successfulResponse = true;
+    }
     if (genericResultIsFailure(result)) {
-      warnings.push(result.title + '：' + result.summary);
+      failureCount += 1;
+      if (remainingReadAuthFailure(result)) {
+        authFailureCount += 1;
+      }
+      if (remainingReadRetryable(result)) {
+        retryable = true;
+      }
+      const warning = result.title + '：' + result.summary;
+      if (warnings.indexOf(warning) < 0) {
+        warnings.push(warning);
+      }
+      if (result.providerPhase === 'execution' || failureMessage.length === 0) {
+        failureMessage = result.summary.length > 0 ? result.summary : result.title;
+      }
+    }
+    if (result.providerPhase === 'execution' &&
+      !sourceAlreadyIncluded(actualSources, result.sourceTag, result.toolName)) {
+      actualSources.push(remainingReadSource(result));
     }
   });
-  if (data.threads.length > 0) {
-    return warnings.length > 0 ?
-      partialDataResult('mail.search', 'mailThreads', data, sources, warnings) :
-      successfulDataResult('mail.search', 'mailThreads', data, sources);
+  if (entityCount > 0) {
+    return failureCount > 0 ?
+      partialDataResult('mail.search', 'mailThreads', data, actualSources, warnings) :
+      successfulDataResult('mail.search', 'mailThreads', data, actualSources);
   }
-  if (warnings.length > 0) {
-    const authOnly = data.statuses.length > 0 && data.statuses.every((status: MailProviderStatus): boolean =>
-      status.status === 'needs_auth' || remainingReadAuthFailure({
-        sourceTag: status.provider, toolName: 'mail.search', title: status.title,
-        status: status.status, summary: status.message, rows: [], rawPreview: ''
-      }));
+  if (successfulResponse) {
+    const empty = successfulDataResult('mail.search', 'mailThreads', data, actualSources);
+    empty.status = 'empty';
+    empty.warnings = warnings;
+    return empty;
+  }
+  if (failureCount > 0) {
     return structuredErrorWithData(
-      'mail.search', 'mailThreads', data, authOnly ? 'AUTH_REQUIRED' : 'PROVIDER_ERROR',
-      warnings.join('；'), false, sources, warnings
+      'mail.search', 'mailThreads', data, authFailureCount === failureCount ? 'AUTH_REQUIRED' : 'PROVIDER_ERROR',
+      failureMessage.length > 0 ? failureMessage : warnings.join('；'), retryable, actualSources, warnings
     );
   }
-  const empty = successfulDataResult('mail.search', 'mailThreads', data, sources);
+  const empty = successfulDataResult('mail.search', 'mailThreads', data, actualSources);
   empty.status = 'empty';
   return empty;
+}
+
+export function mailSearchDataResultForTest(data: MailSearchStructuredData, sources: DataSource[]): DataResult {
+  return mailSearchDataResult(data, sources);
 }
 
 async function callStructuredMailSearch(prompt: string, args: Object | null): Promise<DataResult> {
@@ -11037,10 +11168,6 @@ async function callStructuredMailSearch(prompt: string, args: Object | null): Pr
   }
   if (parsed.providers.indexOf('outlook') >= 0) {
     const outlook = await composioAppResult('Outlook', parsed.query, '的邮件');
-    if (isComposioConfigured() || outlook.status === 'success') {
-      outlook.providerPhase = 'execution';
-      sources.push(remainingReadSource(outlook));
-    }
     data.extras.push(outlook);
   }
   return mailSearchDataResult(data, sources);
@@ -11053,7 +11180,7 @@ async function callStructuredMailThreadRead(toolId: string, args: Object | null)
     return identityError;
   }
   if (request.provider === 'gmail') {
-    return callStructuredGmailReadTool('gmail.thread.read', '', request as Object);
+    return callStructuredGmailReadTool(toolId, '', request as Object, 'gmail.thread.read');
   }
   const configured = localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0;
   const sources: DataSource[] = configured ? [{
@@ -11182,17 +11309,6 @@ async function composioFixedAppResult(
   }
 }
 
-function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
-  return results.length > 0 && results[0].status === 'error';
-}
-
-function gmailResultErrorSummary(results: DynamicGenericToolResult[]): string {
-  if (results.length === 0) {
-    return 'empty Gmail API result';
-  }
-  return results[0].summary.length > 0 ? results[0].summary : results[0].title;
-}
-
 async function gmailOAuthFallbackResults(
   toolId: string,
   prompt: string,
@@ -11218,10 +11334,35 @@ async function gmailOAuthFallbackResults(
       gmailMcpArgsForPrompt(toolId, prompt, args)
     )];
   } catch (error) {
+    const message = describeThrown(error);
     aiLogError('[AIPhone][GmailLocalOAuthFallbackFailed] toolId=' + toolId +
-      ' reason=' + describeThrown(error).substring(0, 200));
-    return [];
+      ' reason=' + message.substring(0, 200));
+    return [{
+      sourceTag: 'Gmail OAuth',
+      toolName: toolId,
+      title: 'Gmail OAuth 调用失败',
+      status: 'error',
+      summary: message,
+      rows: [{ label: 'Error', value: message.substring(0, 240) }],
+      rawPreview: '',
+      providerPhase: 'execution'
+    }];
   }
+}
+
+function clonedGmailResult(result: DynamicGenericToolResult): DynamicGenericToolResult {
+  return {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows.map((row: A2uiLabelValueData): A2uiLabelValueData => ({ label: row.label, value: row.value })),
+    rawPreview: result.rawPreview,
+    actions: result.actions,
+    registration: result.registration,
+    providerPhase: result.providerPhase
+  };
 }
 
 async function configuredGmailResults(
@@ -11229,16 +11370,15 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
-  const composioAttempted = isComposioConfigured();
-  const composioResult = await composioFixedAppResult(
-    toolId,
-    'Gmail',
-    prompt,
-    toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
-    args
-  );
-  if (composioResult.status === 'success') {
-    composioResult.providerPhase = 'execution';
+  const composioResult = gmailComposioResultForTests === null ?
+    await composioFixedAppResult(
+      toolId,
+      'Gmail',
+      prompt,
+      toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
+      args
+    ) : clonedGmailResult(gmailComposioResultForTests);
+  if (composioResult.status === 'success' && composioResult.providerPhase === 'execution') {
     return [composioResult];
   }
   const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
@@ -11246,10 +11386,13 @@ async function configuredGmailResults(
     result.providerPhase = 'execution';
   });
   if (fallbackResults.length > 0) {
+    const fallbackSucceeded = fallbackResults.some((result: DynamicGenericToolResult): boolean =>
+      result.status === 'success' || result.status === 'empty');
+    if (fallbackSucceeded) {
+      return fallbackResults;
+    }
+    fallbackResults.push(composioResult);
     return fallbackResults;
-  }
-  if (composioAttempted) {
-    composioResult.providerPhase = 'execution';
   }
   return [composioResult];
 }
@@ -11321,10 +11464,11 @@ function mailDetailMatchesRequest(detail: MailDetail, request: MailDetailRequest
 async function callStructuredGmailReadTool(
   toolId: string,
   prompt: string,
-  args: Object | null
+  args: Object | null,
+  providerToolId: string = toolId
 ): Promise<DataResult> {
   if (toolId === 'gmail.mail.search') {
-    const results = await configuredGmailResults(toolId, prompt, args);
+    const results = await configuredGmailResults(providerToolId, prompt, args);
     const data: GmailSearchStructuredData = gmailSearchStructuredDataFromResults(results);
     const base = remainingReadStructuredDataResult(toolId, 'mailThreads', results);
     base.data = data;
@@ -11338,7 +11482,7 @@ async function callStructuredGmailReadTool(
   if (identityError !== null) {
     return identityError;
   }
-  const results = await configuredGmailResults(toolId, prompt, request as Object);
+  const results = await configuredGmailResults(providerToolId, prompt, request as Object);
   const base = remainingReadStructuredDataResult(toolId, 'mailThread', results);
   if (base.status !== 'success' || results.length === 0) {
     return base;
@@ -11929,7 +12073,7 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
 function mailDetailDynamicResult(toolId: string, data: MailThreadStructuredData): DynamicGenericToolResult {
   return {
     sourceTag: data.provider === 'gmail' ? 'Gmail API' : 'QQ Mail',
-    toolName: toolId,
+    toolName: data.provider === 'gmail' ? 'users.threads.get' : toolId,
     title: data.subject.length > 0 ? data.subject : '(no subject)',
     status: 'success',
     summary: data.body.length > 0 ? data.body : data.bodyHtml,
@@ -11959,6 +12103,19 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
     if (toolId === 'gmail.mail.search') {
       const result = await callStructuredGmailReadTool(toolId, prompt, args);
       return gmailSearchStructuredDataA2ui(surfaceId, toolId, result.data as GmailSearchStructuredData);
+    }
+    if (toolId === 'gmail.thread.read') {
+      const result = await callStructuredGmailReadTool(toolId, prompt, args);
+      if (result.status === 'success') {
+        return gmailThreadResultsA2ui(surfaceId, toolId, [
+          mailDetailDynamicResult(toolId, result.data as MailThreadStructuredData)
+        ]);
+      }
+      const message = result.error?.message === undefined ? 'Gmail thread read failed.' : result.error.message;
+      return gmailThreadResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 正文读取失败', status: 'error',
+        summary: message, rows: [{ label: '错误', value: message }], rawPreview: ''
+      }]);
     }
     const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {

@@ -23,6 +23,7 @@ import { DynamicGenericToolResult } from '@loop/agent-core';
 import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
 import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
+import { gmailReplyDraftAction } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
@@ -32,6 +33,7 @@ import {
   callStructuredHotelTool,
   configureComposioConfigFromRawJson,
   configureDidiMcpSandboxForRuntime,
+  configureGmailComposioResultForTests,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureHotelMcpClientForTests,
@@ -63,7 +65,9 @@ import {
   isRegisteredToolId,
   isTransientPayPalRequestErrorForTest,
   localProviderConfigDebugSummary,
+  mailSearchDataResultForTest,
   mailSearchArgs,
+  mailThreadSummary,
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
@@ -102,7 +106,8 @@ import {
   travelStructuredDataA2ui,
   travelStructuredDataResult,
   FoodProviderPartialSnapshot,
-  FoodProviderResult
+  FoodProviderResult,
+  MailSearchStructuredData
 } from '@loop/agent-core';
 
 class SuccessfulGmailMcpClient extends GenericMcpClient {
@@ -134,6 +139,15 @@ class ScriptedGmailMcpClient extends GenericMcpClient {
   async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
     this.callCount += 1;
     return this.response;
+  }
+}
+
+class ThrowingGmailMcpClient extends GenericMcpClient {
+  callCount: number = 0;
+
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
+    throw new Error('Gmail OAuth transport timeout');
   }
 }
 
@@ -188,6 +202,24 @@ interface PaymentTestArgs {
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
+}
+
+function gmailFullDetailResult(threadId: string, messageId: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Gmail OAuth',
+    toolName: 'gmail.thread.read',
+    title: 'Gmail thread',
+    status: 'success',
+    summary: 'full thread',
+    rows: [{ label: 'Thread ID', value: threadId }],
+    rawPreview: '{"successful":true,"data":{"id":' + JSON.stringify(threadId) + ',"messages":[{' +
+      '"id":' + JSON.stringify(messageId) + ',"threadId":' + JSON.stringify(threadId) + ',"payload":{' +
+      '"mimeType":"multipart/alternative","headers":[' +
+      '{"name":"Subject","value":"Status update"},' +
+      '{"name":"From","value":"Alice <alice@example.com>"},' +
+      '{"name":"To","value":"Me <me@example.com>"}],' +
+      '"parts":[{"mimeType":"text/plain","body":{"data":"SGVsbG8gR21haWw="}}]}}]}}'
+  };
 }
 
 function searchArgsForGateway(): Object {
@@ -847,19 +879,125 @@ export default function toolGatewayClientTest() {
       configureGmailMcpClientForTests(client);
       try {
         configureComposioConfigFromRawJson('{}');
-        const result = await callStructuredTool(
+        const gmailResult = await callStructuredTool(
           'gmail.thread.read', '',
           looseObject('{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
             '"threadId":"thread-real-1","messageId":"message-real-1","subject":"Status update"}')
         );
-        const serialized = JSON.stringify(result.data);
+        const callsAfterGmail = client.callCount;
+        const mailResult = await callStructuredTool(
+          'mail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"Status update"}')
+        );
+        const serialized = JSON.stringify(gmailResult.data);
 
-        expect(client.callCount).assertEqual(1);
-        expect(result.status).assertEqual('success');
+        expect(callsAfterGmail).assertEqual(1);
+        expect(client.callCount).assertEqual(2);
+        expect(gmailResult.toolId).assertEqual('gmail.thread.read');
+        expect(gmailResult.outputSchema).assertEqual('mailThread');
+        expect(mailResult.toolId).assertEqual('mail.thread.read');
+        expect(mailResult.outputSchema).assertEqual('mailThread');
+        expect(gmailResult.status).assertEqual('success');
+        expect(mailResult.status).assertEqual('success');
         expect(serialized.indexOf('gmail:thread-real-1')).assertLarger(-1);
         expect(serialized.indexOf('message-real-1')).assertLarger(-1);
         expect(serialized.indexOf('Hello Gmail')).assertLarger(-1);
         expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
+        expect(JSON.stringify(mailResult.data)).assertEqual(serialized);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('routes legacy Gmail thread reads through the same exact structured detail contract', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient(gmailFullDetailResult('thread-legacy-1', 'message-legacy-1'));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.thread.read',
+          '打开这封 Gmail 正文',
+          'surface_gmail_legacy_detail',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-legacy-1",' +
+            '"threadId":"thread-legacy-1","messageId":"message-legacy-1","subject":"Status update"}')
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(client.callCount).assertEqual(1);
+        expect(rendered.length).assertEqual(1);
+        expect(rendered[0].sourceTag).assertEqual('Gmail API');
+        expect(rendered[0].toolName).assertEqual('users.threads.get');
+        expect(rendered[0].status).assertEqual('success');
+        expect(rendered[0].summary.indexOf('Hello Gmail')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('gmail:thread-legacy-1')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('message-legacy-1')).assertLarger(-1);
+        const action = gmailReplyDraftAction(rendered[0]);
+        expect(action !== null).assertTrue();
+        if (action !== null) {
+          expect(action.id).assertEqual('gmail.ai.reply.draft');
+          expect(JSON.stringify(action.args).indexOf('thread-legacy-1')).assertLarger(-1);
+          expect(JSON.stringify(action.args).indexOf('alice@example.com')).assertLarger(-1);
+        }
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects invalid stale and summary-only legacy Gmail detail requests', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient(gmailFullDetailResult('thread-stale-provider', 'message-stale-provider'));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const invalid = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_invalid_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:wrong",' +
+            '"threadId":"thread-requested","messageId":"message-requested"}')
+        );
+        expect(client.callCount).assertEqual(0);
+        expect(genericToolResults(invalid.surface)[0].status).assertEqual('error');
+
+        const stale = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_stale_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-requested",' +
+            '"threadId":"thread-requested","messageId":"message-requested"}')
+        );
+        expect(client.callCount).assertEqual(1);
+        expect(genericToolResults(stale.surface)[0].status).assertEqual('error');
+
+        const summaryClient = new ScriptedGmailMcpClient({
+          sourceTag: 'Gmail OAuth', toolName: 'gmail.thread.read', title: 'Gmail summary',
+          status: 'success', summary: 'summary only', rows: [{ label: 'Thread ID', value: 'thread-summary' }],
+          rawPreview: '{"threadId":"thread-summary","messageId":"message-summary","snippet":"No full body"}'
+        });
+        configureGmailMcpClientForTests(summaryClient);
+        const summaryOnly = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_summary_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-summary",' +
+            '"threadId":"thread-summary","messageId":"message-summary"}')
+        );
+        expect(summaryClient.callCount).assertEqual(1);
+        expect(genericToolResults(summaryOnly.surface)[0].status).assertEqual('error');
+        expect(JSON.stringify(genericToolResults(summaryOnly.surface)).indexOf('No full body')).assertEqual(-1);
       } finally {
         configureGmailMcpClientForTests(null);
         configureGmailCredentialStoreForTests(null);
@@ -1931,6 +2069,96 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('derives aggregate mail entity status retryability and sources from actual provider evidence', 0, () => {
+      const outlookEntity: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook result',
+        status: 'success', summary: 'one message', rows: [{ label: 'Message ID', value: 'outlook-message-1' }],
+        rawPreview: '{"messages":[{"id":"outlook-message-1"}]}', providerPhase: 'execution'
+      };
+      const outlookEmpty: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook empty',
+        status: 'empty', summary: 'no matching message', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const outlookTechnicalSuccess: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook query completed',
+        status: 'success', summary: 'provider returned no mail entity',
+        rows: [{ label: 'Query', value: 'latest' }, { label: 'provider', value: 'Outlook' }],
+        rawPreview: '{"successful":true,"query":"latest"}', providerPhase: 'execution'
+      };
+      const outlookAuth: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook auth required',
+        status: 'needs_auth', summary: 'Outlook OAuth is not connected', rows: [], rawPreview: ''
+      };
+      const outlookTimeout: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook transport error',
+        status: 'error', summary: 'Outlook transport timeout', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const gmailEmpty: DynamicGenericToolResult = {
+        sourceTag: 'Gmail OAuth', toolName: 'gmail.mail.search', title: 'Gmail empty',
+        status: 'empty', summary: 'no matching message', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const gmailThread = mailThreadSummary({
+        provider: 'gmail', accountLabel: 'work@example.com', threadId: 'gmail-thread-1',
+        messageId: 'gmail-message-1', subject: 'Mail result', from: 'alice@example.com',
+        to: ['me@example.com'], participants: ['alice@example.com', 'me@example.com'],
+        snippet: 'Actual entity', receivedAt: '2026-07-22T01:00:00Z', unread: true, important: true,
+        sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/gmail-thread-1', rawProviderRef: 'gmail-ref-1'
+      });
+
+      const entity = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookEntity] } as MailSearchStructuredData, []
+      );
+      expect(entity.status).assertEqual('success');
+      expect(entity.sources.length).assertEqual(1);
+      expect(entity.sources[0].provider).assertEqual('Composio Outlook');
+      expect(entity.sources[0].backend).assertEqual('oauth_api');
+      expect(entity.sources[0].operation).assertEqual('outlook.mail.search');
+
+      const empty = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookEmpty] } as MailSearchStructuredData, []
+      );
+      expect(empty.status).assertEqual('empty');
+      expect(empty.sources.length).assertEqual(1);
+
+      const technicalOnly = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookTechnicalSuccess] } as MailSearchStructuredData, []
+      );
+      expect(technicalOnly.status).assertEqual('empty');
+      expect(technicalOnly.sources.length).assertEqual(1);
+
+      const auth = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookAuth] } as MailSearchStructuredData, []
+      );
+      expect(auth.status).assertEqual('error');
+      expect(auth.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(auth.error?.retryable).assertFalse();
+      expect(auth.sources.length).assertEqual(0);
+
+      const transport = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookTimeout] } as MailSearchStructuredData, []
+      );
+      expect(transport.status).assertEqual('error');
+      expect(transport.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(transport.error?.retryable).assertTrue();
+      expect(transport.sources.length).assertEqual(1);
+      expect(transport.sources[0].operation).assertEqual('outlook.mail.search');
+
+      const mixed = mailSearchDataResultForTest(
+        { threads: [gmailThread], statuses: [], extras: [outlookTimeout] } as MailSearchStructuredData,
+        [{ provider: 'Gmail OAuth', backend: 'oauth_api', operation: 'gmail.mail.search', fetchedAt: '2026-07-22T01:00:00Z' }]
+      );
+      expect(mixed.status).assertEqual('partial');
+      expect(mixed.sources.length).assertEqual(2);
+
+      const successfulEmptyWithFailure = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [gmailEmpty, outlookTimeout] } as MailSearchStructuredData, []
+      );
+      expect(successfulEmptyWithFailure.status).assertEqual('empty');
+      expect(successfulEmptyWithFailure.warnings.length).assertLarger(0);
+      expect(successfulEmptyWithFailure.sources.length).assertEqual(2);
+      expect(successfulEmptyWithFailure.error === undefined).assertTrue();
+    });
+
     it('extracts aggregate mail keyword when model timeout falls back without args', 0, () => {
       const parsed = mailSearchArgs('聚合搜索 Gmail 和 QQ 邮箱里关键词 loopy 的邮件', null);
 
@@ -2253,6 +2481,132 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('keeps the real local Gmail timeout when Composio only failed discovery', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ThrowingGmailMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio discovery failed',
+        status: 'needs_auth', summary: 'Composio Gmail is not connected', rows: [], rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('error');
+        expect(result.error?.message.indexOf('Gmail OAuth transport timeout')).assertLarger(-1);
+        expect(result.error?.retryable).assertTrue();
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('Gmail OAuth');
+        expect(result.sources[0].backend).assertEqual('oauth_api');
+        expect(result.sources[0].operation).assertEqual('gmail.mail.search');
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses a real local Gmail success after discovery failure without a stale Composio source', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth', toolName: 'gmail.mail.search', title: 'Local Gmail result',
+        status: 'success', summary: 'one local result', rows: [{ label: 'Result size', value: '1' }],
+        rawPreview: '{"messages":[{"provider":"gmail","accountLabel":"work@example.com",' +
+          '"threadId":"local-thread-1","messageId":"local-message-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Local fallback","snippet":"Actual local result","unread":true,"important":true,' +
+          '"rawProviderRef":"local-provider-ref-1"}]}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio discovery failed',
+        status: 'needs_auth', summary: 'Composio Gmail is not connected', rows: [], rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('Gmail OAuth');
+        expect(serialized.indexOf('local-thread-1')).assertLarger(-1);
+        expect(serialized.indexOf('local-provider-ref-1')).assertLarger(-1);
+        expect(serialized.indexOf('Composio discovery failed')).assertEqual(-1);
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses Composio execution phase for Gmail source and never invents it from configuration', 0, async () => {
+      const emptyStore = new MemoryCredentialStore();
+      configureGmailCredentialStoreForTests(emptyStore);
+      try {
+        configureGmailComposioResultForTests({
+          sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio Gmail error',
+          status: 'error', summary: 'Composio execution transport timeout', rows: [], rawPreview: '',
+          providerPhase: 'execution'
+        });
+        const executionError = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(executionError.status).assertEqual('error');
+        expect(executionError.error?.retryable).assertTrue();
+        expect(executionError.sources.length).assertEqual(1);
+        expect(executionError.sources[0].provider).assertEqual('Composio Gmail');
+        expect(executionError.sources[0].operation).assertEqual('gmail.mail.search');
+
+        const localClient = new SuccessfulGmailMcpClient();
+        const tokenStore = new MemoryCredentialStore();
+        await tokenStore.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+        configureGmailCredentialStoreForTests(tokenStore);
+        configureGmailMcpClientForTests(localClient);
+        configureGmailComposioResultForTests({
+          sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio Gmail result',
+          status: 'success', summary: 'one result', rows: [{ label: 'Result size', value: '1' }],
+          rawPreview: '{"messages":[{"threadId":"composio-thread-1","messageId":"composio-message-1",' +
+            '"sender":"Composio <composio@example.com>","subject":"Composio success","snippet":"Actual result"}]}',
+          providerPhase: 'execution'
+        });
+        const executionSuccess = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(executionSuccess.status).assertEqual('success');
+        expect(executionSuccess.sources.length).assertEqual(1);
+        expect(executionSuccess.sources[0].provider).assertEqual('Composio Gmail');
+        expect(localClient.callCount).assertEqual(0);
+
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(emptyStore);
+        configureComposioConfigFromRawJson('{}');
+        const notConfigured = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(notConfigured.status).assertEqual('error');
+        expect(notConfigured.error?.code).assertEqual('AUTH_REQUIRED');
+        expect(notConfigured.sources.length).assertEqual(0);
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
     it('uses the same Gmail OAuth fallback when saving a reply draft', 0, async () => {
       const store = new MemoryCredentialStore();
       await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
@@ -2284,7 +2638,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps Gmail thread-read args visible on the fixed Composio path', 0, async () => {
+    it('rejects incomplete Gmail thread-read identity before the fixed provider path', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -2302,8 +2656,8 @@ export default function toolGatewayClientTest() {
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.thread.read');
-        expect(rendered[0].status).assertEqual('needs_auth');
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-123')).assertLarger(-1);
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('matching provider, requestKey')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
