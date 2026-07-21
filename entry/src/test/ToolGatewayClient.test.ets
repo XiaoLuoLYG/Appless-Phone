@@ -5,6 +5,7 @@ import {
   A2uiLabelValueData,
   A2uiSurfaceState,
   A2uiTravelOptionData,
+  DataSource,
   HotelSearchResult
 } from '@loop/agent-core';
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
@@ -18,6 +19,7 @@ import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-cor
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
+  callStructuredTool,
   callToolGateway,
   callStructuredHotelTool,
   configureComposioConfigFromRawJson,
@@ -29,6 +31,8 @@ import {
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
+  emptyDataResult,
+  errorDataResult,
   foodA2uiRenderState,
   foodDistanceMeters,
   foodProviderProgressRows,
@@ -48,6 +52,7 @@ import {
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
+  partialDataResult,
   rideAmapGeocodePointForTest,
   rideAmapGeocodeKeyForTest,
   rideAmapRequestArgsForTest,
@@ -74,6 +79,7 @@ import {
   saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
+  successfulDataResult,
   FoodProviderPartialSnapshot,
   FoodProviderResult
 } from '@loop/agent-core';
@@ -538,6 +544,119 @@ export default function toolGatewayClientTest() {
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
       }
+    });
+
+    it('builds exact immutable structured data envelopes', 0, () => {
+      const source: DataSource = {
+        provider: 'Provider A',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-21T00:00:00.000Z'
+      };
+      const sources: DataSource[] = [source];
+      const successData = looseObject('{"items":[{"id":"real-1"}]}');
+      const success = successfulDataResult('travel.search', 'travelOptions', successData, sources);
+      const partial = partialDataResult(
+        'media.aggregate.search',
+        'genericToolResults',
+        looseObject('{"items":[{"id":"real-2"}]}'),
+        sources,
+        ['One provider failed.']
+      );
+      const empty = emptyDataResult('food.search', 'foodChoices', [], 'No stores returned.');
+      const error = errorDataResult(
+        'maps.place.search',
+        'genericToolResults',
+        'PROVIDER_TIMEOUT',
+        'Provider timed out.',
+        true,
+        sources
+      );
+      sources.push({
+        provider: 'Provider B',
+        backend: 'mcp_remote',
+        operation: 'search',
+        fetchedAt: '2026-07-21T00:00:01.000Z'
+      });
+
+      expect(JSON.stringify(success)).assertEqual(
+        '{"toolId":"travel.search","outputSchema":"travelOptions","status":"success",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{"items":[{"id":"real-1"}]},"warnings":[]}'
+      );
+      expect(JSON.stringify(partial)).assertEqual(
+        '{"toolId":"media.aggregate.search","outputSchema":"genericToolResults","status":"partial",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{"items":[{"id":"real-2"}]},' +
+        '"warnings":["One provider failed."]}'
+      );
+      expect(JSON.stringify(empty)).assertEqual(
+        '{"toolId":"food.search","outputSchema":"foodChoices","status":"empty","sources":[],' +
+        '"data":{},"warnings":["No stores returned."]}'
+      );
+      expect(JSON.stringify(error)).assertEqual(
+        '{"toolId":"maps.place.search","outputSchema":"genericToolResults","status":"error",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{},"warnings":[],' +
+        '"error":{"code":"PROVIDER_TIMEOUT","message":"Provider timed out.","retryable":true}}'
+      );
+    });
+
+    it('fails closed for action-owned unknown and unmigrated structured tools', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const actionOwned = await callStructuredTool('hotel.navigate', '', detailArgsForGateway());
+        const unknown = await callStructuredTool('unknown.tool', '', new Object());
+        const missingAdapter = await callStructuredTool('travel.search', '深圳到香港', new Object());
+
+        expect(actionOwned.status).assertEqual('error');
+        expect(actionOwned.outputSchema).assertEqual('systemIntentResult');
+        expect(actionOwned.error?.code).assertEqual('TOOL_NOT_ALLOWED');
+        expect(unknown.status).assertEqual('error');
+        expect(unknown.outputSchema).assertEqual('');
+        expect(unknown.error?.code).assertEqual('TOOL_NOT_ALLOWED');
+        expect(missingAdapter.status).assertEqual('error');
+        expect(missingAdapter.outputSchema).assertEqual('travelOptions');
+        expect(missingAdapter.error?.code).assertEqual('STRUCTURED_ADAPTER_MISSING');
+        expect(client.callCount).assertEqual(0);
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('delegates structured hotel reads without rewriting sources or errors', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const success = await callStructuredTool('hotel.search', 'ignored prompt', searchArgsForGateway());
+
+        expect(success.status).assertEqual('success');
+        expect(success.outputSchema).assertEqual('hotelSearchResults');
+        expect(success.sources.length).assertEqual(1);
+        expect(success.sources[0].provider).assertEqual('RollingGo');
+        expect(success.sources[0].operation).assertEqual('searchHotels');
+        expect(client.callCount).assertEqual(1);
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+
+      const error = await callStructuredTool('hotel.detail', '', detailArgsForGateway());
+      expect(error.status).assertEqual('error');
+      expect(error.error?.code).assertEqual('HOTEL_CONFIG_MISSING');
+      expect(error.sources.length).assertEqual(0);
     });
 
     it('returns a structured missing-config hotel error', 0, async () => {

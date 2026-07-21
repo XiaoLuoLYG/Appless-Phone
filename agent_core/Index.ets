@@ -2,6 +2,7 @@ export { ChatMessage, ConversationContext, ConversationRole } from './src/main/e
 export { TimeTool } from './src/main/ets/agent/TimeTool';
 export * from './src/main/ets/agent/message/AgentMessage';
 export * from './src/main/ets/agent/message/DataResult';
+export * from './src/main/ets/agent/message/DataResultFactory';
 export { AgentMessageReader, LinkedMessageBus } from './src/main/ets/agent/message/LinkedMessageBus';
 export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
 export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';

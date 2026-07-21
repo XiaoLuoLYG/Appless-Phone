@@ -65,6 +65,7 @@ import {
 } from './GmailOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
+import { errorDataResult } from '../../agent/message/DataResultFactory';
 import { ActionCatalog } from '../../agent/action/ActionCatalog';
 import {
   ActionArgsValidator,
@@ -120,7 +121,7 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
+import { dataAgentToolDefinitions, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
 import { ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
@@ -12096,19 +12097,7 @@ function hotelDataError(
   sources: DataSource[] = [],
   retryable: boolean = false
 ): DataResult {
-  return {
-    toolId: toolId,
-    outputSchema: outputSchema,
-    status: 'error',
-    sources: sources,
-    data: new Object(),
-    warnings: [],
-    error: {
-      code: code,
-      message: message,
-      retryable: retryable
-    }
-  };
+  return errorDataResult(toolId, outputSchema, code, message, retryable, sources);
 }
 
 function hotelDataSource(operation: string): DataSource {
@@ -12187,6 +12176,34 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
     return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
   }
+}
+
+export async function callStructuredTool(
+  toolId: string,
+  _prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  const definition = toolDefinitionForToolId(toolId);
+  const allowed = definition !== null && dataAgentToolDefinitions().some(
+    (candidate: ToolDefinition): boolean => candidate.toolId === toolId
+  );
+  if (definition === null || !allowed) {
+    return errorDataResult(
+      toolId,
+      definition === null ? '' : definition.outputSchema,
+      'TOOL_NOT_ALLOWED',
+      'DataAgent cannot execute ' + toolId + '.'
+    );
+  }
+  if (toolId === 'hotel.search' || toolId === 'hotel.detail') {
+    return callStructuredHotelTool(toolId, args);
+  }
+  return errorDataResult(
+    toolId,
+    definition.outputSchema,
+    'STRUCTURED_ADAPTER_MISSING',
+    'Structured adapter is not migrated for ' + toolId + '.'
+  );
 }
 
 class CurrentHotelToolLookup implements ToolDefinitionLookup {
