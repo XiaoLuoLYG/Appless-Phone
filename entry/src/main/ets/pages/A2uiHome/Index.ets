@@ -101,7 +101,10 @@ import { PersonaPack } from '../../model/PersonaTypes';
 import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../../model/VoiceInputBridge';
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
-import { CheckoutWebKind } from './components/CheckoutWebOverlay';
+import {
+  CheckoutWebKind,
+  isAllowed12306BookingUrl
+} from './components/CheckoutWebOverlay';
 import { ConfigPage } from './components/ConfigPage';
 import {
   HotelAgentRuntime,
@@ -378,6 +381,10 @@ interface PaymentCheckoutActionPayload {
   note?: HtmlActionValue;
   checkoutUrl?: HtmlActionValue;
   providerSessionId?: HtmlActionValue;
+}
+
+interface TrainBookingActionPayload {
+  bookingUrl?: HtmlActionValue;
 }
 
 interface StripeOnboardingActionPayload {
@@ -2871,6 +2878,14 @@ struct Index {
     return action.prompt.trim();
   }
 
+  private trainBookingUrlForAction(action: A2uiAction): string {
+    if (action.args === undefined) {
+      return '';
+    }
+    const payload = action.args as TrainBookingActionPayload;
+    return this.actionText(payload.bookingUrl).trim();
+  }
+
   private luckinPayUrlForAction(action: A2uiAction): string {
     if (action.args !== undefined) {
       const payload = action.args as Record<string, Object | string | number | boolean | null | undefined>;
@@ -3517,6 +3532,18 @@ struct Index {
       this.checkoutWebKind = 'payment';
       this.showCheckoutWeb = true;
       aiLogInfo('[AIPhone][PaymentCheckoutOpen] urlChars=' + checkoutUrl.length.toString());
+      return;
+    }
+    if (action.id === 'train.booking.open') {
+      const bookingUrl = this.trainBookingUrlForAction(action);
+      if (!isAllowed12306BookingUrl(bookingUrl)) {
+        this.logHtmlHomeActionError(action, 'invalid_12306_booking_url');
+        return;
+      }
+      this.checkoutWebKind = 'train';
+      this.checkoutWebUrl = bookingUrl;
+      this.showCheckoutWeb = true;
+      aiLogInfo('[AIPhone][TrainBookingOpen] urlChars=' + bookingUrl.length.toString());
       return;
     }
     if (action.id === 'luckin.pay.open') {
@@ -4203,7 +4230,18 @@ struct Index {
           this.stopVoiceInput();
         },
         onCloseCheckoutWeb: () => {
+          const closedTrainBooking = this.checkoutWebKind === 'train';
           this.showCheckoutWeb = false;
+          if (closedTrainBooking) {
+            this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+              ok: true,
+              status: 'ready',
+              message: '订单与支付结果请以 12306 为准。',
+              requestDebug: this.lastModelRequest,
+              assistantDebug: this.lastModelOutput,
+              error: ''
+            }));
+          }
         },
         onCheckoutWebReturn: (url: string) => {
           this.handlePaymentCheckoutReturn(url);
