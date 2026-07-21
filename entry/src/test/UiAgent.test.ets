@@ -517,7 +517,11 @@ export default function uiAgentTest() {
 
       expect(renderer.resultHotelIds.join(',')).assertEqual('101,202');
       expect(renderer.resultBatchSizes.join(',')).assertEqual('2');
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('result:')
+      ).length).assertEqual(1);
       expect(writer.writes.length).assertEqual(2);
+      expect(writer.writes[0].surfaceId).assertEqual(writer.writes[1].surfaceId);
       agent.stop();
       observer.close();
     });

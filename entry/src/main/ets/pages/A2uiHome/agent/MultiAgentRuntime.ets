@@ -4,6 +4,8 @@ import {
   ActionPlanRequestPayload,
   ActionResultPayload,
   ActionRunPayload,
+  ActionOffer,
+  ActionOfferContext,
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
@@ -13,6 +15,7 @@ import {
   CreateUiTaskPayload,
   CurrentSurfaceSummary,
   DataAgent,
+  DataResult,
   LeaderAgent,
   LeaderPlanningContext,
   LegacyHandoffPayload,
@@ -31,6 +34,8 @@ import {
   MultiAgentSettledOutcome,
   MultiAgentTurnOutcome
 } from './MultiAgentRuntimeTypes';
+import { RegisteredActionOfferResolver } from './RegisteredActionOfferResolver';
+import { StructuredToolUiRenderer } from './StructuredToolUiRenderer';
 
 const DEFAULT_SUBMIT_TIMEOUT_MS: number = 30000;
 const DEFAULT_ACTION_TIMEOUT_MS: number = 15000;
@@ -153,11 +158,20 @@ export class MultiAgentRuntime {
       options.dataExecutor,
       options.dataPlanner
     );
-    this.ui = new UiAgent(this.bus, options.uiRenderer, options.surfaceWriter);
+    const uiRenderer = options.uiRenderer === undefined ?
+      new StructuredToolUiRenderer(
+        options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
+        options.uiLayoutTimeoutMs
+      ) : options.uiRenderer;
+    const registeredOfferResolver = new RegisteredActionOfferResolver(options.actionCatalog);
+    const actionOfferResolver = options.actionOfferResolver === undefined ?
+      async (dataResult: DataResult, context: ActionOfferContext): Promise<ActionOffer[]> =>
+        registeredOfferResolver.resolve(dataResult, context) : options.actionOfferResolver;
+    this.ui = new UiAgent(this.bus, uiRenderer, options.surfaceWriter);
     this.action = new ActionAgent(
       this.bus,
       options.actionCatalog,
-      options.actionOfferResolver,
+      actionOfferResolver,
       options.actionExecutor,
       options.actionCompiler,
       options.virtualActionResolver

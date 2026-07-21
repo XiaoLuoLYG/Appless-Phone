@@ -83,6 +83,7 @@ import multiAgentLeaderPlannerTest from './MultiAgentLeaderPlanner.test';
 import dataAgentTest from './DataAgent.test';
 import readOnlyDataPlannerTest from './ReadOnlyDataPlanner.test';
 import uiAgentTest from './UiAgent.test';
+import structuredToolUiRendererTest from './StructuredToolUiRenderer.test';
 import actionCatalogTest from './ActionCatalog.test';
 import actionPlanRunnerTest from './ActionPlanRunner.test';
 import actionAgentTest from './ActionAgent.test';
@@ -167,6 +168,7 @@ export default function testsuite() {
   dataAgentTest();
   readOnlyDataPlannerTest();
   uiAgentTest();
+  structuredToolUiRendererTest();
   actionCatalogTest();
   actionPlanRunnerTest();
   actionAgentTest();

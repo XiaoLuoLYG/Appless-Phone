@@ -12,6 +12,7 @@ import {
   LinkedMessageBus,
   RegisteredActionExecutor,
   TurnResultStatus,
+  UiLayoutPlanner,
   UiSurfaceWriter,
   UiTaskRenderer,
   VirtualActionIntentResolver
@@ -41,10 +42,12 @@ export interface MultiAgentRuntimeOptions {
   dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer;
   dataAuthorizer: DataTaskAuthorizer;
   dataExecutor: DataTaskExecutor;
-  uiRenderer: UiTaskRenderer;
+  uiRenderer?: UiTaskRenderer;
+  uiLayoutPlanner?: UiLayoutPlanner;
+  uiLayoutTimeoutMs?: number;
   surfaceWriter: UiSurfaceWriter;
   actionCatalog: ActionCatalog;
-  actionOfferResolver: ActionOfferResolver;
+  actionOfferResolver?: ActionOfferResolver;
   actionExecutor: RegisteredActionExecutor;
   bus?: LinkedMessageBus;
   conversationId?: string;
