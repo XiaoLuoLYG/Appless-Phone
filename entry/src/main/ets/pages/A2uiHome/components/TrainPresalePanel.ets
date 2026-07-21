@@ -304,6 +304,9 @@ export function validateTrainPresaleConfirmation(
   if (passengerNames.length === 0) {
     return validationError('请填写至少一位乘车人姓名。');
   }
+  if (new Set<string>(passengerNames).size !== passengerNames.length) {
+    return validationError('乘车人姓名不能重复。');
+  }
   const seatPriority = input.seatPriority.trim();
   if (!isSupportedSeat(seatPriority)) {
     return validationError('请选择支持的席别。');

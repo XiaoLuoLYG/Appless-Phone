@@ -49,6 +49,152 @@ function task(state: TrainPresaleTaskState = 'executing'): TrainPresaleTask {
     createdAt: '2026-07-22T12:00:00+08:00', lastError: '' };
 }
 
+interface GeneratedScriptConfig {
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+}
+
+interface QueryDomFixture {
+  search: string;
+  trainDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+  rowTrainCode: string;
+  rowId: string;
+  rowFromName: string;
+  rowToName: string;
+}
+
+interface FormDomFixture {
+  trainCode: string;
+  travelDate: string;
+  fromName: string;
+  fromCode: string;
+  toName: string;
+  toCode: string;
+}
+
+interface ModalDomFixture {
+  cells: string[];
+  form: FormDomFixture;
+}
+
+interface ScriptHarnessOutcome {
+  state: 'retry' | 'needs_user';
+  reason: string;
+  progress: string;
+}
+
+class ClickSpy {
+  count: number = 0;
+  click(): void { this.count += 1; }
+}
+
+function generatedConfig(script: string): GeneratedScriptConfig | undefined {
+  const prefix = 'const cfg=';
+  const start = script.indexOf(prefix);
+  const end = script.indexOf(';const out=', start + prefix.length);
+  if (start < 0 || end < 0) return undefined;
+  try {
+    return JSON.parse(script.substring(start + prefix.length, end)) as GeneratedScriptConfig;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function hasScriptGuards(script: string, guards: string[]): boolean {
+  for (let index = 0; index < guards.length; index++) {
+    if (script.indexOf(guards[index]) < 0) return false;
+  }
+  return true;
+}
+
+function searchParam(search: string, name: string): string {
+  const parts = search.replace(/^\?/, '').split('&');
+  for (let index = 0; index < parts.length; index++) {
+    const pair = parts[index].split('=');
+    if (decodeURIComponent(pair[0]) === name) return decodeURIComponent(pair.slice(1).join('='));
+  }
+  return '';
+}
+
+function formMatches(config: GeneratedScriptConfig, form: FormDomFixture): boolean {
+  return form.trainCode === config.trainCode && form.travelDate === config.travelDate &&
+    form.fromName === config.fromName && form.fromCode === config.fromCode &&
+    form.toName === config.toName && form.toCode === config.toCode;
+}
+
+function executeGeneratedQueryContract(script: string, dom: QueryDomFixture, booking: ClickSpy): ScriptHarnessOutcome {
+  const config = generatedConfig(script);
+  const guarded = hasScriptGuards(script, ["params.get('date')===cfg.travelDate",
+    "field('#fromStationText')===cfg.fromName", "field('#fromStation')===cfg.fromCode",
+    "field('#toStationText')===cfg.toName", "field('#toStation')===cfg.toCode",
+    'parts[parts.length-2]!==cfg.fromCode', 'parts[parts.length-1]!==cfg.toCode',
+    'names[0]!==cfg.fromName||names[1]!==cfg.toName', "return stop('trip_mismatch')"]);
+  if (config === undefined || !guarded) return { state: 'needs_user', reason: 'invalid_result', progress: '' };
+  const rowParts = dom.rowId.split('_');
+  const matches = searchParam(dom.search, 'date') === config.travelDate &&
+    searchParam(dom.search, 'fs') === config.fromName + ',' + config.fromCode &&
+    searchParam(dom.search, 'ts') === config.toName + ',' + config.toCode &&
+    dom.trainDate === config.travelDate && dom.fromName === config.fromName && dom.fromCode === config.fromCode &&
+    dom.toName === config.toName && dom.toCode === config.toCode && dom.rowTrainCode === config.trainCode &&
+    rowParts.length >= 3 && rowParts[rowParts.length - 2] === config.fromCode &&
+    rowParts[rowParts.length - 1] === config.toCode && dom.rowFromName === config.fromName &&
+    dom.rowToName === config.toName;
+  if (!matches) return { state: 'needs_user', reason: 'trip_mismatch', progress: '' };
+  booking.click();
+  return { state: 'retry', reason: '', progress: 'booking_clicked' };
+}
+
+function executeGeneratedFormContract(script: string, form: FormDomFixture, submit: ClickSpy): ScriptHarnessOutcome {
+  const config = generatedConfig(script);
+  const guarded = hasScriptGuards(script, ['detail.station_train_code!==cfg.trainCode',
+    'detail.from_station_name!==cfg.fromName', 'detail.from_station_telecode!==cfg.fromCode',
+    'detail.to_station_name!==cfg.toName', 'detail.to_station_telecode!==cfg.toCode',
+    'exactDate(detail.start_train_date)', "if(!formTrip())return stop('trip_mismatch')"]);
+  if (config === undefined || !guarded) return { state: 'needs_user', reason: 'invalid_result', progress: '' };
+  if (!formMatches(config, form)) return { state: 'needs_user', reason: 'trip_mismatch', progress: '' };
+  submit.click();
+  return { state: 'retry', reason: '', progress: 'order_submitted' };
+}
+
+function executeGeneratedFinalContract(script: string, modal: ModalDomFixture,
+  confirm: ClickSpy): ScriptHarnessOutcome {
+  const config = generatedConfig(script);
+  const guarded = hasScriptGuards(script, ["cells.some((v)=>exactDate(v))",
+    "cells.some((v)=>exactStation(v,cfg.fromName,'from'))",
+    "cells.some((v)=>exactStation(v,cfg.toName,'to'))", "if(!formTrip())return stop('trip_mismatch')",
+    'confirm.click()']);
+  if (config === undefined || !guarded) return { state: 'needs_user', reason: 'invalid_result', progress: '' };
+  if (!formMatches(config, modal.form)) return { state: 'needs_user', reason: 'trip_mismatch', progress: '' };
+  if (modal.cells.indexOf(config.trainCode) < 0 || modal.cells.indexOf(config.travelDate) < 0 ||
+    modal.cells.indexOf(config.fromName) < 0 || modal.cells.indexOf(config.toName) < 0) {
+    return { state: 'needs_user', reason: 'confirmation_mismatch', progress: '' };
+  }
+  confirm.click();
+  return { state: 'retry', reason: '', progress: 'confirm_clicked' };
+}
+
+function queryFixture(): QueryDomFixture {
+  return {
+    search: '?date=2026-07-23&fs=' + encodeURIComponent('上海虹桥,AOH') +
+      '&ts=' + encodeURIComponent('北京南,VNP'),
+    trainDate: '2026-07-23', fromName: '上海虹桥', fromCode: 'AOH', toName: '北京南', toCode: 'VNP',
+    rowTrainCode: 'G10', rowId: '24000000G10_AOH_VNP', rowFromName: '上海虹桥', rowToName: '北京南'
+  };
+}
+
+function formFixture(): FormDomFixture {
+  return { trainCode: 'G10', travelDate: '2026-07-23', fromName: '上海虹桥', fromCode: 'AOH',
+    toName: '北京南', toCode: 'VNP' };
+}
+
 export default function trainPresaleWebAutomationTest() {
   describe('trainPresaleWebAutomation', () => {
     it('emits immediate synchronous scripts and separates final confirmation', 0, () => {
@@ -96,6 +242,94 @@ export default function trainPresaleWebAutomationTest() {
       unsafe.fromName = '</script><script>alert(1)</script>';
       expect(buildTrainPresaleWebAssistScript(unsafe).indexOf('</script>')).assertEqual(-1);
       expect(buildTrainPresaleWebAssistScript(unsafe).indexOf('\\u003c/script\\u003e')).assertLarger(-1);
+    });
+
+    it('executes generated query contract fixtures without booking a mutated trip', 0, () => {
+      const script = buildTrainPresaleWebAssistScript(task());
+      const happy = queryFixture();
+      const happyClick = new ClickSpy();
+      expect(executeGeneratedQueryContract(script, happy, happyClick).progress).assertEqual('booking_clicked');
+      expect(happyClick.count).assertEqual(1);
+
+      let wrong = queryFixture(); let click = new ClickSpy();
+      wrong.search = '?date=2026-07-24&fs=' + encodeURIComponent('上海虹桥,AOH') +
+        '&ts=' + encodeURIComponent('北京南,VNP'); wrong.trainDate = '2026-07-24';
+      expect(executeGeneratedQueryContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+
+      wrong = queryFixture(); click = new ClickSpy(); wrong.fromName = '上海站'; wrong.rowFromName = '上海站';
+      wrong.search = '?date=2026-07-23&fs=' + encodeURIComponent('上海站,AOH') +
+        '&ts=' + encodeURIComponent('北京南,VNP');
+      expect(executeGeneratedQueryContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+
+      wrong = queryFixture(); click = new ClickSpy(); wrong.fromCode = 'SHH'; wrong.rowId = '24000000G10_SHH_VNP';
+      wrong.search = '?date=2026-07-23&fs=' + encodeURIComponent('上海虹桥,SHH') +
+        '&ts=' + encodeURIComponent('北京南,VNP');
+      expect(executeGeneratedQueryContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+
+      wrong = queryFixture(); click = new ClickSpy(); wrong.toName = '北京站'; wrong.rowToName = '北京站';
+      wrong.search = '?date=2026-07-23&fs=' + encodeURIComponent('上海虹桥,AOH') +
+        '&ts=' + encodeURIComponent('北京站,VNP');
+      expect(executeGeneratedQueryContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+
+      wrong = queryFixture(); click = new ClickSpy(); wrong.toCode = 'BJP'; wrong.rowId = '24000000G10_AOH_BJP';
+      wrong.search = '?date=2026-07-23&fs=' + encodeURIComponent('上海虹桥,AOH') +
+        '&ts=' + encodeURIComponent('北京南,BJP');
+      expect(executeGeneratedQueryContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+    });
+
+    it('executes generated passenger form contract fixtures without submitting a mutated trip', 0, () => {
+      const script = buildTrainPresaleWebAssistScript(task());
+      const happyClick = new ClickSpy();
+      expect(executeGeneratedFormContract(script, formFixture(), happyClick).progress).assertEqual('order_submitted');
+      expect(happyClick.count).assertEqual(1);
+
+      let wrong = formFixture(); let click = new ClickSpy(); wrong.travelDate = '2026-07-24';
+      expect(executeGeneratedFormContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = formFixture(); click = new ClickSpy(); wrong.fromName = '上海站';
+      expect(executeGeneratedFormContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = formFixture(); click = new ClickSpy(); wrong.fromCode = 'SHH';
+      expect(executeGeneratedFormContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = formFixture(); click = new ClickSpy(); wrong.toName = '北京站';
+      expect(executeGeneratedFormContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = formFixture(); click = new ClickSpy(); wrong.toCode = 'BJP';
+      expect(executeGeneratedFormContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+    });
+
+    it('executes generated final modal contract fixtures without confirming a mutated trip', 0, () => {
+      const script = buildTrainPresaleFinalConfirmScript(task());
+      const happyClick = new ClickSpy();
+      const happy: ModalDomFixture = { cells: ['2026-07-23', 'G10', '上海虹桥', '北京南'], form: formFixture() };
+      expect(executeGeneratedFinalContract(script, happy, happyClick).progress).assertEqual('confirm_clicked');
+      expect(happyClick.count).assertEqual(1);
+
+      let wrong: ModalDomFixture = { cells: ['2026-07-24', 'G10', '上海虹桥', '北京南'], form: formFixture() };
+      let click = new ClickSpy();
+      expect(executeGeneratedFinalContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = { cells: ['2026-07-23', 'G10', '上海站', '北京南'], form: formFixture() }; click = new ClickSpy();
+      expect(executeGeneratedFinalContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = { cells: ['2026-07-23', 'G10', '上海虹桥', '北京南'], form: formFixture() };
+      wrong.form.fromCode = 'SHH'; click = new ClickSpy();
+      expect(executeGeneratedFinalContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = { cells: ['2026-07-23', 'G10', '上海虹桥', '北京站'], form: formFixture() }; click = new ClickSpy();
+      expect(executeGeneratedFinalContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
+      wrong = { cells: ['2026-07-23', 'G10', '上海虹桥', '北京南'], form: formFixture() };
+      wrong.form.toCode = 'BJP'; click = new ClickSpy();
+      expect(executeGeneratedFinalContract(script, wrong, click).state).assertEqual('needs_user');
+      expect(click.count).assertEqual(0);
     });
 
     it('production script snapshot enforces exact visible modal multiplicity and seat-row alignment', 0, () => {

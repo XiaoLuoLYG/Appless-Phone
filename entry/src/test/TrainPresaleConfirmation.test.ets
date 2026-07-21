@@ -121,6 +121,18 @@ export default function trainPresaleConfirmationTest() {
       expect(result.error).assertEqual('请填写至少一位乘车人姓名。');
     });
 
+    it('rejects duplicate passengers before reporting confirmation success', 0, () => {
+      const duplicate = validInput();
+      duplicate.passengerNames = ['张三', '张三'];
+      const whitespaceDuplicate = validInput();
+      whitespaceDuplicate.passengerNames = ['张三', ' 张三 '];
+
+      expect(validateTrainPresaleConfirmation(duplicate).task).assertEqual(undefined);
+      expect(validateTrainPresaleConfirmation(duplicate).error).assertEqual('乘车人姓名不能重复。');
+      expect(validateTrainPresaleConfirmation(whitespaceDuplicate).task).assertEqual(undefined);
+      expect(validateTrainPresaleConfirmation(whitespaceDuplicate).error).assertEqual('乘车人姓名不能重复。');
+    });
+
     it('rejects an unsupported seat preference', 0, () => {
       const input = validInput();
       input.seatPriority = '靠窗座';
