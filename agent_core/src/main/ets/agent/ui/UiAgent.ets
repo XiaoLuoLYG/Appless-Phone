@@ -6,7 +6,7 @@ import {
 import { ActionOffer, ActionOffersReadyPayload } from '../action/ActionOfferTypes';
 import { JsonValue } from '../action/ActionPlanTypes';
 import { cloneJsonValue } from '../action/JsonPointer';
-import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
+import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
@@ -98,7 +98,7 @@ class ContextSurfaceWriteLease implements UiSurfaceWriteLease {
   }
 }
 
-export class UiAgent extends StructuredMessageDrivenAgent {
+export class UiAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly renderer: UiTaskRenderer;
   private readonly writer: UiSurfaceWriter;

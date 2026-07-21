@@ -1,4 +1,4 @@
-import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
+import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
@@ -35,7 +35,7 @@ interface LeaderTurnState {
   releasePlanning: (() => void) | null;
 }
 
-export class LeaderAgent extends StructuredMessageDrivenAgent {
+export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly planner: LeaderPlanner;
   private readonly planningContext: LeaderPlanningContext;

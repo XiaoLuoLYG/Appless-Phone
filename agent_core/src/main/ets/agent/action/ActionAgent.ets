@@ -1,4 +1,4 @@
-import { StructuredMessageDrivenAgent } from '../StructuredMessageDrivenAgent';
+import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { AgentMessage, AgentMessageType } from '../message/AgentMessage';
 import { DataResult } from '../message/DataResult';
@@ -152,7 +152,7 @@ function directPlan(
   };
 }
 
-export class ActionAgent extends StructuredMessageDrivenAgent implements ActionStepExecutor {
+export class ActionAgent extends MessageDrivenAgent implements ActionStepExecutor {
   private readonly bus: LinkedMessageBus;
   private readonly catalog: ActionCatalog;
   private readonly offerResolver: ActionOfferResolver;
