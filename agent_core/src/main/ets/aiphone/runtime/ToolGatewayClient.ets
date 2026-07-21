@@ -37,9 +37,19 @@ import {
   gmailBlockedSendA2ui,
   gmailDraftPreviewA2ui,
   gmailOpenWebA2ui,
+  gmailSearchStructuredDataA2ui,
+  gmailSearchStructuredDataFromResults,
+  GmailSearchStructuredData,
+  GmailThreadSummary,
   gmailThreadResultsA2ui
 } from './GmailToolA2ui';
-import { mailDraftPreviewA2ui, mailResultsA2ui, mailResultsFromDynamicA2ui } from './MailToolA2ui';
+import {
+  mailDraftPreviewA2ui,
+  mailResultsFromDynamicA2ui,
+  mailSearchStructuredDataA2ui,
+  mailThreadSummary,
+  MailSearchStructuredData
+} from './MailToolA2ui';
 import {
   MailDetail,
   MailDetailRequest,
@@ -138,6 +148,7 @@ import {
   composioDynamicResultFromObservation,
   composioPhoneNumberIdsFromObservation,
   ComposioRawExecution,
+  isComposioConfigured,
   refreshComposioConnections
 } from './ComposioDynamicBackend';
 import { aggregateSearchA2ui } from './AggregateSearchA2ui';
@@ -147,7 +158,7 @@ import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './Dyna
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
 import { dataAgentToolDefinitions, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
-import { ToolDefinition } from './ToolDefinitionTypes';
+import { ToolBackendType, ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
   PaymentMode,
@@ -3379,7 +3390,7 @@ function rideEstimateResult(origin: RidePoint, destination: RidePoint, estimateP
   if (traceId.length > 0) {
     rows.push({
       label: 'traceId',
-      value: traceId.length > 16 ? traceId.substring(0, 8) + '...' + traceId.substring(traceId.length - 6) : traceId
+      value: traceId
     });
   }
   rows.push({ label: '来源', value: '滴滴 taxi_estimate' });
@@ -3702,6 +3713,7 @@ function rideDriverEtaText(payload: Object): string {
 function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLocationArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
   const location = rideDriverCoordinate(payload, ['lng', 'lon', 'longitude', 'driver_lng', 'driverLng'], ['lat', 'latitude', 'driver_lat', 'driverLat']);
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'driverStatus', 'driver_status']);
+  const driverId = rideOrderPayloadText(payload, ['driverId', 'driver_id']);
   const driverName = rideOrderPayloadText(payload, ['driverName', 'driver_name', 'name']);
   const etaText = rideDriverEtaText(payload);
   const rows: A2uiLabelValueData[] = [
@@ -3712,6 +3724,9 @@ function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLo
   }
   if (location.length > 0) {
     rows.push({ label: '司机位置', value: location });
+  }
+  if (driverId.length > 0) {
+    rows.push({ label: '司机 ID', value: driverId });
   }
   if (driverName.length > 0) {
     rows.push({ label: '司机', value: driverName });
@@ -3992,18 +4007,18 @@ async function callLocalDidiRideCancelOrder(surfaceId: string, args: Object | nu
   return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
 }
 
-async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+async function callDidiRideDriverLocationResults(args: Object | null): Promise<DynamicGenericToolResult[]> {
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
   const requestArgs = rideDidiDriverLocationArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (didiKey.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 司机位置接口。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+    return results;
   }
   if (requestArgs.order_id.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少订单号', '刷新滴滴司机位置需要 order_id；请从订单卡片点击刷新。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+    return results;
   }
   try {
     const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', requestArgs);
@@ -4011,15 +4026,15 @@ async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object |
   } catch (error) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(error)));
   }
-  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  return results;
 }
 
-async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args: Object | null): Promise<string> {
+async function callMockRideEstimateResults(toolId: string, args: Object | null): Promise<DynamicGenericToolResult[]> {
   const route = rideRouteFromArgs(args);
   if (route.origin.length === 0 || route.destination.length === 0) {
-    return genericToolResultsA2ui(surfaceId, toolId, [
+    return [
       rideErrorResult('模拟打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；模拟数据也需要明确路线。')
-    ]);
+    ];
   }
   const originPoint = rideMockPoint(route.origin, '114.066231,22.657805');
   const destinationPoint = rideMockPoint(route.destination, '114.060432,22.548829');
@@ -4038,7 +4053,7 @@ async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args
       destinationPoint.location
     ));
   }
-  return genericToolResultsA2ui(surfaceId, toolId, results);
+  return results;
 }
 
 async function callLocalMockRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
@@ -4078,37 +4093,31 @@ async function callLocalMockRideCancelOrder(surfaceId: string, args: Object | nu
   ]);
 }
 
-async function callLocalMockRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+async function callMockRideDriverLocationResults(args: Object | null): Promise<DynamicGenericToolResult[]> {
   const requestArgs = rideDidiDriverLocationArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (requestArgs.order_id.length === 0) {
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+    return [
       rideErrorResult('模拟滴滴', 'ride.driver.location', '缺少订单号', '刷新模拟司机位置需要 order_id；请从订单卡片点击刷新。')
-    ]);
+    ];
   }
-  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+  return [
     rideDriverLocationResult(rideMockDriverPayload(requestArgs), requestArgs, routeContext)
-  ]);
+  ];
 }
 
-async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  if (toolId === 'ride.order.create') {
-    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
-  }
-  if (toolId === 'ride.order.cancel') {
-    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
-  }
+async function callStructuredRideReadResults(toolId: string, args: Object | null): Promise<DynamicGenericToolResult[]> {
   if (toolId === 'ride.driver.location') {
-    return rideMockEnabled() ? callLocalMockRideDriverLocation(surfaceId, args) : callLocalDidiRideDriverLocation(surfaceId, args);
+    return rideMockEnabled() ? callMockRideDriverLocationResults(args) : callDidiRideDriverLocationResults(args);
   }
   if (rideMockEnabled() && (toolId === 'ride.estimate' || toolId === 'ride.app.link')) {
-    return callLocalMockRideEstimate(surfaceId, toolId, args);
+    return callMockRideEstimateResults(toolId, args);
   }
   const route = rideRouteFromArgs(args);
   if (route.origin.length === 0 || route.destination.length === 0) {
-    return genericToolResultsA2ui(surfaceId, toolId, [
+    return [
       rideErrorResult('打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；AIPhone 不会使用记忆坐标或猜测坐标。')
-    ]);
+    ];
   }
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
@@ -4196,7 +4205,17 @@ async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: str
     const destinationLocation = destinationPoint !== null ? destinationPoint.location : (amapDestinationPoint !== null ? amapDestinationPoint.location : '');
     results.push(rideLinkResult(route.origin, route.destination, didiLink, amapLink, originLocation, destinationLocation));
   }
-  return genericToolResultsA2ui(surfaceId, toolId, results);
+  return results;
+}
+
+async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'ride.order.create') {
+    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.order.cancel') {
+    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, await callStructuredRideReadResults(toolId, args));
 }
 
 function build12306LeftTicketUrl(path: string, date: string, fromCode: string, toCode: string): string {
@@ -5634,6 +5653,105 @@ export function genericStructuredDataResult(
   if (failureCount > 0) {
     return structuredErrorWithData(
       toolId, outputSchema, data, 'PROVIDER_ERROR', firstGenericFailure(results), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult(toolId, outputSchema, data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
+function remainingReadText(result: DynamicGenericToolResult): string {
+  return (result.title + ' ' + result.summary).toLowerCase();
+}
+
+function remainingReadAuthFailure(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result);
+  return result.status === 'needs_auth' ||
+    text.indexOf('oauth') >= 0 || text.indexOf('未授权') >= 0 || text.indexOf('未配置') >= 0 ||
+    text.indexOf('disconnected') >= 0 || text.indexOf('access token') >= 0 ||
+    text.indexOf('mcp key') >= 0 || text.indexOf('_token') >= 0;
+}
+
+function remainingReadInputFailure(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result);
+  return result.status === 'needs_input' || text.indexOf('缺少订单号') >= 0 || text.indexOf('order_id') >= 0 ||
+    text.indexOf('需要补充起点') >= 0 || text.indexOf('需要补充城市') >= 0 ||
+    text.indexOf('requestkey') >= 0 || text.indexOf('threadid') >= 0 ||
+    text.indexOf('required input') >= 0;
+}
+
+function remainingReadRetryable(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result);
+  return text.indexOf('timeout') >= 0 || text.indexOf('timed out') >= 0 ||
+    text.indexOf('transport') >= 0 || text.indexOf('http 5') >= 0 ||
+    text.indexOf('failed to resolve') >= 0 || text.indexOf('network') >= 0;
+}
+
+function remainingReadSource(result: DynamicGenericToolResult): DataSource {
+  const lower = result.sourceTag.toLowerCase();
+  let backend: ToolBackendType = 'local_adapter';
+  if (lower.indexOf('gmail') >= 0 || lower.indexOf('calendar') >= 0 ||
+    lower.indexOf('youtube') >= 0 || lower.indexOf('composio') >= 0) {
+    backend = 'oauth_api';
+  } else if (lower.indexOf('qq') >= 0) {
+    backend = 'imap';
+  }
+  return {
+    provider: result.sourceTag,
+    backend: backend,
+    operation: result.toolName,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+export function remainingReadStructuredDataResult(
+  toolId: string,
+  outputSchema: string,
+  results: DynamicGenericToolResult[]
+): DataResult {
+  const data: GenericStructuredData = { results: results };
+  const sources: DataSource[] = [];
+  const warnings: string[] = [];
+  let dataCount = 0;
+  let failureCount = 0;
+  let authCount = 0;
+  let inputCount = 0;
+  let retryable = false;
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (genericResultHasData(result)) {
+      dataCount += 1;
+    }
+    if (genericResultIsFailure(result)) {
+      failureCount += 1;
+      if (remainingReadAuthFailure(result)) {
+        authCount += 1;
+      } else if (remainingReadInputFailure(result)) {
+        inputCount += 1;
+      }
+      if (remainingReadRetryable(result)) {
+        retryable = true;
+      }
+      warnings.push(result.sourceTag + '：' + (result.summary.length > 0 ? result.summary : result.title));
+    }
+    if (result.providerPhase === 'execution' &&
+      !sourceAlreadyIncluded(sources, result.sourceTag, result.toolName)) {
+      sources.push(remainingReadSource(result));
+    }
+  });
+  if (dataCount > 0) {
+    return failureCount > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  if (failureCount > 0) {
+    let code = 'PROVIDER_ERROR';
+    if (authCount === failureCount) {
+      code = 'AUTH_REQUIRED';
+    } else if (inputCount === failureCount) {
+      code = 'INPUT_REQUIRED';
+    }
+    return structuredErrorWithData(
+      toolId, outputSchema, data, code, firstGenericFailure(results), retryable, sources, warnings
     );
   }
   const empty = successfulDataResult(toolId, outputSchema, data, sources);
@@ -7741,27 +7859,41 @@ function luckinOrderProduct(item: LuckinProductRecord, quantity: number): Luckin
 }
 
 function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: string, summary: string, rows: A2uiLabelValueData[], rawPreview: string, actions: A2uiAction[]): string {
-  const results: A2uiGenericToolResultData[] = [{
+  return luckinDynamicResultA2ui(surfaceId, {
     sourceTag: '瑞幸',
     toolName: toolId,
     title: title,
     status: 'success',
     summary: summary,
     rows: rows,
-    rawPreview: rawPreview
+    rawPreview: rawPreview,
+    actions: actions
+  });
+}
+
+function luckinDynamicResultA2ui(surfaceId: string, result: DynamicGenericToolResult): string {
+  const actions = result.actions === undefined ? [] : result.actions;
+  const results: A2uiGenericToolResultData[] = [{
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview
   }];
   const components: A2uiComponent[] = [
     {
       id: 'root',
       component: 'SurfaceRoot',
       child: 'results',
-      title: title,
+      title: result.title,
       status: 'ready'
     },
     {
       id: 'results',
       component: 'GenericToolResults',
-      title: title,
+      title: result.title,
       body: '以下展示瑞幸 MCP 的真实返回字段。',
       status: 'ready',
       dataPath: '/genericToolResults',
@@ -7769,8 +7901,8 @@ function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: strin
     }
   ];
   const summaryData: A2uiSummaryData = {
-    text: summary,
-    toolName: toolId,
+    text: result.summary,
+    toolName: result.toolName,
     dataLabel: 'genericToolResults',
     count: 1
   };
@@ -7779,7 +7911,7 @@ function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: strin
       createSurface: {
         surfaceId: surfaceId,
         root: 'root',
-        title: title,
+        title: result.title,
         intent: 'luckin',
         status: 'ready',
         sendDataModel: true
@@ -8080,18 +8212,42 @@ async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Pr
   return luckinGenericResultA2ui(surfaceId, 'luckin.order.create', '瑞幸订单已创建', summary, rows, JSON.stringify(createPayload).substring(0, 1200), createActions);
 }
 
-async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+async function callStructuredLuckinStatusResult(args: Object | null): Promise<DynamicGenericToolResult> {
   const token = localProviderConfig.luckinMcpToken;
   const request = luckinActionArgs(args);
   const orderId = textOf(request.orderId);
   if (token.length === 0 || orderId.length === 0) {
-    return luckinErrorA2ui(surfaceId, 'luckin.order.status', '无法查询瑞幸订单', token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。');
+    const message = token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。';
+    return {
+      sourceTag: '瑞幸',
+      toolName: 'luckin.order.status',
+      title: '无法查询瑞幸订单',
+      status: token.length === 0 ? 'needs_auth' : 'error',
+      summary: message,
+      rows: [{ label: '错误', value: message }],
+      rawPreview: ''
+    };
   }
   const detailArgs: LuckinOrderActionArgs = {
     orderId: orderId
   };
-  const payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  let payload: Object;
+  try {
+    payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  } catch (error) {
+    return {
+      sourceTag: '瑞幸',
+      toolName: 'luckin.order.status',
+      title: '瑞幸订单状态查询失败',
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '错误', value: describeThrown(error) }],
+      rawPreview: '',
+      providerPhase: 'execution'
+    };
+  }
   const detail = luckinOrderRecordFromPayload(payload);
+  const traceId = rideOrderPayloadText(payload, ['traceId', 'trace_id', 'requestId', 'request_id']);
   const rows: A2uiLabelValueData[] = [
     { label: '订单号', value: firstText([detail.orderIdStr, detail.orderId, orderId]) },
     { label: '订单状态', value: firstText([detail.orderStatusName, detail.orderStatus]) },
@@ -8100,6 +8256,9 @@ async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Pr
     { label: '支付链接', value: firstText([detail.payOrderUrl, request.payOrderUrl]) },
     { label: '支付二维码', value: firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]) }
   ];
+  if (traceId.length > 0) {
+    rows.push({ label: 'Trace ID', value: traceId });
+  }
   const payOrderUrl = firstText([detail.payOrderUrl, request.payOrderUrl]);
   const payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]);
   const statusArgs: LuckinOrderActionArgs = {
@@ -8142,7 +8301,24 @@ async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Pr
   if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
     aiLogInfo('[AIPhone][LuckinOrderStatusMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(payload));
   }
-  return luckinGenericResultA2ui(surfaceId, 'luckin.order.status', '瑞幸订单状态', firstText([detail.orderStatusName, detail.orderStatus, '已返回订单状态']), rows, JSON.stringify(payload).substring(0, 1200), statusActions);
+  const providerError = luckinPayloadErrorMessage(payload);
+  return {
+    sourceTag: '瑞幸',
+    toolName: 'luckin.order.status',
+    title: providerError.length > 0 ? '瑞幸订单状态查询失败' : '瑞幸订单状态',
+    status: providerError.length > 0 ? 'error' :
+      (firstText([detail.orderStatusName, detail.orderStatus]).length > 0 ? 'success' : 'empty'),
+    summary: providerError.length > 0 ? providerError :
+      firstText([detail.orderStatusName, detail.orderStatus, '瑞幸查询成功，但没有返回订单状态。']),
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: statusActions,
+    providerPhase: 'execution'
+  };
+}
+
+async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+  return luckinDynamicResultA2ui(surfaceId, await callStructuredLuckinStatusResult(args));
 }
 
 async function callLocalLuckinTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -10782,6 +10958,124 @@ function mailProviderError(provider: string, message: string): MailProviderStatu
   };
 }
 
+function mailSearchDataResult(
+  data: MailSearchStructuredData,
+  sources: DataSource[]
+): DataResult {
+  const warnings: string[] = [];
+  data.statuses.forEach((status: MailProviderStatus) => {
+    if (status.status !== 'success') {
+      warnings.push(status.title + '：' + status.message);
+    }
+  });
+  data.extras.forEach((result: DynamicGenericToolResult) => {
+    if (genericResultIsFailure(result)) {
+      warnings.push(result.title + '：' + result.summary);
+    }
+  });
+  if (data.threads.length > 0) {
+    return warnings.length > 0 ?
+      partialDataResult('mail.search', 'mailThreads', data, sources, warnings) :
+      successfulDataResult('mail.search', 'mailThreads', data, sources);
+  }
+  if (warnings.length > 0) {
+    const authOnly = data.statuses.length > 0 && data.statuses.every((status: MailProviderStatus): boolean =>
+      status.status === 'needs_auth' || remainingReadAuthFailure({
+        sourceTag: status.provider, toolName: 'mail.search', title: status.title,
+        status: status.status, summary: status.message, rows: [], rawPreview: ''
+      }));
+    return structuredErrorWithData(
+      'mail.search', 'mailThreads', data, authOnly ? 'AUTH_REQUIRED' : 'PROVIDER_ERROR',
+      warnings.join('；'), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult('mail.search', 'mailThreads', data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
+async function callStructuredMailSearch(prompt: string, args: Object | null): Promise<DataResult> {
+  const parsed = mailSearchArgs(prompt, args);
+  const data: MailSearchStructuredData = { threads: [], statuses: [], extras: [] };
+  const sources: DataSource[] = [];
+  if (parsed.providers.indexOf('gmail') >= 0) {
+    try {
+      const gmailResult = await callStructuredGmailReadTool('gmail.mail.search', parsed.query, parsed as Object);
+      const gmailData = gmailResult.data as GmailSearchStructuredData;
+      gmailData.threads.forEach((thread: GmailThreadSummary) => data.threads.push(mailThreadSummary(thread)));
+      gmailData.statuses.forEach((status: MailProviderStatus) => data.statuses.push(status));
+      gmailData.extras.forEach((extra: DynamicGenericToolResult) => data.extras.push(extra));
+      gmailResult.sources.forEach((source: DataSource) => sources.push(source));
+    } catch (error) {
+      data.statuses.push(mailProviderError('gmail', describeThrown(error)));
+    }
+  }
+  if (parsed.providers.indexOf('qq') >= 0) {
+    const configured = localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0;
+    try {
+      const rows = await new QqMailImapClient(qqMailConfig()).search(parsed);
+      rows.forEach((thread: MailThreadResult) => data.threads.push(mailThreadSummary(thread)));
+      if (configured) {
+        sources.push({
+          provider: 'QQ Mail', backend: 'imap', operation: 'search', fetchedAt: new Date().toISOString()
+        });
+      }
+      if (rows.length === 0) {
+        data.statuses.push({
+          provider: 'qq', status: 'success', title: 'QQ Mail 没有找到匹配邮件',
+          message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
+        });
+      }
+    } catch (error) {
+      data.statuses.push(mailProviderError('qq', describeThrown(error)));
+      if (configured) {
+        sources.push({
+          provider: 'QQ Mail', backend: 'imap', operation: 'search', fetchedAt: new Date().toISOString()
+        });
+      }
+    }
+  }
+  if (parsed.providers.indexOf('outlook') >= 0) {
+    const outlook = await composioAppResult('Outlook', parsed.query, '的邮件');
+    if (isComposioConfigured() || outlook.status === 'success') {
+      outlook.providerPhase = 'execution';
+      sources.push(remainingReadSource(outlook));
+    }
+    data.extras.push(outlook);
+  }
+  return mailSearchDataResult(data, sources);
+}
+
+async function callStructuredMailThreadRead(toolId: string, args: Object | null): Promise<DataResult> {
+  const request = mailDetailRequestFromArgs(args);
+  const identityError = mailDetailIdentityError(toolId, 'mailThread', request);
+  if (identityError !== null) {
+    return identityError;
+  }
+  if (request.provider === 'gmail') {
+    return callStructuredGmailReadTool('gmail.thread.read', '', request as Object);
+  }
+  const configured = localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0;
+  const sources: DataSource[] = configured ? [{
+    provider: 'QQ Mail', backend: 'imap', operation: 'thread.read', fetchedAt: new Date().toISOString()
+  }] : [];
+  try {
+    const detail = await new QqMailImapClient(qqMailConfig()).readDetail(request);
+    if (!mailDetailMatchesRequest(detail, request)) {
+      return structuredErrorWithData(
+        toolId, 'mailThread', new Object(), 'PROVIDER_IDENTITY_MISMATCH',
+        'QQ Mail returned a stale identity or no full message body.', false, sources
+      );
+    }
+    return successfulDataResult(toolId, 'mailThread', mailThreadStructuredData(detail), sources);
+  } catch (error) {
+    return structuredErrorWithData(
+      toolId, 'mailThread', new Object(), configured ? 'PROVIDER_ERROR' : 'AUTH_REQUIRED',
+      describeThrown(error), configured, sources
+    );
+  }
+}
+
 function composioResultTitle(appName: string): string {
   return 'Composio ' + appName + ' 结果';
 }
@@ -10935,6 +11229,7 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
+  const composioAttempted = isComposioConfigured();
   const composioResult = await composioFixedAppResult(
     toolId,
     'Gmail',
@@ -10943,10 +11238,127 @@ async function configuredGmailResults(
     args
   );
   if (composioResult.status === 'success') {
+    composioResult.providerPhase = 'execution';
     return [composioResult];
   }
   const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
-  return fallbackResults.length > 0 ? fallbackResults : [composioResult];
+  fallbackResults.forEach((result: DynamicGenericToolResult) => {
+    result.providerPhase = 'execution';
+  });
+  if (fallbackResults.length > 0) {
+    return fallbackResults;
+  }
+  if (composioAttempted) {
+    composioResult.providerPhase = 'execution';
+  }
+  return [composioResult];
+}
+
+export interface MailThreadStructuredData {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  internetMessageId: string;
+  subject: string;
+  from: string;
+  replyTo: string;
+  to: string[];
+  cc: string[];
+  body: string;
+  bodyHtml: string;
+}
+
+function mailDetailRequestFromArgs(args: Object | null): MailDetailRequest {
+  const request = args === null ? {} as MailDetailRequest : args as MailDetailRequest;
+  return {
+    requestKey: textOf(request.requestKey).trim(),
+    provider: textOf(request.provider).trim().toLowerCase(),
+    threadId: textOf(request.threadId).trim(),
+    messageId: textOf(request.messageId).trim(),
+    subject: textOf(request.subject).trim()
+  };
+}
+
+function mailDetailIdentityError(toolId: string, outputSchema: string, request: MailDetailRequest): DataResult | null {
+  const identity = request.provider === 'gmail' ? request.threadId : request.messageId;
+  if ((request.provider !== 'gmail' && request.provider !== 'qq') || identity.length === 0 ||
+    request.requestKey !== request.provider + ':' + identity) {
+    return errorDataResult(
+      toolId,
+      outputSchema,
+      'INPUT_REQUIRED',
+      'mail thread read requires a matching provider, requestKey, and provider thread/message identity.'
+    );
+  }
+  return null;
+}
+
+function mailThreadStructuredData(detail: MailDetail): MailThreadStructuredData {
+  return {
+    requestKey: detail.requestKey,
+    provider: detail.provider,
+    threadId: detail.threadId,
+    messageId: detail.messageId,
+    internetMessageId: detail.internetMessageId === undefined ? '' : detail.internetMessageId,
+    subject: detail.subject,
+    from: detail.from,
+    replyTo: detail.replyTo,
+    to: detail.to.slice(),
+    cc: detail.cc.slice(),
+    body: detail.bodyText,
+    bodyHtml: detail.bodyHtml
+  };
+}
+
+function mailDetailMatchesRequest(detail: MailDetail, request: MailDetailRequest): boolean {
+  return detail.provider === request.provider && detail.requestKey === request.requestKey &&
+    (request.threadId.length === 0 || detail.threadId === request.threadId) &&
+    (request.messageId.length === 0 || detail.messageId === request.messageId) &&
+    (detail.bodyText.trim().length > 0 || detail.bodyHtml.trim().length > 0);
+}
+
+async function callStructuredGmailReadTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  if (toolId === 'gmail.mail.search') {
+    const results = await configuredGmailResults(toolId, prompt, args);
+    const data: GmailSearchStructuredData = gmailSearchStructuredDataFromResults(results);
+    const base = remainingReadStructuredDataResult(toolId, 'mailThreads', results);
+    base.data = data;
+    return base;
+  }
+  const request = mailDetailRequestFromArgs(args);
+  if (request.provider.length === 0) {
+    request.provider = 'gmail';
+  }
+  const identityError = mailDetailIdentityError(toolId, 'mailThread', request);
+  if (identityError !== null) {
+    return identityError;
+  }
+  const results = await configuredGmailResults(toolId, prompt, request as Object);
+  const base = remainingReadStructuredDataResult(toolId, 'mailThread', results);
+  if (base.status !== 'success' || results.length === 0) {
+    return base;
+  }
+  try {
+    const detail = gmailMailDetailFromPayload(JSON.parse(results[0].rawPreview) as Object, request);
+    if (!mailDetailMatchesRequest(detail, request)) {
+      return structuredErrorWithData(
+        toolId, 'mailThread', new Object(), 'PROVIDER_IDENTITY_MISMATCH',
+        'Gmail returned a stale identity or no full message body.', false, base.sources
+      );
+    }
+    base.data = mailThreadStructuredData(detail);
+    return base;
+  } catch (error) {
+    return structuredErrorWithData(
+      toolId, 'mailThread', new Object(), 'PROVIDER_INVALID_RESPONSE',
+      describeThrown(error), false, base.sources
+    );
+  }
 }
 
 function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
@@ -11443,14 +11855,36 @@ async function callStructuredYouTubeVideoTool(prompt: string, args: Object | nul
   );
 }
 
+async function callStructuredYouTubeAccountTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  const configured = isComposioConfigured();
+  const result = await composioFixedAppResult(
+    toolId,
+    'YouTube',
+    prompt,
+    toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表',
+    args
+  );
+  if (configured || result.status === 'success') {
+    result.providerPhase = 'execution';
+  }
+  return remainingReadStructuredDataResult(
+    toolId,
+    toolId === 'youtube.mine.subscriptions' ? 'youtubeSubscriptions' : 'youtubePlaylists',
+    [result]
+  );
+}
+
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'youtube.video.search') {
     const result = await callStructuredYouTubeVideoTool(prompt, args);
     return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
   }
-  return genericToolResultsA2ui(surfaceId, toolId, [
-    await composioFixedAppResult(toolId, 'YouTube', prompt, toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表', args)
-  ]);
+  const result = await callStructuredYouTubeAccountTool(toolId, prompt, args);
+  return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
 }
 
 async function callStructuredMediaTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
@@ -11492,6 +11926,28 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
   }]);
 }
 
+function mailDetailDynamicResult(toolId: string, data: MailThreadStructuredData): DynamicGenericToolResult {
+  return {
+    sourceTag: data.provider === 'gmail' ? 'Gmail API' : 'QQ Mail',
+    toolName: toolId,
+    title: data.subject.length > 0 ? data.subject : '(no subject)',
+    status: 'success',
+    summary: data.body.length > 0 ? data.body : data.bodyHtml,
+    rows: [
+      { label: 'Provider', value: data.provider },
+      { label: 'Request Key', value: data.requestKey },
+      { label: 'Thread ID', value: data.threadId },
+      { label: 'Message ID', value: data.messageId },
+      { label: 'From', value: data.from },
+      { label: 'To', value: data.to.join(', ') }
+    ],
+    rawPreview: JSON.stringify({
+      provider: data.provider, requestKey: data.requestKey,
+      threadId: data.threadId, messageId: data.messageId
+    })
+  };
+}
+
 async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'gmail.message.send') {
     return gmailBlockedSendA2ui(surfaceId, toolId);
@@ -11500,6 +11956,10 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
   try {
+    if (toolId === 'gmail.mail.search') {
+      const result = await callStructuredGmailReadTool(toolId, prompt, args);
+      return gmailSearchStructuredDataA2ui(surfaceId, toolId, result.data as GmailSearchStructuredData);
+    }
     const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
       return gmailDraftPreviewA2ui(surfaceId, results[0]);
@@ -11512,50 +11972,22 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
 
 async function callLocalMailTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'mail.search') {
-    const parsed = mailSearchArgs(prompt, args);
-    const threads: MailThreadResult[] = [];
-    const statuses: MailProviderStatus[] = [];
-    const extras: DynamicGenericToolResult[] = [];
+    const result = await callStructuredMailSearch(prompt, args);
+    return mailSearchStructuredDataA2ui(surfaceId, toolId, result.data as MailSearchStructuredData);
+  }
 
-    if (parsed.providers.indexOf('gmail') >= 0) {
-      try {
-        const gmailResults = await configuredGmailResults('gmail.mail.search', parsed.query, parsed as Object);
-        const gmailResult = gmailResults[0];
-        statuses.push({
-          provider: 'gmail',
-          status: gmailResult.status,
-          title: gmailResult.title,
-          message: gmailResult.summary
-        });
-        gmailResults.forEach((result: DynamicGenericToolResult) => extras.push(result));
-      } catch (error) {
-        statuses.push(mailProviderError('gmail', describeThrown(error)));
-      }
+  if (toolId === 'mail.thread.read') {
+    const result = await callStructuredMailThreadRead(toolId, args);
+    if (result.status === 'success') {
+      return mailResultsFromDynamicA2ui(surfaceId, toolId, [
+        mailDetailDynamicResult(toolId, result.data as MailThreadStructuredData)
+      ]);
     }
-
-    if (parsed.providers.indexOf('qq') >= 0) {
-      try {
-        const qq = new QqMailImapClient(qqMailConfig());
-        const qqRows = await qq.search(parsed);
-        qqRows.forEach((row: MailThreadResult) => threads.push(row));
-        if (qqRows.length === 0) {
-          statuses.push({
-            provider: 'qq',
-            status: 'success',
-            title: 'QQ Mail 没有找到匹配邮件',
-            message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
-          });
-        }
-      } catch (error) {
-        statuses.push(mailProviderError('qq', describeThrown(error)));
-      }
-    }
-
-    if (parsed.providers.indexOf('outlook') >= 0) {
-      extras.push(await composioAppResult('Outlook', parsed.query, '的邮件'));
-    }
-
-    return mailResultsA2ui(surfaceId, toolId, threads, statuses, extras);
+    const message = result.error?.message === undefined ? 'Mail thread read failed.' : result.error.message;
+    return mailResultsFromDynamicA2ui(surfaceId, toolId, [{
+      sourceTag: 'Mail', toolName: toolId, title: '邮件正文读取失败', status: 'error',
+      summary: message, rows: [{ label: '错误', value: message }], rawPreview: ''
+    }]);
   }
 
   if (toolId === 'mail.draft.create') {
@@ -11720,6 +12152,49 @@ function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
   return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
 }
 
+async function callStructuredCalendarRead(prompt: string, args: Object | null): Promise<DataResult> {
+  const toolId = 'calendar.events.search';
+  const normalized = calendarComposioArgs(toolId, prompt, args);
+  const missing = calendarEventRequiredFields(toolId, normalized);
+  if (missing.length > 0) {
+    return remainingReadStructuredDataResult(
+      toolId, 'calendarEvents', [calendarMissingArgsResult(toolId, missing)]
+    );
+  }
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('Google Calendar', prompt, '日程'),
+      toolId,
+      normalized as Object
+    );
+    const generic = composioDynamicResultFromObservation('execute', execution.observation, execution.toolSlug, prompt);
+    let results: DynamicGenericToolResult[];
+    if (generic.status === 'error') {
+      results = [composioFixedResult(toolId, 'Google Calendar', generic, normalized as Object)];
+    } else {
+      results = calendarResultsFromComposioObservation(toolId, execution.observation, normalized);
+    }
+    results.forEach((result: DynamicGenericToolResult) => {
+      result.providerPhase = 'execution';
+    });
+    return remainingReadStructuredDataResult(toolId, 'calendarEvents', results);
+  } catch (error) {
+    const result: DynamicGenericToolResult = {
+      sourceTag: 'Composio Google Calendar',
+      toolName: toolId,
+      title: isComposioConfigured() ? 'Google Calendar 调用失败' : 'Composio 未配置',
+      status: isComposioConfigured() ? 'error' : 'needs_auth',
+      summary: describeThrown(error),
+      rows: [],
+      rawPreview: ''
+    };
+    if (isComposioConfigured()) {
+      result.providerPhase = 'execution';
+    }
+    return remainingReadStructuredDataResult(toolId, 'calendarEvents', [result]);
+  }
+}
+
 async function callLocalCalendarTool(
   toolId: string,
   prompt: string,
@@ -11727,6 +12202,10 @@ async function callLocalCalendarTool(
   actionId: string,
   args: Object | null = null
 ): Promise<string> {
+  if (toolId === 'calendar.events.search') {
+    const result = await callStructuredCalendarRead(prompt, args);
+    return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
+  }
   const normalized = calendarComposioArgs(toolId, prompt, args);
   let updateMatches: DynamicGenericToolResult[] = [];
   if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
@@ -13021,6 +13500,30 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
   }
 }
 
+async function callStructuredRideReadTool(toolId: string, args: Object | null): Promise<DataResult> {
+  const results = await callStructuredRideReadResults(toolId, args);
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (result.status === 'success' || result.status === 'empty') {
+      result.providerPhase = 'execution';
+      return;
+    }
+    const lower = result.sourceTag.toLowerCase();
+    if ((lower.indexOf('滴滴') >= 0 && localProviderConfig.didiMcpKey.trim().length > 0) ||
+      (lower.indexOf('高德') >= 0 && localProviderConfig.amapMcpKey.trim().length > 0)) {
+      result.providerPhase = 'execution';
+    }
+  });
+  return remainingReadStructuredDataResult(toolId, 'genericToolResults', results);
+}
+
+async function callStructuredLuckinStatus(args: Object | null): Promise<DataResult> {
+  return remainingReadStructuredDataResult(
+    'luckin.order.status',
+    'genericToolResults',
+    [await callStructuredLuckinStatusResult(args)]
+  );
+}
+
 export async function callStructuredTool(
   toolId: string,
   prompt: string,
@@ -13070,6 +13573,27 @@ export async function callStructuredTool(
   }
   if (toolId === 'social.feed.search') {
     return callStructuredSocialHubTool(args);
+  }
+  if (toolId === 'mail.search') {
+    return callStructuredMailSearch(prompt, args);
+  }
+  if (toolId === 'mail.thread.read') {
+    return callStructuredMailThreadRead(toolId, args);
+  }
+  if (toolId === 'gmail.mail.search' || toolId === 'gmail.thread.read') {
+    return callStructuredGmailReadTool(toolId, prompt, args);
+  }
+  if (toolId === 'youtube.mine.playlists' || toolId === 'youtube.mine.subscriptions') {
+    return callStructuredYouTubeAccountTool(toolId, prompt, args);
+  }
+  if (toolId === 'calendar.events.search') {
+    return callStructuredCalendarRead(prompt, args);
+  }
+  if (toolId === 'luckin.order.status') {
+    return callStructuredLuckinStatus(args);
+  }
+  if (toolId === 'ride.estimate' || toolId === 'ride.app.link' || toolId === 'ride.driver.location') {
+    return callStructuredRideReadTool(toolId, args);
   }
   return errorDataResult(
     toolId,

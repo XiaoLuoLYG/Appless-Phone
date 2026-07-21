@@ -67,6 +67,7 @@ import {
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
+  remainingReadStructuredDataResult,
   partialDataResult,
   rideAmapGeocodePointForTest,
   rideAmapGeocodeKeyForTest,
@@ -105,7 +106,10 @@ import {
 } from '@loop/agent-core';
 
 class SuccessfulGmailMcpClient extends GenericMcpClient {
+  callCount: number = 0;
+
   async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
     return {
       sourceTag: 'Gmail OAuth',
       toolName: 'search_threads',
@@ -115,6 +119,21 @@ class SuccessfulGmailMcpClient extends GenericMcpClient {
       rows: [{ label: 'Subject', value: 'Latest important mail' }],
       rawPreview: 'gmail-oauth-result'
     };
+  }
+}
+
+class ScriptedGmailMcpClient extends GenericMcpClient {
+  private readonly response: DynamicGenericToolResult;
+  callCount: number = 0;
+
+  constructor(response: DynamicGenericToolResult) {
+    super();
+    this.response = response;
+  }
+
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
+    return this.response;
   }
 }
 
@@ -706,6 +725,176 @@ export default function toolGatewayClientTest() {
         configureLocalProviderConfigFromRawJson('{}');
         configureComposioConfigFromRawJson('{}');
       }
+    });
+
+    it('dispatches every remaining read tool to a structured adapter without rendered payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+        const tools: string[] = [
+          'mail.search', 'mail.thread.read', 'gmail.mail.search', 'gmail.thread.read',
+          'youtube.mine.playlists', 'youtube.mine.subscriptions', 'calendar.events.search',
+          'luckin.order.status', 'ride.estimate', 'ride.app.link', 'ride.driver.location'
+        ];
+        const schemas: string[] = [
+          'mailThreads', 'mailThread', 'mailThreads', 'mailThread',
+          'youtubePlaylists', 'youtubeSubscriptions', 'calendarEvents',
+          'genericToolResults', 'genericToolResults', 'genericToolResults', 'genericToolResults'
+        ];
+        for (let index = 0; index < tools.length; index++) {
+          const result = await callStructuredTool(tools[index], '', new Object());
+          const serialized = JSON.stringify(result.data);
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(result.outputSchema).assertEqual(schemas[index]);
+          expect(serialized.indexOf('updateComponents')).assertEqual(-1);
+          expect(serialized.indexOf('createSurface')).assertEqual(-1);
+          expect(serialized.indexOf('updateDataModel')).assertEqual(-1);
+          expect(serialized.indexOf('jsonl')).assertEqual(-1);
+        }
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('executes Gmail search once and preserves exact summary identities without a body', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth',
+        toolName: 'gmail.mail.search',
+        title: 'Gmail result',
+        status: 'success',
+        summary: 'one real result',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"messages":[{"threadId":"thread-once-1","messageId":"message-once-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Provider once","snippet":"Summary only",' +
+          '"body":"FULL BODY MUST NOT ENTER SEARCH DATA"}]}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest important mail',
+          looseObject('{"query":"newer_than:30d","pageSize":10,"providers":["gmail"]}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(serialized.indexOf('gmail:thread-once-1')).assertLarger(-1);
+        expect(serialized.indexOf('message-once-1')).assertLarger(-1);
+        expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
+        expect(serialized.indexOf('FULL BODY MUST NOT ENTER SEARCH DATA')).assertEqual(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects Gmail detail identities before provider execution', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new SuccessfulGmailMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const wrong = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:stale-thread",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1"}')
+        );
+        const missing = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","threadId":"thread-real-1","messageId":"message-real-1"}')
+        );
+
+        expect(wrong.status === 'success').assertFalse();
+        expect(missing.status === 'success').assertFalse();
+        expect(wrong.sources.length).assertEqual(0);
+        expect(missing.sources.length).assertEqual(0);
+        expect(client.callCount).assertEqual(0);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('executes Gmail detail once and requires a full body for the exact request identity', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth',
+        toolName: 'gmail.thread.read',
+        title: 'Gmail thread',
+        status: 'success',
+        summary: 'full thread',
+        rows: [{ label: 'Thread ID', value: 'thread-real-1' }],
+        rawPreview: '{"successful":true,"data":{"id":"thread-real-1","messages":[{' +
+          '"id":"message-real-1","threadId":"thread-real-1","payload":{' +
+          '"mimeType":"multipart/alternative","headers":[' +
+          '{"name":"Subject","value":"Status update"},' +
+          '{"name":"From","value":"Alice <alice@example.com>"},' +
+          '{"name":"To","value":"Me <me@example.com>"}],' +
+          '"parts":[{"mimeType":"text/plain","body":{"data":"SGVsbG8gR21haWw="}}]}}]}}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const result = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"Status update"}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(serialized.indexOf('gmail:thread-real-1')).assertLarger(-1);
+        expect(serialized.indexOf('message-real-1')).assertLarger(-1);
+        expect(serialized.indexOf('Hello Gmail')).assertLarger(-1);
+        expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps exact Luckin order and trace identities with current status actions', 0, () => {
+      const provider: DynamicGenericToolResult = {
+        sourceTag: '瑞幸',
+        toolName: 'luckin.order.status',
+        title: '瑞幸订单状态',
+        status: 'success',
+        summary: '制作中',
+        rows: [
+          { label: '订单号', value: 'luckin-order-real-88' },
+          { label: 'Trace ID', value: 'luckin-trace-real-123456789' }
+        ],
+        rawPreview: '{"orderId":"luckin-order-real-88","traceId":"luckin-trace-real-123456789"}',
+        actions: [{
+          id: 'luckin.order.status', label: '刷新订单状态', prompt: '查询瑞幸订单状态',
+          variant: 'secondary', kind: 'prompt', args: looseObject('{"orderId":"luckin-order-real-88"}')
+        }],
+        providerPhase: 'execution'
+      };
+      const result = remainingReadStructuredDataResult(
+        'luckin.order.status', 'genericToolResults', [provider]
+      );
+      const serialized = JSON.stringify(result.data);
+
+      expect(result.status).assertEqual('success');
+      expect(serialized.indexOf('luckin-order-real-88')).assertLarger(-1);
+      expect(serialized.indexOf('luckin-trace-real-123456789')).assertLarger(-1);
+      expect(serialized.indexOf('luckin.order.status')).assertLarger(-1);
+      expect(result.sources.length).assertEqual(1);
     });
 
     it('returns unsupported for a limited-only SocialHub platform without a provider source', 0, async () => {

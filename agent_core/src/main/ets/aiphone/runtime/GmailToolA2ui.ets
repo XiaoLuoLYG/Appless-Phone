@@ -1,4 +1,5 @@
 import { DynamicGenericToolResult } from './DynamicToolTypes';
+import { MailProviderStatus, MailThreadResult } from './MailToolTypes';
 import {
   A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_SURFACE_ROOT,
@@ -284,6 +285,137 @@ function isComposioGmailReadResult(result: DynamicGenericToolResult): boolean {
     return false;
   }
   return source.indexOf('gmail') >= 0 || title.indexOf('gmail') >= 0 || tool.indexOf('gmail') >= 0;
+}
+
+export interface GmailThreadSummary extends MailThreadResult {
+  requestKey: string;
+}
+
+export interface GmailSearchStructuredData {
+  threads: GmailThreadSummary[];
+  statuses: MailProviderStatus[];
+  extras: DynamicGenericToolResult[];
+}
+
+function structuredRowValue(result: A2uiGenericToolResultData, label: string): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    if (result.rows[index].label === label) {
+      return result.rows[index].value.trim();
+    }
+  }
+  return '';
+}
+
+function gmailSummaryFromCard(card: A2uiGenericToolResultData): GmailThreadSummary | null {
+  const threadId = structuredRowValue(card, 'Thread ID');
+  const messageId = structuredRowValue(card, 'Message ID');
+  if (threadId.length === 0) {
+    return null;
+  }
+  const from = structuredRowValue(card, 'From');
+  const to = structuredRowValue(card, 'To');
+  const participants: string[] = [];
+  if (from.length > 0) {
+    participants.push(from);
+  }
+  if (to.length > 0) {
+    participants.push(to);
+  }
+  return {
+    provider: 'gmail',
+    accountLabel: 'Gmail',
+    threadId: threadId,
+    messageId: messageId,
+    subject: card.title,
+    from: from,
+    to: to.length > 0 ? [to] : [],
+    participants: participants,
+    snippet: card.summary,
+    receivedAt: structuredRowValue(card, 'Date'),
+    unread: false,
+    important: false,
+    sourceUrl: GMAIL_WEB_URL,
+    rawProviderRef: JSON.stringify({ threadId: threadId, messageId: messageId }),
+    requestKey: 'gmail:' + threadId
+  };
+}
+
+export function gmailSearchStructuredDataFromResults(results: DynamicGenericToolResult[]): GmailSearchStructuredData {
+  const threads: GmailThreadSummary[] = [];
+  const statuses: MailProviderStatus[] = [];
+  const extras: DynamicGenericToolResult[] = [];
+  results.forEach((result: DynamicGenericToolResult) => {
+    let readResult = result;
+    if (result.sourceTag.toLowerCase().indexOf('gmail') >= 0 &&
+      result.sourceTag.toLowerCase().indexOf('composio') < 0) {
+      readResult = {
+        sourceTag: 'Composio Gmail', toolName: result.toolName, title: result.title,
+        status: result.status, summary: result.summary, rows: result.rows,
+        rawPreview: result.rawPreview
+      };
+    }
+    const cards = gmailComposioThreadResults(readResult);
+    let addedThread = false;
+    cards.forEach((card: A2uiGenericToolResultData) => {
+      const thread = gmailSummaryFromCard(card);
+      if (thread !== null) {
+        threads.push(thread);
+        addedThread = true;
+      }
+    });
+    if (!addedThread) {
+      if (result.status === 'success' || result.status === 'empty') {
+        extras.push(result);
+      } else {
+        statuses.push({
+          provider: 'gmail',
+          status: result.status,
+          title: result.title,
+          message: result.summary
+        });
+        extras.push(result);
+      }
+    }
+  });
+  return { threads: threads, statuses: statuses, extras: extras };
+}
+
+function gmailCardFromSummary(thread: GmailThreadSummary): A2uiGenericToolResultData {
+  const rows: A2uiLabelValueData[] = [];
+  appendRow(rows, 'Thread ID', thread.threadId);
+  appendRow(rows, 'Message ID', thread.messageId);
+  appendRow(rows, 'From', thread.from);
+  appendRow(rows, 'To', thread.to.join(', '));
+  appendRow(rows, 'Date', thread.receivedAt);
+  appendRow(rows, 'Source', 'Composio Gmail');
+  return {
+    sourceTag: 'Gmail API',
+    toolName: 'users.threads.get',
+    title: thread.subject,
+    status: 'success',
+    summary: thread.snippet,
+    rows: rows,
+    rawPreview: JSON.stringify({ source: 'Composio Gmail', threadId: thread.threadId, messageId: thread.messageId })
+  };
+}
+
+export function gmailSearchStructuredDataA2ui(
+  surfaceId: string,
+  toolId: string,
+  data: GmailSearchStructuredData
+): string {
+  const mapped: A2uiGenericToolResultData[] = [];
+  data.threads.forEach((thread: GmailThreadSummary) => mapped.push(gmailCardFromSummary(thread)));
+  genericResultsFromDynamic(data.extras).forEach((result: A2uiGenericToolResultData) => mapped.push(result));
+  const count = mapped.length;
+  return genericResultsA2ui(
+    surfaceId,
+    GMAIL_DISPLAY_NAME,
+    'ready',
+    'ready',
+    mapped,
+    summary(count.toString() + (count === 1 ? ' Gmail result returned for review.' : ' Gmail results returned for review.'), toolId, count)
+  );
 }
 
 function gmailCardFromRecord(record: Object, fallbackTitle: string, fallbackSummary: string, index: number): A2uiGenericToolResultData {

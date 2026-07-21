@@ -13,7 +13,8 @@ import {
   calendarUpdateArgsFromResultsForTest,
   calendarUpdateNeedsInputResults,
   calendarUpdateBody,
-  normalizedCalendarArgsForPrompt
+  normalizedCalendarArgsForPrompt,
+  remainingReadStructuredDataResult
 } from '@loop/agent-core';
 
 export default function calendarApiClientTest() {
@@ -209,6 +210,47 @@ export default function calendarApiClientTest() {
       expect(results[0].sourceTag).assertEqual('Composio Google Calendar');
       expect(results[0].rows[0].value).assertEqual('event-composio-1');
       expect(results[0].rows[1].value).assertEqual('2026-07-31T15:00:00+08:00');
+    });
+
+    it('preserves real Calendar event IDs in structured data without rendered envelopes', 0, () => {
+      const observation = '{"data":{"items":[{"id":"event-structured-real-1","summary":"Structured QA",' +
+        '"start":{"dateTime":"2026-07-31T15:00:00+08:00"},' +
+        '"end":{"dateTime":"2026-07-31T15:30:00+08:00"}}]},"error":null}';
+      const provider = calendarResultsFromComposioObservation('calendar.events.search', observation);
+      provider[0].providerPhase = 'execution';
+      const structured = remainingReadStructuredDataResult(
+        'calendar.events.search', 'calendarEvents', provider
+      );
+      const serialized = JSON.stringify(structured.data);
+
+      expect(structured.status).assertEqual('success');
+      expect(serialized.indexOf('event-structured-real-1')).assertLarger(-1);
+      expect(serialized.indexOf('updateComponents')).assertEqual(-1);
+      expect(serialized.indexOf('createSurface')).assertEqual(-1);
+      expect(serialized.indexOf('jsonl')).assertEqual(-1);
+    });
+
+    it('separates Calendar missing auth successful empty and inner provider error', 0, () => {
+      const auth = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', [{
+        sourceTag: 'Composio Google Calendar', toolName: 'calendar.events.search', title: 'Composio 未配置',
+        status: 'needs_auth', summary: 'Google Calendar OAuth 未授权。', rows: [], rawPreview: ''
+      }]);
+      const emptyProvider = calendarEventResultsFromListPayload('{"items":[]}');
+      emptyProvider[0].providerPhase = 'execution';
+      const empty = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', emptyProvider);
+      const inner = calendarResultsFromComposioObservation(
+        'calendar.events.search', '{"data":null,"error":"calendar backend unavailable"}'
+      );
+      inner[0].providerPhase = 'execution';
+      const error = remainingReadStructuredDataResult('calendar.events.search', 'calendarEvents', inner);
+
+      expect(auth.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(auth.sources.length).assertEqual(0);
+      expect(empty.status).assertEqual('empty');
+      expect(empty.sources.length).assertEqual(1);
+      expect(error.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(error.error?.message.indexOf('calendar backend unavailable')).assertLarger(-1);
+      expect(error.sources.length).assertEqual(1);
     });
 
     it('maps a Composio Calendar create payload into a visible confirmation event', 0, () => {

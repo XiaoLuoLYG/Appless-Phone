@@ -10,6 +10,8 @@ import {
   gmailOpenDraftAction,
   gmailOpenWebA2ui,
   gmailReplyDraftAction,
+  gmailSearchStructuredDataA2ui,
+  gmailSearchStructuredDataFromResults,
   gmailThreadResultsA2ui
 } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
@@ -163,6 +165,39 @@ export default function gmailToolA2uiTest() {
       expect(rowValue(rendered[0], 'From')).assertEqual('Chair <chair@example.edu>');
       expect(rendered[0].summary).assertEqual('Please check the latest review note.');
       expect(store.getSurface().dataModelJson.indexOf('FULL BODY SHOULD NOT LEAK')).assertEqual(-1);
+    });
+
+    it('renders the same structured Gmail summary without changing reply identities', 0, () => {
+      const composio: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail result',
+        status: 'success',
+        summary: 'one result',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"messages":[{"threadId":"thread-structured-1","messageId":"message-structured-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Structured Gmail","snippet":"Same normalized summary"}]}'
+      };
+      const structured = gmailSearchStructuredDataFromResults([composio]);
+      const oldRows = genericToolResults(surfaceFromJsonl(
+        gmailThreadResultsA2ui('gmail_old', 'gmail.mail.search', [composio])
+      ).getSurface());
+      const newRows = genericToolResults(surfaceFromJsonl(
+        gmailSearchStructuredDataA2ui('gmail_new', 'gmail.mail.search', structured)
+      ).getSurface());
+
+      expect(newRows.length).assertEqual(oldRows.length);
+      expect(newRows[0].title).assertEqual(oldRows[0].title);
+      expect(rowValue(newRows[0], 'Thread ID')).assertEqual('thread-structured-1');
+      expect(rowValue(newRows[0], 'Message ID')).assertEqual('message-structured-1');
+      expect(rowValue(newRows[0], 'To')).assertEqual('Me <me@example.com>');
+      const action = gmailReplyDraftAction(newRows[0]);
+      expect(action !== null).assertTrue();
+      if (action !== null) {
+        expect(JSON.stringify(action.args).indexOf('thread-structured-1')).assertLarger(-1);
+        expect(JSON.stringify(action.args).indexOf('alice@example.com')).assertLarger(-1);
+      }
     });
 
     it('prefers compact Composio Gmail messages over technical query rows', 0, () => {
