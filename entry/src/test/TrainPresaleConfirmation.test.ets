@@ -2,9 +2,13 @@ import { describe, it, expect } from '@ohos/hypium';
 import { preferences } from '@kit.ArkData';
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import {
+  cancelScheduledTrainPresaleTask,
+  findMatchingOpenTrainPresaleTask,
+  findMatchingScheduledTrainPresaleTask,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
-  validateTrainPresaleConfirmation
+  validateTrainPresaleConfirmation,
+  validateTrainPresaleTrip
 } from '../main/ets/pages/A2uiHome/components/TrainPresalePanel';
 import { SystemOneShotScheduler } from '../main/ets/pages/A2uiHome/train/SystemOneShotScheduler';
 import { TrainPresaleTask, TrainPresaleTaskStore } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
@@ -12,7 +16,9 @@ import { TrainPresaleTask, TrainPresaleTaskStore } from '../main/ets/pages/A2uiH
 class MemoryPreferences {
   private value: preferences.ValueType = '';
   private writes: number = 0;
-  failAfterFirstWrite: boolean = false;
+  failWrites: boolean = false;
+  failWriteAt: number = 0;
+  failFlushes: number = 0;
 
   getSync(_key: string, defaultValue: preferences.ValueType): preferences.ValueType {
     return this.value === '' ? defaultValue : this.value;
@@ -20,13 +26,18 @@ class MemoryPreferences {
 
   putSync(_key: string, value: preferences.ValueType): void {
     this.writes++;
-    if (this.failAfterFirstWrite && this.writes > 1) {
+    if (this.failWrites || this.failWriteAt === this.writes) {
       throw new Error('persist failed');
     }
     this.value = value;
   }
 
-  flushSync(): void {}
+  flushSync(): void {
+    if (this.failFlushes > 0) {
+      this.failFlushes--;
+      throw new Error('persist failed');
+    }
+  }
 }
 
 function task(): TrainPresaleTask {
@@ -103,6 +114,14 @@ export default function trainPresaleConfirmationTest() {
       const invalidSaleAt = validInput();
       invalidSaleAt.saleAt = '2026-08-06 12:45';
       expect(validateTrainPresaleConfirmation(invalidSaleAt).task).assertEqual(undefined);
+
+      const invalidClock = validInput();
+      invalidClock.saleAt = '2026-08-06T24:00:00+08:00';
+      expect(validateTrainPresaleConfirmation(invalidClock).task).assertEqual(undefined);
+
+      const stale = validInput();
+      stale.createdAt = '2026-08-06T04:45:01.000Z';
+      expect(validateTrainPresaleConfirmation(stale).error).assertEqual('开售时间已过，请重新查询。');
     });
 
     it('requires explicit real unpaid-order authorization', 0, () => {
@@ -125,7 +144,86 @@ export default function trainPresaleConfirmationTest() {
       expect(validateTrainPresaleConfirmation(input).task === undefined).assertFalse();
     });
 
-    it('does not report scheduled when reminder publication fails', 0, async () => {
+    it('validates a future trip before panel display', 0, () => {
+      const input = validInput();
+      const result = validateTrainPresaleTrip(input, input.createdAt);
+      expect(result.error).assertEqual('');
+      expect(result.trip === undefined).assertFalse();
+
+      const stale = validInput();
+      stale.travelDate = '2026-07-22';
+      stale.saleAt = '2026-07-22T09:59:59+08:00';
+      expect(validateTrainPresaleTrip(stale, '2026-07-22T02:00:00.000Z').error)
+        .assertEqual('开售时间已过，请重新查询。');
+    });
+
+    it('finds only an exact scheduled task with a valid reminder ID', 0, () => {
+      const exact = task();
+      exact.reminderId = 73;
+      const invalidId = task();
+      invalidId.taskId = 'invalid-id';
+      invalidId.reminderId = 0;
+      const otherRoute = task();
+      otherRoute.taskId = 'other-route';
+      otherRoute.reminderId = 74;
+      otherRoute.toCode = 'BJP';
+
+      expect(findMatchingScheduledTrainPresaleTask([invalidId, otherRoute, exact], validInput())?.taskId)
+        .assertEqual('train-1');
+      const changedSaleTime = validInput();
+      changedSaleTime.saleAt = '2026-08-06T13:00:00+08:00';
+      expect(findMatchingScheduledTrainPresaleTask([exact], changedSaleTime)).assertEqual(undefined);
+      exact.state = 'cancelled';
+      expect(findMatchingScheduledTrainPresaleTask([exact], validInput())).assertEqual(undefined);
+    });
+
+    it('finds the persisted task after store reopen so the action does not publish a duplicate', 0, () => {
+      const native = new MemoryPreferences();
+      const firstStore = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduled = task();
+      scheduled.reminderId = 73;
+      firstStore.create(scheduled);
+
+      const reopenedStore = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const existing = findMatchingScheduledTrainPresaleTask(reopenedStore.list(), validInput());
+
+      expect(existing?.taskId).assertEqual('train-1');
+      expect(reopenedStore.list().length).assertEqual(1);
+    });
+
+    it('restores a durable needs-user cancellation state instead of allowing a duplicate', 0, () => {
+      const attention = task();
+      attention.reminderId = 73;
+      attention.state = 'needs_user';
+
+      const existing = findMatchingOpenTrainPresaleTask([attention], validInput());
+
+      expect(existing?.taskId).assertEqual('train-1');
+      expect(existing?.state).assertEqual('needs_user');
+    });
+
+    it('publishes before persisting and reloads the complete scheduled task', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      let emptyAtPublish = false;
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => {
+          emptyAtPublish = store.list().length === 0;
+          return 73;
+        },
+        async (): Promise<void> => {},
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await scheduleTrainPresaleTask(task(), store, scheduler);
+
+      expect(emptyAtPublish).assertTrue();
+      expect(result.error).assertEqual('');
+      expect(result.task?.reminderId).assertEqual(73);
+      expect(store.get('train-1')?.reminderId).assertEqual(73);
+    });
+
+    it('leaves no local task when reminder publication fails', 0, async () => {
       const native = new MemoryPreferences();
       const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
       let cancelledId = -1;
@@ -143,13 +241,29 @@ export default function trainPresaleConfirmationTest() {
 
       expect(result.task).assertEqual(undefined);
       expect(result.error.indexOf('publish failed')).assertLarger(-1);
-      expect(store.get('train-1')?.state).assertEqual('cancelled');
+      expect(store.get('train-1')).assertEqual(undefined);
       expect(cancelledId).assertEqual(-1);
     });
 
-    it('cancels a published reminder when reminder ID persistence fails', 0, async () => {
+    it('rejects a non-positive published reminder ID without persistence', 0, async () => {
       const native = new MemoryPreferences();
-      native.failAfterFirstWrite = true;
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (): Promise<void> => {},
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await scheduleTrainPresaleTask(task(), store, scheduler);
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error).assertEqual('提醒创建失败：系统未返回有效的提醒编号。');
+      expect(store.list().length).assertEqual(0);
+    });
+
+    it('cancels a published reminder when complete task persistence fails', 0, async () => {
+      const native = new MemoryPreferences();
+      native.failFlushes = 1;
       const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
       let cancelledId = -1;
       const scheduler = new SystemOneShotScheduler(
@@ -165,7 +279,91 @@ export default function trainPresaleConfirmationTest() {
       expect(result.task).assertEqual(undefined);
       expect(result.error.indexOf('persist failed')).assertLarger(-1);
       expect(cancelledId).assertEqual(73);
-      expect(store.get('train-1')?.reminderId).assertEqual(-1);
+      expect(store.get('train-1')).assertEqual(undefined);
+    });
+
+    it('reports cleanup failure without a false scheduled task', 0, async () => {
+      const native = new MemoryPreferences();
+      native.failWrites = true;
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 73,
+        async (): Promise<void> => {
+          throw new Error('cleanup failed');
+        },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await scheduleTrainPresaleTask(task(), store, scheduler);
+
+      expect(result.task).assertEqual(undefined);
+      expect(result.error.indexOf('cleanup failed')).assertLarger(-1);
+      expect(store.get('train-1')).assertEqual(undefined);
+    });
+
+    it('cancels native reminder and persists cancelled state', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduled = task();
+      scheduled.reminderId = 73;
+      store.create(scheduled);
+      let cancelledId = -1;
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (reminderId: number): Promise<void> => {
+          expect(store.get('train-1')?.state).assertEqual('needs_user');
+          cancelledId = reminderId;
+        },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await cancelScheduledTrainPresaleTask(scheduled, store, scheduler);
+
+      expect(result.state).assertEqual('cancelled');
+      expect(result.error).assertEqual('');
+      expect(cancelledId).assertEqual(73);
+      expect(store.get('train-1')?.state).assertEqual('cancelled');
+    });
+
+    it('keeps scheduled state when native cancellation fails', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduled = task();
+      scheduled.reminderId = 73;
+      store.create(scheduled);
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (): Promise<void> => {
+          throw new Error('native cancel failed');
+        },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await cancelScheduledTrainPresaleTask(scheduled, store, scheduler);
+
+      expect(result.state).assertEqual('scheduled');
+      expect(result.error.indexOf('任务仍为已安排')).assertLarger(-1);
+      expect(store.get('train-1')?.state).assertEqual('scheduled');
+    });
+
+    it('requires user attention when native cancellation succeeds but local persistence fails', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const scheduled = task();
+      scheduled.reminderId = 73;
+      store.create(scheduled);
+      native.failWriteAt = 3;
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (): Promise<void> => {},
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await cancelScheduledTrainPresaleTask(scheduled, store, scheduler);
+
+      expect(result.state).assertEqual('needs_user');
+      expect(result.error.indexOf('系统提醒已取消，但本地状态保存失败')).assertLarger(-1);
+      expect(result.task?.state).assertEqual('needs_user');
     });
   });
 }

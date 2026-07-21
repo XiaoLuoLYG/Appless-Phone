@@ -106,7 +106,8 @@ function copyTask(value: TrainPresaleTask): TrainPresaleTask {
 
 function canTransition(from: TrainPresaleTaskState, to: TrainPresaleTaskState): boolean {
   return from === to ||
-    (from === 'scheduled' && (to === 'executing' || to === 'cancelled')) ||
+    (from === 'scheduled' && (to === 'executing' || to === 'needs_user' || to === 'cancelled')) ||
+    (from === 'needs_user' && (to === 'scheduled' || to === 'cancelled')) ||
     (from === 'executing' && (to === 'awaiting_payment' || to === 'needs_user'));
 }
 
@@ -231,6 +232,19 @@ export class TrainPresaleTaskStore {
 
   cancel(taskId: string): void {
     this.update(taskId, { state: 'cancelled' });
+  }
+
+  remove(taskId: string): void {
+    const tasks = this.tasks();
+    const remaining: TrainPresaleTask[] = [];
+    for (let index = 0; index < tasks.length; index++) {
+      if (tasks[index].taskId !== taskId) {
+        remaining.push(tasks[index]);
+      }
+    }
+    if (remaining.length !== tasks.length) {
+      this.save(remaining);
+    }
   }
 
   claimDue(nowIso: string, taskId?: string): TrainPresaleTask | undefined {

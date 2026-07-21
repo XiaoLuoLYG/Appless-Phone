@@ -29,6 +29,7 @@ import {
   TrainPresalePanelSubmission,
   TrainPresaleTrip
 } from './TrainPresalePanel';
+import { TrainPresaleTask } from '../train/TrainPresaleTaskStore';
 import {
   isPromptInputEnabled,
   nextSendSpinnerRotation
@@ -83,6 +84,7 @@ export struct HomePage {
   @Prop checkoutWebUrl: string = '';
   @Prop showTrainPresalePanel: boolean = false;
   @Prop trainPresaleTrip: TrainPresaleTrip = emptyTrainPresaleTrip();
+  @Prop trainPresaleTask: TrainPresaleTask | null = null;
   @Prop trainPresaleTaskState: string = '';
   @Prop trainPresaleError: string = '';
   @Prop trainPresaleWorking: boolean = false;
@@ -379,6 +381,7 @@ export struct HomePage {
       if (this.showTrainPresalePanel) {
         TrainPresalePanel({
           trip: this.trainPresaleTrip,
+          task: this.trainPresaleTask,
           taskState: this.trainPresaleTaskState,
           errorMessage: this.trainPresaleError,
           isWorking: this.trainPresaleWorking,

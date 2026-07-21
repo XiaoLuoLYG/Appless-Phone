@@ -56,6 +56,19 @@ export interface TrainPresaleScheduleResult {
   task: TrainPresaleTask | undefined;
 }
 
+export interface TrainPresaleTripValidationResult {
+  error: string;
+  trip: TrainPresaleTrip | undefined;
+}
+
+export type TrainPresaleCancellationState = 'cancelled' | 'scheduled' | 'needs_user';
+
+export interface TrainPresaleCancellationResult {
+  state: TrainPresaleCancellationState;
+  error: string;
+  task: TrainPresaleTask;
+}
+
 export function emptyTrainPresaleTrip(): TrainPresaleTrip {
   return {
     trainCode: '',
@@ -89,6 +102,88 @@ function isSupportedSeat(value: string): boolean {
   return TRAIN_PRESALE_SEAT_PREFERENCES.indexOf(value) >= 0;
 }
 
+export function validateTrainPresaleTrip(
+  input: TrainPresaleTrip,
+  nowIso: string
+): TrainPresaleTripValidationResult {
+  const trainCode = extractExactTrainCode(input.trainCode);
+  const travelDate = input.travelDate.trim();
+  const fromName = input.fromName.trim();
+  const fromCode = input.fromCode.trim().toUpperCase();
+  const toName = input.toName.trim();
+  const toCode = input.toCode.trim().toUpperCase();
+  const saleAt = input.saleAt.trim();
+  const salePattern = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\+08:00$/;
+  const saleTime = new Date(saleAt).getTime();
+  const nowTime = new Date(nowIso).getTime();
+  if (trainCode.length === 0 || trainCode !== input.trainCode.trim().toUpperCase() || !isValidDate(travelDate) ||
+    fromName.length === 0 || toName.length === 0 ||
+    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) ||
+    fromName === toName || fromCode === toCode || !salePattern.test(saleAt) ||
+    saleAt.substring(0, 10) !== travelDate || isNaN(saleTime) || isNaN(nowTime)) {
+    return { error: '车次、日期、路线或开售时间无效，请重新查询。', trip: undefined };
+  }
+  if (saleTime <= nowTime) {
+    return { error: '开售时间已过，请重新查询。', trip: undefined };
+  }
+  return {
+    error: '',
+    trip: {
+      trainCode: trainCode,
+      travelDate: travelDate,
+      fromName: fromName,
+      fromCode: fromCode,
+      toName: toName,
+      toCode: toCode,
+      saleAt: saleAt
+    }
+  };
+}
+
+export function findMatchingScheduledTrainPresaleTask(
+  tasks: TrainPresaleTask[],
+  trip: TrainPresaleTrip
+): TrainPresaleTask | undefined {
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    if (task.state === 'scheduled' && matchesTrainPresaleTask(task, trip)) {
+      return task;
+    }
+  }
+  return undefined;
+}
+
+function matchesTrainPresaleTask(task: TrainPresaleTask, trip: TrainPresaleTrip): boolean {
+  const trainCode = trip.trainCode.trim().toUpperCase();
+  const travelDate = trip.travelDate.trim();
+  const fromName = trip.fromName.trim();
+  const fromCode = trip.fromCode.trim().toUpperCase();
+  const toName = trip.toName.trim();
+  const toCode = trip.toCode.trim().toUpperCase();
+  const saleAt = trip.saleAt.trim();
+  return task.reminderId > 0 && task.reminderId % 1 === 0 &&
+    task.trainCode.trim().toUpperCase() === trainCode && task.travelDate.trim() === travelDate &&
+    task.fromName.trim() === fromName && task.fromCode.trim().toUpperCase() === fromCode &&
+    task.toName.trim() === toName && task.toCode.trim().toUpperCase() === toCode && task.saleAt.trim() === saleAt;
+}
+
+export function findMatchingOpenTrainPresaleTask(
+  tasks: TrainPresaleTask[],
+  trip: TrainPresaleTrip
+): TrainPresaleTask | undefined {
+  const scheduled = findMatchingScheduledTrainPresaleTask(tasks, trip);
+  if (scheduled !== undefined) {
+    return scheduled;
+  }
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    if (task.state === 'needs_user' && matchesTrainPresaleTask(task, trip)) {
+      return task;
+    }
+  }
+  return undefined;
+}
+
 export function validateTrainPresaleConfirmation(
   input: TrainPresaleConfirmationInput
 ): TrainPresaleConfirmationResult {
@@ -102,21 +197,16 @@ export function validateTrainPresaleConfirmation(
   if (!isSupportedSeat(seatPriority)) {
     return validationError('请选择支持的席别。');
   }
-  const trainCode = extractExactTrainCode(input.trainCode);
-  const travelDate = input.travelDate.trim();
-  const fromName = input.fromName.trim();
-  const fromCode = input.fromCode.trim().toUpperCase();
-  const toName = input.toName.trim();
-  const toCode = input.toCode.trim().toUpperCase();
-  const saleAt = input.saleAt.trim();
-  if (trainCode.length === 0 || trainCode !== input.trainCode.trim().toUpperCase() || !isValidDate(travelDate) ||
-    fromName.length === 0 || toName.length === 0 ||
-    !/^[A-Z]{3}$/.test(fromCode) || !/^[A-Z]{3}$/.test(toCode) ||
-    fromName === toName || fromCode === toCode ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/.test(saleAt) ||
-    saleAt.substring(0, 10) !== travelDate || isNaN(new Date(saleAt).getTime())) {
-    return validationError('车次、日期、路线或开售时间无效，请重新查询。');
+  const taskId = input.taskId.trim();
+  const createdAt = input.createdAt.trim();
+  if (taskId.length === 0 || isNaN(new Date(createdAt).getTime())) {
+    return validationError('无法创建提醒，请重试。');
   }
+  const tripResult = validateTrainPresaleTrip(input, createdAt);
+  if (tripResult.trip === undefined) {
+    return validationError(tripResult.error);
+  }
+  const trip = tripResult.trip;
   if (!input.unpaidOrderAuthorized) {
     return validationError('请明确授权在开售时提交真实未支付订单。');
   }
@@ -126,27 +216,28 @@ export function validateTrainPresaleConfirmation(
   if (input.source === 'debug' && !input.debugConfirmed) {
     return validationError('请再次确认这是调试测试。');
   }
-  const taskId = input.taskId.trim();
-  const createdAt = input.createdAt.trim();
-  if (taskId.length === 0 || isNaN(new Date(createdAt).getTime())) {
-    return validationError('无法创建提醒，请重试。');
-  }
   return {
     error: '',
     task: {
       taskId: taskId,
       source: input.source,
       state: 'scheduled',
-      trainCode: trainCode,
-      travelDate: travelDate,
-      fromName: fromName,
-      fromCode: fromCode,
-      toName: toName,
-      toCode: toCode,
-      saleAt: saleAt,
+      trainCode: trip.trainCode,
+      travelDate: trip.travelDate,
+      fromName: trip.fromName,
+      fromCode: trip.fromCode,
+      toName: trip.toName,
+      toCode: trip.toCode,
+      saleAt: trip.saleAt,
       passengerNames: passengerNames,
       seatPriority: seatPriority,
-      bookingUrl: build12306BookingUrl(travelDate, fromName, fromCode, toName, toCode),
+      bookingUrl: build12306BookingUrl(
+        trip.travelDate,
+        trip.fromName,
+        trip.fromCode,
+        trip.toName,
+        trip.toCode
+      ),
       reminderId: -1,
       createdAt: createdAt,
       lastError: ''
@@ -161,36 +252,103 @@ export async function scheduleTrainPresaleTask(
 ): Promise<TrainPresaleScheduleResult> {
   let reminderId = -1;
   try {
-    store.create(task);
-    if (store.get(task.taskId) === undefined) {
-      throw new Error('任务保存失败');
-    }
     reminderId = await scheduler.schedule(task, task.saleAt);
-    store.update(task.taskId, { reminderId: reminderId });
+    if (reminderId <= 0 || reminderId % 1 !== 0) {
+      throw new Error('系统未返回有效的提醒编号。');
+    }
+    task.reminderId = reminderId;
+    store.create(task);
     const persisted = store.get(task.taskId);
-    if (persisted === undefined || persisted.reminderId !== reminderId) {
-      throw new Error('提醒编号保存失败');
+    if (persisted === undefined || persisted.state !== 'scheduled' || persisted.reminderId !== reminderId) {
+      throw new Error('完整任务保存失败');
     }
     return { error: '', task: persisted };
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
     let cleanupError = '';
-    if (reminderId >= 0) {
+    if (reminderId > 0 && reminderId % 1 === 0) {
       try {
         await scheduler.cancel(reminderId);
       } catch (cancelError) {
         cleanupError = cancelError instanceof Error ? cancelError.message : JSON.stringify(cancelError);
       }
     }
+    let localCleanupError = '';
     try {
-      store.update(task.taskId, { lastError: message });
-      store.cancel(task.taskId);
-    } catch (_storeError) {
+      const localTask = store.get(task.taskId);
+      if (localTask !== undefined && localTask.reminderId === reminderId) {
+        store.remove(task.taskId);
+      }
+      if (store.get(task.taskId) !== undefined) {
+        throw new Error('本地任务清理失败');
+      }
+    } catch (storeError) {
+      localCleanupError = storeError instanceof Error ? storeError.message : JSON.stringify(storeError);
     }
     return {
       error: '提醒创建失败：' + message +
-        (cleanupError.length > 0 ? '；已发布提醒取消失败：' + cleanupError : ''),
+        (cleanupError.length > 0 ? '；已发布提醒取消失败：' + cleanupError : '') +
+        (localCleanupError.length > 0 ? '；本地任务清理失败：' + localCleanupError : ''),
       task: undefined
+    };
+  }
+}
+
+export async function cancelScheduledTrainPresaleTask(
+  task: TrainPresaleTask,
+  store: TrainPresaleTaskStore,
+  scheduler: SystemOneShotScheduler
+): Promise<TrainPresaleCancellationResult> {
+  if (task.reminderId <= 0 || task.reminderId % 1 !== 0) {
+    return { state: 'scheduled', error: '取消任务失败：提醒编号无效，任务仍为已安排。', task: task };
+  }
+  let attentionTask = task;
+  try {
+    store.update(task.taskId, { state: 'needs_user', lastError: '正在取消系统提醒。' });
+    const persisted = store.get(task.taskId);
+    if (persisted === undefined || persisted.state !== 'needs_user') {
+      throw new Error('取消准备状态保存失败');
+    }
+    attentionTask = persisted;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    return { state: 'scheduled', error: '取消任务失败：' + message + '；任务仍为已安排。', task: task };
+  }
+  try {
+    await scheduler.cancel(task.reminderId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    try {
+      store.update(task.taskId, { state: 'scheduled', lastError: message });
+      const restored = store.get(task.taskId);
+      if (restored === undefined || restored.state !== 'scheduled') {
+        throw new Error('任务状态恢复失败');
+      }
+      return { state: 'scheduled', error: '取消任务失败：' + message + '；任务仍为已安排。', task: restored };
+    } catch (storeError) {
+      const storeMessage = storeError instanceof Error ? storeError.message : JSON.stringify(storeError);
+      attentionTask.lastError = message + '；' + storeMessage;
+      return {
+        state: 'needs_user',
+        error: '系统提醒取消失败，且本地状态恢复失败：' + attentionTask.lastError + '。请检查任务状态。',
+        task: attentionTask
+      };
+    }
+  }
+  try {
+    store.cancel(task.taskId);
+    const persisted = store.get(task.taskId);
+    if (persisted === undefined || persisted.state !== 'cancelled') {
+      throw new Error('任务取消状态保存失败');
+    }
+    return { state: 'cancelled', error: '', task: persisted };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    attentionTask.lastError = message;
+    return {
+      state: 'needs_user',
+      error: '系统提醒已取消，但本地状态保存失败：' + message + '。请重新打开行程确认状态。',
+      task: attentionTask
     };
   }
 }
@@ -198,6 +356,7 @@ export async function scheduleTrainPresaleTask(
 @Component
 export struct TrainPresalePanel {
   @Prop trip: TrainPresaleTrip = emptyTrainPresaleTrip();
+  @Prop task: TrainPresaleTask | null = null;
   @Prop taskState: string = '';
   @Prop errorMessage: string = '';
   @Prop isWorking: boolean = false;
@@ -215,12 +374,19 @@ export struct TrainPresalePanel {
     return this.trip.saleAt.length >= 16 ? this.trip.saleAt.substring(11, 16) : this.trip.saleAt;
   }
 
+  private statusSeatPriority(): string {
+    return this.task === null ? this.seatPriority : this.task.seatPriority;
+  }
+
   private statusLabel(): string {
     if (this.taskState === 'scheduled') {
       return '已安排';
     }
     if (this.taskState === 'cancelled') {
       return '已取消';
+    }
+    if (this.taskState === 'needs_user') {
+      return '需要处理';
     }
     return this.taskState;
   }
@@ -236,14 +402,14 @@ export struct TrainPresalePanel {
   }
 
   @Builder
-  private VerifiedTripCard() {
+  private TripCard() {
     Column() {
       Row() {
         Text(this.trip.trainCode)
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_INK)
-        Text('已核验')
+        Text('待确认')
           .fontSize(11)
           .fontColor(COLOR_SUCCESS)
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
@@ -292,7 +458,7 @@ export struct TrainPresalePanel {
         .fontSize(13)
         .fontColor(COLOR_TEXT)
         .margin({ top: 8 })
-      Text(this.saleTimeText() + ' 开售 · ' + this.seatPriority)
+      Text(this.saleTimeText() + ' 开售 · ' + this.statusSeatPriority())
         .fontSize(12)
         .fontColor(COLOR_MUTED)
         .margin({ top: 5 })
@@ -352,10 +518,10 @@ export struct TrainPresalePanel {
         .alignItems(VerticalAlign.Center)
         .margin({ bottom: 14 })
 
-        if (this.taskState === 'scheduled' || this.taskState === 'cancelled') {
+        if (this.taskState === 'scheduled' || this.taskState === 'cancelled' || this.taskState === 'needs_user') {
           this.StatusCard()
         } else {
-          this.VerifiedTripCard()
+          this.TripCard()
 
           Text('乘车人显示名称')
             .fontSize(12)
@@ -412,6 +578,7 @@ export struct TrainPresalePanel {
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
             Toggle({ type: ToggleType.Switch, isOn: this.unpaidOrderAuthorized })
+              .accessibilityText('授权提交真实未支付订单')
               .selectedColor(COLOR_ACCENT)
               .enabled(!this.isWorking)
               .onChange((isOn: boolean) => {
@@ -459,6 +626,7 @@ export struct TrainPresalePanel {
                   .fontColor(COLOR_TEXT)
                   .layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.debugConfirmed })
+                  .accessibilityText('再次确认这是调试测试')
                   .selectedColor(COLOR_ACCENT)
                   .enabled(!this.isWorking)
                   .onChange((isOn: boolean) => {

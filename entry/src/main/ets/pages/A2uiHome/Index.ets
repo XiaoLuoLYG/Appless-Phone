@@ -102,13 +102,16 @@ import { startVoiceInputSession, VoiceInputResult, VoiceInputSession } from '../
 import { ComposioAuthPage } from './components/ComposioAuthPage';
 import { HomePage } from './components/HomePage';
 import {
+  cancelScheduledTrainPresaleTask,
   emptyTrainPresaleTrip,
+  findMatchingOpenTrainPresaleTask,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
   TrainPresaleConfirmationResult,
   TrainPresalePanelSubmission,
   TrainPresaleTrip,
-  validateTrainPresaleConfirmation
+  validateTrainPresaleConfirmation,
+  validateTrainPresaleTrip
 } from './components/TrainPresalePanel';
 import {
   CheckoutWebKind,
@@ -2955,14 +2958,32 @@ struct Index {
       this.logHtmlHomeActionError(action, 'invalid_train_presale_args');
       return;
     }
-    this.trainPresaleTrip = trip;
-    this.trainPresaleTask = null;
-    this.trainPresaleTaskState = '';
-    this.trainPresaleError = '';
-    this.trainPresaleWorking = false;
-    this.showCheckoutWeb = false;
-    this.showTrainPresalePanel = true;
-    aiLogInfo('[AIPhone][TrainPresalePanel] train=' + trip.trainCode + ' open=true');
+    const validation = validateTrainPresaleTrip(trip, new Date().toISOString());
+    if (validation.trip === undefined) {
+      this.logHtmlHomeActionError(action, 'invalid_or_stale_train_presale_trip');
+      aiLogError('[AIPhone][TrainPresalePanel] validation=' + validation.error);
+      return;
+    }
+    try {
+      const store = this.trainPresaleStore();
+      if (store === null) {
+        throw new Error('缺少应用上下文');
+      }
+      const existing = findMatchingOpenTrainPresaleTask(store.list(), validation.trip);
+      this.trainPresaleTrip = validation.trip;
+      this.trainPresaleTask = existing === undefined ? null : existing;
+      this.trainPresaleTaskState = existing === undefined ? '' : existing.state;
+      this.trainPresaleError = '';
+      this.trainPresaleWorking = false;
+      this.showCheckoutWeb = false;
+      this.showTrainPresalePanel = true;
+      aiLogInfo('[AIPhone][TrainPresalePanel] train=' + validation.trip.trainCode +
+        ' existing=' + (existing === undefined ? 'false' : 'true') + ' open=true');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      this.logHtmlHomeActionError(action, 'train_presale_store_unavailable');
+      aiLogError('[AIPhone][TrainPresalePanel] store=' + message.substring(0, 240));
+    }
   }
 
   private trainPresaleStore(): TrainPresaleTaskStore | null {
@@ -3047,17 +3068,16 @@ struct Index {
       if (store === null) {
         throw new Error('缺少应用上下文');
       }
-      if (task.reminderId >= 0) {
-        await new SystemOneShotScheduler().cancel(task.reminderId);
+      const result = await cancelScheduledTrainPresaleTask(task, store, new SystemOneShotScheduler());
+      this.trainPresaleTask = result.task;
+      this.trainPresaleTaskState = result.state;
+      this.trainPresaleError = result.error;
+      if (result.state === 'cancelled') {
+        aiLogInfo('[AIPhone][TrainPresaleCancel] taskId=' + task.taskId + ' ok=true');
+      } else {
+        aiLogError('[AIPhone][TrainPresaleCancel] taskId=' + task.taskId +
+          ' state=' + result.state + ' error=' + result.error.substring(0, 240));
       }
-      store.cancel(task.taskId);
-      const persisted = store.get(task.taskId);
-      if (persisted === undefined || persisted.state !== 'cancelled') {
-        throw new Error('任务取消状态保存失败');
-      }
-      this.trainPresaleTask = persisted;
-      this.trainPresaleTaskState = 'cancelled';
-      aiLogInfo('[AIPhone][TrainPresaleCancel] taskId=' + task.taskId + ' ok=true');
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       this.trainPresaleError = '取消任务失败：' + message;
@@ -4392,6 +4412,7 @@ struct Index {
         checkoutWebUrl: this.checkoutWebUrl,
         showTrainPresalePanel: this.showTrainPresalePanel,
         trainPresaleTrip: this.trainPresaleTrip,
+        trainPresaleTask: this.trainPresaleTask,
         trainPresaleTaskState: this.trainPresaleTaskState,
         trainPresaleError: this.trainPresaleError,
         trainPresaleWorking: this.trainPresaleWorking,
