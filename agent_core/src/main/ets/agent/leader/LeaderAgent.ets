@@ -13,6 +13,7 @@ import {
   LeaderDataTask,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPersonaMetadata,
   LeaderPlanningContext,
   LeaderSkillMetadata,
   LeaderToolMetadata,
@@ -259,9 +260,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (skillId.trim().length === 0) {
       return true;
     }
-    for (let index = 0; index < this.planningContext.skills.length; index++) {
-      if (this.planningContext.skills[index].skillId === skillId) {
-        return true;
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const skills = this.planningContext.personas[personaIndex].activeSkills;
+      for (let skillIndex = 0; skillIndex < skills.length; skillIndex++) {
+        if (skills[skillIndex].skillId === skillId) {
+          return true;
+        }
       }
     }
     return false;
@@ -329,7 +333,7 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private copyPlanningContext(context: LeaderPlanningContext): LeaderPlanningContext {
     const tools: LeaderToolMetadata[] = [];
-    const skills: LeaderSkillMetadata[] = [];
+    const personas: LeaderPersonaMetadata[] = [];
     for (let index = 0; index < context.tools.length; index++) {
       const tool = context.tools[index];
       tools.push({
@@ -341,15 +345,23 @@ export class LeaderAgent extends MessageDrivenAgent {
         actions: tool.actions.slice()
       });
     }
-    for (let index = 0; index < context.skills.length; index++) {
-      const skill = context.skills[index];
-      skills.push({
-        skillId: skill.skillId,
-        description: skill.description,
-        instructions: skill.instructions
+    for (let index = 0; index < context.personas.length; index++) {
+      const persona = context.personas[index];
+      personas.push({
+        personaId: persona.personaId,
+        name: persona.name,
+        soul: persona.soul,
+        memory: persona.memory,
+        previous: persona.previous,
+        activeSkills: persona.activeSkills.map((skill: LeaderSkillMetadata): LeaderSkillMetadata => ({
+          skillId: skill.skillId,
+          description: skill.description,
+          instructions: skill.instructions,
+          status: skill.status
+        }))
       });
     }
-    return { tools, skills };
+    return { tools, personas };
   }
 
   private publishError(message: AgentMessage, code: string, detail: string): void {

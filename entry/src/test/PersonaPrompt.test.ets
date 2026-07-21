@@ -1,6 +1,9 @@
 import { describe, it, expect } from '@ohos/hypium';
+import { LeaderPersonaMetadata } from '@loop/agent-core';
 import { configureDefaultPersonaStoreForTests, updatePersonaPackText } from '../main/ets/model/PersonaStore';
 import { preparePersonaPrompt } from '../main/ets/model/PersonaPrompt';
+import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
+import { routePersonaForPrompt } from '../main/ets/model/PersonaRouter';
 
 export default function personaPromptTest() {
   describe('personaPrompt', () => {
@@ -62,6 +65,22 @@ export default function personaPromptTest() {
       expect(prepared.modelPrompt.indexOf('# Food Search')).assertLarger(-1);
       expect(prepared.modelPrompt.indexOf('coffee-order')).assertLarger(-1);
       expect(prepared.modelPrompt.indexOf('Planned capability')).assertEqual(-1);
+    });
+
+    it('builds bounded persona metadata and keeps explicit work selection above the previous hint', 0, () => {
+      configureDefaultPersonaStoreForTests();
+      const catalog = leaderPersonaContext('food_companion');
+      const food = catalog.filter((item: LeaderPersonaMetadata): boolean =>
+        item.personaId === 'food_companion')[0];
+      const explicitWork = routePersonaForPrompt('用工作分身');
+
+      expect(food.previous).assertTrue();
+      expect(food.activeSkills.length).assertEqual(1);
+      expect(food.activeSkills[0].status).assertEqual('active');
+      expect(food.soul.length > 0).assertTrue();
+      expect(food.memory.length > 0).assertTrue();
+      expect(JSON.stringify(catalog).indexOf('placeholder')).assertEqual(-1);
+      expect(explicitWork.personaId).assertEqual('work_companion');
     });
   });
 }

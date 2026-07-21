@@ -47,11 +47,21 @@ export interface LeaderSkillMetadata {
   skillId: string;
   description: string;
   instructions: string;
+  status: string;
+}
+
+export interface LeaderPersonaMetadata {
+  personaId: string;
+  name: string;
+  soul: string;
+  memory: string;
+  previous: boolean;
+  activeSkills: LeaderSkillMetadata[];
 }
 
 export interface LeaderPlanningContext {
   tools: LeaderToolMetadata[];
-  skills: LeaderSkillMetadata[];
+  personas: LeaderPersonaMetadata[];
 }
 
 export interface LeaderPlanner {

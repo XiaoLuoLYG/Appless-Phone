@@ -77,7 +77,7 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
     }],
-    skills: []
+    personas: []
   };
 }
 

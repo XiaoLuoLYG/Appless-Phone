@@ -177,10 +177,18 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
     }],
-    skills: [{
-      skillId: 'hotel-search',
-      description: 'Search real hotel inventory.',
-      instructions: 'Use hotel.search and do not claim booking.'
+    personas: [{
+      personaId: 'hotel_test',
+      name: 'Hotel test',
+      soul: '',
+      memory: '',
+      previous: false,
+      activeSkills: [{
+        skillId: 'hotel-search',
+        description: 'Search real hotel inventory.',
+        instructions: 'Use hotel.search and do not claim booking.',
+        status: 'active'
+      }]
     }]
   };
 }

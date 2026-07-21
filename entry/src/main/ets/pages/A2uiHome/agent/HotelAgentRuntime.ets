@@ -767,7 +767,7 @@ function authorizeHotelDataTask(task: CreateDataTaskPayload): DataTaskAuthorizat
 function hotelLeaderPlanningContext(): LeaderPlanningContext {
   const definition = toolDefinitionForToolId('hotel.search');
   if (definition === null) {
-    return { tools: [], skills: [] };
+    return { tools: [], personas: [] };
   }
   return {
     tools: [{
@@ -778,7 +778,7 @@ function hotelLeaderPlanningContext(): LeaderPlanningContext {
       outputSchema: definition.outputSchema,
       actions: definition.actions.slice()
     }],
-    skills: []
+    personas: []
   };
 }
 

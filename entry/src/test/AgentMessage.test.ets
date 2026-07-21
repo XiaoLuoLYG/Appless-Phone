@@ -87,11 +87,7 @@ export default function agentMessageTest() {
           outputSchema: 'hotelSearchResults',
           actions: ['hotel.detail', 'hotel.navigate']
         }],
-        skills: [{
-          skillId: 'hotel-search',
-          description: 'Search real hotel inventory.',
-          instructions: 'Use hotel.search and do not claim booking.'
-        }]
+        personas: []
       };
       const ui: CreateUiTaskPayload = {
         taskId: 'ui-1',
