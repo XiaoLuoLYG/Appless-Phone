@@ -8,7 +8,8 @@ import {
   webHostForDisplay
 } from '../main/ets/pages/A2uiHome/components/CheckoutWebOverlay';
 import { a2uiWebExecutionTokenForRequest, a2uiWebOwnershipAfterPopupClose, a2uiWebOwnershipAfterPopupOpen,
-  A2uiWebExecutionToken, initialA2uiWebExecutionOwnership, invalidateA2uiWebExecutionOwnership,
+  a2uiWebLoadErrorTokenForEvent, a2uiWebOwnershipAfterNavigationBegin, A2uiWebExecutionToken,
+  initialA2uiWebExecutionOwnership, invalidateA2uiWebExecutionOwnership,
   isCurrentA2uiWebExecutionToken } from '../main/ets/pages/A2uiHome/components/common/A2uiWebSurfaceView';
 
 export default function checkoutWebOverlayTest() {
@@ -127,6 +128,9 @@ export default function checkoutWebOverlayTest() {
       const returned = a2uiWebOwnershipAfterPopupClose(popup);
       expect(isCurrentA2uiWebExecutionToken(returned, popupToken)).assertFalse();
       expect(returned.active).assertEqual('main');
+      const mainLoading = a2uiWebOwnershipAfterNavigationBegin(returned, 'main');
+      expect(a2uiWebExecutionTokenForRequest(mainLoading, 'main', mainLoading.mainGeneration, 4,
+        'assist()', false, false)).assertEqual(undefined);
     });
 
     it('invalidates late controller results on cancel and unmount and verifies payment callback URL', 0, () => {
@@ -137,6 +141,14 @@ export default function checkoutWebOverlayTest() {
       expect(disposed.active).assertEqual('none');
       expect(isCurrentA2uiWebExecutionToken(disposed, token)).assertFalse();
       expect(a2uiWebExecutionTokenForRequest(state, 'main', 0, 2, '', true, false)).assertEqual(undefined);
+      const mainError = a2uiWebLoadErrorTokenForEvent(state, 'main', 3);
+      expect(mainError?.controller).assertEqual('main');
+      const popupState = a2uiWebOwnershipAfterPopupOpen(state);
+      expect(a2uiWebLoadErrorTokenForEvent(popupState, 'main', 3)).assertEqual(undefined);
+      expect(a2uiWebLoadErrorTokenForEvent(popupState, 'popup', 3)?.generation)
+        .assertEqual(popupState.popupGeneration);
+      const staleState = a2uiWebOwnershipAfterNavigationBegin(state, 'main');
+      expect(mainError === undefined ? true : isCurrentA2uiWebExecutionToken(staleState, mainError)).assertFalse();
       expect(isOfficial12306PaymentUrl('https://epay.12306.cn/pay/webBusiness')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/payOrder/init')).assertTrue();
       expect(isOfficial12306PaymentUrl('https://kyfw.12306.cn/otn/confirmPassenger/initDc')).assertFalse();

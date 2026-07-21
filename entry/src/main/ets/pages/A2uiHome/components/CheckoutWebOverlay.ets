@@ -13,12 +13,19 @@ import {
   buildTrainWebAssistExecutionRequest,
   isCurrentTrainWebAssistExecution,
   isCurrentTrainWebAssistTimer,
+  initialTrainWebAssistBudget,
   nextTrainWebAssistEpoch,
   parseTrainWebAssistOutcome,
+  trainWebAssistBudgetAfterActivation,
+  trainWebAssistBudgetAfterExecution,
+  trainWebAssistBudgetForOutcome,
+  trainWebAssistBudgetForStageTransition,
   trainWebAssistFinalClickMayHaveRun,
+  trainWebAssistLoadErrorOutcome,
   trainWebAssistReasonText,
   trainWebAssistRetryExhausted,
   trainWebAssistTargetState,
+  TrainWebAssistBudget,
   TrainWebAssistExecutionBinding,
   TrainWebAssistExecutionRequest,
   TrainWebAssistOutcome
@@ -171,8 +178,7 @@ export struct CheckoutWebOverlay {
   @State assistScriptGeneration: number = -1;
   @State assistCancelToken: number = 0;
   private assistStage: 'initial' | 'final' | 'stopped' = 'initial';
-  private assistAttempts: number = 0;
-  private assistRetryStage: string = '';
+  private assistBudget: TrainWebAssistBudget = initialTrainWebAssistBudget();
   private assistTimer: number = -1;
   private assistEpoch: number = 0;
   private activeController: A2uiWebControllerIdentity = 'none';
@@ -184,6 +190,7 @@ export struct CheckoutWebOverlay {
 
   aboutToAppear(): void {
     this.assistStage = 'initial';
+    this.assistBudget = initialTrainWebAssistBudget();
     this.assistDisposed = false;
     this.finalClickMayHaveRun = false;
   }
@@ -218,6 +225,7 @@ export struct CheckoutWebOverlay {
     this.assistCancelToken += 1;
     if (stop) {
       this.assistStage = 'stopped';
+      this.assistBudget = initialTrainWebAssistBudget();
       this.assistDisposed = true;
     }
   }
@@ -235,8 +243,8 @@ export struct CheckoutWebOverlay {
       return;
     }
     if (this.assistStage === 'final' && this.finalClickMayHaveRun) {
-      this.assistAttempts += 1;
-      if (this.assistAttempts >= 40) {
+      this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
+      if (this.assistBudget.attempts >= 40) {
         this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, this.activeUrl);
       } else {
         this.scheduleTrainAssistRetry();
@@ -256,7 +264,7 @@ export struct CheckoutWebOverlay {
       this.handleTerminalAssist({ state: 'needs_user', reason: request.reason }, this.activeUrl);
       return;
     }
-    this.assistAttempts += 1;
+    this.assistBudget = trainWebAssistBudgetAfterExecution(this.assistBudget);
     this.assistScriptTarget = this.activeController;
     this.assistScriptGeneration = this.activeGeneration;
     this.assistScript = request.script;
@@ -301,8 +309,7 @@ export struct CheckoutWebOverlay {
     this.activeGeneration = generation;
     this.activeUrl = url;
     this.currentUrl = url;
-    if (!this.finalClickMayHaveRun) this.assistAttempts = 0;
-    this.assistRetryStage = '';
+    this.assistBudget = trainWebAssistBudgetAfterActivation(this.assistBudget);
     if (this.kind === 'train' && this.taskId.length > 0 && controller !== 'none' && url.length > 0) {
       this.requestTrainAssist();
     }
@@ -332,12 +339,9 @@ export struct CheckoutWebOverlay {
     this.clearPendingTrainAssist();
     const outcome: TrainWebAssistOutcome = parseTrainWebAssistOutcome(raw);
     if (outcome.state === 'retry') {
-      if (this.assistRetryStage !== outcome.stage) {
-        this.assistRetryStage = outcome.stage;
-        this.assistAttempts = 1;
-      }
+      this.assistBudget = trainWebAssistBudgetForOutcome(this.assistBudget, outcome);
       if (trainWebAssistRetryExhausted(this.assistStage === 'final' ? 'final' : 'initial',
-        outcome, this.assistAttempts)) {
+        outcome, this.assistBudget.attempts)) {
         this.handleTerminalAssist({ state: 'needs_user', reason: 'no_navigation' }, sourceUrl);
       } else {
         if (trainWebAssistFinalClickMayHaveRun(this.assistStage === 'final' ? 'final' : 'initial',
@@ -352,8 +356,7 @@ export struct CheckoutWebOverlay {
         return;
       }
       this.assistStage = 'final';
-      this.assistAttempts = 0;
-      this.assistRetryStage = '';
+      this.assistBudget = trainWebAssistBudgetForStageTransition('confirm');
       this.requestTrainAssist();
       return;
     }
@@ -362,6 +365,15 @@ export struct CheckoutWebOverlay {
       return;
     }
     this.handleTerminalAssist(outcome, sourceUrl);
+  }
+
+  private handleAssistLoadError(reason: string, controller: 'main' | 'popup', generation: number,
+    session: number): void {
+    const actual: TrainWebAssistExecutionBinding = { controller, generation, session };
+    if (this.kind !== 'train' || this.assistDisposed) return;
+    const outcome = trainWebAssistLoadErrorOutcome(reason, this.activeController, this.activeGeneration,
+      this.assistScriptSession, actual);
+    if (outcome !== undefined) this.handleTerminalAssist(outcome, this.activeUrl);
   }
 
   private handleTerminalAssist(outcome: TrainWebAssistOutcome, _sourceUrl: string): void {
@@ -485,6 +497,8 @@ export struct CheckoutWebOverlay {
         onPageScriptResult: (result: string, sourceUrl: string, controller: 'main' | 'popup',
           generation: number, session: number): void =>
           this.handleAssistResult(result, sourceUrl, controller, generation, session),
+        onLoadError: (reason: string, controller: 'main' | 'popup', generation: number,
+          session: number): void => this.handleAssistLoadError(reason, controller, generation, session),
         onUrlIntercept: (url: string, isMainFrame: boolean): boolean => this.intercept(url, isMainFrame),
         onLoadEnd: (url: string, _controller: 'main' | 'popup'): void => {
           if (this.kind === 'train' && url.trim().toLowerCase().startsWith('https://kyfw.12306.cn/')) {

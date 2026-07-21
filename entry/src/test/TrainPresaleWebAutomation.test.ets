@@ -3,10 +3,14 @@ import { preferences } from '@kit.ArkData';
 import {
   buildTrainPresaleFinalConfirmScript, buildTrainPresaleWebAssistScript,
   buildTrainWebAssistExecutionRequest,
-  isCurrentTrainWebAssistExecution, isCurrentTrainWebAssistTimer, nextTrainWebAssistEpoch,
+  isCurrentTrainWebAssistExecution, isCurrentTrainWebAssistLifecycleEvent,
+  isCurrentTrainWebAssistTimer, nextTrainWebAssistEpoch,
   parseTrainWebAssistOutcome, trainWebAssistDurableGateReason,
   trainWebAssistFinalClickMayHaveRun, trainWebAssistRetryExhausted, trainWebAssistTargetState,
-  TrainWebAssistExecutionBinding,
+  initialTrainWebAssistBudget, trainWebAssistBudgetAfterActivation,
+  trainWebAssistBudgetAfterExecution, trainWebAssistBudgetForOutcome,
+  trainWebAssistBudgetForStageTransition, trainWebAssistLoadErrorOutcome,
+  TrainWebAssistBudget, TrainWebAssistExecutionBinding,
   TrainWebAssistOutcome, TrainWebAssistRetryOutcome
 } from '../main/ets/pages/A2uiHome/train/TrainPresaleWebAutomation';
 import { TrainPresaleTask, TrainPresaleTaskState } from '../main/ets/pages/A2uiHome/train/TrainPresaleTaskStore';
@@ -138,6 +142,38 @@ export default function trainPresaleWebAutomationTest() {
       expect(trainWebAssistFinalClickMayHaveRun('final', false,
         { state: 'retry', stage: 'confirm', progress: 'confirm_clicked' })).assertTrue();
       expect(trainWebAssistFinalClickMayHaveRun('final', true, undefined)).assertTrue();
+      let budget: TrainWebAssistBudget = initialTrainWebAssistBudget();
+      budget = trainWebAssistBudgetAfterExecution(budget);
+      budget = trainWebAssistBudgetForOutcome(budget, query);
+      for (let index = 1; index < 19; index++) {
+        budget = trainWebAssistBudgetAfterActivation(budget);
+        budget = trainWebAssistBudgetAfterExecution(budget);
+        budget = trainWebAssistBudgetForOutcome(budget, query);
+      }
+      expect(budget.attempts).assertEqual(19);
+      expect(trainWebAssistRetryExhausted('initial', query, budget.attempts)).assertFalse();
+      budget = trainWebAssistBudgetAfterExecution(trainWebAssistBudgetAfterActivation(budget));
+      budget = trainWebAssistBudgetForOutcome(budget, query);
+      expect(trainWebAssistRetryExhausted('initial', query, budget.attempts)).assertTrue();
+      const passengerBudget = trainWebAssistBudgetForOutcome(budget,
+        { state: 'retry', stage: 'passenger', progress: 'waiting_form' });
+      expect(passengerBudget.attempts).assertEqual(1);
+      const passengerAttempt = trainWebAssistBudgetAfterExecution(passengerBudget);
+      const backwardOutcome = trainWebAssistBudgetForOutcome(passengerAttempt, query);
+      expect(backwardOutcome.stage).assertEqual('passenger');
+      expect(backwardOutcome.attempts).assertEqual(2);
+      expect(trainWebAssistBudgetForStageTransition('confirm').attempts).assertEqual(0);
+      const activeError: TrainWebAssistExecutionBinding = { controller: 'main', generation: 7, session: 11 };
+      expect(isCurrentTrainWebAssistLifecycleEvent('main', 7, 11, activeError)).assertTrue();
+      expect(isCurrentTrainWebAssistLifecycleEvent('main', 8, 11, activeError)).assertFalse();
+      expect(isCurrentTrainWebAssistLifecycleEvent('popup', 7, 11, activeError)).assertFalse();
+      expect(isCurrentTrainWebAssistLifecycleEvent('main', 7, 12, activeError)).assertFalse();
+      expect(trainWebAssistLoadErrorOutcome('page_mismatch', 'main', 7, 11, activeError)?.state)
+        .assertEqual('needs_user');
+      expect(trainWebAssistLoadErrorOutcome('network-secret', 'main', 7, 11, activeError)?.reason)
+        .assertEqual('invalid_result');
+      expect(trainWebAssistLoadErrorOutcome('page_mismatch', 'main', 8, 11, activeError))
+        .assertEqual(undefined);
     });
 
     it('flushes terminal task before compare-and-clearing matching handoff', 0, () => {

@@ -21,6 +21,12 @@ export interface TrainWebAssistExecutionBinding {
   session: number;
 }
 
+export type TrainWebAssistBudgetStage = 'none' | 'query' | 'passenger' | 'confirm';
+export interface TrainWebAssistBudget {
+  stage: TrainWebAssistBudgetStage;
+  attempts: number;
+}
+
 const SANITIZED_REASONS: string[] = [
   'login_required', 'captcha_required', 'page_mismatch', 'train_mismatch', 'missing_passenger',
   'passenger_mismatch', 'missing_seat', 'confirmation_mismatch', 'not_authorized', 'timeout',
@@ -53,10 +59,49 @@ export function trainWebAssistRetryExhausted(stage: TrainWebAssistRunStage,
   return attempts >= trainWebAssistRetryLimit(outcome.stage);
 }
 
+export function initialTrainWebAssistBudget(): TrainWebAssistBudget {
+  return { stage: 'none', attempts: 0 };
+}
+
+export function trainWebAssistBudgetAfterActivation(budget: TrainWebAssistBudget): TrainWebAssistBudget {
+  return { stage: budget.stage, attempts: budget.attempts };
+}
+
+export function trainWebAssistBudgetAfterExecution(budget: TrainWebAssistBudget): TrainWebAssistBudget {
+  return { stage: budget.stage, attempts: budget.attempts + 1 };
+}
+
+export function trainWebAssistBudgetForOutcome(budget: TrainWebAssistBudget,
+  outcome: TrainWebAssistRetryOutcome): TrainWebAssistBudget {
+  if (budget.stage === outcome.stage) return { stage: budget.stage, attempts: budget.attempts };
+  if (budget.stage === 'none' || (budget.stage === 'query' && outcome.stage === 'passenger')) {
+    return { stage: outcome.stage, attempts: 1 };
+  }
+  return { stage: budget.stage, attempts: budget.attempts };
+}
+
+export function trainWebAssistBudgetForStageTransition(stage: 'query' | 'passenger' | 'confirm'):
+  TrainWebAssistBudget {
+  return { stage, attempts: 0 };
+}
+
 export function isCurrentTrainWebAssistExecution(expected: TrainWebAssistExecutionBinding,
   actual: TrainWebAssistExecutionBinding): boolean {
   return expected.controller === actual.controller && expected.generation === actual.generation &&
     expected.session === actual.session;
+}
+
+export function isCurrentTrainWebAssistLifecycleEvent(activeController: 'main' | 'popup' | 'none',
+  activeGeneration: number, activeSession: number, actual: TrainWebAssistExecutionBinding): boolean {
+  return activeController === actual.controller && activeGeneration === actual.generation &&
+    activeSession === actual.session;
+}
+
+export function trainWebAssistLoadErrorOutcome(reason: string, activeController: 'main' | 'popup' | 'none',
+  activeGeneration: number, activeSession: number,
+  actual: TrainWebAssistExecutionBinding): TrainWebAssistNeedsUserOutcome | undefined {
+  return isCurrentTrainWebAssistLifecycleEvent(activeController, activeGeneration, activeSession, actual) ?
+    { state: 'needs_user', reason: sanitizedReason(reason) } : undefined;
 }
 
 export function nextTrainWebAssistEpoch(current: number): number { return current + 1; }

@@ -33,6 +33,14 @@ export function a2uiWebOwnershipAfterPopupClose(state: A2uiWebExecutionOwnership
     popupGeneration: state.popupGeneration + 1, disposed: state.disposed };
 }
 
+export function a2uiWebOwnershipAfterNavigationBegin(state: A2uiWebExecutionOwnership,
+  controller: 'main' | 'popup'): A2uiWebExecutionOwnership {
+  return { active: state.active,
+    mainGeneration: controller === 'main' ? state.mainGeneration + 1 : state.mainGeneration,
+    popupGeneration: controller === 'popup' ? state.popupGeneration + 1 : state.popupGeneration,
+    disposed: state.disposed };
+}
+
 export function invalidateA2uiWebExecutionOwnership(state: A2uiWebExecutionOwnership,
   disposed: boolean = false): A2uiWebExecutionOwnership {
   return { active: disposed ? 'none' : state.active, mainGeneration: state.mainGeneration + 1,
@@ -54,6 +62,12 @@ export function a2uiWebExecutionTokenForRequest(state: A2uiWebExecutionOwnership
   const generation = state.active === 'main' ? state.mainGeneration : state.popupGeneration;
   return ready && generation === targetGeneration ?
     { controller: state.active, generation, session } as A2uiWebExecutionToken : undefined;
+}
+
+export function a2uiWebLoadErrorTokenForEvent(state: A2uiWebExecutionOwnership,
+  controller: 'main' | 'popup', session: number): A2uiWebExecutionToken | undefined {
+  if (state.disposed || state.active !== controller) return undefined;
+  return { controller, generation: controller === 'main' ? state.mainGeneration : state.popupGeneration, session };
 }
 
 @Component
@@ -78,7 +92,8 @@ export struct A2uiWebSurfaceView {
     (_url: string, _isMainFrame: boolean): boolean => false;
   onLoadEnd: (url: string, controller: 'main' | 'popup') => void =
     (_url: string, _controller: 'main' | 'popup'): void => {};
-  onLoadError: (message: string) => void = (_message: string): void => {};
+  onLoadError: (reason: string, controller: 'main' | 'popup', generation: number, session: number) => void =
+    (_reason: string, _controller: 'main' | 'popup', _generation: number, _session: number): void => {};
   onActiveControllerChange: (controller: A2uiWebControllerIdentity, url: string, generation: number) => void =
     (_controller: A2uiWebControllerIdentity, _url: string, _generation: number): void => {};
   onPageScriptWillExecute: (sourceUrl: string, controller: 'main' | 'popup', generation: number,
@@ -222,6 +237,13 @@ export struct A2uiWebSurfaceView {
     return info.length > 0 ? '页面加载失败：' + info : '页面加载失败，请检查网络后重试。';
   }
 
+  private notifyLoadError(controller: 'main' | 'popup'): void {
+    const token = a2uiWebLoadErrorTokenForEvent(this.ownership, controller, this.pageScriptSession);
+    if (token !== undefined) {
+      this.onLoadError('page_mismatch', token.controller, token.generation, token.session);
+    }
+  }
+
   private closePopup(): void {
     this.ownership = a2uiWebOwnershipAfterPopupClose(this.ownership);
     this.popupReady = false;
@@ -290,11 +312,13 @@ export struct A2uiWebSurfaceView {
         .height('100%')
         .backgroundColor(COLOR_PAGE)
         .onPageBegin(() => {
-          this.ownership = { active: this.ownership.active,
-            mainGeneration: this.ownership.mainGeneration + 1,
-            popupGeneration: this.ownership.popupGeneration, disposed: this.ownership.disposed };
+          this.webReady = false;
+          this.ownership = a2uiWebOwnershipAfterNavigationBegin(this.ownership, 'main');
           this.loading = true;
           this.errorText = '';
+          if (this.ownership.active === 'main') {
+            this.onActiveControllerChange('main', '', this.ownership.mainGeneration);
+          }
         })
         .onPageEnd((event) => {
           const pageUrl = event === undefined || event === null ? '' : event.url;
@@ -310,7 +334,7 @@ export struct A2uiWebSurfaceView {
           if (event !== undefined && event !== null && this.mainFrameError(event)) {
             this.errorText = this.webErrorText(event);
             this.loading = false;
-            this.onLoadError(this.errorText);
+            this.notifyLoadError('main');
           }
         })
         .onLoadIntercept((event) => {
@@ -365,10 +389,11 @@ export struct A2uiWebSurfaceView {
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
             .onPageBegin(() => {
-              this.ownership = { active: this.ownership.active,
-                mainGeneration: this.ownership.mainGeneration,
-                popupGeneration: this.ownership.popupGeneration + 1, disposed: this.ownership.disposed };
               this.popupReady = false;
+              this.ownership = a2uiWebOwnershipAfterNavigationBegin(this.ownership, 'popup');
+              if (this.ownership.active === 'popup') {
+                this.onActiveControllerChange('popup', '', this.ownership.popupGeneration);
+              }
             })
             .onPageEnd((event) => {
               const pageUrl = event === undefined || event === null ? '' : event.url;
@@ -383,6 +408,12 @@ export struct A2uiWebSurfaceView {
               const pageUrl = request === null ? '' : request.getRequestUrl();
               const isMainFrame = request !== null && request.isMainFrame();
               return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
+            })
+            .onErrorReceive((event) => {
+              if (event !== undefined && event !== null && this.mainFrameError(event)) {
+                this.popupReady = false;
+                this.notifyLoadError('popup');
+              }
             })
             .onWindowExit(() => {
               this.popupReady = false;
