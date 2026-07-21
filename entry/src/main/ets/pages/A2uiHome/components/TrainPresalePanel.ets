@@ -11,13 +11,12 @@ import {
   COLOR_INK,
   COLOR_MUTED,
   COLOR_SUCCESS,
-  COLOR_SUCCESS_SOFT,
   COLOR_TEXT
 } from '../style/A2uiHomeTheme';
 import { A2UI_HOME_FLOATING_RADIUS } from '../style/A2uiHomeLayout';
-import { TrainPresaleTask } from '../train/TrainPresaleTaskStore';
+import { TrainPresaleTask, TrainPresaleTaskState } from '../train/TrainPresaleTaskStore';
 import { TrainPresaleTaskStore } from '../train/TrainPresaleTaskStore';
-import { SystemOneShotScheduler } from '../train/SystemOneShotScheduler';
+import { ListedReminderRequest, SystemOneShotScheduler } from '../train/SystemOneShotScheduler';
 import { A2uiButtonView } from './common/A2uiButtonView';
 
 export const TRAIN_PRESALE_SEAT_PREFERENCES: string[] = ['二等座', '一等座', '商务座', '无座'];
@@ -65,6 +64,11 @@ export type TrainPresaleCancellationState = 'cancelled' | 'scheduled' | 'needs_u
 
 export interface TrainPresaleCancellationResult {
   state: TrainPresaleCancellationState;
+  error: string;
+  task: TrainPresaleTask;
+}
+
+export interface TrainPresaleReconcileResult {
   error: string;
   task: TrainPresaleTask;
 }
@@ -140,17 +144,39 @@ export function validateTrainPresaleTrip(
   };
 }
 
-export function findMatchingScheduledTrainPresaleTask(
+export function findMatchingTrainPresaleTask(
   tasks: TrainPresaleTask[],
   trip: TrainPresaleTrip
 ): TrainPresaleTask | undefined {
+  let scheduled: TrainPresaleTask | undefined = undefined;
+  let needsUser: TrainPresaleTask | undefined = undefined;
+  let executing: TrainPresaleTask | undefined = undefined;
+  let awaitingPayment: TrainPresaleTask | undefined = undefined;
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
-    if (task.state === 'scheduled' && matchesTrainPresaleTask(task, trip)) {
-      return task;
+    if (!matchesTrainPresaleTask(task, trip) || task.state === 'cancelled') {
+      continue;
+    }
+    if (task.state === 'scheduled' && scheduled === undefined) {
+      scheduled = task;
+    } else if (task.state === 'needs_user' && needsUser === undefined) {
+      needsUser = task;
+    } else if (task.state === 'executing' && executing === undefined) {
+      executing = task;
+    } else if (task.state === 'awaiting_payment' && awaitingPayment === undefined) {
+      awaitingPayment = task;
     }
   }
-  return undefined;
+  if (awaitingPayment !== undefined) {
+    return awaitingPayment;
+  }
+  if (executing !== undefined) {
+    return executing;
+  }
+  if (scheduled !== undefined) {
+    return scheduled;
+  }
+  return needsUser;
 }
 
 function matchesTrainPresaleTask(task: TrainPresaleTask, trip: TrainPresaleTrip): boolean {
@@ -161,27 +187,21 @@ function matchesTrainPresaleTask(task: TrainPresaleTask, trip: TrainPresaleTrip)
   const toName = trip.toName.trim();
   const toCode = trip.toCode.trim().toUpperCase();
   const saleAt = trip.saleAt.trim();
-  return task.reminderId > 0 && task.reminderId % 1 === 0 &&
-    task.trainCode.trim().toUpperCase() === trainCode && task.travelDate.trim() === travelDate &&
+  return task.trainCode.trim().toUpperCase() === trainCode && task.travelDate.trim() === travelDate &&
     task.fromName.trim() === fromName && task.fromCode.trim().toUpperCase() === fromCode &&
     task.toName.trim() === toName && task.toCode.trim().toUpperCase() === toCode && task.saleAt.trim() === saleAt;
 }
 
-export function findMatchingOpenTrainPresaleTask(
-  tasks: TrainPresaleTask[],
-  trip: TrainPresaleTrip
-): TrainPresaleTask | undefined {
-  const scheduled = findMatchingScheduledTrainPresaleTask(tasks, trip);
-  if (scheduled !== undefined) {
-    return scheduled;
-  }
-  for (let index = 0; index < tasks.length; index++) {
-    const task = tasks[index];
-    if (task.state === 'needs_user' && matchesTrainPresaleTask(task, trip)) {
-      return task;
-    }
-  }
-  return undefined;
+function tripFromTrainPresaleTask(task: TrainPresaleTask): TrainPresaleTrip {
+  return {
+    trainCode: task.trainCode,
+    travelDate: task.travelDate,
+    fromName: task.fromName,
+    fromCode: task.fromCode,
+    toName: task.toName,
+    toCode: task.toCode,
+    saleAt: task.saleAt
+  };
 }
 
 export function validateTrainPresaleConfirmation(
@@ -250,14 +270,46 @@ export async function scheduleTrainPresaleTask(
   store: TrainPresaleTaskStore,
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleScheduleResult> {
+  const trip = tripFromTrainPresaleTask(task);
+  const duplicate = findMatchingTrainPresaleTask(store.list(), trip);
+  if (duplicate !== undefined) {
+    const reconciled = await reconcileTrainPresaleTask(duplicate, store, scheduler);
+    return {
+      error: '该行程已有开售任务，请先处理现有任务。' +
+        (reconciled.error.length > 0 ? ' ' + reconciled.error : ''),
+      task: reconciled.task
+    };
+  }
+  task.state = 'needs_user';
+  task.reminderId = -1;
+  task.lastError = '正在创建系统提醒；如流程中断，可重试取消或清除预留。';
   let reminderId = -1;
   try {
+    store.create(task);
+    const reservation = store.get(task.taskId);
+    if (reservation === undefined || reservation.state !== 'needs_user' || reservation.reminderId !== -1 ||
+      !matchesTrainPresaleTask(reservation, trip)) {
+      throw new Error('任务预留保存失败');
+    }
+    const beforePublish = findMatchingTrainPresaleTask(store.list(), trip);
+    if (beforePublish === undefined || beforePublish.taskId !== task.taskId) {
+      try {
+        store.cancel(task.taskId);
+      } catch (_error) {
+      }
+      const existing = beforePublish === undefined ? reservation : beforePublish;
+      const reconciled = await reconcileTrainPresaleTask(existing, store, scheduler);
+      return {
+        error: '该行程已有开售任务，请先处理现有任务。' +
+          (reconciled.error.length > 0 ? ' ' + reconciled.error : ''),
+        task: reconciled.task
+      };
+    }
     reminderId = await scheduler.schedule(task, task.saleAt);
     if (reminderId <= 0 || reminderId % 1 !== 0) {
       throw new Error('系统未返回有效的提醒编号。');
     }
-    task.reminderId = reminderId;
-    store.create(task);
+    store.update(task.taskId, { state: 'scheduled', reminderId: reminderId, lastError: '' });
     const persisted = store.get(task.taskId);
     if (persisted === undefined || persisted.state !== 'scheduled' || persisted.reminderId !== reminderId) {
       throw new Error('完整任务保存失败');
@@ -265,32 +317,116 @@ export async function scheduleTrainPresaleTask(
     return { error: '', task: persisted };
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
+    let localTask: TrainPresaleTask | undefined = undefined;
+    try {
+      localTask = store.get(task.taskId);
+    } catch (_error) {
+    }
+    if (reminderId < 0 && localTask === undefined) {
+      return { error: '提醒创建失败：' + message, task: undefined };
+    }
     let cleanupError = '';
+    let compensationSucceeded = false;
     if (reminderId > 0 && reminderId % 1 === 0) {
       try {
         await scheduler.cancel(reminderId);
+        compensationSucceeded = true;
       } catch (cancelError) {
         cleanupError = cancelError instanceof Error ? cancelError.message : JSON.stringify(cancelError);
       }
     }
-    let localCleanupError = '';
+    const stateError = message + (cleanupError.length > 0 ? '；系统提醒取消失败：' + cleanupError : '');
+    const targetState: TrainPresaleTaskState = compensationSucceeded ? 'cancelled' : 'needs_user';
+    const targetReminderId = reminderId > 0 && reminderId % 1 === 0 ? reminderId : -1;
+    let persistedFailure: TrainPresaleTask | undefined = undefined;
+    let localError = '';
     try {
-      const localTask = store.get(task.taskId);
-      if (localTask !== undefined && localTask.reminderId === reminderId) {
-        store.remove(task.taskId);
-      }
-      if (store.get(task.taskId) !== undefined) {
-        throw new Error('本地任务清理失败');
+      store.update(task.taskId, {
+        state: targetState,
+        reminderId: targetReminderId,
+        lastError: stateError
+      });
+      persistedFailure = store.get(task.taskId);
+      if (persistedFailure === undefined || persistedFailure.state !== targetState) {
+        throw new Error('失败状态保存失败');
       }
     } catch (storeError) {
-      localCleanupError = storeError instanceof Error ? storeError.message : JSON.stringify(storeError);
+      localError = storeError instanceof Error ? storeError.message : JSON.stringify(storeError);
+      task.state = 'needs_user';
+      task.reminderId = targetReminderId;
+      task.lastError = stateError + '；本地状态保存失败：' + localError;
     }
     return {
       error: '提醒创建失败：' + message +
         (cleanupError.length > 0 ? '；已发布提醒取消失败：' + cleanupError : '') +
-        (localCleanupError.length > 0 ? '；本地任务清理失败：' + localCleanupError : ''),
-      task: undefined
+        (localError.length > 0 ? '；本地状态保存失败：' + localError : ''),
+      task: persistedFailure === undefined ? task : persistedFailure
     };
+  }
+}
+
+export async function reconcileTrainPresaleTask(
+  task: TrainPresaleTask,
+  store: TrainPresaleTaskStore,
+  scheduler: SystemOneShotScheduler
+): Promise<TrainPresaleReconcileResult> {
+  if (task.state !== 'scheduled') {
+    return { error: task.lastError, task: task };
+  }
+  let error = '';
+  if (task.reminderId <= 0 || task.reminderId % 1 !== 0) {
+    error = '本地任务缺少有效提醒编号，请重试取消或清除。';
+  } else {
+    try {
+      if (await hasTrainPresaleReminder(scheduler, task.reminderId)) {
+        return { error: task.lastError, task: task };
+      }
+      error = '系统提醒不存在，请重试取消以清理本地任务。';
+    } catch (listError) {
+      const message = listError instanceof Error ? listError.message : JSON.stringify(listError);
+      error = '无法核验系统提醒：' + message + '。请重试取消或稍后再试。';
+    }
+  }
+  task.state = 'needs_user';
+  task.lastError = error;
+  try {
+    store.update(task.taskId, { state: 'needs_user', lastError: error });
+    const persisted = store.get(task.taskId);
+    if (persisted !== undefined && persisted.state === 'needs_user') {
+      return { error: error, task: persisted };
+    }
+  } catch (_error) {
+  }
+  return { error: error, task: task };
+}
+
+async function hasTrainPresaleReminder(scheduler: SystemOneShotScheduler, reminderId: number): Promise<boolean> {
+  const reminders = await scheduler.list();
+  for (let index = 0; index < reminders.length; index++) {
+    const reminder = reminders[index] as ListedReminderRequest;
+    if (reminder.reminderId === reminderId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function cancelLocalTrainPresaleTask(
+  task: TrainPresaleTask,
+  store: TrainPresaleTaskStore
+): TrainPresaleCancellationResult {
+  try {
+    store.cancel(task.taskId);
+    const persisted = store.get(task.taskId);
+    if (persisted === undefined || persisted.state !== 'cancelled') {
+      throw new Error('本地预留清理失败');
+    }
+    return { state: 'cancelled', error: '', task: persisted };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    task.state = 'needs_user';
+    task.lastError = message;
+    return { state: 'needs_user', error: '本地预留清理失败：' + message, task: task };
   }
 }
 
@@ -299,8 +435,17 @@ export async function cancelScheduledTrainPresaleTask(
   store: TrainPresaleTaskStore,
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleCancellationResult> {
+  const startedNeedsUser = task.state === 'needs_user';
   if (task.reminderId <= 0 || task.reminderId % 1 !== 0) {
-    return { state: 'scheduled', error: '取消任务失败：提醒编号无效，任务仍为已安排。', task: task };
+    return cancelLocalTrainPresaleTask(task, store);
+  }
+  if (startedNeedsUser) {
+    try {
+      if (!await hasTrainPresaleReminder(scheduler, task.reminderId)) {
+        return cancelLocalTrainPresaleTask(task, store);
+      }
+    } catch (_error) {
+    }
   }
   let attentionTask = task;
   try {
@@ -318,6 +463,22 @@ export async function cancelScheduledTrainPresaleTask(
     await scheduler.cancel(task.reminderId);
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
+    if (startedNeedsUser) {
+      try {
+        store.update(task.taskId, { state: 'needs_user', lastError: message });
+        const persisted = store.get(task.taskId);
+        if (persisted !== undefined && persisted.state === 'needs_user') {
+          return {
+            state: 'needs_user',
+            error: '系统提醒取消失败：' + message + '。请稍后重试。',
+            task: persisted
+          };
+        }
+      } catch (_error) {
+      }
+      attentionTask.lastError = message;
+      return { state: 'needs_user', error: '系统提醒取消失败：' + message + '。请稍后重试。', task: attentionTask };
+    }
     try {
       store.update(task.taskId, { state: 'scheduled', lastError: message });
       const restored = store.get(task.taskId);
@@ -388,7 +549,20 @@ export struct TrainPresalePanel {
     if (this.taskState === 'needs_user') {
       return '需要处理';
     }
+    if (this.taskState === 'executing') {
+      return '处理中';
+    }
+    if (this.taskState === 'awaiting_payment') {
+      return '等待支付';
+    }
     return this.taskState;
+  }
+
+  private cancelLabel(): string {
+    if (this.taskState === 'needs_user') {
+      return this.task !== null && this.task.reminderId > 0 ? '重试取消' : '清除预留';
+    }
+    return '取消任务';
   }
 
   private submit(): void {
@@ -411,9 +585,9 @@ export struct TrainPresalePanel {
           .fontColor(COLOR_INK)
         Text('待确认')
           .fontSize(11)
-          .fontColor(COLOR_SUCCESS)
+          .fontColor(COLOR_MUTED)
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor(COLOR_SUCCESS_SOFT)
+          .backgroundColor(COLOR_FIELD)
           .borderRadius(8)
           .margin({ left: 10 })
       }
@@ -475,8 +649,8 @@ export struct TrainPresalePanel {
           .margin({ top: 12 })
       }
 
-      if (this.taskState === 'scheduled') {
-        A2uiButtonView({ label: '取消任务', shape: 'pill', tone: 'secondary', isEnabled: !this.isWorking })
+      if (this.taskState === 'scheduled' || this.taskState === 'needs_user') {
+        A2uiButtonView({ label: this.cancelLabel(), shape: 'pill', tone: 'secondary', isEnabled: !this.isWorking })
           .enabled(!this.isWorking)
           .margin({ top: 16 })
           .onClick(() => this.onCancelTask())
@@ -518,7 +692,7 @@ export struct TrainPresalePanel {
         .alignItems(VerticalAlign.Center)
         .margin({ bottom: 14 })
 
-        if (this.taskState === 'scheduled' || this.taskState === 'cancelled' || this.taskState === 'needs_user') {
+        if (this.taskState.length > 0) {
           this.StatusCard()
         } else {
           this.TripCard()

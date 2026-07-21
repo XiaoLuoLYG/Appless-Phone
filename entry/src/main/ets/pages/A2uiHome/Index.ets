@@ -104,7 +104,8 @@ import { HomePage } from './components/HomePage';
 import {
   cancelScheduledTrainPresaleTask,
   emptyTrainPresaleTrip,
-  findMatchingOpenTrainPresaleTask,
+  findMatchingTrainPresaleTask,
+  reconcileTrainPresaleTask,
   scheduleTrainPresaleTask,
   TrainPresaleConfirmationInput,
   TrainPresaleConfirmationResult,
@@ -2952,7 +2953,7 @@ struct Index {
       trip.fromCode.length > 0 && trip.toName.length > 0 && trip.toCode.length > 0 && trip.saleAt.length > 0 ? trip : null;
   }
 
-  private openTrainPresalePanel(action: A2uiAction): void {
+  private async openTrainPresalePanel(action: A2uiAction): Promise<void> {
     const trip = this.trainPresaleTripForAction(action);
     if (trip === null) {
       this.logHtmlHomeActionError(action, 'invalid_train_presale_args');
@@ -2969,11 +2970,13 @@ struct Index {
       if (store === null) {
         throw new Error('缺少应用上下文');
       }
-      const existing = findMatchingOpenTrainPresaleTask(store.list(), validation.trip);
+      const existing = findMatchingTrainPresaleTask(store.list(), validation.trip);
+      const reconciled = existing === undefined ? undefined :
+        await reconcileTrainPresaleTask(existing, store, new SystemOneShotScheduler());
       this.trainPresaleTrip = validation.trip;
-      this.trainPresaleTask = existing === undefined ? null : existing;
-      this.trainPresaleTaskState = existing === undefined ? '' : existing.state;
-      this.trainPresaleError = '';
+      this.trainPresaleTask = reconciled === undefined ? null : reconciled.task;
+      this.trainPresaleTaskState = reconciled === undefined ? '' : reconciled.task.state;
+      this.trainPresaleError = reconciled === undefined ? '' : reconciled.error;
       this.trainPresaleWorking = false;
       this.showCheckoutWeb = false;
       this.showTrainPresalePanel = true;
@@ -3044,9 +3047,15 @@ struct Index {
           ' error=' + scheduleResult.error.substring(0, 240));
       } else {
         this.trainPresaleTask = scheduleResult.task;
-        this.trainPresaleTaskState = 'scheduled';
-        aiLogInfo('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
-          ' reminderId=' + scheduleResult.task.reminderId.toString());
+        this.trainPresaleTaskState = scheduleResult.task.state;
+        this.trainPresaleError = scheduleResult.error;
+        if (scheduleResult.task.state === 'scheduled') {
+          aiLogInfo('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+            ' reminderId=' + scheduleResult.task.reminderId.toString());
+        } else {
+          aiLogError('[AIPhone][TrainPresaleSchedule] taskId=' + task.taskId +
+            ' state=' + scheduleResult.task.state + ' error=' + scheduleResult.error.substring(0, 240));
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
@@ -3058,7 +3067,7 @@ struct Index {
 
   private async cancelTrainPresaleTask(): Promise<void> {
     const task = this.trainPresaleTask;
-    if (task === null || task.state !== 'scheduled' || this.trainPresaleWorking) {
+    if (task === null || (task.state !== 'scheduled' && task.state !== 'needs_user') || this.trainPresaleWorking) {
       return;
     }
     this.trainPresaleWorking = true;
@@ -3735,7 +3744,7 @@ struct Index {
       return;
     }
     if (action.id === 'train.presale.schedule') {
-      this.openTrainPresalePanel(action);
+      await this.openTrainPresalePanel(action);
       return;
     }
     if (action.id === 'train.booking.open') {

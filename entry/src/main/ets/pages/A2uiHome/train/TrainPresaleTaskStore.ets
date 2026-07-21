@@ -234,19 +234,6 @@ export class TrainPresaleTaskStore {
     this.update(taskId, { state: 'cancelled' });
   }
 
-  remove(taskId: string): void {
-    const tasks = this.tasks();
-    const remaining: TrainPresaleTask[] = [];
-    for (let index = 0; index < tasks.length; index++) {
-      if (tasks[index].taskId !== taskId) {
-        remaining.push(tasks[index]);
-      }
-    }
-    if (remaining.length !== tasks.length) {
-      this.save(remaining);
-    }
-  }
-
   claimDue(nowIso: string, taskId?: string): TrainPresaleTask | undefined {
     const result = claimDueTrainPresaleTask(this.tasks(), nowIso, taskId);
     if (result.task !== undefined) {

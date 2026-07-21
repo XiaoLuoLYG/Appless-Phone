@@ -4,6 +4,21 @@ import { TrainPresaleTask } from './TrainPresaleTaskStore';
 const BUNDLE_NAME: string = 'com.example.aiphonedemo';
 const ABILITY_NAME: string = 'EntryAbility';
 
+export interface ListedReminderRequest extends reminderAgentManager.ReminderRequest {
+  reminderId: number;
+}
+
+async function listSystemReminderRequests(): Promise<reminderAgentManager.ReminderRequest[]> {
+  const infos = await reminderAgentManager.getAllValidReminders();
+  const requests: reminderAgentManager.ReminderRequest[] = [];
+  for (let index = 0; index < infos.length; index++) {
+    const request = infos[index].reminderReq as ListedReminderRequest;
+    request.reminderId = infos[index].reminderId;
+    requests.push(request);
+  }
+  return requests;
+}
+
 export function buildReminderRequest(
   task: TrainPresaleTask,
   fireAt: string
@@ -46,8 +61,7 @@ export class SystemOneShotScheduler {
     publishReminder: (request: reminderAgentManager.ReminderRequestCalendar) => Promise<number> =
       reminderAgentManager.publishReminder,
     cancelReminder: (reminderId: number) => Promise<void> = reminderAgentManager.cancelReminder,
-    getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]> =
-      reminderAgentManager.getValidReminders
+    getValidReminders: () => Promise<reminderAgentManager.ReminderRequest[]> = listSystemReminderRequests
   ) {
     this.publishReminder = publishReminder;
     this.cancelReminder = cancelReminder;
