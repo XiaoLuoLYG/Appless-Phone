@@ -425,7 +425,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     riskLevel: 'confirm_required',
     backendPriority: ['oauth_api'],
     authModes: ['oauth'],
-    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,title?:string,start:string,end:string,timezone:string,calendarId?:string',
+    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,title?:string,start?:string,end?:string,timezone?:string,calendarId?:string',
     outputSchema: 'calendarEvent',
     a2uiComponent: 'GenericToolResults',
     actions: ['calendar.authorize']

@@ -2466,7 +2466,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('routes Gmail reply send fallback to the provider and keeps open-web local', 0, async () => {
+    it('keeps Gmail reply send outside the registered surface executor fail closed', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
         const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
@@ -2494,7 +2494,9 @@ export default function toolGatewayClientTest() {
 
         expect(providerResult.ok).assertTrue();
         expect(genericToolResults(providerResult.surface)[0].status).assertEqual('error');
-        expect(genericToolResults(providerResult.surface)[0].summary.indexOf('Composio 未配置')).assertLarger(-1);
+        expect(genericToolResults(providerResult.surface)[0].summary.indexOf('registered current Gmail surface action'))
+          .assertLarger(-1);
+        expect(providerResult.raw.indexOf('Composio 未配置')).assertEqual(-1);
         expect(providerResult.raw.indexOf('UnsafeActionBlocked')).assertEqual(-1);
         expect(providerResult.raw.indexOf('Gmail 回复已发送')).assertEqual(-1);
 
@@ -2502,34 +2504,6 @@ export default function toolGatewayClientTest() {
         expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
         expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
         expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
-      } finally {
-        configureComposioConfigFromRawJson('{}');
-      }
-    });
-
-    it('rejects incomplete Gmail reply fallback identity before provider execution', 0, async () => {
-      try {
-        configureComposioConfigFromRawJson('{}');
-        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-        const result = await callToolGateway(
-          defaultToolGatewayUrl(),
-          'gmail.message.send',
-          '发送当前 Gmail 回复',
-          'surface_gmail_send_invalid',
-          'html_mail_reply_send',
-          noop,
-          null,
-          looseObject('{"requestKey":"gmail:wrong-thread","provider":"gmail",' +
-            '"accountLabel":"work@example.com","threadId":"thread-1","messageId":"message-1",' +
-            '"to":["alice@example.com"],"subject":"Re: Demo","body":"Confirmed.",' +
-            '"replyMode":"reply","contextSummary":"Demo"}')
-        );
-        const rendered = genericToolResults(result.surface)[0];
-
-        expect(result.ok).assertTrue();
-        expect(rendered.status).assertEqual('error');
-        expect(rendered.summary.indexOf('exact current thread')).assertLarger(-1);
-        expect(rendered.summary.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
       }

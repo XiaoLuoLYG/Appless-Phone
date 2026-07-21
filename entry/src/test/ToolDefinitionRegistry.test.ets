@@ -294,8 +294,18 @@ export default function toolDefinitionRegistryTest() {
     });
 
     it('keeps every public and runtime tool contract semantically aligned', 0, () => {
-      expect(JSON.stringify(allAiphoneToolDefinitions()))
-        .assertEqual(JSON.stringify(allToolDefinitions()));
+      const publicDefinitions: ToolDefinition[] = allAiphoneToolDefinitions();
+      const runtimeDefinitions: ToolDefinition[] = allToolDefinitions();
+      const publicUpdate = publicDefinitions.filter((definition: ToolDefinition): boolean =>
+        definition.toolId === 'calendar.event.update')[0];
+      const runtimeUpdate = runtimeDefinitions.filter((definition: ToolDefinition): boolean =>
+        definition.toolId === 'calendar.event.update')[0];
+      const optionalUpdateSchema = 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,' +
+        'title?:string,start?:string,end?:string,timezone?:string,calendarId?:string';
+
+      expect(JSON.stringify(publicDefinitions)).assertEqual(JSON.stringify(runtimeDefinitions));
+      expect(publicUpdate.inputSchema).assertEqual(optionalUpdateSchema);
+      expect(runtimeUpdate.inputSchema).assertEqual(optionalUpdateSchema);
     });
 
     it('registers aggregate mail tools without enabling send', 0, () => {

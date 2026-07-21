@@ -215,6 +215,15 @@ function toolDefinitionContractsMatch(left, right, toolId) {
     JSON.stringify(toolDefinitionContract(right, toolId));
 }
 
+const calendarUpdateOptionalSchema =
+  'eventId?:string,query?:string,timeMin?:string,timeMax?:string,title?:string,' +
+  'start?:string,end?:string,timezone?:string,calendarId?:string';
+
+function hasOptionalCalendarUpdateSchema(source) {
+  return toolDefinitionStringField(source, 'calendar.event.update', 'inputSchema') ===
+    calendarUpdateOptionalSchema;
+}
+
 function hasSystemIntentDefinition(source, toolId) {
   const body = toolDefinitionBody(source, toolId);
   return body.length > 0 && /backendPriority:\s*\[\s*'system_intent'\s*\]/.test(body);
@@ -426,6 +435,12 @@ function verifyArchitectureVerifier() {
     !toolDefinitionContractsMatch(registryContract, driftedRegistryContract, 'gmail.message.send'),
     'verifier rejects tool-definition field drift'
   );
+  const optionalCalendarContract = `{
+    toolId: 'calendar.event.update', inputSchema: '${calendarUpdateOptionalSchema}'
+  }`;
+  const requiredCalendarContract = optionalCalendarContract.replace('start?:string', 'start:string');
+  assert(hasOptionalCalendarUpdateSchema(optionalCalendarContract), 'verifier accepts optional Calendar update fields');
+  assert(!hasOptionalCalendarUpdateSchema(requiredCalendarContract), 'verifier rejects required Calendar update fields');
 }
 
 function runHarBuild() {
@@ -499,6 +514,8 @@ function verifySourceContracts() {
   const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const localGmailTool = liveDeclarationBody(runtimeGateway, 'async function callLocalGmailTool');
+  const registeredGmailReply = liveDeclarationBody(a2uiHome, 'private async executeRegisteredGmailReply');
   const gmailNormalizer = read('agent_core/src/main/ets/aiphone/runtime/GmailToolNormalizer.ets');
   const gmailStructuredNormalizer = liveDeclarationBody(
     gmailNormalizer,
@@ -651,6 +668,10 @@ function verifySourceContracts() {
     'public and runtime tool registries align semantically',
     `drift=[${semanticDriftToolIds.join(', ')}]`
   );
+  assert(
+    hasOptionalCalendarUpdateSchema(definitions) && hasOptionalCalendarUpdateSchema(runtimeDefinitions),
+    'Calendar update schema keeps lookup and destination fields optional'
+  );
 
   const forbiddenHotelTools = ['hotel.book', 'hotel.create', 'hotel.status', 'hotel.cancel'];
   assert(hasStructuredHotelGateway(runtimeGateway), 'structured hotel gateway export exists');
@@ -701,8 +722,11 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalSocialHubTool', 'runtime includes SocialHub execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
   assertContains(runtimeGateway, 'callComposioDynamic', 'dynamic.search tries Composio fallback');
-  assertContains(runtimeGateway, "actionId !== 'html_mail_reply_send'", 'runtime limits Gmail reply send fallback to the exact reply button');
-  assertContains(runtimeGateway, 'await sendConfiguredMailReply(command)', 'runtime Gmail reply fallback uses the configured provider path');
+  assert(
+    localGmailTool.length > 0 && !localGmailTool.includes('sendConfiguredMailReply'),
+    'runtime Gmail fallback cannot invoke the reply provider'
+  );
+  assertContains(registeredGmailReply, 'await sendConfiguredMailReply(command)', 'registered Gmail action owns provider execution');
   assertContains(composioDynamic, "if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';", 'Gmail reply send pins the exact Composio write tool');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');

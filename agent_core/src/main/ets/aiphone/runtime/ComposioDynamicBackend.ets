@@ -2072,23 +2072,23 @@ async function callComposioSearchAndExecuteParsed(
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   let tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  const expected = composioExactToolSlugForFixedTool(fixedToolId);
+  if (tool === null && expected.length > 0) {
+    return {
+      sourceTag: 'Composio',
+      toolName: fixedToolId,
+      title: 'Composio 工具不可用',
+      status: 'error',
+      summary: 'Composio 没有返回必需工具 ' + expected + '。',
+      rows: [{ label: 'Expected Tool', value: expected }],
+      rawPreview: searchObservation.substring(0, 16000),
+      providerPhase: 'discovery'
+    };
+  }
   if (tool === null && Array.isArray(payload.tools) && payload.tools.length === 1) {
     tool = payload.tools[0] as ComposioSearchTool;
   }
   if (tool === null) {
-    const expected = composioExactToolSlugForFixedTool(fixedToolId);
-    if (expected.length > 0) {
-      return {
-        sourceTag: 'Composio',
-        toolName: fixedToolId,
-        title: 'Composio 工具不可用',
-        status: 'error',
-        summary: 'Composio 没有返回必需工具 ' + expected + '。',
-        rows: [{ label: 'Expected Tool', value: expected }],
-        rawPreview: searchObservation.substring(0, 16000),
-        providerPhase: 'discovery'
-      };
-    }
     if (fixedToolId === 'x.post.search') {
       return xDiscoveryFailure(prompt, searchObservation);
     }

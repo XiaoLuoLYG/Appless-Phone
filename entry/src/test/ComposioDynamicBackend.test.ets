@@ -452,9 +452,8 @@ export default function composioDynamicBackendTest() {
         'Delete a Google Calendar event by event ID');
     });
 
-    it('fails closed without executing when Gmail reply discovery omits the exact write tool', 0, async () => {
+    it('rejects a lone read candidate when Gmail reply discovery omits the exact write tool', 0, async () => {
       const searchObservation = '{"source":"Composio","authorizedToolkits":["gmail"],"tools":[' +
-        '{"toolSlug":"GMAIL_FETCH_EMAILS","description":"Read Gmail messages","inputSchema":"{}"},' +
         '{"toolSlug":"GMAIL_GET_THREAD","description":"Read a Gmail thread","inputSchema":"{}"}' +
         '],"instruction":"execute selected tool"}';
       const client = new RecordingComposioSearchExecuteClient(
