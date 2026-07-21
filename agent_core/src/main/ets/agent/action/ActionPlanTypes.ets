@@ -1,3 +1,5 @@
+import { ActionOffer } from './ActionOfferTypes';
+
 export type JsonValue = Object | string | number | boolean | null;
 
 export interface ActionInputBinding {
@@ -18,6 +20,14 @@ export interface ActionPlanDraft {
   runId: string;
   label: string;
   steps: ActionPlanStep[];
+}
+
+export interface ActionPlanCompiler {
+  compile(
+    goal: string,
+    offers: ActionOffer[],
+    allowedActionIds: string[]
+  ): Promise<ActionPlanDraft>;
 }
 
 export interface ActionPlan {

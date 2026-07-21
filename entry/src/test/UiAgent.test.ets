@@ -58,6 +58,7 @@ class TestGate {
 class RecordingRenderer implements UiTaskRenderer {
   readonly calls: string[] = [];
   readonly resultHotelIds: number[] = [];
+  readonly resultBatchSizes: number[] = [];
   readonly resultOfferIds: string[] = [];
   readonly resultOfferHotelIds: number[] = [];
 
@@ -68,13 +69,18 @@ class RecordingRenderer implements UiTaskRenderer {
 
   async result(
     task: CreateUiTaskPayload,
-    data: DataResult,
+    data: DataResult[],
     offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
-    const hotel: HotelResult = data.data as HotelResult;
     this.calls.push(`result:${task.taskId}:${surfaceId}`);
-    this.resultHotelIds.push(hotel.hotelId);
+    this.resultBatchSizes.push(data.length);
+    const batchIds: number[] = [];
+    for (let index = 0; index < data.length; index++) {
+      const hotel: HotelResult = data[index].data as HotelResult;
+      this.resultHotelIds.push(hotel.hotelId);
+      batchIds.push(hotel.hotelId);
+    }
     for (let index = 0; index < offers.length; index++) {
       this.resultOfferIds.push(offers[index].offerId);
       const args = offers[index].args as Record<
@@ -86,7 +92,7 @@ class RecordingRenderer implements UiTaskRenderer {
         this.resultOfferHotelIds.push(offeredHotelId);
       }
     }
-    return render(`result:${hotel.hotelId}`);
+    return render(`result:${batchIds.join(',')}`);
   }
 
   async error(
@@ -112,7 +118,7 @@ class ProposalRenderer extends RecordingRenderer {
 
   async result(
     task: CreateUiTaskPayload,
-    data: DataResult,
+    data: DataResult[],
     offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
@@ -136,7 +142,7 @@ class ProposalRenderer extends RecordingRenderer {
 class EarlyWorkflowRenderer extends ProposalRenderer {
   async result(
     task: CreateUiTaskPayload,
-    data: DataResult,
+    data: DataResult[],
     offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
@@ -164,7 +170,7 @@ class JsonlProbeRenderer extends RecordingRenderer {
 
   async result(
     task: CreateUiTaskPayload,
-    data: DataResult,
+    data: DataResult[],
     offers: ActionOffer[],
     surfaceId: string
   ): Promise<UiRenderResult> {
@@ -249,7 +255,7 @@ class DeferredSkeletonRenderer implements UiTaskRenderer {
 
   async result(
     _task: CreateUiTaskPayload,
-    _data: DataResult,
+    _data: DataResult[],
     _offers: ActionOffer[],
     _surfaceId: string
   ): Promise<UiRenderResult> {
@@ -327,6 +333,23 @@ function uiTaskMessage(
     conversationId,
     turnId,
     taskId,
+    payload
+  };
+}
+
+function multiUiTaskMessage(dataTaskIds: string[]): AgentMessage {
+  const payload: CreateUiTaskPayload = {
+    taskId: 'ui-multi',
+    skillId: '',
+    intent: 'Show ordered travel results',
+    expectedOutputSchema: 'hotelSearchResults',
+    dataTaskIds: dataTaskIds.slice()
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_UI,
+    conversationId: 'conversation-a',
+    turnId: 'turn-multi',
+    taskId: payload.taskId,
     payload
   };
 }
@@ -471,12 +494,101 @@ async function receiveTaskErrorCode(
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 12; index++) {
+    await Promise.resolve();
+  }
 }
 
 export default function uiAgentTest() {
   describe('uiAgent', () => {
+    it('renders multiple Data results in declared order after reverse arrival', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(multiUiTaskMessage(['flight-data', 'train-data']));
+      await receiveUiState(observer, 'skeleton');
+      publishData(bus, 'conversation-a', 'turn-multi', 'train-data', 202);
+      publishData(bus, 'conversation-a', 'turn-multi', 'flight-data', 101);
+      await receiveUiState(observer, 'result');
+
+      expect(renderer.resultHotelIds.join(',')).assertEqual('101,202');
+      expect(renderer.resultBatchSizes.join(',')).assertEqual('2');
+      expect(writer.writes.length).assertEqual(2);
+      agent.stop();
+      observer.close();
+    });
+
+    it('renders one partial result after every success or error is terminal', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+      const providerError: TaskErrorPayload = {
+        code: 'DATA_TASK_FAILED',
+        message: 'flight provider unavailable'
+      };
+
+      bus.publish(multiUiTaskMessage(['flight-data', 'train-data']));
+      await receiveUiState(observer, 'skeleton');
+      publishData(bus, 'conversation-a', 'turn-multi', 'train-data', 202);
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_ERROR,
+        'conversation-a',
+        'turn-multi',
+        'flight-data',
+        providerError
+      ));
+      await receiveUiState(observer, 'result');
+
+      expect(renderer.resultHotelIds.join(',')).assertEqual('202');
+      expect(renderer.resultBatchSizes.join(',')).assertEqual('1');
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('error:')
+      ).length).assertEqual(0);
+      expect(writer.writes.length).assertEqual(2);
+      agent.stop();
+      observer.close();
+    });
+
+    it('renders the final aggregate exactly once when terminal messages repeat', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(bus, renderer, writer);
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(multiUiTaskMessage(['flight-data', 'train-data']));
+      await receiveUiState(observer, 'skeleton');
+      publishData(bus, 'conversation-a', 'turn-multi', 'flight-data', 101);
+      publishData(bus, 'conversation-a', 'turn-multi', 'train-data', 202);
+      await receiveUiState(observer, 'result');
+      publishData(bus, 'conversation-a', 'turn-multi', 'flight-data', 999);
+      publishData(bus, 'conversation-a', 'turn-multi', 'train-data', 999);
+      bus.publish(turnMessage(
+        AgentMessageType.ACTION_PROGRESS,
+        'conversation-a',
+        'turn-multi',
+        'result-barrier',
+        actionPayload(writer.writes[0].surfaceId, 'result-barrier', 'running')
+      ));
+      await receiveUiState(observer, 'action');
+
+      expect(renderer.calls.filter(
+        (call: string): boolean => call.startsWith('result:')
+      ).length).assertEqual(1);
+      expect(renderer.resultHotelIds.join(',')).assertEqual('101,202');
+      expect(writer.writes.length).assertEqual(3);
+      agent.stop();
+      observer.close();
+    });
+
     it('writes a skeleton then patches the same surface when UI arrives first', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const renderer: RecordingRenderer = new RecordingRenderer();

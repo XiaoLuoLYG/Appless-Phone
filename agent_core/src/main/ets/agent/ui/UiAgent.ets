@@ -61,6 +61,7 @@ interface PendingDataEntry {
   data?: DataResult;
   offers?: ActionOffer[];
   offerSourceToolId?: string;
+  errorMessage?: string;
   invalidCode: string;
   invalidMessage: string;
 }
@@ -73,7 +74,6 @@ interface UiTurnContext {
   uiTask?: CreateUiTaskPayload;
   pendingDataByTaskId: Map<string, PendingDataEntry>;
   pendingDataOrder: string[];
-  dataErrorPending: boolean;
   canceled: boolean;
   generation: number;
   skeletonWritten: boolean;
@@ -262,20 +262,25 @@ export class UiAgent extends MessageDrivenAgent {
     }
     context.skeletonWritten = true;
     this.publishUiResult(context, 'skeleton');
-    const pending: PendingDataEntry | undefined = context.pendingDataByTaskId.get(task.dataTaskIds[0]);
-    if (pending !== undefined && pending.invalidCode.length > 0) {
-      this.publishOwnedDataError(context, pending.invalidCode, pending.invalidMessage);
-      return;
+    for (let index = 0; index < task.dataTaskIds.length; index++) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]);
+      if (pending !== undefined && pending.invalidCode.length > 0) {
+        this.publishOwnedDataError(
+          context,
+          task.dataTaskIds[index],
+          pending.invalidCode,
+          pending.invalidMessage
+        );
+      }
     }
     await this.maybeRenderData(context, key);
   }
 
   private async handleDataResult(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
-    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskIds[0]) {
+    if (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId)) {
       return;
     }
-    if (context.canceled || context.resultWritten || context.terminalRenderStarted ||
-      context.dataErrorPending) {
+    if (context.canceled || context.resultWritten || context.terminalRenderStarted) {
       return;
     }
     const data: DataResult | null = this.dataResult(message.payload);
@@ -287,12 +292,23 @@ export class UiAgent extends MessageDrivenAgent {
         'Data result payload is malformed'
       );
       if (context.uiTask !== undefined) {
-        this.publishOwnedDataError(context, 'UI_DATA_INVALID', 'Data result payload is malformed');
+        this.publishOwnedDataError(
+          context,
+          message.taskId,
+          'UI_DATA_INVALID',
+          'Data result payload is malformed'
+        );
       }
       return;
     }
-    if (context.uiTask !== undefined && data.outputSchema !== context.uiTask.expectedOutputSchema) {
-      this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
+    if (context.uiTask !== undefined && context.uiTask.dataTaskIds.length === 1 &&
+      data.outputSchema !== context.uiTask.expectedOutputSchema) {
+      this.publishOwnedDataError(
+        context,
+        message.taskId,
+        'UI_DATA_SCHEMA_MISMATCH',
+        'Data result schema does not match UI task'
+      );
       return;
     }
     this.rememberPendingData(context, message.taskId, data);
@@ -304,7 +320,7 @@ export class UiAgent extends MessageDrivenAgent {
     key: string,
     context: UiTurnContext
   ): Promise<void> {
-    if (context.uiTask !== undefined && message.taskId !== context.uiTask.dataTaskIds[0]) {
+    if (context.uiTask !== undefined && !this.ownsDataTask(context.uiTask, message.taskId)) {
       return;
     }
     const ready = this.offersReady(message.payload, message.taskId);
@@ -325,18 +341,38 @@ export class UiAgent extends MessageDrivenAgent {
     if (task === undefined || !context.skeletonWritten) {
       return;
     }
-    const pending = context.pendingDataByTaskId.get(task.dataTaskIds[0]);
-    if (pending === undefined || pending.data === undefined || pending.offers === undefined ||
-      pending.offerSourceToolId !== pending.data.toolId) {
+    const data: DataResult[] = [];
+    const offers: ActionOffer[] = [];
+    const errors: string[] = [];
+    for (let index = 0; index < task.dataTaskIds.length; index++) {
+      const pending = context.pendingDataByTaskId.get(task.dataTaskIds[index]);
+      if (pending === undefined) {
+        return;
+      }
+      if (pending.errorMessage !== undefined) {
+        errors.push(pending.errorMessage);
+        continue;
+      }
+      if (pending.data === undefined || pending.offers === undefined ||
+        pending.offerSourceToolId !== pending.data.toolId) {
+        return;
+      }
+      data.push(pending.data);
+      for (let offerIndex = 0; offerIndex < pending.offers.length; offerIndex++) {
+        offers.push(pending.offers[offerIndex]);
+      }
+    }
+    if (data.length === 0) {
+      await this.renderDataError(context, key, errors[0]);
       return;
     }
-    await this.renderData(context, key, pending.data, pending.offers);
+    await this.renderData(context, key, data, offers);
   }
 
   private async renderData(
     context: UiTurnContext,
     key: string,
-    data: DataResult,
+    data: DataResult[],
     offers: ActionOffer[]
   ): Promise<void> {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
@@ -344,8 +380,13 @@ export class UiAgent extends MessageDrivenAgent {
       context.terminalRenderStarted) {
       return;
     }
-    if (data.outputSchema !== task.expectedOutputSchema) {
-      this.publishOwnedDataError(context, 'UI_DATA_SCHEMA_MISMATCH', 'Data result schema does not match UI task');
+    if (task.dataTaskIds.length === 1 && data[0].outputSchema !== task.expectedOutputSchema) {
+      this.publishOwnedDataError(
+        context,
+        task.dataTaskIds[0],
+        'UI_DATA_SCHEMA_MISMATCH',
+        'Data result schema does not match UI task'
+      );
       return;
     }
     context.terminalRenderStarted = true;
@@ -372,16 +413,21 @@ export class UiAgent extends MessageDrivenAgent {
   private async handleTaskError(message: AgentMessage, key: string, context: UiTurnContext): Promise<void> {
     if (context.canceled || context.resultWritten ||
       context.terminalRenderStarted || context.uiTask === undefined ||
-      message.taskId !== context.uiTask.dataTaskIds[0]) {
+      !this.ownsDataTask(context.uiTask, message.taskId)) {
       return;
     }
     const errorMessage: string | null = this.taskErrorMessage(message.payload);
     if (errorMessage === null) {
-      this.publishOwnedDataError(context, 'UI_DATA_ERROR_INVALID', 'Data error payload is malformed');
+      this.publishOwnedDataError(
+        context,
+        message.taskId,
+        'UI_DATA_ERROR_INVALID',
+        'Data error payload is malformed'
+      );
       return;
     }
-    context.dataErrorPending = false;
-    await this.renderDataError(context, key, errorMessage);
+    this.rememberPendingError(context, message.taskId, errorMessage);
+    await this.maybeRenderData(context, key);
   }
 
   private async renderDataError(context: UiTurnContext, key: string, message: string): Promise<void> {
@@ -442,10 +488,15 @@ export class UiAgent extends MessageDrivenAgent {
 
   private rememberPendingData(context: UiTurnContext, taskId: string, data: DataResult): void {
     const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
+      return;
+    }
     const entry: PendingDataEntry = {
       data,
       offers: current === undefined ? undefined : current.offers,
       offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: '',
       invalidMessage: ''
     };
@@ -459,12 +510,14 @@ export class UiAgent extends MessageDrivenAgent {
     message: string
   ): void {
     const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
-    if (current !== undefined && current.data !== undefined) {
+    if (current !== undefined &&
+      (current.data !== undefined || current.errorMessage !== undefined)) {
       return;
     }
     const entry: PendingDataEntry = {
       offers: current === undefined ? undefined : current.offers,
       offerSourceToolId: current === undefined ? undefined : current.offerSourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: code,
       invalidMessage: message
     };
@@ -478,14 +531,34 @@ export class UiAgent extends MessageDrivenAgent {
     offers: ActionOffer[]
   ): void {
     const current: PendingDataEntry | undefined = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined && current.errorMessage !== undefined) {
+      return;
+    }
+    if (current !== undefined && current.offers !== undefined &&
+      (current.data === undefined || current.offerSourceToolId === current.data.toolId)) {
+      return;
+    }
     const entry: PendingDataEntry = {
       data: current === undefined ? undefined : current.data,
       offers: offers.slice(),
       offerSourceToolId: sourceToolId,
+      errorMessage: current === undefined ? undefined : current.errorMessage,
       invalidCode: current === undefined ? '' : current.invalidCode,
       invalidMessage: current === undefined ? '' : current.invalidMessage
     };
     this.rememberPendingEntry(context, taskId, entry);
+  }
+
+  private rememberPendingError(context: UiTurnContext, taskId: string, message: string): void {
+    const current = context.pendingDataByTaskId.get(taskId);
+    if (current !== undefined && current.errorMessage !== undefined) {
+      return;
+    }
+    this.rememberPendingEntry(context, taskId, {
+      errorMessage: message,
+      invalidCode: '',
+      invalidMessage: ''
+    });
   }
 
   private rememberPendingEntry(context: UiTurnContext, taskId: string, entry: PendingDataEntry): void {
@@ -493,7 +566,7 @@ export class UiAgent extends MessageDrivenAgent {
       context.pendingDataOrder.push(taskId);
     }
     context.pendingDataByTaskId.set(taskId, entry);
-    while (context.pendingDataOrder.length > PENDING_DATA_LIMIT) {
+    while (context.uiTask === undefined && context.pendingDataOrder.length > PENDING_DATA_LIMIT) {
       const oldest: string | undefined = context.pendingDataOrder.shift();
       if (oldest !== undefined) {
         context.pendingDataByTaskId.delete(oldest);
@@ -501,18 +574,22 @@ export class UiAgent extends MessageDrivenAgent {
     }
   }
 
-  private publishOwnedDataError(context: UiTurnContext, code: string, message: string): void {
+  private publishOwnedDataError(
+    context: UiTurnContext,
+    dataTaskId: string,
+    code: string,
+    message: string
+  ): void {
     const task: CreateUiTaskPayload | undefined = context.uiTask;
-    if (task === undefined || context.dataErrorPending) {
+    if (task === undefined || !this.ownsDataTask(task, dataTaskId)) {
       return;
     }
-    context.dataErrorPending = true;
     const payload: TaskErrorPayload = { code, message };
     this.bus.publish({
       type: AgentMessageType.TASK_ERROR,
       conversationId: context.conversationId,
       turnId: context.turnId,
-      taskId: task.dataTaskIds[0],
+      taskId: dataTaskId,
       payload
     });
   }
@@ -529,7 +606,6 @@ export class UiAgent extends MessageDrivenAgent {
       uiTaskId: '',
       pendingDataByTaskId: new Map<string, PendingDataEntry>(),
       pendingDataOrder: [],
-      dataErrorPending: false,
       canceled: false,
       generation: 0,
       skeletonWritten: false,
@@ -592,14 +668,33 @@ export class UiAgent extends MessageDrivenAgent {
     const intent = values['intent'];
     const expectedOutputSchema = values['expectedOutputSchema'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
-      !Array.isArray(dataTaskIds) || dataTaskIds.length !== 1 ||
-      typeof dataTaskIds[0] !== 'string' || dataTaskIds[0].trim().length === 0 || dataTaskIds[0] === taskId ||
+      !Array.isArray(dataTaskIds) || !this.validDataTaskIds(dataTaskIds as Object[], taskId) ||
       typeof skillId !== 'string' ||
       typeof intent !== 'string' || intent.trim().length === 0 ||
       typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {
       return null;
     }
     return payload as CreateUiTaskPayload;
+  }
+
+  private validDataTaskIds(dataTaskIds: Object[], uiTaskId: string): boolean {
+    if (dataTaskIds.length === 0) {
+      return false;
+    }
+    const ids: Set<string> = new Set<string>();
+    for (let index = 0; index < dataTaskIds.length; index++) {
+      const taskId = dataTaskIds[index];
+      if (typeof taskId !== 'string' || taskId.trim().length === 0 ||
+        taskId === uiTaskId || ids.has(taskId)) {
+        return false;
+      }
+      ids.add(taskId);
+    }
+    return true;
+  }
+
+  private ownsDataTask(task: CreateUiTaskPayload, dataTaskId: string): boolean {
+    return task.dataTaskIds.indexOf(dataTaskId) >= 0;
   }
 
   private offersReady(payload: Object, taskId: string): ActionOffersReadyPayload | null {

@@ -36,6 +36,8 @@ import {
   LeaderPlanningContext,
   LinkedMessageBus,
   LocalModel,
+  SingleDataUiTaskRenderer,
+  SingleDataUiTaskRendererAdapter,
   SurfaceActionAuthorizer,
   TaskErrorPayload,
   ToolDefinition,
@@ -46,7 +48,6 @@ import {
   UiRenderResultPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
-  UiTaskRenderer,
   UserInputPayload,
   callStructuredHotelTool,
   hotelActionsFor,
@@ -937,7 +938,7 @@ class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
   }
 }
 
-class HotelUiRenderer implements UiTaskRenderer {
+class HotelUiRenderer implements SingleDataUiTaskRenderer {
   private readonly layoutPlanner: UiLayoutPlanner | null;
   private readonly layoutTimeoutMs: number;
 
@@ -1467,7 +1468,11 @@ export class HotelAgentRuntime {
     );
     this.leader = new LeaderAgent(this.bus, planner, hotelLeaderPlanningContext());
     this.data = new DataAgent(this.bus, authorizeHotelDataTask, executor);
-    this.ui = new UiAgent(this.bus, renderer, this.surfaceWriter);
+    this.ui = new UiAgent(
+      this.bus,
+      new SingleDataUiTaskRendererAdapter(renderer),
+      this.surfaceWriter
+    );
     this.action = new ActionAgent(
       this.bus,
       this.catalog,

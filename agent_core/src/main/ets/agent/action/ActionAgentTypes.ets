@@ -21,6 +21,13 @@ export interface ActionPlanDraftPayload {
   draft: ActionPlanDraft;
 }
 
+export interface ActionPlanRequestPayload {
+  uiTaskId: string;
+  dataTaskIds: string[];
+  goal: string;
+  allowedActionIds: string[];
+}
+
 export interface ActionPlanReadyPayload {
   uiTaskId: string;
   surfaceId: string;

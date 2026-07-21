@@ -10,8 +10,10 @@ import {
   ActionOfferContext,
   ActionOffersReadyPayload,
   ActionPlan,
+  ActionPlanCompiler,
   ActionPlanDraft,
   ActionPlanDraftPayload,
+  ActionPlanRequestPayload,
   ActionPlanReadyPayload,
   ActionPlanStepOutput,
   ActionProgressPayload,
@@ -59,6 +61,15 @@ class ActionLookup implements ToolDefinitionLookup {
     }
     if (toolId === 'hotel.booking.open') {
       return definition(toolId, this.confirmCall ? 'confirm_required' : 'draft', []);
+    }
+    if (toolId === 'social.source') {
+      return definition(toolId, 'read', ['social.reply.draft']);
+    }
+    if (toolId === 'gmail.source') {
+      return definition(toolId, 'read', ['gmail.draft.create']);
+    }
+    if (toolId === 'social.reply.draft' || toolId === 'gmail.draft.create') {
+      return definition(toolId, 'draft', []);
     }
     return null;
   }
@@ -111,6 +122,9 @@ class ExactActionSurface implements SurfaceActionAuthorizer {
     if (actionId === 'hotel.booking.open') {
       return JSON.stringify(args).indexOf('"hotelId":101') >= 0 &&
         JSON.stringify(args).indexOf('rollinggo.cn/pages/hotel/detail/index') >= 0;
+    }
+    if (actionId === 'social.reply.draft') {
+      return JSON.stringify(args) === '{}';
     }
     return false;
   }
@@ -221,6 +235,76 @@ async function noOffers(
   return [];
 }
 
+class ScriptedActionPlanCompiler implements ActionPlanCompiler {
+  readonly goals: string[] = [];
+  readonly offerIds: string[] = [];
+  readonly allowedIds: string[] = [];
+  draft: ActionPlanDraft;
+
+  constructor(draft: ActionPlanDraft) {
+    this.draft = draft;
+  }
+
+  async compile(
+    goal: string,
+    offers: ActionOffer[],
+    allowedActionIds: string[]
+  ): Promise<ActionPlanDraft> {
+    this.goals.push(goal);
+    for (let index = 0; index < offers.length; index++) {
+      this.offerIds.push(offers[index].offerId);
+    }
+    for (let index = 0; index < allowedActionIds.length; index++) {
+      this.allowedIds.push(allowedActionIds[index]);
+    }
+    return this.draft;
+  }
+}
+
+async function composedOffers(
+  data: DataResult,
+  _context: ActionOfferContext
+): Promise<ActionOffer[]> {
+  if (data.toolId === 'social.source') {
+    return [{
+      offerId: 'offer-generate',
+      actionId: 'social.reply.draft',
+      label: '生成回复',
+      variant: 'primary',
+      args: new Object()
+    }];
+  }
+  return [{
+    offerId: 'offer-save',
+    actionId: 'gmail.draft.create',
+    label: '保存草稿',
+    variant: 'secondary',
+    args: new Object()
+  }];
+}
+
+function compiledPlan(firstArgs: Object = new Object()): ActionPlanDraft {
+  return {
+    planId: 'plan-1',
+    runId: 'run-1',
+    label: '生成并保存',
+    steps: [{
+      stepId: 'generate',
+      actionId: 'social.reply.draft',
+      args: firstArgs
+    }, {
+      stepId: 'save',
+      actionId: 'gmail.draft.create',
+      args: new Object(),
+      inputFrom: [{
+        target: '/body',
+        stepId: 'generate',
+        path: '/body'
+      }]
+    }]
+  };
+}
+
 function compositePlan(
   planId: string = 'plan-1',
   turnId: string = 'turn-1',
@@ -274,6 +358,67 @@ function message(
     taskId,
     payload
   };
+}
+
+function planRequest(): ActionPlanRequestPayload {
+  return {
+    uiTaskId: 'ui-1',
+    dataTaskIds: ['social-data', 'gmail-data'],
+    goal: '生成回复后保存草稿',
+    allowedActionIds: ['social.reply.draft', 'gmail.draft.create']
+  };
+}
+
+function observedTask(taskId: string, toolId: string): CreateDataTaskPayload {
+  return {
+    taskId,
+    roundId: 'turn-1',
+    skillId: '',
+    goal: toolId,
+    allowedToolIds: [toolId],
+    toolId,
+    outputSchema: `${toolId}Result`,
+    args: new Object(),
+    required: true
+  };
+}
+
+function observedResult(toolId: string): DataResult {
+  return {
+    toolId,
+    outputSchema: `${toolId}Result`,
+    status: 'success',
+    sources: [],
+    data: new Object(),
+    warnings: []
+  };
+}
+
+function publishCompilerInputs(bus: LinkedMessageBus): void {
+  bus.publish(message(
+    AgentMessageType.TASK_CREATE_DATA,
+    observedTask('social-data', 'social.source'),
+    'turn-1',
+    'social-data'
+  ));
+  bus.publish(message(
+    AgentMessageType.TASK_CREATE_DATA,
+    observedTask('gmail-data', 'gmail.source'),
+    'turn-1',
+    'gmail-data'
+  ));
+  bus.publish(message(
+    AgentMessageType.TASK_RESULT_DATA,
+    observedResult('gmail.source'),
+    'turn-1',
+    'gmail-data'
+  ));
+  bus.publish(message(
+    AgentMessageType.TASK_RESULT_DATA,
+    observedResult('social.source'),
+    'turn-1',
+    'social-data'
+  ));
 }
 
 function publishPlan(
@@ -405,6 +550,128 @@ function messagesOfType(
 
 export default function actionAgentTest() {
   describe('actionAgent', () => {
+    it('compiles a composed request from ordered current offers before READY', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(compiledPlan());
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        composedOffers,
+        new RecordingRegisteredExecutor(),
+        compiler
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        planRequest(),
+        'turn-1',
+        'plan-request'
+      ));
+      publishCompilerInputs(bus);
+      const draftMessage = await receiveType(observer, AgentMessageType.ACTION_PLAN_DRAFT);
+      const payload = draftMessage.payload as ActionPlanDraftPayload;
+      const uiResult: UiRenderResultPayload = {
+        surfaceId: 'surface-1',
+        state: 'result'
+      };
+      bus.publish(message(
+        AgentMessageType.TASK_RESULT_UI,
+        uiResult,
+        'turn-1',
+        'ui-1'
+      ));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+
+      expect(compiler.goals.join(',')).assertEqual('生成回复后保存草稿');
+      expect(compiler.offerIds.join(',')).assertEqual('offer-generate,offer-save');
+      expect(compiler.allowedIds.join(',')).assertEqual(
+        'social.reply.draft,gmail.draft.create'
+      );
+      expect(payload.dataTaskId).assertEqual('social-data');
+      expect(payload.sourceToolId).assertEqual('social.source');
+      expect(payload.draft.steps[1].inputFrom![0].target).assertEqual('/body');
+      expect(ready.uiTaskId).assertEqual('ui-1');
+      expect(ready.surfaceId).assertEqual('surface-1');
+      expect(ready.planId).assertEqual('plan-1');
+      expect(ready.runId).assertEqual('run-1');
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects compiler steps that mutate or invent current offers', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(
+        compiledPlan(JSON.parse('{"invented":true}') as Object)
+      );
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        composedOffers,
+        new RecordingRegisteredExecutor(),
+        compiler
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_PLAN_REQUEST,
+        planRequest(),
+        'turn-1',
+        'invalid-plan-request'
+      ));
+      publishCompilerInputs(bus);
+      const observed = await receiveUntilResult(observer);
+      const result = observed[observed.length - 1].payload as ActionResultPayload;
+
+      expect(result.errorCode).assertEqual('ACTION_PLAN_OFFER_MISMATCH');
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_DRAFT).length).assertEqual(0);
+      expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_READY).length).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('runs an exact direct offer without invoking the optional compiler', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const compiler = new ScriptedActionPlanCompiler(compiledPlan());
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(
+        bus,
+        catalog(new ActionLookup()),
+        noOffers,
+        executor,
+        compiler
+      );
+      const observer = bus.openReader();
+      agent.start();
+
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        directRun(
+          'run-direct-no-compiler',
+          'hotel.navigate',
+          JSON.parse(
+            '{"hotelId":101,"latitude":22.5,"longitude":114}'
+          ) as Object
+        )
+      ));
+      const result = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(result.status).assertEqual('success');
+      expect(compiler.goals.length).assertEqual(0);
+      expect(executor.actionIds.join(',')).assertEqual('hotel.navigate');
+      agent.stop();
+      observer.close();
+    });
+
     it('publishes only catalog-approved immutable Action offers for an observed Data result', 0, async () => {
       const bus = new LinkedMessageBus();
       const navigateArgs = JSON.parse(
