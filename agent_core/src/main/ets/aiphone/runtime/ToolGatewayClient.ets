@@ -87,7 +87,11 @@ import {
   parseHotelDetailRequest,
   parseHotelSearchRequest
 } from './HotelToolTypes';
-import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
+import {
+  callGmailApiTool,
+  gmailMailDetailFromComposioObservation,
+  readGmailMailDetail
+} from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import {
@@ -9953,29 +9957,44 @@ function qqMailConfig(): QqMailConfig {
 }
 
 async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailDetail> {
-  try {
-    const execution: ComposioRawExecution = await callComposioFixedRaw(
-      'Gmail read full thread ' + args.threadId,
-      'gmail.thread.read',
-      args as Object
-    );
-    aiLogInfo('[AIPhone][GmailDetailComposio] tool=' + execution.toolSlug +
-      ' responseChars=' + execution.observation.length.toString());
-    const payload = JSON.parse(execution.observation) as Object;
-    const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
-      Object.keys(payload).slice(0, 12).join(',') : '';
-    aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
-    return gmailMailDetailFromPayload(payload, args);
-  } catch (composioError) {
-    const message = describeThrown(composioError);
-    aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
-    const accessToken = await gmailAccessTokenForMcp();
-    if (accessToken.length === 0) {
-      throw new Error(message);
+  let composioFailure = '';
+  if (args.messageId.trim().length > 0) {
+    try {
+      const execution: ComposioRawExecution = await callComposioFixedRaw(
+        'Fetch exactly one Gmail message by message ID',
+        'gmail.message.read',
+        args as Object
+      );
+      aiLogInfo('[AIPhone][GmailDetailComposio] mode=message tool=' + execution.toolSlug +
+        ' responseChars=' + execution.observation.length.toString());
+      return gmailMailDetailFromComposioObservation(execution.observation, args);
+    } catch (messageError) {
+      composioFailure = describeThrown(messageError);
+      aiLogError('[AIPhone][GmailDetailMessageComposioFailed] ' + composioFailure.substring(0, 240));
     }
-    aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
-    return readGmailMailDetail(accessToken, args);
   }
+  if (args.threadId.trim().length > 0) {
+    try {
+      aiLogInfo('[AIPhone][GmailDetailThreadFallback] start');
+      const execution: ComposioRawExecution = await callComposioFixedRaw(
+        'Gmail read full thread by thread ID',
+        'gmail.thread.read',
+        args as Object
+      );
+      aiLogInfo('[AIPhone][GmailDetailComposio] mode=thread_fallback tool=' + execution.toolSlug +
+        ' responseChars=' + execution.observation.length.toString());
+      return gmailMailDetailFromComposioObservation(execution.observation, args);
+    } catch (threadError) {
+      composioFailure = describeThrown(threadError);
+      aiLogError('[AIPhone][GmailDetailThreadComposioFailed] ' + composioFailure.substring(0, 240));
+    }
+  }
+  const accessToken = await gmailAccessTokenForMcp();
+  if (accessToken.length === 0) {
+    throw new Error(composioFailure.length > 0 ? composioFailure : 'Gmail detail requires a message ID or thread ID.');
+  }
+  aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
+  return readGmailMailDetail(accessToken, args);
 }
 
 export async function readConfiguredMailDetail(args: MailDetailRequest): Promise<MailDetail> {
@@ -10170,17 +10189,18 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
+  const providerArgs = toolId === 'gmail.mail.search' ? gmailMcpArgsForPrompt(toolId, prompt, args) : args;
   const composioResult = await composioFixedAppResult(
     toolId,
     'Gmail',
     prompt,
     toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
-    args
+    providerArgs
   );
   if (composioResult.status === 'success') {
     return [composioResult];
   }
-  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
+  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, providerArgs);
   return fallbackResults.length > 0 ? fallbackResults : [composioResult];
 }
 

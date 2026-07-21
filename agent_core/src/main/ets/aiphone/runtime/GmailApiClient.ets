@@ -57,6 +57,7 @@ interface GmailMessage {
   threadId?: string;
   labelIds?: string[];
   snippet?: string;
+  messageText?: string;
   internalDate?: string;
   payload?: GmailMessagePayload;
 }
@@ -392,16 +393,36 @@ function firstHeader(message: GmailMessage, headerName: string): string {
   return '';
 }
 
+function isDraftMessage(message: GmailMessage): boolean {
+  if (!Array.isArray(message.labelIds)) {
+    return false;
+  }
+  for (let index = 0; index < message.labelIds.length; index++) {
+    if (message.labelIds[index].trim().toUpperCase() === 'DRAFT') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function lastMessage(thread: GmailThread): GmailMessage {
   if (Array.isArray(thread.messages) && thread.messages.length > 0) {
-    return thread.messages[thread.messages.length - 1];
+    for (let index = thread.messages.length - 1; index >= 0; index--) {
+      if (!isDraftMessage(thread.messages[index])) {
+        return thread.messages[index];
+      }
+    }
   }
   return {};
 }
 
 function firstMessage(thread: GmailThread): GmailMessage {
   if (Array.isArray(thread.messages) && thread.messages.length > 0) {
-    return thread.messages[0];
+    for (let index = 0; index < thread.messages.length; index++) {
+      if (!isDraftMessage(thread.messages[index])) {
+        return thread.messages[index];
+      }
+    }
   }
   return {};
 }
@@ -414,7 +435,29 @@ function labelsText(message: GmailMessage): string {
 }
 
 function messageCount(thread: GmailThread): number {
-  return Array.isArray(thread.messages) ? thread.messages.length : 0;
+  if (!Array.isArray(thread.messages)) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < thread.messages.length; index++) {
+    if (!isDraftMessage(thread.messages[index])) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function draftMessageCount(thread: GmailThread): number {
+  if (!Array.isArray(thread.messages)) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < thread.messages.length; index++) {
+    if (isDraftMessage(thread.messages[index])) {
+      count++;
+    }
+  }
+  return count;
 }
 
 function threadResult(thread: GmailThread): DynamicGenericToolResult {
@@ -596,7 +639,9 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
   const first = firstMessage(thread);
   const body: GmailBodyParts = { plain: '', html: '' };
   collectGmailBody(newest.payload, body);
-  const bodyText = (body.plain.length > 0 ? body.plain : gmailTextFromHtml(body.html)).substring(0, 30000);
+  const directText = textOf(newest.messageText).trim();
+  const bodyText = (body.plain.length > 0 ? body.plain :
+    (directText.length > 0 ? directText : gmailTextFromHtml(body.html))).substring(0, 30000);
   const subject = gmailHeader(first, 'Subject').length > 0 ? gmailHeader(first, 'Subject') : args.subject;
   const detail: MailDetail = {
     requestKey: args.requestKey,
@@ -618,13 +663,44 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
 export function gmailMailDetailFromPayload(payload: Object, args: MailDetailRequest): MailDetail {
   const thread = findGmailThread(payload, args);
   if (thread === null) {
-    throw new Error('Composio Gmail response did not contain a readable thread payload.');
+    throw new Error('Composio Gmail response did not contain a readable message or thread payload.');
+  }
+  aiLogInfo('[AIPhone][GmailDetailThreadShape] messages=' +
+    (Array.isArray(thread.messages) ? thread.messages.length : 0).toString() +
+    ' drafts=' + draftMessageCount(thread).toString());
+  if (Array.isArray(thread.messages) && thread.messages.length > 0 && messageCount(thread) === 0) {
+    throw new Error('Composio Gmail thread contained only draft messages.');
   }
   const detail = gmailDetailFromThread(thread, args);
   if (detail.bodyText.length === 0 && detail.bodyHtml.length === 0) {
     throw new Error('Composio Gmail response did not include the message body.');
   }
   return detail;
+}
+
+export function gmailMailDetailFromComposioObservation(
+  observation: string,
+  args: MailDetailRequest
+): MailDetail {
+  const raw = observation.trim();
+  if (raw.length === 0) {
+    throw new Error('Composio Gmail detail response was empty.');
+  }
+  let payload: Object;
+  try {
+    payload = JSON.parse(raw) as Object;
+  } catch (_error) {
+    throw new Error('Composio Gmail detail response was not valid JSON.');
+  }
+  if (Array.isArray(payload) || typeof payload !== 'object') {
+    throw new Error('Composio Gmail detail response was not a JSON object.');
+  }
+  const record = payload as Record<string, GmailJsonValue>;
+  aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + Object.keys(record).slice(0, 12).join(','));
+  if (record.truncated === true) {
+    throw new Error('Composio Gmail detail response was truncated before Gmail parsing.');
+  }
+  return gmailMailDetailFromPayload(payload, args);
 }
 
 async function getThreadFull(accessToken: string, threadId: string): Promise<GmailThread> {

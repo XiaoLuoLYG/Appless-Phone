@@ -97,7 +97,10 @@ const HTML_HOME_CSS: string = `
   --ride-blue-soft: rgba(53, 111, 163, 0.12);
   --mail-inbox-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='22 12 16 12 14 15 10 15 8 12 2 12'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E");
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
 body {
   margin: 0;
   min-height: 100dvh;
@@ -973,8 +976,9 @@ body[data-scene] {
 body[data-scene="gmail"] {
   --scene-accent: #c24636;
   --scene-accent-2: #476f9f;
-  --scene-bg: #f7f3ee;
+  --scene-bg: var(--paper);
   --scene-image: url('https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80');
+  background: var(--paper);
 }
 body[data-scene="luckin"] {
   --scene-accent: #466eb8;
@@ -2233,10 +2237,10 @@ body[data-scene="gmail"] .details {
   border-top-color: rgba(33, 27, 23, 0.06);
 }
 body[data-scene="gmail"] .mail-tech-details {
-  margin-top: 0;
-  border: 0;
-  border-top: 1px solid rgba(33, 27, 23, 0.06);
-  border-radius: 0;
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid rgba(33, 27, 23, 0.08);
+  border-radius: 10px;
   padding: 0;
   background: #ffffff;
 }
@@ -2265,6 +2269,9 @@ body[data-scene="gmail"] .mail-tech-details[open] > summary::after {
 body[data-scene="gmail"] .mail-tech-body {
   border-top: 1px solid rgba(33, 27, 23, 0.06);
   padding: 0 20px 14px;
+}
+body[data-scene="gmail"] .mail-tech-body .value {
+  font-weight: 400;
 }
 body[data-scene="gmail"] .block-top {
   padding: 18px 20px 18px;
@@ -2452,7 +2459,12 @@ body[data-scene="gmail"] .details {
   color: #ffffff;
   justify-content: center;
 }
+body.mail-reply-open {
+  overflow: hidden;
+}
 .mail-reply-overlay {
+  --kind-accent: var(--accent);
+  --kind-soft: var(--accent-soft);
   position: fixed;
   inset: 0;
   z-index: 120;
@@ -2461,7 +2473,20 @@ body[data-scene="gmail"] .details {
   justify-content: center;
   padding: 16px;
   background: transparent;
-  pointer-events: none;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+}
+.mail-reply-overlay[data-source-key="mail-gmail"] {
+  --kind-accent: var(--gmail);
+  --kind-soft: var(--gmail-soft);
+}
+.mail-reply-overlay[data-source-key="mail-qq"] {
+  --kind-accent: var(--qqmail);
+  --kind-soft: var(--qqmail-soft);
+}
+.mail-reply-overlay[data-source-key="composio-outlook"] {
+  --kind-accent: var(--outlook);
+  --kind-soft: var(--outlook-soft);
 }
 .mail-reply-dialog {
   width: min(432px, 100%);
@@ -2615,6 +2640,9 @@ body[data-scene] .expand-button {
   box-shadow: none;
   font-size: 11px;
 }
+body[data-scene="gmail"] .expand-button {
+  border-bottom: 0;
+}
 body[data-scene] .actions {
   gap: 7px;
 }
@@ -2647,14 +2675,14 @@ body[data-scene="gmail"] .mail-calendar-add.action.primary:disabled {
   box-shadow: none;
 }
 body[data-scene="gmail"] .mail-reply-launch .action.primary {
-  border: 0;
+  border: 1px solid var(--kind-accent);
   min-height: 42px;
   border-radius: 12px;
-  background: #262626;
-  color: #ffffff;
+  background: var(--kind-soft);
+  color: var(--kind-accent);
   font-size: 14px;
   font-weight: 680;
-  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
+  box-shadow: none;
 }
 body[data-scene="gmail"] .mail-reply-ai.action.secondary {
   min-width: 74px;
@@ -2676,11 +2704,11 @@ body[data-scene="gmail"] .mail-reply-footer .action.secondary {
   box-shadow: 0 2px 8px rgba(31, 41, 55, 0.04);
 }
 body[data-scene="gmail"] .mail-reply-footer .action.primary {
-  border: 0;
-  background: #262626;
-  color: #ffffff;
+  border: 1px solid var(--kind-accent);
+  background: var(--kind-soft);
+  color: var(--kind-accent);
   font-weight: 680;
-  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
+  box-shadow: none;
 }
 body[data-scene] .credential {
   border: 1px solid rgba(46, 111, 143, 0.22);
@@ -3449,6 +3477,7 @@ const HTML_HOME_JS: string = `
       activeMailReply.overlay.parentNode.removeChild(activeMailReply.overlay);
     }
     activeMailReply = null;
+    if (document.body) { document.body.classList.remove('mail-reply-open'); }
   }
   function submitMailReply(operation) {
     if (!activeMailReply || activeMailReply.busy) { return; }
@@ -3504,9 +3533,10 @@ const HTML_HOME_JS: string = `
     if (activeMailReply) { closeMailReply(); }
     var requestKey = text(detail.requestKey) || text(entry.detailAction.prompt);
     var overlay = add(document.body, 'div', 'mail-reply-overlay');
+    overlay.setAttribute('data-source-key', entry.card.getAttribute('data-source-key') || '');
     var dialog = add(overlay, 'section', 'mail-reply-dialog');
     dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'false');
+    dialog.setAttribute('aria-modal', 'true');
     var header = add(dialog, 'header', 'mail-reply-header');
     add(header, 'h2', 'mail-reply-title', '编辑回复');
     var aiButton = add(header, 'button', 'action secondary mail-reply-ai', 'AI回复');
@@ -3535,6 +3565,10 @@ const HTML_HOME_JS: string = `
       args: copiedMailReplyArgs(entry.replyAction, detail, requestKey),
       busy: false
     };
+    if (document.body) { document.body.classList.add('mail-reply-open'); }
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) { closeMailReply(); }
+    });
     editor.addEventListener('input', function () { mailReplyDrafts[requestKey] = editor.value; });
     closeButton.addEventListener('click', closeMailReply);
     aiButton.addEventListener('click', function () { requestMailReplyAiDraft(); });
