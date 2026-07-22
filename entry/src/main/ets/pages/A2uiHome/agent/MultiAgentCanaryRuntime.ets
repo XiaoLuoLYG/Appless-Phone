@@ -52,7 +52,7 @@ import {
   normalizeHotelSearchTaskInput
 } from './HotelLeaderPlanner';
 import { MultiAgentRuntime } from './MultiAgentRuntime';
-import { MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
+import { MIGRATED_TOOL_IDS, MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import {
   authorizeHotelDataTask,
@@ -219,16 +219,31 @@ function normalizeCanaryTaskInput(
 }
 
 function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
-  if (task.toolId !== 'calendar.events.search') {
+  if (task.toolId === 'hotel.search' || task.toolId === 'hotel.detail') {
     return authorizeHotelDataTask(task);
   }
-  const valid = task.allowedToolIds.length === 1 &&
-    task.allowedToolIds[0] === 'calendar.events.search' &&
-    task.outputSchema === 'calendarEvents' && task.required;
+  const definition = toolDefinitionForToolId(task.toolId);
+  let valid: boolean = definition !== null && definition.riskLevel === 'read' &&
+    definition.outputSchema === task.outputSchema && task.required &&
+    definition.backendPriority.indexOf('system_intent') < 0 &&
+    task.allowedToolIds.length > 0;
+  const allowed: Set<string> = new Set<string>();
+  for (let index = 0; valid && index < task.allowedToolIds.length; index++) {
+    const toolId: string = task.allowedToolIds[index];
+    const allowedDefinition = toolDefinitionForToolId(toolId);
+    if (allowed.has(toolId) || allowedDefinition === null ||
+      allowedDefinition.riskLevel !== 'read' ||
+      allowedDefinition.backendPriority.indexOf('system_intent') >= 0) {
+      valid = false;
+    } else {
+      allowed.add(toolId);
+    }
+  }
+  valid = valid && allowed.has(task.toolId);
   return {
     ok: valid,
-    code: valid ? '' : 'CALENDAR_DATA_TASK_DENIED',
-    message: valid ? '' : 'Calendar read task is outside the exact allowlist.'
+    code: valid ? '' : 'DATA_TASK_UNAUTHORIZED',
+    message: valid ? '' : 'Data task is outside the registered read allowlist.'
   };
 }
 
@@ -520,21 +535,15 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
     outputSchema: memory.outputSchema,
     actions: memory.actions.slice()
   });
+  const runtimeOwnedToolIds: string[] = [];
+  MIGRATED_TOOL_IDS.forEach((toolId: string): void => {
+    runtimeOwnedToolIds.push(toolId);
+  });
+  runtimeOwnedToolIds.push(MEMORY_ACTION_ID);
   return {
     tools,
     personas: leaderPersonaContext(previousPersonaId),
-    runtimeOwnedToolIds: [
-      'hotel.search',
-      'hotel.detail',
-      'hotel.navigate',
-      'hotel.booking.open',
-      'worldcup.open',
-      'maps.route.open',
-      'calendar.events.search',
-      'calendar.event.create',
-      'calendar.event.update',
-      MEMORY_ACTION_ID
-    ]
+    runtimeOwnedToolIds
   };
 }
 
@@ -547,6 +556,7 @@ export class MultiAgentCanaryRuntime {
   private readonly currentPageSnapshot: () => RegisteredPageSnapshot | null;
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
+  private surfaceGeneration: number = 0;
 
   constructor(options: MultiAgentCanaryOptions) {
     const conversationId: string = options.conversationId === undefined ?
@@ -558,6 +568,12 @@ export class MultiAgentCanaryRuntime {
     const followUpIds = new PreparedHotelFollowUpIds(ids);
     this.authority = new HotelSurfaceAuthority();
     const visibility = new HotelVisibility();
+    const onOwnedSurface = (surface: A2uiSurfaceState): void => {
+      this.surfaceGeneration++;
+      surface.runtimeOwner = 'multi_agent';
+      surface.runtimeGeneration = this.surfaceGeneration;
+      options.onSurface(surface);
+    };
     const lookup = new CanaryToolLookup();
     const catalog = new ActionCatalog(
       lookup,
@@ -569,7 +585,7 @@ export class MultiAgentCanaryRuntime {
       conversationId,
       options.downstreamWriter === undefined ?
         new IgnoreHotelSurfaceWriter() : options.downstreamWriter,
-      options.onSurface,
+      onOwnedSurface,
       this.authority,
       visibility,
       true
@@ -604,7 +620,7 @@ export class MultiAgentCanaryRuntime {
       actionExecutor: new CanaryRegisteredExecutor(
         aiphoneExecutor,
         options.onMemoryUpdate,
-        options.onSurface
+        onOwnedSurface
       ),
       virtualActionResolver: new MemoryIntentResolver(options.currentLocalDate),
       submitTimeoutMs: options.submitTimeoutMs,
@@ -643,6 +659,7 @@ export class MultiAgentCanaryRuntime {
     const document = snapshot.document;
     const generation = snapshot.generation;
     if (!Number.isSafeInteger(generation) || generation <= 0 ||
+      surface.runtimeOwner !== 'multi_agent' ||
       surface.surfaceId.trim().length === 0 || clicked.args === undefined ||
       document.surfaceId === undefined || document.surfaceId !== surface.surfaceId ||
       document.generatedAt.trim().length === 0 ||
@@ -708,5 +725,6 @@ export class MultiAgentCanaryRuntime {
     this.aiphoneExecutor.dispose();
     this.pageGeneration = 0;
     this.pageFingerprint = '';
+    this.surfaceGeneration = 0;
   }
 }

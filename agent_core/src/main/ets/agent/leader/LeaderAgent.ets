@@ -4,10 +4,13 @@ import {
   AgentMessageType,
   ConversationTurnMessage,
   CurrentSurfaceSummary,
+  LegacyHandoff,
   LegacyHandoffPayload,
   ObservationDigest,
+  RuntimeOwnershipDecision,
   TaskErrorPayload,
-  TurnResultPayload
+  TurnResultPayload,
+  ownershipForPlan
 } from '../message/AgentMessage';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
@@ -305,7 +308,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
-    if (!this.runtimeOwnsDecision(decision)) {
+    const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
+    if (ownership.owner === 'legacy') {
       if (executionStarted) {
         this.publishError(
           message,
@@ -313,35 +317,27 @@ export class LeaderAgent extends MessageDrivenAgent {
           'Leader cannot hand off after runtime execution has started'
         );
       } else {
-        this.publishHandoff(message, decision);
+        this.publishHandoff(message, decision, ownership);
       }
       this.finishTurn(state);
       return;
     }
     if (decision.roundAction === 'legacy_handoff') {
-      if (executionStarted) {
-        this.publishError(
-          message,
-          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
-          'Leader cannot hand off after runtime execution has started'
-        );
-      } else {
-        this.publishHandoff(message, decision);
-      }
+      this.publishError(
+        message,
+        'LEADER_HANDOFF_INVALID',
+        'Legacy handoff requires at least one unmigrated capability'
+      );
       this.finishTurn(state);
       return;
     }
     if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
       state.turnObservations.length === 0 && decision.requestedCapabilityIds.length > 0) {
-      if (executionStarted) {
-        this.publishError(
-          message,
-          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
-          'Leader cannot hand off after runtime execution has started'
-        );
-      } else {
-        this.publishHandoff(message, decision);
-      }
+      this.publishError(
+        message,
+        'LEADER_UNOBSERVED_TERMINAL',
+        'Capability-backed terminal decisions require a runtime observation'
+      );
       this.finishTurn(state);
       return;
     }
@@ -644,17 +640,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.requestedCapabilitiesMatchExecution(decision);
   }
 
-  private runtimeOwnsDecision(decision: LeaderDecision): boolean {
+  private decisionOwnership(decision: LeaderDecision): RuntimeOwnershipDecision {
     const ownedIds: string[] | undefined = this.planningContext.runtimeOwnedToolIds;
     if (ownedIds === undefined) {
-      return true;
+      return { owner: 'multi_agent', unmigratedToolIds: [] };
     }
-    for (let index = 0; index < decision.requestedCapabilityIds.length; index++) {
-      if (ownedIds.indexOf(decision.requestedCapabilityIds[index]) < 0) {
-        return false;
-      }
-    }
-    return true;
+    return ownershipForPlan(decision.requestedCapabilityIds, new Set<string>(ownedIds));
   }
 
   private validRequestedCapabilityIds(ids: string[]): boolean {
@@ -1094,9 +1085,16 @@ export class LeaderAgent extends MessageDrivenAgent {
     return hasError ? 'error' : 'empty';
   }
 
-  private publishHandoff(input: AgentMessage, decision: LeaderDecision): void {
+  private publishHandoff(
+    input: AgentMessage,
+    decision: LeaderDecision,
+    handoff: LegacyHandoff
+  ): void {
     const payload: LegacyHandoffPayload = {
-      reasonCode: decision.reasonCode,
+      owner: 'legacy',
+      reason: 'unmigrated_tool',
+      unmigratedToolIds: handoff.unmigratedToolIds.slice(),
+      reasonCode: 'unmigrated_tool',
       personaId: decision.personaId,
       skillId: decision.skillId
     };

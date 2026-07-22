@@ -537,17 +537,37 @@ export class MultiAgentRuntime {
       return;
     }
     const payload: LegacyHandoffPayload = message.payload as LegacyHandoffPayload;
-    if (!nonempty(payload.reasonCode) || !nonempty(payload.personaId) ||
-      typeof payload.skillId !== 'string') {
+    if (payload.owner !== 'legacy' || payload.reason !== 'unmigrated_tool' ||
+      payload.reasonCode !== 'unmigrated_tool' || !nonempty(payload.personaId) ||
+      typeof payload.skillId !== 'string' ||
+      !this.validUnmigratedToolIds(payload.unmigratedToolIds)) {
       return;
     }
     const outcome: MultiAgentHandoffOutcome = {
       kind: 'handoff',
+      owner: 'legacy',
+      reason: 'unmigrated_tool',
+      unmigratedToolIds: payload.unmigratedToolIds.slice(),
       reasonCode: payload.reasonCode,
       personaId: payload.personaId,
       skillId: payload.skillId
     };
     this.settleTurn(pending, outcome);
+  }
+
+  private validUnmigratedToolIds(ids: string[]): boolean {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return false;
+    }
+    const unique: Set<string> = new Set<string>();
+    for (let index = 0; index < ids.length; index++) {
+      const toolId: string = ids[index];
+      if (!nonempty(toolId) || unique.has(toolId)) {
+        return false;
+      }
+      unique.add(toolId);
+    }
+    return true;
   }
 
   private trySettleTurn(pending: PendingTurn): void {

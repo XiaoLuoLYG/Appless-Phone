@@ -178,6 +178,8 @@ function pageSurface(sourceToolId: string, clicked: A2uiAction, sequence: number
   surface.intent = sourceToolId;
   surface.status = 'ready';
   surface.sequence = sequence;
+  surface.runtimeOwner = 'multi_agent';
+  surface.runtimeGeneration = sequence;
   surface.components = [{
     id: 'root',
     component: 'SurfaceRoot',
@@ -1001,7 +1003,7 @@ export default function registeredPageActionMigrationTest() {
       expect(worldcup.kind).assertEqual('settled');
       expect(maps.kind).assertEqual('settled');
       expect(ambiguousMaps.kind).assertEqual('settled');
-      expect(social.kind).assertEqual('handoff');
+      expect(social.kind).assertEqual('settled');
       expect(invoker.calls.length).assertEqual(2);
       expect(invoker.calls[0].toolId).assertEqual('worldcup.open');
       expect(invoker.calls[0].pageActionId).assertEqual('worldcup.open');

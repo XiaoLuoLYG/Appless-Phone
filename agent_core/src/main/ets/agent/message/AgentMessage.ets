@@ -25,6 +25,44 @@ export interface AgentMessage {
   payload: Object;
 }
 
+export type RuntimeOwner = 'multi_agent' | 'legacy';
+
+export interface MultiAgentOwnership {
+  owner: 'multi_agent';
+  unmigratedToolIds: string[];
+}
+
+export interface LegacyHandoff {
+  owner: 'legacy';
+  unmigratedToolIds: string[];
+  reason: 'unmigrated_tool';
+}
+
+export type RuntimeOwnershipDecision = MultiAgentOwnership | LegacyHandoff;
+
+export function ownershipForPlan(
+  toolIds: string[],
+  migratedToolIds: Set<string>
+): RuntimeOwnershipDecision {
+  const missing: string[] = [];
+  const seen: Set<string> = new Set<string>();
+  for (let index = 0; index < toolIds.length; index++) {
+    const toolId = toolIds[index];
+    if (!migratedToolIds.has(toolId) && !seen.has(toolId)) {
+      missing.push(toolId);
+      seen.add(toolId);
+    }
+  }
+  if (missing.length === 0) {
+    return { owner: 'multi_agent', unmigratedToolIds: [] };
+  }
+  return {
+    owner: 'legacy',
+    unmigratedToolIds: missing,
+    reason: 'unmigrated_tool'
+  };
+}
+
 export type TurnConversationRole = 'user' | 'assistant';
 
 export interface ConversationTurnMessage {
@@ -65,7 +103,7 @@ export interface TurnResultPayload {
   message: string;
 }
 
-export interface LegacyHandoffPayload {
+export interface LegacyHandoffPayload extends LegacyHandoff {
   reasonCode: string;
   personaId: string;
   skillId: string;

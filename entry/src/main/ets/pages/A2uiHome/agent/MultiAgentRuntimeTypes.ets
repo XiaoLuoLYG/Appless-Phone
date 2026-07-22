@@ -3,6 +3,7 @@ import {
   ActionOfferResolver,
   ActionPlanCompiler,
   A2uiAction,
+  LegacyHandoff,
   DataTaskAuthorizer,
   DataTaskExecutor,
   DataTaskPlanner,
@@ -15,7 +16,12 @@ import {
   UiLayoutPlanner,
   UiSurfaceWriter,
   UiTaskRenderer,
-  VirtualActionIntentResolver
+  VirtualActionIntentResolver,
+  RuntimeOwner as CoreRuntimeOwner,
+  RuntimeOwnershipDecision,
+  ToolDefinition,
+  allToolDefinitions,
+  ownershipForPlan as decideOwnershipForPlan
 } from '@loop/agent-core';
 import {
   HotelActionIdFactory,
@@ -31,7 +37,20 @@ export interface MultiAgentSettledOutcome {
   message: string;
 }
 
-export interface MultiAgentHandoffOutcome {
+export const MIGRATED_TOOL_IDS: Set<string> = new Set<string>(
+  allToolDefinitions().map((definition: ToolDefinition): string => definition.toolId)
+);
+
+export function ownershipForPlan(
+  toolIds: string[],
+  migratedToolIds: Set<string> = MIGRATED_TOOL_IDS
+): RuntimeOwnershipDecision {
+  return decideOwnershipForPlan(toolIds, migratedToolIds);
+}
+
+export type RuntimeOwner = CoreRuntimeOwner;
+
+export interface MultiAgentHandoffOutcome extends LegacyHandoff {
   kind: 'handoff';
   reasonCode: string;
   personaId: string;

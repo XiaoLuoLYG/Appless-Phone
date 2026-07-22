@@ -698,7 +698,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(this.surface.components),
       dataModelJson: this.surface.dataModelJson,
       error: this.surface.error,
-      sequence: this.surface.sequence
+      sequence: this.surface.sequence,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
   }
 
@@ -717,7 +719,9 @@ export class A2uiSurfaceStore {
       components: cloneComponents(surface.components),
       dataModelJson: surface.dataModelJson,
       error: surface.error,
-      sequence: surface.sequence
+      sequence: surface.sequence,
+      runtimeOwner: surface.runtimeOwner,
+      runtimeGeneration: surface.runtimeGeneration
     };
     return this.getSurface();
   }
@@ -768,7 +772,9 @@ export class A2uiSurfaceStore {
           components: [],
           dataModelJson: JSON.stringify(nextDataModel),
           error: '',
-          sequence: this.surface.sequence + 1
+          sequence: this.surface.sequence + 1,
+          runtimeOwner: this.surface.runtimeOwner,
+          runtimeGeneration: this.surface.runtimeGeneration
         };
         return { ok: true, error: '' };
       }
@@ -822,7 +828,9 @@ export class A2uiSurfaceStore {
       ],
       dataModelJson: '{}',
       error: detail,
-      sequence: this.surface.sequence + 1
+      sequence: this.surface.sequence + 1,
+      runtimeOwner: this.surface.runtimeOwner,
+      runtimeGeneration: this.surface.runtimeGeneration
     };
     return this.getSurface();
   }

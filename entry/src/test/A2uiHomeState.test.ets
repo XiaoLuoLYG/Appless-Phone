@@ -7,6 +7,7 @@ import {
   isWelcomeSurface,
   isPromptInputEnabled,
   nextSendSpinnerRotation,
+  runtimeOwnerAllowsSurfaceAction,
   shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
@@ -14,7 +15,13 @@ import {
   voiceInputTextAfterRecognition
 } from '../main/ets/pages/A2uiHome/state/A2uiHomeState';
 
-function surface(sequence: number, status: string, surfaceId: string = 'surface_model'): A2uiSurfaceState {
+function surface(
+  sequence: number,
+  status: string,
+  surfaceId: string = 'surface_model',
+  runtimeOwner: 'multi_agent' | 'legacy' = 'multi_agent',
+  runtimeGeneration: number = 1
+): A2uiSurfaceState {
   return {
     surfaceId: surfaceId,
     rootId: 'root',
@@ -24,7 +31,9 @@ function surface(sequence: number, status: string, surfaceId: string = 'surface_
     components: [],
     dataModelJson: '{}',
     error: '',
-    sequence: sequence
+    sequence: sequence,
+    runtimeOwner,
+    runtimeGeneration
   };
 }
 
@@ -69,6 +78,28 @@ export default function a2uiHomeStateTest() {
     it('skips applying the same surface sequence twice', 0, () => {
       expect(shouldApplySurfaceUpdate(surface(12, 'ready'), surface(12, 'ready'))).assertFalse();
       expect(shouldApplySurfaceUpdate(surface(12, 'calling_tool'), surface(13, 'ready'))).assertTrue();
+    });
+
+    it('accepts only exact-owner actions and rejects stale or late owner changes', 0, () => {
+      const multi = surface(12, 'ready', 'surface_multi', 'multi_agent', 4);
+      const legacy = surface(12, 'ready', 'surface_legacy', 'legacy', 4);
+
+      expect(runtimeOwnerAllowsSurfaceAction(multi, 'multi_agent')).assertTrue();
+      expect(runtimeOwnerAllowsSurfaceAction(multi, 'legacy')).assertFalse();
+      expect(runtimeOwnerAllowsSurfaceAction(legacy, 'legacy')).assertTrue();
+      expect(runtimeOwnerAllowsSurfaceAction(legacy, 'multi_agent')).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(99, 'ready', 'surface_old', 'legacy', 3)
+      )).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(13, 'ready', 'surface_mutated', 'legacy', 4)
+      )).assertFalse();
+      expect(shouldApplySurfaceUpdate(
+        multi,
+        surface(1, 'ready', 'surface_next', 'legacy', 5)
+      )).assertTrue();
     });
 
     it('keeps send spinner rotation monotonic while loading', 0, () => {

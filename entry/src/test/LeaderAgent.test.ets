@@ -896,11 +896,22 @@ export default function leaderAgentTest() {
       const bus = new LinkedMessageBus();
       const decision = semanticDecision([]);
       decision.roundAction = 'legacy_handoff';
-      decision.reasonCode = 'outside_canary';
+      decision.requestedCapabilityIds = ['dynamic.search'];
+      decision.reasonCode = 'unmigrated_tool';
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'dynamic.search',
+        intent: 'dynamic.search',
+        riskLevel: 'read',
+        inputSchema: 'dynamicToolSearchQuery',
+        outputSchema: 'dynamicToolConnect',
+        actions: []
+      });
+      context.runtimeOwnedToolIds = ['hotel.search'];
       const leader = new LeaderAgent(
         bus,
         new RoundScriptedPlanner([decision]),
-        semanticPlanningContext()
+        context
       );
       const observer = bus.openReader();
       leader.start();
@@ -919,7 +930,10 @@ export default function leaderAgentTest() {
       expect(beforeMarker[0].type).assertEqual(AgentMessageType.INPUT_USER);
       expect(beforeMarker[1].type).assertEqual(AgentMessageType.TURN_HANDOFF);
       const handoff = beforeMarker[1].payload as LegacyHandoffPayload;
-      expect(handoff.reasonCode).assertEqual('outside_canary');
+      expect(handoff.owner).assertEqual('legacy');
+      expect(handoff.reason).assertEqual('unmigrated_tool');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('dynamic.search');
+      expect(handoff.reasonCode).assertEqual('unmigrated_tool');
       expect(handoff.personaId).assertEqual('travel_companion');
       expect(handoff.skillId).assertEqual('');
       leader.stop();

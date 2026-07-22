@@ -8,6 +8,7 @@ import {
   OpenAiA2uiModel,
   OpenAiCompatibleModel,
   PaymentAccount,
+  RuntimeOwner,
   StripeReceivingAccountCardData,
   UserInputPayload,
   defaultLocalModelSettings
@@ -149,6 +150,7 @@ import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
+  runtimeOwnerAllowsSurfaceAction,
   shouldApplySurfaceUpdate,
   shouldShowQueryPendingSurface,
   shouldShowWelcome,
@@ -606,6 +608,8 @@ struct Index {
   private hotelReturnSurface: A2uiSurfaceState | null = null;
   private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
   private hotelAgentRuntimeFingerprint: string = '';
+  private runtimeGeneration: number = 0;
+  private activeRuntimeOwner: RuntimeOwner = 'legacy';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
   private luckinOptionSwitchInFlight: boolean = false;
@@ -1253,7 +1257,7 @@ struct Index {
       opener: opener,
       onSurface: (surface: A2uiSurfaceState): void => {
         this.isAwaitingFirstSurface = false;
-        this.applySurface(surface);
+        this.applyRuntimeSurface(surface, 'multi_agent', this.runtimeGeneration);
       },
       onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
         this.applyPersonaMemoryUpdate(update);
@@ -1347,8 +1351,38 @@ struct Index {
       components: this.cloneSurfaceComponents(surface.components),
       dataModelJson: surface.dataModelJson,
       error: surface.error,
-      sequence: surface.sequence
+      sequence: surface.sequence,
+      runtimeOwner: surface.runtimeOwner,
+      runtimeGeneration: surface.runtimeGeneration
     };
+  }
+
+  private beginRuntimeTurn(owner: RuntimeOwner): number {
+    this.runtimeGeneration++;
+    this.activeRuntimeOwner = owner;
+    return this.runtimeGeneration;
+  }
+
+  private ownedSurface(
+    surface: A2uiSurfaceState,
+    owner: RuntimeOwner,
+    generation: number
+  ): A2uiSurfaceState {
+    const next = this.surfaceSnapshot(surface);
+    next.runtimeOwner = owner;
+    next.runtimeGeneration = generation;
+    return next;
+  }
+
+  private applyRuntimeSurface(
+    surface: A2uiSurfaceState,
+    owner: RuntimeOwner,
+    generation: number
+  ): void {
+    if (owner !== this.activeRuntimeOwner || generation !== this.runtimeGeneration) {
+      return;
+    }
+    this.applySurface(this.ownedSurface(surface, owner, generation));
   }
 
   private parsedDataModel(): A2uiRuntimeDataModel | null {
@@ -1382,6 +1416,9 @@ struct Index {
     return [
       this.currentSurface.surfaceId,
       this.currentSurface.sequence.toString(),
+      this.currentSurface.runtimeOwner === undefined ? '' : this.currentSurface.runtimeOwner,
+      this.currentSurface.runtimeGeneration === undefined ? '' :
+        this.currentSurface.runtimeGeneration.toString(),
       this.surfaceRenderTick.toString(),
       this.currentSurface.status,
       this.isBusy ? 'busy' : 'idle',
@@ -1464,10 +1501,19 @@ struct Index {
   }
 
   private applySurface(surface: A2uiSurfaceState): void {
-    if (!shouldApplySurfaceUpdate(this.currentSurface, surface)) {
+    const next = this.surfaceSnapshot(surface);
+    if (next.runtimeOwner === undefined) {
+      next.runtimeOwner = this.activeRuntimeOwner;
+    }
+    if (next.runtimeGeneration === undefined) {
+      next.runtimeGeneration = this.runtimeGeneration;
+    }
+    if (next.runtimeOwner !== this.activeRuntimeOwner ||
+      next.runtimeGeneration !== this.runtimeGeneration ||
+      !shouldApplySurfaceUpdate(this.currentSurface, next)) {
       return;
     }
-    this.currentSurface = this.surfaceSnapshot(surface);
+    this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
@@ -1480,7 +1526,18 @@ struct Index {
   }
 
   private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
-    this.currentSurface = this.surfaceSnapshot(surface);
+    const next = this.surfaceSnapshot(surface);
+    if (next.runtimeOwner === undefined) {
+      next.runtimeOwner = this.activeRuntimeOwner;
+    }
+    if (next.runtimeGeneration === undefined) {
+      next.runtimeGeneration = this.runtimeGeneration;
+    }
+    if (next.runtimeOwner !== this.activeRuntimeOwner ||
+      next.runtimeGeneration !== this.runtimeGeneration) {
+      return;
+    }
+    this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
@@ -2026,6 +2083,9 @@ struct Index {
       }));
       return;
     }
+    const turnGeneration: number = this.beginRuntimeTurn(
+      actionId.length === 0 ? 'multi_agent' : 'legacy'
+    );
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.appendMessage('user', visibleText);
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + modelPrompt.length.toString() +
@@ -2068,7 +2128,9 @@ struct Index {
           return;
         }
         aiLogInfo('[AIPhone][MultiAgentHandoff] reason=' + canaryOutcome.reasonCode +
-          ' personaId=' + canaryOutcome.personaId);
+          ' personaId=' + canaryOutcome.personaId +
+          ' unmigratedToolIds=' + canaryOutcome.unmigratedToolIds.join(','));
+        this.activeRuntimeOwner = 'legacy';
       }
       const result: A2uiCallResult = await callLocalModel(
         this.getSettings(),
@@ -2076,7 +2138,7 @@ struct Index {
         this.recentMessages(),
         (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
           this.isAwaitingFirstSurface = false;
-          this.applySurface(surface);
+          this.applyRuntimeSurface(surface, 'legacy', turnGeneration);
           const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
           this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
             ok: true,
@@ -2094,7 +2156,7 @@ struct Index {
         actionArgs
       );
       this.isAwaitingFirstSurface = false;
-      this.applySurface(result.surface);
+      this.applyRuntimeSurface(result.surface, 'legacy', turnGeneration);
       aiLogInfo('[AIPhone][A2uiHomeModelResult] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
         ' rawChars=' + result.raw.length.toString() +
@@ -2120,7 +2182,12 @@ struct Index {
           } else if (fallbackRequest.hasTool) {
             aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
               ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
-            await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
+            await this.callToolById(
+              fallbackRequest.toolId,
+              fallbackRequest.prompt,
+              fallbackRequest.actionId,
+              fallbackRequest.args
+            );
           } else {
             aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
           }
@@ -2132,7 +2199,12 @@ struct Index {
         if (fallbackRequest.hasTool) {
           aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
             ' reason=model_failed promptChars=' + fallbackRequest.prompt.length.toString());
-          await this.callToolById(fallbackRequest.toolId, fallbackRequest.prompt, fallbackRequest.actionId, fallbackRequest.args);
+          await this.callToolById(
+            fallbackRequest.toolId,
+            fallbackRequest.prompt,
+            fallbackRequest.actionId,
+            fallbackRequest.args
+          );
         } else {
           this.appendMessage('assistant', 'A2UI 生成失败：' + result.error);
         }
@@ -3952,6 +4024,13 @@ struct Index {
   }
 
   private async runRegisteredPageAction(action: A2uiAction): Promise<boolean> {
+    const snapshot = this.registeredPageSnapshotStore.current();
+    if (this.activeRuntimeOwner !== 'multi_agent' ||
+      !runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent') ||
+      snapshot === null ||
+      !runtimeOwnerAllowsSurfaceAction(snapshot.surface, 'multi_agent')) {
+      return false;
+    }
     const runtime = this.canaryRuntime();
     this.isBusy = true;
     try {
@@ -3974,7 +4053,8 @@ struct Index {
     action: A2uiAction,
     document: HtmlHomeDocument
   ): Promise<void> {
-    if (this.multiAgentRuntime !== null &&
+    if (this.multiAgentRuntime !== null && this.activeRuntimeOwner === 'multi_agent' &&
+      runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent') &&
       (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
       const runtime = this.multiAgentRuntime;
       const context = runtime.currentActionContext();
@@ -3995,6 +4075,18 @@ struct Index {
         }));
       } finally {
         this.isBusy = false;
+      }
+      return;
+    }
+    const kind = action.kind.length > 0 ? action.kind : 'prompt';
+    if (this.activeRuntimeOwner === 'multi_agent' ||
+      runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent')) {
+      if (kind === 'client') {
+        await this.handleClientAction(action);
+      } else if (kind === 'input') {
+        this.focusEditQuery(action.id);
+      } else {
+        this.logHtmlHomeActionError(action, 'runtime_owner_mismatch');
       }
       return;
     }
@@ -4027,7 +4119,6 @@ struct Index {
       );
       return;
     }
-    const kind = action.kind.length > 0 ? action.kind : 'prompt';
     if (kind === 'client') {
       await this.handleClientAction(action);
       return;
@@ -4084,7 +4175,8 @@ struct Index {
       args,
       (result: A2uiCallResult): void => {
         observation.result = result;
-      }
+      },
+      'multi_agent'
     );
     const observed = observation.result;
     return {
@@ -4100,8 +4192,14 @@ struct Index {
     prompt: string,
     actionId: string,
     args: Object | null = null,
-    resultObserver?: (result: A2uiCallResult) => void
+    resultObserver?: (result: A2uiCallResult) => void,
+    runtimeOwner: RuntimeOwner = 'legacy'
   ): Promise<boolean> {
+    const toolGeneration: number = runtimeOwner === 'legacy' ?
+      this.beginRuntimeTurn('legacy') : this.runtimeGeneration;
+    if (runtimeOwner !== this.activeRuntimeOwner) {
+      return false;
+    }
     if (!isRegisteredToolId(toolId)) {
       const message = '模型请求了未注册工具：' + toolId;
       aiLogError('[AIPhone][A2uiHomeToolRequestInvalid] toolId=' + toolId);
@@ -4177,7 +4275,7 @@ struct Index {
           return;
         }
         const nextSurface = copyPersonaData(personaSourceSurface, surface);
-        this.applySurface(nextSurface);
+        this.applyRuntimeSurface(nextSurface, runtimeOwner, toolGeneration);
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'checking',
@@ -4190,6 +4288,12 @@ struct Index {
       null,
       callArgs
     );
+    if (runtimeOwner !== this.activeRuntimeOwner || toolGeneration !== this.runtimeGeneration) {
+      if (inlineLuckinSwitch) {
+        this.finishLuckinOptionSwitch(false);
+      }
+      return false;
+    }
 
     aiLogInfo('[AIPhone][A2uiHomeToolResult] ok=' + (result.ok ? 'true' : 'false') +
       ' errorChars=' + result.error.length.toString() +
@@ -4198,7 +4302,11 @@ struct Index {
     if (resultObserver !== undefined) {
       resultObserver(result);
     }
-    const resultSurface = copyPersonaData(personaSourceSurface, result.surface);
+    const resultSurface = this.ownedSurface(
+      copyPersonaData(personaSourceSurface, result.surface),
+      runtimeOwner,
+      toolGeneration
+    );
     if (inlineLuckinSwitch) {
       if (result.ok && this.applyLuckinInlineConfirmPatch(resultSurface)) {
         this.finishLuckinOptionSwitch(false);
@@ -4215,7 +4323,7 @@ struct Index {
       this.finishLuckinOptionSwitch(false);
       aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchFallback] ok=' + (result.ok ? 'true' : 'false'));
     }
-    this.applySurface(resultSurface);
+    this.applyRuntimeSurface(resultSurface, runtimeOwner, toolGeneration);
     if (toolId === 'payment.account.setup') {
       await this.saveStripeReceivingProfile(resultSurface);
     }

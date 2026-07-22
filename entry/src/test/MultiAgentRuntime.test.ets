@@ -22,6 +22,7 @@ import {
   InputUserPayload,
   LeaderDecision,
   LeaderDecisionDataTask,
+  LegacyHandoff,
   LeaderPlanner,
   LeaderPlanningContext,
   LinkedMessageBus,
@@ -37,13 +38,16 @@ import {
   UiSurfaceWriter,
   UiTaskRenderer,
   VirtualActionIntent,
-  VirtualActionIntentResolver
+  VirtualActionIntentResolver,
+  allToolDefinitions
 } from '@loop/agent-core';
 import { MultiAgentRuntime } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
 import {
   MultiAgentHandoffOutcome,
+  MIGRATED_TOOL_IDS,
   MultiAgentRuntimeOptions,
-  MultiAgentSettledOutcome
+  MultiAgentSettledOutcome,
+  ownershipForPlan
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 
 class TestGate {
@@ -112,6 +116,29 @@ class HandoffPlanner implements LeaderPlanner {
     return {
       personaId: 'travel_companion',
       skillId: '',
+      requestedCapabilityIds: ['dynamic.search'],
+      roundAction: 'legacy_handoff',
+      dataTasks: [],
+      uiIntent: {
+        purpose: 'handoff',
+        preferredDensity: 'comfortable',
+        requiredSections: []
+      },
+      reasonCode: 'unmigrated_tool'
+    };
+  }
+}
+
+class GenericHandoffPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    return {
+      personaId: 'travel_companion',
+      skillId: '',
       requestedCapabilityIds: [],
       roundAction: 'legacy_handoff',
       dataTasks: [],
@@ -120,7 +147,44 @@ class HandoffPlanner implements LeaderPlanner {
         preferredDensity: 'comfortable',
         requiredSections: []
       },
-      reasonCode: 'outside_canary'
+      reasonCode: 'model_failed'
+    };
+  }
+}
+
+class MixedOwnershipPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    const task: LeaderDecisionDataTask = {
+      localId: 'hotel-search',
+      goal: 'Search real hotels',
+      allowedToolIds: ['hotel.search'],
+      toolId: 'hotel.search',
+      input: JSON.parse(
+        '{"city":"Shenzhen","checkIn":"2026-07-21","checkOut":"2026-07-22","guests":2}'
+      ) as Object,
+      required: true
+    };
+    return {
+      personaId: 'travel_companion',
+      skillId: '',
+      requestedCapabilityIds: ['hotel.search', 'legacy.action'],
+      roundAction: 'execute',
+      dataTasks: [task],
+      uiIntent: {
+        purpose: 'mixed ownership',
+        preferredDensity: 'comfortable',
+        requiredSections: ['hotels']
+      },
+      actionIntent: {
+        goal: 'Run an unmigrated action',
+        allowedActionIds: ['legacy.action']
+      },
+      reasonCode: 'mixed_plan'
     };
   }
 }
@@ -393,7 +457,7 @@ function planningContext(): LeaderPlanningContext {
         riskLevel: 'read',
         inputSchema: 'hotelSearchRequest',
         outputSchema: 'hotelSearchResults',
-        actions: []
+        actions: ['legacy.action']
       },
       {
         toolId: 'memory.update',
@@ -402,6 +466,14 @@ function planningContext(): LeaderPlanningContext {
         inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
+      },
+      {
+        toolId: 'dynamic.search',
+        intent: 'dynamic.search',
+        riskLevel: 'read',
+        inputSchema: 'dynamicToolSearchQuery',
+        outputSchema: 'dynamicToolConnect',
+        actions: []
       }
     ],
     personas: [{
@@ -411,8 +483,18 @@ function planningContext(): LeaderPlanningContext {
       memory: '常用出发地：北京。',
       previous: true,
       activeSkills: []
-    }]
+    }],
+    runtimeOwnedToolIds: migratedRuntimeIds()
   };
+}
+
+function migratedRuntimeIds(): string[] {
+  const ids: string[] = [];
+  MIGRATED_TOOL_IDS.forEach((toolId: string): void => {
+    ids.push(toolId);
+  });
+  ids.push('memory.update');
+  return ids;
 }
 
 async function noOffers(
@@ -520,6 +602,26 @@ function publishTurnTerminal(
 
 export default function multiAgentRuntimeTest() {
   describe('multiAgentRuntime', () => {
+    it('derives all 44 fixed owners from the verified registry and types unknown handoff exactly', 0, () => {
+      const registryIds = allToolDefinitions().map(
+        (definition: ToolDefinition): string => definition.toolId
+      );
+      const known = ownershipForPlan(registryIds, MIGRATED_TOOL_IDS);
+      const unknown = ownershipForPlan(
+        ['travel.search', 'unknown.tool', 'unknown.tool'],
+        MIGRATED_TOOL_IDS
+      );
+
+      expect(MIGRATED_TOOL_IDS.size).assertEqual(44);
+      expect(new Set<string>(registryIds).size).assertEqual(44);
+      expect(known.owner).assertEqual('multi_agent');
+      expect(known.unmigratedToolIds.length).assertEqual(0);
+      const handoff = unknown as LegacyHandoff;
+      expect(handoff.owner).assertEqual('legacy');
+      expect(handoff.reason).assertEqual('unmigrated_tool');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.tool');
+    });
+
     it('opens exactly four Agent readers and one observer before bounded INPUT.USER', 0, async () => {
       const bus = new CountingBus();
       const planner = new AnswerPlanner();
@@ -767,7 +869,10 @@ export default function multiAgentRuntimeTest() {
       const handoff = raw as MultiAgentHandoffOutcome;
 
       expect(handoff.kind).assertEqual('handoff');
-      expect(handoff.reasonCode).assertEqual('outside_canary');
+      expect(handoff.owner).assertEqual('legacy');
+      expect(handoff.reason).assertEqual('unmigrated_tool');
+      expect(handoff.reasonCode).assertEqual('unmigrated_tool');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('dynamic.search');
       expect(handoff.personaId).assertEqual('travel_companion');
       expect(bus.published.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.TASK_CREATE_DATA ||
@@ -775,6 +880,72 @@ export default function multiAgentRuntimeTest() {
           message.type === AgentMessageType.ACTION_RUN
       ).length).assertEqual(0);
       runtime.dispose();
+    });
+
+    it('hands a mixed plan wholly to legacy before publishing its known Data task', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new SuccessDataExecutor();
+      const options = runtimeOptions(bus, new MixedOwnershipPlanner(), new ControlledWriter());
+      options.dataExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+
+      const handoff = await runtime.submit('mixed plan', { text: '' }) as MultiAgentHandoffOutcome;
+
+      expect(handoff.kind).assertEqual('handoff');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('legacy.action');
+      expect(executor.calls).assertEqual(0);
+      expect(bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA ||
+          message.type === AgentMessageType.TASK_CREATE_UI ||
+          message.type === AgentMessageType.ACTION_PLAN_REQUEST ||
+          message.type === AgentMessageType.ACTION_RUN
+      ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('rejects a generic planner handoff before publication instead of invoking legacy', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new GenericHandoffPlanner(),
+        new ControlledWriter()
+      ));
+
+      const outcome = await runtime.submit('generic failure', { text: '' }) as MultiAgentSettledOutcome;
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(outcome.status).assertEqual('error');
+      expect(bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_HANDOFF
+      ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('isolates concurrent ownership decisions by runtime conversation', 0, async () => {
+      const migratedBus = new CountingBus();
+      const legacyBus = new CountingBus();
+      const migrated = new MultiAgentRuntime(runtimeOptions(
+        migratedBus,
+        new AnswerPlanner(),
+        new ControlledWriter()
+      ));
+      const legacy = new MultiAgentRuntime(runtimeOptions(
+        legacyBus,
+        new HandoffPlanner(),
+        new ControlledWriter()
+      ));
+
+      const outcomes = await Promise.all([
+        migrated.submit('你好', { text: '' }),
+        legacy.submit('dynamic tool', { text: '' })
+      ]);
+
+      expect(outcomes[0].kind).assertEqual('settled');
+      expect(outcomes[1].kind).assertEqual('handoff');
+      expect((outcomes[1] as MultiAgentHandoffOutcome).unmigratedToolIds[0])
+        .assertEqual('dynamic.search');
+      migrated.dispose();
+      legacy.dispose();
     });
 
     it('ignores wrong correlation and accepts only the exact terminal result', 0, async () => {

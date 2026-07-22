@@ -70,6 +70,20 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
+const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
+  '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
+  '"input":{"query":"北京到上海"},"required":true},{"localId":"train",' +
+  '"goal":"search trains","allowedToolIds":["train.search"],"toolId":"train.search",' +
+  '"input":{"query":"北京到上海"},"required":true}],' +
+  '"uiIntent":{"purpose":"travel.compare","preferredDensity":"comfortable",' +
+  '"requiredSections":["travel","train"]},"reasonCode":"two_tool_compare"}';
+const TWO_TOOL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"answer",' +
+  '"dataTasks":[],"uiIntent":{"purpose":"travel.compare",' +
+  '"preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"出行结果已就绪","reasonCode":"two_tool_ready"}';
 const WORLDCUP_ACTION_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
   '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
   '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
@@ -224,6 +238,28 @@ class CanaryHotelExecutor implements DataTaskExecutor {
       throw new Error('Invalid canary hotel search task.');
     }
     return hotelSearchDataResult(searchResult(parsed.value), []);
+  }
+}
+
+class TwoToolExecutor implements DataTaskExecutor {
+  readonly calls: string[] = [];
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls.push(task.toolId);
+    const data: Object = task.toolId === 'travel.search' ? JSON.parse(
+      '{"title":"出行方案","body":"真实出行结果","summary":"1 result",' +
+        '"options":[],"rows":[]}'
+    ) as Object : JSON.parse(
+      '{"title":"高铁方案","body":"真实高铁结果","summary":"1 result","trains":[]}'
+    ) as Object;
+    return {
+      toolId: task.toolId,
+      outputSchema: task.outputSchema,
+      status: 'success',
+      sources: [],
+      data,
+      warnings: []
+    };
   }
 }
 
@@ -484,6 +520,8 @@ function pageSurface(
   surface.intent = sourceToolId;
   surface.status = 'ready';
   surface.sequence = sequence;
+  surface.runtimeOwner = 'multi_agent';
+  surface.runtimeGeneration = sequence;
   surface.components = [{
     id: 'root',
     component: 'SurfaceRoot',
@@ -513,7 +551,31 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('gates initial direct terminals from exact requested capabilities', 0, async () => {
+    it('owns one independent two-tool turn without legacy handoff', 0, async () => {
+      const executor = new TwoToolExecutor();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([TWO_TOOL_DECISION, TWO_TOOL_DONE_DECISION]),
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit('比较北京到上海的出行和高铁', {
+        text: ''
+      }) as MultiAgentSettledOutcome;
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(outcome.status).assertEqual('success');
+      expect(executor.calls.sort().join(',')).assertEqual('train.search,travel.search');
+      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('keeps known direct-answer planner errors inside multi-agent and hands off only unmigrated IDs', 0, async () => {
       const model = new QueueModel([
         ANSWER_DECISION,
         MAIL_DIRECT_ANSWER,
@@ -540,10 +602,13 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(greeting.kind).assertEqual('settled');
       expect((greeting as MultiAgentSettledOutcome).message).assertEqual('你好');
-      expect(mail.kind).assertEqual('handoff');
+      expect(mail.kind).assertEqual('settled');
+      expect((mail as MultiAgentSettledOutcome).status).assertEqual('error');
       expect(weather.kind).assertEqual('handoff');
-      expect(misleadingHotel.kind).assertEqual('handoff');
-      expect(unobservedHotel.kind).assertEqual('handoff');
+      expect(misleadingHotel.kind).assertEqual('settled');
+      expect((misleadingHotel as MultiAgentSettledOutcome).status).assertEqual('error');
+      expect(unobservedHotel.kind).assertEqual('settled');
+      expect((unobservedHotel as MultiAgentSettledOutcome).status).assertEqual('error');
       expect(executor.calls.length).assertEqual(0);
       expect(bus.messages.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.TASK_CREATE_DATA ||
@@ -554,12 +619,8 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('hands unmigrated and unavailable real-planner choices to legacy before execution', 0, async () => {
-      const model = new QueueModel([
-        MAIL_DECISION,
-        WEATHER_HANDOFF_DECISION,
-        MAIL_DECISION
-      ]);
+    it('hands an unmigrated real-planner choice to legacy before execution', 0, async () => {
+      const model = new QueueModel([WEATHER_HANDOFF_DECISION]);
       const executor = new CanaryHotelExecutor();
       const bus = new TrackingBus();
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
@@ -571,13 +632,9 @@ export default function multiAgentCanaryRuntimeTest() {
         bus
       ));
 
-      const mail = await runtime.submit('查一下酒店确认邮件', { text: '' });
       const weather = await runtime.submit('查询北京天气', { text: '' });
-      const misleadingHotel = await runtime.submit('酒店两个字不要误导，查我的邮件', { text: '' });
 
-      expect(mail.kind).assertEqual('handoff');
       expect(weather.kind).assertEqual('handoff');
-      expect(misleadingHotel.kind).assertEqual('handoff');
       expect(executor.calls.length).assertEqual(0);
       expect(bus.messages.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.TASK_CREATE_DATA ||
@@ -593,7 +650,7 @@ export default function multiAgentCanaryRuntimeTest() {
     });
 
     it('fails inside the canary instead of handing off after owned provider execution', 0, async () => {
-      const model = new QueueModel([HOTEL_DECISION, MAIL_DECISION]);
+      const model = new QueueModel([HOTEL_DECISION, WEATHER_HANDOFF_DECISION]);
       const executor = new CanaryHotelExecutor();
       const bus = new TrackingBus();
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
@@ -1053,6 +1110,54 @@ export default function multiAgentCanaryRuntimeTest() {
         message.type === AgentMessageType.ACTION_RESULT &&
           JSON.stringify(message.payload).indexOf('"status":"paused"') >= 0
       ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('rejects a legacy-stamped surface action and accepts the exact multi-agent owner', 0, async () => {
+      const calls: RecordedPageAction[] = [];
+      const action: A2uiAction = {
+        id: 'mail.draft.create',
+        label: '创建草稿',
+        prompt: '创建草稿',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse(
+          '{"provider":"qq","to":"a@example.com","subject":"QA","body":"draft"}'
+        ) as Object
+      };
+      const surface = pageSurface('mail.search', action, 30);
+      const document = createHtmlHomeDocument({
+        surface,
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      let current: RegisteredPageSnapshot = { surface, document, generation: 30 };
+      const options = canaryOptions(
+        new QueueModel([]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return { status: 'success', output: JSON.parse('{"status":"drafted"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      surface.runtimeOwner = 'legacy';
+      current = { surface, document, generation: 30 };
+      expect(await runtime.runPageAction(action)).assertFalse();
+      surface.runtimeOwner = 'multi_agent';
+      current = { surface, document, generation: 31 };
+      expect(await runtime.runPageAction(action)).assertTrue();
+      expect(calls.length).assertEqual(1);
       runtime.dispose();
     });
 

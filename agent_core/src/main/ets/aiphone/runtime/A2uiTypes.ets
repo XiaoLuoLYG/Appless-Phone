@@ -336,6 +336,8 @@ export interface A2uiSurfaceState {
   dataModelJson: string;
   error: string;
   sequence: number;
+  runtimeOwner?: 'multi_agent' | 'legacy';
+  runtimeGeneration?: number;
 }
 
 export interface A2uiApplyResult {
