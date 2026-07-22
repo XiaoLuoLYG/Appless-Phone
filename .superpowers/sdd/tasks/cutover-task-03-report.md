@@ -8,6 +8,7 @@ Implementation commits:
 
 - `4f8007aab3a78d4f8ac6f5ca42282701605e4b40` — initial lifecycle coverage
 - `f9c994ea` — reviewer-requested correlation hardening
+- `4770ec1af8c8e8f2d6daa068a79829f2ab099424` — second-review false-positive closure
 
 ## Corrective scope
 
@@ -18,6 +19,13 @@ The first independent review rejected the initial report with four Important fin
 - Lifecycle parsing stops at the first matching `TurnResult`, reports same-turn late markers, requires create-before-terminal ordering, exact tool multiplicity, known task terminals, prior-round settlement, explicit dependent-task metadata, one UI dependency owner, and equality between the final UI and terminal surface. Unknown/input `TaskError` is terminally invalid.
 - Direct actions require the exact ordered current conversation/turn/surface/source/action run-result chain. Calendar source is derived from the final visible UI's unique Data dependency rather than hard-coded. Hotel detail, booking, and navigation use their exact search/detail visible-surface contexts. Virtual actions require plan-request before result and reject a fabricated `ActionRun`.
 - C20 no longer accepts a generic NETSTACK HTTP 200. It requires ordered RollingGo request and real response/source markers before the hotel document, ready state, final UI result, and `TurnResult`. The provider chain is correlated to the lifecycle's final surface, and the actual smoke verdict consumes the combined result.
+
+The second independent review found four remaining executable false positives. `4770ec1a` closes only those parser/caller/test gaps, without adding product state:
+
+- F12 now supplies its exact Maps search-to-detail predecessor, `/places/0/placeId` source path, and `/placeId` target to both capture and analysis. The safe `--full-regression --list-cases` manifest exposes the same dependency contract for a no-device regression assertion.
+- A terminal UI `state=result` must occur after every declared Data dependency terminal; an early UI result can no longer pass because its Data result appears later in the turn.
+- A virtual action plan is validated in virtual mode against its own conversation, turn, action ID, request, and result. An unrelated direct action run/result in the same turn cannot substitute for a missing virtual result.
+- C20 compares the raw provider surface directly with the lifecycle surface. The helper no longer rewrites a mismatched provider surface into the lifecycle value.
 
 ## Production boundary
 
@@ -32,9 +40,11 @@ Reviewer-derived RED cases covered:
 - generic NETSTACK-only hotel evidence, reversed RollingGo response/request order, and mismatched/uncombined provider chains;
 - raw email/phone/newline/long IDs, unsafe registry IDs, raw prompt/provider/entity values, true Maps entity provenance, and no-provenance fail-closed behavior.
 
+Second-review RED cases additionally cover missing F12 dependency options in the executable case manifest, UI result before its Data dependency terminal, a virtual plan without a result plus an unrelated direct action result, and a stale raw C20 provider surface.
+
 ## Final host gates
 
-- Focused Node lifecycle/hotel suites: PASS, 38/38.
+- Focused Node lifecycle/hotel suites: PASS, 38/38 in 0.3 seconds.
 - Changed-script syntax checks: PASS.
 - Case lists: PASS, exactly C01-C20 and C01-C20 plus F01-F16; M01 remains list-only behind both safe variables and X02 remains excluded.
 - Backend verifier: PASS, 245 checks including HAR build.
@@ -43,10 +53,10 @@ Reviewer-derived RED cases covered:
 - `git diff --check`: PASS.
 - Generated `agent_core/BuildProfile.ets`: restored to `debug` and absent from the final diff.
 
-Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; acceptance uses the authoritative `test_result.txt`, which has zero failures and errors.
+Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:29:24+0800` has zero failures and errors.
 
 ## Matrix and scope
 
 The external scenario matrix remains at `/Users/luoyige/.codex/skills/appless-device-regression/references/scenario-matrix.md`; the coverage audit confirms no missing product/matrix/docs entries. It is intentionally outside this repository.
 
-No device command, HDC interaction, provider call, Gmail send, installation, push, merge, branch cleanup, or worktree cleanup was performed. Device/provider execution remains a separate cutover acceptance gate.
+While adding the F12 caller assertion, an initial test import accidentally executed the smoke CLI's top-level main path. The exact Node PID was terminated, its partial output was discarded, and the test was changed to use the existing list-only subprocess; the same suite then completed in 0.3 seconds. This accidental invocation is not device or provider acceptance evidence. No Gmail send, installation, push, merge, branch cleanup, or worktree cleanup was performed. Device/provider execution remains a separate cutover acceptance gate.
