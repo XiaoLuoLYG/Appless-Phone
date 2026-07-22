@@ -41,6 +41,14 @@ const ANSWER_WITHOUT_ANSWER_DECISION: string = '{"personaId":"travel_companion",
   '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
   '"reasonCode":"greeting"}';
+const LIVE_ANSWER_WITHOUT_REASON_CODE: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"LIVE_PRIVATE_MARKER"}';
+const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+  0,
+  LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+) + ',"reasonCode":"greeting"}';
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -138,7 +146,7 @@ function planningContext(): LeaderPlanningContext {
 }
 
 async function fails(output: string): Promise<boolean> {
-  const model: QueueLocalModel = new QueueLocalModel([output]);
+  const model: QueueLocalModel = new QueueLocalModel([output, output]);
   const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
   const input: InputUserPayload = { text: '查航班和高铁' };
   try {
@@ -208,6 +216,65 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('originQuery, place, placeType, countryCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Do not invent missing destination, date, year, guest') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
+    });
+
+    it('repairs one completed strict-schema rejection once without exposing its output', 0, async () => {
+      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
+      const planner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = { text: '你好' };
+
+      const decision = await planner.plan(inputMessage(), input, planningContext(), 1);
+
+      expect(decision.reasonCode).assertEqual('greeting');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf(model.prompts[0])).assertEqual(0);
+      expect(model.prompts[1].indexOf('previous decision rejected by strict schema') >= 0).assertTrue();
+      expect(model.prompts[1].indexOf('LIVE_PRIVATE_MARKER')).assertEqual(-1);
+      expect(model.systemPrompts[1]).assertEqual(model.systemPrompts[0]);
+      expect(model.prompts[1].indexOf('Round: 1') >= 0).assertTrue();
+    });
+
+    it('stops after one failed strict-schema repair', 0, async () => {
+      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const planner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = { text: '你好' };
+      let failed: boolean = false;
+
+      try {
+        await planner.plan(inputMessage(), input, planningContext(), 1);
+      } catch (_error) {
+        failed = true;
+      }
+
+      expect(failed).assertTrue();
+      expect(model.prompts.length).assertEqual(2);
+    });
+
+    it('does not repair a first model transport failure', 0, async () => {
+      const model = new QueueLocalModel([]);
+      const planner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = { text: '你好' };
+      let failed: boolean = false;
+
+      try {
+        await planner.plan(inputMessage(), input, planningContext(), 1);
+      } catch (_error) {
+        failed = true;
+      }
+
+      expect(failed).assertTrue();
+      expect(model.prompts.length).assertEqual(1);
+    });
+
+    it('uses one model call when the first decision is valid', 0, async () => {
+      const model = new QueueLocalModel([VALID_ANSWER_DECISION]);
+      const planner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = { text: '你好' };
+
+      const decision = await planner.plan(inputMessage(), input, planningContext(), 1);
+
+      expect(decision.reasonCode).assertEqual('greeting');
+      expect(model.prompts.length).assertEqual(1);
     });
 
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {

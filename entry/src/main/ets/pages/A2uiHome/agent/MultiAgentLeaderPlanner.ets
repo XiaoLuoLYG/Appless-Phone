@@ -30,6 +30,8 @@ const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include an
   'For roundAction execute or legacy_handoff, omit answer.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE;
+const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
+  'Return one corrected decision matching the schema exactly.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -65,11 +67,25 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
     }
+    const prompt: string = this.prompt(input, context, round);
     const output: string = await this.model.complete(
-      this.prompt(input, context, round),
+      prompt,
       undefined,
       LEADER_SYSTEM_PROMPT
     );
+    try {
+      return this.parseDecision(output, context);
+    } catch (_error) {
+      const repaired: string = await this.model.complete(
+        prompt + '\n' + REPAIR_INSTRUCTION,
+        undefined,
+        LEADER_SYSTEM_PROMPT
+      );
+      return this.parseDecision(repaired, context);
+    }
+  }
+
+  private parseDecision(output: string, context: LeaderPlanningContext): LeaderDecision {
     const trimmed: string = output.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Leader planner requires exactly one JSON object.');
