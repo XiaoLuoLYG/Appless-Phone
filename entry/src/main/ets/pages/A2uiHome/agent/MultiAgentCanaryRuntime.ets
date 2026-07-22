@@ -49,6 +49,7 @@ import {
 } from '../../../model/PersonaMemoryUpdate';
 import { personaPackForId } from '../../../model/PersonaStore';
 import { MultiAgentLeaderPlanner } from './MultiAgentLeaderPlanner';
+import { MultiAgentActionPlanCompiler } from './MultiAgentActionPlanCompiler';
 import {
   HotelLocalDateProvider,
   normalizeHotelSearchTaskInput
@@ -693,6 +694,7 @@ export class MultiAgentCanaryRuntime {
       ),
       surfaceWriter: writer,
       actionCatalog: catalog,
+      actionCompiler: new MultiAgentActionPlanCompiler(options.model),
       actionExecutor: new CanaryRegisteredExecutor(
         aiphoneExecutor,
         (update: PersonaMemoryUpdateRequest, context: ActionExecutionContext): void => {

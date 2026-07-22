@@ -27,7 +27,9 @@ import {
   LeaderPlanningContext,
   LeaderSkillMetadata,
   LeaderToolMetadata,
-  LeaderUiTask
+  LeaderUiTask,
+  MAX_LEADER_DATA_TASKS_PER_ROUND,
+  MAX_LEADER_DATA_TASKS_PER_TURN
 } from './LeaderTypes';
 import { leaderInputHasEntityAuthority } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
@@ -338,6 +340,16 @@ export class LeaderAgent extends MessageDrivenAgent {
     state: LeaderTurnState,
     decision: LeaderDecision
   ): void {
+    if (Array.isArray(decision.dataTasks) &&
+      decision.dataTasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_DATA_TASK_LIMIT',
+        'Leader cannot publish more than eight Data tasks in one round'
+      );
+      return;
+    }
     if (!this.validDecision(decision)) {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
@@ -411,6 +423,17 @@ export class LeaderAgent extends MessageDrivenAgent {
       );
       return;
     }
+    // Three bounded rounds stay below UiAgent's retained pending-data window.
+    if (state.dataTaskIds.length + decision.dataTasks.length >
+      MAX_LEADER_DATA_TASKS_PER_TURN) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_DATA_TASK_LIMIT',
+        'Leader cannot publish more than twenty-four Data tasks in one turn'
+      );
+      return;
+    }
     if (this.decisionObserver !== null) {
       this.decisionObserver(
         message.conversationId,
@@ -476,21 +499,12 @@ export class LeaderAgent extends MessageDrivenAgent {
       decision.dataTasks.length === 0) {
       return false;
     }
-    const refs: string[] = [];
-    for (let index = 0; index < state.turnObservations.length; index++) {
-      const observation: ObservationDigest = state.turnObservations[index];
-      if (observation.status !== 'success' && observation.status !== 'partial') {
-        continue;
-      }
-      for (let refIndex = 0; refIndex < observation.entityRefs.length; refIndex++) {
-        const ref: string = observation.entityRefs[refIndex];
-        if (refs.indexOf(ref) < 0) {
-          refs.push(ref);
-        }
-      }
-    }
     for (let index = 0; index < decision.dataTasks.length; index++) {
-      if (!leaderInputHasEntityAuthority(decision.dataTasks[index].input, refs)) {
+      if (!leaderInputHasEntityAuthority(
+        decision.dataTasks[index].toolId,
+        decision.dataTasks[index].input,
+        state.turnObservations
+      )) {
         return true;
       }
     }
@@ -882,6 +896,9 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private validDecisionTasks(tasks: LeaderDecisionDataTask[]): boolean {
+    if (tasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      return false;
+    }
     const localIds: Set<string> = new Set<string>();
     for (let index = 0; index < tasks.length; index++) {
       const task = tasks[index];

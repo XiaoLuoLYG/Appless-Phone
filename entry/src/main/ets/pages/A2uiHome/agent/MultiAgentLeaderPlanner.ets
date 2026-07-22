@@ -13,6 +13,7 @@ import {
   LeaderToolMetadata,
   LeaderUiIntent,
   LocalModel,
+  MAX_LEADER_DATA_TASKS_PER_ROUND,
   ObservationDigest,
   ToolDefinition,
   dataAgentToolDefinitions,
@@ -113,7 +114,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       );
       this.rejectUnboundLaterTool(
         decision,
-        this.currentTurnEntityRefs(message, input, round),
+        this.currentTurnDependencyObservations(message, input, round),
         round
       );
       return decision;
@@ -141,7 +142,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       );
       this.rejectUnboundLaterTool(
         repairedDecision,
-        this.currentTurnEntityRefs(message, input, round),
+        this.currentTurnDependencyObservations(message, input, round),
         round
       );
       return repairedDecision;
@@ -150,14 +151,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
 
   private rejectUnboundLaterTool(
     decision: LeaderDecision,
-    entityRefs: string[],
+    observations: ObservationDigest[],
     round: number
   ): void {
     if (round <= 1 || decision.roundAction !== 'execute') {
       return;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
-      if (!leaderInputHasEntityAuthority(decision.dataTasks[index].input, entityRefs)) {
+      if (!leaderInputHasEntityAuthority(
+        decision.dataTasks[index].toolId,
+        decision.dataTasks[index].input,
+        observations
+      )) {
         throw new Error(UNBOUND_LATER_TOOL_ERROR);
       }
     }
@@ -277,6 +282,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
         'the unique union of every selected Data tool, allowed tool, and Action ID.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
+      'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
       TRAVEL_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
@@ -321,17 +327,17 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     return result;
   }
 
-  private currentTurnEntityRefs(
+  private currentTurnDependencyObservations(
     message: AgentMessage,
     input: InputUserPayload,
     currentRound: number
-  ): string[] {
+  ): ObservationDigest[] {
     if (currentRound <= 1) {
       return [];
     }
     const observations: ObservationDigest[] = input.recentObservations === undefined ? [] :
       input.recentObservations;
-    const result: string[] = [];
+    const result: ObservationDigest[] = [];
     for (let index = 0; index < observations.length; index++) {
       const observation: ObservationDigest = observations[index];
       const observationRound: number = this.observationRound(message.taskId, observation.taskId);
@@ -339,12 +345,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         observationRound <= 0 || observationRound >= currentRound) {
         continue;
       }
-      for (let refIndex = 0; refIndex < observation.entityRefs.length; refIndex++) {
-        const ref: string = observation.entityRefs[refIndex];
-        if (typeof ref === 'string' && ref.trim().length > 0 && result.indexOf(ref) < 0) {
-          result.push(ref);
-        }
-      }
+      result.push(observation);
     }
     return result;
   }
@@ -516,6 +517,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private dataTasks(rawTasks: Object[], context: LeaderPlanningContext): LeaderDecisionDataTask[] {
+    if (rawTasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      throw new Error('LEADER_DATA_TASK_LIMIT');
+    }
     const tasks: LeaderDecisionDataTask[] = [];
     const localIds: Set<string> = new Set<string>();
     for (let index = 0; index < rawTasks.length; index++) {

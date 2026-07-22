@@ -1,6 +1,9 @@
 import { AgentMessage, UserInputPayload } from '../message/AgentMessage';
 import { ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
 
+export const MAX_LEADER_DATA_TASKS_PER_ROUND: number = 8;
+export const MAX_LEADER_DATA_TASKS_PER_TURN: number = 24;
+
 export type InputUserPayload = UserInputPayload;
 
 export interface LeaderUiTask {

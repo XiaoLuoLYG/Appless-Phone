@@ -71,6 +71,14 @@ const MAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":""
   '"threadId":"thread-real-1","messageId":"message-real-1"},"required":true}],' +
   '"uiIntent":{"purpose":"展示邮件正文","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]}}';
+const GMAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["gmail.thread.read"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"gmail-read","goal":"读取真实 Gmail 正文",' +
+  '"allowedToolIds":["gmail.thread.read"],"toolId":"gmail.thread.read",' +
+  '"input":{"requestKey":"gmail:thread-real-1","threadId":"thread-real-1",' +
+  '"messageId":"message-real-1"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 Gmail 正文","preferredDensity":"comfortable",' +
+  '"requiredSections":["mail"]}}';
 const EXACT_MULTI_TOOL_ACTION_DECISION: string = PARALLEL_DECISION
   .replace(
     '"requestedCapabilityIds":["flight.search","train.search"]',
@@ -119,6 +127,19 @@ const REGISTERED_DATA_TOOL_IDS: string[] = [
   'mail.thread.read',
   'gmail.mail.search'
 ];
+
+function manyTravelDecision(count: number): string {
+  const tasks: string[] = [];
+  for (let index = 0; index < count; index++) {
+    tasks.push('{"localId":"travel-' + index.toString() + '",' +
+      '"goal":"read travel source","allowedToolIds":["travel.search"],' +
+      '"toolId":"travel.search","input":{"query":"北京到上海"},"required":true}');
+  }
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+    '"dataTasks":[' + tasks.join(',') + '],"uiIntent":{"purpose":"travel.search",' +
+    '"preferredDensity":"comfortable","requiredSections":["travel"]}}';
+}
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -275,6 +296,13 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'mailThread',
       actions: []
     }, {
+      toolId: 'gmail.thread.read',
+      intent: 'Read one exact Gmail identity',
+      riskLevel: 'read',
+      inputSchema: 'mailThreadReadRequest',
+      outputSchema: 'mailThread',
+      actions: []
+    }, {
       toolId: 'memory.update',
       intent: 'Update persona memory',
       riskLevel: 'draft',
@@ -331,6 +359,21 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('rejects a model decision that exceeds the per-round Data task budget', 0, async () => {
+      const model = new QueueLocalModel([manyTravelDecision(33)]);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: '查询很多来源' }, planningContext(), 1
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_DATA_TASK_LIMIT');
+      expect(model.prompts.length).assertEqual(1);
+    });
     it('parses one exact registry-bound LeaderDecision and includes round context', 0, async () => {
       const model: QueueLocalModel = new QueueLocalModel([PARALLEL_DECISION]);
       const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
@@ -477,12 +520,12 @@ export default function multiAgentLeaderPlannerTest() {
         )).assertEqual(-1);
       }
 
-      const dependentModel: ObservationPromptAwareModel = new ObservationPromptAwareModel();
+      const dependentModel = new QueueLocalModel([MAP_DETAILS_DECISION]);
       const dependentInput: InputUserPayload = {
         text: '读取上一轮真实地点详情',
         recentObservations: [{
-          taskId: 'input-1:round-1:travel',
-          toolId: 'travel.search',
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
           status: 'success',
           summary: '真实地点 place-real-1',
           entityRefs: ['place-real-1']
@@ -624,8 +667,8 @@ export default function multiAgentLeaderPlannerTest() {
       const dependentInput: InputUserPayload = {
         text: '读取上一轮真实地点详情',
         recentObservations: [{
-          taskId: 'input-1:round-1:travel',
-          toolId: 'travel.search',
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
           status: 'success',
           summary: 'real place',
           entityRefs: ['place-real-1']
@@ -698,6 +741,14 @@ export default function multiAgentLeaderPlannerTest() {
       const valid = await new MultiAgentLeaderPlanner(
         new QueueLocalModel([MAP_DETAILS_DECISION])
       ).plan(inputMessage(), successInput, planningContext(), 2);
+      const validFallbackId = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([
+          MAP_DETAILS_DECISION.replace(
+            '"input":{"placeId":"place-real-1"}',
+            '"input":{"id":"place-real-1"}'
+          )
+        ])
+      ).plan(inputMessage(), successInput, planningContext(), 2);
       let fakeRejected: boolean = false;
       let emptyRejected: boolean = false;
       try {
@@ -716,8 +767,63 @@ export default function multiAgentLeaderPlannerTest() {
       }
 
       expect(valid.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(validFallbackId.dataTasks[0].toolId).assertEqual('maps.place.details');
       expect(fakeRejected).assertTrue();
       expect(emptyRejected).assertTrue();
+    });
+
+    it('rejects real references hidden in unused fields forged consumed fields and cross-tool sources', 0, async () => {
+      const mapsInput: InputUserPayload = {
+        text: '查看这个地点详情',
+        recentObservations: [{
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
+          status: 'success',
+          summary: 'real place',
+          entityRefs: ['place-real-1']
+        }]
+      };
+      const foodWithUnusedRef: string = UNBOUND_FOOD_DECISION.replace(
+        '"input":{"query":"附近餐厅"}',
+        '"input":{"query":"附近餐厅","unusedPlaceId":"place-real-1"}'
+      );
+      const mapsWithForgedConsumedField: string = MAP_DETAILS_DECISION.replace(
+        '"input":{"placeId":"place-real-1"}',
+        '"input":{"placeId":"place-forged","unused":{"placeId":"place-real-1"}}'
+      );
+      const mapsWithForgedPreferredField: string = MAP_DETAILS_DECISION.replace(
+        '"input":{"placeId":"place-real-1"}',
+        '"input":{"placeId":"place-forged","id":"place-real-1"}'
+      );
+      const mailBackedMapsInput: InputUserPayload = {
+        text: mapsInput.text,
+        recentObservations: [{
+          taskId: 'input-1:round-1:mail',
+          toolId: 'mail.search',
+          status: 'success',
+          summary: 'mail result',
+          entityRefs: ['place-real-1']
+        }]
+      };
+      const rejected: boolean[] = [];
+      const attempts: Array<[string, InputUserPayload]> = [
+        [foodWithUnusedRef, mapsInput],
+        [mapsWithForgedConsumedField, mapsInput],
+        [mapsWithForgedPreferredField, mapsInput],
+        [MAP_DETAILS_DECISION, mailBackedMapsInput]
+      ];
+      for (let index = 0; index < attempts.length; index++) {
+        try {
+          await new MultiAgentLeaderPlanner(
+            new QueueLocalModel([attempts[index][0]])
+          ).plan(inputMessage(), attempts[index][1], planningContext(), 2);
+          rejected.push(false);
+        } catch (_error) {
+          rejected.push(true);
+        }
+      }
+
+      expect(rejected.join(',')).assertEqual('true,true,true,true');
     });
 
     it('allows mail search to read only an exact real result identity', 0, async () => {
@@ -734,7 +840,25 @@ export default function multiAgentLeaderPlannerTest() {
       const valid = await new MultiAgentLeaderPlanner(
         new QueueLocalModel([MAIL_READ_DECISION])
       ).plan(inputMessage(), input, planningContext(), 2);
+      const qqInput: InputUserPayload = {
+        text: input.text,
+        recentObservations: [{
+          taskId: 'input-1:round-1:qq-mail-search',
+          toolId: 'mail.search',
+          status: 'success',
+          summary: 'real QQ mail list',
+          entityRefs: ['qq:message-real-1', 'thread-real-1', 'message-real-1']
+        }]
+      };
+      const qqDecision: string = MAIL_READ_DECISION
+        .replace('"provider":"gmail"', '"provider":"qq"')
+        .replace('gmail:thread-real-1', 'qq:message-real-1');
+      const validQq = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([qqDecision])
+      ).plan(inputMessage(), qqInput, planningContext(), 2);
       let forgedRejected: boolean = false;
+      let forgedPreferredIdentityRejected: boolean = false;
+      let forgedQqIdentityRejected: boolean = false;
       try {
         await new MultiAgentLeaderPlanner(new QueueLocalModel([
           MAIL_READ_DECISION
@@ -745,9 +869,78 @@ export default function multiAgentLeaderPlannerTest() {
       } catch (_error) {
         forgedRejected = true;
       }
+      try {
+        await new MultiAgentLeaderPlanner(new QueueLocalModel([
+          MAIL_READ_DECISION
+            .replace('gmail:thread-real-1', 'gmail:thread-forged')
+            .replace('"threadId":"thread-real-1"', '"threadId":"thread-forged"')
+        ])).plan(inputMessage(), input, planningContext(), 2);
+      } catch (_error) {
+        forgedPreferredIdentityRejected = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(new QueueLocalModel([
+          qqDecision
+            .replace('qq:message-real-1', 'qq:message-forged')
+            .replace('"messageId":"message-real-1"', '"messageId":"message-forged"')
+        ])).plan(inputMessage(), qqInput, planningContext(), 2);
+      } catch (_error) {
+        forgedQqIdentityRejected = true;
+      }
 
       expect(valid.dataTasks[0].toolId).assertEqual('mail.thread.read');
+      expect(validQq.dataTasks[0].toolId).assertEqual('mail.thread.read');
       expect(forgedRejected).assertTrue();
+      expect(forgedPreferredIdentityRejected).assertTrue();
+      expect(forgedQqIdentityRejected).assertTrue();
+    });
+
+    it('allows Gmail read only from a real Gmail search identity', 0, async () => {
+      const input: InputUserPayload = {
+        text: '打开第一封 Gmail',
+        recentObservations: [{
+          taskId: 'input-1:round-1:gmail-search',
+          toolId: 'gmail.mail.search',
+          status: 'partial',
+          summary: 'real Gmail list',
+          entityRefs: ['gmail:thread-real-1', 'thread-real-1', 'message-real-1']
+        }]
+      };
+      const valid = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([GMAIL_READ_DECISION])
+      ).plan(inputMessage(), input, planningContext(), 2);
+      let wrongSourceRejected: boolean = false;
+      let forgedPreferredIdentityRejected: boolean = false;
+      try {
+        const wrongSource: InputUserPayload = {
+          text: input.text,
+          recentObservations: [{
+            taskId: 'input-1:round-1:mail-search',
+            toolId: 'mail.search',
+            status: 'success',
+            summary: 'wrong source',
+            entityRefs: ['thread-real-1']
+          }]
+        };
+        await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([GMAIL_READ_DECISION])
+        ).plan(inputMessage(), wrongSource, planningContext(), 2);
+      } catch (_error) {
+        wrongSourceRejected = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(new QueueLocalModel([
+          GMAIL_READ_DECISION
+            .replace('gmail:thread-real-1', 'gmail:thread-forged')
+            .replace('"threadId":"thread-real-1"', '"threadId":"thread-forged"')
+        ])).plan(inputMessage(), input, planningContext(), 2);
+      } catch (_error) {
+        forgedPreferredIdentityRejected = true;
+      }
+
+      expect(valid.dataTasks[0].toolId).assertEqual('gmail.thread.read');
+      expect(wrongSourceRejected).assertTrue();
+      expect(forgedPreferredIdentityRejected).assertTrue();
     });
 
     it('ignores old forged current and future observations for repeat authority', 0, async () => {

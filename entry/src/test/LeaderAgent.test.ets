@@ -24,6 +24,8 @@ import {
   LeaderUiTask,
   LinkedMessageBus,
   LocalModel,
+  MAX_LEADER_DATA_TASKS_PER_ROUND,
+  MAX_LEADER_DATA_TASKS_PER_TURN,
   TaskErrorPayload,
   TurnResultPayload,
   UiRenderResultPayload
@@ -315,6 +317,14 @@ function semanticDecision(tasks: LeaderDecisionDataTask[], action: string = 'exe
   return decision;
 }
 
+function repeatedSemanticTasks(count: number): LeaderDecisionDataTask[] {
+  const tasks: LeaderDecisionDataTask[] = [];
+  for (let index = 0; index < count; index++) {
+    tasks.push(semanticDataTask('travel-' + index.toString(), 'travel.search'));
+  }
+  return tasks;
+}
+
 function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
@@ -453,6 +463,19 @@ function dataResultMessage(task: AgentMessage, summary: string = 'real result'):
     taskId: task.taskId,
     payload
   };
+}
+
+function dataResultMessageWithEntityRefs(
+  task: AgentMessage,
+  summary: string,
+  entityRefs: string[]
+): AgentMessage {
+  const message: AgentMessage = dataResultMessage(task, summary);
+  (message.payload as DataResult).data = JSON.parse(
+    '{"summary":' + JSON.stringify(summary) + ',"entityRefs":' + JSON.stringify(entityRefs) +
+    ',"secret":"must-not-reach-model"}'
+  ) as Object;
+  return message;
 }
 
 function dataResultMessageWithStatus(task: AgentMessage, status: DataResultStatus): AgentMessage {
@@ -1396,7 +1419,7 @@ export default function leaderAgentTest() {
         _input: InputUserPayload,
         task: LeaderDecisionDataTask
       ): Object => task.toolId === 'maps.place.details' ?
-        JSON.parse('{"selection":{"placeId":"entity-1"}}') as Object : task.input;
+        JSON.parse('{"placeId":"entity-1","unused":{"placeId":"forged"}}') as Object : task.input;
       const bus = new LinkedMessageBus();
       const leader = new LeaderAgent(
         bus,
@@ -1415,10 +1438,10 @@ export default function leaderAgentTest() {
       await receive(observer);
       const secondData = await receive(observer);
       const args = (secondData.payload as CreateDataTaskPayload).args as
-        Record<string, Record<string, string>>;
+        Record<string, string | Record<string, string>>;
 
       expect(secondData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
-      expect(args['selection']['placeId']).assertEqual('entity-1');
+      expect(args['placeId'] as string).assertEqual('entity-1');
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-normalized'));
       await receive(observer);
       leader.stop();
@@ -1453,18 +1476,20 @@ export default function leaderAgentTest() {
         'food.search',
         'social.feed.search',
         'x.post.search',
-        'mail.search',
-        'mail.thread.read'
+        'maps.place.search'
       ];
       const firstRoundTasks: LeaderDecisionDataTask[] = ids.map(
         (toolId: string, index: number): LeaderDecisionDataTask =>
           semanticDataTask('tool-' + index.toString(), toolId)
       );
+      const dependent = semanticDataTask('place-details', 'maps.place.details');
+      dependent.input = JSON.parse('{"placeId":"entity-1"}') as Object;
       const planner = new RoundScriptedPlanner([
         semanticDecision(firstRoundTasks),
+        semanticDecision([dependent]),
         semanticDecision([semanticDataTask('repeat-travel', 'travel.search')])
       ]);
-      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
@@ -1480,15 +1505,71 @@ export default function leaderAgentTest() {
         bus.publish(dataResultMessage(tasks[index], 'result-' + index.toString()));
         expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       }
+      const dependentTask = await receive(observer);
+      expect(dependentTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((dependentTask.payload as CreateDataTaskPayload).toolId)
+        .assertEqual('maps.place.details');
+      bus.publish(dataResultMessage(dependentTask, 'place-details'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       const blocked: AgentMessage = await receive(observer);
 
-      expect(planner.calls).assertEqual(2);
-      expect(planner.inputs[1].recentObservations!.length).assertEqual(8);
-      expect(planner.inputs[1].recentObservations!.some(
+      expect(planner.calls).assertEqual(3);
+      expect(planner.inputs[2].recentObservations!.length).assertEqual(8);
+      expect(planner.inputs[2].recentObservations!.some(
         (observation): boolean => observation.toolId === 'travel.search'
       )).assertFalse();
       expect(blocked.type).assertEqual(AgentMessageType.TASK_ERROR);
       expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_COMPLETED_TOOL_REUSE');
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a malicious oversized planner result and remains live for the next turn', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision(repeatedSemanticTasks(33)),
+        semanticDecision([semanticDataTask('next-turn', 'travel.search')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const rejected = await receive(observer);
+      expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_DATA_TASK_LIMIT');
+
+      bus.publish(inputMessage('conversation-hotel', 'turn-2', 'input-2', '继续查询'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const next = await receive(observer);
+      expect(next.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((next.payload as CreateDataTaskPayload).toolId).assertEqual('travel.search');
+      expect(planner.calls).assertEqual(2);
+      leader.stop();
+      observer.close();
+    });
+
+    it('publishes eight legal independent Data tasks in one round', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision(repeatedSemanticTasks(8))
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      expect(MAX_LEADER_DATA_TASKS_PER_ROUND).assertEqual(8);
+      expect(MAX_LEADER_DATA_TASKS_PER_TURN).assertEqual(24);
+      expect(MAX_LEADER_DATA_TASKS_PER_TURN <= 32).assertTrue();
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      for (let index = 0; index < 8; index++) {
+        const task = await receive(observer);
+        expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect(task.taskId.indexOf(':round-1:travel-') >= 0).assertTrue();
+      }
+      expect(planner.calls).assertEqual(1);
       leader.stop();
       observer.close();
     });
@@ -1575,24 +1656,37 @@ export default function leaderAgentTest() {
 
     it('rejects planning a fourth semantic round without publishing another task', 0, async () => {
       const bus = new LinkedMessageBus();
-      const roundOne = semanticDataTask('round-1', 'travel.search');
-      const roundTwo = semanticDataTask('round-2', 'train.search');
-      const roundThree = semanticDataTask('round-3', 'flight.search');
-      roundTwo.input = JSON.parse('{"entityId":"entity-1"}') as Object;
-      roundThree.input = JSON.parse('{"entityId":"entity-1"}') as Object;
+      const roundOneMaps = semanticDataTask('round-1-maps', 'maps.place.search');
+      const roundOneMail = semanticDataTask('round-1-mail', 'mail.search');
+      const roundTwo = semanticDataTask('round-2', 'maps.place.details');
+      const roundThree = semanticDataTask('round-3', 'mail.thread.read');
+      roundTwo.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      roundThree.input = JSON.parse('{"provider":"gmail","requestKey":"gmail:entity-1",' +
+        '"threadId":"entity-1","messageId":"entity-1"}') as Object;
       const planner = new RoundScriptedPlanner([
-        semanticDecision([roundOne]),
+        semanticDecision([roundOneMaps, roundOneMail]),
         semanticDecision([roundTwo]),
         semanticDecision([roundThree])
       ]);
-      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
       bus.publish(inputMessage());
       await receive(observer);
-      for (let round = 1; round <= 3; round++) {
-        const task = await receive(observer);
+      const firstTasks: AgentMessage[] = [await receive(observer), await receive(observer)];
+      for (let index = 0; index < firstTasks.length; index++) {
+        expect(firstTasks[index].type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect((firstTasks[index].payload as CreateDataTaskPayload).roundId.indexOf('1') >= 0).assertTrue();
+        const toolId: string = (firstTasks[index].payload as CreateDataTaskPayload).toolId;
+        bus.publish(toolId === 'mail.search' ?
+          dataResultMessageWithEntityRefs(
+            firstTasks[index], 'round-1', ['gmail:entity-1', 'entity-1']
+          ) : dataResultMessage(firstTasks[index], 'round-1'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      }
+      for (let round = 2; round <= 3; round++) {
+        const task: AgentMessage = await receive(observer);
         expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
         expect((task.payload as CreateDataTaskPayload).roundId.indexOf(round.toString()) >= 0).assertTrue();
         bus.publish(dataResultMessage(task, 'round-' + round.toString()));

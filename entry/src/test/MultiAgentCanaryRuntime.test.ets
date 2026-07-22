@@ -7,6 +7,7 @@ import {
   ActionExecutionResult,
   AgentMessage,
   AgentMessageType,
+  ConversationContext,
   CreateDataTaskPayload,
   DataResult,
   DataTaskExecutor,
@@ -74,6 +75,20 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
+const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["hotel.search","hotel.detail"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"hotel-search",' +
+  '"goal":"search real hotels","allowedToolIds":["hotel.search"],' +
+  '"toolId":"hotel.search","input":' + SEARCH_INPUT + ',"required":true}],' +
+  '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["hotels"]},"actionIntent":{' +
+  '"goal":"open the selected hotel details",' +
+  '"allowedActionIds":["hotel.detail"]},"reasonCode":"hotel_search_with_detail"}';
+const HOTEL_ACTION_DRAFT: string = '{"planId":"plan-model-1","runId":"run-model-1",' +
+  '"label":"查看实时房型","steps":[{"stepId":"step-1","actionId":"hotel.detail",' +
+  '"args":{"hotelId":47675,"checkInDate":"2026-08-15",' +
+  '"checkOutDate":"2026-08-17","countryCode":"CN","currency":"CNY",' +
+  '"adultCount":2,"childCount":0,"childAgeDetails":[],"roomCount":1}}]}';
 const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
@@ -203,18 +218,47 @@ const UNOBSERVED_HOTEL_DIRECT_ANSWER: string = '{"personaId":"travel_companion",
 
 class QueueModel implements LocalModel {
   readonly prompts: string[] = [];
+  readonly systemPrompts: string[] = [];
   private readonly outputs: string[];
 
   constructor(outputs: string[]) {
     this.outputs = outputs.slice();
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
     this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt === undefined ? '' : systemPrompt);
     if (this.outputs.length === 0) {
       throw new Error('No scripted canary Leader output.');
     }
     return this.outputs.shift() as string;
+  }
+}
+
+class ActionCompilerCanaryModel implements LocalModel {
+  readonly prompts: string[] = [];
+  readonly systemPrompts: string[] = [];
+  leaderCalls: number = 0;
+  actionCalls: number = 0;
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt === undefined ? '' : systemPrompt);
+    if (systemPrompt !== undefined &&
+      systemPrompt.indexOf('Appless Action Agent planner') >= 0) {
+      this.actionCalls++;
+      return HOTEL_ACTION_DRAFT;
+    }
+    this.leaderCalls++;
+    return this.leaderCalls === 1 ? HOTEL_ACTION_DECISION : HOTEL_DONE_DECISION;
   }
 }
 
@@ -723,6 +767,35 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(executor.calls.sort().join(',')).assertEqual('train.search,travel.search');
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
       expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('assembles the approved Action Agent prompt on the production canary model seam', 0, async () => {
+      const model = new ActionCompilerCanaryModel();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+      await flush();
+
+      expect(outcome.status).assertEqual('success');
+      expect(model.leaderCalls).assertEqual(2);
+      expect(model.actionCalls).assertEqual(1);
+      expect(bus.count(AgentMessageType.ACTION_PLAN_DRAFT)).assertEqual(1);
+      const actionPromptIndex = model.systemPrompts.findIndex((value: string): boolean =>
+        value.indexOf('Appless Action Agent planner') >= 0
+      );
+      expect(actionPromptIndex >= 0).assertTrue();
+      expect(model.prompts[actionPromptIndex].indexOf('hotel.detail') >= 0).assertTrue();
+      expect(model.prompts[actionPromptIndex].indexOf('open the selected hotel details') >= 0)
+        .assertTrue();
       runtime.dispose();
     });
 

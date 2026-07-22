@@ -294,7 +294,19 @@ class TwoDataRoundPlanner implements LeaderPlanner {
         reasonCode: 'dependent_details'
       };
     }
-    return new HotelRoundPlanner().plan(_message, input, _context, _round);
+    return {
+      personaId: 'travel_companion', skillId: '',
+      requestedCapabilityIds: ['maps.place.search'], roundAction: 'execute',
+      dataTasks: [{
+        localId: 'place-search', goal: 'Search real places',
+        allowedToolIds: ['maps.place.search'], toolId: 'maps.place.search',
+        input: JSON.parse('{"query":"Shenzhen hotel"}') as Object, required: true
+      }],
+      uiIntent: {
+        purpose: 'combined results', preferredDensity: 'comfortable', requiredSections: ['place']
+      },
+      reasonCode: 'place_search'
+    };
   }
 }
 
@@ -674,6 +686,14 @@ function planningContext(): LeaderPlanningContext {
         inputSchema: 'hotelSearchRequest',
         outputSchema: 'hotelSearchResults',
         actions: ['legacy.action', 'hotel.detail']
+      },
+      {
+        toolId: 'maps.place.search',
+        intent: 'maps.place.search',
+        riskLevel: 'read',
+        inputSchema: 'mapsPlaceSearchQuery',
+        outputSchema: 'places',
+        actions: []
       },
       {
         toolId: 'maps.place.details',
