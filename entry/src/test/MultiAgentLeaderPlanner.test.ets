@@ -17,6 +17,40 @@ const PARALLEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",
   '{"localId":"train","goal":"查高铁","allowedToolIds":["train.search"],"toolId":"train.search","input":{},"required":false}' +
   '],"uiIntent":{"purpose":"比较出行方案","preferredDensity":"comfortable","requiredSections":["flight","train"]},' +
   '"reasonCode":"parallel_reads"}';
+const TRAVEL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"travel","goal":"我明天要从北京去上海，帮我搜索出行方案",' +
+  '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
+  '"input":{"origin":"北京","destination":"上海","date":"明天",' +
+  '"query":"我明天要从北京去上海，帮我搜索出行方案"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示综合出行方案","preferredDensity":"comfortable",' +
+  '"requiredSections":["travel"]},"reasonCode":"travel_search"}';
+const FLIGHT_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"flight","goal":"帮我查明天北京到上海的航班",' +
+  '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
+  '"input":{"origin":"北京","destination":"上海","date":"明天"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示航班","preferredDensity":"comfortable",' +
+  '"requiredSections":["flight"]},"reasonCode":"flight_search"}';
+const TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"train","goal":"帮我查询明天晚上六点以后深圳北到香港西九龙的高铁",' +
+  '"allowedToolIds":["train.search"],"toolId":"train.search",' +
+  '"input":{"origin":"深圳北","destination":"香港西九龙","date":"明天",' +
+  '"departureAfter":"18:00"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示高铁","preferredDensity":"comfortable",' +
+  '"requiredSections":["train"]},"reasonCode":"train_search"}';
+const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
+  '"requiredSections":["travel"]},"answer":"根据上一轮真实结果继续回答。"}';
+const MAP_DETAILS_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["maps.place.details"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"place-details","goal":"读取上一轮真实地点的详情",' +
+  '"allowedToolIds":["maps.place.details"],"toolId":"maps.place.details",' +
+  '"input":{"placeId":"place-real-1"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示地点详情","preferredDensity":"comfortable",' +
+  '"requiredSections":["place"]}}';
 const EXACT_MULTI_TOOL_ACTION_DECISION: string = PARALLEL_DECISION
   .replace(
     '"requestedCapabilityIds":["flight.search","train.search"]',
@@ -77,6 +111,48 @@ class QueueLocalModel implements LocalModel {
   }
 }
 
+class TravelPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const hasAggregateContract: boolean = prompt.indexOf(
+      'Broad or multimodal requests such as 出行方案, 怎么去, or 比较 must select exactly one travel.search Data task.'
+    ) >= 0;
+    if (prompt.indexOf('我明天要从北京去上海，帮我搜索出行方案') >= 0) {
+      return hasAggregateContract ? TRAVEL_DECISION : PARALLEL_DECISION;
+    }
+    if (prompt.indexOf('帮我查明天北京到上海的航班') >= 0) {
+      return FLIGHT_DECISION;
+    }
+    if (prompt.indexOf('帮我查询明天晚上六点以后深圳北到香港西九龙的高铁') >= 0) {
+      return TRAIN_DECISION;
+    }
+    return PARALLEL_DECISION;
+  }
+}
+
+class ObservationPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const hasCompletedTools: boolean = prompt.indexOf(
+      'Current-turn completed Data tool IDs: ["travel.search"]'
+    ) >= 0;
+    const hasNoRepeatContract: boolean = prompt.indexOf(
+      'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status.'
+    ) >= 0;
+    if (!hasCompletedTools || !hasNoRepeatContract) {
+      return TRAVEL_DECISION;
+    }
+    if (prompt.indexOf('读取上一轮真实地点详情') >= 0) {
+      return MAP_DETAILS_DECISION;
+    }
+    return ANSWER_FROM_TRAVEL_OBSERVATION;
+  }
+}
+
 function inputMessage(): AgentMessage {
   const payload: InputUserPayload = { text: '查航班和高铁' };
   return {
@@ -91,6 +167,13 @@ function inputMessage(): AgentMessage {
 function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
+      toolId: 'travel.search',
+      intent: 'Search aggregate real travel options',
+      riskLevel: 'read',
+      inputSchema: 'travelSearchQuery',
+      outputSchema: 'travelOptions',
+      actions: []
+    }, {
       toolId: 'flight.search',
       intent: 'Search real flights',
       riskLevel: 'read',
@@ -117,6 +200,13 @@ function planningContext(): LeaderPlanningContext {
       riskLevel: 'read',
       inputSchema: 'hotelNavigateRequest',
       outputSchema: 'hotelNavigateResult',
+      actions: []
+    }, {
+      toolId: 'maps.place.details',
+      intent: 'Read details for one real place ID',
+      riskLevel: 'read',
+      inputSchema: 'mapsPlaceDetailsQuery',
+      outputSchema: 'place',
       actions: []
     }, {
       toolId: 'memory.update',
@@ -224,6 +314,114 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('originQuery, place, placeType, countryCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Do not invent missing destination, date, year, guest') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
+    });
+
+    it('lets the model distinguish aggregate travel explicit modes and an explicit pair', 0, async () => {
+      const model: TravelPromptAwareModel = new TravelPromptAwareModel();
+      const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
+      const c02Text: string = '我明天要从北京去上海，帮我搜索出行方案';
+      const c02Input: InputUserPayload = { text: c02Text };
+      const c02Message: AgentMessage = {
+        type: AgentMessageType.INPUT_USER,
+        conversationId: 'conversation-c02',
+        turnId: 'turn-c02',
+        taskId: 'input-c02',
+        payload: c02Input
+      };
+
+      const c02: LeaderDecision = await planner.plan(c02Message, c02Input, planningContext(), 1);
+      const flight: LeaderDecision = await planner.plan(
+        inputMessage(),
+        { text: '帮我查明天北京到上海的航班' },
+        planningContext(),
+        1
+      );
+      const train: LeaderDecision = await planner.plan(
+        inputMessage(),
+        { text: '帮我查询明天晚上六点以后深圳北到香港西九龙的高铁' },
+        planningContext(),
+        1
+      );
+      const both: LeaderDecision = await planner.plan(
+        inputMessage(),
+        { text: '查明天北京到上海的航班和高铁' },
+        planningContext(),
+        1
+      );
+
+      expect(c02.dataTasks.length).assertEqual(1);
+      expect(c02.dataTasks[0].toolId).assertEqual('travel.search');
+      const c02Args = c02.dataTasks[0].input as Record<string, Object | string | number | boolean>;
+      expect(c02Args['date']).assertEqual('明天');
+      expect(c02Args['query']).assertEqual(c02Text);
+      expect(flight.dataTasks.length).assertEqual(1);
+      expect(flight.dataTasks[0].toolId).assertEqual('flight.search');
+      expect(train.dataTasks.length).assertEqual(1);
+      expect(train.dataTasks[0].toolId).assertEqual('train.search');
+      expect(both.dataTasks.length).assertEqual(2);
+      expect(both.dataTasks[0].toolId).assertEqual('flight.search');
+      expect(both.dataTasks[1].toolId).assertEqual('train.search');
+    });
+
+    it('tells later rounds not to repeat completed tools while allowing a different dependent tool', 0, async () => {
+      const terminalStatuses: string[] = ['success', 'partial', 'empty', 'error'];
+      for (let index = 0; index < terminalStatuses.length; index++) {
+        const model: ObservationPromptAwareModel = new ObservationPromptAwareModel();
+        const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
+        const input: InputUserPayload = {
+          text: '根据上一轮结果继续回答',
+          recentObservations: [{
+            taskId: 'input-1:round-1:travel',
+            toolId: 'travel.search',
+            status: terminalStatuses[index],
+            summary: '真实出行结果',
+            entityRefs: ['travel-real-1']
+          }, {
+            taskId: 'older-input:round-1:flight',
+            toolId: 'flight.search',
+            status: 'success',
+            summary: '旧 turn 结果',
+            entityRefs: ['flight-old-1']
+          }]
+        };
+
+        const decision: LeaderDecision = await planner.plan(
+          inputMessage(), input, planningContext(), 2
+        );
+
+        expect(decision.roundAction).assertEqual('answer');
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(model.prompts[0].indexOf(
+          'Current-turn completed Data tool IDs: ["travel.search"]'
+        ) >= 0).assertTrue();
+        expect(model.prompts[0].indexOf(
+          'Data Agent owns same-tool adapter fallback and retry.'
+        ) >= 0).assertTrue();
+        expect(model.prompts[0].indexOf(
+          'Current-turn completed Data tool IDs: ["travel.search","flight.search"]'
+        )).assertEqual(-1);
+      }
+
+      const dependentModel: ObservationPromptAwareModel = new ObservationPromptAwareModel();
+      const dependentInput: InputUserPayload = {
+        text: '读取上一轮真实地点详情',
+        recentObservations: [{
+          taskId: 'input-1:round-1:travel',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: '真实地点 place-real-1',
+          entityRefs: ['place-real-1']
+        }]
+      };
+      const dependent: LeaderDecision = await new MultiAgentLeaderPlanner(dependentModel).plan(
+        inputMessage(), dependentInput, planningContext(), 2
+      );
+
+      expect(dependent.dataTasks.length).assertEqual(1);
+      expect(dependent.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(dependentModel.prompts[0].indexOf(
+        'A different later-round tool is allowed only when it requires real prior output.'
+      ) >= 0).assertTrue();
     });
 
     it('repairs one missing authority field once without exposing its output', 0, async () => {

@@ -13,6 +13,7 @@ import {
   LeaderToolMetadata,
   LeaderUiIntent,
   LocalModel,
+  ObservationDigest,
   ToolDefinition,
   dataAgentToolDefinitions
 } from '@loop/agent-core';
@@ -34,6 +35,17 @@ const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly.';
+const TRAVEL_SELECTION_CONTRACT: string =
+  'Travel selection contract: Broad or multimodal requests such as 出行方案, 怎么去, or 比较 must select ' +
+  'exactly one travel.search Data task. Use flight.search only when the user explicitly asks only for ' +
+  'flights. Use train.search only when the user explicitly asks only for trains or high-speed rail. ' +
+  'When the user explicitly asks for both flights and trains, select flight.search and train.search as ' +
+  'two independent tasks in the same round. Preserve route fields and relative date wording such as 明天 ' +
+  'in the selected task input; do not drop or silently replace them.';
+const OBSERVATION_REUSE_CONTRACT: string =
+  'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
+  'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
+  'requires real prior output. Otherwise answer truthfully from the observations.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -61,7 +73,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   async plan(
-    _message: AgentMessage,
+    message: AgentMessage,
     input: InputUserPayload,
     context: LeaderPlanningContext,
     round: number = 1,
@@ -70,7 +82,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
     }
-    const prompt: string = this.prompt(input, context, round);
+    const prompt: string = this.prompt(message, input, context, round);
     const output: string = await this.model.complete(
       prompt,
       undefined,
@@ -163,7 +175,13 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     return false;
   }
 
-  private prompt(input: InputUserPayload, context: LeaderPlanningContext, round: number): string {
+  private prompt(
+    message: AgentMessage,
+    input: InputUserPayload,
+    context: LeaderPlanningContext,
+    round: number
+  ): string {
+    const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input);
     return [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
@@ -184,6 +202,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
         'the unique union of every selected Data tool, allowed tool, and Action ID.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
+      TRAVEL_SELECTION_CONTRACT,
+      'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
+      OBSERVATION_REUSE_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
       'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +
@@ -197,6 +218,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       ),
       'Personas: ' + JSON.stringify(context.personas)
     ].join('\n');
+  }
+
+  private currentTurnCompletedToolIds(message: AgentMessage, input: InputUserPayload): string[] {
+    const observations: ObservationDigest[] = input.recentObservations === undefined ? [] :
+      input.recentObservations;
+    const taskPrefix: string = message.taskId + ':round-';
+    const result: string[] = [];
+    for (let index = 0; index < observations.length; index++) {
+      const observation: ObservationDigest = observations[index];
+      const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
+        observation.status === 'empty' || observation.status === 'error';
+      if (terminal && observation.taskId.startsWith(taskPrefix) &&
+        observation.toolId.trim().length > 0 && result.indexOf(observation.toolId) < 0) {
+        result.push(observation.toolId);
+      }
+    }
+    return result;
   }
 
   private decision(parsed: Object, context: LeaderPlanningContext): LeaderDecision {
