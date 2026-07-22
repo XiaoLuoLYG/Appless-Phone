@@ -86,6 +86,45 @@ const TWO_TOOL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId
   '"dataTasks":[],"uiIntent":{"purpose":"travel.compare",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"出行结果已就绪","reasonCode":"two_tool_ready"}';
+const C02_QUERY: string = '我明天要从北京去上海，帮我搜索出行方案';
+const F01_QUERY: string = '帮我查明天北京到上海的航班';
+const F02_QUERY: string = '帮我查询明天晚上六点以后深圳北到香港西九龙的高铁';
+const C02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"travel","goal":"搜索从北京到上海的出行方案",' +
+  '"allowedToolIds":["travel.search"],"toolId":"travel.search",' +
+  '"input":{"origin":"北京","destination":"上海","departureDate":"2026-07-23",' +
+  '"query":"模型伪造的后天广州到深圳"},"required":true}],' +
+  '"uiIntent":{"purpose":"travel.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["travel"]}}';
+const C02_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"travel.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"综合出行结果已就绪"}';
+const F01_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"flight","goal":"搜索北京到上海的航班",' +
+  '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
+  '"input":{"origin":"北京","destination":"上海","departureDate":"2026-07-23",' +
+  '"query":"模型伪造的下周航班"},"required":true}],' +
+  '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["flight"]}}';
+const F01_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"flight.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"航班结果已就绪"}';
+const F02_QUERY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"train","goal":"搜索深圳北到香港西九龙的高铁",' +
+  '"allowedToolIds":["train.search"],"toolId":"train.search",' +
+  '"input":{"origin":"深圳北","destination":"香港西九龙","departureDate":"2026-07-23",' +
+  '"query":"模型伪造的全天火车"},"required":true}],' +
+  '"uiIntent":{"purpose":"train.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["train"]}}';
+const F02_QUERY_DONE: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["train.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"train.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"高铁结果已就绪"}';
 const WORLDCUP_ACTION_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
   '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
   '"uiIntent":{"purpose":"worldcup.open","preferredDensity":"comfortable",' +
@@ -301,6 +340,34 @@ class RecordingDynamicExecutor implements DataTaskExecutor {
       warnings: []
     };
   }
+}
+
+interface StructuredToolCallRecord {
+  toolId: string;
+  prompt: string;
+  args: Object;
+}
+
+function canaryStructuredResult(toolId: string, outputSchema: string): DataResult {
+  let data: Object;
+  if (toolId === 'travel.search') {
+    data = JSON.parse('{"title":"出行方案","body":"真实结果","summary":"0 result",' +
+      '"options":[],"rows":[]}') as Object;
+  } else if (toolId === 'train.search') {
+    data = JSON.parse('{"title":"高铁方案","body":"真实结果","summary":"0 result","trains":[]}') as Object;
+  } else if (toolId === 'flight.search') {
+    data = JSON.parse('{"title":"航班方案","body":"真实结果","summary":"0 result","flights":[]}') as Object;
+  } else {
+    data = JSON.parse('{"results":[]}') as Object;
+  }
+  return {
+    toolId,
+    outputSchema,
+    status: 'success',
+    sources: [],
+    data,
+    warnings: []
+  };
 }
 
 class CalendarUpdateExecutor implements DataTaskExecutor {
@@ -645,6 +712,63 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       runtime.dispose();
     });
+
+    it('executes travel flight and train with the exact host query while leaving non-travel goals unchanged', 0,
+      async () => {
+        const calls: StructuredToolCallRecord[] = [];
+        const options: MultiAgentCanaryOptions = canaryOptions(
+          new QueueModel([
+            C02_QUERY_DECISION, C02_QUERY_DONE,
+            F01_QUERY_DECISION, F01_QUERY_DONE,
+            F02_QUERY_DECISION, F02_QUERY_DONE,
+            DYNAMIC_READ_DECISION, DYNAMIC_READ_DONE
+          ]),
+          new CanaryHotelExecutor(),
+          new RecordingOpener(),
+          [],
+          []
+        );
+        options.dataExecutor = undefined;
+        options.structuredToolCall = async (
+          toolId: string,
+          prompt: string,
+          args: Object
+        ): Promise<DataResult> => {
+          calls.push({ toolId, prompt, args });
+          const definitionOutput: string = toolId === 'travel.search' ? 'travelOptions' :
+            (toolId === 'flight.search' ? 'flights' :
+              (toolId === 'train.search' ? 'trains' : 'dynamicToolConnect'));
+          return canaryStructuredResult(toolId, definitionOutput);
+        };
+        const runtime: MultiAgentCanaryRuntime = new MultiAgentCanaryRuntime(options);
+
+        await runtime.submit(C02_QUERY, { text: '' });
+        await runtime.submit(F01_QUERY, { text: '' });
+        await runtime.submit(F02_QUERY, { text: '' });
+        await runtime.submit('搜索我授权的 Notion 页面', { text: '' });
+
+        expect(calls.length).assertEqual(4);
+        expect(calls[0].toolId).assertEqual('travel.search');
+        expect(calls[0].prompt).assertEqual(C02_QUERY);
+        expect(calls[1].toolId).assertEqual('flight.search');
+        expect(calls[1].prompt).assertEqual(F01_QUERY);
+        expect(calls[2].toolId).assertEqual('train.search');
+        expect(calls[2].prompt).assertEqual(F02_QUERY);
+        expect(calls[3].toolId).assertEqual('dynamic.search');
+        expect(calls[3].prompt).assertEqual('find the selected Notion page');
+        const c02Args = calls[0].args as Record<string, Object | string | number | boolean>;
+        const flightArgs = calls[1].args as Record<string, Object | string | number | boolean>;
+        const trainArgs = calls[2].args as Record<string, Object | string | number | boolean>;
+        const dynamicArgs = calls[3].args as Record<string, Object | string | number | boolean>;
+        expect(c02Args['query']).assertEqual(C02_QUERY);
+        expect(c02Args['departureDate']).assertEqual('2026-07-23');
+        expect(c02Args['origin']).assertEqual('北京');
+        expect(c02Args['destination']).assertEqual('上海');
+        expect(flightArgs['query']).assertEqual(F01_QUERY);
+        expect(trainArgs['query']).assertEqual(F02_QUERY);
+        expect(dynamicArgs['qualifiedName']).assertEqual('NOTION_SEARCH');
+        runtime.dispose();
+      });
 
     it('keeps C13 dynamic read in MultiAgent Data and executes only the selected read slug', 0, async () => {
       const executor = new RecordingDynamicExecutor();

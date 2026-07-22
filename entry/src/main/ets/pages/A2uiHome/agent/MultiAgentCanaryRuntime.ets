@@ -117,6 +117,7 @@ export interface MultiAgentCanaryOptions {
   actionTimeoutMs?: number;
   currentLocalDate?: HotelLocalDateProvider;
   dataExecutor?: DataTaskExecutor;
+  structuredToolCall?: (toolId: string, prompt: string, args: Object) => Promise<DataResult>;
   bus?: LinkedMessageBus;
   conversationId?: string;
 }
@@ -202,6 +203,19 @@ function normalizeCanaryTaskInput(
   if (task.toolId === 'hotel.search') {
     return normalizeHotelSearchTaskInput(input, task);
   }
+  if (task.toolId === 'travel.search' || task.toolId === 'train.search' ||
+    task.toolId === 'flight.search') {
+    const source = task.input as Record<string, Object | string | number | boolean | null | undefined>;
+    const normalized: Record<string, Object | string | number | boolean | null> = {};
+    Object.keys(source).forEach((key: string) => {
+      const value = source[key];
+      if (value !== undefined) {
+        normalized[key] = value as Object | string | number | boolean | null;
+      }
+    });
+    normalized['query'] = input.text;
+    return normalized;
+  }
   if (task.toolId !== 'calendar.events.search') {
     return task.input;
   }
@@ -259,8 +273,32 @@ function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthoriza
 }
 
 class CanaryStructuredDataExecutor implements DataTaskExecutor {
+  private readonly structuredToolCall: (
+    toolId: string,
+    prompt: string,
+    args: Object
+  ) => Promise<DataResult>;
+
+  constructor(structuredToolCall?: (
+    toolId: string,
+    prompt: string,
+    args: Object
+  ) => Promise<DataResult>) {
+    this.structuredToolCall = structuredToolCall === undefined ? callStructuredTool : structuredToolCall;
+  }
+
   async execute(task: CreateDataTaskPayload): Promise<DataResult> {
-    const result = await callStructuredTool(task.toolId, task.goal, task.args);
+    let prompt: string = task.goal;
+    if (task.toolId === 'travel.search' || task.toolId === 'train.search' ||
+      task.toolId === 'flight.search') {
+      const values = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+      const query = values['query'];
+      if (typeof query !== 'string' || query.trim().length === 0) {
+        throw new Error('TRAVEL_QUERY_MISSING');
+      }
+      prompt = query;
+    }
+    const result = await this.structuredToolCall(task.toolId, prompt, task.args);
     if (task.toolId !== 'calendar.events.search' || result.status === 'error') {
       return result;
     }
@@ -649,7 +687,7 @@ export class MultiAgentCanaryRuntime {
         normalizeCanaryTaskInput(input, task, calendarNow(options.currentLocalDate)),
       dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
-        new CanaryStructuredDataExecutor() : options.dataExecutor,
+        new CanaryStructuredDataExecutor(options.structuredToolCall) : options.dataExecutor,
       uiRenderer: new StructuredToolUiRenderer(
         options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
         6000
