@@ -9,12 +9,13 @@ Implementation commits:
 - `4f8007aab3a78d4f8ac6f5ca42282701605e4b40` — initial lifecycle coverage
 - `f9c994ea` — reviewer-requested correlation hardening
 - `4770ec1af8c8e8f2d6daa068a79829f2ab099424` — second-review false-positive closure
+- `cffb4953bbbd990e92988793ccf5a9473f0c068f` — generated-surface evidence correlation
 
 ## Corrective scope
 
 The first independent review rejected the initial report with four Important findings. `f9c994ea` closes those findings:
 
-- Multi-Agent evidence now maps conversation, turn, task, surface, plan, and run IDs to opaque per-runtime tokens. The formatter uses one bounded FIFO map and one sequence; it logs no prompt, local ID, entity value, action args, provider message, URL, receipt, recipient, email, phone, order ID, or event ID.
+- Multi-Agent evidence maps conversation, turn, task, plan, and run IDs to opaque per-runtime tokens. Generated UI surfaces are the sole exception: only `loop_surface_<digits>` with an optional numeric collision suffix is preserved so lifecycle and A2UI logs can be compared exactly; every other surface shape becomes `invalid`. The formatter uses one bounded FIFO map and one sequence; it logs no prompt, local ID, entity value, action args, provider message, URL, receipt, recipient, email, phone, order ID, or event ID.
 - F12 provenance is not inferred from tool names or round numbers. A successful Data result records bounded `entityRefs` or the real Maps `places[i].placeId` only in memory; a later `args.placeId` must exactly match before the logger emits an opaque predecessor task token, a JSON Pointer path, and `binding=true`. The raw entity is never logged.
 - Lifecycle parsing stops at the first matching `TurnResult`, reports same-turn late markers, requires create-before-terminal ordering, exact tool multiplicity, known task terminals, prior-round settlement, explicit dependent-task metadata, one UI dependency owner, and equality between the final UI and terminal surface. Unknown/input `TaskError` is terminally invalid.
 - Direct actions require the exact ordered current conversation/turn/surface/source/action run-result chain. Calendar source is derived from the final visible UI's unique Data dependency rather than hard-coded. Hotel detail, booking, and navigation use their exact search/detail visible-surface contexts. Virtual actions require plan-request before result and reject a fabricated `ActionRun`.
@@ -26,6 +27,8 @@ The second independent review found four remaining executable false positives. `
 - A terminal UI `state=result` must occur after every declared Data dependency terminal; an early UI result can no longer pass because its Data result appears later in the turn.
 - A virtual action plan is validated in virtual mode against its own conversation, turn, action ID, request, and result. An unrelated direct action run/result in the same turn cannot substitute for a missing virtual result.
 - C20 compares the raw provider surface directly with the lifecycle surface. The helper no longer rewrites a mismatched provider surface into the lifecycle value.
+
+The same-reviewer check then found that exact C20 comparison would reject the live runtime because lifecycle surfaces were still opaque while `A2uiHomeSurfaceUpdate` logged the generated surface. `cffb4953` closes that false negative without a second alias map or any new state. The generation audit found one Multi-Agent UI source: `UiAgent.uniqueSurfaceId()` uses `newSurfaceId()` and can only append a numeric collision suffix. The evidence formatter therefore preserves exactly `^loop_surface_[0-9]+(?:_[0-9]+)?$` and fails every other surface shape closed.
 
 ## Production boundary
 
@@ -40,11 +43,11 @@ Reviewer-derived RED cases covered:
 - generic NETSTACK-only hotel evidence, reversed RollingGo response/request order, and mismatched/uncombined provider chains;
 - raw email/phone/newline/long IDs, unsafe registry IDs, raw prompt/provider/entity values, true Maps entity provenance, and no-provenance fail-closed behavior.
 
-Second-review RED cases additionally cover missing F12 dependency options in the executable case manifest, UI result before its Data dependency terminal, a virtual plan without a result plus an unrelated direct action result, and a stale raw C20 provider surface.
+Second-review RED cases additionally cover missing F12 dependency options in the executable case manifest, UI result before its Data dependency terminal, a virtual plan without a result plus an unrelated direct action result, a stale raw C20 provider surface, and the real generated surface shape shared by lifecycle and A2UI logs. The generated-surface logger expectation was observed RED at 1088/1089 before the strict allowlist change; malformed/user-shaped surfaces remain `invalid` without leaking their value.
 
 ## Final host gates
 
-- Focused Node lifecycle/hotel suites: PASS, 38/38 in 0.3 seconds.
+- Focused Node lifecycle/hotel suites: PASS, 38/38 in 0.4 seconds.
 - Changed-script syntax checks: PASS.
 - Case lists: PASS, exactly C01-C20 and C01-C20 plus F01-F16; M01 remains list-only behind both safe variables and X02 remains excluded.
 - Backend verifier: PASS, 245 checks including HAR build.
@@ -53,7 +56,7 @@ Second-review RED cases additionally cover missing F12 dependency options in the
 - `git diff --check`: PASS.
 - Generated `agent_core/BuildProfile.ets`: restored to `debug` and absent from the final diff.
 
-Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:29:24+0800` has zero failures and errors.
+Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:42:53+0800` has zero failures and errors.
 
 ## Matrix and scope
 
