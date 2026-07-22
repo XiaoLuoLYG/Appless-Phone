@@ -2775,6 +2775,7 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
 
 async function runQuery(query, index, expectedTool) {
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const lifecycle = lifecycleOptions(expectedCase);
   const expectedToolIds = lifecycle.expectedToolIds;
@@ -2790,6 +2791,8 @@ async function runQuery(query, index, expectedTool) {
   moveAppWindowIntoScreenshot();
   const appPid = hdc(['shell', 'pidof', 'com.example.aiphonedemo']).trim().split(/\s+/)[0] || '';
   const controls = await waitForControls();
+  const directTextBaselineName = `query-${index + 1}-direct-text-baseline-layout.json`;
+  let directTextBaselineLayout = null;
   const logs = await captureWhile(appPid, async () => {
     let typed = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2808,6 +2811,12 @@ async function runQuery(query, index, expectedTool) {
       throw new Error(`Could not type full query into AIPhone input: ${query}`);
     }
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
+    if (expectsDirectText) {
+      directTextBaselineLayout = dumpLayout(directTextBaselineName);
+      if (!collectInputText(directTextBaselineLayout).includes(query)) {
+        throw new Error(`Direct-text baseline lost the typed query: ${query}`);
+      }
+    }
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
   }, { expectedToolIds, minimumDataRounds, expectedDependencies });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
@@ -2835,16 +2844,30 @@ async function runQuery(query, index, expectedTool) {
   const layoutText = layoutTextValues.join('\n');
   const layoutTextPath = join(outDir, `query-${index + 1}-final-layout-text.txt`);
   writeFileSync(layoutTextPath, layoutText + '\n');
-  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
-  const directTextEvidence = expectsDirectText ? directTextVisibleEvidence(
+  const directTextEvidence = expectsDirectText && directTextBaselineLayout !== null ? directTextVisibleEvidence(
     safeLogText,
+    directTextBaselineLayout,
     layout,
     query,
-    { expectedToolIds, minimumDataRounds, expectedDependencies }
-  ) : { ok: true, replyChars: 0, failures: [], skipped: true };
+    {
+      conversationId: summary.multiAgentLifecycle.conversationId,
+      turnId: summary.multiAgentLifecycle.turnId,
+      expectedToolIds,
+      minimumDataRounds,
+      expectedDependencies
+    }
+  ) : (expectsDirectText ?
+    { ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: ['missing_direct_text_baseline'], skipped: false } :
+    { ok: true, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: [], skipped: true });
+  summary.directTextBaselineLayoutPath = expectsDirectText ?
+    join(outDir, directTextBaselineName) : '';
   summary.directTextVisible = {
     ok: directTextEvidence.ok,
     replyChars: directTextEvidence.replyChars,
+    baselineMessageCount: directTextEvidence.baselineMessageCount,
+    finalMessageCount: directTextEvidence.finalMessageCount,
     failures: directTextEvidence.failures,
     skipped: directTextEvidence.skipped === true
   };
@@ -3479,20 +3502,38 @@ const finalLayoutRouteHits = finalLayoutRouteMarkers.filter((marker) => finalLay
 const hilogProcesses = activeHilogProcesses();
 const finalExpectsDirectText = finalSummary !== null && finalSummary.expectedTool === false &&
   !isPersonaMemoryUpdateQuery(finalQuery);
-let finalDirectTextVisible = { ok: false, replyChars: 0, failures: ['not_direct_text'], skipped: true };
-if (finalExpectsDirectText && typeof finalSummary.logPath === 'string') {
-  const evidence = directTextVisibleEvidence(
-    readFileSync(finalSummary.logPath, 'utf8'),
-    finalLayout,
-    finalQuery,
-    { expectedToolIds: finalSummary.expectedToolIds || [] }
-  );
-  finalDirectTextVisible = {
-    ok: evidence.ok,
-    replyChars: evidence.replyChars,
-    failures: evidence.failures,
-    skipped: false
-  };
+let finalDirectTextVisible = {
+  ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+  failures: ['not_direct_text'], skipped: true
+};
+if (finalExpectsDirectText && typeof finalSummary.logPath === 'string' &&
+  typeof finalSummary.directTextBaselineLayoutPath === 'string') {
+  try {
+    const evidence = directTextVisibleEvidence(
+      readFileSync(finalSummary.logPath, 'utf8'),
+      JSON.parse(readFileSync(finalSummary.directTextBaselineLayoutPath, 'utf8')),
+      finalLayout,
+      finalQuery,
+      {
+        conversationId: finalSummary.multiAgentLifecycle?.conversationId || '',
+        turnId: finalSummary.multiAgentLifecycle?.turnId || '',
+        expectedToolIds: finalSummary.expectedToolIds || []
+      }
+    );
+    finalDirectTextVisible = {
+      ok: evidence.ok,
+      replyChars: evidence.replyChars,
+      baselineMessageCount: evidence.baselineMessageCount,
+      finalMessageCount: evidence.finalMessageCount,
+      failures: evidence.failures,
+      skipped: false
+    };
+  } catch (_error) {
+    finalDirectTextVisible = {
+      ok: false, replyChars: 0, baselineMessageCount: 0, finalMessageCount: 0,
+      failures: ['direct_text_baseline_unavailable'], skipped: false
+    };
+  }
 }
 const finalOutputPresent = finalExpectsDirectText ? finalDirectTextVisible.ok :
   (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate ||

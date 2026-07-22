@@ -432,13 +432,18 @@ function nodeTextValues(node, values) {
 
 function semanticMessages(layout) {
   const messages = [];
+  let articleCount = 0;
   const visit = (node) => {
     if (node === null || typeof node !== 'object') return;
     if (node.attributes?.type === 'article') {
+      articleCount += 1;
       const values = [];
       nodeTextValues(node, values);
-      const roleIndex = values.findIndex((value) => value === 'user' || value === 'assistant');
-      if (roleIndex >= 0) {
+      const roleIndexes = values
+        .map((value, index) => value === 'user' || value === 'assistant' ? index : -1)
+        .filter((index) => index >= 0);
+      if (roleIndexes.length === 1) {
+        const roleIndex = roleIndexes[0];
         messages.push({
           role: values[roleIndex],
           text: values.slice(roleIndex + 1)
@@ -451,13 +456,27 @@ function semanticMessages(layout) {
     for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
   };
   visit(layout);
-  return messages;
+  const validPairs = articleCount === messages.length && messages.length % 2 === 0 &&
+    messages.every((message, index) => message.text.length > 0 &&
+      message.role === (index % 2 === 0 ? 'user' : 'assistant'));
+  return { articleCount, messages, validPairs };
 }
 
-export function directTextVisibleEvidence(logText, layout, query, options = {}) {
+export function directTextVisibleEvidence(logText, baselineLayout, finalLayout, query, options = {}) {
   const text = String(logText || '');
-  const lifecycle = multiAgentTurnEvidence(text, options);
   const failures = [];
+  const capturedRecords = records(text);
+  const capturedTarget = targetRecords(capturedRecords, options).selected;
+  const nextInput = capturedTarget === null ? undefined : capturedRecords.find((item) =>
+    item.index > capturedTarget.index && item.marker === 'MultiAgentInput' &&
+    (item.fields.conversation !== capturedTarget.fields.conversation ||
+      item.fields.turn !== capturedTarget.fields.turn ||
+      item.fields.task !== capturedTarget.fields.task));
+  const capturedLines = text.split('\n');
+  const scopeText = capturedTarget === null ? '' : capturedLines
+    .slice(capturedTarget.index, nextInput?.index ?? capturedLines.length)
+    .join('\n');
+  const lifecycle = multiAgentTurnEvidence(scopeText, options);
   if (!lifecycle.complete || !lifecycle.ok || lifecycle.status !== 'success' ||
     !lifecycle.textResult || lifecycle.surfaceId !== 'none' ||
     lifecycle.finalUiSurfaceId !== '' || lifecycle.toolIds.length !== 0 ||
@@ -465,8 +484,8 @@ export function directTextVisibleEvidence(logText, layout, query, options = {}) 
     failures.push('invalid_direct_lifecycle');
   }
 
-  const all = records(text);
-  const { selected, window } = targetRecords(all, options);
+  const all = records(scopeText);
+  const { selected } = targetRecords(all, options);
   const terminal = selected === null ? undefined : all.find((item) =>
     item.index > selected.index && item.marker === 'MultiAgentTurnResult' &&
     item.fields.conversation === selected.fields.conversation &&
@@ -474,21 +493,32 @@ export function directTextVisibleEvidence(logText, layout, query, options = {}) 
   if (selected === null || terminal === undefined || terminal.index !== lifecycle.terminalIndex) {
     failures.push('missing_current_terminal');
   } else {
-    const currentText = text.split('\n').slice(selected.index, terminal.index + 1).join('\n');
+    const currentText = scopeText.split('\n').slice(selected.index, terminal.index + 1).join('\n');
     if (!modelTransportEvidence(currentText, options)) failures.push('missing_current_transport');
   }
-  if (window.some((item) => DIRECT_TEXT_FORBIDDEN_MARKERS.has(item.marker))) {
+  if (all.some((item) => DIRECT_TEXT_FORBIDDEN_MARKERS.has(item.marker))) {
     failures.push('non_direct_work');
   }
-  if (externalOrSyntheticError(window)) failures.push('error_or_synthetic');
+  if (externalOrSyntheticError(all) || all.some((item) =>
+    /(?:Error|Exception|Failed)$/.test(item.marker) || item.fields.ok === 'false' ||
+    item.fields.success === 'false' || item.fields.status === 'error')) {
+    failures.push('error_or_synthetic');
+  }
 
-  const messages = semanticMessages(layout);
+  const baseline = semanticMessages(baselineLayout);
+  const final = semanticMessages(finalLayout);
+  const messages = final.messages;
   const expectedQuery = String(query || '').trim();
-  const userIndex = messages.findLastIndex((message) =>
-    message.role === 'user' && message.text === expectedQuery);
-  const assistant = userIndex >= 0 ? messages[userIndex + 1] : undefined;
+  const historyMatches = baseline.validPairs && final.validPairs &&
+    messages.length === baseline.messages.length + 2 &&
+    baseline.messages.every((message, index) =>
+      messages[index]?.role === message.role && messages[index]?.text === message.text);
+  const userIndex = baseline.messages.length;
+  const user = historyMatches ? messages[userIndex] : undefined;
+  const assistant = historyMatches ? messages[userIndex + 1] : undefined;
   const expectedChars = Number(terminal?.fields.messageChars || 0);
-  if (expectedQuery.length === 0 || userIndex !== messages.length - 2 ||
+  if (!historyMatches || expectedQuery.length === 0 || user?.role !== 'user' ||
+    user.text !== expectedQuery ||
     assistant?.role !== 'assistant' || assistant.text.length === 0 ||
     assistant.text === expectedQuery || assistant.text.length !== expectedChars) {
     failures.push('missing_current_visible_reply');
@@ -498,6 +528,8 @@ export function directTextVisibleEvidence(logText, layout, query, options = {}) 
     ok: failures.length === 0,
     replyText: assistant?.text || '',
     replyChars: assistant?.text.length || 0,
+    baselineMessageCount: baseline.messages.length,
+    finalMessageCount: final.messages.length,
     failures
   };
 }
