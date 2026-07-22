@@ -668,9 +668,13 @@ function publishTurnTerminal(
   bus: CountingBus,
   input: AgentMessage,
   status: 'success' | 'error',
-  message: string
+  message: string,
+  surfaceId: string = ''
 ): void {
   const payload: TurnResultPayload = { status, roundCount: 2, message };
+  if (surfaceId.length > 0) {
+    payload.surfaceId = surfaceId;
+  }
   bus.publish({
     type: AgentMessageType.TURN_RESULT,
     conversationId: input.conversationId,
@@ -963,7 +967,7 @@ export default function multiAgentRuntimeTest() {
       runtime.dispose();
     });
 
-    it('joins an exact UI error with Leader terminal before canceling and settling', 0, async () => {
+    it('settles an exact UI error with one Leader-owned terminal', 0, async () => {
       const bus = new CountingBus();
       const runtime = new MultiAgentRuntime(runtimeOptions(
         bus,
@@ -983,18 +987,26 @@ export default function multiAgentRuntimeTest() {
       await settle();
 
       expect(resolved).assertFalse();
-      publishTurnTerminal(bus, input, 'success', 'provider work completed');
+      publishTurnTerminal(bus, input, 'error', 'UI rendering failed', 'surface-error');
       const result = await pending as MultiAgentSettledOutcome;
       const correlated: AgentMessage[] = bus.published.filter((message: AgentMessage): boolean =>
         message.turnId === input.turnId &&
           (message.type === AgentMessageType.TURN_CANCEL ||
             message.type === AgentMessageType.TURN_RESULT)
       );
+      const terminals: AgentMessage[] = correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_RESULT
+      );
+      const cancels: AgentMessage[] = correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_CANCEL
+      );
 
       expect(result.status).assertEqual('error');
       expect(result.surfaceId).assertEqual('surface-error');
-      expect(correlated[correlated.length - 2].type).assertEqual(AgentMessageType.TURN_CANCEL);
-      expect(correlated[correlated.length - 1].type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect(terminals.length).assertEqual(1);
+      expect((terminals[0].payload as TurnResultPayload).status).assertEqual('error');
+      expect((terminals[0].payload as TurnResultPayload).surfaceId).assertEqual('surface-error');
+      expect(cancels.length).assertEqual(0);
       runtime.dispose();
     });
 

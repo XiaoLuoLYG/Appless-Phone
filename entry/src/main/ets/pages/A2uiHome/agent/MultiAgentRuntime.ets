@@ -816,13 +816,12 @@ export class MultiAgentRuntime {
     const surfaceId: string = pending.uiTaskId.length > 0 ?
       pending.uiSurfaceId : result.surfaceId === undefined ? '' : result.surfaceId;
     if (pending.uiState === 'error') {
-      this.forceTurn(
-        pending,
-        'error',
-        'Multi-agent UI rendering failed.',
-        surfaceId,
-        'ui_error'
-      );
+      this.activeConversationId = pending.conversationId;
+      this.activeTurnId = pending.turnId;
+      this.activeSurfaceId = surfaceId;
+      const message: string = result.status === 'error' ?
+        result.message : 'Multi-agent UI rendering failed.';
+      this.settleTurn(pending, settled('error', message, surfaceId));
       return;
     }
     this.activeConversationId = pending.conversationId;

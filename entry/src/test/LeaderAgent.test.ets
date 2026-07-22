@@ -1010,6 +1010,83 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('lets an exact UI-first error override the Data-derived terminal status', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('travel', 'travel.search')]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const uiTask = await receive(observer);
+      const dataTask = await receive(observer);
+      const uiResult: UiRenderResultPayload = {
+        surfaceId: 'loop_surface_ui_error_first',
+        state: 'error'
+      };
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: uiResult
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const terminal = await receive(observer);
+      const payload = terminal.payload as TurnResultPayload;
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect(payload.status).assertEqual('error');
+      expect(payload.surfaceId).assertEqual('loop_surface_ui_error_first');
+      leader.stop();
+      observer.close();
+    });
+
+    it('lets an exact Data-first UI error own the single terminal', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('travel', 'travel.search')]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const uiTask = await receive(observer);
+      const dataTask = await receive(observer);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      await settle();
+      const uiResult: UiRenderResultPayload = {
+        surfaceId: 'loop_surface_data_error_first',
+        state: 'error'
+      };
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: uiResult
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const terminal = await receive(observer);
+      const payload = terminal.payload as TurnResultPayload;
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect(payload.status).assertEqual('error');
+      expect(payload.surfaceId).assertEqual('loop_surface_data_error_first');
+      leader.stop();
+      observer.close();
+    });
+
     it('does not attach an inherited surface to a direct clarification', 0, async () => {
       const bus = new LinkedMessageBus();
       const direct = semanticDecision([], 'answer');

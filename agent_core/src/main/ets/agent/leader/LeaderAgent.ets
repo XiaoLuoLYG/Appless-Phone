@@ -50,6 +50,7 @@ interface LeaderTurnState {
   turnObservations: ObservationDigest[];
   skillId: string;
   uiDone: boolean;
+  uiState: '' | 'result' | 'error';
   uiSurfaceId: string;
   pendingAnswer: string | null;
   dataDone: boolean;
@@ -230,6 +231,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       turnObservations: [],
       skillId: '',
       uiDone: false,
+      uiState: '',
       uiSurfaceId: '',
       pendingAnswer: null,
       dataDone: false,
@@ -492,6 +494,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     state.uiDone = true;
+    state.uiState = payload.state;
     state.uiSurfaceId = payload.surfaceId.trim();
     if (state.pendingAnswer === null) {
       return;
@@ -1097,6 +1100,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     };
     state.uiTaskId = taskId;
     state.uiDone = false;
+    state.uiState = '';
     state.uiSurfaceId = '';
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
@@ -1141,9 +1145,9 @@ export class LeaderAgent extends MessageDrivenAgent {
     answer: string
   ): void {
     const payload: TurnResultPayload = {
-      status: this.turnResultStatus(state),
+      status: state.uiState === 'error' ? 'error' : this.turnResultStatus(state),
       roundCount: state.round,
-      message: answer
+      message: state.uiState === 'error' ? 'Multi-agent UI rendering failed.' : answer
     };
     if (state.uiSurfaceId.length > 0) {
       payload.surfaceId = state.uiSurfaceId;
