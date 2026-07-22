@@ -31,6 +31,25 @@ const successTurn = `
 [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=surface-1 roundCount=1 messageChars=12
 `;
 
+const dualChannelTurn = `
+07-22 09:41:13.001  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+07-22 09:41:13.002  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+07-22 09:41:13.003  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=travel.search predecessor=none path=none target=none binding=false
+07-22 09:41:13.004  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=travel.search predecessor=none path=none target=none binding=false
+07-22 09:41:13.005  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-2 round=1 tool=travel.search predecessor=none path=none target=none binding=false
+07-22 09:41:13.006  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-2 round=1 tool=travel.search predecessor=none path=none target=none binding=false
+07-22 09:41:13.007  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1,data-2
+07-22 09:41:13.008  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1,data-2
+07-22 09:41:13.009  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false
+07-22 09:41:13.010  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false
+07-22 09:41:13.011  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentTaskError] conversation=c1 turn=t1 task=data-2 code=PROVIDER_FAILED
+07-22 09:41:13.012  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentTaskError] conversation=c1 turn=t1 task=data-2 code=PROVIDER_FAILED
+07-22 09:41:13.013  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result
+07-22 09:41:13.014  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result
+07-22 09:41:13.015  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=partial surface=surface-1 roundCount=1 messageChars=12
+07-22 09:41:13.016  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=partial surface=surface-1 roundCount=1 messageChars=12
+`;
+
 test('requires one strictly correlated successful multi-agent turn', () => {
   const evidence = multiAgentTurnEvidence(successTurn, {
     expectedToolIds: ['travel.search']
@@ -47,6 +66,39 @@ test('requires one strictly correlated successful multi-agent turn', () => {
   assert.equal(multiAgentTurnEvidence(earlyUi, {
     expectedToolIds: ['travel.search']
   }).complete, false);
+});
+
+test('collapses adjacent identical lifecycle copies from the two HiLog channels', () => {
+  const evidence = multiAgentTurnEvidence(dualChannelTurn, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.status, 'partial');
+  assert.deepEqual(evidence.toolIds, ['travel.search', 'travel.search']);
+  assert.deepEqual(evidence.failures, []);
+});
+
+test('preserves same-channel and later repeated lifecycle events', () => {
+  const sameChannel = dualChannelTurn.replaceAll('A03D00/JSAPP', 'A00000/AIPhone');
+  const sameChannelEvidence = multiAgentTurnEvidence(sameChannel, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+  assert.equal(sameChannelEvidence.complete, false);
+  assert.ok(sameChannelEvidence.failures.includes('late_same_turn_marker'));
+  assert.deepEqual(sameChannelEvidence.toolIds, [
+    'travel.search', 'travel.search', 'travel.search', 'travel.search'
+  ]);
+
+  const laterCopy = dualChannelTurn.replace(
+    '07-22 09:41:13.012  4821  4821 I A03D00/JSAPP:',
+    '07-22 09:41:13.011  4821  4821 I A00000/AIPhone: [AIPhone][ModelStreamResponse] code=200\n' +
+      '07-22 09:41:13.012  4821  4821 I A03D00/JSAPP:'
+  );
+  const laterCopyEvidence = multiAgentTurnEvidence(laterCopy, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+  assert.equal(laterCopyEvidence.complete, false);
+  assert.ok(laterCopyEvidence.failures.includes('missing_or_duplicate_data_terminal'));
 });
 
 test('extracts only the latest exact generated UI result surface', () => {

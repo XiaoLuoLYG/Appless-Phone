@@ -8,17 +8,31 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
   'MultiAgentTurnResult'
 ]);
+const DUPLICATE_HILOG_CHANNELS = new Set(['A00000/AIPHONE', 'A03D00/JSAPP']);
 
 function records(logText) {
-  return String(logText || '').split('\n').flatMap((line, index) => {
+  const result = [];
+  for (const [index, line] of String(logText || '').split('\n').entries()) {
     const marker = /\[AIPhone\]\[([^\]]+)\]/.exec(line);
-    if (marker === null) return [];
+    if (marker === null) continue;
     const fields = {};
     for (const match of line.matchAll(/\b([A-Za-z][A-Za-z0-9]*)=([^\s]+)/g)) {
       fields[match[1]] = match[2];
     }
-    return [{ marker: marker[1], fields, index, line }];
-  });
+    const channelMatch = /\b(A00000|A03D00)\/(?:[^/\s:]+\/)*(AIPhone|JSAPP):\s*$/i
+      .exec(line.slice(0, marker.index));
+    const channel = channelMatch === null ? '' :
+      `${channelMatch[1].toUpperCase()}/${channelMatch[2].toUpperCase()}`;
+    const normalized = line.slice(marker.index).trim();
+    const previous = result.at(-1);
+    if (LIFECYCLE_MARKERS.has(marker[1]) && previous?.index === index - 1 &&
+      previous.normalized === normalized && previous.channel !== channel &&
+      DUPLICATE_HILOG_CHANNELS.has(previous.channel) && DUPLICATE_HILOG_CHANNELS.has(channel)) {
+      continue;
+    }
+    result.push({ marker: marker[1], fields, index, line, channel, normalized });
+  }
+  return result;
 }
 
 export function latestMultiAgentUiSurface(logText, options = {}) {
