@@ -10,7 +10,7 @@ import {
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarSearchQueryText,
-  calendarUpdateArgsFromResultsForTest,
+  calendarUpdateArgsFromResults,
   calendarUpdateNeedsInputResults,
   calendarUpdateBody,
   normalizedCalendarArgsForPrompt,
@@ -51,7 +51,7 @@ export default function calendarApiClientTest() {
       const matches = calendarEventResultsFromListPayload(
         '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
       );
-      const resolved = calendarUpdateArgsFromResultsForTest({
+      const resolved = calendarUpdateArgsFromResults({
         query: '团队同步',
         timeMin: '2026-07-18T16:00:00+08:00',
         timeMax: '2026-07-18T17:00:00+08:00',
@@ -70,7 +70,7 @@ export default function calendarApiClientTest() {
       const matches = calendarEventResultsFromListPayload(
         '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'
       );
-      const resolved = calendarUpdateArgsFromResultsForTest({
+      const resolved = calendarUpdateArgsFromResults({
         query: '团队同步',
         timeMin: '2026-07-18T12:00:00+08:00',
         timeMax: '2026-07-18T18:00:00+08:00',
@@ -90,7 +90,7 @@ export default function calendarApiClientTest() {
         '{"id":"event-real-1","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}},' +
         '{"id":"event-real-2","summary":"团队同步","start":{"dateTime":"2026-07-18T17:00:00+08:00"},"end":{"dateTime":"2026-07-18T17:30:00+08:00"}}]}'
       );
-      const resolved = calendarUpdateArgsFromResultsForTest({
+      const resolved = calendarUpdateArgsFromResults({
         query: '团队同步',
         timeMin: '2026-07-18T15:00:00+08:00',
         timeMax: '2026-07-18T18:00:00+08:00',
@@ -359,19 +359,79 @@ export default function calendarApiClientTest() {
       expect(args.timeMax).assertEqual('2026-08-01T00:00:00+08:00');
     });
 
-    it('does not rewrite model-owned Calendar write parameters from prompt text', 0, () => {
-      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.event.create', '帮我在明天下午创建一个一对一会议的日程，4:30开始持续半个小时', {
-        title: '一对一会议',
-        start: '2023-10-05T16:30:00+08:00',
-        end: '2023-10-05T17:00:00+08:00',
-        timezone: 'Asia/Shanghai',
-        calendarId: 'primary'
-      }, new Date('2026-07-01T09:00:00+08:00'));
+    it('parses the documented Calendar create prompt through the shared normalizer', 0, () => {
+      const args: CalendarEventArgs = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
 
-      expect(args.title).assertEqual('一对一会议');
-      expect(args.start).assertEqual('2023-10-05T16:30:00+08:00');
-      expect(args.end).assertEqual('2023-10-05T17:00:00+08:00');
+      expect(args.title).assertEqual('AIPhoneDemo');
+      expect(args.start).assertEqual('2026-07-30T15:00:00+08:00');
+      expect(args.end).assertEqual('2026-07-30T15:30:00+08:00');
       expect(args.timezone).assertEqual('Asia/Shanghai');
+      expect(args.calendarId).assertEqual('primary');
+    });
+
+    it('parses an unlabeled relative create prompt but rejects a missing explicit time', 0, () => {
+      const exact = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '明天下午3点帮我创建一个30分钟的产品评审日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const vague = normalizedCalendarArgsForPrompt(
+        'calendar.event.create',
+        '明天下午帮我创建标题为产品评审的日程',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+
+      expect(exact.title).assertEqual('产品评审');
+      expect(exact.start).assertEqual('2026-07-23T15:00:00+08:00');
+      expect(exact.end).assertEqual('2026-07-23T15:30:00+08:00');
+      expect(calendarEventRequiredFields('calendar.event.create', vague).join(','))
+        .assertEqual('start,end');
+    });
+
+    it('parses documented and common Calendar updates without accepting an eventId', 0, () => {
+      const documented = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把 2026年7月30日 的 Appless QA run-1 日程改到下午4点',
+        { eventId: 'user-forged' },
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const renamed = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把明天下午的产品评审日程改名为产品终审并改到上午9点',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+      const vague = normalizedCalendarArgsForPrompt(
+        'calendar.event.update',
+        '把明天下午的产品评审日程移到上午',
+        {},
+        new Date('2026-07-22T09:00:00+08:00'),
+        true
+      );
+
+      expect(documented.eventId).assertEqual('');
+      expect(documented.query).assertEqual('Appless QA run-1');
+      expect(documented.timeMin).assertEqual('2026-07-30T00:00:00+08:00');
+      expect(documented.timeMax).assertEqual('2026-07-31T00:00:00+08:00');
+      expect(documented.start).assertEqual('2026-07-30T16:00:00+08:00');
+      expect(documented.end).assertEqual('');
+      expect(renamed.query).assertEqual('产品评审');
+      expect(renamed.title).assertEqual('产品终审');
+      expect(renamed.start).assertEqual('2026-07-23T09:00:00+08:00');
+      expect(vague.query).assertEqual('产品评审');
+      expect(vague.start).assertEqual('');
     });
   });
 }

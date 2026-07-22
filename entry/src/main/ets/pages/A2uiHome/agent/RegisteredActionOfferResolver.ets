@@ -3,6 +3,7 @@ import {
   ActionCatalog,
   ActionOffer,
   ActionOfferContext,
+  CalendarEventArgs,
   DataResult,
   DynamicGenericToolResult,
   HotelDetailResult,
@@ -10,6 +11,8 @@ import {
   MailThreadSummary,
   SocialHubItemData,
   ToolDefinition,
+  calendarEventRequiredFields,
+  calendarUpdateArgsFromResults,
   hotelActionsFor,
   hotelBookingOpenAction,
   toolDefinitionForToolId
@@ -41,15 +44,6 @@ interface SocialDraftArgs {
   itemId: string;
   platform: string;
   instruction: string;
-}
-
-interface CalendarUpdateArgs {
-  eventId: string;
-  title: string;
-  start: string;
-  end: string;
-  timezone: string;
-  calendarId: string;
 }
 
 interface CanonicalState {
@@ -161,15 +155,6 @@ function socialDraftCandidate(item: SocialHubItemData): CandidateOffer {
   };
 }
 
-function resultRow(result: DynamicGenericToolResult, label: string): string {
-  for (let index = 0; index < result.rows.length; index++) {
-    if (result.rows[index].label === label) {
-      return result.rows[index].value.trim();
-    }
-  }
-  return '';
-}
-
 function calendarUpdateCandidates(record: OfferRecord): CandidateOffer[] {
   const rawResults = record['results'];
   const requested = recordOf(record['requestedAction']);
@@ -177,26 +162,23 @@ function calendarUpdateCandidates(record: OfferRecord): CandidateOffer[] {
     requested['actionId'] !== 'calendar.event.update') {
     return [];
   }
-  const matches: DynamicGenericToolResult[] = [];
   const results = rawResults as DynamicGenericToolResult[];
-  for (let index = 0; index < results.length; index++) {
-    const current = results[index];
-    if (current.status === 'success' && current.sourceTag === 'Composio Google Calendar' &&
-      current.toolName === 'calendar.events.search' && resultRow(current, 'Event ID').length > 0) {
-      matches.push(current);
-    }
-  }
-  if (matches.length !== 1) {
+  if (results.length !== 1 || results[0].status !== 'success' ||
+    results[0].sourceTag !== 'Composio Google Calendar' ||
+    results[0].toolName !== 'calendar.events.search') {
     return [];
   }
-  const args: CalendarUpdateArgs = {
-    eventId: resultRow(matches[0], 'Event ID'),
+  const requestedArgs: CalendarEventArgs = {
     title: typeof requested['title'] === 'string' ? requested['title'].trim() : '',
     start: typeof requested['start'] === 'string' ? requested['start'].trim() : '',
     end: typeof requested['end'] === 'string' ? requested['end'].trim() : '',
     timezone: typeof requested['timezone'] === 'string' ? requested['timezone'].trim() : '',
     calendarId: typeof requested['calendarId'] === 'string' ? requested['calendarId'].trim() : ''
   };
+  const args = calendarUpdateArgsFromResults(requestedArgs, results);
+  if (args === null || calendarEventRequiredFields('calendar.event.update', args).length > 0) {
+    return [];
+  }
   return [{
     action: action('calendar.event.update', '确认更新日程', 'primary', args as Object)
   }];

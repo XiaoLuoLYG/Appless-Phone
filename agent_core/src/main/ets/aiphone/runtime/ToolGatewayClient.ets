@@ -114,10 +114,12 @@ import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClien
 import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
 import {
   CalendarEventArgs,
+  calendarDateFromPrompt,
   calendarEventRequiredFields,
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarResultsFromComposioObservation,
+  calendarTimeFromPrompt,
   normalizedCalendarArgsForPrompt
 } from './CalendarApiClient';
 import {
@@ -1957,95 +1959,6 @@ function pad2(value: number): string {
     return '0' + value.toString();
   }
   return value.toString();
-}
-
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date.getTime());
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatDate(date: Date): string {
-  return date.getFullYear().toString() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
-}
-
-function parseTravelDate(source: string): string {
-  const now = new Date();
-  if (/后天/.test(source)) {
-    return formatDate(addDays(now, 2));
-  }
-  if (/明天|明日/.test(source)) {
-    return formatDate(addDays(now, 1));
-  }
-  if (/今天|今日/.test(source)) {
-    return formatDate(now);
-  }
-
-  const iso = /20\d{2}[-/年](\d{1,2})[-/月](\d{1,2})/.exec(source);
-  if (iso !== null) {
-    return source.substring(iso.index, iso.index + 4) + '-' + pad2(Number(iso[1])) + '-' + pad2(Number(iso[2]));
-  }
-
-  const monthDay = /(\d{1,2})\s*(?:月|-|\/)\s*(\d{1,2})\s*(?:日|号)?/.exec(source);
-  if (monthDay !== null) {
-    return now.getFullYear().toString() + '-' + pad2(Number(monthDay[1])) + '-' + pad2(Number(monthDay[2]));
-  }
-  return '';
-}
-
-function parseChineseNumberToken(token: string): number {
-  const raw = token.trim();
-  if (/^\d+$/.test(raw)) {
-    return Number(raw);
-  }
-  const chars = ['零', '一', '二', '两', '三', '四', '五', '六', '七', '八', '九', '十'];
-  const values = [0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  if (raw.length === 1) {
-    const index = chars.indexOf(raw);
-    return index >= 0 ? values[index] : -1;
-  }
-  if (raw.startsWith('十') && raw.length === 2) {
-    const index = chars.indexOf(raw.substring(1));
-    return index >= 0 ? 10 + values[index] : -1;
-  }
-  if (raw.endsWith('十') && raw.length === 2) {
-    const index = chars.indexOf(raw.substring(0, 1));
-    return index >= 0 ? values[index] * 10 : -1;
-  }
-  const tens = /^([一二三四五六七八九])十([一二三四五六七八九])?$/.exec(raw);
-  if (tens !== null) {
-    const tenIndex = chars.indexOf(tens[1]);
-    const oneIndex = tens[2] === undefined ? -1 : chars.indexOf(tens[2]);
-    return values[tenIndex] * 10 + (oneIndex >= 0 ? values[oneIndex] : 0);
-  }
-  return -1;
-}
-
-function parseDepartAfter(source: string): string {
-  const colon = /(\d{1,2})\s*[:：]\s*(\d{2})\s*(?:之)?(?:后|以后|之后|起)?/.exec(source);
-  if (colon !== null) {
-    const hour = Number(colon[1]);
-    const minute = Number(colon[2]);
-    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      return pad2(hour) + ':' + pad2(minute);
-    }
-  }
-  const point = /(凌晨|早上|上午|中午|下午|傍晚|晚上|夜间)?\s*([零一二三四五六七八九十两\d]{1,4})\s*点(?:\s*([零一二三四五六七八九十\d]{1,2})\s*分)?(?:\s*(?:之)?(?:后|以后|之后|起))?/.exec(source);
-  if (point !== null) {
-    let hour = parseChineseNumberToken(point[2]);
-    const minute = point[3] === undefined ? 0 : parseChineseNumberToken(point[3]);
-    if (hour < 0 || minute < 0) {
-      return '';
-    }
-    const period = point[1] === undefined ? '' : point[1];
-    if ((period === '下午' || period === '晚上' || period === '傍晚') && hour >= 1 && hour <= 11) {
-      hour += 12;
-    }
-    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      return pad2(hour) + ':' + pad2(minute);
-    }
-  }
-  return '';
 }
 
 function normalizeTrainStationName(name: string, source: string): string {
@@ -6026,7 +5939,7 @@ async function callStructuredFlightTool(prompt: string): Promise<DataResult> {
   }
 
   const source = prompt;
-  const date = parseTravelDate(source);
+  const date = calendarDateFromPrompt(source);
   const flightNumber = extractFlightNumber(source);
   const flightRoute = extractFlightCityCodes(source);
   const wantsPrice = /票价|价格|多少钱|最低价|机票/.test(source);
@@ -9632,7 +9545,7 @@ function trainErrorData(title: string, body: string): TrainStructuredData {
 
 async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
   const source = prompt;
-  const date = parseTravelDate(source);
+  const date = calendarDateFromPrompt(source);
   if (date.length === 0) {
     const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
     return structuredErrorWithData(
@@ -9651,7 +9564,7 @@ async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
     );
   }
   const routeNames = extractRouteNames(source, stations.names);
-  const departAfter = parseDepartAfter(source);
+  const departAfter = calendarTimeFromPrompt(source);
   if (routeNames.length < 2) {
     const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
     return structuredErrorWithData(
@@ -12479,47 +12392,36 @@ function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
 type WhatsAppObservationValue = Object | string | number | boolean | null | undefined;
 type WhatsAppObservationRecord = Record<string, WhatsAppObservationValue>;
 
-function whatsAppMessageIdFromObservation(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw) as WhatsAppObservationRecord;
-    const records: WhatsAppObservationRecord[] = [parsed];
-    const data = parsed['data'];
-    if (data !== null && data !== undefined && typeof data === 'object' && !Array.isArray(data)) {
-      const dataRecord = data as WhatsAppObservationRecord;
-      records.push(dataRecord);
-      const response = dataRecord['response_data'];
-      if (response !== null && response !== undefined && typeof response === 'object' && !Array.isArray(response)) {
-        records.push(response as WhatsAppObservationRecord);
-      }
-    }
-    for (let recordIndex = 0; recordIndex < records.length; recordIndex++) {
-      const messages = records[recordIndex]['messages'];
-      if (!Array.isArray(messages) || messages.length !== 1) {
-        continue;
-      }
-      const messageValues = messages as WhatsAppObservationValue[];
-      const item: WhatsAppObservationValue = messageValues[0];
-      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
-        continue;
-      }
-      const id = (item as WhatsAppObservationRecord)['id'];
-      if (typeof id === 'string' && id.trim().startsWith('wamid.')) {
-        return id.trim();
-      }
-    }
-  } catch (_error) {
-  }
-  return '';
+interface WhatsAppObservationTruth {
+  messageId: string;
+  failed: boolean;
 }
 
-function whatsAppObservationValueFailed(value: WhatsAppObservationValue, depth: number): boolean {
-  if (depth > 8 || value === null || value === undefined || typeof value !== 'object') {
+function whatsAppErrorValue(value: WhatsAppObservationValue): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length > 0 && value.trim().toLowerCase() !== 'null';
+  }
+  return true;
+}
+
+function inspectWhatsAppObservation(
+  value: WhatsAppObservationValue,
+  depth: number,
+  messageIds: string[]
+): boolean {
+  if (depth > 10) {
+    return true;
+  }
+  if (value === null || value === undefined || typeof value !== 'object') {
     return false;
   }
   if (Array.isArray(value)) {
     const items = value as WhatsAppObservationValue[];
     for (let index = 0; index < items.length; index++) {
-      if (whatsAppObservationValueFailed(items[index], depth + 1)) {
+      if (inspectWhatsAppObservation(items[index], depth + 1, messageIds)) {
         return true;
       }
     }
@@ -12530,8 +12432,8 @@ function whatsAppObservationValueFailed(value: WhatsAppObservationValue, depth: 
     record['successful'] === false || record['successful'] === 'false') {
     return true;
   }
-  const error = record['error'];
-  if (typeof error === 'string' && error.trim().length > 0) {
+  const keys = Object.keys(record);
+  if (keys.indexOf('error') >= 0 && whatsAppErrorValue(record['error'])) {
     return true;
   }
   const status = typeof record['status'] === 'string' ? record['status'].trim().toLowerCase() : '';
@@ -12540,26 +12442,46 @@ function whatsAppObservationValueFailed(value: WhatsAppObservationValue, depth: 
     status.indexOf('invalid') >= 0) {
     return true;
   }
-  const keys = Object.keys(record);
   for (let index = 0; index < keys.length; index++) {
-    if (whatsAppObservationValueFailed(record[keys[index]], depth + 1)) {
+    const key = keys[index];
+    if (key === 'messages') {
+      const messages = record[key];
+      if (!Array.isArray(messages) || messages.length !== 1) {
+        return true;
+      }
+      const item = (messages as WhatsAppObservationValue[])[0];
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        return true;
+      }
+      const id = (item as WhatsAppObservationRecord)['id'];
+      if (typeof id !== 'string' || !id.trim().startsWith('wamid.')) {
+        return true;
+      }
+      messageIds.push(id.trim());
+    }
+    if (inspectWhatsAppObservation(record[key], depth + 1, messageIds)) {
       return true;
     }
   }
   return false;
 }
 
-function whatsAppObservationFailed(raw: string): boolean {
+function parseWhatsAppObservation(raw: string): WhatsAppObservationTruth {
   try {
-    return whatsAppObservationValueFailed(JSON.parse(raw) as Object, 0);
+    const messageIds: string[] = [];
+    const failed = inspectWhatsAppObservation(JSON.parse(raw) as Object, 0, messageIds);
+    return {
+      messageId: !failed && messageIds.length === 1 ? messageIds[0] : '',
+      failed: failed || messageIds.length !== 1
+    };
   } catch (_error) {
-    return true;
+    return { messageId: '', failed: true };
   }
 }
 
 function normalizedWhatsAppProviderResult(result: DynamicGenericToolResult): DynamicGenericToolResult {
-  const messageId = whatsAppMessageIdFromObservation(result.rawPreview);
-  if (messageId.length === 0 || whatsAppObservationFailed(result.rawPreview)) {
+  const truth = parseWhatsAppObservation(result.rawPreview);
+  if (truth.failed) {
     return {
       sourceTag: 'Composio WhatsApp Business',
       toolName: 'whatsapp.message.send',
@@ -12576,7 +12498,7 @@ function normalizedWhatsAppProviderResult(result: DynamicGenericToolResult): Dyn
   result.rows = result.rows.filter(
     (row: A2uiLabelValueData): boolean => row.label.trim().toLowerCase() !== 'message id'
   );
-  result.rows.push({ label: 'Message ID', value: messageId });
+  result.rows.push({ label: 'Message ID', value: truth.messageId });
   result.actions = undefined;
   return result;
 }

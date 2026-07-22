@@ -797,11 +797,11 @@ export default function registeredPageActionMigrationTest() {
     it('resolves only an unambiguous Calendar create into a review action without guessing event IDs', 0, () => {
       const create = resolveVirtualRegisteredPageAction(
         'calendar.event.create',
-        '创建日程；标题：产品评审；时间：2026-07-30 15:00 至 2026-07-30 15:30'
+        '帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程'
       );
       expect(create === null).assertFalse();
       expect(JSON.stringify((create as A2uiAction).args)).assertEqual(
-        '{"title":"产品评审","start":"2026-07-30T15:00:00+08:00",' +
+        '{"title":"AIPhoneDemo","start":"2026-07-30T15:00:00+08:00",' +
         '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}'
       );
       expect(resolveVirtualRegisteredPageAction(
@@ -902,6 +902,14 @@ export default function registeredPageActionMigrationTest() {
         '{"data":{"messages":[{"id":"wamid.must-not-pass"}]},"successful":false,' +
         '"error":"provider rejected send"}'
       );
+      const objectError: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{"data":{"messages":[{"id":"wamid.must-not-pass-object"}]},' +
+        '"error":{"code":100,"message":"provider rejected send"}}'
+      );
+      const nestedError: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{"data":{"messages":[{"id":"wamid.must-not-pass-nested"}],' +
+        '"error":[{"code":100,"message":"nested provider rejection"}]},"error":null}'
+      );
       const invoker = new FixedProviderResultInvoker(provider);
       const context: RegisteredPageActionContext = {
         conversationId: 'whatsapp-provider-shape',
@@ -929,6 +937,14 @@ export default function registeredPageActionMigrationTest() {
       expect(malformed.status).assertEqual('error');
       expect(missing.status).assertEqual('error');
       expect(failed.status).assertEqual('error');
+      expect(objectError.status).assertEqual('error');
+      expect(objectError.rows.filter((row: A2uiLabelValueData): boolean =>
+        row.label === 'Message ID'
+      ).length).assertEqual(0);
+      expect(nestedError.status).assertEqual('error');
+      expect(nestedError.rows.filter((row: A2uiLabelValueData): boolean =>
+        row.label === 'Message ID'
+      ).length).assertEqual(0);
     });
 
     it('rejects receipt-shaped evidence from the wrong action or negative status', 0, async () => {

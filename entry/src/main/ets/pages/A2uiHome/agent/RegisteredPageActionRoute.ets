@@ -3,10 +3,13 @@ import {
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
   JsonValue,
+  CalendarEventArgs,
   MapsRouteArgs,
   ToolDefinition,
   actionAgentToolDefinitions,
+  calendarEventRequiredFields,
   mapsRouteInputFromPrompt,
+  normalizedCalendarArgsForPrompt,
   toolDefinitionForToolId
 } from '@loop/agent-core';
 import { HtmlHomeDocument } from '../html/HtmlHomeTypes';
@@ -61,44 +64,6 @@ export type LegacyPageActionRunner = (action: A2uiAction) => Promise<void>;
 
 interface WorldCupVirtualArgs {
   route: string;
-}
-
-interface CalendarCreateVirtualArgs {
-  title: string;
-  start: string;
-  end: string;
-  timezone: string;
-  calendarId: string;
-}
-
-function labeledPromptValue(input: string, label: string): string {
-  const index = input.indexOf(label);
-  if (index < 0) {
-    return '';
-  }
-  const start = index + label.length;
-  let end = input.indexOf('；', start);
-  const asciiEnd = input.indexOf(';', start);
-  if (end < 0 || (asciiEnd >= 0 && asciiEnd < end)) {
-    end = asciiEnd;
-  }
-  return input.substring(start, end < 0 ? input.length : end).trim();
-}
-
-function calendarCreateArgsFromPrompt(inputText: string): CalendarCreateVirtualArgs | null {
-  const prompt = inputText.trim();
-  const title = labeledPromptValue(prompt, '标题：');
-  const timeMatch = /(?:时间|新时间)[：:]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(?:至|到)\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(prompt);
-  if (title.length === 0 || timeMatch === null) {
-    return null;
-  }
-  const start = timeMatch[1] + 'T' + timeMatch[2] + ':00+08:00';
-  const end = timeMatch[3] + 'T' + timeMatch[4] + ':00+08:00';
-  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)) ||
-    Date.parse(end) <= Date.parse(start)) {
-    return null;
-  }
-  return { title, start, end, timezone: 'Asia/Shanghai', calendarId: 'primary' };
 }
 
 function registeredProductAction(actionId: string): boolean {
@@ -314,7 +279,8 @@ export async function dispatchRegisteredPageActionCandidate(
 
 export function resolveVirtualRegisteredPageAction(
   actionId: string,
-  inputText: string
+  inputText: string,
+  now: Date = new Date()
 ): A2uiAction | null {
   if (actionId === 'worldcup.open' && inputText.trim().length > 0) {
     const args: WorldCupVirtualArgs = { route: 'pages/A2uiHome/AnythingDemo' };
@@ -342,10 +308,17 @@ export function resolveVirtualRegisteredPageAction(
     };
   }
   if (actionId === 'calendar.event.create') {
-    const args = calendarCreateArgsFromPrompt(inputText);
-    if (args === null) {
+    const normalized = normalizedCalendarArgsForPrompt(actionId, inputText, {}, now, true);
+    if (calendarEventRequiredFields(actionId, normalized).length > 0) {
       return null;
     }
+    const args: CalendarEventArgs = {
+      title: normalized.title,
+      start: normalized.start,
+      end: normalized.end,
+      timezone: normalized.timezone,
+      calendarId: normalized.calendarId
+    };
     return {
       id: actionId,
       label: '确认创建日程',

@@ -239,6 +239,7 @@ class CalendarUpdateExecutor implements DataTaskExecutor {
     this.tasks.push(task);
     const values = task.args as Record<string, Object | string | number | boolean | null | undefined>;
     const rawRequestedAction = values['requestedAction'];
+    const query = typeof values['query'] === 'string' ? values['query'] as string : '';
     const requestedAction: Object = rawRequestedAction !== null &&
       rawRequestedAction !== undefined && typeof rawRequestedAction === 'object' &&
       !Array.isArray(rawRequestedAction) ? rawRequestedAction as Object : JSON.parse('{}') as Object;
@@ -247,7 +248,7 @@ class CalendarUpdateExecutor implements DataTaskExecutor {
       const result: DynamicGenericToolResult = {
         sourceTag: 'Composio Google Calendar',
         toolName: 'calendar.events.search',
-        title: '产品评审',
+        title: query,
         status: 'success',
         summary: 'Real provider event.',
         rows: [
@@ -770,7 +771,7 @@ export default function multiAgentCanaryRuntimeTest() {
       const runtime = new MultiAgentCanaryRuntime(options);
 
       const outcome = await runtime.submit(
-        '创建日程；标题：产品评审；时间：2026-07-30 15:00 至 2026-07-30 15:30',
+        '帮我在 2026年7月30日下午3点创建一个title为AIPhoneDemo的30分钟日程',
         { text: '' }
       ) as MultiAgentSettledOutcome;
       const exact = renderedAction(surfaces[surfaces.length - 1], 'calendar.event.create');
@@ -831,8 +832,7 @@ export default function multiAgentCanaryRuntimeTest() {
       const runtime = new MultiAgentCanaryRuntime(options);
 
       const outcome = await runtime.submit(
-        '更新日程；原日程：产品评审；新标题：产品终审；新时间：' +
-        '2026-07-30 16:00 至 2026-07-30 16:30',
+        '把 2026年7月30日 的 Appless QA run-1 日程改到下午4点',
         { text: '' }
       ) as MultiAgentSettledOutcome;
       const review = renderedAction(surfaces[surfaces.length - 1], 'calendar.event.update');

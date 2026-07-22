@@ -9,6 +9,7 @@ import {
   A2uiAction,
   A2uiSurfaceStore,
   A2uiSurfaceState,
+  CalendarEventArgs,
   ClientActionAuthorizer,
   CreateDataTaskPayload,
   DataResult,
@@ -34,6 +35,7 @@ import {
   allToolDefinitions,
   callStructuredTool,
   genericToolResultsA2ui,
+  normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   toolDefinitionForToolId
 } from '@loop/agent-core';
@@ -84,17 +86,17 @@ interface CalendarReviewOutput {
   surfaceId: string;
 }
 
-interface CalendarUpdateRequestArgs {
+interface CalendarUpdateRequestArgs extends CalendarEventArgs {
   actionId: string;
-  title: string;
-  start: string;
-  end: string;
-  timezone: string;
-  calendarId: string;
 }
 
 interface CalendarUpdateSearchArgs {
   query: string;
+  date: string;
+  timeMin: string;
+  timeMax: string;
+  timezone: string;
+  calendarId: string;
   requestedAction: CalendarUpdateRequestArgs;
 }
 
@@ -155,49 +157,45 @@ class RejectClientAction implements ClientActionAuthorizer {
   }
 }
 
-function labeledCalendarValue(input: string, label: string): string {
-  const index = input.indexOf(label);
-  if (index < 0) {
-    return '';
+function calendarNow(currentLocalDate?: HotelLocalDateProvider): Date {
+  if (currentLocalDate === undefined) {
+    return new Date();
   }
-  const start = index + label.length;
-  let end = input.indexOf('；', start);
-  const asciiEnd = input.indexOf(';', start);
-  if (end < 0 || (asciiEnd >= 0 && asciiEnd < end)) {
-    end = asciiEnd;
-  }
-  return input.substring(start, end < 0 ? input.length : end).trim();
+  const value = currentLocalDate().trim();
+  const timestamp = Date.parse(value + 'T00:00:00+08:00');
+  return Number.isNaN(timestamp) ? new Date() : new Date(timestamp);
 }
 
-function calendarUpdateSearchArgs(input: string): CalendarUpdateSearchArgs | null {
-  const query = labeledCalendarValue(input, '原日程：');
-  const title = labeledCalendarValue(input, '新标题：');
-  const timeMatch = /新时间[：:]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(?:至|到)\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(input);
-  if (query.length === 0 || title.length === 0 || timeMatch === null) {
-    return null;
-  }
-  const start = timeMatch[1] + 'T' + timeMatch[2] + ':00+08:00';
-  const end = timeMatch[3] + 'T' + timeMatch[4] + ':00+08:00';
-  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)) ||
-    Date.parse(end) <= Date.parse(start)) {
+function calendarUpdateSearchArgs(input: string, now: Date): CalendarUpdateSearchArgs | null {
+  const normalized = normalizedCalendarArgsForPrompt('calendar.event.update', input, {}, now, true);
+  const query = normalized.query === undefined ? '' : normalized.query.trim();
+  const title = normalized.title === undefined ? '' : normalized.title.trim();
+  const start = normalized.start === undefined ? '' : normalized.start.trim();
+  if (query.length === 0 || (title.length === 0 && start.length === 0)) {
     return null;
   }
   return {
     query,
+    date: normalized.date === undefined ? '' : normalized.date,
+    timeMin: normalized.timeMin === undefined ? '' : normalized.timeMin,
+    timeMax: normalized.timeMax === undefined ? '' : normalized.timeMax,
+    timezone: normalized.timezone === undefined ? '' : normalized.timezone,
+    calendarId: normalized.calendarId === undefined ? '' : normalized.calendarId,
     requestedAction: {
       actionId: 'calendar.event.update',
       title,
       start,
-      end,
-      timezone: 'Asia/Shanghai',
-      calendarId: 'primary'
+      end: normalized.end === undefined ? '' : normalized.end,
+      timezone: normalized.timezone === undefined ? '' : normalized.timezone,
+      calendarId: normalized.calendarId === undefined ? '' : normalized.calendarId
     }
   };
 }
 
 function normalizeCanaryTaskInput(
   input: InputUserPayload,
-  task: LeaderDecisionDataTask
+  task: LeaderDecisionDataTask,
+  now: Date
 ): Object {
   if (task.toolId === 'hotel.search') {
     return normalizeHotelSearchTaskInput(input, task);
@@ -205,7 +203,7 @@ function normalizeCanaryTaskInput(
   if (task.toolId !== 'calendar.events.search') {
     return task.input;
   }
-  const update = calendarUpdateSearchArgs(input.text);
+  const update = calendarUpdateSearchArgs(input.text, now);
   if (update !== null) {
     return update as Object;
   }
@@ -217,7 +215,7 @@ function normalizeCanaryTaskInput(
       safe[key] = value as Object | string | number | boolean;
     }
   });
-  return safe as Object;
+  return normalizedCalendarArgsForPrompt('calendar.events.search', input.text, safe, now) as Object;
 }
 
 function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
@@ -347,6 +345,12 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
 }
 
 class MemoryIntentResolver implements VirtualActionIntentResolver {
+  private readonly currentLocalDate?: HotelLocalDateProvider;
+
+  constructor(currentLocalDate?: HotelLocalDateProvider) {
+    this.currentLocalDate = currentLocalDate;
+  }
+
   async resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
     if (request.virtual !== true || request.dataTaskIds.length !== 0 ||
       request.allowedActionIds.length !== 1 ||
@@ -355,7 +359,9 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
     }
     const actionId = request.allowedActionIds[0];
     if (actionId !== MEMORY_ACTION_ID) {
-      const action = resolveVirtualRegisteredPageAction(actionId, request.inputText);
+      const action = resolveVirtualRegisteredPageAction(
+        actionId, request.inputText, calendarNow(this.currentLocalDate)
+      );
       if (action === null || action.args === undefined) {
         return null;
       }
@@ -584,7 +590,8 @@ export class MultiAgentCanaryRuntime {
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
         canaryPlanningContext(options.selectedPersonaId()),
-      dataTaskInputNormalizer: normalizeCanaryTaskInput,
+      dataTaskInputNormalizer: (input: InputUserPayload, task: LeaderDecisionDataTask): Object =>
+        normalizeCanaryTaskInput(input, task, calendarNow(options.currentLocalDate)),
       dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
         new CanaryStructuredDataExecutor() : options.dataExecutor,
@@ -599,7 +606,7 @@ export class MultiAgentCanaryRuntime {
         options.onMemoryUpdate,
         options.onSurface
       ),
-      virtualActionResolver: new MemoryIntentResolver(),
+      virtualActionResolver: new MemoryIntentResolver(options.currentLocalDate),
       submitTimeoutMs: options.submitTimeoutMs,
       actionTimeoutMs: options.actionTimeoutMs,
       settingsFingerprint: options.settingsFingerprint,
