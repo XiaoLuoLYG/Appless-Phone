@@ -28,7 +28,8 @@ import {
   TurnResultStatus,
   UiAgent,
   UiRenderResultPayload,
-  UserInputPayload
+  UserInputPayload,
+  aiLogInfo
 } from '@loop/agent-core';
 import {
   MultiAgentHandoffOutcome,
@@ -121,6 +122,91 @@ function settled(
 
 function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function evidenceValue(value: string | undefined, fallback: string = 'none'): string {
+  if (value === undefined || value.length === 0) {
+    return fallback;
+  }
+  const bounded: string = value.substring(0, 256);
+  const safe: string = bounded.replace(/[^A-Za-z0-9._:/,-]/g, '_');
+  if (safe.length === 0) {
+    return fallback;
+  }
+  return safe;
+}
+
+export function multiAgentEvidenceLine(message: AgentMessage): string {
+  const identity: string = ' conversation=' + evidenceValue(message.conversationId) +
+    ' turn=' + evidenceValue(message.turnId) + ' task=' + evidenceValue(message.taskId);
+  if (message.type === AgentMessageType.INPUT_USER) {
+    return '[AIPhone][MultiAgentInput]' + identity;
+  }
+  if (message.type === AgentMessageType.TASK_CREATE_DATA) {
+    const payload = message.payload as CreateDataTaskPayload;
+    return '[AIPhone][MultiAgentDataTask]' + identity + ' round=' +
+      evidenceValue(payload.roundId) + ' tool=' + evidenceValue(payload.toolId);
+  }
+  if (message.type === AgentMessageType.TASK_RESULT_DATA) {
+    const payload = message.payload as DataResult;
+    return '[AIPhone][MultiAgentDataResult]' + identity + ' tool=' +
+      evidenceValue(payload.toolId) + ' status=' + evidenceValue(payload.status) +
+      ' sources=' + payload.sources.length.toString() +
+      ' error=' + (payload.error === undefined ? 'false' : 'true');
+  }
+  if (message.type === AgentMessageType.TASK_CREATE_UI) {
+    const payload = message.payload as CreateUiTaskPayload;
+    return '[AIPhone][MultiAgentUiTask]' + identity + ' dataTasks=' +
+      evidenceValue(payload.dataTaskIds.join(','));
+  }
+  if (message.type === AgentMessageType.TASK_RESULT_UI) {
+    const payload = message.payload as UiRenderResultPayload;
+    return '[AIPhone][MultiAgentUiResult]' + identity + ' surface=' +
+      evidenceValue(payload.surfaceId) + ' state=' + evidenceValue(payload.state);
+  }
+  if (message.type === AgentMessageType.TASK_ERROR) {
+    const payload = message.payload as TaskErrorPayload;
+    return '[AIPhone][MultiAgentTaskError]' + identity + ' code=' + evidenceValue(payload.code);
+  }
+  if (message.type === AgentMessageType.ACTION_PLAN_REQUEST) {
+    const payload = message.payload as ActionPlanRequestPayload;
+    return '[AIPhone][MultiAgentActionPlan]' + identity + ' uiTask=' +
+      evidenceValue(payload.uiTaskId) + ' dataTasks=' +
+      evidenceValue(payload.dataTaskIds.join(',')) + ' actions=' +
+      evidenceValue(payload.allowedActionIds.join(',')) +
+      ' virtual=' + (payload.virtual === true ? 'true' : 'false');
+  }
+  if (message.type === AgentMessageType.ACTION_RUN) {
+    const payload = message.payload as ActionRunPayload;
+    return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' +
+      evidenceValue(payload.surfaceId) + ' run=' + evidenceValue(payload.runId) +
+      ' action=' + evidenceValue(payload.actionId) +
+      ' source=' + evidenceValue(payload.sourceToolId);
+  }
+  if (message.type === AgentMessageType.ACTION_RESULT) {
+    const payload = message.payload as ActionResultPayload;
+    return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' +
+      evidenceValue(payload.surfaceId) + ' plan=' + evidenceValue(payload.planId) +
+      ' run=' + evidenceValue(payload.runId) + ' status=' + evidenceValue(payload.status);
+  }
+  if (message.type === AgentMessageType.TURN_RESULT) {
+    const payload = message.payload as TurnResultPayload;
+    return '[AIPhone][MultiAgentTurnResult]' + identity + ' status=' +
+      evidenceValue(payload.status) + ' surface=' + evidenceValue(payload.surfaceId) +
+      ' roundCount=' + payload.roundCount.toString() +
+      ' messageChars=' + payload.message.length.toString();
+  }
+  return '';
+}
+
+function emitEvidence(message: AgentMessage): void {
+  try {
+    const line: string = multiAgentEvidenceLine(message);
+    if (line.length > 0) {
+      aiLogInfo(line);
+    }
+  } catch (_error) {
+  }
 }
 
 function runtimeOwnedIds(context: LeaderPlanningContext): string[] {
@@ -450,6 +536,7 @@ export class MultiAgentRuntime {
       return;
     }
     const action: PendingAction | undefined = this.pendingActions.get(message.taskId);
+    emitEvidence(message);
     if (message.type === AgentMessageType.ACTION_RESULT && action !== undefined) {
       this.observeActionResult(message, action);
       return;

@@ -41,7 +41,10 @@ import {
   VirtualActionIntentResolver,
   allToolDefinitions
 } from '@loop/agent-core';
-import { MultiAgentRuntime } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
+import {
+  multiAgentEvidenceLine,
+  MultiAgentRuntime
+} from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
 import {
   MultiAgentHandoffOutcome,
   MIGRATED_TOOL_IDS,
@@ -675,6 +678,68 @@ function publishTurnTerminal(
 
 export default function multiAgentRuntimeTest() {
   describe('multiAgentRuntime', () => {
+    it('formats bounded redacted lifecycle evidence from typed messages', 0, () => {
+      const inputPayload: InputUserPayload = {
+        text: 'secret prompt and recipient@example.com'
+      };
+      const inputMessage: AgentMessage = {
+        type: AgentMessageType.INPUT_USER,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'input-1',
+        payload: inputPayload
+      };
+      const dataPayload: CreateDataTaskPayload = {
+        taskId: 'data-1',
+        roundId: 'turn-1:round-2',
+        skillId: '',
+        goal: 'must not log',
+        allowedToolIds: ['maps.place.details'],
+        toolId: 'maps.place.details',
+        outputSchema: 'place',
+        args: JSON.parse('{"placeId":"private-place-id"}') as Object,
+        required: true
+      };
+      const dataMessage: AgentMessage = {
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'data-1',
+        payload: dataPayload
+      };
+      const turnPayload: TurnResultPayload = {
+        status: 'partial',
+        surfaceId: 'surface-2',
+        roundCount: 2,
+        message: 'provider message must not log'
+      };
+      const turnMessage: AgentMessage = {
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'input-1',
+        payload: turnPayload
+      };
+      const inputLine = multiAgentEvidenceLine(inputMessage);
+      const dataLine = multiAgentEvidenceLine(dataMessage);
+      const turnLine = multiAgentEvidenceLine(turnMessage);
+
+      expect(inputLine).assertEqual(
+        '[AIPhone][MultiAgentInput] conversation=conversation-1 turn=turn-1 task=input-1'
+      );
+      expect(dataLine).assertEqual(
+        '[AIPhone][MultiAgentDataTask] conversation=conversation-1 turn=turn-1 task=data-1 ' +
+          'round=turn-1:round-2 tool=maps.place.details'
+      );
+      expect(turnLine).assertEqual(
+        '[AIPhone][MultiAgentTurnResult] conversation=conversation-1 turn=turn-1 task=input-1 ' +
+          'status=partial surface=surface-2 roundCount=2 messageChars=29'
+      );
+      expect(inputLine.indexOf('secret')).assertEqual(-1);
+      expect(dataLine.indexOf('private-place-id')).assertEqual(-1);
+      expect(turnLine.indexOf('provider message')).assertEqual(-1);
+    });
+
     it('owns all 44 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
       const registryIds = allToolDefinitions().map(
         (definition: ToolDefinition): string => definition.toolId

@@ -2,11 +2,17 @@
 
 更新时间：2026-07-22
 
-来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
+来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
 当前 agent 工具箱：44 个固定 `ToolDefinition`（24 个 Data Agent + 20 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 43 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
+
+## multi-Agent smoke 证据边界
+
+自动 smoke 以同一 `conversation`、`turn`、`task` 下的 `MultiAgentInput`、Data/UI task 与 terminal、`MultiAgentTurnResult` 为主证据；并行任务必须全部 terminal，依赖任务必须出现递增的 `round-*`。`success`、`partial`、`empty`、`error`、`canceled` 保留原状态，不把旧 `LoopBackend`/页面 ready/HTTP 200 单独当成成功。当前 surface 动作还要求 `MultiAgentActionRun` 与同一 surface/run 的 `MultiAgentActionResult`；virtual action 使用精确 `MultiAgentActionPlan` request 与 terminal result 关联。
+
+`node scripts/aiphone-device-smoke.mjs --list-cases` 只列 C01-C20，`--full-regression --list-cases` 再列 F01-F16，均不运行设备或 provider。`gmail.message.send` 不进入自动列表；只有同时配置 `AIPHONE_GMAIL_SAFE_THREAD_ID` 与 `AIPHONE_GMAIL_SAFE_RECIPIENT` 时，`--gmail-send-manual --list-cases` 才显示 manual-only M01，且脚本不会自动发送。X02“不确认直接发送”继续 excluded。
 
 ## 固定/虚拟能力 owner 账本
 
@@ -36,7 +42,7 @@
 | `gmail.draft.create` | Action Agent | core | 当前收件人/正文草稿动作 |
 | `gmail.draft.apply` | Action Agent | full | 当前草稿应用确认 |
 | `gmail.open.web` | Action Agent | excluded | 明确 Web 打开动作 |
-| `gmail.message.send` | Action Agent | manual-only | 当前 Gmail 回复卡一次确认；exact provider/thread/message/body |
+| `gmail.message.send` | Action Agent | manual-only | 当前 Gmail 回复卡一次确认；exact provider/thread/message/body；仅安全 thread/recipient 手工门禁 |
 | `youtube.video.search` | Data Agent | full | 无 |
 | `media.video.search` | Data Agent | core | 无 |
 | `media.aggregate.search` | Data Agent | core | 无 |
@@ -86,7 +92,7 @@
 | Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送；缺少结构化 `to`/`body` 时直接报错，不会从 prompt 补正文 | `draft` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | Gmail cases |
 | Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿；缺少结构化 `threadId`/`to`/`subject`/`replyMode`/`body` 时直接报错 | `confirm_required` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | 单元/动作链路 |
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
-| Gmail | `gmail.message.send` | 当前 Gmail 回复卡片点击“发送回复” | 仅复用当前可见回复卡片的一次确认，固定执行 `GMAIL_REPLY_TO_THREAD`；provider 未返回明确成功证据时显示真实错误，不声称已发送 | `confirm_required` | Composio Gmail connected account + 当前 thread/message/requestKey/recipient/body | 通常需要外网/VPN | 是 | 参数/身份/重放/失败单测；真实发送 manual-only |
+| Gmail | `gmail.message.send` | 当前 Gmail 回复卡片点击“发送回复” | 仅复用当前可见回复卡片的一次确认，固定执行 `GMAIL_REPLY_TO_THREAD`；provider 未返回明确成功证据时显示真实错误，不声称已发送 | `confirm_required` | Composio Gmail connected account + 当前 thread/message/requestKey/recipient/body；M01 还要求安全 thread/recipient 环境变量 | 通常需要外网/VPN | 是 | 参数/身份/重放/失败单测；`--gmail-send-manual --list-cases` 仅列手工门禁，不自动发送 |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
 | 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID` + X/HN connected account；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | X/HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
 | 世界杯 | `worldcup.open` | `我想看世界杯下一场比赛和赛程` | 打开 App 内世界杯专页；不把静态页冒充实时比赛结果 | `read` | 无 | 页面本身不需要 | 否 | core C12 |
@@ -131,4 +137,4 @@
 
 ## 更新规则
 
-改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 agent-only 工具看 `LoopBackend.ets`; 新增聚合搜索来源看 `AggregateSearchClient.ets`；新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。
+改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 virtual owner 或 runtime action 看 `MultiAgentCanaryRuntime.ets` 与 `MultiAgentRuntime.ets`；新增聚合搜索来源看 `AggregateSearchClient.ets`；新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。

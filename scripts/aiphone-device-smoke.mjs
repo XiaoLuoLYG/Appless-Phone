@@ -10,6 +10,7 @@ import {
   hotelActionEvidenceFromLogs,
   hotelDetailLifecycleFromLogs,
   hotelDetailClickLocator,
+  hotelMultiAgentSearchEvidence,
   hotelToolLifecycleFromLogs,
   hasSafeHotelSystemIntentOpen,
   isExpectedHotelSystemBundle,
@@ -19,6 +20,10 @@ import {
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
+import {
+  multiAgentActionEvidence,
+  multiAgentTurnEvidence
+} from './multi-agent-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const outDir = join(rootDir, 'tool-gateway', '.smoke');
@@ -161,7 +166,7 @@ const coreRegressionCases = [
   { id: 'C09', query: '帮我查看我今天 X 和 Slack 上的消息', expectsTool: true, expectedToolId: 'social.feed.search', verifySocialDraft: true },
   { id: 'C10', query: '帮我查看 X 上 OpenAI 最近的公开 post', expectsTool: true, expectedToolId: 'x.post.search' },
   { id: 'C11a', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search' },
-  { id: 'C11b', query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '' },
+  { id: 'C11b', query: '我只喝瑞幸咖啡', expectsTool: false, expectedToolId: '', expectedToolIds: ['memory.update'] },
   { id: 'C11c', query: '点一杯咖啡', expectsTool: true, expectedToolId: 'food.search', expectedPersonaMemory: 'luckin_only' },
   { id: 'C12', query: '我想看世界杯下一场比赛和赛程', expectsTool: true, expectedToolId: 'worldcup.open' },
   { id: 'C13', query: '帮我查明天深圳天气', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'weather.query' },
@@ -204,12 +209,48 @@ const retainedFullCases = [
   { id: 'F09', query: '帮我在 YouTube 搜索世界杯相关视频', expectsTool: true, expectedToolId: 'youtube.video.search' },
   { id: 'F10', query: '帮我查看我的 YouTube 播放列表', expectsTool: true, expectedToolId: 'youtube.mine.playlists' },
   { id: 'F11', query: '帮我查看我的 YouTube 订阅', expectsTool: true, expectedToolId: 'youtube.mine.subscriptions' },
+  {
+    id: 'F12',
+    query: '帮我先用 Google Maps 搜索伦敦国王十字车站，再用搜索结果的真实 placeId 查询地点详情',
+    expectsTool: true,
+    expectedToolId: 'maps.place.search',
+    expectedToolIds: ['maps.place.search', 'maps.place.details'],
+    minimumDataRounds: 2
+  },
   { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
   { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
-  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' }
+  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
+  {
+    id: 'F16',
+    query: '打开当前应用的 Composio 管理授权设置',
+    expectsTool: false,
+    expectedToolId: '',
+    expectedToolIds: [],
+    verifyComposioSettings: true
+  }
 ];
 
 const fullRegressionCases = [...coreRegressionCases, ...retainedFullCases];
+
+const coreScenarioManifest = [
+  ['C01', []], ['C02', ['travel.search']], ['C03', ['food.search']],
+  ['C04', ['maps.place.search']], ['C05', ['mail.search']],
+  ['C06', ['gmail.mail.search']], ['C07', ['media.video.search']],
+  ['C08', ['media.aggregate.search']], ['C09', ['social.feed.search']],
+  ['C10', ['x.post.search']], ['C11', ['food.search', 'memory.update']],
+  ['C12', ['worldcup.open']], ['C13', ['dynamic.search']],
+  ['C14', ['ride.estimate']], ['C15', ['luckin.order.preview']],
+  ['C16', ['maps.route.open']], ['C17', ['payment.send']],
+  ['C18', ['whatsapp.message.send']],
+  ['C19', ['calendar.events.search', 'calendar.event.create', 'calendar.event.update', 'calendar.event.delete']],
+  ['C20', ['hotel.search']]
+].map(([id, expectedToolIds]) => ({ id, expectedToolIds }));
+
+const fullScenarioManifest = retainedFullCases.map((testCase) => ({
+  id: testCase.id,
+  expectedToolIds: testCase.expectedToolIds ||
+    (testCase.expectedToolId.length > 0 ? [testCase.expectedToolId] : [])
+}));
 
 const forbiddenSocialHubLegacyMarkers = [
   'SocialInbox',
@@ -420,6 +461,7 @@ const runComposioAuthCases = argv.includes('--composio-auth');
 const runGoogleApps = argv.includes('--google-apps');
 const runFullRegression = argv.includes('--full-regression');
 const runCoreRegression = argv.includes('--core-regression');
+const runGmailSendManual = argv.includes('--gmail-send-manual');
 const listCases = argv.includes('--list-cases');
 const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--dynamic-tools' &&
@@ -428,6 +470,7 @@ const queryArgs = argv.filter((arg) => arg !== '--clean-data' &&
   arg !== '--google-apps' &&
   arg !== '--full-regression' &&
   arg !== '--core-regression' &&
+  arg !== '--gmail-send-manual' &&
   arg !== '--list-cases');
 const selectedDefaultCases = runComposioCases ? composioCases :
   (runFullRegression ? fullRegressionCases :
@@ -437,8 +480,30 @@ const selectedDefaultCases = runComposioCases ? composioCases :
 const useDefaultCases = queryArgs.length === 0;
 const queries = useDefaultCases ? selectedDefaultCases.map((testCase) => testCase.query) : queryArgs;
 if (listCases) {
-  console.log(JSON.stringify(selectedDefaultCases, null, 2));
+  if (runGmailSendManual) {
+    const safeThreadId = (process.env.AIPHONE_GMAIL_SAFE_THREAD_ID || '').trim();
+    const safeRecipient = (process.env.AIPHONE_GMAIL_SAFE_RECIPIENT || '').trim();
+    if (safeThreadId.length === 0 || safeRecipient.length === 0) {
+      console.error('Manual Gmail reply-send listing requires AIPHONE_GMAIL_SAFE_THREAD_ID and AIPHONE_GMAIL_SAFE_RECIPIENT.');
+      process.exit(2);
+    }
+    console.log(JSON.stringify([{
+      id: 'M01',
+      mode: 'manual-only',
+      automated: false,
+      expectedToolIds: ['gmail.message.send'],
+      requiresCurrentVisibleReplySurface: true
+    }], null, 2));
+    process.exit(0);
+  }
+  const manifest = runFullRegression ?
+    [...coreScenarioManifest, ...fullScenarioManifest] : coreScenarioManifest;
+  console.log(JSON.stringify(manifest, null, 2));
   process.exit(0);
+}
+if (runGmailSendManual) {
+  console.error('gmail.message.send is manual-only; use --gmail-send-manual --list-cases to inspect its safe gate.');
+  process.exit(2);
 }
 const target = process.env.AIPHONE_HDC_TARGET || firstTarget();
 const timeoutMs = Number.parseInt(process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000', 10);
@@ -1188,7 +1253,7 @@ function lineMatchesPid(line, pid) {
   return line.indexOf(` ${pid} `) >= 0;
 }
 
-async function captureWhile(appPid, runAction) {
+async function captureWhile(appPid, runAction, lifecycleOptions = null) {
   const logs = [];
   const child = spawn('hdc', ['-t', target, 'hilog'], {
     stdio: ['ignore', 'pipe', 'pipe']
@@ -1227,13 +1292,15 @@ async function captureWhile(appPid, runAction) {
         hasPopulatedHotelActionEvidence(hotelActionEvidence);
       const hotelToolLifecycle = hotelToolLifecycleFromLogs(text);
       const hotelToolLifecycleComplete = hotelToolLifecycle.ok;
+      const multiAgentLifecycle = lifecycleOptions === null ? null :
+        multiAgentTurnEvidence(text, lifecycleOptions);
       const hasTerminalOutcome =
         /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
-      const done = hotelActionEvidencePopulated ||
-        hotelToolLifecycleComplete ||
-        hasTerminalOutcome;
+      const done = lifecycleOptions === null ?
+        (hotelActionEvidencePopulated || hotelToolLifecycleComplete || hasTerminalOutcome) :
+        multiAgentLifecycle.complete;
       const hotelActionRequested =
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=hotel\.(?:search|detail)/.test(text);
       const hotelRuntimeRequested = hotelActionRequested || hotelToolLifecycle.requested;
@@ -1241,7 +1308,8 @@ async function captureWhile(appPid, runAction) {
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      const hotelUiReady = hotelActionEvidencePopulated ||
+      const hotelUiReady = lifecycleOptions !== null ? multiAgentLifecycle.complete :
+        hotelActionEvidencePopulated ||
         (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
       if (done && (!hotelRuntimeRequested || hotelUiReady) &&
@@ -1250,7 +1318,8 @@ async function captureWhile(appPid, runAction) {
       }
       const modelFailed = /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text);
       const hasToolRequest = /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text);
-      if (modelFailed && !hasToolRequest && Date.now() - started > 5000) {
+      if (lifecycleOptions === null && modelFailed && !hasToolRequest &&
+        Date.now() - started > 5000) {
         break;
       }
     }
@@ -1384,15 +1453,25 @@ function htmlHomeSurfaceLoadEvidence(logs) {
   };
 }
 
-function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscoveredToolId = '') {
+function analyze(
+  query,
+  logs,
+  expectedTool,
+  expectedToolId = '',
+  expectedDiscoveredToolId = '',
+  expectedToolIds = [],
+  minimumDataRounds = 0
+) {
   const text = logs.join('\n');
+  const multiAgentLifecycle = multiAgentTurnEvidence(text, {
+    expectedToolIds,
+    minimumDataRounds
+  });
   const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
   const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
   const escapedToolId = escapeRegExp(expectedToolId);
-  const toolIdPattern = expectedToolId.length > 0 ?
-    new RegExp(`\\[AIPhone\\]\\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\\][^\\n]*toolId=${escapedToolId}`) :
-    null;
-  const hasExpectedToolId = toolIdPattern === null ? true : toolIdPattern.test(text);
+  const hasExpectedToolId = multiAgentLifecycle.complete &&
+    expectedToolIds.every((toolId) => multiAgentLifecycle.toolIds.includes(toolId));
   const discoveryPattern = expectedDiscoveredToolId.length > 0 ?
     new RegExp(`\\[AIPhone\\]\\[DynamicToolDiscovery\\][^\\n]*selectedToolId=${expectedDiscoveredToolId.replace('.', '\\.')}`) :
     null;
@@ -1403,14 +1482,14 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     new RegExp(`toolId=${escapedToolId}`).test(text);
   const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
   const personaMemoryUpdateProof = !isPersonaMemoryUpdateQuery(query) ||
-    (/\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text) &&
-      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
-      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text));
+    /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text);
   const result = {
     query,
     expectedTool,
     expectedToolId,
+    expectedToolIds,
     expectedDiscoveredToolId,
+    multiAgentLifecycle,
     hasExpectedToolId,
     hasExpectedDiscoveredToolId,
     htmlHomeDocument,
@@ -1422,33 +1501,33 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
     model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
-    modelOk: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=true/.test(text),
-    toolRequested: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=/.test(text),
-    toolOk: /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=true/.test(text),
+    modelOk: multiAgentLifecycle.ok,
+    toolRequested: multiAgentLifecycle.toolIds.length > 0,
+    toolOk: multiAgentLifecycle.ok && multiAgentLifecycle.toolIds.length > 0,
     failedConnect: /failed to connect|Could not connect|Couldn.t connect|ECONNREFUSED|server is not running|CURLcode result 7|curl_code":7|os_errno":111/i.test(text),
     providerFailed: /\[AIPhone\]\[LocalTool12306Endpoint\][^\n]*code=[45]\d\d/.test(text) ||
       /\[AIPhone\]\[LocalToolException\]/.test(text) ||
       /\[AIPhone\]\[A2uiHomeToolOutput\][^\n]*"status":"error"/.test(text) ||
       /Google Calendar API 调用失败/.test(text) ||
       /invalid request data provided|Composio 调用失败|WhatsApp Business 账号不可用/i.test(text) ||
+      (multiAgentLifecycle.complete && multiAgentLifecycle.status === 'error') ||
       (missingConfig && expectedToolId !== 'travel.search'),
-    modelFailed: /\[AIPhone\]\[(ModelResult|A2uiHomeModelResult)\] ok=false/.test(text),
-    toolNone: /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text),
+    modelFailed: !multiAgentLifecycle.ok,
+    toolNone: multiAgentLifecycle.complete && multiAgentLifecycle.toolIds.length === 0,
     gmailWebOpened:
       /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel|LocalToolRequest)\][^\n]*toolId=gmail\.open\.web/.test(text) &&
       /\[AIPhone\]\[A2uiHomeOpenUrl\] ok=true scheme=https chars=\d+/.test(text),
     worldCupOpened: /\[AIPhone\]\[AnythingDemoRouteByTool\]/.test(text),
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
-  const modelFallbackOnlyAfterSameToolSelection = result.modelFailed && result.directIntent && result.modelSelectedExpectedToolId;
-  const modelPassed = modelFallbackOnlyAfterSameToolSelection || (result.model200 && result.modelOk && !result.modelFailed);
+  const modelPassed = multiAgentLifecycle.ok;
   const htmlDocumentPassed = result.htmlHomeDocument.ok ||
     (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0) ||
     (expectedToolId === 'worldcup.open' && result.worldCupOpened);
   const baseWithoutTransport = !result.htmlLoadError &&
     result.htmlHomeSurfaceLoad.ok &&
     !result.syntheticFallback &&
-    (!result.directIntent || modelFallbackOnlyAfterSameToolSelection || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
+    (!result.directIntent || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
     htmlDocumentPassed;
   result.modelPassed = modelPassed;
   result.transportPassed = !result.failedConnect && !result.providerFailed;
@@ -1458,18 +1537,17 @@ function analyze(query, logs, expectedTool, expectedToolId = '', expectedDiscove
     result.modelPassed = result.personaMemoryUpdateProof === true;
     result.transportPassed = true;
     result.basePassedWithoutTransport = true;
-    result.ok = result.personaMemoryUpdateProof === true &&
-      /\[AIPhone\]\[ToolRequest\][^\n]*toolId=memory\.update/.test(text) &&
-      /\[AIPhone\]\[ToolResult\] ok=true toolId=memory\.update/.test(text);
+    result.ok = result.personaMemoryUpdateProof === true && multiAgentLifecycle.ok &&
+      multiAgentLifecycle.toolIds.length === 1 &&
+      multiAgentLifecycle.toolIds[0] === 'memory.update';
   } else if (expectedTool === true) {
-    result.ok = basePassed && modelPassed && result.toolRequested &&
-      (result.localToolRequest || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
-      result.toolOk && result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
+    result.ok = basePassed && modelPassed && result.toolRequested && result.toolOk &&
+      result.hasExpectedToolId && result.hasExpectedDiscoveredToolId && result.personaCoffeeProof;
   } else if (expectedTool === false) {
-    result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested && !result.localToolRequest;
+    result.ok = basePassed && modelPassed && result.toolNone && !result.toolRequested;
   } else {
     result.ok = basePassed && modelPassed &&
-      (result.toolRequested ? (result.localToolRequest && result.toolOk) : (result.toolNone && !result.localToolRequest));
+      (result.toolRequested ? result.toolOk : result.toolNone);
   }
   return result;
 }
@@ -1884,14 +1962,18 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
       const resultLayout = dumpLayout(`query-${index + 1}-calendar-delete-layout.json`);
       const text = collectLayoutText(resultLayout).join('\n');
       const logs = actionLogs.join('\n');
+      const actionEvidence = multiAgentActionEvidence(logs, {
+        expectedActionId: 'calendar.event.delete'
+      });
       const logPath = join(outDir, `query-${index + 1}-calendar-delete.log`);
       const textPath = join(outDir, `query-${index + 1}-calendar-delete-layout-text.txt`);
       writeFileSync(logPath, logs + '\n');
       writeFileSync(textPath, text + '\n');
       return {
-        ok: /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
+        ok: actionEvidence.ok && /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
           !/status":"error"|删除失败/.test(`${text}\n${logs}`),
         capability: 'calendar.event.delete.confirm',
+        actionEvidence,
         logPath,
         textPath,
         screenPath: captureScreen(`query-${index + 1}-calendar-delete-screen.png`)
@@ -1971,6 +2053,9 @@ async function exerciseHotelSystemAction(
   });
   const rawActionLogs = capturedActionLogs.join('\n');
   const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
+  const multiAgentAction = multiAgentActionEvidence(actionLogs, {
+    expectedActionId: actionId
+  });
   const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
   writeFileSync(logPath, actionLogs + '\n');
   const schemeOpened = hasSafeHotelSystemIntentOpen(actionLogs, expectedScheme);
@@ -1981,8 +2066,9 @@ async function exerciseHotelSystemAction(
   const screenPath = captureCurrentScreen(
     `query-${index + 1}-hotel-${actionName}-system-screen.png`
   );
-  runtime.systemSurfaceOpened = schemeOpened && systemSurfaceRecognized;
+  runtime.systemSurfaceOpened = multiAgentAction.ok && schemeOpened && systemSurfaceRecognized;
   runtime.evidenceCaptured = screenPath.length > 0;
+  runtime.multiAgentAction = multiAgentAction;
 
   // The only injected events on the external surface are bounded Back presses.
   let backPressCount = 0;
@@ -2016,6 +2102,7 @@ async function exerciseHotelSystemAction(
   }
   return {
     runtime,
+    actionEvidence: multiAgentAction,
     schemeOpened,
     systemSurfaceRecognized,
     foregroundBundle: externalForeground.bundleName,
@@ -2096,10 +2183,14 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
   hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
   await sleep(2200);
   const bookingLogs = sanitizeExternalUrlLogs(hdc(['shell', 'hilog', '-x']));
+  const multiAgentAction = multiAgentActionEvidence(bookingLogs, {
+    expectedActionId: 'hotel.booking.open'
+  });
   const logPath = join(outDir, `query-${index + 1}-hotel-booking.log`);
   writeFileSync(logPath, bookingLogs + '\n');
   const foreground = captureForegroundAbility(`query-${index + 1}-hotel-booking-ability.txt`);
   report.foregroundBundle = foreground.bundleName;
+  report.multiAgentAction = multiAgentAction;
   report.screenPath = captureCurrentScreen(`query-${index + 1}-hotel-booking-screen.png`);
   report.layoutPath = join(outDir, `query-${index + 1}-hotel-booking-layout.json`);
   let bookingLayout = dumpLayout(`query-${index + 1}-hotel-booking-layout.json`);
@@ -2130,7 +2221,8 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
     report.roomSurfaceRestored = /房型与价格规则|价格与取消规则/.test(roomText);
   }
   report.logPath = logPath;
-  report.ok = report.returnedToRoom && report.headerVisible && report.domainVisible &&
+  report.ok = multiAgentAction.ok && report.returnedToRoom &&
+    report.headerVisible && report.domainVisible &&
     report.loginBoundaryReached && report.roomSurfaceRestored;
   report.blocked = !report.ok && report.returnedToRoom && report.screenPath.length > 0;
   if (!report.ok && report.reason === undefined) {
@@ -2267,11 +2359,12 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
   const detailLifecycle = hotelDetailLifecycleFromLogs(detailLogText);
-  const detailRequested = detailLifecycle.requested ||
-    /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest|A2uiHomeToolRequestFromModel)\][^\n]*toolId=hotel\.detail/.test(detailLogText) ||
-    /\[AIPhone\]\[LocalToolRequest\][^\n]*toolId=hotel\.detail/.test(detailLogText);
-  const detailOk = detailLifecycle.ok ||
-    /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText);
+  const multiAgentDetailAction = multiAgentActionEvidence(detailLogText, {
+    expectedActionId: 'hotel.detail'
+  });
+  const detailRequested = multiAgentDetailAction.complete;
+  const detailOk = multiAgentDetailAction.ok && (detailLifecycle.ok ||
+    /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText));
   const restoredOk = /酒店结果/.test(restoredText);
   const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
   const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
@@ -2307,6 +2400,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     detailRequested,
     detailOk,
     detailLifecycle,
+    multiAgentDetailAction,
     restoredOk,
     detailLogPath,
     textPath,
@@ -2609,6 +2703,11 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
 }
 
 async function runQuery(query, index, expectedTool) {
+  const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+  const expectedToolId = expectedCase.expectedToolId || '';
+  const expectedToolIds = expectedCase.expectedToolIds ||
+    (expectedToolId.length > 0 ? [expectedToolId] : []);
+  const minimumDataRounds = expectedCase.minimumDataRounds || 0;
   clearHilog();
   hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
   if (cleanData) {
@@ -2638,16 +2737,22 @@ async function runQuery(query, index, expectedTool) {
     }
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
-  });
+  }, { expectedToolIds, minimumDataRounds });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
   const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
   writeFileSync(logPath, safeLogText + '\n');
-  const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
-  const expectedToolId = expectedCase.expectedToolId || '';
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
-  const summary = analyze(query, safeLogs, expectedTool, expectedToolId, expectedDiscoveredToolId);
+  const summary = analyze(
+    query,
+    safeLogs,
+    expectedTool,
+    expectedToolId,
+    expectedDiscoveredToolId,
+    expectedToolIds,
+    minimumDataRounds
+  );
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;
   summary.hotelCapabilities = expectedCase.hotelCapabilities || [];
@@ -2782,9 +2887,12 @@ async function runQuery(query, index, expectedTool) {
     ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs)
     : { ok: true, skipped: true };
   summary.providerFailed = summary.providerFailed || summary.hotelDetailAction.bookingAction?.blocked === true;
-  summary.hotelSearchLifecycle = expectedCase.verifyHotelDetail === true
-    ? hotelToolLifecycleFromLogs(safeLogText)
-    : { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
+  const combinedHotelSearchEvidence = expectedCase.verifyHotelDetail === true
+    ? hotelMultiAgentSearchEvidence(safeLogText)
+    : null;
+  summary.hotelSearchLifecycle = combinedHotelSearchEvidence?.lifecycle || summary.multiAgentLifecycle;
+  summary.hotelProviderEvidence = combinedHotelSearchEvidence?.provider ||
+    { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
     !evidenceText.includes(summary.expectedAbsentText) ||
@@ -2830,7 +2938,8 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
   if (expectedCase.verifyHotelDetail === true) {
     summary.ok = summary.hotelSearchLifecycle.ok &&
-      summary.hotelSearchLifecycle.network200 &&
+      summary.hotelProviderEvidence.network200 &&
+      summary.hotelProviderEvidence.blocks > 0 &&
       summary.htmlHomeSurfaceLoad.ok &&
       !summary.htmlLoadError &&
       !summary.syntheticFallback &&
@@ -3155,6 +3264,18 @@ for (let index = 0; index < queries.length; index += 1) {
     };
     summaries.push(blockedSummary);
     console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
+  if (inferredCase.verifyComposioSettings === true) {
+    const settingsSummary = await runComposioAuthSmoke();
+    settingsSummary.caseId = inferredCase.id || '';
+    settingsSummary.query = inferredCase.query;
+    settingsSummary.expectedTool = false;
+    settingsSummary.expectedToolId = '';
+    settingsSummary.expectedToolIds = [];
+    settingsSummary.status = settingsSummary.ok ? 'PASS' : 'FAIL';
+    summaries.push(settingsSummary);
+    console.log(JSON.stringify(settingsSummary, null, 2));
     continue;
   }
   const expectedTool = inferredCase.expectsTool;

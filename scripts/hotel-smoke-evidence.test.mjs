@@ -7,6 +7,7 @@ import {
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   hotelDetailLifecycleFromLogs,
+  hotelMultiAgentSearchEvidence,
   hotelSearchActionEvidence,
   hotelToolLifecycleFromLogs,
   hasSafeHotelSystemIntentOpen,
@@ -102,6 +103,28 @@ test('requires one hotel surface to progress from calling_tool through real bloc
   assert.equal(hotelToolLifecycleFromLogs(
     '[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready'
   ).requested, false);
+});
+
+test('combines generic turn correlation with specialized hotel provider evidence', () => {
+  const complete = hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=t1:round-1 tool=hotel.search
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=calling_tool components=2
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=skeleton
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=hotel-search-1 roundCount=1 messageChars=12
+  `);
+  assert.equal(complete.ok, true);
+  assert.equal(complete.lifecycle.toolIds[0], 'hotel.search');
+  assert.equal(complete.provider.blocks, 64);
+  assert.equal(hotelMultiAgentSearchEvidence(
+    complete.raw || '[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready'
+  ).ok, false);
 });
 
 test('validates exactly one booking action on a detail surface', () => {

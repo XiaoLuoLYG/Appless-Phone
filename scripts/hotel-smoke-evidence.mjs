@@ -1,3 +1,5 @@
+import { multiAgentTurnEvidence } from './multi-agent-smoke-evidence.mjs';
+
 function objectArgs(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -150,6 +152,18 @@ export function hotelToolLifecycleFromLogs(logText) {
 
 export function hotelDetailLifecycleFromLogs(logText) {
   return hotelToolLifecycleFromLogs(logText);
+}
+
+export function hotelMultiAgentSearchEvidence(logText) {
+  const lifecycle = multiAgentTurnEvidence(logText, {
+    expectedToolIds: ['hotel.search']
+  });
+  const provider = hotelToolLifecycleFromLogs(logText);
+  return {
+    ok: lifecycle.ok && provider.network200 && provider.blocks > 0,
+    lifecycle,
+    provider
+  };
 }
 
 export function hasSafeHotelSystemIntentOpen(logText, expectedScheme) {
