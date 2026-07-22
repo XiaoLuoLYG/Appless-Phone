@@ -5,6 +5,7 @@
 - Base commit: `c52e718d0783f399ea748f32fcc99dbc1a80004e`.
 - Product commit: `70882b7d` (`feat: complete multi-agent action ownership`).
 - Review-fix product commit: `38abc3bfef410882e6d063917dc36877317e189f` (`fix: close action ownership review gaps`).
+- Third-review product commit: `555b1300` (`fix: restore confirmed calendar action flow`).
 - All **20 fixed Action Agent definitions** now have an explicit registered owner route; the Task 8 deferred allowlist and `ACTION_ROUTE_DEFERRED` result are removed.
 - Migrated the seven remaining external writes: `luckin.order.create`, `calendar.event.create`, `calendar.event.update`, `calendar.event.delete`, `whatsapp.message.send`, `ride.order.create`, and `ride.order.cancel`.
 - Preserved the existing rendered UI IDs, labels, card lifecycle, provider adapters, and public optional `calendar.event.update` input schema.
@@ -17,11 +18,11 @@
 - Exact rendered aliases map to their fixed owners: Calendar delete confirm, WhatsApp send confirm, Ride estimate confirm, Ride order cancel, and Luckin create.
 - Migrated candidates are terminal. Authority, snapshot, policy, handler, or provider failure cannot fall through to a legacy tool call or natural-language submission.
 - Existing generation/fingerprint, current-surface argument authorization, and bounded replay identity checks remain in force.
-- Natural language cannot synthesize any of the seven writes directly. Only the existing exact World Cup and structured Maps virtual routes remain.
+- Natural language can create only a deterministic Calendar review card from an exact labeled title and absolute time range. It cannot call the Calendar provider until the exact current review action is clicked. Calendar update and delete never accept a model- or user-invented Event ID.
 
 ## Domain Safety
 
-- **Calendar:** create/update require a real provider Event ID; selector lookup is fail-closed when incomplete or ambiguous. Delete uses the exact visible Event ID and rendered confirm action. Payload `confirmed` flags were removed without making the public update fields required.
+- **Calendar:** create validates an exact title and absolute time range before rendering a review. Update first searches the real provider and binds a review only when exactly one event is returned. Delete uses the exact visible provider Event ID and rendered confirm action. Payload `confirmed` flags were removed without making the public update fields required.
 - **Luckin:** create requires the exact current preview button and exact current SKU/options. Stale or mutated create arguments are rejected. Provider success requires a returned order ID with no inner error; the request order ID is never reused as a success receipt.
 - **WhatsApp:** only the normalized E.164 target configured as `AIPHONE_WHATSAPP_TEST_TO` can reach confirmation/provider execution. Missing or mismatched configuration is blocked without guessing a number. The exact current confirm action is required and no payload confirmation flag remains.
 - **Ride:** create requires the exact current estimate action, trace, route, and vehicle; cancel requires the exact current order action and order ID. A Ride app link cannot resolve into an order action. Create needs a provider order ID and cancel needs an explicitly positive cancel status.
@@ -101,15 +102,46 @@ Exact-HEAD verification for `38abc3bfef410882e6d063917dc36877317e189f`:
 - Fresh authoritative artifact timestamp: `2026-07-22T09:40:00+0800`.
 - Artifact SHA-256: `558c05a8f5bc3ee05b0fc5beb80dc102d70813b0dec3849f3649789deb67b979`.
 - Hypium: **1062/1062 passed**, zero failures and zero errors.
-- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, with successful HAR and HAP builds.
+- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, including a successful `agent_core` HAR build.
 - Appless audit: **44 registry tools**, **2 runtime tools**, **36 actions**, and **69 capabilities**; all missing/drift arrays are empty and only the existing ten review-required social/work/knowledge entries remain.
 - `node scripts/aiphone-device-smoke.mjs --list-cases` listed the deterministic smoke catalog only. No device, connected account, or live provider write was exercised.
 - `git diff --check` passed. Hvigor's known coverage reporter `00507008` parse message remained non-authoritative noise after Hypium completed and wrote the complete green result file.
 
 This addendum supersedes the earlier 1054-test completion count. The Calendar lifecycle uses deterministic provider fixtures solely to prove production handler/plan binding; it is not evidence of a live provider mutation or a real Event ID.
 
+## Third Review-Fix Addendum (2026-07-22)
+
+The third review closes the four remaining Important findings while preserving the external-write confirmation boundary:
+
+- Calendar create is now reachable through the real multi-agent Leader action-intent path, but that virtual execution can only render the local review surface. The matching provider action remains `confirm_required` and executes only after the exact current card click. Forged, stale, canceled, and late actions remain terminal.
+- Calendar update is read-first: the normalized task strips model-forged Event IDs, a real `calendar.events.search` result must contain exactly one matching provider event, and only that provider Event ID is bound into the rendered update action. Ambiguous and empty results expose no write action.
+- Calendar delete is adapted only from the exact current `calendar.events.search` action `calendar.event.delete.confirm` to fixed owner `calendar.event.delete`. The real tool-gateway adapter receives the aliased page action; stale or constructed actions are rejected.
+- The lifecycle regression carries the create provider Event ID through JSON Pointer binding into update and delete. The later delete step uses `calendar.event.delete.confirm`; provider error and cancellation stop all later calls.
+- The validator no longer derives acceptance from the definition registry. Each of the 20 fixed Actions has an explicit minimum argument contract, and malformed arguments are rejected both as entry actions and as later plan steps.
+- WhatsApp confirmed send now parses the real Provider `messages:[{id:"wamid..."}]` observation, emits one canonical `Message ID`, calls the registered handler once, and rejects malformed JSON, missing IDs, explicit failure, and ambiguous message arrays without retrying.
+- The public and runtime Calendar registries again match semantically. The report and verifier claim only the `agent_core` HAR build; no application package was built or claimed by this review.
+
+Third-review TDD checkpoints:
+
+1. The first RED run failed compilation because the WhatsApp observation adapter export did not exist.
+2. The first complete behavioral RED ran 1070 tests and reported 1060 passes, eight failures, and two errors. After implementing the specific routes, the next run reported 1062 passes, seven failures, and one error; those remaining failures exposed the Calendar review pipeline and stale strict-validator fixtures.
+3. The Calendar diagnostic run showed that the confirm-required virtual create paused before the local review renderer and that update required a second Leader round after its data task. The final implementation fixes those lifecycle seams without granting provider authority to natural language.
+
+Exact product verification for `555b1300`:
+
+- Fresh authoritative artifact timestamp: `2026-07-22T10:33:25+0800`.
+- Artifact SHA-256: `9264aa17ef943a54498b725242ff770b90191114fceba167f9d8a9131ceee575`.
+- Hypium: **1070/1070 passed**, zero failures and zero errors.
+- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, including public/runtime registry equality and a successful `agent_core` HAR build.
+- Appless audit: **44 registry tools**, **2 runtime tools**, **37 actions**, and **69 capabilities**. All missing/drift arrays are empty; the existing ten review-required social/work/knowledge entries remain.
+- Hotel evidence: **15/15 passed**.
+- `node scripts/aiphone-device-smoke.mjs --list-cases` listed the deterministic smoke catalog only. No device, connected account, or live provider write was exercised.
+- `git diff --check` and stale-pattern scans passed. Hvigor's known coverage reporter `00507008` parse message remained non-authoritative noise after Hypium wrote the complete green result file.
+
+This addendum supersedes the earlier 1062-test completion count.
+
 ## Evidence Boundary
 
 - This report claims deterministic unit/integration routing, current-surface authority, lifecycle, structural verifier, capability-audit, and HAR-build evidence only.
-- It does not claim a live Calendar mutation, Luckin order, WhatsApp send, Ride order/cancel, connected-account success, signed HAP, device run, or end-to-end provider receipt.
+- It does not claim a live Calendar mutation, Luckin order, WhatsApp send, Ride order/cancel, connected-account success, signed application package, device run, or end-to-end provider receipt.
 - No automated test used a live WhatsApp target or invoked a provider write.
