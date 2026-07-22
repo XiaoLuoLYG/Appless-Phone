@@ -23,14 +23,16 @@ function records(logText) {
       .exec(line.slice(0, marker.index));
     const channel = channelMatch === null ? '' :
       `${channelMatch[1].toUpperCase()}/${channelMatch[2].toUpperCase()}`;
+    const timestamp = /^\s*(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\b/.exec(line)?.[1] || '';
     const normalized = line.slice(marker.index).trim();
     const previous = result.at(-1);
     if (LIFECYCLE_MARKERS.has(marker[1]) && previous?.index === index - 1 &&
+      timestamp.length > 0 && previous.timestamp === timestamp &&
       previous.normalized === normalized && previous.channel !== channel &&
       DUPLICATE_HILOG_CHANNELS.has(previous.channel) && DUPLICATE_HILOG_CHANNELS.has(channel)) {
       continue;
     }
-    result.push({ marker: marker[1], fields, index, line, channel, normalized });
+    result.push({ marker: marker[1], fields, index, line, channel, timestamp, normalized });
   }
   return result;
 }
@@ -293,7 +295,7 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   }
 
   const virtualActions = virtualPlans.flatMap((item) => list(item.fields.actions));
-  const action = multiAgentActionEvidence(events.map((item) => item.line).join('\n'),
+  const action = multiAgentActionEvidence(events.map((item) => item.normalized).join('\n'),
     virtualPlans.length > 0 ? {
       expectedActionId: virtualActions.length === 1 ? virtualActions[0] : 'invalid',
       expectedConversationId: selected?.fields.conversation || 'invalid',
