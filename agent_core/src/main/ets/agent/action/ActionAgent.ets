@@ -1374,7 +1374,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       context,
       taskId: message.taskId,
       followUpPublished: false
-    }, null, consumed !== null && consumed.confirmed ? 'step-1' : '');
+    }, null, virtualAction || (consumed !== null && consumed.confirmed) ? 'step-1' : '');
   }
 
   private startStoredRun(message: AgentMessage, payload: ActionRunPayload): void {

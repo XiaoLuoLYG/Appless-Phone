@@ -125,10 +125,11 @@ export class ActionCatalog {
   }
 
   validateActionIntentExecution(actionId: string, args: Object): ActionCatalogResult {
-    if (actionId !== 'worldcup.open' && actionId !== 'maps.route.open') {
+    if (actionId !== 'worldcup.open' && actionId !== 'maps.route.open' &&
+      actionId !== 'calendar.event.create') {
       return denied(
         'ACTION_INTENT_DENIED',
-        'Only the registered World Cup and Maps actions may execute from actionIntent.'
+        'Only registered no-Data actions with deterministic args may execute from actionIntent.'
       );
     }
     return this.validateRegisteredStep(actionId, args);

@@ -9,8 +9,6 @@ import {
   HotelBookingOpenArgs,
   HotelNavigateArgs,
   RegisteredActionExecutor,
-  ToolDefinition,
-  actionAgentToolDefinitions,
   calendarEventRequiredFields,
   hotelNavigationUri,
   validateHotelActionArgs
@@ -76,6 +74,16 @@ function validation(ok: boolean, code: string, message: string): ActionValidatio
   };
 }
 
+function recipientsValid(value: MailReplyArgValue): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  return Array.isArray(value) && value.length > 0 && value.every(
+    (recipient: MailReplyArgValue): boolean =>
+      typeof recipient === 'string' && recipient.trim().length > 0
+  );
+}
+
 export function validateGmailReplyActionArgs(args: Object): ActionValidationResult {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return {
@@ -121,11 +129,58 @@ export function validateRegisteredPageActionArgs(
     return validateGmailReplyActionArgs(args);
   }
   const values = args as MailReplyArgRecord;
+  if (actionId === 'luckin.order.preview') {
+    return validation(
+      argText(values, ['deptId']).length > 0,
+      'LUCKIN_PREVIEW_ARGS_INVALID', 'Luckin preview requires the exact store.'
+    );
+  }
   if (actionId === 'luckin.order.create') {
     return validation(
       argText(values, ['deptId']).length > 0 && argText(values, ['productId']).length > 0 &&
         argText(values, ['skuCode']).length > 0,
       'LUCKIN_ORDER_ARGS_INVALID', 'Luckin order requires the exact store, product, and SKU.'
+    );
+  }
+  if (actionId === 'social.reply.draft') {
+    return validation(
+      argText(values, ['itemId']).length > 0 && argText(values, ['platform']).length > 0 &&
+        argText(values, ['instruction']).length > 0,
+      'SOCIAL_DRAFT_ARGS_INVALID', 'Social draft requires the exact item, platform, and instruction.'
+    );
+  }
+  if (actionId === 'mail.draft.create') {
+    const provider = argText(values, ['provider']).toLowerCase();
+    return validation(
+      (provider === 'gmail' || provider === 'qq') && recipientsValid(values['to']) &&
+        argText(values, ['body']).length > 0,
+      'MAIL_DRAFT_ARGS_INVALID', 'Mail draft requires an exact provider, recipient, and body.'
+    );
+  }
+  if (actionId === 'gmail.draft.create') {
+    return validation(
+      recipientsValid(values['to']) && argText(values, ['body']).length > 0,
+      'GMAIL_DRAFT_ARGS_INVALID', 'Gmail draft requires an exact recipient and body.'
+    );
+  }
+  if (actionId === 'gmail.draft.apply') {
+    return validation(
+      argText(values, ['threadId']).length > 0 && recipientsValid(values['to']) &&
+        argText(values, ['subject']).length > 0 && argText(values, ['replyMode']) === 'reply' &&
+        argText(values, ['body']).length > 0,
+      'GMAIL_DRAFT_ARGS_INVALID', 'Gmail apply requires the exact thread, recipients, subject, mode, and body.'
+    );
+  }
+  if (actionId === 'gmail.open.web') {
+    return validation(
+      argText(values, ['url']).startsWith('https://mail.google.com/'),
+      'GMAIL_WEB_ARGS_INVALID', 'Gmail Web requires an exact Google Mail URL.'
+    );
+  }
+  if (actionId === 'worldcup.open') {
+    return validation(
+      argText(values, ['route']) === 'pages/A2uiHome/AnythingDemo',
+      'WORLDCUP_ARGS_INVALID', 'World Cup requires the exact registered page route.'
     );
   }
   if (actionId === 'calendar.event.create' || actionId === 'calendar.event.update') {
@@ -138,6 +193,29 @@ export function validateRegisteredPageActionArgs(
     return validation(
       argText(values, ['eventId']).length > 0,
       'CALENDAR_EVENT_ARGS_INVALID', 'Calendar delete requires the exact Event ID.'
+    );
+  }
+  if (actionId === 'payment.send') {
+    return validation(
+      argText(values, ['provider']).length > 0 && argText(values, ['recipient']).length > 0 &&
+        argText(values, ['amountText']).length > 0 && argText(values, ['currency']).length > 0,
+      'PAYMENT_SEND_ARGS_INVALID', 'Payment requires the exact provider, recipient, amount, and currency.'
+    );
+  }
+  if (actionId === 'payment.account.setup') {
+    return validation(
+      argText(values, ['country']).length > 0 && argText(values, ['businessType']).length > 0,
+      'PAYMENT_ACCOUNT_ARGS_INVALID', 'Payment account setup requires exact country and business type.'
+    );
+  }
+  if (actionId === 'maps.route.open') {
+    const mode = argText(values, ['travelMode']);
+    const navigate = values['navigate'];
+    return validation(
+      argText(values, ['origin']).length > 0 && argText(values, ['destination']).length > 0 &&
+        (mode.length === 0 || ['driving', 'walking', 'bicycling', 'transit', 'two-wheeler'].indexOf(mode) >= 0) &&
+        (navigate === undefined || typeof navigate === 'boolean'),
+      'MAPS_ROUTE_ARGS_INVALID', 'Maps route requires exact origin and destination.'
     );
   }
   if (actionId === 'whatsapp.message.send') {
@@ -159,14 +237,7 @@ export function validateRegisteredPageActionArgs(
       'RIDE_ORDER_ARGS_INVALID', 'Ride cancel requires the exact order ID.'
     );
   }
-  const registered = actionAgentToolDefinitions().some(
-    (definition: ToolDefinition): boolean => definition.toolId === actionId
-  );
-  return validation(
-    registered,
-    'ACTION_NOT_REGISTERED',
-    'Action is not registered for product execution.'
-  );
+  return validation(false, 'ACTION_NOT_REGISTERED', 'Action is not registered for product execution.');
 }
 
 function validPageResult(result: ActionExecutionResult): boolean {
@@ -307,7 +378,8 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
       runId: context.runId,
       stepId: context.stepId,
       isSurfaceEntry: context.isSurfaceEntry,
-      pageActionId: context.isSurfaceEntry === false ? actionId :
+      pageActionId: context.isSurfaceEntry === false ?
+        (actionId === 'calendar.event.delete' ? 'calendar.event.delete.confirm' : actionId) :
         (context.pageActionId === undefined || context.pageActionId.length === 0 ?
           actionId : context.pageActionId),
       virtualAction: context.virtualAction

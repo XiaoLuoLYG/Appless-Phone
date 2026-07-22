@@ -10,6 +10,7 @@ import {
   CreateDataTaskPayload,
   DataResult,
   DataTaskExecutor,
+  DynamicGenericToolResult,
   HotelDetailRequest,
   HotelDetailResult,
   HotelRatePlan,
@@ -79,6 +80,24 @@ const MAPS_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"uiIntent":{"purpose":"maps.route.open","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"actionIntent":{"goal":"open the requested map route",' +
   '"allowedActionIds":["maps.route.open"]},"reasonCode":"maps_action"}';
+const CALENDAR_CREATE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.create"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.create","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"actionIntent":{"goal":"review an exact Calendar event",' +
+  '"allowedActionIds":["calendar.event.create"]},"reasonCode":"calendar_create_review"}';
+const CALENDAR_UPDATE_SEARCH_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
+  '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
+  '"input":{"query":"产品评审","eventId":"model-forged",' +
+  '"requestedAction":{"eventId":"model-forged","title":"forged"}},"required":true}],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["events","review"]},"reasonCode":"calendar_update_read_first"}';
+const CALENDAR_UPDATE_DONE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认更新。",' +
+  '"reasonCode":"calendar_update_review_ready"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"mail-search",' +
@@ -170,6 +189,22 @@ class TestGate {
   }
 }
 
+class GatedModel implements LocalModel {
+  readonly started: TestGate = new TestGate();
+  readonly release: TestGate = new TestGate();
+  private readonly output: string;
+
+  constructor(output: string) {
+    this.output = output;
+  }
+
+  async complete(_prompt: string): Promise<string> {
+    this.started.open();
+    await this.release.promise;
+    return this.output;
+  }
+}
+
 class CanaryHotelExecutor implements DataTaskExecutor {
   readonly calls: string[] = [];
   readonly tasks: CreateDataTaskPayload[] = [];
@@ -189,6 +224,56 @@ class CanaryHotelExecutor implements DataTaskExecutor {
       throw new Error('Invalid canary hotel search task.');
     }
     return hotelSearchDataResult(searchResult(parsed.value), []);
+  }
+}
+
+class CalendarUpdateExecutor implements DataTaskExecutor {
+  readonly tasks: CreateDataTaskPayload[] = [];
+  private readonly eventIds: string[];
+
+  constructor(eventIds: string[]) {
+    this.eventIds = eventIds.slice();
+  }
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.tasks.push(task);
+    const values = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+    const rawRequestedAction = values['requestedAction'];
+    const requestedAction: Object = rawRequestedAction !== null &&
+      rawRequestedAction !== undefined && typeof rawRequestedAction === 'object' &&
+      !Array.isArray(rawRequestedAction) ? rawRequestedAction as Object : JSON.parse('{}') as Object;
+    const results: DynamicGenericToolResult[] = [];
+    this.eventIds.forEach((eventId: string) => {
+      const result: DynamicGenericToolResult = {
+        sourceTag: 'Composio Google Calendar',
+        toolName: 'calendar.events.search',
+        title: '产品评审',
+        status: 'success',
+        summary: 'Real provider event.',
+        rows: [
+          { label: 'Event ID', value: eventId },
+          { label: 'Start', value: '2026-07-30T15:00:00+08:00' },
+          { label: 'End', value: '2026-07-30T15:30:00+08:00' }
+        ],
+        rawPreview: '{"id":' + JSON.stringify(eventId) + '}',
+        providerPhase: 'execution'
+      };
+      results.push(result);
+    });
+    const data = JSON.parse(JSON.stringify({ results, requestedAction })) as Object;
+    return {
+      toolId: 'calendar.events.search',
+      outputSchema: 'calendarEvents',
+      status: results.length === 0 ? 'empty' : 'success',
+      sources: results.length === 0 ? [] : [{
+        provider: 'Composio Google Calendar',
+        backend: 'oauth_api',
+        operation: 'calendar.events.search',
+        fetchedAt: '2026-07-22T00:00:00Z'
+      }],
+      data,
+      warnings: []
+    };
   }
 }
 
@@ -644,6 +729,159 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('renders an exact Calendar create review and calls the provider only after the current click', 0, async () => {
+      const surfaces: A2uiSurfaceState[] = [];
+      const calls: RecordedPageAction[] = [];
+      let current: RegisteredPageSnapshot | null = null;
+      let generation = 0;
+      const options = canaryOptions(
+        new QueueModel([CALENDAR_CREATE_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.onSurface = (surface: A2uiSurfaceState): void => {
+        surfaces.push(surface);
+        generation++;
+        current = {
+          surface,
+          document: createHtmlHomeDocument({
+            surface,
+            messages: [],
+            isBusy: false,
+            isAwaitingFirstSurface: false
+          }),
+          generation
+        };
+      };
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"eventId":"event-provider-real-1"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '创建日程；标题：产品评审；时间：2026-07-30 15:00 至 2026-07-30 15:30',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const exact = renderedAction(surfaces[surfaces.length - 1], 'calendar.event.create');
+      const forged = JSON.parse(JSON.stringify(exact)) as A2uiAction;
+      (forged.args as Record<string, Object | string | number | boolean | null | undefined>)['title'] = '伪造标题';
+
+      expect(outcome.status).assertEqual('success');
+      expect(calls.length).assertEqual(0);
+      expect(exact === null).assertFalse();
+      expect(await runtime.runPageAction(forged)).assertFalse();
+      expect(await runtime.runPageAction(exact as A2uiAction)).assertTrue();
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].actionId).assertEqual('calendar.event.create');
+      expect(calls[0].context.pageActionId).assertEqual('calendar.event.create');
+      current = null;
+      expect(await runtime.runPageAction(exact as A2uiAction)).assertFalse();
+      expect(calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('binds Calendar update to one real search event before review and never trusts a model eventId', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
+      const surfaces: A2uiSurfaceState[] = [];
+      const calls: RecordedPageAction[] = [];
+      let current: RegisteredPageSnapshot | null = null;
+      const options = canaryOptions(
+        new QueueModel([CALENDAR_UPDATE_SEARCH_DECISION, CALENDAR_UPDATE_DONE_DECISION]),
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.onSurface = (surface: A2uiSurfaceState): void => {
+        surfaces.push(surface);
+        current = {
+          surface,
+          document: createHtmlHomeDocument({
+            surface,
+            messages: [],
+            isBusy: false,
+            isAwaitingFirstSurface: false
+          }),
+          generation: 1
+        };
+      };
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"eventId":"event-provider-real-1"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '更新日程；原日程：产品评审；新标题：产品终审；新时间：' +
+        '2026-07-30 16:00 至 2026-07-30 16:30',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const review = renderedAction(surfaces[surfaces.length - 1], 'calendar.event.update');
+      const taskJson = JSON.stringify(executor.tasks[0].args);
+
+      expect(outcome.status).assertEqual('success');
+      expect(review === null).assertFalse();
+      expect(taskJson.indexOf('model-forged')).assertEqual(-1);
+      expect(JSON.stringify((review as A2uiAction).args).indexOf('event-provider-real-1')).assertLarger(-1);
+      expect(calls.length).assertEqual(0);
+      expect(await runtime.runPageAction(review as A2uiAction)).assertTrue();
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].actionId).assertEqual('calendar.event.update');
+      expect(JSON.stringify(calls[0].args).indexOf('event-provider-real-1')).assertLarger(-1);
+      runtime.dispose();
+    });
+
+    it('cancels Calendar create planning before review without a provider call or late surface', 0, async () => {
+      const model = new GatedModel(CALENDAR_CREATE_DECISION);
+      const surfaces: A2uiSurfaceState[] = [];
+      let providerCalls = 0;
+      const options = canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.pageAction = async (): Promise<ActionExecutionResult> => {
+        providerCalls++;
+        return { status: 'success', output: JSON.parse('{"eventId":"unexpected"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const pending = runtime.submit(
+        '创建日程；标题：产品评审；时间：2026-07-30 15:00 至 2026-07-30 15:30',
+        { text: '' }
+      );
+      await model.started.promise;
+      runtime.cancelActiveTurn('user_cancel');
+      model.release.open();
+      const outcome = await pending as MultiAgentSettledOutcome;
+      await flush();
+
+      expect(outcome.status).assertEqual('canceled');
+      expect(surfaces.length).assertEqual(0);
+      expect(providerCalls).assertEqual(0);
+      runtime.dispose();
+    });
+
     it('refreshes second-turn planning from the updated C11 persona memory', 0, async () => {
       configureDefaultPersonaStoreForTests();
       const updates: PersonaMemoryUpdateRequest[] = [];
@@ -771,17 +1009,19 @@ export default function multiAgentCanaryRuntimeTest() {
         ['social.feed.search', 'social.reply.draft', 'social.reply.draft',
           JSON.parse('{"itemId":"post-1","platform":"x","instruction":"draft"}') as Object, 'prompt'],
         ['mail.search', 'mail.draft.create', 'mail.draft.create',
-          JSON.parse('{"to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
+          JSON.parse('{"provider":"qq","to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
         ['gmail.thread.read', 'gmail.draft.create', 'gmail.draft.create',
           JSON.parse('{"to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
         ['gmail.draft.create', 'gmail.draft.apply', 'gmail.draft.apply',
-          JSON.parse('{"draftId":"draft-1","body":"exact"}') as Object, 'prompt'],
+          JSON.parse('{"threadId":"thread-1","to":"a@example.com","subject":"QA",' +
+            '"replyMode":"reply","body":"exact"}') as Object, 'prompt'],
         ['gmail.draft.apply', 'gmail.open.web', 'gmail.open.web',
           JSON.parse('{"url":"https://mail.google.com/"}') as Object, 'client'],
         ['luckin.order.preview', 'luckin.order.preview', 'luckin.order.preview',
           JSON.parse('{"deptId":"shop-1","location":"114.0,22.5"}') as Object, 'prompt'],
         ['payment.send', 'payment.confirm', 'payment.send',
-          JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object, 'prompt'],
+          JSON.parse('{"provider":"stripe","recipient":"real-user","amountText":"5.00",' +
+            '"currency":"USD","phase":"confirm"}') as Object, 'prompt'],
         ['payment.account.setup', 'stripe.account.create', 'payment.account.setup',
           JSON.parse('{"country":"US","businessType":"individual"}') as Object, 'client']
       ];
@@ -836,7 +1076,8 @@ export default function multiAgentCanaryRuntimeTest() {
       };
       options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
       const runtime = new MultiAgentCanaryRuntime(options);
-      const args = JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object;
+      const args = JSON.parse('{"provider":"stripe","recipient":"real-user","amountText":"5.00",' +
+        '"currency":"USD","phase":"confirm"}') as Object;
       const clicked: A2uiAction = {
         id: 'payment.confirm',
         label: 'payment.confirm',
@@ -859,7 +1100,8 @@ export default function multiAgentCanaryRuntimeTest() {
         prompt: clicked.prompt,
         variant: clicked.variant,
         kind: clicked.kind,
-        args: JSON.parse('{"recipient":"mallory","amountText":"5000","currency":"USD","phase":"confirm"}') as Object
+        args: JSON.parse('{"provider":"stripe","recipient":"mallory","amountText":"5000",' +
+          '"currency":"USD","phase":"confirm"}') as Object
       };
       const clientOnly: A2uiAction = {
         id: 'payment.cancel',

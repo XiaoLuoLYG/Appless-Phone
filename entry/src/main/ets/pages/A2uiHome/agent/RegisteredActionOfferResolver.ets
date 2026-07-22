@@ -4,6 +4,7 @@ import {
   ActionOffer,
   ActionOfferContext,
   DataResult,
+  DynamicGenericToolResult,
   HotelDetailResult,
   HotelSearchResult,
   MailThreadSummary,
@@ -40,6 +41,15 @@ interface SocialDraftArgs {
   itemId: string;
   platform: string;
   instruction: string;
+}
+
+interface CalendarUpdateArgs {
+  eventId: string;
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  calendarId: string;
 }
 
 interface CanonicalState {
@@ -151,6 +161,47 @@ function socialDraftCandidate(item: SocialHubItemData): CandidateOffer {
   };
 }
 
+function resultRow(result: DynamicGenericToolResult, label: string): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    if (result.rows[index].label === label) {
+      return result.rows[index].value.trim();
+    }
+  }
+  return '';
+}
+
+function calendarUpdateCandidates(record: OfferRecord): CandidateOffer[] {
+  const rawResults = record['results'];
+  const requested = recordOf(record['requestedAction']);
+  if (!Array.isArray(rawResults) || requested === null ||
+    requested['actionId'] !== 'calendar.event.update') {
+    return [];
+  }
+  const matches: DynamicGenericToolResult[] = [];
+  const results = rawResults as DynamicGenericToolResult[];
+  for (let index = 0; index < results.length; index++) {
+    const current = results[index];
+    if (current.status === 'success' && current.sourceTag === 'Composio Google Calendar' &&
+      current.toolName === 'calendar.events.search' && resultRow(current, 'Event ID').length > 0) {
+      matches.push(current);
+    }
+  }
+  if (matches.length !== 1) {
+    return [];
+  }
+  const args: CalendarUpdateArgs = {
+    eventId: resultRow(matches[0], 'Event ID'),
+    title: typeof requested['title'] === 'string' ? requested['title'].trim() : '',
+    start: typeof requested['start'] === 'string' ? requested['start'].trim() : '',
+    end: typeof requested['end'] === 'string' ? requested['end'].trim() : '',
+    timezone: typeof requested['timezone'] === 'string' ? requested['timezone'].trim() : '',
+    calendarId: typeof requested['calendarId'] === 'string' ? requested['calendarId'].trim() : ''
+  };
+  return [{
+    action: action('calendar.event.update', '确认更新日程', 'primary', args as Object)
+  }];
+}
+
 function candidatesFor(data: DataResult): CandidateOffer[] {
   const record = recordOf(data.data);
   if (data.toolId === 'hotel.search' && record !== null && record['ok'] === true &&
@@ -191,6 +242,9 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
       }
     }
     return candidates;
+  }
+  if (data.toolId === 'calendar.events.search' && record !== null) {
+    return calendarUpdateCandidates(record);
   }
   return [];
 }

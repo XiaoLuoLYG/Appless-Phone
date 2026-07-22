@@ -210,6 +210,38 @@ function genericData(data: DataResult): GenericStructuredData | null {
   return hasArray(record, 'results') ? data.data as GenericStructuredData : null;
 }
 
+function genericDataWithOffers(
+  data: DataResult,
+  offers: ActionOffer[]
+): GenericStructuredData | null {
+  const source = genericData(data);
+  if (source === null) {
+    return null;
+  }
+  const generic = JSON.parse(JSON.stringify(source)) as GenericStructuredData;
+  if (generic.results.length !== 1 || offers.length === 0) {
+    return generic;
+  }
+  const actions: A2uiAction[] = generic.results[0].actions === undefined ?
+    [] : generic.results[0].actions as A2uiAction[];
+  for (let index = 0; index < offers.length; index++) {
+    const offer = offers[index];
+    if (actions.some((current: A2uiAction): boolean => current.id === offer.actionId)) {
+      continue;
+    }
+    actions.push({
+      id: offer.actionId,
+      label: offer.label,
+      prompt: offer.label,
+      variant: offer.variant,
+      kind: 'prompt',
+      args: offer.args
+    });
+  }
+  generic.results[0].actions = actions;
+  return generic;
+}
+
 function mailThreadDynamic(data: DataResult): DynamicGenericToolResult | null {
   const record = recordOf(data.data);
   if (!hasText(record, 'provider') || !hasText(record, 'requestKey') ||
@@ -328,7 +360,7 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
     case 'youtubeSubscriptions':
     case 'calendarEvents':
     case 'genericToolResults': {
-      const generic = genericData(data);
+      const generic = genericDataWithOffers(data, offers);
       if (generic === null) {
         throw new Error(data.outputSchema + ' data is malformed');
       }

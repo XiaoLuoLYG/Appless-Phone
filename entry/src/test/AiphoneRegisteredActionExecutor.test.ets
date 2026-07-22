@@ -36,7 +36,6 @@ import {
   RegisteredPageToolInvocation,
   RegisteredPageToolInvoker
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionHandler';
-import { isFixedRegisteredPageAction } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 
 function object(raw: string): Object {
   return JSON.parse(raw) as Object;
@@ -350,6 +349,53 @@ function wave4Args(actionId: string): Object {
     return object('{"productCategory":"express","estimateTraceId":"trace-1"}');
   }
   return object('{"orderId":"order-1"}');
+}
+
+function fixedActionArgs(actionId: string): Object {
+  if (actionId === 'hotel.navigate') {
+    return navigateArgs();
+  }
+  if (actionId === 'hotel.booking.open') {
+    return bookingArgs();
+  }
+  if (actionId === 'luckin.order.preview') {
+    return object('{"deptId":"store-1"}');
+  }
+  if (actionId === 'luckin.order.create' || actionId.indexOf('calendar.event.') === 0 ||
+    actionId.indexOf('ride.order.') === 0 || actionId === 'whatsapp.message.send') {
+    return wave4Args(actionId);
+  }
+  if (actionId === 'social.reply.draft') {
+    return object('{"itemId":"post-1","platform":"x","instruction":"draft a reply"}');
+  }
+  if (actionId === 'mail.draft.create') {
+    return object('{"provider":"qq","to":["qa@example.com"],"subject":"QA","body":"Draft"}');
+  }
+  if (actionId === 'gmail.draft.create') {
+    return object('{"to":["qa@example.com"],"subject":"QA","body":"Draft"}');
+  }
+  if (actionId === 'gmail.draft.apply') {
+    return object('{"threadId":"thread-1","to":["qa@example.com"],"subject":"Re: QA",' +
+      '"replyMode":"reply","body":"Approved draft"}');
+  }
+  if (actionId === 'gmail.open.web') {
+    return object('{"url":"https://mail.google.com/"}');
+  }
+  if (actionId === 'gmail.message.send') {
+    return object('{"provider":"gmail","threadId":"thread-1","messageId":"message-1",' +
+      '"requestKey":"gmail:thread-1","to":["qa@example.com"],"subject":"Re: QA",' +
+      '"body":"Send exact reply","replyMode":"reply"}');
+  }
+  if (actionId === 'worldcup.open') {
+    return object('{"route":"pages/A2uiHome/AnythingDemo"}');
+  }
+  if (actionId === 'payment.send') {
+    return object('{"provider":"stripe","recipient":"acct-real-1","amountText":"5.00","currency":"USD"}');
+  }
+  if (actionId === 'payment.account.setup') {
+    return object('{"country":"US","businessType":"individual"}');
+  }
+  return object('{"origin":"深圳北","destination":"香港西九龙","travelMode":"driving","navigate":false}');
 }
 
 async function executeTampered(
@@ -709,7 +755,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       ];
       for (let index = 0; index < actionIds.length; index++) {
         const actionId = actionIds[index];
-        const args = object('{"marker":"exact-' + index.toString() + '"}');
+        const args = fixedActionArgs(actionId);
         const recorder = new RecordingPageAction();
         const executor = pageExecutor(actionId, args, recorder, new FakeUriOpener(), actionId);
         const result = await executor.execute(actionId, args, pageContext(actionId));
@@ -721,7 +767,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('gives every fixed Action definition one explicit executable owner route', 0, () => {
+    it('validates invalid and minimal args for all 20 fixed Action definitions', 0, () => {
       const expected: string[] = [
         'hotel.navigate', 'hotel.booking.open', 'luckin.order.preview', 'luckin.order.create',
         'social.reply.draft', 'mail.draft.create', 'gmail.draft.create', 'gmail.draft.apply',
@@ -735,7 +781,32 @@ export default function aiphoneRegisteredActionExecutorTest() {
       expect(definitions.map((current: ToolDefinition): string => current.toolId).sort().join(','))
         .assertEqual(expected.slice().sort().join(','));
       for (let index = 0; index < expected.length; index++) {
-        expect(isFixedRegisteredPageAction(expected[index])).assertTrue();
+        const invalid = validateRegisteredPageActionArgs(expected[index], object('{}'));
+        const valid = validateRegisteredPageActionArgs(expected[index], fixedActionArgs(expected[index]));
+        expect(invalid.ok).assertFalse();
+        expect(valid.ok).assertTrue();
+      }
+    });
+
+    it('rejects invalid args for every fixed Action when it appears as a later plan step', 0, async () => {
+      const actionIds = actionAgentToolDefinitions().map(
+        (current: ToolDefinition): string => current.toolId
+      );
+      for (let index = 0; index < actionIds.length; index++) {
+        const actionId = actionIds[index];
+        const args = fixedActionArgs(actionId);
+        const recorder = new RecordingPageAction();
+        const executor = pageExecutor(actionId, args, recorder, new FakeUriOpener(), actionId);
+        const entry = pageContext(actionId, actionId);
+        const first = await executor.execute(actionId, args, entry);
+        const later = pageContext(actionId, actionId);
+        later.isSurfaceEntry = false;
+        later.runId = 'later-run-' + index.toString();
+        later.stepId = 'later-step-' + index.toString();
+        const invalid = await executor.execute(actionId, object('{}'), later);
+
+        expect(first.status).assertEqual('success');
+        expect(invalid.status).assertEqual('error');
       }
     });
 
@@ -840,7 +911,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       expect(invoker.calls.length).assertEqual(3);
       expect(invoker.calls[0].pageActionId).assertEqual('calendar.event.create');
       expect(invoker.calls[1].pageActionId).assertEqual('calendar.event.update');
-      expect(invoker.calls[2].pageActionId).assertEqual('calendar.event.delete');
+      expect(invoker.calls[2].pageActionId).assertEqual('calendar.event.delete.confirm');
       expect(JSON.stringify(invoker.calls[1].args).indexOf('event-provider-real-1')).assertLarger(-1);
       expect(JSON.stringify(invoker.calls[2].args).indexOf('event-provider-real-1')).assertLarger(-1);
     });

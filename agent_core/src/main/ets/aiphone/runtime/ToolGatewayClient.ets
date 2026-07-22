@@ -12476,6 +12476,125 @@ function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
   return args === null ? JSON.parse('{}') as WhatsAppSendArgs : args as WhatsAppSendArgs;
 }
 
+type WhatsAppObservationValue = Object | string | number | boolean | null | undefined;
+type WhatsAppObservationRecord = Record<string, WhatsAppObservationValue>;
+
+function whatsAppMessageIdFromObservation(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as WhatsAppObservationRecord;
+    const records: WhatsAppObservationRecord[] = [parsed];
+    const data = parsed['data'];
+    if (data !== null && data !== undefined && typeof data === 'object' && !Array.isArray(data)) {
+      const dataRecord = data as WhatsAppObservationRecord;
+      records.push(dataRecord);
+      const response = dataRecord['response_data'];
+      if (response !== null && response !== undefined && typeof response === 'object' && !Array.isArray(response)) {
+        records.push(response as WhatsAppObservationRecord);
+      }
+    }
+    for (let recordIndex = 0; recordIndex < records.length; recordIndex++) {
+      const messages = records[recordIndex]['messages'];
+      if (!Array.isArray(messages) || messages.length !== 1) {
+        continue;
+      }
+      const messageValues = messages as WhatsAppObservationValue[];
+      const item: WhatsAppObservationValue = messageValues[0];
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      const id = (item as WhatsAppObservationRecord)['id'];
+      if (typeof id === 'string' && id.trim().startsWith('wamid.')) {
+        return id.trim();
+      }
+    }
+  } catch (_error) {
+  }
+  return '';
+}
+
+function whatsAppObservationValueFailed(value: WhatsAppObservationValue, depth: number): boolean {
+  if (depth > 8 || value === null || value === undefined || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const items = value as WhatsAppObservationValue[];
+    for (let index = 0; index < items.length; index++) {
+      if (whatsAppObservationValueFailed(items[index], depth + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as WhatsAppObservationRecord;
+  if (record['success'] === false || record['success'] === 'false' ||
+    record['successful'] === false || record['successful'] === 'false') {
+    return true;
+  }
+  const error = record['error'];
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return true;
+  }
+  const status = typeof record['status'] === 'string' ? record['status'].trim().toLowerCase() : '';
+  if (status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0) {
+    return true;
+  }
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    if (whatsAppObservationValueFailed(record[keys[index]], depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function whatsAppObservationFailed(raw: string): boolean {
+  try {
+    return whatsAppObservationValueFailed(JSON.parse(raw) as Object, 0);
+  } catch (_error) {
+    return true;
+  }
+}
+
+function normalizedWhatsAppProviderResult(result: DynamicGenericToolResult): DynamicGenericToolResult {
+  const messageId = whatsAppMessageIdFromObservation(result.rawPreview);
+  if (messageId.length === 0 || whatsAppObservationFailed(result.rawPreview)) {
+    return {
+      sourceTag: 'Composio WhatsApp Business',
+      toolName: 'whatsapp.message.send',
+      title: 'WhatsApp Business 返回无效',
+      status: 'error',
+      summary: 'Provider 未返回唯一有效的 WhatsApp Message ID。',
+      rows: [],
+      rawPreview: result.rawPreview
+    };
+  }
+  result.status = 'success';
+  result.sourceTag = 'Composio WhatsApp Business';
+  result.toolName = 'whatsapp.message.send';
+  result.rows = result.rows.filter(
+    (row: A2uiLabelValueData): boolean => row.label.trim().toLowerCase() !== 'message id'
+  );
+  result.rows.push({ label: 'Message ID', value: messageId });
+  result.actions = undefined;
+  return result;
+}
+
+export function whatsAppProviderResultFromObservationForTest(
+  observation: string
+): DynamicGenericToolResult {
+  const parsed = composioDynamicResultFromObservation(
+    'execute', observation, 'WHATSAPP_SEND_MESSAGE', 'WhatsApp Business send'
+  );
+  parsed.rawPreview = observation.substring(0, 16000);
+  return normalizedWhatsAppProviderResult(composioFixedResult(
+    'whatsapp.message.send',
+    'WhatsApp Business',
+    parsed
+  ));
+}
+
 function whatsAppRecipientDigits(value: string): string {
   const input = value.trim();
   if (input.length === 0 || input.charAt(0) !== '+') {
@@ -12684,7 +12803,23 @@ async function callLocalWhatsAppTool(
     phoneNumberId: phoneNumberId,
     previewUrl: parsed.previewUrl === true
   };
-  const result = await composioFixedAppResult('whatsapp.message.send', 'WhatsApp Business', prompt, '消息', providerArgs as Object);
+  let result: DynamicGenericToolResult;
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('WhatsApp Business', prompt, '消息'),
+      'whatsapp.message.send',
+      providerArgs as Object
+    );
+    const generic = composioDynamicResultFromObservation(
+      'execute', execution.observation, execution.toolSlug, prompt
+    );
+    generic.rawPreview = execution.observation.substring(0, 16000);
+    result = normalizedWhatsAppProviderResult(composioFixedResult(
+      'whatsapp.message.send', 'WhatsApp Business', generic, providerArgs as Object
+    ));
+  } catch (error) {
+    result = whatsAppProviderFailureResult(describeThrown(error));
+  }
   if (result.status === 'success') {
     result.title = 'WhatsApp Business 消息已发送';
     result.summary = 'Provider 已确认发送成功。';

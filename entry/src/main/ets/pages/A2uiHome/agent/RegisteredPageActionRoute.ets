@@ -27,6 +27,8 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'stripe.account.refresh',
   'payment.account.setup',
   'maps.route.open',
+  'calendar.event.create',
+  'calendar.event.update',
   'calendar.event.delete.confirm',
   'whatsapp.message.send.confirm',
   'ride.order.confirm',
@@ -61,6 +63,44 @@ interface WorldCupVirtualArgs {
   route: string;
 }
 
+interface CalendarCreateVirtualArgs {
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  calendarId: string;
+}
+
+function labeledPromptValue(input: string, label: string): string {
+  const index = input.indexOf(label);
+  if (index < 0) {
+    return '';
+  }
+  const start = index + label.length;
+  let end = input.indexOf('；', start);
+  const asciiEnd = input.indexOf(';', start);
+  if (end < 0 || (asciiEnd >= 0 && asciiEnd < end)) {
+    end = asciiEnd;
+  }
+  return input.substring(start, end < 0 ? input.length : end).trim();
+}
+
+function calendarCreateArgsFromPrompt(inputText: string): CalendarCreateVirtualArgs | null {
+  const prompt = inputText.trim();
+  const title = labeledPromptValue(prompt, '标题：');
+  const timeMatch = /(?:时间|新时间)[：:]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(?:至|到)\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(prompt);
+  if (title.length === 0 || timeMatch === null) {
+    return null;
+  }
+  const start = timeMatch[1] + 'T' + timeMatch[2] + ':00+08:00';
+  const end = timeMatch[3] + 'T' + timeMatch[4] + ':00+08:00';
+  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)) ||
+    Date.parse(end) <= Date.parse(start)) {
+    return null;
+  }
+  return { title, start, end, timezone: 'Asia/Shanghai', calendarId: 'primary' };
+}
+
 function registeredProductAction(actionId: string): boolean {
   return actionAgentToolDefinitions().some(
     (definition: ToolDefinition): boolean => definition.toolId === actionId
@@ -77,7 +117,7 @@ function adaptedTarget(sourceToolId: string, clickedActionId: string): string {
       clickedActionId === 'stripe.account.refresh')) {
     return 'payment.account.setup';
   }
-  if (sourceToolId === 'calendar.event.delete' &&
+  if ((sourceToolId === 'calendar.events.search' || sourceToolId === 'calendar.event.delete') &&
     clickedActionId === 'calendar.event.delete.confirm') {
     return 'calendar.event.delete';
   }
@@ -223,7 +263,8 @@ export function resolveRegisteredPageAction(
     return null;
   }
   let targetId = '';
-  if (source.actions.indexOf(clicked.id) >= 0 && registeredProductAction(clicked.id)) {
+  if ((source.actions.indexOf(clicked.id) >= 0 || sourceToolId === clicked.id) &&
+    registeredProductAction(clicked.id)) {
     targetId = clicked.id;
   } else if (sourceToolId === 'luckin.order.preview' && clicked.id === 'luckin.order.preview') {
     targetId = clicked.id;
@@ -247,10 +288,6 @@ export function resolveRegisteredPageAction(
       args: clicked.args
     }
   };
-}
-
-export function isFixedRegisteredPageAction(actionId: string): boolean {
-  return registeredProductAction(actionId);
 }
 
 export function isRegisteredPageActionCandidate(actionId: string): boolean {
@@ -298,6 +335,20 @@ export function resolveVirtualRegisteredPageAction(
     return {
       id: actionId,
       label: actionId,
+      prompt: inputText.trim(),
+      variant: 'primary',
+      kind: 'prompt',
+      args: args as Object
+    };
+  }
+  if (actionId === 'calendar.event.create') {
+    const args = calendarCreateArgsFromPrompt(inputText);
+    if (args === null) {
+      return null;
+    }
+    return {
+      id: actionId,
+      label: '确认创建日程',
       prompt: inputText.trim(),
       variant: 'primary',
       kind: 'prompt',

@@ -39,6 +39,11 @@ interface GenericResultsFixture {
   results: DynamicGenericToolResult[];
 }
 
+interface CalendarReviewFixture {
+  results: DynamicGenericToolResult[];
+  requestedAction: Object;
+}
+
 class RegistryLookup implements ToolDefinitionLookup {
   find(toolId: string): ToolDefinition | null {
     return toolDefinitionForToolId(toolId);
@@ -607,6 +612,66 @@ export default function structuredToolUiRendererTest() {
         'https://rollinggo.cn/pages/hotel/detail/index?id=47675&checkInDate=2026-08-15&' +
         'checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0'
       );
+    });
+
+    it('binds a Calendar update review only to one exact provider event ID', 0, async () => {
+      const providerEvent = (eventId: string): DynamicGenericToolResult => ({
+        sourceTag: 'Composio Google Calendar',
+        toolName: 'calendar.events.search',
+        title: '产品评审',
+        status: 'success',
+        summary: 'Real provider event.',
+        rows: [
+          { label: 'Event ID', value: eventId },
+          { label: 'Start', value: '2026-07-30T15:00:00+08:00' },
+          { label: 'End', value: '2026-07-30T15:30:00+08:00' }
+        ],
+        rawPreview: '{"id":' + JSON.stringify(eventId) + '}',
+        providerPhase: 'execution'
+      });
+      const requestedAction = object(
+        '{"actionId":"calendar.event.update","title":"产品评审",' +
+        '"start":"2026-07-30T16:00:00+08:00","end":"2026-07-30T16:30:00+08:00",' +
+        '"timezone":"Asia/Shanghai","calendarId":"primary"}'
+      );
+      const exactData: CalendarReviewFixture = {
+        results: [providerEvent('event-provider-real-1')],
+        requestedAction
+      };
+      const ambiguousData: CalendarReviewFixture = {
+        results: [providerEvent('event-provider-real-1'), providerEvent('event-provider-real-2')],
+        requestedAction
+      };
+      const missingData: CalendarReviewFixture = {
+        results: [],
+        requestedAction
+      };
+      const exact = dataResult('calendar.events.search', 'calendarEvents', exactData as Object);
+      const ambiguous = dataResult('calendar.events.search', 'calendarEvents', ambiguousData as Object);
+      const missing = dataResult('calendar.events.search', 'calendarEvents', missingData as Object);
+      missing.status = 'empty';
+      const resolver = new RegisteredActionOfferResolver(catalog());
+
+      const exactOffers = await resolver.resolve(exact, offerContext('calendar-exact'));
+      const ambiguousOffers = await resolver.resolve(ambiguous, offerContext('calendar-ambiguous'));
+      const missingOffers = await resolver.resolve(missing, offerContext('calendar-missing'));
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [exact], exactOffers, 'surface-calendar-update'
+      );
+
+      expect(exactOffers.length).assertEqual(1);
+      expect(exactOffers[0].actionId).assertEqual('calendar.event.update');
+      const exactArgs = exactOffers[0].args as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(exactArgs['eventId']).assertEqual('event-provider-real-1');
+      expect(exactArgs['title']).assertEqual('产品评审');
+      expect(exactArgs['start']).assertEqual('2026-07-30T16:00:00+08:00');
+      expect(exactArgs['end']).assertEqual('2026-07-30T16:30:00+08:00');
+      expect(exactArgs['timezone']).assertEqual('Asia/Shanghai');
+      expect(exactArgs['calendarId']).assertEqual('primary');
+      expect(ambiguousOffers.length).assertEqual(0);
+      expect(missingOffers.length).assertEqual(0);
+      expect(rendered.jsonl.indexOf('"id":"calendar.event.update"')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('event-provider-real-1')).assertLarger(-1);
     });
 
     it('keeps same-hotel offers on their registered source tool in aggregate rendering', 0, async () => {

@@ -11,9 +11,11 @@ import {
   CreateDataTaskPayload,
   DataResult,
   DataTaskExecutor,
+  DynamicGenericToolResult,
   LocalModel,
   LinkedMessageBus,
-  createSeedA2uiSurface
+  createSeedA2uiSurface,
+  whatsAppProviderResultFromObservationForTest
 } from '@loop/agent-core';
 import {
   MultiAgentCanaryOptions,
@@ -119,6 +121,38 @@ class RecordingPageToolInvoker implements RegisteredPageToolInvoker {
       return { ok: true, result: null, error: '' };
     }
     return { ok: true, result: successfulToolResult(toolId), error: '' };
+  }
+}
+
+class FixedProviderResultInvoker implements RegisteredPageToolInvoker {
+  calls: number = 0;
+  private readonly provider: DynamicGenericToolResult;
+
+  constructor(provider: DynamicGenericToolResult) {
+    this.provider = provider;
+  }
+
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    this.calls++;
+    const result = successfulToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults = [{
+      sourceTag: this.provider.sourceTag,
+      toolName: this.provider.toolName,
+      title: this.provider.title,
+      status: this.provider.status,
+      summary: this.provider.summary,
+      rows: this.provider.rows,
+      rawPreview: this.provider.rawPreview,
+      actions: this.provider.actions
+    }];
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
   }
 }
 
@@ -612,7 +646,8 @@ export default function registeredPageActionMigrationTest() {
       };
       const exact = action(
         'payment.confirm',
-        JSON.parse('{"recipient":"real-user","amountText":"5.00","currency":"USD","phase":"confirm"}') as Object
+        JSON.parse('{"provider":"stripe","recipient":"real-user","amountText":"5.00",' +
+          '"currency":"USD","phase":"confirm"}') as Object
       );
 
       current = snapshot(pageSurface('missing.source', exact, 1), 1);
@@ -628,7 +663,8 @@ export default function registeredPageActionMigrationTest() {
       current = snapshot(exactSurface, 2);
       const mutated = action(
         'payment.confirm',
-        JSON.parse('{"recipient":"mallory","amountText":"5000","currency":"USD","phase":"confirm"}') as Object
+        JSON.parse('{"provider":"stripe","recipient":"mallory","amountText":"5000",' +
+          '"currency":"USD","phase":"confirm"}') as Object
       );
       const mutatedResult = await dispatchRegisteredPageActionCandidate(
         mutated,
@@ -670,7 +706,7 @@ export default function registeredPageActionMigrationTest() {
     it('maps every exact Wave 4 rendered confirmation to its fixed Action owner', 0, () => {
       const sourceIds: string[] = [
         'luckin.order.preview',
-        'calendar.event.delete',
+        'calendar.events.search',
         'whatsapp.message.send',
         'ride.estimate',
         'ride.order.create'
@@ -705,6 +741,31 @@ export default function registeredPageActionMigrationTest() {
       )).assertNull();
     });
 
+    it('rejects a constructed Calendar delete when it is not the exact current search-card action', 0, async () => {
+      const invoker = new ProviderEvidenceInvoker('success');
+      const handler = new RegisteredPageActionHandler(invoker);
+      const exactArgs = JSON.parse('{"eventId":"event-provider-real-1","calendarId":"primary","sendUpdates":"none"}') as Object;
+      const exact = action('calendar.event.delete.confirm', exactArgs);
+      const surface = pageSurface('calendar.events.search', exact, 30);
+      let current: RegisteredPageSnapshot | null = snapshot(surface, 30);
+      const runtime = canary(new QueueModel([]), handler, (): RegisteredPageSnapshot | null => current);
+      const forged = action(
+        'calendar.event.delete.confirm',
+        JSON.parse('{"eventId":"event-forged","calendarId":"primary","sendUpdates":"none"}') as Object
+      );
+
+      expect(await runtime.runPageAction(forged)).assertFalse();
+      expect(await runtime.runPageAction(exact)).assertTrue();
+      expect(invoker.calls.length).assertEqual(1);
+      expect(invoker.calls[0].toolId).assertEqual('calendar.event.delete');
+      expect(invoker.calls[0].pageActionId).assertEqual('calendar.event.delete.confirm');
+      expect(JSON.stringify(invoker.calls[0].args)).assertEqual(JSON.stringify(exactArgs));
+      current = null;
+      expect(await runtime.runPageAction(exact)).assertFalse();
+      expect(invoker.calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
     it('keeps all Wave 4 candidates terminal when registered authority or provider fails', 0, async () => {
       const candidateIds: string[] = [
         'luckin.order.create',
@@ -733,10 +794,22 @@ export default function registeredPageActionMigrationTest() {
       expect(legacyCalls).assertEqual(0);
     });
 
-    it('does not turn natural language into a direct Wave 4 write action', 0, () => {
+    it('resolves only an unambiguous Calendar create into a review action without guessing event IDs', 0, () => {
+      const create = resolveVirtualRegisteredPageAction(
+        'calendar.event.create',
+        '创建日程；标题：产品评审；时间：2026-07-30 15:00 至 2026-07-30 15:30'
+      );
+      expect(create === null).assertFalse();
+      expect(JSON.stringify((create as A2uiAction).args)).assertEqual(
+        '{"title":"产品评审","start":"2026-07-30T15:00:00+08:00",' +
+        '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai","calendarId":"primary"}'
+      );
+      expect(resolveVirtualRegisteredPageAction(
+        'calendar.event.create', '明天下午帮我创建一个日程'
+      )).assertNull();
+
       const actionIds: string[] = [
         'luckin.order.create',
-        'calendar.event.create',
         'calendar.event.update',
         'calendar.event.delete',
         'whatsapp.message.send',
@@ -813,6 +886,49 @@ export default function registeredPageActionMigrationTest() {
 
       expect(malformed.status).assertEqual('error');
       expect(innerFailure.status).assertEqual('error');
+    });
+
+    it('normalizes the real WhatsApp messages payload into one canonical provider completion', 0, async () => {
+      const provider: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{"data":{"messages":[{"id":"wamid.provider-real-1"}]},"error":null}'
+      );
+      const malformed: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{not-json'
+      );
+      const missing: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{"data":{"messages":[]},"error":null}'
+      );
+      const failed: DynamicGenericToolResult = whatsAppProviderResultFromObservationForTest(
+        '{"data":{"messages":[{"id":"wamid.must-not-pass"}]},"successful":false,' +
+        '"error":"provider rejected send"}'
+      );
+      const invoker = new FixedProviderResultInvoker(provider);
+      const context: RegisteredPageActionContext = {
+        conversationId: 'whatsapp-provider-shape',
+        turnId: 'turn-1',
+        surfaceId: 'surface-1',
+        sourceToolId: 'whatsapp.message.send',
+        planId: 'plan-1',
+        runId: 'run-1',
+        stepId: 'step-1',
+        pageActionId: 'whatsapp.message.send.confirm'
+      };
+      const completed = await new RegisteredPageActionHandler(invoker).execute(
+        'whatsapp.message.send',
+        JSON.parse('{"toNumber":"+8613800138000","text":"QA"}') as Object,
+        context
+      );
+
+      expect(provider.status).assertEqual('success');
+      expect(provider.rows.filter((row: A2uiLabelValueData): boolean =>
+        row.label === 'Message ID' && row.value === 'wamid.provider-real-1'
+      ).length).assertEqual(1);
+      expect(provider.actions === undefined || provider.actions.length === 0).assertTrue();
+      expect(completed.status).assertEqual('success');
+      expect(invoker.calls).assertEqual(1);
+      expect(malformed.status).assertEqual('error');
+      expect(missing.status).assertEqual('error');
+      expect(failed.status).assertEqual('error');
     });
 
     it('rejects receipt-shaped evidence from the wrong action or negative status', 0, async () => {

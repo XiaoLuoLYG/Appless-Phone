@@ -2479,6 +2479,33 @@ export default function toolGatewayClientTest() {
       expect(JSON.stringify(actions).indexOf('calendar.event.delete.confirm')).assertEqual(-1);
     });
 
+    it('lets the exact Calendar delete-confirm alias reach the real gateway adapter', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.delete',
+          '删除当前精确日程',
+          'surface_calendar_delete_gateway',
+          'calendar.event.delete.confirm',
+          noop,
+          null,
+          looseObject('{"eventId":"event-provider-real-1","calendarId":"primary"}')
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(rendered[0].toolName).assertEqual('calendar.event.delete');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(rendered[0].summary.indexOf('registered Calendar action required')).assertEqual(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('event-provider-real-1')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
     it('resolves a natural-language Calendar delete only when the Provider search has one event', 0, () => {
       const event: DynamicGenericToolResult = {
         sourceTag: 'Composio Google Calendar',

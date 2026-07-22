@@ -52,7 +52,8 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
     }
     if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
       toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
-      toolId === 'maps.route.open' || toolId === 'memory.update') {
+      toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
+      toolId === 'memory.update') {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
@@ -255,7 +256,7 @@ export default function actionCatalogTest() {
       expect(surface.calls).assertEqual(0);
     });
 
-    it('rejects self-source placement and limits actionIntent authority to World Cup and Maps', 0, () => {
+    it('rejects self-source placement and limits actionIntent authority to deterministic registered actions', 0, () => {
       const detailArgs = args('{"hotelId":47675}');
       const lookup = new FakeToolDefinitionLookup([]);
       const surface = new ExactSurfaceAuthorizer(
@@ -291,6 +292,11 @@ export default function actionCatalogTest() {
         'maps.route.open',
         args('{"origin":"深圳北","destination":"香港西九龙"}')
       );
+      const calendarIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'calendar.event.create',
+        args('{"title":"QA","start":"2026-07-30T15:00:00+08:00",' +
+          '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+      );
       const hotelIntent: ActionCatalogResult =
         actionCatalog.validateActionIntentExecution('hotel.detail', detailArgs);
       const memoryIntent: ActionCatalogResult =
@@ -302,6 +308,7 @@ export default function actionCatalogTest() {
       expect(surface.calls).assertEqual(0);
       expect(worldCupIntent.ok).assertTrue();
       expect(mapsIntent.ok).assertTrue();
+      expect(calendarIntent.ok).assertTrue();
       expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
       expect(memoryIntent.code).assertEqual('ACTION_INTENT_DENIED');
     });

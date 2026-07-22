@@ -7,15 +7,21 @@ import {
   ActionPlanRequestPayload,
   ActionValidationResult,
   A2uiAction,
+  A2uiSurfaceStore,
   A2uiSurfaceState,
   ClientActionAuthorizer,
+  CreateDataTaskPayload,
+  DataResult,
   DataTaskExecutor,
+  DataTaskAuthorizationResult,
+  DynamicGenericToolResult,
+  InputUserPayload,
+  LeaderDecisionDataTask,
   LeaderPlanningContext,
   LeaderToolMetadata,
   LinkedMessageBus,
   LocalModel,
   RegisteredActionExecutor,
-  SingleDataUiTaskRendererAdapter,
   SurfaceActionAuthorizer,
   ToolDefinition,
   ToolDefinitionLookup,
@@ -26,6 +32,9 @@ import {
   VirtualActionIntent,
   VirtualActionIntentResolver,
   allToolDefinitions,
+  callStructuredTool,
+  genericToolResultsA2ui,
+  parseA2uiJsonl,
   toolDefinitionForToolId
 } from '@loop/agent-core';
 import { leaderPersonaContext } from '../../../model/LeaderPersonaContext';
@@ -48,13 +57,12 @@ import {
   HotelRuntimeSurfaceWriter,
   HotelSurfaceAuthority,
   HotelSurfaceCallback,
-  HotelUiRenderer,
   HotelVisibility,
   IgnoreHotelSurfaceWriter,
   MonotonicHotelIds,
-  PreparedHotelFollowUpIds,
-  StructuredHotelDataExecutor
+  PreparedHotelFollowUpIds
 } from './HotelAgentRuntime';
+import { StructuredToolUiRenderer } from './StructuredToolUiRenderer';
 import {
   AiphoneRegisteredActionExecutor,
   RegisteredPageAction,
@@ -71,6 +79,24 @@ import {
 
 const MEMORY_ACTION_ID: string = 'memory.update';
 const MEMORY_SUMMARY_LIMIT: number = 240;
+
+interface CalendarReviewOutput {
+  surfaceId: string;
+}
+
+interface CalendarUpdateRequestArgs {
+  actionId: string;
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  calendarId: string;
+}
+
+interface CalendarUpdateSearchArgs {
+  query: string;
+  requestedAction: CalendarUpdateRequestArgs;
+}
 
 export interface MultiAgentCanaryOptions {
   model: LocalModel;
@@ -127,6 +153,149 @@ class RejectClientAction implements ClientActionAuthorizer {
   allows(_actionId: string, _args: Object): boolean {
     return false;
   }
+}
+
+function labeledCalendarValue(input: string, label: string): string {
+  const index = input.indexOf(label);
+  if (index < 0) {
+    return '';
+  }
+  const start = index + label.length;
+  let end = input.indexOf('；', start);
+  const asciiEnd = input.indexOf(';', start);
+  if (end < 0 || (asciiEnd >= 0 && asciiEnd < end)) {
+    end = asciiEnd;
+  }
+  return input.substring(start, end < 0 ? input.length : end).trim();
+}
+
+function calendarUpdateSearchArgs(input: string): CalendarUpdateSearchArgs | null {
+  const query = labeledCalendarValue(input, '原日程：');
+  const title = labeledCalendarValue(input, '新标题：');
+  const timeMatch = /新时间[：:]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})\s*(?:至|到)\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(input);
+  if (query.length === 0 || title.length === 0 || timeMatch === null) {
+    return null;
+  }
+  const start = timeMatch[1] + 'T' + timeMatch[2] + ':00+08:00';
+  const end = timeMatch[3] + 'T' + timeMatch[4] + ':00+08:00';
+  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end)) ||
+    Date.parse(end) <= Date.parse(start)) {
+    return null;
+  }
+  return {
+    query,
+    requestedAction: {
+      actionId: 'calendar.event.update',
+      title,
+      start,
+      end,
+      timezone: 'Asia/Shanghai',
+      calendarId: 'primary'
+    }
+  };
+}
+
+function normalizeCanaryTaskInput(
+  input: InputUserPayload,
+  task: LeaderDecisionDataTask
+): Object {
+  if (task.toolId === 'hotel.search') {
+    return normalizeHotelSearchTaskInput(input, task);
+  }
+  if (task.toolId !== 'calendar.events.search') {
+    return task.input;
+  }
+  const update = calendarUpdateSearchArgs(input.text);
+  if (update !== null) {
+    return update as Object;
+  }
+  const source = task.input as Record<string, Object | string | number | boolean | null | undefined>;
+  const safe: Record<string, Object | string | number | boolean> = {};
+  Object.keys(source).forEach((key: string) => {
+    const value = source[key];
+    if (key !== 'eventId' && key !== 'requestedAction' && value !== null && value !== undefined) {
+      safe[key] = value as Object | string | number | boolean;
+    }
+  });
+  return safe as Object;
+}
+
+function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  if (task.toolId !== 'calendar.events.search') {
+    return authorizeHotelDataTask(task);
+  }
+  const valid = task.allowedToolIds.length === 1 &&
+    task.allowedToolIds[0] === 'calendar.events.search' &&
+    task.outputSchema === 'calendarEvents' && task.required;
+  return {
+    ok: valid,
+    code: valid ? '' : 'CALENDAR_DATA_TASK_DENIED',
+    message: valid ? '' : 'Calendar read task is outside the exact allowlist.'
+  };
+}
+
+class CanaryStructuredDataExecutor implements DataTaskExecutor {
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    const result = await callStructuredTool(task.toolId, task.goal, task.args);
+    if (task.toolId !== 'calendar.events.search' || result.status === 'error') {
+      return result;
+    }
+    const taskValues = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+    const requestedAction = taskValues['requestedAction'];
+    if (requestedAction === null || requestedAction === undefined ||
+      typeof requestedAction !== 'object' || Array.isArray(requestedAction)) {
+      return result;
+    }
+    const data = result.data as Record<string, Object | string | number | boolean | null | undefined>;
+    data['requestedAction'] = requestedAction;
+    return result;
+  }
+}
+
+function surfaceFromJsonl(jsonl: string): A2uiSurfaceState | null {
+  const parsed = parseA2uiJsonl(jsonl);
+  if (parsed.error.length > 0) {
+    return null;
+  }
+  const store = new A2uiSurfaceStore();
+  for (let index = 0; index < parsed.envelopes.length; index++) {
+    if (!store.apply(parsed.envelopes[index]).ok) {
+      return null;
+    }
+  }
+  return store.getSurface();
+}
+
+function calendarReviewSurface(
+  surfaceId: string,
+  actionId: string,
+  args: Object
+): A2uiSurfaceState | null {
+  const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const review: DynamicGenericToolResult = {
+    sourceTag: 'Composio Google Calendar',
+    toolName: actionId,
+    title: actionId === 'calendar.event.create' ? '确认创建日程' : '确认更新日程',
+    status: 'confirm_required',
+    summary: '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。',
+    rows: [
+      { label: 'Title', value: typeof values['title'] === 'string' ? values['title'] : '' },
+      { label: 'Start', value: typeof values['start'] === 'string' ? values['start'] : '' },
+      { label: 'End', value: typeof values['end'] === 'string' ? values['end'] : '' }
+    ],
+    rawPreview: JSON.stringify(args),
+    actions: [{
+      id: actionId,
+      label: actionId === 'calendar.event.create' ? '确认创建' : '确认更新',
+      prompt: actionId,
+      variant: 'primary',
+      kind: 'prompt',
+      args
+    }]
+  };
+  return surfaceFromJsonl(genericToolResultsA2ui(
+    surfaceId, actionId, [review], 'calendar', review.title
+  ));
 }
 
 function memoryRequest(args: Object): PersonaMemoryUpdateRequest | null {
@@ -267,6 +436,21 @@ class CanaryRegisteredExecutor implements RegisteredActionExecutor {
     args: Object,
     context: ActionExecutionContext
   ): Promise<ActionExecutionResult> {
+    if (actionId === 'calendar.event.create' && context.virtualAction === true) {
+      this.sequence++;
+      const surfaceId = 'calendar-review:' + this.sequence.toString();
+      const surface = calendarReviewSurface(surfaceId, actionId, args);
+      if (surface === null) {
+        return {
+          status: 'error',
+          errorCode: 'CALENDAR_REVIEW_RENDER_FAILED',
+          message: 'Calendar review surface could not be rendered.'
+        };
+      }
+      this.onSurface(surface);
+      const output: CalendarReviewOutput = { surfaceId };
+      return { status: 'success', output };
+    }
     if (actionId !== MEMORY_ACTION_ID) {
       return this.aiphone.execute(actionId, args, context);
     }
@@ -298,7 +482,8 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
   const tools: LeaderToolMetadata[] = allToolDefinitions().map(
     (definition: ToolDefinition): LeaderToolMetadata => {
       const actions = definition.actions.slice();
-      if ((definition.toolId === 'worldcup.open' || definition.toolId === 'maps.route.open') &&
+      if ((definition.toolId === 'worldcup.open' || definition.toolId === 'maps.route.open' ||
+        definition.toolId === 'calendar.event.create') &&
         actions.indexOf(definition.toolId) < 0) {
         actions.push(definition.toolId);
       }
@@ -339,6 +524,9 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
       'hotel.booking.open',
       'worldcup.open',
       'maps.route.open',
+      'calendar.events.search',
+      'calendar.event.create',
+      'calendar.event.update',
       MEMORY_ACTION_ID
     ]
   };
@@ -396,14 +584,14 @@ export class MultiAgentCanaryRuntime {
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
         canaryPlanningContext(options.selectedPersonaId()),
-      dataTaskInputNormalizer: normalizeHotelSearchTaskInput,
-      dataAuthorizer: authorizeHotelDataTask,
+      dataTaskInputNormalizer: normalizeCanaryTaskInput,
+      dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
-        new StructuredHotelDataExecutor() : options.dataExecutor,
-      uiRenderer: new SingleDataUiTaskRendererAdapter(new HotelUiRenderer(
+        new CanaryStructuredDataExecutor() : options.dataExecutor,
+      uiRenderer: new StructuredToolUiRenderer(
         options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
         6000
-      )),
+      ),
       surfaceWriter: writer,
       actionCatalog: catalog,
       actionExecutor: new CanaryRegisteredExecutor(
