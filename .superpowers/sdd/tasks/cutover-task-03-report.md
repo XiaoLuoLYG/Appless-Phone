@@ -2,65 +2,51 @@
 
 Date: 2026-07-22
 
-Status: PASS for repository implementation and static/local test scope.
+Status: host implementation and gates PASS; independent re-review of the corrective commit is pending. No device or provider PASS is claimed.
 
-Implementation commit: `4f8007aab3a78d4f8ac6f5ca42282701605e4b40` (`test: cover multi-agent scenario lifecycle`)
+Implementation commits:
 
-## Delivered scope
+- `4f8007aab3a78d4f8ac6f5ca42282701605e4b40` — initial lifecycle coverage
+- `f9c994ea` — reviewer-requested correlation hardening
 
-- Added a strict generic lifecycle parser for one exact multi-Agent turn. It correlates `MultiAgentInput`, Data/UI task creation, their terminal result or task error, and the input task's single `MultiAgentTurnResult` by conversation, turn, and task identity.
-- Preserved terminal truth for `success`, `partial`, `empty`, `error`, and `canceled`; rejected legacy-only markers, missing or duplicate terminals, mismatched tools, stale turns, and synthetic/external-error false positives.
-- Required every parallel Data task to settle and required dependent tasks to use contiguous increasing `round-*` evidence. C01 is covered as a typed text-only terminal without inventing a tool task.
-- Added strict current-surface and virtual-action correlation. Direct actions require exact run/result surface, task, run, action, source, and derived plan identity; virtual actions require one exact action-plan request and its derived terminal result.
-- Integrated the generic lifecycle gate into `scripts/aiphone-device-smoke.mjs`, while retaining specialized provider/domain checks as additional evidence. Hotel search now requires both the generic multi-Agent lifecycle and the existing structured provider/network/block evidence.
-- Added exact non-executing catalogs: plain `--list-cases` lists C01-C20; `--full-regression --list-cases` lists C01-C20 plus F01-F16. F12 is the two-round Maps search-to-details scenario and F16 routes to the existing Composio settings handler.
-- Kept `gmail.message.send` outside automated catalogs. `--gmail-send-manual --list-cases` exposes only M01, only when both safe thread and safe recipient variables are present, and the script refuses every non-list manual-send invocation. X02 remains excluded.
-- Updated `docs/current-capabilities.md` with the lifecycle evidence contract and manual-only boundary.
+## Corrective scope
 
-## Minimal production instrumentation
+The first independent review rejected the initial report with four Important findings. `f9c994ea` closes those findings:
 
-`MultiAgentRuntime.ets` adds 89 lines and follows the approved Ponytail boundary:
+- Multi-Agent evidence now maps conversation, turn, task, surface, plan, and run IDs to opaque per-runtime tokens. The formatter uses one bounded FIFO map and one sequence; it logs no prompt, local ID, entity value, action args, provider message, URL, receipt, recipient, email, phone, order ID, or event ID.
+- F12 provenance is not inferred from tool names or round numbers. A successful Data result records bounded `entityRefs` or the real Maps `places[i].placeId` only in memory; a later `args.placeId` must exactly match before the logger emits an opaque predecessor task token, a JSON Pointer path, and `binding=true`. The raw entity is never logged.
+- Lifecycle parsing stops at the first matching `TurnResult`, reports same-turn late markers, requires create-before-terminal ordering, exact tool multiplicity, known task terminals, prior-round settlement, explicit dependent-task metadata, one UI dependency owner, and equality between the final UI and terminal surface. Unknown/input `TaskError` is terminally invalid.
+- Direct actions require the exact ordered current conversation/turn/surface/source/action run-result chain. Calendar source is derived from the final visible UI's unique Data dependency rather than hard-coded. Hotel detail, booking, and navigation use their exact search/detail visible-surface contexts. Virtual actions require plan-request before result and reject a fabricated `ActionRun`.
+- C20 no longer accepts a generic NETSTACK HTTP 200. It requires ordered RollingGo request and real response/source markers before the hotel document, ready state, final UI result, and `TurnResult`. The provider chain is correlated to the lifecycle's final surface, and the actual smoke verdict consumes the combined result.
 
-- one bounded value sanitizer;
-- one typed message-to-evidence formatter;
-- one fail-open evidence emitter;
-- one call in the existing fifth observer after conversation validation.
+## Production boundary
 
-It adds no resolver wrapper, lifecycle state, evidence framework, or orchestration path. Evidence contains only bounded identifiers, enum/status values, source counts, error presence, round/message counts, and action identities. Prompt text, goals, action args, provider messages, URLs, receipts, recipients, and source payloads are not logged. The typed Hypium test asserts those redaction boundaries.
+The allowlist, formatter, and emitter occupy 149 physical lines in `MultiAgentRuntime.ets`. The file's corrective diff is `+138/-71`. Production state added by the logger is limited to one 128-entry bounded map, its FIFO keys, and one scalar sequence; `dispose()` clears all three. Provider instrumentation adds only privacy-safe RollingGo operation/status/source-count markers, including truthful error terminals for provider and exception paths. Parser complexity remains in the Mac smoke scripts.
 
-## TDD evidence
+## TDD and adversarial coverage
 
-The work was driven through observable RED/GREEN transitions:
+Reviewer-derived RED cases covered:
 
-- missing generic parser module: `ERR_MODULE_NOT_FOUND`, then green after the parser was added;
-- missing ArkTS formatter export: compile failure, then green after minimal instrumentation;
-- UI rendering failure case: red before truthful UI error aggregation, then green;
-- action external-error false-positive case: red before action-window rejection, then green;
-- exact C/F list tests: red before catalog wiring, then green;
-- combined hotel generic/provider test: red before the combined helper, then green.
+- post-terminal Data/UI events, result-before-create, duplicate tool multiplicity, unknown/input task errors, overlapping rounds, missing/exact dependency metadata, and final-surface mismatch;
+- direct result-before-run, stale turn/surface/source, virtual result-before-plan, and fabricated virtual `ActionRun`;
+- generic NETSTACK-only hotel evidence, reversed RollingGo response/request order, and mismatched/uncombined provider chains;
+- raw email/phone/newline/long IDs, unsafe registry IDs, raw prompt/provider/entity values, true Maps entity provenance, and no-provenance fail-closed behavior.
 
-## Final gates
+## Final host gates
 
-- Focused Node lifecycle/hotel suites: PASS, 32 tests, 32 pass, 0 fail.
-- Node syntax checks for changed `.mjs` files: PASS.
-- Exact case lists: PASS, 20 core IDs and 36 full IDs in the required order.
-- `node scripts/verify-loopy-backend.mjs`: PASS, 245 checks.
-- Coverage audit: PASS; 44 registry tools, 2 runtime tools, 37 actions, 69 capabilities; `missingMatrix`, `missingDocs`, `registryOnlyTools`, `modelOnlyTools`, and `excludedQueriesInSmoke` are all empty. The remaining ten `reviewRequired` capabilities are the existing R-scope list, not missing coverage.
-- Authoritative Hypium result: `Tests run: 1088, Failure: 0, Error: 0, Pass: 1088, Ignore: 0`.
-- `git diff --check` and staged diff check: PASS.
+- Focused Node lifecycle/hotel suites: PASS, 38/38.
+- Changed-script syntax checks: PASS.
+- Case lists: PASS, exactly C01-C20 and C01-C20 plus F01-F16; M01 remains list-only behind both safe variables and X02 remains excluded.
+- Backend verifier: PASS, 245 checks including HAR build.
+- Coverage audit: PASS; 44 registry tools, 2 runtime tools, 37 actions, 69 capabilities; all missing/docs/registry/model/excluded arrays are empty. The ten `reviewRequired` entries remain the intentional R-scope list.
+- Authoritative Hypium: `Tests run: 1089, Failure: 0, Error: 0, Pass: 1089, Ignore: 0`.
+- `git diff --check`: PASS.
+- Generated `agent_core/BuildProfile.ets`: restored to `debug` and absent from the final diff.
 
-Hvigor still prints the pre-existing coverage-report JSON parse warning (`getInitCoverageData failed`), then reports `BUILD SUCCESSFUL`. Acceptance uses the authoritative `test_result.txt`, which contains zero failures and zero errors.
+Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; acceptance uses the authoritative `test_result.txt`, which has zero failures and errors.
 
-## External matrix synchronization
+## Matrix and scope
 
-The task-local reference matrix was updated at:
+The external scenario matrix remains at `/Users/luoyige/.codex/skills/appless-device-regression/references/scenario-matrix.md`; the coverage audit confirms no missing product/matrix/docs entries. It is intentionally outside this repository.
 
-`/Users/luoyige/.codex/skills/appless-device-regression/references/scenario-matrix.md`
-
-It now records the lifecycle contract, C01 typed terminal, C20 combined evidence, F12 dependent rounds, and manual-only M01 safe variables. This file is outside the product repository and intentionally remains an external, uncommitted skill reference change.
-
-## Scope and claims
-
-No device command, HDC interaction, provider call, Gmail send, push, merge, branch cleanup, or worktree cleanup was performed. This report therefore makes no real-device or real-provider PASS claim. The implementation proves repository wiring, parser behavior, static coverage, build-time ArkTS tests, and safe scenario enumeration only. Final device/provider execution remains a separate cutover acceptance activity.
-
-Self-review found no merge-blocking defect in this task's scoped diff. The worktree is preserved for the parent cutover workflow.
+No device command, HDC interaction, provider call, Gmail send, installation, push, merge, branch cleanup, or worktree cleanup was performed. Device/provider execution remains a separate cutover acceptance gate.
