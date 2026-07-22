@@ -140,6 +140,34 @@ Exact product verification for `555b1300`:
 
 This addendum supersedes the earlier 1062-test completion count.
 
+## Fourth Review-Fix Addendum (2026-07-22)
+
+The fourth review closes Calendar natural-language reachability and WhatsApp false-success handling without widening provider authority:
+
+- The documented README/current-capability Calendar create and update prompts, plus common unlabeled Chinese and relative dates, now use the shared `normalizedCalendarArgsForPrompt` seam. The two private labeled Calendar parsers were deleted.
+- Natural Calendar write parsing is opt-in for the review route only. The fixed ToolGateway keeps reviewed structured arguments and cannot manufacture missing write arguments from prompt text.
+- Create remains a local review until the exact current card click. Update strips model/user Event IDs, searches first, requires exactly one real Composio event, binds only its provider Event ID, and preserves its real title and duration when unchanged. Vague destination periods never invent a time.
+- WhatsApp now parses the provider observation once. A unique valid `wamid` with no negative truth is required; `success:false`, negative status, malformed/multiple messages, and string/object/array errors at any nested level all fail closed.
+- The Ponytail pass also reuses the Calendar date/time parser for the former duplicate flight/train prompt helpers. `ToolGatewayClient.ets` is a net deletion, while the five product files together are +83 lines for the new shared Calendar grammar and read-first binding.
+
+Fourth-review TDD checkpoints:
+
+1. The authoritative RED ran 1072 tests and reported six failures, one error, and 1065 passes. Each failure mapped to one requested behavior: documented create/update routing, unlabeled create/missing-time handling, model Event ID rejection, or WhatsApp object/nested-error rejection.
+2. The first integrated run exposed three existing fixed-gateway regressions because prompt parsing was too broad. Natural parsing was made explicitly review-only; no expectation was weakened.
+3. An ArkTS-only compile error rejected `Object.prototype.hasOwnProperty.call`; the final implementation uses the supported record-key check with the same fail-closed semantics.
+
+Exact product verification for `93a3bcb834f7b22d5228333557864dac56823385`:
+
+- Fresh authoritative artifact timestamp: `2026-07-22T11:09:58+0800`.
+- Artifact SHA-256: `9160e11761eb9fb6ef7fc573da8c9630b499178e9f3cb2dfd255085c13b8a3be`.
+- Hypium: **1072/1072 passed**, zero failures and zero errors.
+- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, including public/runtime semantic equality and a successful `agent_core` HAR build.
+- The unchanged Appless registry/docs audit remains **44 registry tools**, **2 runtime tools**, **37 actions**, and **69 capabilities**; this commit does not modify registry, matrix, capability, or documentation inputs, and the exact-tree verifier confirms registry equality.
+- `node scripts/aiphone-device-smoke.mjs --list-cases` listed the deterministic smoke catalog only. No device, connected account, or provider write was exercised.
+- `git diff --check` and stale duplicate-parser scans passed. Hvigor's known coverage reporter `00507008` parse message remained non-authoritative noise after Hypium wrote the complete green result file.
+
+This addendum supersedes the earlier 1070-test completion count.
+
 ## Evidence Boundary
 
 - This report claims deterministic unit/integration routing, current-surface authority, lifecycle, structural verifier, capability-audit, and HAR-build evidence only.
