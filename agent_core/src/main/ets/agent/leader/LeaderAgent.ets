@@ -326,6 +326,15 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
     }
+    if (this.reusesCompletedDataTool(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_COMPLETED_TOOL_REUSE',
+        'Leader cannot execute a completed Data tool again in the same turn'
+      );
+      return;
+    }
     if (this.decisionObserver !== null) {
       this.decisionObserver(
         message.conversationId,
@@ -401,6 +410,33 @@ export class LeaderAgent extends MessageDrivenAgent {
         dataTaskIds.length === 0
       );
     }
+  }
+
+  private reusesCompletedDataTool(state: LeaderTurnState, decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0) {
+      return false;
+    }
+    const completedToolIds: Set<string> = new Set<string>();
+    for (let index = 0; index < state.turnObservations.length; index++) {
+      const observation: ObservationDigest = state.turnObservations[index];
+      const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
+        observation.status === 'empty' || observation.status === 'error';
+      if (terminal && this.dataToolIds.has(observation.toolId)) {
+        completedToolIds.add(observation.toolId);
+      }
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
+      if (completedToolIds.has(task.toolId)) {
+        return true;
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (completedToolIds.has(task.allowedToolIds[allowedIndex])) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {

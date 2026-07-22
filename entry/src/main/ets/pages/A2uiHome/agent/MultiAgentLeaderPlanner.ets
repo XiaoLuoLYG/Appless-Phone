@@ -273,9 +273,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
         observation.status === 'empty' || observation.status === 'error';
       const observationRound: number = this.observationRound(message.taskId, observation.taskId);
-      const toolId: string = observation.toolId.trim();
+      const toolId: string = observation.toolId;
       if (terminal && observationRound > 0 && observationRound < currentRound &&
-        toolId.length > 0 && result.indexOf(toolId) < 0) {
+        this.dataToolIds.has(toolId) && result.indexOf(toolId) < 0) {
         result.push(toolId);
       }
     }

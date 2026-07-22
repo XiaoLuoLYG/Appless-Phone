@@ -92,6 +92,18 @@ const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace
   '"personaId":"travel_companion",',
   ''
 );
+const REGISTERED_DATA_TOOL_IDS: string[] = [
+  'travel.search',
+  'train.search',
+  'flight.search',
+  'hotel.search',
+  'food.search',
+  'social.feed.search',
+  'x.post.search',
+  'mail.search',
+  'mail.thread.read',
+  'gmail.mail.search'
+];
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -636,6 +648,75 @@ export default function multiAgentLeaderPlannerTest() {
       ) >= 0).assertTrue();
     });
 
+    it('does not promote a whitespace near-match into completed authority', 0, async () => {
+      const model = new QueueLocalModel([TRAVEL_DECISION]);
+      const input: InputUserPayload = {
+        text: '继续查询出行方案',
+        recentObservations: [{
+          taskId: 'input-1:round-1:travel',
+          toolId: ' travel.search ',
+          status: 'success',
+          summary: 'near match',
+          entityRefs: []
+        }]
+      };
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), input, planningContext(), 2
+      );
+
+      expect(decision.dataTasks[0].toolId).assertEqual('travel.search');
+      expect(model.prompts.length).assertEqual(1);
+      const metadataStart: number = model.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs:'
+      );
+      const metadataEnd: number = model.prompts[0].indexOf('\n', metadataStart);
+      const metadataLine: string = model.prompts[0].substring(metadataStart, metadataEnd);
+      expect(metadataLine).assertEqual('Current-turn completed Data tool IDs: []');
+      expect(metadataLine.indexOf(' travel.search ')).assertEqual(-1);
+    });
+
+    it('does not let invalid observations hide a later registered completed tool', 0, async () => {
+      const observations: ObservationDigest[] = [];
+      for (let index = 0; index < 10; index++) {
+        observations.push({
+          taskId: 'input-1:round-1:invalid-' + index.toString(),
+          toolId: 'invalid.tool.' + index.toString(),
+          status: 'success',
+          summary: 'invalid summary',
+          entityRefs: []
+        });
+      }
+      observations.push({
+        taskId: 'input-1:round-1:travel',
+        toolId: 'travel.search',
+        status: 'success',
+        summary: 'real travel result',
+        entityRefs: []
+      });
+      const model = new QueueLocalModel([TRAVEL_DECISION, ANSWER_FROM_TRAVEL_OBSERVATION]);
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '继续', recentObservations: observations },
+        planningContext(),
+        2,
+        (): boolean => true
+      );
+
+      expect(decision.roundAction).assertEqual('answer');
+      expect(model.prompts.length).assertEqual(2);
+      const metadataStart: number = model.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs:'
+      );
+      const metadataEnd: number = model.prompts[0].indexOf('\n', metadataStart);
+      const metadataLine: string = model.prompts[0].substring(metadataStart, metadataEnd);
+      expect(metadataLine).assertEqual(
+        'Current-turn completed Data tool IDs: ["travel.search"]'
+      );
+      expect(metadataLine.indexOf('invalid.tool.')).assertEqual(-1);
+    });
+
     it('accepts only exact earlier-round task identities and bounds the completed tool list', 0, async () => {
       const probeInput: InputUserPayload = {
         text: '根据真实结果继续',
@@ -729,10 +810,10 @@ export default function multiAgentLeaderPlannerTest() {
       ) >= 0).assertTrue();
 
       const many: ObservationDigest[] = [];
-      for (let index = 0; index < 10; index++) {
+      for (let index = 0; index < REGISTERED_DATA_TOOL_IDS.length; index++) {
         many.push({
           taskId: 'input-1:round-1:local-' + index.toString(),
-          toolId: 'bounded.tool.' + index.toString(),
+          toolId: REGISTERED_DATA_TOOL_IDS[index],
           status: 'success',
           summary: 'summary-' + index.toString(),
           entityRefs: []
@@ -743,14 +824,14 @@ export default function multiAgentLeaderPlannerTest() {
         inputMessage(), { text: '继续', recentObservations: many }, planningContext(), 2
       );
       expect(boundedModel.prompts[0].indexOf(
-        'Current-turn completed Data tool IDs: ["bounded.tool.0","bounded.tool.1",' +
-          '"bounded.tool.2","bounded.tool.3","bounded.tool.4","bounded.tool.5",' +
-          '"bounded.tool.6","bounded.tool.7"]'
+        'Current-turn completed Data tool IDs: ["travel.search","train.search",' +
+          '"flight.search","hotel.search","food.search","social.feed.search",' +
+          '"x.post.search","mail.search"]'
       ) >= 0).assertTrue();
       expect(boundedModel.prompts[0].indexOf(
-        'Current-turn completed Data tool IDs: ["bounded.tool.0","bounded.tool.1",' +
-          '"bounded.tool.2","bounded.tool.3","bounded.tool.4","bounded.tool.5",' +
-          '"bounded.tool.6","bounded.tool.7","bounded.tool.8"'
+        'Current-turn completed Data tool IDs: ["travel.search","train.search",' +
+          '"flight.search","hotel.search","food.search","social.feed.search",' +
+          '"x.post.search","mail.search","mail.thread.read"'
       )).assertEqual(-1);
     });
 

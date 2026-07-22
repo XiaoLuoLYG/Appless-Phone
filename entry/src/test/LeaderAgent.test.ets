@@ -19,6 +19,7 @@ import {
   LeaderPlanner,
   LeaderPlannerResult,
   LeaderPlanningContext,
+  LeaderToolMetadata,
   LeaderUiTask,
   LinkedMessageBus,
   LocalModel,
@@ -344,6 +345,35 @@ function semanticPlanningContext(): LeaderPlanningContext {
       previous: false,
       activeSkills: []
     }]
+  };
+}
+
+function nineDataPlanningContext(): LeaderPlanningContext {
+  const ids: string[] = [
+    'travel.search',
+    'train.search',
+    'flight.search',
+    'hotel.search',
+    'food.search',
+    'social.feed.search',
+    'x.post.search',
+    'mail.search',
+    'mail.thread.read'
+  ];
+  const tools: LeaderToolMetadata[] = [];
+  for (let index = 0; index < ids.length; index++) {
+    tools.push({
+      toolId: ids[index],
+      intent: ids[index],
+      riskLevel: 'read',
+      inputSchema: ids[index] + '.input',
+      outputSchema: ids[index] + '.output',
+      actions: []
+    });
+  }
+  return {
+    tools,
+    personas: semanticPlanningContext().personas
   };
 }
 
@@ -1056,6 +1086,57 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('blocks a completed tool omitted from the bounded planner observations', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const ids: string[] = [
+        'travel.search',
+        'train.search',
+        'flight.search',
+        'hotel.search',
+        'food.search',
+        'social.feed.search',
+        'x.post.search',
+        'mail.search',
+        'mail.thread.read'
+      ];
+      const firstRoundTasks: LeaderDecisionDataTask[] = ids.map(
+        (toolId: string, index: number): LeaderDecisionDataTask =>
+          semanticDataTask('tool-' + index.toString(), toolId)
+      );
+      const planner = new RoundScriptedPlanner([
+        semanticDecision(firstRoundTasks),
+        semanticDecision([semanticDataTask('repeat-travel', 'travel.search')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      const tasks: AgentMessage[] = [];
+      for (let index = 0; index < ids.length; index++) {
+        const task: AgentMessage = await receive(observer);
+        expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        tasks.push(task);
+      }
+      for (let index = 0; index < tasks.length; index++) {
+        bus.publish(dataResultMessage(tasks[index], 'result-' + index.toString()));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      }
+      const blocked: AgentMessage = await receive(observer);
+
+      expect(planner.calls).assertEqual(2);
+      expect(planner.inputs[1].recentObservations!.length).assertEqual(8);
+      expect(planner.inputs[1].recentObservations!.some(
+        (observation): boolean => observation.toolId === 'travel.search'
+      )).assertFalse();
+      expect(blocked.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_COMPLETED_TOOL_REUSE');
+      leader.stop();
+      observer.close();
+    });
+
     it('derives data-backed terminal status from only this turn observations', 0, async () => {
       expect(await semanticTerminalStatus(['error', 'error'])).assertEqual('error');
       expect(await semanticTerminalStatus(['error', 'empty'])).assertEqual('error');
@@ -1140,11 +1221,11 @@ export default function leaderAgentTest() {
     it('rejects planning a fourth semantic round without publishing another task', 0, async () => {
       const bus = new LinkedMessageBus();
       const planner = new RoundScriptedPlanner([
-        semanticDecision([semanticDataTask('round-1')]),
-        semanticDecision([semanticDataTask('round-2')]),
-        semanticDecision([semanticDataTask('round-3')])
+        semanticDecision([semanticDataTask('round-1', 'travel.search')]),
+        semanticDecision([semanticDataTask('round-2', 'train.search')]),
+        semanticDecision([semanticDataTask('round-3', 'flight.search')])
       ]);
-      const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
       const observer = bus.openReader();
       leader.start();
 
