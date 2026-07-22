@@ -124,89 +124,154 @@ function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function evidenceValue(value: string | undefined, fallback: string = 'none'): string {
-  if (value === undefined || value.length === 0) {
-    return fallback;
-  }
-  const bounded: string = value.substring(0, 256);
-  const safe: string = bounded.replace(/[^A-Za-z0-9._:/,-]/g, '_');
-  if (safe.length === 0) {
-    return fallback;
-  }
-  return safe;
+function evidenceAllowed(
+  value: string | undefined, values: string[] = [],
+  pattern: RegExp = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/
+): string {
+  return value !== undefined && value.length > 0 && value.length <= 96 &&
+    (values.length > 0 ? values.indexOf(value) >= 0 : pattern.test(value)) ? value : 'invalid';
 }
 
-export function multiAgentEvidenceLine(message: AgentMessage): string {
-  const identity: string = ' conversation=' + evidenceValue(message.conversationId) +
-    ' turn=' + evidenceValue(message.turnId) + ' task=' + evidenceValue(message.taskId);
-  if (message.type === AgentMessageType.INPUT_USER) {
-    return '[AIPhone][MultiAgentInput]' + identity;
-  }
-  if (message.type === AgentMessageType.TASK_CREATE_DATA) {
-    const payload = message.payload as CreateDataTaskPayload;
-    return '[AIPhone][MultiAgentDataTask]' + identity + ' round=' +
-      evidenceValue(payload.roundId) + ' tool=' + evidenceValue(payload.toolId);
-  }
-  if (message.type === AgentMessageType.TASK_RESULT_DATA) {
-    const payload = message.payload as DataResult;
-    return '[AIPhone][MultiAgentDataResult]' + identity + ' tool=' +
-      evidenceValue(payload.toolId) + ' status=' + evidenceValue(payload.status) +
-      ' sources=' + payload.sources.length.toString() +
-      ' error=' + (payload.error === undefined ? 'false' : 'true');
-  }
-  if (message.type === AgentMessageType.TASK_CREATE_UI) {
-    const payload = message.payload as CreateUiTaskPayload;
-    return '[AIPhone][MultiAgentUiTask]' + identity + ' dataTasks=' +
-      evidenceValue(payload.dataTaskIds.join(','));
-  }
-  if (message.type === AgentMessageType.TASK_RESULT_UI) {
-    const payload = message.payload as UiRenderResultPayload;
-    return '[AIPhone][MultiAgentUiResult]' + identity + ' surface=' +
-      evidenceValue(payload.surfaceId) + ' state=' + evidenceValue(payload.state);
-  }
-  if (message.type === AgentMessageType.TASK_ERROR) {
-    const payload = message.payload as TaskErrorPayload;
-    return '[AIPhone][MultiAgentTaskError]' + identity + ' code=' + evidenceValue(payload.code);
-  }
-  if (message.type === AgentMessageType.ACTION_PLAN_REQUEST) {
-    const payload = message.payload as ActionPlanRequestPayload;
-    return '[AIPhone][MultiAgentActionPlan]' + identity + ' uiTask=' +
-      evidenceValue(payload.uiTaskId) + ' dataTasks=' +
-      evidenceValue(payload.dataTaskIds.join(',')) + ' actions=' +
-      evidenceValue(payload.allowedActionIds.join(',')) +
-      ' virtual=' + (payload.virtual === true ? 'true' : 'false');
-  }
-  if (message.type === AgentMessageType.ACTION_RUN) {
-    const payload = message.payload as ActionRunPayload;
-    return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' +
-      evidenceValue(payload.surfaceId) + ' run=' + evidenceValue(payload.runId) +
-      ' action=' + evidenceValue(payload.actionId) +
-      ' source=' + evidenceValue(payload.sourceToolId);
-  }
-  if (message.type === AgentMessageType.ACTION_RESULT) {
-    const payload = message.payload as ActionResultPayload;
-    return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' +
-      evidenceValue(payload.surfaceId) + ' plan=' + evidenceValue(payload.planId) +
-      ' run=' + evidenceValue(payload.runId) + ' status=' + evidenceValue(payload.status);
-  }
-  if (message.type === AgentMessageType.TURN_RESULT) {
-    const payload = message.payload as TurnResultPayload;
-    return '[AIPhone][MultiAgentTurnResult]' + identity + ' status=' +
-      evidenceValue(payload.status) + ' surface=' + evidenceValue(payload.surfaceId) +
-      ' roundCount=' + payload.roundCount.toString() +
-      ' messageChars=' + payload.message.length.toString();
-  }
-  return '';
-}
-
-function emitEvidence(message: AgentMessage): void {
-  try {
-    const line: string = multiAgentEvidenceLine(message);
-    if (line.length > 0) {
-      aiLogInfo(line);
+export class MultiAgentEvidenceFormatter {
+  private readonly limit: number;
+  private readonly tokens: Map<string, string> = new Map<string, string>();
+  private readonly order: string[] = [];
+  private sequence: number = 0;
+  constructor(limit: number = 128) { this.limit = Number.isInteger(limit) && limit >= 8 ? Math.min(limit, 512) : 128; }
+  dispose(): void { this.tokens.clear(); this.order.splice(0, this.order.length); this.sequence = 0; }
+  line(message: AgentMessage): string {
+    const identity: string = ' conversation=' + this.token('c', message.conversationId) +
+      ' turn=' + this.token('t', message.turnId) +
+      ' task=' + this.token('k', message.taskId);
+    switch (message.type) {
+      case AgentMessageType.INPUT_USER: return '[AIPhone][MultiAgentInput]' + identity;
+      case AgentMessageType.TASK_CREATE_DATA: return this.dataTaskLine(message, identity);
+      case AgentMessageType.TASK_RESULT_DATA: {
+        const payload = message.payload as DataResult;
+        this.rememberEntities(payload.data, this.token('k', message.taskId));
+        return '[AIPhone][MultiAgentDataResult]' + identity + ' tool=' + evidenceAllowed(payload.toolId) +
+          ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
+          ' sources=' + payload.sources.length.toString() + ' error=' + (payload.error === undefined ? 'false' : 'true');
+      }
+      case AgentMessageType.TASK_CREATE_UI: {
+        const payload = message.payload as CreateUiTaskPayload;
+        return '[AIPhone][MultiAgentUiTask]' + identity + ' dataTasks=' + this.values(payload.dataTaskIds, 'k');
+      }
+      case AgentMessageType.TASK_RESULT_UI: {
+        const payload = message.payload as UiRenderResultPayload;
+        return '[AIPhone][MultiAgentUiResult]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+          ' state=' + evidenceAllowed(payload.state, ['skeleton', 'result', 'error', 'action']);
+      }
+      case AgentMessageType.TASK_ERROR: {
+        const payload = message.payload as TaskErrorPayload;
+        return '[AIPhone][MultiAgentTaskError]' + identity + ' code=' +
+          evidenceAllowed(payload.code, [], /^[A-Z][A-Z0-9_]*$/);
+      }
+      case AgentMessageType.ACTION_PLAN_REQUEST: {
+        const payload = message.payload as ActionPlanRequestPayload;
+        return '[AIPhone][MultiAgentActionPlan]' + identity + ' uiTask=' + this.token('k', payload.uiTaskId) +
+          ' dataTasks=' + this.values(payload.dataTaskIds, 'k') + ' actions=' +
+          this.values(payload.allowedActionIds, '') + ' virtual=' + (payload.virtual === true ? 'true' : 'false');
+      }
+      case AgentMessageType.ACTION_RUN: {
+        const payload = message.payload as ActionRunPayload;
+        return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+          ' plan=' + this.token('p', 'direct:' + payload.runId) + ' run=' + this.token('r', payload.runId) +
+          ' action=' + evidenceAllowed(payload.actionId) + ' source=' + evidenceAllowed(payload.sourceToolId);
+      }
+      case AgentMessageType.ACTION_RESULT: {
+        const payload = message.payload as ActionResultPayload;
+        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+          ' plan=' + this.token('p', payload.planId) + ' run=' + this.token('r', payload.runId) +
+          ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']);
+      }
+      case AgentMessageType.TURN_RESULT: {
+        const payload = message.payload as TurnResultPayload;
+        return '[AIPhone][MultiAgentTurnResult]' + identity + ' status=' +
+          evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error', 'canceled']) + ' surface=' +
+          (payload.surfaceId === undefined ? 'none' : this.token('s', payload.surfaceId)) + ' roundCount=' +
+          payload.roundCount.toString() + ' messageChars=' + payload.message.length.toString();
+      }
+      default: return '';
     }
-  } catch (_error) {
   }
+  private dataTaskLine(message: AgentMessage, identity: string): string {
+    const payload = message.payload as CreateDataTaskPayload;
+    const prefix: string = message.turnId + ':round-';
+    const suffix: string = payload.roundId.startsWith(prefix) ? payload.roundId.substring(prefix.length) : '';
+    const round: string = /^[1-9]\d*$/.test(suffix) ? suffix : 'invalid';
+    let predecessor: string = 'none';
+    let path: string = 'none';
+    const args = payload.args as Record<string, Object | string | number | boolean | null | undefined>;
+    const placeId = args['placeId'];
+    const provenance: string | undefined = typeof placeId === 'string' ? this.tokens.get('e:' + placeId) : undefined;
+    if (provenance !== undefined) {
+      const separator: number = provenance.indexOf('|');
+      predecessor = provenance.substring(0, separator);
+      path = provenance.substring(separator + 1);
+    }
+    return '[AIPhone][MultiAgentDataTask]' + identity + ' round=' + round +
+      ' tool=' + evidenceAllowed(payload.toolId) + ' predecessor=' + predecessor +
+      ' path=' + path + ' target=' + (provenance === undefined ? 'none' : '/placeId') +
+      ' binding=' + (provenance === undefined ? 'false' : 'true');
+  }
+  private rememberEntities(data: Object, task: string): void {
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return;
+    const values = data as Record<string, Object | string | number | boolean | null | undefined>;
+    const refs = values['entityRefs'];
+    if (Array.isArray(refs)) refs.slice(0, 16).forEach((ref: Object, index: number) =>
+      this.remember(ref, task, '/entityRefs/' + index.toString()));
+    const places = values['places'];
+    if (Array.isArray(places)) places.slice(0, 16).forEach((place: Object, index: number) => {
+      if (place !== null && typeof place === 'object' && !Array.isArray(place)) {
+        this.remember((place as Record<string, Object>)['placeId'], task, '/places/' + index.toString() + '/placeId');
+      }
+    });
+  }
+  private remember(ref: Object, task: string, path: string): void {
+    if (typeof ref === 'string' && ref.length > 0 && ref.length <= 256 && ref.indexOf('\n') < 0) {
+      this.put('e:' + ref, task + '|' + path);
+    }
+  }
+  private values(values: string[], kind: string): string {
+    if (values.length === 0) return 'none';
+    const result: string[] = [];
+    for (let index = 0; index < values.length; index++) {
+      result.push(kind.length > 0 ? this.token(kind, values[index]) : evidenceAllowed(values[index]));
+    }
+    return result.join(',');
+  }
+  private token(kind: string, value: string): string {
+    if (value.length === 0) return 'none';
+    if (value.length > 256 || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0) {
+      return 'invalid';
+    }
+    const key: string = kind + ':' + value;
+    const existing: string | undefined = this.tokens.get(key);
+    if (existing !== undefined) return existing;
+    this.sequence++;
+    const token: string = kind + this.sequence.toString();
+    this.put(key, token);
+    return token;
+  }
+  private put(key: string, value: string): void {
+    if (this.tokens.has(key)) { this.tokens.set(key, value); return; }
+    while (this.order.length >= this.limit) {
+      const oldest: string | undefined = this.order.shift();
+      if (oldest !== undefined) {
+        this.tokens.delete(oldest);
+      }
+    }
+    this.tokens.set(key, value);
+    this.order.push(key);
+  }
+}
+
+function emitEvidence(formatter: MultiAgentEvidenceFormatter, message: AgentMessage): void {
+  try {
+    const line: string = formatter.line(message);
+    if (line.length > 0) aiLogInfo(line);
+  } catch (_error) {}
 }
 
 function runtimeOwnedIds(context: LeaderPlanningContext): string[] {
@@ -250,6 +315,7 @@ export class MultiAgentRuntime {
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
   private readonly ownedActionExecutor: AiphoneRegisteredActionExecutor | null;
+  private readonly evidenceFormatter: MultiAgentEvidenceFormatter = new MultiAgentEvidenceFormatter();
   private pendingTurn: PendingTurn | null = null;
   private readonly pendingActions: Map<string, PendingAction> = new Map<string, PendingAction>();
   private generation: number = 0;
@@ -506,6 +572,7 @@ export class MultiAgentRuntime {
     this.pendingActions.forEach((action: PendingAction) => {
       this.settleAction(action, false);
     });
+    this.evidenceFormatter.dispose();
     this.activeConversationId = '';
     this.activeTurnId = '';
     this.activeSurfaceId = '';
@@ -536,7 +603,7 @@ export class MultiAgentRuntime {
       return;
     }
     const action: PendingAction | undefined = this.pendingActions.get(message.taskId);
-    emitEvidence(message);
+    emitEvidence(this.evidenceFormatter, message);
     if (message.type === AgentMessageType.ACTION_RESULT && action !== undefined) {
       this.observeActionResult(message, action);
       return;

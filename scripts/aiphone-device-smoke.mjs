@@ -1950,7 +1950,37 @@ async function verifySocialDraftAction(layout, index) {
   return { ok: false, capability: 'social.reply.draft', reason: '生成草稿 button not found' };
 }
 
-async function verifyCalendarDeleteAction(layout, index, appPid) {
+function latestMultiAgentUiSurface(logText, options = {}) {
+  let latest = null;
+  String(logText || '').split('\n').forEach((line, index) => {
+    const match = /\[AIPhone\]\[MultiAgentUiResult] conversation=(c\d+) turn=(t\d+) task=(k\d+) surface=(s\d+) state=result(?:\s|$)/.exec(line);
+    if (match !== null && index > (options.afterIndex ?? -1) &&
+      (!options.expectedConversationId || match[1] === options.expectedConversationId) &&
+      (!options.expectedTurnId || match[2] === options.expectedTurnId)) {
+      latest = { conversationId: match[1], turnId: match[2], taskId: match[3], surfaceId: match[4] };
+    }
+  });
+  return latest;
+}
+
+function exactActionOptions(actionId, sourceToolId, context) {
+  return {
+    expectedActionId: actionId,
+    expectedSourceToolId: sourceToolId || 'invalid',
+    currentSurfaceId: context?.surfaceId || 'invalid',
+    expectedConversationId: context?.conversationId || 'invalid',
+    expectedTurnId: context?.turnId || 'invalid',
+    expectedVirtual: false
+  };
+}
+
+function visibleSourceToolId(lifecycle) {
+  return Array.isArray(lifecycle?.finalUiToolIds) && lifecycle.finalUiToolIds.length === 1
+    ? lifecycle.finalUiToolIds[0]
+    : '';
+}
+
+async function verifyCalendarDeleteAction(layout, index, appPid, actionContext) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const center = findTextCenter(currentLayout, '确认删除');
@@ -1962,15 +1992,17 @@ async function verifyCalendarDeleteAction(layout, index, appPid) {
       const resultLayout = dumpLayout(`query-${index + 1}-calendar-delete-layout.json`);
       const text = collectLayoutText(resultLayout).join('\n');
       const logs = actionLogs.join('\n');
-      const actionEvidence = multiAgentActionEvidence(logs, {
-        expectedActionId: 'calendar.event.delete'
-      });
+      const actionEvidence = multiAgentActionEvidence(
+        logs,
+        exactActionOptions('calendar.event.delete', visibleSourceToolId(actionContext), actionContext)
+      );
       const logPath = join(outDir, `query-${index + 1}-calendar-delete.log`);
       const textPath = join(outDir, `query-${index + 1}-calendar-delete-layout-text.txt`);
       writeFileSync(logPath, logs + '\n');
       writeFileSync(textPath, text + '\n');
       return {
-        ok: actionEvidence.ok && /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
+        ok: Boolean(actionContext?.surfaceId) && Boolean(visibleSourceToolId(actionContext)) &&
+          actionEvidence.ok && /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
           !/status":"error"|删除失败/.test(`${text}\n${logs}`),
         capability: 'calendar.event.delete.confirm',
         actionEvidence,
@@ -2022,7 +2054,8 @@ async function exerciseHotelSystemAction(
   label,
   actionName,
   expectedScheme,
-  appPid
+  appPid,
+  actionContext
 ) {
   const located = await locateHotelSystemAction(layout, label, index, actionName);
   const runtime = {
@@ -2053,9 +2086,10 @@ async function exerciseHotelSystemAction(
   });
   const rawActionLogs = capturedActionLogs.join('\n');
   const actionLogs = sanitizeExternalUrlLogs(rawActionLogs);
-  const multiAgentAction = multiAgentActionEvidence(actionLogs, {
-    expectedActionId: actionId
-  });
+  const multiAgentAction = multiAgentActionEvidence(
+    actionLogs,
+    exactActionOptions(actionId, 'hotel.search', actionContext)
+  );
   const logPath = join(outDir, `query-${index + 1}-hotel-${actionName}.log`);
   writeFileSync(logPath, actionLogs + '\n');
   const schemeOpened = hasSafeHotelSystemIntentOpen(actionLogs, expectedScheme);
@@ -2066,7 +2100,8 @@ async function exerciseHotelSystemAction(
   const screenPath = captureCurrentScreen(
     `query-${index + 1}-hotel-${actionName}-system-screen.png`
   );
-  runtime.systemSurfaceOpened = multiAgentAction.ok && schemeOpened && systemSurfaceRecognized;
+  runtime.systemSurfaceOpened = Boolean(actionContext?.surfaceId) &&
+    multiAgentAction.ok && schemeOpened && systemSurfaceRecognized;
   runtime.evidenceCaptured = screenPath.length > 0;
   runtime.multiAgentAction = multiAgentAction;
 
@@ -2119,7 +2154,7 @@ async function exerciseHotelSystemAction(
   };
 }
 
-async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
+async function verifyHotelSystemActions(layout, index, actionEvidence, appPid, actionContext) {
   const validated = validateHotelSearchActionEvidence(actionEvidence);
   let currentLayout = layout;
   const runtime = {};
@@ -2135,7 +2170,8 @@ async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
       '导航到酒店',
       'navigate',
       'petalmaps',
-      appPid
+      appPid,
+      actionContext
     );
     runtime.navigation = navigationEvidence.runtime;
     currentLayout = navigationEvidence.restoredLayout;
@@ -2148,7 +2184,7 @@ async function verifyHotelSystemActions(layout, index, actionEvidence, appPid) {
   };
 }
 
-async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
+async function verifyHotelBookingAction(layout, index, appPid, actionEvidence, actionContext) {
   const validated = validateHotelDetailBookingEvidence(actionEvidence);
   const located = await locateHotelSystemAction(
     layout,
@@ -2183,9 +2219,10 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
   hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
   await sleep(2200);
   const bookingLogs = sanitizeExternalUrlLogs(hdc(['shell', 'hilog', '-x']));
-  const multiAgentAction = multiAgentActionEvidence(bookingLogs, {
-    expectedActionId: 'hotel.booking.open'
-  });
+  const multiAgentAction = multiAgentActionEvidence(
+    bookingLogs,
+    exactActionOptions('hotel.booking.open', 'hotel.detail', actionContext)
+  );
   const logPath = join(outDir, `query-${index + 1}-hotel-booking.log`);
   writeFileSync(logPath, bookingLogs + '\n');
   const foreground = captureForegroundAbility(`query-${index + 1}-hotel-booking-ability.txt`);
@@ -2221,7 +2258,7 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
     report.roomSurfaceRestored = /房型与价格规则|价格与取消规则/.test(roomText);
   }
   report.logPath = logPath;
-  report.ok = multiAgentAction.ok && report.returnedToRoom &&
+  report.ok = Boolean(actionContext?.surfaceId) && multiAgentAction.ok && report.returnedToRoom &&
     report.headerVisible && report.domainVisible &&
     report.loginBoundaryReached && report.roomSurfaceRestored;
   report.blocked = !report.ok && report.returnedToRoom && report.screenPath.length > 0;
@@ -2231,7 +2268,7 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence) {
   return report;
 }
 
-async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
+async function verifyHotelDetailAction(layout, index, appPid, queryLogs, queryContext) {
   let currentLayout = layout;
   let detailCenter = null;
   let detailLabel = '';
@@ -2288,6 +2325,14 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   const detailLogText = sanitizeExternalUrlLogs(rawDetailLogText);
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
   writeFileSync(detailLogPath, detailLogText + '\n');
+  const multiAgentDetailAction = multiAgentActionEvidence(
+    detailLogText,
+    exactActionOptions('hotel.detail', visibleSourceToolId(queryContext), queryContext)
+  );
+  const detailUiContext = latestMultiAgentUiSurface(detailLogText, {
+    expectedConversationId: multiAgentDetailAction.conversationId,
+    afterIndex: multiAgentDetailAction.resultIndex
+  });
   await sleep(700);
   currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-layout.json`);
 
@@ -2322,7 +2367,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     currentLayout,
     index,
     appPid,
-    detailActionEvidence
+    detailActionEvidence,
+    detailUiContext
   );
   currentLayout = bookingAction.restoredLayout;
   const bookingReport = { ...bookingAction };
@@ -2352,6 +2398,9 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     await sleep(1200);
   });
   const restoreLogText = restoreLogs.join('\n');
+  const restoredUiContext = latestMultiAgentUiSurface(restoreLogText, {
+    expectedConversationId: queryContext?.conversationId || 'invalid'
+  });
   await sleep(700);
   const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
   const restoredText = collectLayoutText(restoredLayout).join('\n');
@@ -2359,12 +2408,9 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
   const detailLifecycle = hotelDetailLifecycleFromLogs(detailLogText);
-  const multiAgentDetailAction = multiAgentActionEvidence(detailLogText, {
-    expectedActionId: 'hotel.detail'
-  });
   const detailRequested = multiAgentDetailAction.complete;
-  const detailOk = multiAgentDetailAction.ok && (detailLifecycle.ok ||
-    /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult|LocalToolResult)\][^\n]*ok=true/.test(detailLogText));
+  const detailOk = Boolean(queryContext?.surfaceId) && Boolean(detailUiContext?.surfaceId) &&
+    multiAgentDetailAction.ok && detailLifecycle.ok;
   const restoredOk = /酒店结果/.test(restoredText);
   const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
   const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
@@ -2377,7 +2423,8 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs) {
     restoredLayout,
     index,
     rawRestoredActionEvidence,
-    appPid
+    appPid,
+    restoredUiContext
   );
   return {
     ok: pendingSearchCardAbsent &&
@@ -2881,10 +2928,10 @@ async function runQuery(query, index, expectedTool) {
     ? await verifySocialDraftAction(evidenceLayout, index)
     : { ok: true, skipped: true };
   summary.calendarDeleteAction = expectedCase.verifyCalendarDelete === true
-    ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid)
+    ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
   summary.hotelDetailAction = expectedCase.verifyHotelDetail === true
-    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs)
+    ? await verifyHotelDetailAction(evidenceLayout, index, appPid, safeLogs, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
   summary.providerFailed = summary.providerFailed || summary.hotelDetailAction.bookingAction?.blocked === true;
   const combinedHotelSearchEvidence = expectedCase.verifyHotelDetail === true
@@ -2892,7 +2939,7 @@ async function runQuery(query, index, expectedTool) {
     : null;
   summary.hotelSearchLifecycle = combinedHotelSearchEvidence?.lifecycle || summary.multiAgentLifecycle;
   summary.hotelProviderEvidence = combinedHotelSearchEvidence?.provider ||
-    { requested: false, ok: false, surfaceId: '', network200: false, blocks: 0 };
+    { requested: false, ok: false, surfaceId: '', providerResponse: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
   summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
     !evidenceText.includes(summary.expectedAbsentText) ||
@@ -2937,9 +2984,7 @@ async function runQuery(query, index, expectedTool) {
     summary.layoutOk;
   summary.layoutEvidenceRecovered = layoutEvidenceRecovered;
   if (expectedCase.verifyHotelDetail === true) {
-    summary.ok = summary.hotelSearchLifecycle.ok &&
-      summary.hotelProviderEvidence.network200 &&
-      summary.hotelProviderEvidence.blocks > 0 &&
+    summary.ok = combinedHotelSearchEvidence?.ok === true &&
       summary.htmlHomeSurfaceLoad.ok &&
       !summary.htmlLoadError &&
       !summary.syntheticFallback &&

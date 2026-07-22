@@ -13695,6 +13695,12 @@ function sanitizedHotelTransportMessage(message: string): string {
   return sanitized.substring(0, 1200);
 }
 
+function logRollingGoHotelResponse(operation: string, result: DataResult): void {
+  aiLogInfo('[AIPhone][RollingGoHotelResponse] operation=' + operation +
+    ' provider=RollingGo status=' + result.status +
+    ' sources=' + result.sources.length.toString());
+}
+
 export async function callStructuredHotelTool(toolId: string, args: Object | null): Promise<DataResult> {
   if (toolId !== 'hotel.search' && toolId !== 'hotel.detail') {
     return hotelDataError(toolId, '', 'HOTEL_TOOL_UNSUPPORTED', 'Unsupported hotel tool: ' + toolId + '.');
@@ -13715,6 +13721,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     }
     const operation = 'searchHotels';
     try {
+      aiLogInfo('[AIPhone][RollingGoHotelRequest] operation=' + operation);
       const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
         hotelMcpRegistration(toolId, operation),
         localProviderConfig.hotelMcpKey,
@@ -13722,13 +13729,19 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
       );
       const source = hotelDataSource(operation);
       if (!response.ok || response.result === null) {
-        return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+        const failure = hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+        logRollingGoHotelResponse(operation, failure);
+        return failure;
       }
       const result = normalizeHotelSearchResult(response.result, parsed.value);
-      return hotelSearchDataResult(result, [source]);
+      const dataResult = hotelSearchDataResult(result, [source]);
+      logRollingGoHotelResponse(operation, dataResult);
+      return dataResult;
     } catch (error) {
       const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
-      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+      const failure = hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+      logRollingGoHotelResponse(operation, failure);
+      return failure;
     }
   }
   const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
@@ -13737,6 +13750,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
   }
   const operation = 'getHotelDetail';
   try {
+    aiLogInfo('[AIPhone][RollingGoHotelRequest] operation=' + operation);
     const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
       hotelMcpRegistration(toolId, operation),
       localProviderConfig.hotelMcpKey,
@@ -13744,12 +13758,18 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     );
     const source = hotelDataSource(operation);
     if (!response.ok || response.result === null) {
-      return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+      const failure = hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+      logRollingGoHotelResponse(operation, failure);
+      return failure;
     }
-    return hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
+    const dataResult = hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
+    logRollingGoHotelResponse(operation, dataResult);
+    return dataResult;
   } catch (error) {
     const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
-    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+    const failure = hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+    logRollingGoHotelResponse(operation, failure);
+    return failure;
   }
 }
 

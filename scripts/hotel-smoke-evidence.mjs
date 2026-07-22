@@ -106,7 +106,8 @@ export function hasPopulatedHotelActionEvidence(evidence) {
 export function hotelToolLifecycleFromLogs(logText) {
   const callingBySurface = new Map();
   const hotelDocuments = [];
-  const successfulNetworkEvents = [];
+  const providerRequests = [];
+  const providerResponses = [];
   const readyEvents = [];
   const lines = String(logText || '').split('\n');
   lines.forEach((line, index) => {
@@ -118,9 +119,18 @@ export function hotelToolLifecycleFromLogs(logText) {
         readyEvents.push({ surfaceId: surface[1], index });
       }
     }
-    if (/\b(?:response_code":200|RespCode:200)\b/.test(line) &&
-      (line.includes('NETSTACK') || line.includes('http_exec.cpp'))) {
-      successfulNetworkEvents.push(index);
+    const request = /\[AIPhone\]\[RollingGoHotelRequest] operation=(searchHotels|getHotelDetail)\s*$/.exec(line.trim());
+    if (request !== null) {
+      providerRequests.push({ operation: request[1], index });
+    }
+    const response = /\[AIPhone\]\[RollingGoHotelResponse] operation=(searchHotels|getHotelDetail) provider=RollingGo status=(success|partial|empty) sources=(\d+)\s*$/.exec(line.trim());
+    if (response !== null && Number.parseInt(response[3], 10) > 0) {
+      providerResponses.push({
+        operation: response[1],
+        status: response[2],
+        sources: Number.parseInt(response[3], 10),
+        index
+      });
     }
     const document = /\[AIPhone\]\[HtmlHomeDocument\][^\n]*source=tool[^\n]*kind=hotel[^\n]*chars=(\d+)[^\n]*blocks=(\d+)/.exec(line);
     if (document !== null &&
@@ -133,20 +143,47 @@ export function hotelToolLifecycleFromLogs(logText) {
       });
     }
   });
-  const completed = readyEvents.findLast((ready) => {
+  let completed;
+  let completedProvider;
+  let completedDocument;
+  for (let readyOffset = readyEvents.length - 1; readyOffset >= 0; readyOffset -= 1) {
+    const ready = readyEvents[readyOffset];
     const callingIndex = callingBySurface.get(ready.surfaceId);
-    return callingIndex !== undefined &&
-      successfulNetworkEvents.some((index) => index > callingIndex && index < ready.index) &&
-      hotelDocuments.some((document) => document.index > callingIndex && document.index < ready.index);
-  });
+    if (callingIndex === undefined) {
+      continue;
+    }
+    const document = hotelDocuments.find((candidate) =>
+      candidate.index > callingIndex && candidate.index < ready.index);
+    if (document === undefined) {
+      continue;
+    }
+    const response = providerResponses.find((candidate) =>
+      candidate.index > callingIndex && candidate.index < document.index &&
+      providerRequests.some((request) => request.operation === candidate.operation &&
+        request.index > callingIndex && request.index < candidate.index));
+    if (response === undefined) {
+      continue;
+    }
+    const request = providerRequests.find((candidate) =>
+      candidate.operation === response.operation &&
+      candidate.index > callingIndex && candidate.index < response.index);
+    completed = ready;
+    completedProvider = { request, response };
+    completedDocument = document;
+    break;
+  }
   return {
     requested: callingBySurface.size > 0,
     ok: completed !== undefined,
     surfaceId: completed?.surfaceId || '',
-    network200: completed !== undefined,
-    blocks: completed === undefined
-      ? 0
-      : hotelDocuments.findLast((document) => document.index < completed.index)?.blocks || 0
+    operation: completedProvider?.response.operation || '',
+    providerResponse: completedProvider !== undefined,
+    sources: completedProvider?.response.sources || 0,
+    blocks: completedDocument?.blocks || 0,
+    requestIndex: completedProvider?.request.index ?? -1,
+    responseIndex: completedProvider?.response.index ?? -1,
+    documentIndex: completedDocument?.index ?? -1,
+    readyIndex: completed?.index ?? -1
   };
 }
 
@@ -158,9 +195,32 @@ export function hotelMultiAgentSearchEvidence(logText) {
   const lifecycle = multiAgentTurnEvidence(logText, {
     expectedToolIds: ['hotel.search']
   });
-  const provider = hotelToolLifecycleFromLogs(logText);
+  const rawProvider = hotelToolLifecycleFromLogs(logText);
+  const lines = String(logText || '').split('\n');
+  let finalUiIndex = -1;
+  if (lifecycle.finalUiSurfaceId) {
+    const escapedSurface = lifecycle.finalUiSurfaceId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const finalUiPattern = new RegExp(
+      `\\[AIPhone\\]\\[MultiAgentUiResult][^\\n]*surface=${escapedSurface}[^\\n]*state=result(?:\\s|$)`
+    );
+    finalUiIndex = lines.findIndex((line) => finalUiPattern.test(line));
+  }
+  const orderedProviderChain = rawProvider.ok &&
+    rawProvider.operation === 'searchHotels' &&
+    rawProvider.requestIndex < rawProvider.responseIndex &&
+    rawProvider.responseIndex < rawProvider.documentIndex &&
+    rawProvider.documentIndex < rawProvider.readyIndex &&
+    rawProvider.readyIndex < lifecycle.terminalIndex &&
+    rawProvider.documentIndex < finalUiIndex &&
+    finalUiIndex < lifecycle.terminalIndex;
+  const provider = {
+    ...rawProvider,
+    rawSurfaceId: rawProvider.surfaceId,
+    surfaceId: orderedProviderChain ? lifecycle.surfaceId : ''
+  };
   return {
-    ok: lifecycle.ok && provider.network200 && provider.blocks > 0,
+    ok: lifecycle.ok && orderedProviderChain && provider.blocks > 0 &&
+      lifecycle.surfaceId === lifecycle.finalUiSurfaceId,
     lifecycle,
     provider
   };

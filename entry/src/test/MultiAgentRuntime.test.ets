@@ -42,7 +42,7 @@ import {
   allToolDefinitions
 } from '@loop/agent-core';
 import {
-  multiAgentEvidenceLine,
+  MultiAgentEvidenceFormatter,
   MultiAgentRuntime
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
 import {
@@ -678,7 +678,8 @@ function publishTurnTerminal(
 
 export default function multiAgentRuntimeTest() {
   describe('multiAgentRuntime', () => {
-    it('formats bounded redacted lifecycle evidence from typed messages', 0, () => {
+    it('formats bounded opaque lifecycle evidence without raw identities or values', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
       const inputPayload: InputUserPayload = {
         text: 'secret prompt and recipient@example.com'
       };
@@ -688,6 +689,39 @@ export default function multiAgentRuntimeTest() {
         turnId: 'turn-1',
         taskId: 'input-1',
         payload: inputPayload
+      };
+      const firstDataPayload: CreateDataTaskPayload = {
+        taskId: 'search-private',
+        roundId: 'turn-1:round-1',
+        skillId: '',
+        goal: 'must not log',
+        allowedToolIds: ['maps.place.search'],
+        toolId: 'maps.place.search',
+        outputSchema: 'places',
+        args: JSON.parse('{"query":"private query"}') as Object,
+        required: true
+      };
+      const firstDataMessage: AgentMessage = {
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'search-private',
+        payload: firstDataPayload
+      };
+      const firstResult: DataResult = {
+        toolId: 'maps.place.search',
+        outputSchema: 'places',
+        status: 'success',
+        sources: [],
+        data: JSON.parse('{"places":[{"placeId":"private-place-id"}]}') as Object,
+        warnings: []
+      };
+      const firstResultMessage: AgentMessage = {
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'search-private',
+        payload: firstResult
       };
       const dataPayload: CreateDataTaskPayload = {
         taskId: 'data-1',
@@ -720,24 +754,101 @@ export default function multiAgentRuntimeTest() {
         taskId: 'input-1',
         payload: turnPayload
       };
-      const inputLine = multiAgentEvidenceLine(inputMessage);
-      const dataLine = multiAgentEvidenceLine(dataMessage);
-      const turnLine = multiAgentEvidenceLine(turnMessage);
+      const inputLine = formatter.line(inputMessage);
+      const firstDataLine = formatter.line(firstDataMessage);
+      const firstResultLine = formatter.line(firstResultMessage);
+      const dataLine = formatter.line(dataMessage);
+      const turnLine = formatter.line(turnMessage);
 
       expect(inputLine).assertEqual(
-        '[AIPhone][MultiAgentInput] conversation=conversation-1 turn=turn-1 task=input-1'
+        '[AIPhone][MultiAgentInput] conversation=c1 turn=t2 task=k3'
+      );
+      expect(firstDataLine).assertEqual(
+        '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=k4 ' +
+          'round=1 tool=maps.place.search predecessor=none path=none target=none binding=false'
+      );
+      expect(firstResultLine).assertEqual(
+        '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t2 task=k4 ' +
+          'tool=maps.place.search status=success sources=0 error=false'
       );
       expect(dataLine).assertEqual(
-        '[AIPhone][MultiAgentDataTask] conversation=conversation-1 turn=turn-1 task=data-1 ' +
-          'round=turn-1:round-2 tool=maps.place.details'
+        '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=k5 ' +
+          'round=2 tool=maps.place.details predecessor=k4 ' +
+          'path=/places/0/placeId target=/placeId binding=true'
       );
       expect(turnLine).assertEqual(
-        '[AIPhone][MultiAgentTurnResult] conversation=conversation-1 turn=turn-1 task=input-1 ' +
-          'status=partial surface=surface-2 roundCount=2 messageChars=29'
+        '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 ' +
+          'status=partial surface=s6 roundCount=2 messageChars=29'
       );
       expect(inputLine.indexOf('secret')).assertEqual(-1);
+      expect(inputLine.indexOf('conversation-1')).assertEqual(-1);
+      expect(inputLine.indexOf('turn-1')).assertEqual(-1);
+      expect(inputLine.indexOf('input-1')).assertEqual(-1);
       expect(dataLine.indexOf('private-place-id')).assertEqual(-1);
       expect(turnLine.indexOf('provider message')).assertEqual(-1);
+      expect(inputLine.indexOf('\n')).assertEqual(-1);
+      expect(dataLine.length < 320).assertTrue();
+
+      const noProvenance = new MultiAgentEvidenceFormatter(32);
+      noProvenance.line(inputMessage);
+      noProvenance.line(firstDataMessage);
+      const unbound: string = noProvenance.line(dataMessage);
+      expect(unbound.indexOf('predecessor=none path=none target=none binding=false')).assertLarger(-1);
+    });
+
+    it('rejects unsafe registry ids and bounds then disposes opaque correlations', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(8);
+      const payload: InputUserPayload = { text: 'not logged' };
+      const longIdentity: string = 'local@example.com\n+8613800138000-' + 'x'.repeat(400);
+      const input: AgentMessage = {
+        type: AgentMessageType.INPUT_USER,
+        conversationId: longIdentity,
+        turnId: longIdentity,
+        taskId: longIdentity,
+        payload
+      };
+      const first: string = formatter.line(input);
+      expect(first.indexOf('local@example.com')).assertEqual(-1);
+      expect(first.indexOf('+8613800138000')).assertEqual(-1);
+      expect(first.indexOf('\n')).assertEqual(-1);
+
+      const unsafeTaskPayload: CreateDataTaskPayload = {
+        taskId: longIdentity,
+        roundId: longIdentity + ':round-1',
+        skillId: '',
+        goal: '',
+        allowedToolIds: ['alice@example.com'],
+        toolId: 'alice@example.com',
+        outputSchema: '',
+        args: new Object(),
+        required: true
+      };
+      const unsafeTask: AgentMessage = {
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: longIdentity,
+        turnId: longIdentity,
+        taskId: longIdentity,
+        payload: unsafeTaskPayload
+      };
+      expect(formatter.line(unsafeTask).indexOf('tool=invalid')).assertLarger(-1);
+      expect(formatter.line(unsafeTask).indexOf('alice@example.com')).assertEqual(-1);
+
+      const terminalPayload: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'done'
+      };
+      const terminal: AgentMessage = {
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: longIdentity,
+        turnId: longIdentity,
+        taskId: longIdentity,
+        payload: terminalPayload
+      };
+      formatter.line(terminal);
+      formatter.dispose();
+      const afterTerminal: string = formatter.line(input);
+      expect(afterTerminal).assertEqual(first);
     });
 
     it('owns all 44 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
