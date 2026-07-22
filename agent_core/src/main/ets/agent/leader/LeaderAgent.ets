@@ -22,6 +22,7 @@ import {
   LeaderPlan,
   LeaderPlanner,
   LeaderPlannerResult,
+  LeaderPlanningSignal,
   LeaderPersonaMetadata,
   LeaderPlanningContext,
   LeaderSkillMetadata,
@@ -249,13 +250,17 @@ export class LeaderAgent extends MessageDrivenAgent {
     const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
       state.releasePlanning = resolve;
     });
+    const key: string = this.turnKey(message);
+    const planningSignal: LeaderPlanningSignal = (): boolean =>
+      this.turns.get(key) === state && !state.terminal && state.planning;
     try {
       Promise.race([
         this.planner.plan(
           message,
           input,
           this.copyPlanningContext(this.planningContext),
-          state.round
+          state.round,
+          planningSignal
         ),
         timeoutSignal
       ])

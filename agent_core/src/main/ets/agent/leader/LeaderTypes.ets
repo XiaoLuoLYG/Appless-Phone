@@ -98,12 +98,14 @@ export type LeaderDataTaskInputNormalizer = (
 ) => Object;
 
 export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
+export type LeaderPlanningSignal = () => boolean;
 
 export interface LeaderPlanner {
   plan(
     message: AgentMessage,
     input: InputUserPayload,
     context: LeaderPlanningContext,
-    round?: number
+    round?: number,
+    signal?: LeaderPlanningSignal
   ): Promise<LeaderPlannerResult>;
 }

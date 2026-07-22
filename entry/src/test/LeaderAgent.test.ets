@@ -4,6 +4,7 @@ import {
   AgentMessageReader,
   AgentMessageType,
   ActionPlanRequestPayload,
+  ConversationContext,
   CreateDataTaskPayload,
   CreateUiTaskPayload,
   DataResult,
@@ -20,9 +21,11 @@ import {
   LeaderPlanningContext,
   LeaderUiTask,
   LinkedMessageBus,
+  LocalModel,
   TaskErrorPayload,
   TurnResultPayload
 } from '@loop/agent-core';
+import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
 import { routePersonaForPrompt } from '../main/ets/model/PersonaRouter';
 
@@ -168,6 +171,25 @@ class ControlledFirstPlanner implements LeaderPlanner {
     if (resolve !== null) {
       resolve(plan);
     }
+  }
+}
+
+class ControlledInvalidLeaderModel implements LocalModel {
+  prompts: string[] = [];
+  readonly firstStarted: TestGate = new TestGate();
+  readonly releaseFirst: TestGate = new TestGate();
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    _systemPrompt?: string
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    if (this.prompts.length === 1) {
+      this.firstStarted.open();
+      await this.releaseFirst.promise;
+    }
+    return '{"answer":"invalid without the strict decision fields"}';
   }
 }
 
@@ -444,6 +466,38 @@ async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function repairCallsAfterTerminal(kind: string): Promise<number> {
+  const bus = new LinkedMessageBus();
+  const model = new ControlledInvalidLeaderModel();
+  const leader = new LeaderAgent(
+    bus,
+    new MultiAgentLeaderPlanner(model),
+    semanticPlanningContext(),
+    kind === 'timeout' ? 10 : 200
+  );
+  const observer = bus.openReader();
+  leader.start();
+  try {
+    bus.publish(inputMessage());
+    await receive(observer);
+    await model.firstStarted.promise;
+    if (kind === 'cancel') {
+      bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-repair'));
+      await receive(observer);
+    } else if (kind === 'timeout') {
+      await receive(observer);
+    } else {
+      leader.stop();
+    }
+    model.releaseFirst.open();
+    await settle();
+    return model.prompts.length;
+  } finally {
+    leader.stop();
+    observer.close();
+  }
 }
 
 export default function leaderAgentTest() {
@@ -1352,6 +1406,12 @@ export default function leaderAgentTest() {
         leader.stop();
         observer.close();
       }
+    });
+
+    it('does not start schema repair after cancel timeout or stop', 1000, async () => {
+      expect(await repairCallsAfterTerminal('cancel')).assertEqual(1);
+      expect(await repairCallsAfterTerminal('timeout')).assertEqual(1);
+      expect(await repairCallsAfterTerminal('stop')).assertEqual(1);
     });
 
     it('times out once and ignores late UI and Data results', 1000, async () => {

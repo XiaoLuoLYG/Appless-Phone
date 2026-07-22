@@ -6,6 +6,7 @@ import {
   LeaderDecisionDataTask,
   LeaderPersonaMetadata,
   LeaderPlanner,
+  LeaderPlanningSignal,
   LeaderPlanningContext,
   LeaderRoundAction,
   LeaderSkillMetadata,
@@ -62,7 +63,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     _message: AgentMessage,
     input: InputUserPayload,
     context: LeaderPlanningContext,
-    round: number = 1
+    round: number = 1,
+    signal?: LeaderPlanningSignal
   ): Promise<LeaderDecision> {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
@@ -75,7 +77,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     );
     try {
       return this.parseDecision(output, context);
-    } catch (_error) {
+    } catch (error) {
+      if (signal === undefined || !signal()) {
+        const failure: Error = error instanceof Error ? error :
+          new Error('Leader decision failed strict validation.');
+        throw failure;
+      }
       const repaired: string = await this.model.complete(
         prompt + '\n' + REPAIR_INSTRUCTION,
         undefined,

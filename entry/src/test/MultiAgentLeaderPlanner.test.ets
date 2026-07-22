@@ -150,7 +150,7 @@ async function fails(output: string): Promise<boolean> {
   const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
   const input: InputUserPayload = { text: '查航班和高铁' };
   try {
-    await planner.plan(inputMessage(), input, planningContext(), 1);
+    await planner.plan(inputMessage(), input, planningContext(), 1, (): boolean => true);
     return false;
   } catch (_error) {
     return true;
@@ -223,7 +223,13 @@ export default function multiAgentLeaderPlannerTest() {
       const planner = new MultiAgentLeaderPlanner(model);
       const input: InputUserPayload = { text: '你好' };
 
-      const decision = await planner.plan(inputMessage(), input, planningContext(), 1);
+      const decision = await planner.plan(
+        inputMessage(),
+        input,
+        planningContext(),
+        1,
+        (): boolean => true
+      );
 
       expect(decision.reasonCode).assertEqual('greeting');
       expect(model.prompts.length).assertEqual(2);
@@ -234,20 +240,59 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[1].indexOf('Round: 1') >= 0).assertTrue();
     });
 
-    it('stops after one failed strict-schema repair', 0, async () => {
+    it('stops after one invalid or throwing strict-schema repair', 0, async () => {
       const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const throwingModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const planner = new MultiAgentLeaderPlanner(model);
       const input: InputUserPayload = { text: '你好' };
       let failed: boolean = false;
+      let throwingFailed: boolean = false;
 
       try {
-        await planner.plan(inputMessage(), input, planningContext(), 1);
+        await planner.plan(inputMessage(), input, planningContext(), 1, (): boolean => true);
       } catch (_error) {
         failed = true;
       }
+      try {
+        await new MultiAgentLeaderPlanner(throwingModel).plan(
+          inputMessage(), input, planningContext(), 1, (): boolean => true
+        );
+      } catch (_error) {
+        throwingFailed = true;
+      }
 
       expect(failed).assertTrue();
+      expect(throwingFailed).assertTrue();
       expect(model.prompts.length).assertEqual(2);
+      expect(throwingModel.prompts.length).assertEqual(2);
+    });
+
+    it('does not repair without an active lifecycle signal', 0, async () => {
+      const absentModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
+      const inactiveModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
+      const input: InputUserPayload = { text: '你好' };
+      let absentFailed: boolean = false;
+      let inactiveFailed: boolean = false;
+
+      try {
+        await new MultiAgentLeaderPlanner(absentModel).plan(
+          inputMessage(), input, planningContext(), 1
+        );
+      } catch (_error) {
+        absentFailed = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(inactiveModel).plan(
+          inputMessage(), input, planningContext(), 1, (): boolean => false
+        );
+      } catch (_error) {
+        inactiveFailed = true;
+      }
+
+      expect(absentFailed).assertTrue();
+      expect(inactiveFailed).assertTrue();
+      expect(absentModel.prompts.length).assertEqual(1);
+      expect(inactiveModel.prompts.length).assertEqual(1);
     });
 
     it('does not repair a first model transport failure', 0, async () => {
