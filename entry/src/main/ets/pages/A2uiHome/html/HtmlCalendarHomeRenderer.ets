@@ -673,8 +673,7 @@ const CALENDAR_HOME_JS: string = `
           args: {
             eventId: eventId,
             calendarId: 'primary',
-            sendUpdates: 'none',
-            confirmed: true
+            sendUpdates: 'none'
           }
         }));
       }
@@ -727,8 +726,7 @@ const CALENDAR_HOME_JS: string = `
             args: {
               eventId: selectedEventId,
               calendarId: 'primary',
-              sendUpdates: 'none',
-              confirmed: true
+              sendUpdates: 'none'
             }
           }));
         }

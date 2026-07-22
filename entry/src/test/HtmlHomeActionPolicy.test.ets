@@ -46,7 +46,6 @@ interface MailCalendarArgsFixture {
 interface CalendarDeleteArgsFixture {
   eventId: string;
   calendarId: string;
-  confirmed: boolean;
 }
 
 interface LuckinArgsFixture {
@@ -238,16 +237,13 @@ export default function htmlHomeActionPolicyTest() {
         rows: [{ label: 'Event ID', value: 'event-1' }],
         actions: []
       });
-      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: true };
-      const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary', confirmed: true };
-      const unconfirmed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary', confirmed: false };
+      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary' };
+      const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary' };
 
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'prompt', wrongEvent))).assertFalse();
-      expect(isHtmlHomeActionAllowed(doc,
-        action('calendar.event.delete.confirm', '删除日程', 'prompt', unconfirmed))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'client', allowed))).assertFalse();
     });
@@ -618,7 +614,7 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, action('luckin.order.preview', 'evil', 'prompt', invalidOptionArgs))).assertFalse();
     });
 
-    it('allows luckin create after option switch when sku changes', 0, () => {
+    it('rejects a stale Luckin create after the visible option and SKU change', 0, () => {
       const doc = documentFixture();
       doc.kind = 'luckin';
       const createArgs: LuckinArgsFixture = {
@@ -657,7 +653,41 @@ export default function htmlHomeActionPolicyTest() {
       };
       const switchedCreate = action('luckin.order.create', '确认创建瑞幸订单', 'prompt', switchedArgs);
 
-      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, switchedCreate)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, createAction as A2uiAction)).assertTrue();
+    });
+
+    it('allows only the exact visible ride trace and order actions', 0, () => {
+      const doc = documentFixture();
+      const confirmArgs = JSON.parse(
+        '{"productCategory":"express","estimateTraceId":"trace-real-1",' +
+        '"pickupLocation":"114.0,22.5","destinationLocation":"114.1,22.6"}'
+      ) as Object;
+      const cancelArgs = JSON.parse('{"orderId":"ride-order-real-1"}') as Object;
+      const confirm: HtmlHomeAction = {
+        id: 'ride.order.confirm', label: '确认叫车', prompt: '确认叫车',
+        variant: 'primary', kind: 'prompt', args: confirmArgs
+      };
+      const cancel: HtmlHomeAction = {
+        id: 'ride.order.cancel', label: '取消订单', prompt: '取消订单',
+        variant: 'danger', kind: 'prompt', args: cancelArgs
+      };
+      doc.blocks = [{
+        id: 'ride-current', kind: 'generic-tool-result', title: '滴滴订单', subtitle: '',
+        status: 'success', source: '滴滴', metrics: [], rows: [], actions: [confirm, cancel]
+      }];
+      const staleTrace = JSON.parse(
+        '{"productCategory":"express","estimateTraceId":"trace-stale",' +
+        '"pickupLocation":"114.0,22.5","destinationLocation":"114.1,22.6"}'
+      ) as Object;
+      const wrongOrder = JSON.parse('{"orderId":"ride-order-other"}') as Object;
+
+      expect(isHtmlHomeActionAllowed(doc, confirm as A2uiAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, cancel as A2uiAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('ride.order.confirm', '确认叫车', 'prompt', staleTrace))).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc,
+        action('ride.order.cancel', '取消订单', 'prompt', wrongOrder))).assertFalse();
     });
 
     it('allows luckin relocate refresh preview on luckin pages', 0, () => {

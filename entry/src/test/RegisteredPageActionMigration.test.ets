@@ -29,9 +29,12 @@ import {
   RegisteredPageToolInvoker
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionHandler';
 import {
+  RegisteredPageActionResolution,
   RegisteredPageSnapshot,
   RegisteredPageSnapshotStore,
   dispatchRegisteredPageActionCandidate,
+  isRegisteredPageActionCandidate,
+  resolveRegisteredPageAction,
   resolveVirtualRegisteredPageAction
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
@@ -224,6 +227,70 @@ function successfulToolResult(toolId: string): A2uiCallResult {
     assistantDebug: '',
     surface
   };
+}
+
+function providerWriteToolResult(toolId: string, status: string = 'success'): A2uiCallResult {
+  const result = successfulToolResult(toolId);
+  const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+  model.genericToolResults = [{
+    sourceTag: 'Fake provider adapter',
+    toolName: toolId,
+    title: toolId,
+    status,
+    summary: status === 'success' ? 'Provider confirmed completion.' : 'Confirmation required.',
+    rows: status === 'success' ? [{ label: 'Receipt', value: 'provider-receipt-1' }] : [],
+    rawPreview: status === 'success' ? '{"success":true,"id":"provider-receipt-1"}' : ''
+  }];
+  result.surface.dataModelJson = JSON.stringify(model);
+  return result;
+}
+
+class ProviderEvidenceInvoker implements RegisteredPageToolInvoker {
+  readonly calls: ToolInvocationRecord[] = [];
+  private readonly status: string;
+
+  constructor(status: string) {
+    this.status = status;
+  }
+
+  async invoke(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    this.calls.push({ toolId, prompt, pageActionId, args });
+    return { ok: true, result: providerWriteToolResult(toolId, this.status), error: '' };
+  }
+}
+
+class RawProviderEvidenceInvoker implements RegisteredPageToolInvoker {
+  private readonly rawPreview: string;
+
+  constructor(rawPreview: string) {
+    this.rawPreview = rawPreview;
+  }
+
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    const result = successfulToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults = [{
+      sourceTag: 'Malformed provider adapter',
+      toolName: toolId,
+      title: toolId,
+      status: 'success',
+      summary: 'Untrusted provider payload.',
+      rows: [],
+      rawPreview: this.rawPreview
+    }];
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
+  }
 }
 
 function canary(
@@ -531,6 +598,154 @@ export default function registeredPageActionMigrationTest() {
       expect(callToolFallbacks).assertEqual(0);
       expect(submitPromptFallbacks).assertEqual(0);
       runtime.dispose();
+    });
+
+    it('maps every exact Wave 4 rendered confirmation to its fixed Action owner', 0, () => {
+      const sourceIds: string[] = [
+        'luckin.order.preview',
+        'calendar.event.delete',
+        'whatsapp.message.send',
+        'ride.estimate',
+        'ride.order.create'
+      ];
+      const pageActionIds: string[] = [
+        'luckin.order.create',
+        'calendar.event.delete.confirm',
+        'whatsapp.message.send.confirm',
+        'ride.order.confirm',
+        'ride.order.cancel'
+      ];
+      const targetIds: string[] = [
+        'luckin.order.create',
+        'calendar.event.delete',
+        'whatsapp.message.send',
+        'ride.order.create',
+        'ride.order.cancel'
+      ];
+
+      for (let index = 0; index < pageActionIds.length; index++) {
+        const resolved = resolveRegisteredPageAction(
+          sourceIds[index], action(pageActionIds[index], JSON.parse('{"marker":"exact"}') as Object)
+        );
+        expect(resolved === null).assertFalse();
+        expect((resolved as RegisteredPageActionResolution).action.id).assertEqual(targetIds[index]);
+        expect(isRegisteredPageActionCandidate(pageActionIds[index])).assertTrue();
+      }
+
+      expect(resolveRegisteredPageAction(
+        'ride.app.link',
+        action('ride.order.confirm', JSON.parse('{"estimateTraceId":"trace-real-1"}') as Object)
+      )).assertNull();
+    });
+
+    it('keeps all Wave 4 candidates terminal when registered authority or provider fails', 0, async () => {
+      const candidateIds: string[] = [
+        'luckin.order.create',
+        'calendar.event.delete.confirm',
+        'whatsapp.message.send.confirm',
+        'ride.order.confirm',
+        'ride.order.cancel'
+      ];
+      let registeredCalls = 0;
+      let legacyCalls = 0;
+
+      for (let index = 0; index < candidateIds.length; index++) {
+        const dispatched = await dispatchRegisteredPageActionCandidate(
+          action(candidateIds[index], JSON.parse('{"marker":"exact"}') as Object),
+          async (_clicked: A2uiAction): Promise<boolean> => {
+            registeredCalls++;
+            return false;
+          },
+          async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+        );
+        expect(dispatched.candidate).assertTrue();
+        expect(dispatched.ok).assertFalse();
+      }
+
+      expect(registeredCalls).assertEqual(candidateIds.length);
+      expect(legacyCalls).assertEqual(0);
+    });
+
+    it('does not turn natural language into a direct Wave 4 write action', 0, () => {
+      const actionIds: string[] = [
+        'luckin.order.create',
+        'calendar.event.create',
+        'calendar.event.update',
+        'calendar.event.delete',
+        'whatsapp.message.send',
+        'ride.order.create',
+        'ride.order.cancel'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        expect(resolveVirtualRegisteredPageAction(actionIds[index], '请直接执行')).assertNull();
+      }
+    });
+
+    it('requires positive provider completion evidence for every external Wave 4 write', 0, async () => {
+      const actionIds: string[] = [
+        'luckin.order.create',
+        'calendar.event.create',
+        'calendar.event.update',
+        'calendar.event.delete',
+        'whatsapp.message.send',
+        'ride.order.create',
+        'ride.order.cancel'
+      ];
+
+      for (let index = 0; index < actionIds.length; index++) {
+        const actionId = actionIds[index];
+        const invoker = new RecordingPageToolInvoker();
+        const handler = new RegisteredPageActionHandler(invoker);
+        const executionContext: RegisteredPageActionContext = {
+          conversationId: 'provider-evidence',
+          turnId: 'turn-1',
+          surfaceId: 'surface-1',
+          sourceToolId: actionId,
+          planId: 'plan-1',
+          runId: 'run-1',
+          stepId: 'step-1',
+          pageActionId: actionId
+        };
+
+        const missing = await handler.execute(actionId, JSON.parse('{}') as Object, executionContext);
+        expect(missing.status).assertEqual('error');
+
+        const positiveInvoker = new ProviderEvidenceInvoker('success');
+        const positive = await new RegisteredPageActionHandler(positiveInvoker).execute(
+          actionId, JSON.parse('{}') as Object, executionContext
+        );
+        expect(positive.status).assertEqual('success');
+
+        const pausedInvoker = new ProviderEvidenceInvoker('confirm_required');
+        const paused = await new RegisteredPageActionHandler(pausedInvoker).execute(
+          actionId, JSON.parse('{}') as Object, executionContext
+        );
+        expect(paused.status).assertEqual('error');
+      }
+    });
+
+    it('rejects malformed and explicitly failed inner provider write payloads', 0, async () => {
+      const actionId = 'whatsapp.message.send';
+      const executionContext: RegisteredPageActionContext = {
+        conversationId: 'provider-inner-status',
+        turnId: 'turn-1',
+        surfaceId: 'surface-1',
+        sourceToolId: actionId,
+        planId: 'plan-1',
+        runId: 'run-1',
+        stepId: 'step-1',
+        pageActionId: 'whatsapp.message.send.confirm'
+      };
+
+      const malformed = await new RegisteredPageActionHandler(
+        new RawProviderEvidenceInvoker('{}')
+      ).execute(actionId, JSON.parse('{}') as Object, executionContext);
+      const innerFailure = await new RegisteredPageActionHandler(
+        new RawProviderEvidenceInvoker('{"status":"failed","id":"message-fake"}')
+      ).execute(actionId, JSON.parse('{}') as Object, executionContext);
+
+      expect(malformed.status).assertEqual('error');
+      expect(innerFailure.status).assertEqual('error');
     });
 
     it('limits virtual ownership to exact World Cup and structured Maps handlers', 0, async () => {

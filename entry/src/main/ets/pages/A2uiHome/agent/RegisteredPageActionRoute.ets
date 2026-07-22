@@ -11,22 +11,9 @@ import {
 } from '@loop/agent-core';
 import { HtmlHomeDocument } from '../html/HtmlHomeTypes';
 
-const FIXED_PAGE_ACTION_IDS: string[] = [
-  'luckin.order.preview',
-  'social.reply.draft',
-  'mail.draft.create',
-  'gmail.draft.create',
-  'gmail.draft.apply',
-  'gmail.open.web',
-  'worldcup.open',
-  'payment.send',
-  'payment.account.setup',
-  'maps.route.open',
-  'gmail.message.send'
-];
-
 const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'luckin.order.preview',
+  'luckin.order.create',
   'social.reply.draft',
   'mail.draft.create',
   'gmail.draft.create',
@@ -39,7 +26,11 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'stripe.account.onboard',
   'stripe.account.refresh',
   'payment.account.setup',
-  'maps.route.open'
+  'maps.route.open',
+  'calendar.event.delete.confirm',
+  'whatsapp.message.send.confirm',
+  'ride.order.confirm',
+  'ride.order.cancel'
 ];
 
 export interface RegisteredPageActionResolution {
@@ -71,9 +62,6 @@ interface WorldCupVirtualArgs {
 }
 
 function registeredProductAction(actionId: string): boolean {
-  if (FIXED_PAGE_ACTION_IDS.indexOf(actionId) < 0) {
-    return false;
-  }
   return actionAgentToolDefinitions().some(
     (definition: ToolDefinition): boolean => definition.toolId === actionId
   );
@@ -88,6 +76,17 @@ function adaptedTarget(sourceToolId: string, clickedActionId: string): string {
       clickedActionId === 'stripe.account.onboard' ||
       clickedActionId === 'stripe.account.refresh')) {
     return 'payment.account.setup';
+  }
+  if (sourceToolId === 'calendar.event.delete' &&
+    clickedActionId === 'calendar.event.delete.confirm') {
+    return 'calendar.event.delete';
+  }
+  if (sourceToolId === 'whatsapp.message.send' &&
+    clickedActionId === 'whatsapp.message.send.confirm') {
+    return 'whatsapp.message.send';
+  }
+  if (sourceToolId === 'ride.estimate' && clickedActionId === 'ride.order.confirm') {
+    return 'ride.order.create';
   }
   return '';
 }

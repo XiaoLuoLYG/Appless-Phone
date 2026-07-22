@@ -11,6 +11,7 @@ import {
   SurfaceActionAuthorizer,
   ToolDefinition,
   ToolDefinitionLookup,
+  actionAgentToolDefinitions,
   toolDefinitionForToolId,
   validateHotelActionArgs
 } from '@loop/agent-core';
@@ -22,6 +23,7 @@ import {
   SystemUriOpener,
   validateGmailReplyActionArgs
 } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
+import { isFixedRegisteredPageAction } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 
 function object(raw: string): Object {
   return JSON.parse(raw) as Object;
@@ -641,11 +643,17 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('rejects unknown Data client-only and explicitly deferred Task 8 actions', 0, async () => {
-      const rejected: string[] = [
-        'unknown.action',
-        'travel.search',
-        'payment.confirm',
+    it('gives every fixed Action definition one explicit executable owner route', 0, () => {
+      const definitions = actionAgentToolDefinitions();
+
+      expect(definitions.length).assertEqual(20);
+      for (let index = 0; index < definitions.length; index++) {
+        expect(isFixedRegisteredPageAction(definitions[index].toolId)).assertTrue();
+      }
+    });
+
+    it('routes every Wave 4 write through the registered page callback', 0, async () => {
+      const actionIds: string[] = [
         'luckin.order.create',
         'calendar.event.create',
         'calendar.event.update',
@@ -653,6 +661,81 @@ export default function aiphoneRegisteredActionExecutorTest() {
         'whatsapp.message.send',
         'ride.order.create',
         'ride.order.cancel'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        const actionId = actionIds[index];
+        const args = object('{"marker":"wave-4-' + index.toString() + '"}');
+        const recorder = new RecordingPageAction();
+        const executor = pageExecutor(actionId, args, recorder, new FakeUriOpener(), actionId);
+        const result = await executor.execute(actionId, args, pageContext(actionId));
+
+        expect(result.status).assertEqual('success');
+        expect(recorder.calls.length).assertEqual(1);
+        expect(recorder.calls[0].actionId).assertEqual(actionId);
+      }
+    });
+
+    it('preserves a fake provider Calendar eventId through create update and delete', 0, async () => {
+      const createArgs = object(
+        '{"title":"Appless QA","start":"2026-07-29T15:00:00+08:00",' +
+        '"end":"2026-07-29T15:30:00+08:00","calendarId":"primary"}'
+      );
+      const recorder = new RecordingPageAction();
+      const executor = pageExecutor(
+        'calendar.event.create', createArgs, recorder, new FakeUriOpener(), 'calendar.event.create'
+      );
+      recorder.result = {
+        status: 'success',
+        output: object('{"eventId":"event-provider-real-1","status":"confirmed"}')
+      };
+      const created = await executor.execute(
+        'calendar.event.create', createArgs,
+        pageContext('calendar.event.create', 'calendar.event.create')
+      );
+      let eventId = '';
+      if (created.status === 'success') {
+        const createdOutput = created.output as Record<string, Object | string | number | boolean | null | undefined>;
+        eventId = createdOutput['eventId'] as string;
+      }
+      const updateArgs = object(
+        '{"eventId":"' + eventId + '","title":"Appless QA",' +
+        '"start":"2026-07-29T16:00:00+08:00","end":"2026-07-29T16:30:00+08:00"}'
+      );
+      const updateContext = context('calendar.event.create', false);
+      updateContext.stepId = 'step-2';
+      recorder.result = {
+        status: 'success',
+        output: object('{"eventId":"event-provider-real-1","status":"updated"}')
+      };
+      const updated = await executor.execute('calendar.event.update', updateArgs, updateContext);
+      const deleteArgs = object('{"eventId":"' + eventId + '","calendarId":"primary"}');
+      const deleteContext = context('calendar.event.create', false);
+      deleteContext.stepId = 'step-3';
+      recorder.result = {
+        status: 'success',
+        output: object('{"eventId":"event-provider-real-1","status":"deleted"}')
+      };
+      const deleted = await executor.execute('calendar.event.delete', deleteArgs, deleteContext);
+
+      expect(eventId).assertEqual('event-provider-real-1');
+      expect(updated.status).assertEqual('success');
+      expect(deleted.status).assertEqual('success');
+      expect(JSON.stringify(recorder.calls[1].args).indexOf(eventId)).assertLarger(-1);
+      expect(JSON.stringify(recorder.calls[2].args).indexOf(eventId)).assertLarger(-1);
+    });
+
+    it('rejects unknown Data client-only and review-required write actions', 0, async () => {
+      const rejected: string[] = [
+        'unknown.action',
+        'travel.search',
+        'payment.confirm',
+        'work.item.create.confirm',
+        'work.item.comment.confirm',
+        'work.item.update.confirm',
+        'knowledge.create.confirm',
+        'knowledge.append.confirm',
+        'knowledge.overwrite.confirm',
+        'knowledge.share.confirm'
       ];
       for (let index = 0; index < rejected.length; index++) {
         const actionId = rejected[index];

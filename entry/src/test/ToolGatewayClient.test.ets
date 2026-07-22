@@ -85,6 +85,7 @@ import {
   rideDidiQueryMcpUrlForTest,
   rideOrderCreateDedupBlockedForTest,
   rideOrderCreateErrorTitleForTest,
+  rideCreateOrderResultForTest,
   rideCancelOrderResultForTest,
   rideDriverLocationResultForTest,
   rideLinkFromMcpResponseTextForTest,
@@ -93,6 +94,8 @@ import {
   rideShouldSurfaceAppLinkErrorForTest,
   calendarDeleteConfirmedForTest,
   calendarDeleteTargetFromResultsForTest,
+  luckinOrderCreateSucceededForTest,
+  whatsAppSafeTargetAllowedForTest,
   whatsAppSendConfirmedForTest,
   whatsAppProviderFailureSummaryForTest,
   resolveLuckinLocationForTest,
@@ -1807,15 +1810,17 @@ export default function toolGatewayClientTest() {
       expect(actionArgs.indexOf('"destinationLocation":"114.060432,22.548829"')).assertLarger(-1);
       expect(actionArgs.indexOf('"estimateCacheJson"')).assertLarger(-1);
       expect(actionArgs.indexOf('约 48 元')).assertLarger(-1);
+      expect(actionArgs.indexOf('"confirmed"')).assertEqual(-1);
+      expect(actionArgs.indexOf('"confirmation"')).assertEqual(-1);
     });
 
-    it('normalizes ride order create and cancel args behind explicit confirmation', 0, () => {
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmed":true}'))).assertTrue();
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"确认下单"}'))).assertTrue();
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"帮我叫车"}'))).assertFalse();
+    it('normalizes ride order create and cancel args behind exact rendered action authority', 0, () => {
+      expect(rideOrderConfirmedForTest('ride.order.confirm')).assertTrue();
+      expect(rideOrderConfirmedForTest('ride.order.create')).assertFalse();
+      expect(rideOrderConfirmedForTest('')).assertFalse();
 
       const createArgs = JSON.stringify(rideDidiCreateOrderArgsForTest(
-        looseObject('{"productCategory":"express","estimateTraceId":"trace-123","confirmed":true}')
+        looseObject('{"productCategory":"express","estimateTraceId":"trace-123"}')
       ));
       expect(createArgs.indexOf('"product_category":"express"')).assertLarger(-1);
       expect(createArgs.indexOf('"estimate_trace_id":"trace-123"')).assertLarger(-1);
@@ -1889,6 +1894,36 @@ export default function toolGatewayClientTest() {
         expect(result.actions[1].variant).assertEqual('secondary');
         expect(result.actions[1].kind).assertEqual('client');
       }
+    });
+
+    it('requires a real ride order receipt and positive cancel status', 0, () => {
+      const created: DynamicGenericToolResult = rideCreateOrderResultForTest(
+        looseObject('{"orderId":"order-123","status":"accepted"}'), 'express', 'trace-123'
+      );
+      const missingReceipt: DynamicGenericToolResult = rideCreateOrderResultForTest(
+        looseObject('{"status":"accepted"}'), 'express', 'trace-123'
+      );
+      const cancelled = rideCancelOrderResultForTest(
+        looseObject('{"status":"cancelled"}'), 'order-123'
+      );
+      const malformedCancel = rideCancelOrderResultForTest(looseObject('{}'), 'order-123');
+
+      expect(created.status).assertEqual('success');
+      expect(missingReceipt.status).assertEqual('error');
+      expect(cancelled.status).assertEqual('success');
+      expect(malformedCancel.status).assertEqual('error');
+    });
+
+    it('accepts Luckin completion only with a provider order receipt and no inner error', 0, () => {
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"orderId":"luckin-order-1","status":"created"}}')
+      )).assertTrue();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"status":"created"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"success":false,"error":"quota exceeded","data":{"orderId":"fake"}}')
+      )).assertFalse();
     });
 
     it('routes ride order create to the configured Didi MCP when sandbox is disabled', 0, () => {
@@ -2301,15 +2336,25 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('whatsapp.message.send')).assertTrue();
     });
 
-    it('requires the exact client confirmation action for WhatsApp and Calendar delete', 0, () => {
-      expect(whatsAppSendConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":false}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":true}'))).assertTrue();
-      expect(calendarDeleteConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":false}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":true}'))).assertTrue();
+    it('requires exact rendered action identity without payload confirmation flags', 0, () => {
+      expect(whatsAppSendConfirmedForTest('')).assertFalse();
+      expect(whatsAppSendConfirmedForTest('wrong.action')).assertFalse();
+      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm')).assertTrue();
+      expect(calendarDeleteConfirmedForTest('')).assertFalse();
+      expect(calendarDeleteConfirmedForTest('wrong.action')).assertFalse();
+      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm')).assertTrue();
+    });
+
+    it('allows WhatsApp only for the configured safe test target', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{"AIPHONE_WHATSAPP_TEST_TO":"+8613800138000"}');
+
+        expect(whatsAppSafeTargetAllowedForTest('+86 138-0013-8000')).assertTrue();
+        expect(whatsAppSafeTargetAllowedForTest('+8613900139000')).assertFalse();
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+      expect(whatsAppSafeTargetAllowedForTest('+8613800138000')).assertFalse();
     });
 
     it('keeps WhatsApp provider errors concise and actionable', 0, () => {
@@ -2325,23 +2370,29 @@ export default function toolGatewayClientTest() {
     });
 
     it('preserves the configured WhatsApp Business sender through confirmation', 0, async () => {
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const result = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'whatsapp.message.send',
-        '用 WhatsApp 发送消息',
-        'surface_whatsapp_confirmation',
-        '',
-        noop,
-        null,
-        looseObject('{"toNumber":"+8613800138000","text":"十分钟后到","phoneNumberId":"712594308615206","wabaId":"123456789"}')
-      );
-      const rendered = genericToolResults(result.surface);
-      const actionJson = JSON.stringify(rendered[0].actions);
-      expect(rendered[0].status).assertEqual('confirm_required');
-      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
-      expect(actionJson.indexOf('712594308615206')).assertLarger(-1);
-      expect(actionJson.indexOf('123456789')).assertLarger(-1);
+      try {
+        configureLocalProviderConfigFromRawJson('{"AIPHONE_WHATSAPP_TEST_TO":"+8613800138000"}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'whatsapp.message.send',
+          '用 WhatsApp 发送消息',
+          'surface_whatsapp_confirmation',
+          '',
+          noop,
+          null,
+          looseObject('{"toNumber":"+8613800138000","text":"十分钟后到","phoneNumberId":"712594308615206","wabaId":"123456789"}')
+        );
+        const rendered = genericToolResults(result.surface);
+        const actionJson = JSON.stringify(rendered[0].actions);
+        expect(rendered[0].status).assertEqual('confirm_required');
+        expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+        expect(actionJson.indexOf('"confirmed"')).assertEqual(-1);
+        expect(actionJson.indexOf('712594308615206')).assertLarger(-1);
+        expect(actionJson.indexOf('123456789')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('dispatches Calendar delete confirmation back through the fixed tool path', 0, async () => {

@@ -51,7 +51,6 @@ interface HtmlMailCalendarPayload {
 interface HtmlCalendarDeletePayload {
   eventId?: HtmlHomePolicyValue;
   calendarId?: HtmlHomePolicyValue;
-  confirmed?: HtmlHomePolicyValue;
 }
 
 interface LuckinPreviewArgs {
@@ -62,13 +61,6 @@ interface LuckinPreviewArgs {
   attrGroup?: HtmlHomePolicyValue;
   attrChoice?: HtmlHomePolicyValue;
   locationSource?: HtmlHomePolicyValue;
-}
-
-interface LuckinCreateArgs {
-  deptId?: HtmlHomePolicyValue;
-  productId?: HtmlHomePolicyValue;
-  skuCode?: HtmlHomePolicyValue;
-  location?: HtmlHomePolicyValue;
 }
 
 interface LuckinPaymentArgs {
@@ -125,9 +117,6 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
   if (luckinPreviewAllowed(document, action)) {
     return true;
   }
-  if (luckinCreateAllowed(document, action)) {
-    return true;
-  }
   if (luckinPaymentPageAllowed(document, action)) {
     return true;
   }
@@ -140,7 +129,7 @@ function calendarDeleteConfirmAllowed(document: HtmlHomeDocument, action: A2uiAc
   }
   const args = action.args as HtmlCalendarDeletePayload;
   const eventId = policyText(args.eventId).trim();
-  if (eventId.length === 0 || args.confirmed !== true) {
+  if (eventId.length === 0) {
     return false;
   }
   for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
@@ -472,43 +461,6 @@ function luckinPreviewAllowed(document: HtmlHomeDocument, action: A2uiAction): b
     return true;
   }
   return policyText(args.locationSource).trim() === 'refresh';
-}
-
-function luckinCreateAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (document.kind !== 'luckin' || action.id !== 'luckin.order.create') {
-    return false;
-  }
-  if (!hasLuckinConfirmOrderBlock(document)) {
-    return false;
-  }
-  if (action.args === undefined) {
-    return false;
-  }
-  const args = action.args as LuckinCreateArgs;
-  const deptId = policyText(args.deptId).trim();
-  const productId = policyText(args.productId).trim();
-  const skuCode = policyText(args.skuCode).trim();
-  if (deptId.length === 0 || productId.length === 0 || skuCode.length === 0) {
-    return false;
-  }
-  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
-    const block = document.blocks[blockIndex];
-    if (policyText(block.title).indexOf('确认瑞幸订单') < 0) {
-      continue;
-    }
-    for (let actionIndex = 0; actionIndex < block.actions.length; actionIndex++) {
-      const expected = block.actions[actionIndex];
-      if (expected.id !== 'luckin.order.create' || expected.args === undefined) {
-        continue;
-      }
-      const expectedArgs = expected.args as LuckinCreateArgs;
-      if (policyText(expectedArgs.deptId).trim() === deptId &&
-        policyText(expectedArgs.productId).trim() === productId) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 function policyText(value: HtmlHomePolicyValue): string {

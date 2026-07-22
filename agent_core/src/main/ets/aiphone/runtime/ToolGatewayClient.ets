@@ -332,6 +332,7 @@ interface LocalProviderConfig {
   amapMcpKey: string;
   amapMcpUrl: string;
   rideMockEnabled: string;
+  whatsappTestTo: string;
   googleMapsApiKey: string;
   googleOauthClientId: string;
   googleOauthClientSecret: string;
@@ -404,6 +405,7 @@ interface LocalProviderRawConfig {
   AMAP_MCP_KEY?: string;
   AMAP_MCP_URL?: string;
   RIDE_MOCK_ENABLED?: string;
+  AIPHONE_WHATSAPP_TEST_TO?: string;
   GOOGLE_MAPS_API_KEY?: string;
   GMAIL_AUTH_URL?: string;
   GMAIL_OAUTH_CLIENT_ID?: string;
@@ -470,6 +472,7 @@ interface LocalProviderRawConfig {
   amapMcpKey?: string;
   amapMcpUrl?: string;
   rideMockEnabled?: string;
+  whatsappTestTo?: string;
   googleMapsApiKey?: string;
   googleOauthClientId?: string;
   googleOauthClientSecret?: string;
@@ -1303,6 +1306,7 @@ let localProviderConfig: LocalProviderConfig = {
   amapMcpKey: '',
   amapMcpUrl: DEFAULT_AMAP_MCP_URL,
   rideMockEnabled: 'false',
+  whatsappTestTo: '',
   googleMapsApiKey: '',
   googleOauthClientId: '',
   googleOauthClientSecret: '',
@@ -1368,7 +1372,6 @@ interface WhatsAppSendArgs {
   phoneNumberId?: ToolArgValue;
   wabaId?: ToolArgValue;
   previewUrl?: ToolArgValue;
-  confirmed?: ToolArgValue;
 }
 
 interface WhatsAppProviderArgs {
@@ -1384,7 +1387,6 @@ interface WhatsAppConfirmArgs {
   phoneNumberId: string;
   wabaId: string;
   previewUrl: boolean;
-  confirmed: boolean;
 }
 
 interface WhatsAppPhoneNumbersArgs {
@@ -1392,7 +1394,6 @@ interface WhatsAppPhoneNumbersArgs {
 }
 
 interface CalendarComposioArgs extends CalendarEventArgs {
-  confirmed?: boolean;
   sendUpdates?: string;
 }
 
@@ -1402,7 +1403,6 @@ interface CalendarDeleteConfirmArgs {
   title: string;
   start: string;
   end: string;
-  confirmed: boolean;
 }
 
 type ToolArgValue = Object | string | number | boolean | null | undefined;
@@ -1426,8 +1426,6 @@ interface RideOrderArgs {
   estimateTraceId?: ToolArgValue;
   estimate_trace_id?: ToolArgValue;
   traceId?: ToolArgValue;
-  confirmed?: ToolArgValue;
-  confirmation?: ToolArgValue;
   orderId?: ToolArgValue;
   order_id?: ToolArgValue;
   reason?: ToolArgValue;
@@ -1490,8 +1488,6 @@ interface RideOrderActionArgs {
   estimateTraceId?: string;
   estimate_trace_id?: string;
   traceId?: string;
-  confirmed?: boolean;
-  confirmation?: string;
   orderId?: string;
   order_id?: string;
   reason?: string;
@@ -1718,6 +1714,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     amapMcpKey: config.amapMcpKey.trim().length > 0 ? config.amapMcpKey.trim() : config.amapKey.trim(),
     amapMcpUrl: config.amapMcpUrl.trim().length > 0 ? config.amapMcpUrl.trim() : DEFAULT_AMAP_MCP_URL,
     rideMockEnabled: config.rideMockEnabled.trim().toLowerCase() === 'true' ? 'true' : 'false',
+    whatsappTestTo: config.whatsappTestTo.trim(),
     googleMapsApiKey: config.googleMapsApiKey.trim(),
     googleOauthClientId: config.googleOauthClientId.trim(),
     googleOauthClientSecret: config.googleOauthClientSecret.trim(),
@@ -1771,6 +1768,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
     ' amapMcpKeyChars=' + localProviderConfig.amapMcpKey.length.toString() +
     ' rideMockEnabled=' + localProviderConfig.rideMockEnabled +
+    ' whatsappTestToPresent=' + (localProviderConfig.whatsappTestTo.length > 0 ? 'true' : 'false') +
     ' googleMapsApiKeyChars=' + localProviderConfig.googleMapsApiKey.length.toString() +
     ' googleOauthClientIdChars=' + localProviderConfig.googleOauthClientId.length.toString() +
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
@@ -1843,6 +1841,7 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     amapMcpKey: firstText([parsed.AMAP_MCP_KEY, parsed.amapMcpKey]),
     amapMcpUrl: firstText([parsed.AMAP_MCP_URL, parsed.amapMcpUrl]),
     rideMockEnabled: firstText([parsed.RIDE_MOCK_ENABLED, parsed.rideMockEnabled]),
+    whatsappTestTo: firstText([parsed.AIPHONE_WHATSAPP_TEST_TO, parsed.whatsappTestTo]),
     googleMapsApiKey: firstText([parsed.GOOGLE_MAPS_API_KEY, parsed.googleMapsApiKey]),
     googleOauthClientId: firstText([parsed.GOOGLE_OAUTH_CLIENT_ID, parsed.GMAIL_OAUTH_CLIENT_ID, parsed.googleOauthClientId]),
     googleOauthClientSecret: firstText([parsed.GOOGLE_OAUTH_CLIENT_SECRET, parsed.GMAIL_OAUTH_CLIENT_SECRET, parsed.googleOauthClientSecret]),
@@ -1901,6 +1900,7 @@ export function localProviderConfigDebugSummary(): string {
     ', amapMcpKey=' + (localProviderConfig.amapMcpKey.length > 0 ? 'present(' + localProviderConfig.amapMcpKey.length.toString() + ')' : 'missing') +
     ', amapMcpUrl=' + (localProviderConfig.amapMcpUrl.length > 0 ? 'present' : 'missing') +
     ', rideMockEnabled=' + localProviderConfig.rideMockEnabled +
+    ', whatsappTestTo=' + (localProviderConfig.whatsappTestTo.length > 0 ? 'present' : 'missing') +
     ', googleMapsApiKey=' + (localProviderConfig.googleMapsApiKey.length > 0 ? 'present(' + localProviderConfig.googleMapsApiKey.length.toString() + ')' : 'missing') +
     ', googleOauthClientId=' + (localProviderConfig.googleOauthClientId.length > 0 ? 'present(' + localProviderConfig.googleOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
@@ -2955,20 +2955,6 @@ function rideOrderArgText(args: RideOrderArgs, keys: string[]): string {
   return '';
 }
 
-function rideOrderConfirmed(args: RideOrderArgs): boolean {
-  const record = args as ToolArgRecord;
-  const confirmed = record.confirmed;
-  if (confirmed === true) {
-    return true;
-  }
-  const confirmedText = textOf(confirmed).trim().toLowerCase();
-  if (confirmedText === 'true' || confirmedText === 'yes') {
-    return true;
-  }
-  const confirmation = textOf(record.confirmation).trim();
-  return confirmation.indexOf('确认') >= 0 && confirmation.indexOf('下单') >= 0;
-}
-
 function rideDidiCreateOrderArgs(args: Object | null): RideDidiCreateOrderArgs {
   const parsed = rideOrderArgs(args);
   return {
@@ -3060,8 +3046,8 @@ export function rideDidiDriverLocationArgsForTest(args: Object | null): Object {
   return rideDidiDriverLocationArgs(args);
 }
 
-export function rideOrderConfirmedForTest(args: Object | null): boolean {
-  return rideOrderConfirmed(rideOrderArgs(args));
+export function rideOrderConfirmedForTest(actionId: string): boolean {
+  return actionId === 'ride.order.confirm';
 }
 
 function rideErrorResult(
@@ -3342,9 +3328,7 @@ function rideOrderConfirmAction(product: RideProduct, traceId: string, origin: R
     estimateCacheJson: estimateCacheJson,
     estimateTraceId: traceId,
     estimate_trace_id: traceId,
-    traceId: traceId,
-    confirmed: true,
-    confirmation: '确认下单'
+    traceId: traceId
   };
   return {
     id: 'ride.order.confirm',
@@ -3597,6 +3581,15 @@ function rideChangeVehicleAction(context: RideOrderRouteContext | null = null): 
 function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrderArgs, context: RideOrderRouteContext): DynamicGenericToolResult {
   const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status']);
+  const lowerStatus = status.toLowerCase();
+  if (orderId.length === 0 || lowerStatus.indexOf('fail') >= 0 ||
+    lowerStatus.indexOf('error') >= 0 || lowerStatus.indexOf('reject') >= 0 ||
+    lowerStatus.indexOf('denied') >= 0) {
+    return rideErrorResult(
+      '滴滴', 'ride.order.create', '滴滴下单未确认完成',
+      orderId.length === 0 ? 'Provider 未返回订单号，本次不能视为下单成功。' : 'Provider 返回失败状态：' + status
+    );
+  }
   const rows: A2uiLabelValueData[] = [
     { label: '车型', value: context.selectedVehicleText.length > 0 ? context.selectedVehicleText : requestArgs.product_category },
     { label: 'traceId', value: requestArgs.estimate_trace_id.length > 16 ? requestArgs.estimate_trace_id.substring(0, 8) + '...' + requestArgs.estimate_trace_id.substring(requestArgs.estimate_trace_id.length - 6) : requestArgs.estimate_trace_id }
@@ -3614,15 +3607,41 @@ function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrder
     toolName: 'ride.order.create',
     title: '滴滴订单已提交',
     status: 'success',
-    summary: orderId.length > 0 ? '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 下单接口，但响应里没有返回订单号。',
+    summary: '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。',
     rows: rows,
     rawPreview: JSON.stringify(payload).substring(0, 1200),
-    actions: orderId.length > 0 ? [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)] : []
+    actions: [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)]
   };
+}
+
+export function rideCreateOrderResultForTest(
+  payload: Object,
+  productCategory: string,
+  estimateTraceId: string
+): DynamicGenericToolResult {
+  return rideCreateOrderResult(payload, {
+    product_category: productCategory,
+    estimate_trace_id: estimateTraceId
+  }, {
+    routeText: '测试起点 → 测试终点',
+    pickupLocation: '114.0,22.5',
+    destinationLocation: '114.1,22.6',
+    selectedVehicleText: productCategory,
+    estimateCacheJson: ''
+  });
 }
 
 function rideCancelOrderResult(payload: Object, requestArgs: RideDidiCancelOrderArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'cancelStatus', 'cancel_status']);
+  const lowerStatus = status.toLowerCase();
+  const confirmed = lowerStatus.indexOf('cancel') >= 0 || lowerStatus === 'success' ||
+    lowerStatus === 'succeeded' || lowerStatus === 'completed' || lowerStatus === 'ok';
+  if (!confirmed) {
+    return rideErrorResult(
+      '滴滴', 'ride.order.cancel', '滴滴取消未确认完成',
+      status.length === 0 ? 'Provider 未返回取消状态，本次不能视为取消成功。' : 'Provider 返回未确认状态：' + status
+    );
+  }
   const rows: A2uiLabelValueData[] = [
     { label: '订单号', value: requestArgs.order_id }
   ];
@@ -3942,15 +3961,10 @@ function rideOrderCreateErrorSummary(message: string): string {
 async function callLocalDidiRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
-  const parsed = rideOrderArgs(args);
   const requestArgs = rideDidiCreateOrderArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (didiKey.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 下单接口。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
-  }
-  if (!rideOrderConfirmed(parsed)) {
-    results.push(rideErrorResult('滴滴', 'ride.order.create', '需要明确确认车型', '请先查看滴滴价格预估，并明确点击某个车型的确认下单按钮。'));
     return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
   }
   if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
@@ -4059,13 +4073,8 @@ async function callMockRideEstimateResults(toolId: string, args: Object | null):
 
 async function callLocalMockRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
   const results: DynamicGenericToolResult[] = [];
-  const parsed = rideOrderArgs(args);
   const requestArgs = rideDidiCreateOrderArgs(args);
   const routeContext = rideOrderRouteContext(args);
-  if (!rideOrderConfirmed(parsed)) {
-    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '需要明确确认车型', '请先查看模拟价格预估，并明确点击某个车型的确认叫车按钮。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
-  }
   if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
     results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '缺少下单参数', '模拟下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
     return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
@@ -4209,11 +4218,27 @@ async function callStructuredRideReadResults(toolId: string, args: Object | null
   return results;
 }
 
-async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalRideTool(
+  toolId: string,
+  _prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'ride.order.create') {
+    if (!rideOrderConfirmedForTest(actionId)) {
+      return genericToolResultsA2ui(surfaceId, toolId, [
+        rideErrorResult('滴滴', toolId, '需要明确确认车型', '请从当前价格预估卡片点击确认叫车。')
+      ]);
+    }
     return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
   }
   if (toolId === 'ride.order.cancel') {
+    if (actionId !== 'ride.order.cancel') {
+      return genericToolResultsA2ui(surfaceId, toolId, [
+        rideErrorResult('滴滴', toolId, '需要当前订单取消操作', '请从当前订单卡片点击取消。')
+      ]);
+    }
     return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
   }
   return genericToolResultsA2ui(surfaceId, toolId, await callStructuredRideReadResults(toolId, args));
@@ -7696,6 +7721,11 @@ function luckinDeepScanPayFields(root: Object): LuckinOrderActionArgs {
 
 function luckinPayloadErrorMessage(payload: Object): string {
   const wrapped = payload as LuckinPayload;
+  const record = payload as ToolArgRecord;
+  const explicitError = textOf(record['error']).trim();
+  if (explicitError.length > 0) {
+    return explicitError;
+  }
   const code = textOf(wrapped.code).trim();
   if (code.length > 0 && code !== '0' && code !== '200' && code !== '0000') {
     return firstText([wrapped.message, wrapped.msg, '瑞幸返回错误码 ' + code]);
@@ -7704,6 +7734,14 @@ function luckinPayloadErrorMessage(payload: Object): string {
     return firstText([wrapped.message, wrapped.msg, '瑞幸创建订单失败']);
   }
   return '';
+}
+
+export function luckinOrderCreateSucceededForTest(payload: Object): boolean {
+  if (luckinPayloadErrorMessage(payload).length > 0) {
+    return false;
+  }
+  const created = luckinOrderRecordFromPayload(payload);
+  return firstText([created.orderIdStr, created.orderId]).length > 0;
 }
 
 function luckinOrderPayloadCandidates(payload: Object): LuckinOrderRecord[] {
@@ -7944,7 +7982,15 @@ function luckinDynamicResultA2ui(surfaceId: string, result: DynamicGenericToolRe
 }
 
 function luckinErrorA2ui(surfaceId: string, toolId: string, title: string, message: string): string {
-  return luckinGenericResultA2ui(surfaceId, toolId, title, message, [{ label: '错误', value: message }], '', []);
+  return luckinDynamicResultA2ui(surfaceId, {
+    sourceTag: '瑞幸',
+    toolName: toolId,
+    title: title,
+    status: 'error',
+    summary: message,
+    rows: [{ label: '错误', value: message }],
+    rawPreview: ''
+  });
 }
 
 async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -8137,13 +8183,14 @@ async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Pr
   }
   const createPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'createOrder', createArgs);
   const createError = luckinPayloadErrorMessage(createPayload);
+  if (!luckinOrderCreateSucceededForTest(createPayload)) {
+    const failure = createError.length > 0 ? createError : 'Provider 未返回订单号，本次不能视为创建成功。';
+    return luckinErrorA2ui(surfaceId, 'luckin.order.create', '瑞幸订单创建失败', failure);
+  }
   let created = luckinOrderRecordFromPayload(createPayload);
-  let orderId = firstText([created.orderIdStr, created.orderId, request.orderId]);
+  let orderId = firstText([created.orderIdStr, created.orderId]);
   let payOrderUrl = textOf(created.payOrderUrl);
   let payOrderQrCodeUrl = textOf(created.payOrderQrCodeUrl);
-  if (orderId.length === 0 && createError.length > 0) {
-    aiLogInfo('[AIPhone][LuckinOrderCreateDeferred] error=' + createError);
-  }
   if (orderId.length > 0 && payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
     try {
       const detailArgs: LuckinOrderActionArgs = {
@@ -8210,8 +8257,11 @@ async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Pr
     aiLogInfo('[AIPhone][LuckinOrderCreateMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(createPayload) +
       ' payloadPreview=' + JSON.stringify(createPayload).substring(0, 400));
   }
-  const summary = createError.length > 0 ? createError : '';
-  return luckinGenericResultA2ui(surfaceId, 'luckin.order.create', '瑞幸订单已创建', summary, rows, JSON.stringify(createPayload).substring(0, 1200), createActions);
+  return luckinGenericResultA2ui(
+    surfaceId, 'luckin.order.create', '瑞幸订单已创建',
+    'Provider 已返回真实订单号。', rows,
+    JSON.stringify(createPayload).substring(0, 1200), createActions
+  );
 }
 
 async function callStructuredLuckinStatusResult(args: Object | null): Promise<DynamicGenericToolResult> {
@@ -8323,8 +8373,19 @@ async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Pr
   return luckinDynamicResultA2ui(surfaceId, await callStructuredLuckinStatusResult(args));
 }
 
-async function callLocalLuckinTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalLuckinTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'luckin.order.create') {
+    if (actionId !== 'luckin.order.create') {
+      return luckinErrorA2ui(
+        surfaceId, toolId, '需要当前瑞幸订单确认', '请从当前订单预览点击确认下单。'
+      );
+    }
     return callLocalLuckinCreate(surfaceId, args);
   }
   if (toolId === 'luckin.order.status') {
@@ -12240,7 +12301,6 @@ function calendarComposioArgs(toolId: string, prompt: string, args: Object | nul
   const source = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
   const normalized = normalizedCalendarArgsForPrompt(toolId, prompt, source) as CalendarComposioArgs;
   normalized.calendarId = textOf(normalized.calendarId).trim().length > 0 ? textOf(normalized.calendarId).trim() : 'primary';
-  normalized.confirmed = source.confirmed === true;
   if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
     normalized.start = calendarProviderDateTime(textOf(normalized.start));
     normalized.end = calendarProviderDateTime(textOf(normalized.end));
@@ -12251,9 +12311,8 @@ function calendarComposioArgs(toolId: string, prompt: string, args: Object | nul
   return normalized;
 }
 
-export function calendarDeleteConfirmedForTest(actionId: string, args: Object | null): boolean {
-  const parsed = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
-  return actionId === 'calendar.event.delete.confirm' && parsed.confirmed === true;
+export function calendarDeleteConfirmedForTest(actionId: string): boolean {
+  return actionId === 'calendar.event.delete.confirm';
 }
 
 function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
@@ -12274,8 +12333,7 @@ function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGe
     calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
     title: textOf(args.title),
     start: textOf(args.start),
-    end: textOf(args.end),
-    confirmed: true
+    end: textOf(args.end)
   };
   return {
     sourceTag: 'Composio Google Calendar',
@@ -12374,7 +12432,7 @@ async function callLocalCalendarTool(
   }
   const normalized = calendarComposioArgs(toolId, prompt, args);
   let updateMatches: DynamicGenericToolResult[] = [];
-  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
+  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId)) {
     if (textOf(normalized.eventId).trim().length === 0) {
       if (!hasCalendarLookupSelector(normalized)) {
         return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
@@ -12485,9 +12543,14 @@ function whatsAppRecipientDigits(value: string): string {
   return digits.length >= 8 && digits.length <= 15 ? digits : '';
 }
 
-export function whatsAppSendConfirmedForTest(actionId: string, args: Object | null): boolean {
-  const parsed = whatsAppArgs(args);
-  return actionId === 'whatsapp.message.send.confirm' && parsed.confirmed === true;
+export function whatsAppSendConfirmedForTest(actionId: string): boolean {
+  return actionId === 'whatsapp.message.send.confirm';
+}
+
+export function whatsAppSafeTargetAllowedForTest(toNumber: string): boolean {
+  const configured = whatsAppRecipientDigits(localProviderConfig.whatsappTestTo);
+  const requested = whatsAppRecipientDigits(toNumber);
+  return configured.length > 0 && requested === configured;
 }
 
 export function whatsAppProviderFailureSummaryForTest(raw: string): string {
@@ -12542,6 +12605,21 @@ function whatsAppInputResult(toNumber: string, text: string): DynamicGenericTool
   };
 }
 
+function whatsAppUnsafeTargetResult(): DynamicGenericToolResult {
+  const configured = localProviderConfig.whatsappTestTo.trim().length > 0;
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: 'WhatsApp 测试目标未授权',
+    status: 'blocked',
+    summary: configured ?
+      '当前收件人与 AIPHONE_WHATSAPP_TEST_TO 不匹配，已阻止发送。' :
+      '未配置 AIPHONE_WHATSAPP_TEST_TO，已阻止发送且不会猜测号码。',
+    rows: [],
+    rawPreview: configured ? 'safe target mismatch' : 'safe target missing'
+  };
+}
+
 function whatsAppConfirmationResult(
   toNumber: string,
   text: string,
@@ -12554,8 +12632,7 @@ function whatsAppConfirmationResult(
     text: text,
     phoneNumberId: phoneNumberId,
     wabaId: wabaId,
-    previewUrl: previewUrl,
-    confirmed: true
+    previewUrl: previewUrl
   };
   return {
     sourceTag: 'Composio WhatsApp Business',
@@ -12604,7 +12681,10 @@ async function callLocalWhatsAppTool(
   if (inputError !== null) {
     return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [inputError]);
   }
-  if (!whatsAppSendConfirmedForTest(actionId, args)) {
+  if (!whatsAppSafeTargetAllowedForTest(toNumber)) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [whatsAppUnsafeTargetResult()]);
+  }
+  if (!whatsAppSendConfirmedForTest(actionId)) {
     return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
       whatsAppConfirmationResult(
         toNumber,
@@ -13871,10 +13951,10 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalPaymentTool(toolId, prompt, surfaceId, args);
   }
   if (isRideToolId(toolId)) {
-    return callLocalRideTool(toolId, prompt, surfaceId, args);
+    return callLocalRideTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isLuckinToolId(toolId)) {
-    return callLocalLuckinTool(toolId, prompt, surfaceId, args);
+    return callLocalLuckinTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isHotelToolId(toolId) || toolId.startsWith('hotel.')) {
     return callLocalHotelTool(toolId, surfaceId, args);

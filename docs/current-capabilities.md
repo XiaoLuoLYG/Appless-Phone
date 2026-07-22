@@ -4,9 +4,62 @@
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：42 个静态注册工具 + `memory.update` + `dynamic.search`，运行时最多 44 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/excluded 标记为准。
+当前 agent 工具箱：44 个固定 `ToolDefinition`（24 个 Data Agent + 20 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 43 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
+
+## 固定/虚拟能力 owner 账本
+
+`confirmation` 描述产品执行边界，不代表自动回归会点击真实写入。Action Agent 的外部写入必须通过当前 surface/确认计划，并取得 provider receipt/status；`dynamic.search` 只执行只读发现。工作项和知识库写入仍停留在既有 preview/prepare client action，状态为 `review-required`，未注册为固定可执行 ToolDefinition。
+
+| capability | migrated owner | automation state | confirmation |
+| --- | --- | --- | --- |
+| `travel.search` | Data Agent | core | 无 |
+| `train.search` | Data Agent | full | 无；购票为既有 Web client action |
+| `flight.search` | Data Agent | full | 无 |
+| `hotel.search` | Data Agent | core | 无 |
+| `hotel.detail` | Data Agent | core | 当前酒店卡“查看房型” |
+| `hotel.navigate` | Action Agent | core | 当前酒店卡精确坐标动作 |
+| `hotel.booking.open` | Action Agent | core | 当前房型页精确 RollingGo URL 动作 |
+| `food.search` | Data Agent | core | 无 |
+| `luckin.order.preview` | Action Agent | core | 只生成当前订单预览 |
+| `luckin.order.create` | Action Agent | manual-only | 当前预览的精确“确认下单”；不接受自然语言或变更参数 |
+| `luckin.order.status` | Data Agent | manual-only | 需要真实 orderId |
+| `social.feed.search` | Data Agent | core | 无 |
+| `social.reply.draft` | Action Agent | core | 当前真实 item 的草稿动作；不发送 |
+| `x.post.search` | Data Agent | core | 无 |
+| `mail.search` | Data Agent | core | 无 |
+| `mail.thread.read` | Data Agent | core | 当前真实邮件行 |
+| `mail.draft.create` | Action Agent | manual-only | 当前真实线程草稿动作；不发送 |
+| `gmail.mail.search` | Data Agent | core | 无 |
+| `gmail.thread.read` | Data Agent | core | 当前真实 Gmail thread |
+| `gmail.draft.create` | Action Agent | core | 当前收件人/正文草稿动作 |
+| `gmail.draft.apply` | Action Agent | full | 当前草稿应用确认 |
+| `gmail.open.web` | Action Agent | excluded | 明确 Web 打开动作 |
+| `gmail.message.send` | Action Agent | manual-only | 当前 Gmail 回复卡一次确认；exact provider/thread/message/body |
+| `youtube.video.search` | Data Agent | full | 无 |
+| `media.video.search` | Data Agent | core | 无 |
+| `media.aggregate.search` | Data Agent | core | 无 |
+| `worldcup.open` | Action Agent | core | 精确 App 内页面 intent |
+| `youtube.mine.playlists` | Data Agent | full | 无 |
+| `youtube.mine.subscriptions` | Data Agent | full | 无 |
+| `calendar.events.search` | Data Agent | core | 无 |
+| `calendar.event.create` | Action Agent | core | 已确认 Action plan；必须返回真实 eventId |
+| `calendar.event.update` | Action Agent | core | 复用 create/search 返回的真实 eventId；歧义时不执行 |
+| `calendar.event.delete` | Action Agent | core | 当前真实事件的可见删除确认；删除后终止或核验 |
+| `payment.send` | Action Agent | core | 当前收款人/金额/provider 确认；自动回归不最终支付 |
+| `payment.account.setup` | Action Agent | full | 当前 Stripe 设置/开户动作；真实创建 manual-only |
+| `maps.place.search` | Data Agent | core | 无 |
+| `maps.place.details` | Data Agent | full | 上一步真实 placeId |
+| `maps.route.open` | Action Agent | core | 精确起终点与系统/Web 导航动作 |
+| `whatsapp.message.send` | Action Agent | core | 仅 `AIPHONE_WHATSAPP_TEST_TO` 与当前可见确认；自动回归不发送 |
+| `ride.estimate` | Data Agent | core | 无 |
+| `ride.app.link` | Data Agent | excluded | 只打开 provider App，不等同叫车 |
+| `ride.order.create` | Action Agent | manual-only | 当前估价卡的精确车型/trace/路线确认 |
+| `ride.order.cancel` | Action Agent | manual-only | 当前订单可见取消动作与真实 orderId |
+| `ride.driver.location` | Data Agent | manual-only | 需要真实 orderId |
+| `memory.update` | Action Agent（virtual） | core | 用户明确稳定偏好；回归结束恢复 |
+| `dynamic.search` | Data Agent（virtual） | core | 只读 operation；create/update/delete/send/write 一律拒绝 |
 
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

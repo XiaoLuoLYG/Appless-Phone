@@ -82,20 +82,6 @@ export function validateGmailReplyActionArgs(args: Object): ActionValidationResu
   };
 }
 
-function pageActionRoute(actionId: string): boolean {
-  return actionId === 'luckin.order.preview' ||
-    actionId === 'social.reply.draft' ||
-    actionId === 'mail.draft.create' ||
-    actionId === 'gmail.draft.create' ||
-    actionId === 'gmail.draft.apply' ||
-    actionId === 'gmail.open.web' ||
-    actionId === 'worldcup.open' ||
-    actionId === 'payment.send' ||
-    actionId === 'payment.account.setup' ||
-    actionId === 'maps.route.open' ||
-    actionId === 'gmail.message.send';
-}
-
 function validPageResult(result: ActionExecutionResult): boolean {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) {
     return false;
@@ -192,16 +178,6 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
     } else if (this.activeScopeKey !== scopeKey) {
       this.runs.clear();
       this.activeScopeKey = scopeKey;
-    }
-    if (actionId !== 'hotel.detail' &&
-      actionId !== 'hotel.navigate' &&
-      actionId !== 'hotel.booking.open' &&
-      !pageActionRoute(actionId)) {
-      return {
-        status: 'error',
-        errorCode: 'ACTION_ROUTE_DEFERRED',
-        message: 'Registered action execution is deferred to a later migration task.'
-      };
     }
     const runKey = this.runKey(context);
     if (this.runs.has(runKey)) {

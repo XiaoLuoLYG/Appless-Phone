@@ -284,8 +284,6 @@ interface RideLocalOrderActionArgs {
   estimateTraceId?: RideActionArgValue;
   estimate_trace_id?: RideActionArgValue;
   traceId?: RideActionArgValue;
-  confirmed?: RideActionArgValue;
-  confirmation?: RideActionArgValue;
 }
 
 type HtmlActionValue = Object | string | number | boolean | null | undefined;
@@ -3399,9 +3397,7 @@ struct Index {
       estimateCacheJson: estimateCacheJson,
       estimateTraceId: traceId,
       estimate_trace_id: traceId,
-      traceId: traceId,
-      confirmed: true,
-      confirmation: '确认下单'
+      traceId: traceId
     };
     return {
       id: 'ride.order.confirm',

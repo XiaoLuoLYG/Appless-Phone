@@ -327,13 +327,13 @@ export default function a2uiHomeToolRequestTest() {
         surfaceWithToolRequest('', '', ''),
         '确认发送 WhatsApp 消息',
         'whatsapp.message.send.confirm',
-        JSON.parse('{"toNumber":"+8613800138000","text":"十分钟后到","confirmed":true}') as Object
+        JSON.parse('{"toNumber":"+8613800138000","text":"十分钟后到"}') as Object
       );
       const calendar = resolveA2uiHomeToolRequest(
         surfaceWithToolRequest('', '', ''),
         '确认删除 Google Calendar 日程',
         'calendar.event.delete.confirm',
-        JSON.parse('{"eventId":"evt-1","confirmed":true}') as Object
+        JSON.parse('{"eventId":"evt-1"}') as Object
       );
 
       expect(whatsapp.toolId).assertEqual('whatsapp.message.send');

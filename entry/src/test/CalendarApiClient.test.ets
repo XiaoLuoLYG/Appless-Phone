@@ -84,6 +84,28 @@ export default function calendarApiClientTest() {
       expect(resolved.end).assertEqual('2026-07-18T09:30:00');
     });
 
+    it('does not guess an eventId when a Calendar selector is ambiguous', 0, () => {
+      const matches = calendarEventResultsFromListPayload(
+        '{"items":[' +
+        '{"id":"event-real-1","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}},' +
+        '{"id":"event-real-2","summary":"团队同步","start":{"dateTime":"2026-07-18T17:00:00+08:00"},"end":{"dateTime":"2026-07-18T17:30:00+08:00"}}]}'
+      );
+      const resolved = calendarUpdateArgsFromResultsForTest({
+        query: '团队同步',
+        timeMin: '2026-07-18T15:00:00+08:00',
+        timeMax: '2026-07-18T18:00:00+08:00',
+        start: '2026-07-18T19:00:00+08:00',
+        end: '2026-07-18T19:30:00+08:00'
+      }, matches);
+
+      expect(resolved).assertNull();
+      expect(calendarEventRequiredFields('calendar.event.update', {
+        title: '团队同步',
+        start: '2026-07-18T19:00:00+08:00',
+        end: '2026-07-18T19:30:00+08:00'
+      }).indexOf('eventId')).assertLarger(-1);
+    });
+
     it('keeps the resolved real event visible while asking for a missing destination time', 0, () => {
       const matches = calendarEventResultsFromListPayload(
         '{"items":[{"id":"event-123","summary":"团队同步","start":{"dateTime":"2026-07-18T16:00:00+08:00"},"end":{"dateTime":"2026-07-18T16:30:00+08:00"}}]}'

@@ -437,7 +437,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     riskLevel: 'confirm_required',
     backendPriority: ['oauth_api'],
     authModes: ['mcp_auth'],
-    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,timezone?:string,calendarId?:string,title?:string,start?:string,end?:string,confirmed?:boolean',
+    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,timezone?:string,calendarId?:string,title?:string,start?:string,end?:string',
     outputSchema: 'genericToolResults',
     a2uiComponent: 'GenericToolResults',
     actions: ['calendar.event.delete.confirm']
@@ -509,7 +509,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     riskLevel: 'confirm_required',
     backendPriority: ['oauth_api'],
     authModes: ['mcp_auth'],
-    inputSchema: 'toNumber:string,text:string,phoneNumberId?:string,wabaId?:string,previewUrl?:boolean,confirmed?:boolean',
+    inputSchema: 'toNumber:string,text:string,phoneNumberId?:string,wabaId?:string,previewUrl?:boolean',
     outputSchema: 'genericToolResults',
     a2uiComponent: 'GenericToolResults',
     actions: ['whatsapp.message.send.confirm']

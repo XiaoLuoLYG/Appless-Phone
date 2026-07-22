@@ -228,6 +228,7 @@ export default function toolDefinitionRegistryTest() {
       expect(calendarDelete.actions[0]).assertEqual('calendar.event.delete.confirm');
       expect(calendarDelete.inputSchema.indexOf('timeMin')).assertLarger(-1);
       expect(calendarDelete.inputSchema.indexOf('timeMax')).assertLarger(-1);
+      expect(calendarDelete.inputSchema.indexOf('confirmed')).assertEqual(-1);
       expect(mapsSearch.domain).assertEqual('maps');
       expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
       expect(mapsSearch.outputSchema).assertEqual('places');
@@ -238,6 +239,7 @@ export default function toolDefinitionRegistryTest() {
       expect(whatsappSend.domain).assertEqual('whatsapp');
       expect(whatsappSend.riskLevel).assertEqual('confirm_required');
       expect(whatsappSend.actions[0]).assertEqual('whatsapp.message.send.confirm');
+      expect(whatsappSend.inputSchema.indexOf('confirmed')).assertEqual(-1);
     });
 
     it('gives the model a structured Calendar write contract', 0, () => {

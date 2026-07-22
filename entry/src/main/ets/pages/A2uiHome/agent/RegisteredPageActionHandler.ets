@@ -1,7 +1,9 @@
 import {
   A2uiCallResult,
   A2uiRuntimeDataModel,
-  ActionExecutionResult
+  ActionExecutionResult,
+  ToolDefinition,
+  actionAgentToolDefinitions
 } from '@loop/agent-core';
 import { RegisteredPageActionContext } from './AiphoneRegisteredActionExecutor';
 
@@ -40,15 +42,51 @@ type HandlerArgValue = Object | string | number | boolean | null | undefined;
 type HandlerArgRecord = Record<string, HandlerArgValue>;
 
 function pageRoute(actionId: string): boolean {
-  return actionId === 'luckin.order.preview' ||
-    actionId === 'social.reply.draft' ||
-    actionId === 'mail.draft.create' ||
-    actionId === 'gmail.draft.create' ||
-    actionId === 'gmail.draft.apply' ||
-    actionId === 'gmail.open.web' ||
-    actionId === 'payment.send' ||
-    actionId === 'payment.account.setup' ||
-    actionId === 'maps.route.open';
+  if (actionId === 'hotel.navigate' || actionId === 'hotel.booking.open') {
+    return false;
+  }
+  return actionAgentToolDefinitions().some(
+    (definition: ToolDefinition): boolean => definition.toolId === actionId
+  );
+}
+
+function externalWrite(actionId: string): boolean {
+  return actionId === 'luckin.order.create' ||
+    actionId === 'calendar.event.create' ||
+    actionId === 'calendar.event.update' ||
+    actionId === 'calendar.event.delete' ||
+    actionId === 'whatsapp.message.send' ||
+    actionId === 'ride.order.create' ||
+    actionId === 'ride.order.cancel';
+}
+
+function evidenceLabel(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return lower.indexOf('receipt') >= 0 || lower.indexOf('status') >= 0 ||
+    lower.indexOf('event id') >= 0 || lower.indexOf('message id') >= 0 ||
+    lower.indexOf('order id') >= 0 || lower.indexOf('订单号') >= 0 ||
+    lower.indexOf('状态') >= 0;
+}
+
+function hasPositiveWriteEvidence(model: A2uiRuntimeDataModel, actionId: string): boolean {
+  for (let index = 0; index < model.genericToolResults.length; index++) {
+    const result = model.genericToolResults[index];
+    if (result.toolName !== actionId || result.status !== 'success') {
+      continue;
+    }
+    for (let rowIndex = 0; rowIndex < result.rows.length; rowIndex++) {
+      if (evidenceLabel(result.rows[rowIndex].label) &&
+        result.rows[rowIndex].value.trim().length > 0) {
+        return true;
+      }
+    }
+    const raw = result.rawPreview.trim().toLowerCase();
+    if (raw.indexOf('"success":true') >= 0 || raw.indexOf('"successful":true') >= 0 ||
+      raw.indexOf('deleted eventid=') >= 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function providerError(model: A2uiRuntimeDataModel): string {
@@ -168,6 +206,13 @@ export class RegisteredPageActionHandler {
         status: 'error',
         errorCode: 'ACTION_PAGE_PROVIDER_ERROR',
         message: error
+      };
+    }
+    if (externalWrite(actionId) && !hasPositiveWriteEvidence(model, actionId)) {
+      return {
+        status: 'error',
+        errorCode: 'ACTION_PAGE_COMPLETION_UNVERIFIED',
+        message: 'Provider did not return positive write completion evidence.'
       };
     }
     const output: RegisteredToolPageActionOutput = {

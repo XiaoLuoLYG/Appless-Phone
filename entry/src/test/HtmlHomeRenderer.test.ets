@@ -779,7 +779,7 @@ function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
     prompt: '确认删除 Google Calendar 日程',
     variant: 'danger',
     kind: 'prompt',
-    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary"}') as Object
   };
   doc.blocks[0].actions = [confirmAction];
   return doc;
@@ -1816,7 +1816,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
       expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
       expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf('confirmed: true')).assertEqual(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
