@@ -9997,7 +9997,7 @@ async function defaultDynamicReadExecutor(prompt: string, args: Object | null): 
 }
 
 function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResult {
-  const base = genericStructuredDataResult('dynamic.search', 'genericToolResults', execution.results);
+  const base = genericStructuredDataResult('dynamic.search', 'dynamicToolConnect', execution.results);
   const data: DynamicStructuredData = {
     results: execution.results,
     registration: execution.registration
@@ -10020,14 +10020,14 @@ async function callStructuredDynamicTool(prompt: string, args: Object | null): P
   const authorizationMessage = dynamicReadAuthorizationMessage(args);
   if (authorizationMessage.length > 0) {
     return errorDataResult(
-      'dynamic.search', 'genericToolResults', 'DYNAMIC_WRITE_NOT_ALLOWED', authorizationMessage
+      'dynamic.search', 'dynamicToolConnect', 'DYNAMIC_WRITE_NOT_ALLOWED', authorizationMessage
     );
   }
   try {
     return dynamicStructuredDataResult(await dynamicReadExecutor(prompt, args));
   } catch (error) {
     return errorDataResult(
-      'dynamic.search', 'genericToolResults', 'DYNAMIC_PROVIDER_ERROR', describeThrown(error), true
+      'dynamic.search', 'dynamicToolConnect', 'DYNAMIC_PROVIDER_ERROR', describeThrown(error), true
     );
   }
 }

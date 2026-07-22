@@ -93,7 +93,7 @@ const SURFACE_HISTORY_LIMIT: number = 20;
 
 type HotelValue = Object | string | number | boolean | null | undefined;
 
-export type HotelSurfaceCallback = (surface: A2uiSurfaceState) => void;
+export type HotelSurfaceCallback = (surface: A2uiSurfaceState, generation?: number) => void;
 export type HotelTurnStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled' | 'timeout';
 
 const rejectNonHotelPageAction: RegisteredPageAction = async (
@@ -1332,7 +1332,7 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
     this.visibility.restore(record.turnId, generation, record.surfaceId);
     try {
       if (this.callback !== null) {
-        this.callback(surface);
+        this.callback(surface, generation);
       }
       this.authority.activate(
         this.conversationId,
@@ -1359,14 +1359,15 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
     return this.restoreSearchSurface(record.turnId, this.automaticGeneration);
   }
 
-  activateAutomaticTurn(turnId: string): void {
+  activateAutomaticTurn(turnId: string): number {
     if (this.disposed || !this.autoActivate || turnId.trim().length === 0) {
-      return;
+      return 0;
     }
     this.pinnedAutomaticTurnId = turnId;
     this.automaticGeneration++;
     this.visibility.expect(turnId, this.automaticGeneration);
     this.activateTurn(turnId, this.automaticGeneration);
+    return this.automaticGeneration;
   }
 
   activeSurfaceId(): string {
@@ -1416,7 +1417,7 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
       return;
     }
     if (this.callback !== null) {
-      this.callback(record.surface);
+      this.callback(record.surface, record.generation);
     }
     this.authority.activate(
       this.conversationId,

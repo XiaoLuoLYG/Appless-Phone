@@ -35,7 +35,9 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'calendar.event.delete.confirm',
   'whatsapp.message.send.confirm',
   'ride.order.confirm',
-  'ride.order.cancel'
+  'ride.order.cancel',
+  'hotel.navigate',
+  'hotel.booking.open'
 ];
 
 export interface RegisteredPageActionResolution {

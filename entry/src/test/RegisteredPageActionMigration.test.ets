@@ -88,7 +88,10 @@ class RejectDataExecutor implements DataTaskExecutor {
 }
 
 class RecordingOpener implements SystemUriOpener {
-  async open(_uri: string): Promise<boolean> {
+  readonly uris: string[] = [];
+
+  async open(uri: string): Promise<boolean> {
+    this.uris.push(uri);
     return true;
   }
 }
@@ -401,18 +404,30 @@ function canary(
   handler: RegisteredPageActionHandler,
   currentSnapshot: () => RegisteredPageSnapshot | null,
   bus?: LinkedMessageBus,
-  pageAction?: RegisteredPageAction
+  pageAction?: RegisteredPageAction,
+  opener: RecordingOpener = new RecordingOpener(),
+  currentHostSurface?: () => A2uiSurfaceState | null,
+  currentHostGeneration?: () => number
 ): MultiAgentCanaryRuntime {
   const options: MultiAgentCanaryOptions = {
     model,
     selectedPersonaId: (): string => 'travel_companion',
-    opener: new RecordingOpener(),
+    opener,
     pageAction: pageAction === undefined ? (
       actionId: string,
       args: Object,
       context: RegisteredPageActionContext
     ): Promise<ActionExecutionResult> => handler.execute(actionId, args, context) : pageAction,
     currentPageSnapshot: currentSnapshot,
+    currentHostSurface: currentHostSurface === undefined ? (): A2uiSurfaceState | null => {
+      const snapshot = currentSnapshot();
+      return snapshot === null ? null : snapshot.surface;
+    } : currentHostSurface,
+    currentHostGeneration: currentHostGeneration === undefined ? (): number => {
+      const snapshot = currentSnapshot();
+      const generation = snapshot === null ? undefined : snapshot.surface.runtimeGeneration;
+      return generation === undefined ? 0 : generation;
+    } : currentHostGeneration,
     onSurface: (_surface: A2uiSurfaceState): void => {},
     onMemoryUpdate: (): void => {},
     dataExecutor: new RejectDataExecutor(),
@@ -705,6 +720,71 @@ export default function registeredPageActionMigrationTest() {
       runtime.dispose();
     });
 
+    it('rejects stale Gmail payment ride and hotel writes until all host identities are exact', 0, async () => {
+      const invoker = new RecordingPageToolInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const opener = new RecordingOpener();
+      let retained: RegisteredPageSnapshot | null = null;
+      let host: A2uiSurfaceState | null = null;
+      let hostGeneration = 0;
+      let pageCalls = 0;
+      const runtime = canary(
+        new QueueModel([]),
+        handler,
+        (): RegisteredPageSnapshot | null => retained,
+        undefined,
+        async (): Promise<ActionExecutionResult> => {
+          pageCalls++;
+          return {
+            status: 'success',
+            output: JSON.parse('{"providerStatus":"exact"}') as Object
+          };
+        },
+        opener,
+        (): A2uiSurfaceState | null => host,
+        (): number => hostGeneration
+      );
+      const cases: Array<[string, A2uiAction]> = [
+        ['gmail.draft.create', action('gmail.draft.apply', JSON.parse(
+          '{"threadId":"thread-1","to":"a@example.com","subject":"QA",' +
+            '"replyMode":"reply","body":"exact"}'
+        ) as Object)],
+        ['payment.send', action('payment.confirm', JSON.parse(
+          '{"provider":"stripe","recipient":"real-user","amountText":"5.00",' +
+            '"currency":"USD","phase":"confirm"}'
+        ) as Object)],
+        ['ride.estimate', action('ride.order.confirm', JSON.parse(
+          '{"productCategory":"Express","estimateTraceId":"trace-real-1"}'
+        ) as Object)],
+        ['hotel.detail', action('hotel.booking.open', JSON.parse(
+          '{"hotelId":319,"bookingUrl":"https://rollinggo.cn/pages/hotel/detail/index?' +
+            'id=319&checkInDate=2026-07-22&checkOutDate=2026-07-23&roomCount=1&adultCount=2&childCount=0"}'
+        ) as Object)]
+      ];
+
+      for (let index = 0; index < cases.length; index++) {
+        const oldSurface = pageSurface(cases[index][0], cases[index][1], index + 40);
+        retained = snapshot(oldSurface, index + 1);
+        host = pageSurface(cases[index][0], cases[index][1], index + 80);
+        hostGeneration = host.runtimeGeneration as number;
+        expect(await runtime.runPageAction(cases[index][1])).assertFalse();
+
+        host = cloneSnapshot(retained as RegisteredPageSnapshot).surface;
+        host.runtimeOwner = 'legacy';
+        hostGeneration = host.runtimeGeneration as number;
+        expect(await runtime.runPageAction(cases[index][1])).assertFalse();
+
+        host = cloneSnapshot(retained as RegisteredPageSnapshot).surface;
+        hostGeneration = host.runtimeGeneration as number;
+        expect(await runtime.runPageAction(cases[index][1])).assertTrue();
+      }
+
+      expect(pageCalls).assertEqual(3);
+      expect(invoker.calls.length).assertEqual(0);
+      expect(opener.uris.length).assertEqual(1);
+      runtime.dispose();
+    });
+
     it('maps every exact Wave 4 rendered confirmation to its fixed Action owner', 0, () => {
       const sourceIds: string[] = [
         'luckin.order.preview',
@@ -741,6 +821,26 @@ export default function registeredPageActionMigrationTest() {
         'ride.app.link',
         action('ride.order.confirm', JSON.parse('{"estimateTraceId":"trace-real-1"}') as Object)
       )).assertNull();
+    });
+
+    it('keeps hotel navigation and booking clicks terminal in the registered route', 0, async () => {
+      const candidateIds: string[] = ['hotel.navigate', 'hotel.booking.open'];
+      let registeredCalls = 0;
+      let legacyCalls = 0;
+      for (let index = 0; index < candidateIds.length; index++) {
+        const result = await dispatchRegisteredPageActionCandidate(
+          action(candidateIds[index], JSON.parse('{"marker":"exact"}') as Object),
+          async (_clicked: A2uiAction): Promise<boolean> => {
+            registeredCalls++;
+            return false;
+          },
+          async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+        );
+        expect(result.candidate).assertTrue();
+        expect(result.ok).assertFalse();
+      }
+      expect(registeredCalls).assertEqual(2);
+      expect(legacyCalls).assertEqual(0);
     });
 
     it('rejects a constructed Calendar delete when it is not the exact current search-card action', 0, async () => {

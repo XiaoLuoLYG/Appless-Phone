@@ -896,12 +896,12 @@ export default function leaderAgentTest() {
       const bus = new LinkedMessageBus();
       const decision = semanticDecision([]);
       decision.roundAction = 'legacy_handoff';
-      decision.requestedCapabilityIds = ['dynamic.search'];
+      decision.requestedCapabilityIds = ['unknown.search'];
       decision.reasonCode = 'unmigrated_tool';
       const context = semanticPlanningContext();
       context.tools.push({
-        toolId: 'dynamic.search',
-        intent: 'dynamic.search',
+        toolId: 'unknown.search',
+        intent: 'unknown.search',
         riskLevel: 'read',
         inputSchema: 'dynamicToolSearchQuery',
         outputSchema: 'dynamicToolConnect',
@@ -932,7 +932,7 @@ export default function leaderAgentTest() {
       const handoff = beforeMarker[1].payload as LegacyHandoffPayload;
       expect(handoff.owner).assertEqual('legacy');
       expect(handoff.reason).assertEqual('unmigrated_tool');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('dynamic.search');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.search');
       expect(handoff.reasonCode).assertEqual('unmigrated_tool');
       expect(handoff.personaId).assertEqual('travel_companion');
       expect(handoff.skillId).assertEqual('');

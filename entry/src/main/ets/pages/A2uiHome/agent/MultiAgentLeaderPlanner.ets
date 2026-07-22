@@ -49,6 +49,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
       (definition: ToolDefinition): string => definition.toolId
     ));
+    this.dataToolIds.add('dynamic.search');
   }
 
   async plan(

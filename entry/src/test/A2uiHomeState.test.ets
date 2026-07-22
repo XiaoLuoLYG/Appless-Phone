@@ -7,7 +7,9 @@ import {
   isWelcomeSurface,
   isPromptInputEnabled,
   nextSendSpinnerRotation,
+  runtimeCallbackIsCurrent,
   runtimeOwnerAllowsSurfaceAction,
+  runtimeSurfaceIdentityMatches,
   shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
@@ -100,6 +102,50 @@ export default function a2uiHomeStateTest() {
         multi,
         surface(1, 'ready', 'surface_next', 'legacy', 5)
       )).assertTrue();
+    });
+
+    it('accepts callback state only for the generation and owner captured at submit', 0, () => {
+      expect(runtimeCallbackIsCurrent('multi_agent', 7, 'multi_agent', 7)).assertTrue();
+      expect(runtimeCallbackIsCurrent('multi_agent', 8, 'multi_agent', 7)).assertFalse();
+      expect(runtimeCallbackIsCurrent('legacy', 7, 'multi_agent', 7)).assertFalse();
+
+      let activeOwner: 'multi_agent' | 'legacy' = 'multi_agent';
+      let activeGeneration = 10;
+      let mutations = 0;
+      const mutate = (owner: 'multi_agent' | 'legacy', generation: number): void => {
+        if (runtimeCallbackIsCurrent(activeOwner, activeGeneration, owner, generation)) {
+          mutations++;
+        }
+      };
+      const oldMultiAgent = (): void => mutate('multi_agent', 10);
+      const oldLegacyStream = (): void => mutate('legacy', 10);
+      const oldToolStream = (): void => mutate('multi_agent', 10);
+      activeGeneration = 11;
+      oldMultiAgent();
+      oldLegacyStream();
+      oldToolStream();
+      expect(mutations).assertEqual(0);
+      mutate('multi_agent', 11);
+      expect(mutations).assertEqual(1);
+    });
+
+    it('requires exact current host and retained snapshot identity for page actions', 0, () => {
+      const current = surface(20, 'ready', 'surface-current', 'multi_agent', 9);
+      const retained = surface(20, 'ready', 'surface-current', 'multi_agent', 9);
+      expect(runtimeSurfaceIdentityMatches(current, retained, 'multi_agent', 9)).assertTrue();
+      expect(runtimeSurfaceIdentityMatches(
+        surface(21, 'ready', 'surface-newer', 'multi_agent', 10),
+        retained,
+        'multi_agent',
+        10
+      )).assertFalse();
+      expect(runtimeSurfaceIdentityMatches(
+        current,
+        surface(20, 'ready', 'surface-current', 'legacy', 9),
+        'multi_agent',
+        9
+      )).assertFalse();
+      expect(runtimeSurfaceIdentityMatches(current, retained, 'legacy', 9)).assertFalse();
     });
 
     it('keeps send spinner rotation monotonic while loading', 0, () => {

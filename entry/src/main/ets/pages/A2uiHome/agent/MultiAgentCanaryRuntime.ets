@@ -106,8 +106,10 @@ export interface MultiAgentCanaryOptions {
   opener: SystemUriOpener;
   pageAction?: RegisteredPageAction;
   currentPageSnapshot?: () => RegisteredPageSnapshot | null;
-  onSurface: HotelSurfaceCallback;
-  onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void;
+  currentHostSurface?: () => A2uiSurfaceState | null;
+  currentHostGeneration?: () => number;
+  onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => void;
+  onMemoryUpdate: (update: PersonaMemoryUpdateRequest, runtimeGeneration: number) => void;
   downstreamWriter?: UiSurfaceWriter;
   uiLayoutPlanner?: UiLayoutPlanner;
   settingsFingerprint?: string;
@@ -219,6 +221,15 @@ function normalizeCanaryTaskInput(
 }
 
 function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthorizationResult {
+  if (task.toolId === 'dynamic.search') {
+    const validDynamic = task.required && task.outputSchema === 'dynamicToolConnect' &&
+      task.allowedToolIds.length === 1 && task.allowedToolIds[0] === 'dynamic.search';
+    return {
+      ok: validDynamic,
+      code: validDynamic ? '' : 'DATA_TASK_UNAUTHORIZED',
+      message: validDynamic ? '' : 'Dynamic data tasks require the exact read-only virtual tool.'
+    };
+  }
   if (task.toolId === 'hotel.search' || task.toolId === 'hotel.detail') {
     return authorizeHotelDataTask(task);
   }
@@ -438,14 +449,20 @@ const rejectPageAction: RegisteredPageAction = async (
 
 class CanaryRegisteredExecutor implements RegisteredActionExecutor {
   private readonly aiphone: AiphoneRegisteredActionExecutor;
-  private readonly onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void;
-  private readonly onSurface: HotelSurfaceCallback;
+  private readonly onMemoryUpdate: (
+    update: PersonaMemoryUpdateRequest,
+    context: ActionExecutionContext
+  ) => void;
+  private readonly onSurface: (surface: A2uiSurfaceState, context: ActionExecutionContext) => void;
   private sequence: number = 0;
 
   constructor(
     aiphone: AiphoneRegisteredActionExecutor,
-    onMemoryUpdate: (update: PersonaMemoryUpdateRequest) => void,
-    onSurface: HotelSurfaceCallback
+    onMemoryUpdate: (
+      update: PersonaMemoryUpdateRequest,
+      context: ActionExecutionContext
+    ) => void,
+    onSurface: (surface: A2uiSurfaceState, context: ActionExecutionContext) => void
   ) {
     this.aiphone = aiphone;
     this.onMemoryUpdate = onMemoryUpdate;
@@ -468,7 +485,7 @@ class CanaryRegisteredExecutor implements RegisteredActionExecutor {
           message: 'Calendar review surface could not be rendered.'
         };
       }
-      this.onSurface(surface);
+      this.onSurface(surface, context);
       const output: CalendarReviewOutput = { surfaceId };
       return { status: 'success', output };
     }
@@ -483,10 +500,10 @@ class CanaryRegisteredExecutor implements RegisteredActionExecutor {
         message: 'Memory update args are invalid.'
       };
     }
-    this.onMemoryUpdate(update);
+    this.onMemoryUpdate(update, context);
     this.sequence++;
     const surfaceId: string = 'memory-update:' + this.sequence.toString();
-    this.onSurface(memoryUpdateSurface(surfaceId, update));
+    this.onSurface(memoryUpdateSurface(surfaceId, update), context);
     const output: MemorySurfaceOutput = { surfaceId };
     return {
       status: 'success',
@@ -554,6 +571,10 @@ export class MultiAgentCanaryRuntime {
   private readonly conversationId: string;
   private readonly aiphoneExecutor: AiphoneRegisteredActionExecutor;
   private readonly currentPageSnapshot: () => RegisteredPageSnapshot | null;
+  private readonly currentHostSurface: () => A2uiSurfaceState | null;
+  private readonly currentHostGeneration: () => number;
+  private readonly hostGenerations: Map<number, number> = new Map<number, number>();
+  private readonly turnHostGenerations: Map<string, number> = new Map<string, number>();
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
   private surfaceGeneration: number = 0;
@@ -564,15 +585,33 @@ export class MultiAgentCanaryRuntime {
     this.conversationId = conversationId;
     this.currentPageSnapshot = options.currentPageSnapshot === undefined ?
       (): RegisteredPageSnapshot | null => null : options.currentPageSnapshot;
+    this.currentHostSurface = options.currentHostSurface === undefined ?
+      (): A2uiSurfaceState | null => {
+        const snapshot = this.currentPageSnapshot();
+        return snapshot === null ? null : snapshot.surface;
+      } : options.currentHostSurface;
+    this.currentHostGeneration = options.currentHostGeneration === undefined ?
+      (): number => {
+        const current = this.currentHostSurface();
+        return current === null || current.runtimeGeneration === undefined ?
+          0 : current.runtimeGeneration;
+      } : options.currentHostGeneration;
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
     this.authority = new HotelSurfaceAuthority();
     const visibility = new HotelVisibility();
-    const onOwnedSurface = (surface: A2uiSurfaceState): void => {
-      this.surfaceGeneration++;
+    const onOwnedSurface = (surface: A2uiSurfaceState, generation?: number): void => {
+      const internalGeneration = generation === undefined ? 0 : generation;
+      if (internalGeneration <= 0) {
+        return;
+      }
+      const hostGeneration = this.hostGenerations.get(internalGeneration);
+      if (hostGeneration === undefined || hostGeneration <= 0) {
+        return;
+      }
       surface.runtimeOwner = 'multi_agent';
-      surface.runtimeGeneration = this.surfaceGeneration;
-      options.onSurface(surface);
+      surface.runtimeGeneration = hostGeneration;
+      options.onSurface(surface, hostGeneration);
     };
     const lookup = new CanaryToolLookup();
     const catalog = new ActionCatalog(
@@ -619,19 +658,51 @@ export class MultiAgentCanaryRuntime {
       actionCatalog: catalog,
       actionExecutor: new CanaryRegisteredExecutor(
         aiphoneExecutor,
-        options.onMemoryUpdate,
-        onOwnedSurface
+        (update: PersonaMemoryUpdateRequest, context: ActionExecutionContext): void => {
+          const hostGeneration = this.turnHostGenerations.get(context.turnId);
+          if (hostGeneration !== undefined && hostGeneration > 0) {
+            options.onMemoryUpdate(update, hostGeneration);
+          }
+        },
+        (surface: A2uiSurfaceState, context: ActionExecutionContext): void => {
+          const hostGeneration = this.turnHostGenerations.get(context.turnId);
+          if (hostGeneration === undefined || hostGeneration <= 0) {
+            return;
+          }
+          surface.runtimeOwner = 'multi_agent';
+          surface.runtimeGeneration = hostGeneration;
+          options.onSurface(surface, hostGeneration);
+        }
       ),
       virtualActionResolver: new MemoryIntentResolver(options.currentLocalDate),
       submitTimeoutMs: options.submitTimeoutMs,
       actionTimeoutMs: options.actionTimeoutMs,
       settingsFingerprint: options.settingsFingerprint,
-      surfaceTurnActivator: (turnId: string): void => writer.activateAutomaticTurn(turnId)
+      surfaceTurnActivator: (turnId: string, hostGeneration: number): void => {
+        const generation = writer.activateAutomaticTurn(turnId);
+        if (generation > 0) {
+          this.hostGenerations.set(generation, hostGeneration > 0 ? hostGeneration : generation);
+        }
+      },
+      turnGenerationObserver: (turnId: string, hostGeneration: number): void => {
+        let capturedGeneration = hostGeneration;
+        if (!Number.isSafeInteger(capturedGeneration) || capturedGeneration <= 0) {
+          this.surfaceGeneration++;
+          capturedGeneration = this.surfaceGeneration;
+        }
+        this.turnHostGenerations.set(turnId, capturedGeneration);
+      }
     });
   }
 
-  submit(text: string, context: UserInputPayload): Promise<MultiAgentTurnOutcome> {
-    return this.runtime.submit(text, context);
+  submit(
+    text: string,
+    context: UserInputPayload,
+    hostGeneration: number = 0
+  ): Promise<MultiAgentTurnOutcome> {
+    const capturedGeneration = Number.isSafeInteger(hostGeneration) && hostGeneration > 0 ?
+      hostGeneration : 0;
+    return this.runtime.submit(text, context, capturedGeneration);
   }
 
   runAction(action: A2uiAction, context: MultiAgentCanaryActionContext): Promise<boolean> {
@@ -645,21 +716,27 @@ export class MultiAgentCanaryRuntime {
       stepId: '',
       pageActionId: context.pageActionId
     };
-    return this.runtime.runAction(action, execution);
+    return this.runtime.runAction(action, execution, this.currentHostGeneration());
   }
 
   runPageAction(
     clicked: A2uiAction
   ): Promise<boolean> {
     const snapshot = this.currentPageSnapshot();
-    if (snapshot === null) {
+    const currentHost = this.currentHostSurface();
+    const hostGeneration = this.currentHostGeneration();
+    if (snapshot === null || currentHost === null) {
       return Promise.resolve(false);
     }
     const surface = snapshot.surface;
     const document = snapshot.document;
     const generation = snapshot.generation;
     if (!Number.isSafeInteger(generation) || generation <= 0 ||
-      surface.runtimeOwner !== 'multi_agent' ||
+      !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0 ||
+      surface.runtimeOwner !== 'multi_agent' || currentHost.runtimeOwner !== 'multi_agent' ||
+      surface.runtimeGeneration !== hostGeneration ||
+      currentHost.runtimeGeneration !== hostGeneration ||
+      currentHost.surfaceId !== surface.surfaceId ||
       surface.surfaceId.trim().length === 0 || clicked.args === undefined ||
       document.surfaceId === undefined || document.surfaceId !== surface.surfaceId ||
       document.generatedAt.trim().length === 0 ||

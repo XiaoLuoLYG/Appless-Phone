@@ -37,9 +37,12 @@ export interface MultiAgentSettledOutcome {
   message: string;
 }
 
-export const MIGRATED_TOOL_IDS: Set<string> = new Set<string>(
-  allToolDefinitions().map((definition: ToolDefinition): string => definition.toolId)
+const RUNTIME_OWNED_TOOL_IDS: string[] = allToolDefinitions().map(
+  (definition: ToolDefinition): string => definition.toolId
 );
+RUNTIME_OWNED_TOOL_IDS.push('dynamic.search');
+
+export const MIGRATED_TOOL_IDS: Set<string> = new Set<string>(RUNTIME_OWNED_TOOL_IDS);
 
 export function ownershipForPlan(
   toolIds: string[],
@@ -84,7 +87,8 @@ export interface MultiAgentRuntimeOptions {
   submitTimeoutMs?: number;
   actionTimeoutMs?: number;
   settingsFingerprint?: string;
-  surfaceTurnActivator?: (turnId: string) => void;
+  surfaceTurnActivator?: (turnId: string, hostGeneration: number) => void;
+  turnGenerationObserver?: (turnId: string, hostGeneration: number) => void;
 }
 
 export interface MultiAgentActionRequest {

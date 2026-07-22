@@ -87,6 +87,7 @@ export default function dynamicToolDiscoveryTest() {
         const fourthData = fourth.data as DynamicStructuredData;
 
         expect(first.status).assertEqual('success');
+        expect(first.outputSchema).assertEqual('dynamicToolConnect');
         expect(firstData.registration.provider).assertEqual('Composio');
         expect(firstData.registration.qualifiedName).assertEqual('NOTION_SEARCH');
         expect(firstData.registration.receipt).assertEqual('turn-1');
@@ -131,6 +132,7 @@ export default function dynamicToolDiscoveryTest() {
         for (let index = 0; index < cases.length; index++) {
           const result = await callStructuredTool('dynamic.search', 'unsafe', cases[index]);
           expect(result.status).assertEqual('error');
+          expect(result.outputSchema).assertEqual('dynamicToolConnect');
           expect(result.error?.code).assertEqual('DYNAMIC_WRITE_NOT_ALLOWED');
         }
         expect(calls).assertEqual(0);

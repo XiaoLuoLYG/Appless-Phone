@@ -119,6 +119,19 @@ const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"toolId":"mail.search","input":{"query":"酒店确认"},"required":true}],' +
   '"uiIntent":{"purpose":"mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":["mail"]},"reasonCode":"mail_search"}';
+const DYNAMIC_READ_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"dynamic-read","goal":"find the selected Notion page",' +
+  '"allowedToolIds":["dynamic.search"],"toolId":"dynamic.search",' +
+  '"input":{"operation":"search","qualifiedName":"NOTION_SEARCH",' +
+  '"schema":{"type":"object"},"receipt":"turn-dynamic-1"},"required":true}],' +
+  '"uiIntent":{"purpose":"dynamic.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["results"]},"reasonCode":"dynamic_read"}';
+const DYNAMIC_READ_DONE: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"dynamic.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"已返回授权 Notion 的读取结果。",' +
+  '"reasonCode":"dynamic_read_done"}';
 const WEATHER_HANDOFF_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
   '"requestedCapabilityIds":["dynamic.search"],"roundAction":"legacy_handoff","dataTasks":[],' +
   '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
@@ -258,6 +271,31 @@ class TwoToolExecutor implements DataTaskExecutor {
       status: 'success',
       sources: [],
       data,
+      warnings: []
+    };
+  }
+}
+
+class RecordingDynamicExecutor implements DataTaskExecutor {
+  readonly tasks: CreateDataTaskPayload[] = [];
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.tasks.push(task);
+    const result: DynamicGenericToolResult = {
+      sourceTag: 'Composio',
+      toolName: 'NOTION_SEARCH',
+      title: 'Selected read result',
+      status: 'success',
+      summary: 'one result',
+      rows: [],
+      rawPreview: '{"id":"page-real-1"}'
+    };
+    return {
+      toolId: task.toolId,
+      outputSchema: task.outputSchema,
+      status: 'success',
+      sources: [],
+      data: JSON.parse(JSON.stringify({ results: [result] })) as Object,
       warnings: []
     };
   }
@@ -575,6 +613,31 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('keeps C13 dynamic read in MultiAgent Data and executes only the selected read slug', 0, async () => {
+      const executor = new RecordingDynamicExecutor();
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([DYNAMIC_READ_DECISION, DYNAMIC_READ_DONE]),
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit('搜索我授权的 Notion 页面', { text: '' });
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('dynamic.search');
+      expect(executor.tasks[0].allowedToolIds.join(',')).assertEqual('dynamic.search');
+      const args = executor.tasks[0].args as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(args['operation'] as string).assertEqual('search');
+      expect(args['qualifiedName'] as string).assertEqual('NOTION_SEARCH');
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      runtime.dispose();
+    });
+
     it('keeps known direct-answer planner errors inside multi-agent and hands off only unmigrated IDs', 0, async () => {
       const model = new QueueModel([
         ANSWER_DECISION,
@@ -604,7 +667,8 @@ export default function multiAgentCanaryRuntimeTest() {
       expect((greeting as MultiAgentSettledOutcome).message).assertEqual('你好');
       expect(mail.kind).assertEqual('settled');
       expect((mail as MultiAgentSettledOutcome).status).assertEqual('error');
-      expect(weather.kind).assertEqual('handoff');
+      expect(weather.kind).assertEqual('settled');
+      expect((weather as MultiAgentSettledOutcome).status).assertEqual('error');
       expect(misleadingHotel.kind).assertEqual('settled');
       expect((misleadingHotel as MultiAgentSettledOutcome).status).assertEqual('error');
       expect(unobservedHotel.kind).assertEqual('settled');
@@ -619,7 +683,7 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('hands an unmigrated real-planner choice to legacy before execution', 0, async () => {
+    it('rejects a legacy handoff claim for the newly owned dynamic read tool', 0, async () => {
       const model = new QueueModel([WEATHER_HANDOFF_DECISION]);
       const executor = new CanaryHotelExecutor();
       const bus = new TrackingBus();
@@ -634,7 +698,9 @@ export default function multiAgentCanaryRuntimeTest() {
 
       const weather = await runtime.submit('查询北京天气', { text: '' });
 
-      expect(weather.kind).assertEqual('handoff');
+      expect(weather.kind).assertEqual('settled');
+      expect((weather as MultiAgentSettledOutcome).status).assertEqual('error');
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       expect(executor.calls.length).assertEqual(0);
       expect(bus.messages.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.TASK_CREATE_DATA ||
@@ -675,14 +741,14 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(outcome.kind).assertEqual('settled');
       expect(outcome.status).assertEqual('error');
-      expect(outcome.message).assertEqual('Leader cannot hand off after runtime execution has started');
+      expect(outcome.message).assertEqual('Legacy handoff requires at least one unmigrated capability');
       expect(executor.calls.join(',')).assertEqual('hotel.search');
       expect(model.prompts.length).assertEqual(2);
       expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
       expect(errors.length).assertEqual(1);
       expect((errors[0].payload as TaskErrorPayload).code)
-        .assertEqual('LEADER_RUNTIME_OWNERSHIP_VIOLATION');
+        .assertEqual('LEADER_HANDOFF_INVALID');
       runtime.dispose();
     });
 
@@ -738,6 +804,47 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(updates[0].personaId).assertEqual('food_companion');
       expect(updates[0].memoryText.indexOf('我只喝瑞幸咖啡') >= 0).assertTrue();
       expect(surfaces.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('keeps a reentrant virtual memory surface on its captured host generation', 0, async () => {
+      const surfaceGenerations: number[] = [];
+      const updateGenerations: number[] = [];
+      const options = canaryOptions(
+        new QueueModel([MEMORY_DECISION, ANSWER_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      let runtime: MultiAgentCanaryRuntime;
+      let newerTurn: Promise<MultiAgentSettledOutcome> | null = null;
+      options.onSurface = (_surface: A2uiSurfaceState, runtimeGeneration: number): void => {
+        surfaceGenerations.push(runtimeGeneration);
+      };
+      options.onMemoryUpdate = (
+        _update: PersonaMemoryUpdateRequest,
+        runtimeGeneration: number
+      ): void => {
+        updateGenerations.push(runtimeGeneration);
+        if (newerTurn === null) {
+          newerTurn = runtime.submit('newer turn', { text: '' }, 202) as
+            Promise<MultiAgentSettledOutcome>;
+        }
+      };
+      runtime = new MultiAgentCanaryRuntime(options);
+
+      const oldTurn = runtime.submit('我只喝瑞幸咖啡', {
+        text: '',
+        previousPersonaId: 'food_companion'
+      }, 101) as Promise<MultiAgentSettledOutcome>;
+      await oldTurn;
+      await newerTurn;
+
+      expect(updateGenerations.length).assertEqual(1);
+      expect(updateGenerations[0]).assertEqual(101);
+      expect(surfaceGenerations.length).assertEqual(1);
+      expect(surfaceGenerations[0]).assertEqual(101);
       runtime.dispose();
     });
 

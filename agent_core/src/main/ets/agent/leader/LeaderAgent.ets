@@ -67,6 +67,12 @@ export class LeaderAgent extends MessageDrivenAgent {
   private readonly timeoutMs: number;
   private readonly dataToolIds: Set<string>;
   private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
+  private readonly decisionObserver: ((
+    conversationId: string,
+    turnId: string,
+    taskId: string,
+    requestedCapabilityIds: string[]
+  ) => void) | null;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
   // Terminal state is reduced to exact identities so active turn payloads and
   // timers are released without permitting an old input to be dispatched twice.
@@ -77,7 +83,13 @@ export class LeaderAgent extends MessageDrivenAgent {
     planner: LeaderPlanner,
     planningContext: LeaderPlanningContext,
     timeoutMs: number = 30000,
-    dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer
+    dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer,
+    decisionObserver?: (
+      conversationId: string,
+      turnId: string,
+      taskId: string,
+      requestedCapabilityIds: string[]
+    ) => void
   ) {
     super(bus);
     this.bus = bus;
@@ -86,9 +98,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
       (definition: ToolDefinition): string => definition.toolId
     ));
+    this.dataToolIds.add('dynamic.search');
     this.timeoutMs = timeoutMs > 0 ? timeoutMs : 30000;
     this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
       null : dataTaskInputNormalizer;
+    this.decisionObserver = decisionObserver === undefined ? null : decisionObserver;
   }
 
   stop(): void {
@@ -306,6 +320,14 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
+    }
+    if (this.decisionObserver !== null) {
+      this.decisionObserver(
+        message.conversationId,
+        message.turnId,
+        message.taskId,
+        decision.requestedCapabilityIds.slice()
+      );
     }
     const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
     const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);

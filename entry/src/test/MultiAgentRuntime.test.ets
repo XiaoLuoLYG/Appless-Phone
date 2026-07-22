@@ -92,6 +92,23 @@ class CountingBus extends LinkedMessageBus {
   }
 }
 
+class HandoffMutatingBus extends CountingBus {
+  private readonly replacementIds: string[];
+
+  constructor(replacementIds: string[]) {
+    super();
+    this.replacementIds = replacementIds.slice();
+  }
+
+  publish(message: AgentMessage): void {
+    if (message.type === AgentMessageType.TURN_HANDOFF) {
+      const payload = message.payload as LegacyHandoff;
+      payload.unmigratedToolIds = this.replacementIds.slice();
+    }
+    super.publish(message);
+  }
+}
+
 class AnswerPlanner implements LeaderPlanner {
   lastInput: InputUserPayload | null = null;
 
@@ -116,7 +133,7 @@ class HandoffPlanner implements LeaderPlanner {
     return {
       personaId: 'travel_companion',
       skillId: '',
-      requestedCapabilityIds: ['dynamic.search'],
+      requestedCapabilityIds: ['unknown.search'],
       roundAction: 'legacy_handoff',
       dataTasks: [],
       uiIntent: {
@@ -474,6 +491,14 @@ function planningContext(): LeaderPlanningContext {
         inputSchema: 'dynamicToolSearchQuery',
         outputSchema: 'dynamicToolConnect',
         actions: []
+      },
+      {
+        toolId: 'unknown.search',
+        intent: 'unknown.search',
+        riskLevel: 'read',
+        inputSchema: 'unknownSearchQuery',
+        outputSchema: 'unknownSearchResults',
+        actions: []
       }
     ],
     personas: [{
@@ -602,7 +627,7 @@ function publishTurnTerminal(
 
 export default function multiAgentRuntimeTest() {
   describe('multiAgentRuntime', () => {
-    it('derives all 44 fixed owners from the verified registry and types unknown handoff exactly', 0, () => {
+    it('owns all 44 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
       const registryIds = allToolDefinitions().map(
         (definition: ToolDefinition): string => definition.toolId
       );
@@ -612,7 +637,8 @@ export default function multiAgentRuntimeTest() {
         MIGRATED_TOOL_IDS
       );
 
-      expect(MIGRATED_TOOL_IDS.size).assertEqual(44);
+      expect(MIGRATED_TOOL_IDS.size).assertEqual(45);
+      expect(MIGRATED_TOOL_IDS.has('dynamic.search')).assertTrue();
       expect(new Set<string>(registryIds).size).assertEqual(44);
       expect(known.owner).assertEqual('multi_agent');
       expect(known.unmigratedToolIds.length).assertEqual(0);
@@ -872,7 +898,7 @@ export default function multiAgentRuntimeTest() {
       expect(handoff.owner).assertEqual('legacy');
       expect(handoff.reason).assertEqual('unmigrated_tool');
       expect(handoff.reasonCode).assertEqual('unmigrated_tool');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('dynamic.search');
+      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.search');
       expect(handoff.personaId).assertEqual('travel_companion');
       expect(bus.published.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.TASK_CREATE_DATA ||
@@ -880,6 +906,28 @@ export default function multiAgentRuntimeTest() {
           message.type === AgentMessageType.ACTION_RUN
       ).length).assertEqual(0);
       runtime.dispose();
+    });
+
+    it('rejects forged known missing extra and case-mutated handoff capability sets', 0, async () => {
+      const forgeries: string[][] = [
+        ['travel.search'],
+        [],
+        ['unknown.search', 'extra.search'],
+        ['UNKNOWN.SEARCH']
+      ];
+      for (let index = 0; index < forgeries.length; index++) {
+        const bus = new HandoffMutatingBus(forgeries[index]);
+        const runtime = new MultiAgentRuntime(runtimeOptions(
+          bus,
+          new HandoffPlanner(),
+          new ControlledWriter(),
+          20
+        ));
+        const outcome = await runtime.submit('unknown capability', { text: '' });
+        expect(outcome.kind).assertEqual('settled');
+        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+        runtime.dispose();
+      }
     });
 
     it('hands a mixed plan wholly to legacy before publishing its known Data task', 0, async () => {
@@ -943,7 +991,7 @@ export default function multiAgentRuntimeTest() {
       expect(outcomes[0].kind).assertEqual('settled');
       expect(outcomes[1].kind).assertEqual('handoff');
       expect((outcomes[1] as MultiAgentHandoffOutcome).unmigratedToolIds[0])
-        .assertEqual('dynamic.search');
+        .assertEqual('unknown.search');
       migrated.dispose();
       legacy.dispose();
     });

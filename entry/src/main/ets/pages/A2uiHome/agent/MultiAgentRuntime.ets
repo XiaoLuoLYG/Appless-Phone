@@ -56,6 +56,9 @@ interface PendingTurn {
   turnId: string;
   inputTaskId: string;
   generation: number;
+  hostGeneration: number;
+  requestedCapabilityIds: string[];
+  runtimeOwnedToolIds: string[];
   uiTaskId: string;
   uiTerminal: boolean;
   uiState: '' | 'result' | 'error';
@@ -77,6 +80,7 @@ interface PendingAction {
   planId: string;
   runId: string;
   generation: number;
+  hostGeneration: number;
   directTerminal: boolean;
   directSucceeded: boolean;
   followUpTurnId: string;
@@ -119,6 +123,10 @@ function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function runtimeOwnedIds(context: LeaderPlanningContext): string[] {
+  return context.runtimeOwnedToolIds === undefined ? [] : context.runtimeOwnedToolIds.slice();
+}
+
 class RuntimeActionIds implements HotelActionIdFactory {
   private sequence: number = 0;
 
@@ -147,9 +155,11 @@ export class MultiAgentRuntime {
   private readonly settingsFingerprint: string;
   private readonly submitTimeoutMs: number;
   private readonly actionTimeoutMs: number;
-  private readonly surfaceTurnActivator: ((turnId: string) => void) | null;
+  private readonly surfaceTurnActivator: ((turnId: string, hostGeneration: number) => void) | null;
+  private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly leader: LeaderAgent;
   private readonly planningContextProvider: (() => LeaderPlanningContext) | null;
+  private runtimeOwnedToolIds: string[];
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
@@ -173,12 +183,23 @@ export class MultiAgentRuntime {
     this.actionTimeoutMs = boundedTimeout(options.actionTimeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
     this.surfaceTurnActivator = options.surfaceTurnActivator === undefined ?
       null : options.surfaceTurnActivator;
+    this.turnGenerationObserver = options.turnGenerationObserver === undefined ?
+      null : options.turnGenerationObserver;
+    this.runtimeOwnedToolIds = runtimeOwnedIds(options.planningContext);
     this.leader = new LeaderAgent(
       this.bus,
       options.planner,
       options.planningContext,
       this.submitTimeoutMs,
-      options.dataTaskInputNormalizer
+      options.dataTaskInputNormalizer,
+      (
+        conversationId: string,
+        turnId: string,
+        taskId: string,
+        requestedCapabilityIds: string[]
+      ): void => this.recordRequestedCapabilities(
+        conversationId, turnId, taskId, requestedCapabilityIds
+      )
     );
     this.planningContextProvider = options.planningContextProvider === undefined ?
       null : options.planningContextProvider;
@@ -230,7 +251,11 @@ export class MultiAgentRuntime {
     this.observe();
   }
 
-  submit(text: string, context: UserInputPayload): Promise<MultiAgentTurnOutcome> {
+  submit(
+    text: string,
+    context: UserInputPayload,
+    hostGeneration: number = 0
+  ): Promise<MultiAgentTurnOutcome> {
     const prompt: string = text.trim();
     if (!this.active || prompt.length === 0) {
       return Promise.resolve(settled('canceled', 'Multi-agent runtime is unavailable.'));
@@ -239,7 +264,9 @@ export class MultiAgentRuntime {
     const contextProvider: (() => LeaderPlanningContext) | null = this.planningContextProvider;
     if (contextProvider !== null) {
       try {
-        this.leader.updatePlanningContext(contextProvider());
+        const planningContext = contextProvider();
+        this.leader.updatePlanningContext(planningContext);
+        this.runtimeOwnedToolIds = runtimeOwnedIds(planningContext);
       } catch (_error) {
         return Promise.resolve(settled('error', 'Multi-agent planning context refresh failed.'));
       }
@@ -254,6 +281,9 @@ export class MultiAgentRuntime {
         turnId,
         inputTaskId,
         generation: this.generation,
+        hostGeneration,
+        requestedCapabilityIds: [],
+        runtimeOwnedToolIds: this.runtimeOwnedToolIds.slice(),
         uiTaskId: '',
         uiTerminal: false,
         uiState: '',
@@ -270,6 +300,15 @@ export class MultiAgentRuntime {
         this.timeoutTurn(pending);
       }, this.submitTimeoutMs);
       this.pendingTurn = pending;
+      const observeGeneration = this.turnGenerationObserver;
+      if (observeGeneration !== null) {
+        try {
+          observeGeneration(pending.turnId, pending.hostGeneration);
+        } catch (_error) {
+          this.cancelActiveTurn('turn_generation_observer_failed');
+          return;
+        }
+      }
       this.bus.publish({
         type: AgentMessageType.INPUT_USER,
         conversationId: pending.conversationId,
@@ -280,7 +319,11 @@ export class MultiAgentRuntime {
     });
   }
 
-  runAction(action: A2uiAction, context: ActionExecutionContext): Promise<boolean> {
+  runAction(
+    action: A2uiAction,
+    context: ActionExecutionContext,
+    hostGeneration: number = 0
+  ): Promise<boolean> {
     if (!this.active || action.args === undefined || this.pendingActions.size > 0 ||
       !nonempty(context.conversationId) || !nonempty(context.turnId) ||
       !nonempty(context.surfaceId) || !nonempty(context.sourceToolId)) {
@@ -318,6 +361,7 @@ export class MultiAgentRuntime {
         planId,
         runId,
         generation: this.generation,
+        hostGeneration,
         directTerminal: false,
         directSucceeded: false,
         followUpTurnId: '',
@@ -435,7 +479,7 @@ export class MultiAgentRuntime {
       return;
     }
     if (message.type === AgentMessageType.TASK_CREATE_UI) {
-      this.activateSurfaceTurn(message.turnId);
+      this.activateSurfaceTurn(message.turnId, pending.hostGeneration);
       pending.uiTaskId = message.taskId;
       pending.uiTerminal = false;
       pending.uiState = '';
@@ -540,7 +584,8 @@ export class MultiAgentRuntime {
     if (payload.owner !== 'legacy' || payload.reason !== 'unmigrated_tool' ||
       payload.reasonCode !== 'unmigrated_tool' || !nonempty(payload.personaId) ||
       typeof payload.skillId !== 'string' ||
-      !this.validUnmigratedToolIds(payload.unmigratedToolIds)) {
+      !this.validUnmigratedToolIds(payload.unmigratedToolIds) ||
+      !this.exactPendingHandoff(payload.unmigratedToolIds, pending)) {
       return;
     }
     const outcome: MultiAgentHandoffOutcome = {
@@ -553,6 +598,44 @@ export class MultiAgentRuntime {
       skillId: payload.skillId
     };
     this.settleTurn(pending, outcome);
+  }
+
+  private recordRequestedCapabilities(
+    conversationId: string,
+    turnId: string,
+    taskId: string,
+    requestedCapabilityIds: string[]
+  ): void {
+    const pending = this.pendingTurn;
+    if (pending === null || pending.generation !== this.generation ||
+      pending.conversationId !== conversationId || pending.turnId !== turnId ||
+      pending.inputTaskId !== taskId) {
+      return;
+    }
+    pending.requestedCapabilityIds = requestedCapabilityIds.slice();
+  }
+
+  private exactPendingHandoff(ids: string[], pending: PendingTurn): boolean {
+    if (pending.requestedCapabilityIds.length === 0) {
+      return false;
+    }
+    const owned = new Set<string>(pending.runtimeOwnedToolIds);
+    const expected: string[] = [];
+    for (let index = 0; index < pending.requestedCapabilityIds.length; index++) {
+      const toolId = pending.requestedCapabilityIds[index];
+      if (!owned.has(toolId)) {
+        expected.push(toolId);
+      }
+    }
+    if (expected.length === 0 || expected.length !== ids.length) {
+      return false;
+    }
+    for (let index = 0; index < expected.length; index++) {
+      if (expected[index] !== ids[index]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private validUnmigratedToolIds(ids: string[]): boolean {
@@ -646,16 +729,16 @@ export class MultiAgentRuntime {
     pending.followUpUiTaskId = message.taskId;
     pending.followUpDataTaskId = task.dataTaskIds[0];
     pending.followUpUiSeen = true;
-    this.activateSurfaceTurn(message.turnId);
+    this.activateSurfaceTurn(message.turnId, pending.hostGeneration);
   }
 
-  private activateSurfaceTurn(turnId: string): void {
+  private activateSurfaceTurn(turnId: string, hostGeneration: number): void {
     const activate = this.surfaceTurnActivator;
     if (activate === null) {
       return;
     }
     try {
-      activate(turnId);
+      activate(turnId, hostGeneration);
     } catch (_error) {
     }
   }

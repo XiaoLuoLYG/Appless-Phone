@@ -62,6 +62,31 @@ export function runtimeOwnerAllowsSurfaceAction(
   return surface.runtimeOwner === owner;
 }
 
+export function runtimeCallbackIsCurrent(
+  activeOwner: RuntimeOwner,
+  activeGeneration: number,
+  callbackOwner: RuntimeOwner,
+  callbackGeneration: number
+): boolean {
+  return activeOwner === callbackOwner && activeGeneration === callbackGeneration;
+}
+
+export function runtimeSurfaceIdentityMatches(
+  current: A2uiSurfaceState,
+  retained: A2uiSurfaceState,
+  activeOwner: RuntimeOwner,
+  activeGeneration: number
+): boolean {
+  return activeOwner === 'multi_agent' && Number.isSafeInteger(activeGeneration) &&
+    activeGeneration > 0 &&
+    current.runtimeOwner === activeOwner &&
+    retained.runtimeOwner === activeOwner &&
+    current.runtimeGeneration === activeGeneration &&
+    retained.runtimeGeneration === activeGeneration &&
+    current.surfaceId.trim().length > 0 &&
+    current.surfaceId === retained.surfaceId;
+}
+
 export function nextSendSpinnerRotation(current: number, isBusy: boolean): number {
   if (!isBusy) {
     return 0;

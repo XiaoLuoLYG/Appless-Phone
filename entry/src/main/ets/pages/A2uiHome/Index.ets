@@ -150,7 +150,9 @@ import {
   ConnectionPanelState,
   createInitialConnectionPanelState,
   inputTextAfterPromptSubmit,
+  runtimeCallbackIsCurrent,
   runtimeOwnerAllowsSurfaceAction,
+  runtimeSurfaceIdentityMatches,
   shouldApplySurfaceUpdate,
   shouldShowQueryPendingSurface,
   shouldShowWelcome,
@@ -1255,12 +1257,17 @@ struct Index {
       model: model,
       selectedPersonaId: (): string => this.selectedPersonaId,
       opener: opener,
-      onSurface: (surface: A2uiSurfaceState): void => {
-        this.isAwaitingFirstSurface = false;
-        this.applyRuntimeSurface(surface, 'multi_agent', this.runtimeGeneration);
+      onSurface: (surface: A2uiSurfaceState, generation: number): void => {
+        if (this.applyRuntimeSurface(surface, 'multi_agent', generation)) {
+          this.isAwaitingFirstSurface = false;
+        }
       },
-      onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
-        this.applyPersonaMemoryUpdate(update);
+      onMemoryUpdate: (update: PersonaMemoryUpdateRequest, generation: number): void => {
+        if (runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+        )) {
+          this.applyPersonaMemoryUpdate(update);
+        }
       },
       pageAction: (
         actionId: string,
@@ -1270,6 +1277,8 @@ struct Index {
         this.executeRegisteredGmailReply(args) : pageHandler.execute(actionId, args, context),
       currentPageSnapshot: (): RegisteredPageSnapshot | null =>
         this.registeredPageSnapshotStore.current(),
+      currentHostSurface: (): A2uiSurfaceState | null => this.surfaceSnapshot(this.currentSurface),
+      currentHostGeneration: (): number => this.runtimeGeneration,
       currentLocalDate: (): string => this.currentLocalDate(),
       settingsFingerprint: fingerprint
     };
@@ -1378,11 +1387,17 @@ struct Index {
     surface: A2uiSurfaceState,
     owner: RuntimeOwner,
     generation: number
-  ): void {
-    if (owner !== this.activeRuntimeOwner || generation !== this.runtimeGeneration) {
-      return;
+  ): boolean {
+    if (!runtimeCallbackIsCurrent(
+      this.activeRuntimeOwner,
+      this.runtimeGeneration,
+      owner,
+      generation
+    )) {
+      return false;
     }
     this.applySurface(this.ownedSurface(surface, owner, generation));
+    return true;
   }
 
   private parsedDataModel(): A2uiRuntimeDataModel | null {
@@ -1500,7 +1515,7 @@ struct Index {
     this.writeHtmlHomeDebugExport(this.currentHtmlHomeDocument(), 'manual');
   }
 
-  private applySurface(surface: A2uiSurfaceState): void {
+  private applySurface(surface: A2uiSurfaceState): boolean {
     const next = this.surfaceSnapshot(surface);
     if (next.runtimeOwner === undefined) {
       next.runtimeOwner = this.activeRuntimeOwner;
@@ -1511,7 +1526,7 @@ struct Index {
     if (next.runtimeOwner !== this.activeRuntimeOwner ||
       next.runtimeGeneration !== this.runtimeGeneration ||
       !shouldApplySurfaceUpdate(this.currentSurface, next)) {
-      return;
+      return false;
     }
     this.currentSurface = next;
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
@@ -1523,6 +1538,7 @@ struct Index {
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
       ' renderTick=' + this.surfaceRenderTick.toString());
+    return true;
   }
 
   private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
@@ -2105,8 +2121,14 @@ struct Index {
       if (actionId.length === 0) {
         const canaryOutcome: MultiAgentTurnOutcome = await this.canaryRuntime().submit(
           trimmed,
-          this.multiAgentInput(trimmed)
+          this.multiAgentInput(trimmed),
+          turnGeneration
         );
+        if (!runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', turnGeneration
+        )) {
+          return;
+        }
         if (canaryOutcome.kind === 'settled') {
           const result: MultiAgentSettledOutcome = canaryOutcome as MultiAgentSettledOutcome;
           if (!result.ok) {
@@ -2137,8 +2159,10 @@ struct Index {
         modelPrompt,
         this.recentMessages(),
         (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
+          if (!this.applyRuntimeSurface(surface, 'legacy', turnGeneration)) {
+            return;
+          }
           this.isAwaitingFirstSurface = false;
-          this.applyRuntimeSurface(surface, 'legacy', turnGeneration);
           const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
           this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
             ok: true,
@@ -2151,12 +2175,18 @@ struct Index {
         },
         null,
         (update: PersonaMemoryUpdateRequest) => {
-          this.applyPersonaMemoryUpdate(update);
+          if (runtimeCallbackIsCurrent(
+            this.activeRuntimeOwner, this.runtimeGeneration, 'legacy', turnGeneration
+          )) {
+            this.applyPersonaMemoryUpdate(update);
+          }
         },
         actionArgs
       );
+      if (!this.applyRuntimeSurface(result.surface, 'legacy', turnGeneration)) {
+        return;
+      }
       this.isAwaitingFirstSurface = false;
-      this.applyRuntimeSurface(result.surface, 'legacy', turnGeneration);
       aiLogInfo('[AIPhone][A2uiHomeModelResult] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
         ' rawChars=' + result.raw.length.toString() +
@@ -2210,6 +2240,9 @@ struct Index {
         }
       }
     } catch (error) {
+      if (this.runtimeGeneration !== turnGeneration) {
+        return;
+      }
       this.isAwaitingFirstSurface = false;
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       aiLogError('[AIPhone][A2uiHomeModelException] ' + logSnippet(message));
@@ -2222,8 +2255,10 @@ struct Index {
         error: message
       }));
     } finally {
-      this.isAwaitingFirstSurface = false;
-      this.isBusy = false;
+      if (this.runtimeGeneration === turnGeneration) {
+        this.isAwaitingFirstSurface = false;
+        this.isBusy = false;
+      }
     }
   }
 
@@ -4025,16 +4060,24 @@ struct Index {
 
   private async runRegisteredPageAction(action: A2uiAction): Promise<boolean> {
     const snapshot = this.registeredPageSnapshotStore.current();
-    if (this.activeRuntimeOwner !== 'multi_agent' ||
-      !runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent') ||
-      snapshot === null ||
-      !runtimeOwnerAllowsSurfaceAction(snapshot.surface, 'multi_agent')) {
+    const actionGeneration = this.runtimeGeneration;
+    if (snapshot === null || !runtimeSurfaceIdentityMatches(
+      this.currentSurface,
+      snapshot.surface,
+      this.activeRuntimeOwner,
+      actionGeneration
+    )) {
       return false;
     }
     const runtime = this.canaryRuntime();
     this.isBusy = true;
     try {
       const ok = await runtime.runPageAction(action);
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+      )) {
+        return false;
+      }
       this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
         ok,
         status: ok ? 'ready' : 'error',
@@ -4045,7 +4088,11 @@ struct Index {
       }));
       return ok;
     } finally {
-      this.isBusy = false;
+      if (runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+      )) {
+        this.isBusy = false;
+      }
     }
   }
 
@@ -4055,8 +4102,9 @@ struct Index {
   ): Promise<void> {
     if (this.multiAgentRuntime !== null && this.activeRuntimeOwner === 'multi_agent' &&
       runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent') &&
-      (action.id === 'hotel.detail' || action.id === 'hotel.navigate' || action.id === 'hotel.booking.open')) {
+      action.id === 'hotel.detail') {
       const runtime = this.multiAgentRuntime;
+      const actionGeneration = this.runtimeGeneration;
       const context = runtime.currentActionContext();
       if (context === null || !isHtmlHomeActionAllowed(document, action)) {
         this.logHtmlHomeActionError(action, 'hotel_context_not_current');
@@ -4065,6 +4113,11 @@ struct Index {
       this.isBusy = true;
       try {
         const ok = await runtime.runAction(action, context);
+        if (!runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+        )) {
+          return;
+        }
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: ok,
           status: ok ? 'ready' : 'error',
@@ -4074,7 +4127,11 @@ struct Index {
           error: ok ? '' : '酒店 action 与当前 surface/document 不匹配'
         }));
       } finally {
-        this.isBusy = false;
+        if (runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
+        )) {
+          this.isBusy = false;
+        }
       }
       return;
     }
@@ -4196,7 +4253,8 @@ struct Index {
     runtimeOwner: RuntimeOwner = 'legacy'
   ): Promise<boolean> {
     const toolGeneration: number = runtimeOwner === 'legacy' ?
-      this.beginRuntimeTurn('legacy') : this.runtimeGeneration;
+      (this.activeRuntimeOwner === 'legacy' && this.isBusy ?
+        this.runtimeGeneration : this.beginRuntimeTurn('legacy')) : this.runtimeGeneration;
     if (runtimeOwner !== this.activeRuntimeOwner) {
       return false;
     }
@@ -4223,6 +4281,11 @@ struct Index {
         ' promptChars=' + prompt.length.toString());
       this.markChecking('正在打开世界杯界面...');
       const opened = await this.openAnythingDemo();
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+      )) {
+        return false;
+      }
       if (!opened) {
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: false,
@@ -4264,6 +4327,11 @@ struct Index {
       this.markChecking('正在调用工具：' + toolId);
     }
     const callArgs = await this.argsWithCurrentLocationForTool(toolId, args);
+    if (!runtimeCallbackIsCurrent(
+      this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+    )) {
+      return false;
+    }
     const result: A2uiCallResult = await callToolGateway(
       TOOL_GATEWAY_URL,
       toolId,
@@ -4275,7 +4343,9 @@ struct Index {
           return;
         }
         const nextSurface = copyPersonaData(personaSourceSurface, surface);
-        this.applyRuntimeSurface(nextSurface, runtimeOwner, toolGeneration);
+        if (!this.applyRuntimeSurface(nextSurface, runtimeOwner, toolGeneration)) {
+          return;
+        }
         this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
           ok: true,
           status: 'checking',
@@ -4323,9 +4393,16 @@ struct Index {
       this.finishLuckinOptionSwitch(false);
       aiLogInfo('[AIPhone][A2uiHomeLuckinSwitchFallback] ok=' + (result.ok ? 'true' : 'false'));
     }
-    this.applyRuntimeSurface(resultSurface, runtimeOwner, toolGeneration);
+    if (!this.applyRuntimeSurface(resultSurface, runtimeOwner, toolGeneration)) {
+      return false;
+    }
     if (toolId === 'payment.account.setup') {
       await this.saveStripeReceivingProfile(resultSurface);
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, runtimeOwner, toolGeneration
+      )) {
+        return false;
+      }
     }
     this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
       ok: result.ok,
