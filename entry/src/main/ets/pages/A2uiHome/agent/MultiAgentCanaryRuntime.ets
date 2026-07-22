@@ -26,7 +26,6 @@ import {
   VirtualActionIntent,
   VirtualActionIntentResolver,
   allToolDefinitions,
-  validateHotelActionArgs,
   toolDefinitionForToolId
 } from '@loop/agent-core';
 import { leaderPersonaContext } from '../../../model/LeaderPersonaContext';
@@ -60,7 +59,7 @@ import {
   AiphoneRegisteredActionExecutor,
   RegisteredPageAction,
   SystemUriOpener,
-  validateGmailReplyActionArgs
+  validateRegisteredPageActionArgs
 } from './AiphoneRegisteredActionExecutor';
 import {
   RegisteredPageSnapshot,
@@ -152,18 +151,7 @@ class CanaryArgsValidator implements ActionArgsValidator {
         message: valid ? '' : 'Memory update args are invalid.'
       };
     }
-    if (actionId.indexOf('hotel.') === 0) {
-      return validateHotelActionArgs(actionId, args);
-    }
-    if (actionId === 'gmail.message.send') {
-      return validateGmailReplyActionArgs(args);
-    }
-    const valid = args !== null && typeof args === 'object' && !Array.isArray(args);
-    return {
-      ok: valid,
-      code: valid ? '' : 'ACTION_ARGS_INVALID',
-      message: valid ? '' : 'Action args are invalid.'
-    };
+    return validateRegisteredPageActionArgs(actionId, args);
   }
 }
 

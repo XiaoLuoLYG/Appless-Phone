@@ -223,8 +223,9 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, forged)).assertFalse();
     });
 
-    it('allows Calendar delete only for a visible real event after confirmation', 0, () => {
+    it('allows Calendar delete only for the exact rendered confirmation action', 0, () => {
       const doc = documentFixture();
+      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary' };
       doc.blocks.push({
         id: 'calendar-event-1',
         kind: 'generic-tool-result',
@@ -235,9 +236,8 @@ export default function htmlHomeActionPolicyTest() {
         toolId: 'calendar.events.search',
         metrics: [],
         rows: [{ label: 'Event ID', value: 'event-1' }],
-        actions: []
+        actions: [action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed)]
       });
-      const allowed: CalendarDeleteArgsFixture = { eventId: 'event-1', calendarId: 'primary' };
       const wrongEvent: CalendarDeleteArgsFixture = { eventId: 'event-2', calendarId: 'primary' };
 
       expect(isHtmlHomeActionAllowed(doc,
@@ -246,6 +246,10 @@ export default function htmlHomeActionPolicyTest() {
         action('calendar.event.delete.confirm', '删除日程', 'prompt', wrongEvent))).assertFalse();
       expect(isHtmlHomeActionAllowed(doc,
         action('calendar.event.delete.confirm', '删除日程', 'client', allowed))).assertFalse();
+
+      doc.blocks[doc.blocks.length - 1].actions = [];
+      expect(isHtmlHomeActionAllowed(doc,
+        action('calendar.event.delete.confirm', '删除日程', 'prompt', allowed))).assertFalse();
     });
 
     it('allows dynamic credential save only for the current dynamic block', 0, () => {

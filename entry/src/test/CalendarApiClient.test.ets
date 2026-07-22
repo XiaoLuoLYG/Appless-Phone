@@ -297,6 +297,42 @@ export default function calendarApiClientTest() {
       expect(results[0].status).assertEqual('success');
     });
 
+    it('fails Calendar writes closed on nested negative provider truth', 0, () => {
+      const create = calendarResultsFromComposioObservation(
+        'calendar.event.create',
+        '{"data":{"successful":false,"response_data":{"id":"event-fake"}},"error":null}'
+      );
+      const update = calendarResultsFromComposioObservation(
+        'calendar.event.update',
+        '{"data":{"response_data":{"success":false,"id":"event-fake"}},"error":null}'
+      );
+      const remove = calendarResultsFromComposioObservation(
+        'calendar.event.delete',
+        '{"data":{"response_data":{"status":"delete_failed"}},"error":null}',
+        { eventId: 'event-request-only', calendarId: 'primary' }
+      );
+
+      expect(create[0].status).assertEqual('error');
+      expect(update[0].status).assertEqual('error');
+      expect(remove[0].status).assertEqual('error');
+      expect(JSON.stringify(remove[0].rows).indexOf('event-request-only')).assertEqual(-1);
+    });
+
+    it('requires positive provider evidence before returning Calendar delete success', 0, () => {
+      const missing = calendarResultsFromComposioObservation(
+        'calendar.event.delete', '{"data":{},"error":null}',
+        { eventId: 'event-request-only', calendarId: 'primary' }
+      );
+      const positive = calendarResultsFromComposioObservation(
+        'calendar.event.delete', '{"data":{"successful":true},"error":null}',
+        { eventId: 'event-provider-confirmed', calendarId: 'primary' }
+      );
+
+      expect(missing[0].status).assertEqual('error');
+      expect(positive[0].status).assertEqual('success');
+      expect(positive[0].rows[0].value).assertEqual('event-provider-confirmed');
+    });
+
     it('normalizes current week search prompts before calling Calendar', 0, () => {
       const args: CalendarEventArgs = normalizedCalendarArgsForPrompt('calendar.events.search', '帮我查看我本周的calendar日程', {
         timeRange: 'this week',

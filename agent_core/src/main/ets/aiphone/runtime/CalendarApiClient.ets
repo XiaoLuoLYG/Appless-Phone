@@ -33,6 +33,9 @@ interface CalendarComposioData {
   response_data?: CalendarEventPayload;
 }
 
+type CalendarProviderValue = Object | string | number | boolean | null | undefined;
+type CalendarProviderRecord = Record<string, CalendarProviderValue>;
+
 interface CalendarEventBodyTime {
   dateTime: string;
   timeZone: string;
@@ -433,6 +436,68 @@ function composioCalendarResults(results: DynamicGenericToolResult[]): DynamicGe
   return results;
 }
 
+function calendarProviderObject(value: CalendarProviderValue): Object | null {
+  return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value) ?
+    value as Object : null;
+}
+
+function calendarProviderRecords(payload: CalendarComposioPayload): Object[] {
+  const records: Object[] = [payload as Object];
+  const data = calendarProviderObject(payload.data);
+  if (data !== null) {
+    records.push(data);
+    const response = calendarProviderObject((data as CalendarProviderRecord)['response_data']);
+    if (response !== null) {
+      records.push(response);
+    }
+  }
+  return records;
+}
+
+function negativeCalendarStatus(value: string): boolean {
+  const status = value.trim().toLowerCase();
+  return status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0;
+}
+
+function calendarWriteFailure(payload: CalendarComposioPayload): string {
+  const records = calendarProviderRecords(payload);
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] as CalendarProviderRecord;
+    if (record['success'] === false || record['success'] === 'false' ||
+      record['successful'] === false || record['successful'] === 'false') {
+      return textOf(record['message']).trim().length > 0 ? textOf(record['message']) :
+        'Provider explicitly reported failure.';
+    }
+    if (negativeCalendarStatus(textOf(record['status']))) {
+      return 'Provider returned failure status: ' + textOf(record['status']);
+    }
+    const error = textOf(record['error']).trim();
+    if (error.length > 0 && error !== 'null') {
+      return error;
+    }
+  }
+  return '';
+}
+
+function calendarDeleteConfirmed(payload: CalendarComposioPayload): boolean {
+  const records = calendarProviderRecords(payload);
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] as CalendarProviderRecord;
+    if (record['success'] === true || record['success'] === 'true' ||
+      record['successful'] === true || record['successful'] === 'true') {
+      return true;
+    }
+    const status = textOf(record['status']).trim().toLowerCase();
+    if (status === 'success' || status === 'succeeded' || status === 'completed' ||
+      status === 'ok' || status === 'deleted') {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function calendarResultsFromComposioObservation(
   toolId: string,
   rawJson: string,
@@ -445,6 +510,10 @@ export function calendarResultsFromComposioObservation(
     }
     if (payload.data === undefined || payload.data === null) {
       return composioCalendarResults([errorResult(toolId, 'Google Calendar 返回无效', 'Provider 未返回 data。')]);
+    }
+    const writeFailure = calendarWriteFailure(payload);
+    if (toolId !== 'calendar.events.search' && writeFailure.length > 0) {
+      return composioCalendarResults([errorResult(toolId, 'Google Calendar 调用失败', writeFailure)]);
     }
     if (toolId === 'calendar.events.search') {
       return composioCalendarResults(calendarEventResultsFromListPayload(JSON.stringify(payload.data), args));
@@ -459,6 +528,11 @@ export function calendarResultsFromComposioObservation(
         '已直接写入真实 Google Calendar。' : '已直接更新真实 Google Calendar。')]);
     }
     if (toolId === 'calendar.event.delete') {
+      if (!calendarDeleteConfirmed(payload)) {
+        return composioCalendarResults([errorResult(
+          toolId, 'Google Calendar 返回无效', 'Provider 未返回明确的删除成功状态。'
+        )]);
+      }
       const eventId = args === null ? '' : textOf(args.eventId).trim();
       return [{
         sourceTag: 'Composio Google Calendar',
@@ -467,7 +541,7 @@ export function calendarResultsFromComposioObservation(
         status: 'success',
         summary: '已从真实 Google Calendar 删除日程。',
         rows: eventId.length > 0 ? [{ label: 'Event ID', value: eventId }] : [],
-        rawPreview: 'deleted eventId=' + eventId
+        rawPreview: rawJson.substring(0, 1200)
       }];
     }
     return composioCalendarResults([errorResult(toolId, '不支持的 Google Calendar 工具', toolId)]);

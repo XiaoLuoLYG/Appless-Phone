@@ -115,9 +115,6 @@ import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVide
 import {
   CalendarEventArgs,
   calendarEventRequiredFields,
-  calendarDeleteTargetFromResultsForTest,
-  calendarUpdateArgsFromResultsForTest,
-  calendarUpdateNeedsInputResults,
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarResultsFromComposioObservation,
@@ -1395,14 +1392,6 @@ interface WhatsAppPhoneNumbersArgs {
 
 interface CalendarComposioArgs extends CalendarEventArgs {
   sendUpdates?: string;
-}
-
-interface CalendarDeleteConfirmArgs {
-  eventId: string;
-  calendarId: string;
-  title: string;
-  start: string;
-  end: string;
 }
 
 type ToolArgValue = Object | string | number | boolean | null | undefined;
@@ -3487,6 +3476,44 @@ function rideOrderPayloadText(payload: Object, keys: string[]): string {
   return '';
 }
 
+function rideWriteFailure(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  const records: Object[] = [root];
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    records.push(data);
+  }
+  const items = ridePayloadItems(payload);
+  if (items.length > 0) {
+    records.push(items[0]);
+  }
+  for (let index = 0; index < records.length; index++) {
+    const success = rideObjectValue(records[index], 'success');
+    const successful = rideObjectValue(records[index], 'successful');
+    if (success === false || success === 'false' ||
+      successful === false || successful === 'false') {
+      return firstText([
+        rideObjectValue(records[index], 'message'),
+        rideObjectValue(records[index], 'error'),
+        'Provider explicitly reported failure.'
+      ]);
+    }
+    const status = firstText([
+      rideObjectValue(records[index], 'status'),
+      rideObjectValue(records[index], 'orderStatus'),
+      rideObjectValue(records[index], 'order_status'),
+      rideObjectValue(records[index], 'cancelStatus'),
+      rideObjectValue(records[index], 'cancel_status')
+    ]).trim();
+    const lower = status.toLowerCase();
+    if (lower.indexOf('fail') >= 0 || lower.indexOf('error') >= 0 ||
+      lower.indexOf('reject') >= 0 || lower.indexOf('denied') >= 0) {
+      return 'Provider returned failure status: ' + status;
+    }
+  }
+  return '';
+}
+
 function rideCancelAction(orderId: string, context: RideOrderRouteContext | null = null): A2uiAction {
   const args: RideOrderActionArgs = {
     orderId: orderId,
@@ -3582,12 +3609,14 @@ function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrder
   const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status']);
   const lowerStatus = status.toLowerCase();
-  if (orderId.length === 0 || lowerStatus.indexOf('fail') >= 0 ||
+  const providerFailure = rideWriteFailure(payload);
+  if (orderId.length === 0 || providerFailure.length > 0 || lowerStatus.indexOf('fail') >= 0 ||
     lowerStatus.indexOf('error') >= 0 || lowerStatus.indexOf('reject') >= 0 ||
     lowerStatus.indexOf('denied') >= 0) {
     return rideErrorResult(
       '滴滴', 'ride.order.create', '滴滴下单未确认完成',
-      orderId.length === 0 ? 'Provider 未返回订单号，本次不能视为下单成功。' : 'Provider 返回失败状态：' + status
+      orderId.length === 0 ? 'Provider 未返回订单号，本次不能视为下单成功。' :
+        (providerFailure.length > 0 ? providerFailure : 'Provider 返回失败状态：' + status)
     );
   }
   const rows: A2uiLabelValueData[] = [
@@ -3634,8 +3663,11 @@ export function rideCreateOrderResultForTest(
 function rideCancelOrderResult(payload: Object, requestArgs: RideDidiCancelOrderArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'cancelStatus', 'cancel_status']);
   const lowerStatus = status.toLowerCase();
-  const confirmed = lowerStatus.indexOf('cancel') >= 0 || lowerStatus === 'success' ||
-    lowerStatus === 'succeeded' || lowerStatus === 'completed' || lowerStatus === 'ok';
+  const providerFailure = rideWriteFailure(payload);
+  const confirmed = providerFailure.length === 0 &&
+    (lowerStatus === 'cancel' || lowerStatus === 'canceled' || lowerStatus === 'cancelled' ||
+      lowerStatus === 'success' || lowerStatus === 'succeeded' ||
+      lowerStatus === 'completed' || lowerStatus === 'ok');
   if (!confirmed) {
     return rideErrorResult(
       '滴滴', 'ride.order.cancel', '滴滴取消未确认完成',
@@ -7732,6 +7764,24 @@ function luckinPayloadErrorMessage(payload: Object): string {
   }
   if (wrapped.success === false || wrapped.success === 'false') {
     return firstText([wrapped.message, wrapped.msg, '瑞幸创建订单失败']);
+  }
+  const records: Object[] = [payload];
+  const nested = mcpPayloadData(wrapped);
+  if (nested !== undefined && nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    records.push(nested as Object);
+  }
+  for (let index = 0; index < records.length; index++) {
+    const current = records[index] as ToolArgRecord;
+    if (current['success'] === false || current['success'] === 'false' ||
+      current['successful'] === false || current['successful'] === 'false') {
+      return firstText([current['message'], current['msg'], current['error'], '瑞幸创建订单失败']);
+    }
+    const status = textOf(current['status']).trim();
+    const lower = status.toLowerCase();
+    if (lower.indexOf('fail') >= 0 || lower.indexOf('error') >= 0 ||
+      lower.indexOf('reject') >= 0 || lower.indexOf('denied') >= 0) {
+      return firstText([current['message'], current['msg'], current['error'], '瑞幸返回失败状态：' + status]);
+    }
   }
   return '';
 }
@@ -12315,65 +12365,29 @@ export function calendarDeleteConfirmedForTest(actionId: string): boolean {
   return actionId === 'calendar.event.delete.confirm';
 }
 
-function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
-  const eventId = textOf(args.eventId).trim();
-  if (eventId.length === 0) {
-    return {
-      sourceTag: 'Composio Google Calendar',
-      toolName: 'calendar.event.delete',
-      title: '需要日程 Event ID',
-      status: 'needs_input',
-      summary: '请先选择一条真实日程再删除。',
-      rows: [{ label: 'Missing', value: 'eventId' }],
-      rawPreview: 'missing=eventId'
-    };
+function calendarWriteActionAllowed(toolId: string, actionId: string): boolean {
+  if (toolId === 'calendar.event.delete') {
+    return actionId === 'calendar.event.delete.confirm';
   }
-  const confirmArgs: CalendarDeleteConfirmArgs = {
-    eventId: eventId,
-    calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
-    title: textOf(args.title),
-    start: textOf(args.start),
-    end: textOf(args.end)
-  };
-  return {
-    sourceTag: 'Composio Google Calendar',
-    toolName: 'calendar.event.delete',
-    title: '确认删除日程',
-    status: 'confirm_required',
-    summary: '删除后无法在本 App 内撤销，请确认。',
-    rows: [
-      { label: 'Event ID', value: eventId },
-      { label: 'Title', value: textOf(args.title) },
-      { label: 'Start', value: textOf(args.start) }
-    ],
-    rawPreview: 'confirm calendar delete eventId=' + eventId,
-    actions: [{
-      id: 'calendar.event.delete.confirm',
-      label: '确认删除',
-      prompt: '确认删除 Google Calendar 日程',
-      variant: 'danger',
-      kind: 'prompt',
-      args: confirmArgs as Object
-    }]
-  };
+  return (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') &&
+    actionId === toolId;
 }
 
-function calendarDeleteSelectorResult(): DynamicGenericToolResult {
+function isCalendarWriteTool(toolId: string): boolean {
+  return toolId === 'calendar.event.create' || toolId === 'calendar.event.update' ||
+    toolId === 'calendar.event.delete';
+}
+
+function calendarRegisteredActionRequired(toolId: string): DynamicGenericToolResult {
   return {
     sourceTag: 'Composio Google Calendar',
-    toolName: 'calendar.event.delete',
-    title: '请选择要删除的日程',
-    status: 'needs_input',
-    summary: '请说明日期和时间段，或先从日程列表中选择一条日程。',
+    toolName: toolId,
+    title: '需要当前日程操作确认',
+    status: 'blocked',
+    summary: 'Calendar 写操作只能由当前已注册的精确页面操作执行。',
     rows: [],
-    rawPreview: 'missing structured calendar delete selector'
+    rawPreview: 'registered Calendar action required'
   };
-}
-
-function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
-  const start = Date.parse(textOf(args.timeMin));
-  const end = Date.parse(textOf(args.timeMax));
-  return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
 }
 
 async function callStructuredCalendarRead(prompt: string, args: Object | null): Promise<DataResult> {
@@ -12430,77 +12444,13 @@ async function callLocalCalendarTool(
     const result = await callStructuredCalendarRead(prompt, args);
     return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
   }
+  if (!calendarWriteActionAllowed(toolId, actionId)) {
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarRegisteredActionRequired(toolId)]);
+  }
   const normalized = calendarComposioArgs(toolId, prompt, args);
-  let updateMatches: DynamicGenericToolResult[] = [];
-  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId)) {
-    if (textOf(normalized.eventId).trim().length === 0) {
-      if (!hasCalendarLookupSelector(normalized)) {
-        return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
-      }
-      try {
-        const lookup = await callComposioFixedRaw(
-          composioProviderPrompt('Google Calendar', prompt, '待删除日程'),
-          'calendar.events.search',
-          normalized as Object
-        );
-        const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
-        if (generic.status === 'error') {
-          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-            composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
-          ]);
-        }
-        const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
-        const target = calendarDeleteTargetFromResultsForTest(matches);
-        if (target === null) {
-          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
-        }
-        normalized.eventId = target.eventId;
-        normalized.title = target.title;
-        normalized.start = target.start;
-        normalized.end = target.end;
-      } catch (_error) {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-          await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待删除日程', normalized as Object)
-        ]);
-      }
-    }
-    return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteConfirmationResult(normalized)]);
-  }
-  if (toolId === 'calendar.event.update' && textOf(normalized.eventId).trim().length === 0 &&
-    hasCalendarLookupSelector(normalized)) {
-    try {
-      const lookup = await callComposioFixedRaw(
-        composioProviderPrompt('Google Calendar', prompt, '待修改日程'),
-        'calendar.events.search',
-        normalized as Object
-      );
-      const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
-      if (generic.status === 'error') {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-          composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
-        ]);
-      }
-      const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
-      const resolved = calendarUpdateArgsFromResultsForTest(normalized, matches);
-      if (resolved === null) {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
-      }
-      updateMatches = matches;
-      normalized.eventId = resolved.eventId;
-      normalized.title = resolved.title;
-      normalized.start = resolved.start;
-      normalized.end = resolved.end;
-    } catch (_error) {
-      return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-        await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
-      ]);
-    }
-  }
   const missing = calendarEventRequiredFields(toolId, normalized);
   if (missing.length > 0) {
-    const results = toolId === 'calendar.event.update' && updateMatches.length > 0 ?
-      calendarUpdateNeedsInputResults(updateMatches, missing) : [calendarMissingArgsResult(toolId, missing)];
-    return genericToolResultsA2ui(surfaceId, toolId, results);
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarMissingArgsResult(toolId, missing)]);
   }
   try {
     const execution = await callComposioFixedRaw(
@@ -14069,7 +14019,8 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
 
 export async function callToolGateway(baseUrl: string, toolId: string, prompt: string, surfaceId: string, actionId: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null, args: Object | null = null): Promise<A2uiCallResult> {
   const endpoint = buildToolGatewayUrl(baseUrl);
-  if (isLocalToolGatewayUrl(endpoint)) {
+  if (isLocalToolGatewayUrl(endpoint) ||
+    (isCalendarWriteTool(toolId) && !calendarWriteActionAllowed(toolId, actionId))) {
     return callLocalTool(toolId, prompt, surfaceId, actionId, onSurface, initialSurface, args);
   }
 

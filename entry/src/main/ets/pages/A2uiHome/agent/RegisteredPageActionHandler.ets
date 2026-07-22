@@ -1,5 +1,6 @@
 import {
   A2uiCallResult,
+  A2uiLabelValueData,
   A2uiRuntimeDataModel,
   ActionExecutionResult,
   ToolDefinition,
@@ -60,29 +61,165 @@ function externalWrite(actionId: string): boolean {
     actionId === 'ride.order.cancel';
 }
 
-function evidenceLabel(value: string): boolean {
-  const lower = value.trim().toLowerCase();
-  return lower.indexOf('receipt') >= 0 || lower.indexOf('status') >= 0 ||
-    lower.indexOf('event id') >= 0 || lower.indexOf('message id') >= 0 ||
-    lower.indexOf('order id') >= 0 || lower.indexOf('订单号') >= 0 ||
-    lower.indexOf('状态') >= 0;
+function evidenceRow(
+  rows: A2uiLabelValueData[],
+  labels: string[]
+): string {
+  for (let index = 0; index < rows.length; index++) {
+    const label = rows[index].label.trim().toLowerCase();
+    if (labels.indexOf(label) >= 0 && rows[index].value.trim().length > 0) {
+      return rows[index].value.trim();
+    }
+  }
+  return '';
+}
+
+function positiveCompletionStatus(value: string): boolean {
+  const status = value.trim().toLowerCase();
+  return status === 'success' || status === 'succeeded' || status === 'completed' ||
+    status === 'ok' || status === 'created' || status === 'accepted' ||
+    status === 'sent' || status === 'updated' || status === 'deleted' ||
+    status === 'cancel' || status === 'canceled' || status === 'cancelled';
+}
+
+function hasActionCompletionEvidence(
+  actionId: string,
+  rows: A2uiLabelValueData[],
+  rawPreview: string
+): boolean {
+  if (actionId === 'luckin.order.create' || actionId === 'ride.order.create') {
+    return evidenceRow(rows, ['order id', '订单号']).length > 0;
+  }
+  if (actionId === 'calendar.event.create' || actionId === 'calendar.event.update') {
+    return evidenceRow(rows, ['event id']).length > 0;
+  }
+  if (actionId === 'calendar.event.delete') {
+    return evidenceRow(rows, ['event id']).length > 0 && rawProviderSucceeded(rawPreview);
+  }
+  if (actionId === 'whatsapp.message.send') {
+    return evidenceRow(rows, ['message id']).length > 0;
+  }
+  if (actionId === 'ride.order.cancel') {
+    return positiveCompletionStatus(evidenceRow(rows, ['status', '状态']));
+  }
+  return false;
+}
+
+function matchingProviderSource(actionId: string, sourceTag: string): boolean {
+  if (actionId === 'luckin.order.create') {
+    return sourceTag === '瑞幸';
+  }
+  if (actionId.indexOf('calendar.event.') === 0) {
+    return sourceTag === 'Composio Google Calendar';
+  }
+  if (actionId === 'whatsapp.message.send') {
+    return sourceTag === 'Composio WhatsApp Business';
+  }
+  if (actionId === 'ride.order.create' || actionId === 'ride.order.cancel') {
+    return sourceTag === '滴滴';
+  }
+  return false;
+}
+
+function providerValueFailed(value: HandlerArgValue, depth: number): boolean {
+  if (depth > 8 || value === null || value === undefined || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const values = value as HandlerArgValue[];
+    for (let index = 0; index < values.length; index++) {
+      if (providerValueFailed(values[index], depth + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as HandlerArgRecord;
+  if (record['success'] === false || record['success'] === 'false' ||
+    record['successful'] === false || record['successful'] === 'false') {
+    return true;
+  }
+  const status = typeof record['status'] === 'string' ? record['status'].trim().toLowerCase() : '';
+  if (status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0) {
+    return true;
+  }
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    if (providerValueFailed(record[keys[index]], depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function rawProviderFailed(rawPreview: string): boolean {
+  const raw = rawPreview.trim();
+  if (raw.length === 0 || raw.charAt(0) !== '{') {
+    return false;
+  }
+  try {
+    return providerValueFailed(JSON.parse(raw) as Object, 0);
+  } catch (_error) {
+    return true;
+  }
+}
+
+function providerValueSucceeded(value: HandlerArgValue, depth: number): boolean {
+  if (depth > 8 || value === null || value === undefined || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const values = value as HandlerArgValue[];
+    for (let index = 0; index < values.length; index++) {
+      if (providerValueSucceeded(values[index], depth + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as HandlerArgRecord;
+  if (record['success'] === true || record['success'] === 'true' ||
+    record['successful'] === true || record['successful'] === 'true') {
+    return true;
+  }
+  const status = typeof record['status'] === 'string' ? record['status'].trim().toLowerCase() : '';
+  if (status === 'success' || status === 'succeeded' || status === 'completed' ||
+    status === 'ok' || status === 'deleted') {
+    return true;
+  }
+  const keys = Object.keys(record);
+  for (let index = 0; index < keys.length; index++) {
+    if (providerValueSucceeded(record[keys[index]], depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function rawProviderSucceeded(rawPreview: string): boolean {
+  const raw = rawPreview.trim();
+  if (raw.length === 0 || raw.charAt(0) !== '{') {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Object;
+    return !providerValueFailed(parsed, 0) && providerValueSucceeded(parsed, 0);
+  } catch (_error) {
+    return false;
+  }
 }
 
 function hasPositiveWriteEvidence(model: A2uiRuntimeDataModel, actionId: string): boolean {
   for (let index = 0; index < model.genericToolResults.length; index++) {
     const result = model.genericToolResults[index];
-    if (result.toolName !== actionId || result.status !== 'success') {
+    if (result.toolName !== actionId || result.status !== 'success' ||
+      !matchingProviderSource(actionId, result.sourceTag) ||
+      rawProviderFailed(result.rawPreview)) {
       continue;
     }
-    for (let rowIndex = 0; rowIndex < result.rows.length; rowIndex++) {
-      if (evidenceLabel(result.rows[rowIndex].label) &&
-        result.rows[rowIndex].value.trim().length > 0) {
-        return true;
-      }
-    }
-    const raw = result.rawPreview.trim().toLowerCase();
-    if (raw.indexOf('"success":true') >= 0 || raw.indexOf('"successful":true') >= 0 ||
-      raw.indexOf('deleted eventid=') >= 0) {
+    if (hasActionCompletionEvidence(actionId, result.rows, result.rawPreview)) {
       return true;
     }
   }

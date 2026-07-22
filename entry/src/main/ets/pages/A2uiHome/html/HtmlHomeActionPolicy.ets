@@ -48,11 +48,6 @@ interface HtmlMailCalendarPayload {
   messageId?: HtmlHomePolicyValue;
 }
 
-interface HtmlCalendarDeletePayload {
-  eventId?: HtmlHomePolicyValue;
-  calendarId?: HtmlHomePolicyValue;
-}
-
 interface LuckinPreviewArgs {
   deptId?: HtmlHomePolicyValue;
   productId?: HtmlHomePolicyValue;
@@ -77,9 +72,6 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
     return hasBlockKind(document, 'flight-option');
   }
   if (action.id === 'payment.account.save' && paymentAccountSaveAllowed(document, action)) {
-    return true;
-  }
-  if (action.id === 'calendar.event.delete.confirm' && calendarDeleteConfirmAllowed(document, action)) {
     return true;
   }
   for (let index = 0; index < document.actions.length; index++) {
@@ -119,32 +111,6 @@ export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2ui
   }
   if (luckinPaymentPageAllowed(document, action)) {
     return true;
-  }
-  return false;
-}
-
-function calendarDeleteConfirmAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (action.kind !== 'prompt' || action.args === undefined) {
-    return false;
-  }
-  const args = action.args as HtmlCalendarDeletePayload;
-  const eventId = policyText(args.eventId).trim();
-  if (eventId.length === 0) {
-    return false;
-  }
-  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
-    const block = document.blocks[blockIndex];
-    const calendarBlock = policyText(block.toolId).indexOf('calendar.') === 0 ||
-      policyText(block.source).indexOf('Google Calendar') >= 0;
-    if (!calendarBlock) {
-      continue;
-    }
-    for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
-      if (policyText(block.rows[rowIndex].label).trim() === 'Event ID' &&
-        policyText(block.rows[rowIndex].value).trim() === eventId) {
-        return true;
-      }
-    }
   }
   return false;
 }

@@ -1740,7 +1740,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '给我明天下午3点创建一个标题为 CalendarCRUDQA-C-20260716 的30分钟日程',
           'surface_calendar_create_invalid_time',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"title":"CalendarCRUDQA-C-20260716","start":"明天 15:00","end":"明天 15:30","timezone":"Asia/Shanghai"}')
@@ -1754,6 +1754,49 @@ export default function toolGatewayClientTest() {
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks model-originated Calendar writes before provider authorization or execution', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson(JSON.stringify({
+          COMPOSIO_API_KEY: 'authorized-fake'
+        }));
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.create',
+          '创建日程',
+          'surface_calendar_model_write_blocked',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"title":"Blocked","start":"2026-07-30T15:00:00+08:00",' +
+            '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].status).assertEqual('blocked');
+        expect(rendered[0].summary.indexOf('已注册')).assertLarger(-1);
+        expect(rendered[0].status === 'needs_auth').assertFalse();
+
+        const remoteResult = await callToolGateway(
+          'http://127.0.0.1:1',
+          'calendar.event.create',
+          '创建日程',
+          'surface_calendar_remote_model_write_blocked',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"title":"Blocked","start":"2026-07-30T15:00:00+08:00",' +
+            '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+        );
+        const remoteRendered = genericToolResults(remoteResult.surface);
+        expect(remoteRendered.length).assertEqual(1);
+        expect(remoteRendered[0].status).assertEqual('blocked');
+        expect(remoteResult.requestDebug.indexOf('127.0.0.1')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
       }
     });
 
@@ -1914,6 +1957,23 @@ export default function toolGatewayClientTest() {
       expect(malformedCancel.status).assertEqual('error');
     });
 
+    it('rejects nested Ride write failures even when receipt-shaped fields exist', 0, () => {
+      const create = rideCreateOrderResultForTest(
+        looseObject('{"data":{"success":false,"orderId":"order-fake","status":"created"}}'),
+        'express', 'trace-real-1'
+      );
+      const cancel = rideCancelOrderResultForTest(
+        looseObject('{"data":{"successful":false,"status":"cancelled"}}'), 'order-real-1'
+      );
+      const failedStatus = rideCancelOrderResultForTest(
+        looseObject('{"status":"cancel_failed"}'), 'order-real-1'
+      );
+
+      expect(create.status).assertEqual('error');
+      expect(cancel.status).assertEqual('error');
+      expect(failedStatus.status).assertEqual('error');
+    });
+
     it('accepts Luckin completion only with a provider order receipt and no inner error', 0, () => {
       expect(luckinOrderCreateSucceededForTest(
         looseObject('{"data":{"orderId":"luckin-order-1","status":"created"}}')
@@ -1923,6 +1983,12 @@ export default function toolGatewayClientTest() {
       )).assertFalse();
       expect(luckinOrderCreateSucceededForTest(
         looseObject('{"success":false,"error":"quota exceeded","data":{"orderId":"fake"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"success":false,"orderId":"luckin-fake"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"status":"failed","orderId":"luckin-fake"}}')
       )).assertFalse();
     });
 
@@ -2395,7 +2461,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('dispatches Calendar delete confirmation back through the fixed tool path', 0, async () => {
+    it('blocks unregistered Calendar delete requests before confirmation or provider work', 0, async () => {
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
       const result = await callToolGateway(
         defaultToolGatewayUrl(),
@@ -2408,10 +2474,9 @@ export default function toolGatewayClientTest() {
         looseObject('{"eventId":"event-1","calendarId":"primary"}')
       );
       const rendered = genericToolResults(result.surface);
-      const actionJson = JSON.stringify(rendered[0].actions);
-      expect(rendered[0].status).assertEqual('confirm_required');
-      expect(actionJson.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+      expect(rendered[0].status).assertEqual('blocked');
+      const actions = rendered[0].actions === undefined ? [] : rendered[0].actions;
+      expect(JSON.stringify(actions).indexOf('calendar.event.delete.confirm')).assertEqual(-1);
     });
 
     it('resolves a natural-language Calendar delete only when the Provider search has one event', 0, () => {
@@ -3023,7 +3088,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '帮我创建一个日程',
           'surface_calendar_create_missing',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"title":"AIPhoneDemo sync","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
@@ -3050,7 +3115,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.update',
           '帮我更新这个日程',
           'surface_calendar_update_missing',
-          'model_tool_request',
+          'calendar.event.update',
           noop,
           null,
           looseObject('{"eventId":"evt-456","title":"AIPhoneDemo moved","start":"2026-07-30T16:00:00+08:00","end":"2026-07-30T16:30:00+08:00","timezone":"Asia/Shanghai"}')
@@ -3077,7 +3142,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程',
           'surface_calendar_create_missing_required',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"end":"2026-07-30T15:30:00+08:00"}')
@@ -3105,7 +3170,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.update',
           '把刚才的日程改到下午4点',
           'surface_calendar_update_missing_required',
-          'model_tool_request',
+          'calendar.event.update',
           noop,
           null,
           looseObject('{"timezone":"Asia/Shanghai"}')

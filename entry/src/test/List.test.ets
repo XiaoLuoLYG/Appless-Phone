@@ -90,6 +90,7 @@ import actionPlanRunnerTest from './ActionPlanRunner.test';
 import actionAgentTest from './ActionAgent.test';
 import a2uiLayoutMergerTest from './A2uiLayoutMerger.test';
 import checkoutWebOverlayTest from './CheckoutWebOverlay.test';
+import loopBackendTest from './LoopBackend.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -184,4 +185,5 @@ export default function testsuite() {
   htmlHomeSnapshotTest();
   htmlHomeRendererTest();
   htmlHomeActionPolicyTest();
+  loopBackendTest();
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import {
   A2uiAction,
   A2uiCallResult,
+  A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
   ActionExecutionResult,
@@ -232,13 +233,32 @@ function successfulToolResult(toolId: string): A2uiCallResult {
 function providerWriteToolResult(toolId: string, status: string = 'success'): A2uiCallResult {
   const result = successfulToolResult(toolId);
   const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+  let rows: A2uiLabelValueData[] = status === 'success' ?
+    [{ label: 'Receipt', value: 'provider-receipt-1' }] : [];
+  if (status === 'success' && (toolId === 'luckin.order.create' || toolId === 'ride.order.create')) {
+    rows = [{ label: '订单号', value: 'provider-order-1' }];
+  } else if (status === 'success' && toolId.indexOf('calendar.event.') === 0) {
+    rows = [{ label: 'Event ID', value: 'provider-event-1' }];
+  } else if (status === 'success' && toolId === 'whatsapp.message.send') {
+    rows = [{ label: 'Message ID', value: 'provider-message-1' }];
+  } else if (status === 'success' && toolId === 'ride.order.cancel') {
+    rows = [{ label: '状态', value: 'cancelled' }];
+  }
+  let sourceTag = 'Composio Google Calendar';
+  if (toolId === 'luckin.order.create') {
+    sourceTag = '瑞幸';
+  } else if (toolId === 'whatsapp.message.send') {
+    sourceTag = 'Composio WhatsApp Business';
+  } else if (toolId.indexOf('ride.order.') === 0) {
+    sourceTag = '滴滴';
+  }
   model.genericToolResults = [{
-    sourceTag: 'Fake provider adapter',
+    sourceTag,
     toolName: toolId,
     title: toolId,
     status,
     summary: status === 'success' ? 'Provider confirmed completion.' : 'Confirmation required.',
-    rows: status === 'success' ? [{ label: 'Receipt', value: 'provider-receipt-1' }] : [],
+    rows,
     rawPreview: status === 'success' ? '{"success":true,"id":"provider-receipt-1"}' : ''
   }];
   result.surface.dataModelJson = JSON.stringify(model);
@@ -280,7 +300,8 @@ class RawProviderEvidenceInvoker implements RegisteredPageToolInvoker {
     const result = successfulToolResult(toolId);
     const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
     model.genericToolResults = [{
-      sourceTag: 'Malformed provider adapter',
+      sourceTag: toolId === 'whatsapp.message.send' ?
+        'Composio WhatsApp Business' : 'Composio Google Calendar',
       toolName: toolId,
       title: toolId,
       status: 'success',
@@ -288,6 +309,52 @@ class RawProviderEvidenceInvoker implements RegisteredPageToolInvoker {
       rows: [],
       rawPreview: this.rawPreview
     }];
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
+  }
+}
+
+class WrongSourceProviderEvidenceInvoker implements RegisteredPageToolInvoker {
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    const result = providerWriteToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults[0].sourceTag = 'Unrelated provider';
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
+  }
+}
+
+class FailedReceiptProviderEvidenceInvoker implements RegisteredPageToolInvoker {
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    const result = providerWriteToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults[0].rawPreview =
+      '{"data":{"successful":false,"status":"failed"}}';
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
+  }
+}
+
+class MissingDeleteAckProviderEvidenceInvoker implements RegisteredPageToolInvoker {
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    const result = providerWriteToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults[0].rawPreview = '{}';
     result.surface.dataModelJson = JSON.stringify(model);
     return { ok: true, result, error: '' };
   }
@@ -746,6 +813,43 @@ export default function registeredPageActionMigrationTest() {
 
       expect(malformed.status).assertEqual('error');
       expect(innerFailure.status).assertEqual('error');
+    });
+
+    it('rejects receipt-shaped evidence from the wrong action or negative status', 0, async () => {
+      const executionContext: RegisteredPageActionContext = {
+        conversationId: 'provider-action-evidence',
+        turnId: 'turn-1',
+        surfaceId: 'surface-1',
+        sourceToolId: 'calendar.event.create',
+        planId: 'plan-1',
+        runId: 'run-1',
+        stepId: 'step-1',
+        pageActionId: 'calendar.event.create'
+      };
+      const wrongAction = await new RegisteredPageActionHandler(
+        new RawProviderEvidenceInvoker('{"success":true,"orderId":"order-wrong-domain"}')
+      ).execute('calendar.event.create', JSON.parse('{}') as Object, executionContext);
+      const negativeStatus = await new RegisteredPageActionHandler(
+        new RawProviderEvidenceInvoker('{"status":"failed","eventId":"event-fake"}')
+      ).execute('calendar.event.create', JSON.parse('{}') as Object, executionContext);
+      const wrongSource = await new RegisteredPageActionHandler(
+        new WrongSourceProviderEvidenceInvoker()
+      ).execute('calendar.event.create', JSON.parse('{}') as Object, executionContext);
+      const failedReceipt = await new RegisteredPageActionHandler(
+        new FailedReceiptProviderEvidenceInvoker()
+      ).execute('calendar.event.create', JSON.parse('{}') as Object, executionContext);
+      const deleteContext = JSON.parse(JSON.stringify(executionContext)) as RegisteredPageActionContext;
+      deleteContext.sourceToolId = 'calendar.event.delete';
+      deleteContext.pageActionId = 'calendar.event.delete.confirm';
+      const missingDeleteAck = await new RegisteredPageActionHandler(
+        new MissingDeleteAckProviderEvidenceInvoker()
+      ).execute('calendar.event.delete', JSON.parse('{}') as Object, deleteContext);
+
+      expect(wrongAction.status).assertEqual('error');
+      expect(negativeStatus.status).assertEqual('error');
+      expect(wrongSource.status).assertEqual('error');
+      expect(failedReceipt.status).assertEqual('error');
+      expect(missingDeleteAck.status).assertEqual('error');
     });
 
     it('limits virtual ownership to exact World Cup and structured Maps handlers', 0, async () => {

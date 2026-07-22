@@ -203,10 +203,18 @@ export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
 }
 
 function isLoopToolExposedToModel(toolId: string): boolean {
-  return !isSurfaceDerivedHotelActionId(toolId) && toolId !== 'gmail.message.send';
+  return !isSurfaceDerivedHotelActionId(toolId) && toolId !== 'gmail.message.send' &&
+    toolId !== 'calendar.event.create' && toolId !== 'calendar.event.update' &&
+    toolId !== 'calendar.event.delete';
 }
 
 export class LoopBackend {
+  private readonly modelOverride: LocalModel | null;
+
+  constructor(modelOverride: LocalModel | null = null) {
+    this.modelOverride = modelOverride;
+  }
+
   async run(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): Promise<LoopRunResult> {
     const conversation = this.buildConversation(request);
     const model = this.buildModel(request);
@@ -289,6 +297,9 @@ export class LoopBackend {
   }
 
   private buildModel(request: LoopBackendRequest): LocalModel {
+    if (this.modelOverride !== null) {
+      return this.modelOverride;
+    }
     const settings = request.modelSettings;
     const provider = new LlmProvider(settings.provider, settings.apiKey, settings.baseUrl, settings.model, settings.customParametersJson);
     return provider.isConfigured() ? new OpenAiCompatibleModel(provider) : new ScriptedLocalModel();

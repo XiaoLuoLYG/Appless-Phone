@@ -4,7 +4,13 @@ import {
   ActionCatalog,
   ActionExecutionContext,
   ActionExecutionResult,
+  ActionPlan,
+  ActionPlanPausedOutcome,
+  ActionPlanRunContext,
+  ActionPlanRunner,
   ActionValidationResult,
+  A2uiCallResult,
+  A2uiRuntimeDataModel,
   ClientActionAuthorizer,
   HotelBookingOpenArgs,
   HotelNavigateArgs,
@@ -12,6 +18,7 @@ import {
   ToolDefinition,
   ToolDefinitionLookup,
   actionAgentToolDefinitions,
+  createSeedA2uiSurface,
   toolDefinitionForToolId,
   validateHotelActionArgs
 } from '@loop/agent-core';
@@ -21,8 +28,14 @@ import {
   RegisteredPageAction,
   RegisteredPageActionContext,
   SystemUriOpener,
-  validateGmailReplyActionArgs
+  validateGmailReplyActionArgs,
+  validateRegisteredPageActionArgs
 } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
+import {
+  RegisteredPageActionHandler,
+  RegisteredPageToolInvocation,
+  RegisteredPageToolInvoker
+} from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionHandler';
 import { isFixedRegisteredPageAction } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 
 function object(raw: string): Object {
@@ -134,12 +147,7 @@ class RegisteredArgsValidator implements ActionArgsValidator {
     if (actionId.indexOf('hotel.') === 0) {
       return validateHotelActionArgs(actionId, args);
     }
-    const valid = args !== null && typeof args === 'object' && !Array.isArray(args);
-    return {
-      ok: valid,
-      code: valid ? '' : 'ACTION_ARGS_INVALID',
-      message: valid ? '' : 'Action args are invalid.'
-    };
+    return validateRegisteredPageActionArgs(actionId, args);
   }
 }
 
@@ -216,6 +224,52 @@ class RecordingPageAction {
   }
 }
 
+interface CalendarProviderCall {
+  toolId: string;
+  pageActionId: string;
+  args: Object;
+}
+
+class CalendarLifecycleInvoker implements RegisteredPageToolInvoker {
+  calls: CalendarProviderCall[] = [];
+  failingToolId: string = '';
+
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    pageActionId: string,
+    args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    this.calls.push({ toolId, pageActionId, args });
+    if (toolId === this.failingToolId) {
+      return { ok: false, result: null, error: 'Calendar provider failed.' };
+    }
+    const result = createSeedA2uiSurface();
+    const model = JSON.parse(result.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults = [{
+      sourceTag: 'Composio Google Calendar',
+      toolName: toolId,
+      title: toolId,
+      status: 'success',
+      summary: 'Provider confirmed Calendar write.',
+      rows: [{ label: 'Event ID', value: 'event-provider-real-1' }],
+      rawPreview: '{"successful":true}'
+    }];
+    result.surfaceId = 'calendar-result-' + this.calls.length.toString();
+    result.status = 'ready';
+    result.dataModelJson = JSON.stringify(model);
+    const callResult: A2uiCallResult = {
+      ok: true,
+      raw: '{}',
+      error: '',
+      requestDebug: '',
+      assistantDebug: '',
+      surface: result
+    };
+    return { ok: true, result: callResult, error: '' };
+  }
+}
+
 function pageCallback(recorder: RecordingPageAction): RegisteredPageAction {
   return (
     actionId: string,
@@ -272,6 +326,30 @@ function bookingArgs(): HotelBookingOpenArgs {
     bookingUrl: 'https://rollinggo.cn/pages/hotel/detail/index?id=47675&' +
       'checkInDate=2026-08-15&checkOutDate=2026-08-17&roomCount=1&adultCount=2&childCount=0'
   };
+}
+
+function wave4Args(actionId: string): Object {
+  if (actionId === 'luckin.order.create') {
+    return object('{"deptId":"store-1","productId":"product-1","skuCode":"sku-1"}');
+  }
+  if (actionId === 'calendar.event.create') {
+    return object('{"title":"QA","start":"2026-07-29T15:00:00+08:00",' +
+      '"end":"2026-07-29T15:30:00+08:00"}');
+  }
+  if (actionId === 'calendar.event.update') {
+    return object('{"eventId":"event-1","title":"QA","start":"2026-07-29T16:00:00+08:00",' +
+      '"end":"2026-07-29T16:30:00+08:00"}');
+  }
+  if (actionId === 'calendar.event.delete') {
+    return object('{"eventId":"event-1","calendarId":"primary"}');
+  }
+  if (actionId === 'whatsapp.message.send') {
+    return object('{"toNumber":"+8613800138000","text":"QA"}');
+  }
+  if (actionId === 'ride.order.create') {
+    return object('{"productCategory":"express","estimateTraceId":"trace-1"}');
+  }
+  return object('{"orderId":"order-1"}');
 }
 
 async function executeTampered(
@@ -644,11 +722,38 @@ export default function aiphoneRegisteredActionExecutorTest() {
     });
 
     it('gives every fixed Action definition one explicit executable owner route', 0, () => {
+      const expected: string[] = [
+        'hotel.navigate', 'hotel.booking.open', 'luckin.order.preview', 'luckin.order.create',
+        'social.reply.draft', 'mail.draft.create', 'gmail.draft.create', 'gmail.draft.apply',
+        'gmail.open.web', 'gmail.message.send', 'worldcup.open', 'calendar.event.create',
+        'calendar.event.update', 'calendar.event.delete', 'payment.send', 'payment.account.setup',
+        'maps.route.open', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel'
+      ];
       const definitions = actionAgentToolDefinitions();
 
       expect(definitions.length).assertEqual(20);
-      for (let index = 0; index < definitions.length; index++) {
-        expect(isFixedRegisteredPageAction(definitions[index].toolId)).assertTrue();
+      expect(definitions.map((current: ToolDefinition): string => current.toolId).sort().join(','))
+        .assertEqual(expected.slice().sort().join(','));
+      for (let index = 0; index < expected.length; index++) {
+        expect(isFixedRegisteredPageAction(expected[index])).assertTrue();
+      }
+    });
+
+    it('rejects incomplete registered write args before any page provider callback', 0, async () => {
+      const actionIds: string[] = [
+        'luckin.order.create', 'calendar.event.create', 'calendar.event.update',
+        'calendar.event.delete', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        const recorder = new RecordingPageAction();
+        const executor = pageExecutor(
+          actionIds[index], object('{}'), recorder, new FakeUriOpener(), actionIds[index]
+        );
+        const result = await executor.execute(
+          actionIds[index], object('{}'), pageContext(actionIds[index], actionIds[index])
+        );
+        expect(result.status).assertEqual('error');
+        expect(recorder.calls.length).assertEqual(0);
       }
     });
 
@@ -664,7 +769,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       ];
       for (let index = 0; index < actionIds.length; index++) {
         const actionId = actionIds[index];
-        const args = object('{"marker":"wave-4-' + index.toString() + '"}');
+        const args = wave4Args(actionId);
         const recorder = new RecordingPageAction();
         const executor = pageExecutor(actionId, args, recorder, new FakeUriOpener(), actionId);
         const result = await executor.execute(actionId, args, pageContext(actionId));
@@ -675,53 +780,134 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('preserves a fake provider Calendar eventId through create update and delete', 0, async () => {
+    it('binds the production Calendar handler eventId through create update and delete', 0, async () => {
       const createArgs = object(
         '{"title":"Appless QA","start":"2026-07-29T15:00:00+08:00",' +
         '"end":"2026-07-29T15:30:00+08:00","calendarId":"primary"}'
       );
-      const recorder = new RecordingPageAction();
-      const executor = pageExecutor(
-        'calendar.event.create', createArgs, recorder, new FakeUriOpener(), 'calendar.event.create'
+      const currentCatalog = catalog('calendar.event.create', createArgs, 'calendar.event.create');
+      const invoker = new CalendarLifecycleInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const executor = new AiphoneRegisteredActionExecutor(
+        currentCatalog,
+        new FakeUriOpener(),
+        new DeterministicIds(),
+        (
+          actionId: string,
+          args: Object,
+          executionContext: RegisteredPageActionContext
+        ): Promise<ActionExecutionResult> => handler.execute(actionId, args, executionContext)
       );
-      recorder.result = {
-        status: 'success',
-        output: object('{"eventId":"event-provider-real-1","status":"confirmed"}')
+      const runner = new ActionPlanRunner(currentCatalog, executor);
+      const actionPlan = object(
+        '{"planId":"calendar-lifecycle","turnId":"turn-1","surfaceId":"surface-1",' +
+        '"label":"Calendar lifecycle","steps":[' +
+        '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
+        '{"stepId":"update","actionId":"calendar.event.update",' +
+        '"args":{"title":"Appless QA","start":"2026-07-29T16:00:00+08:00",' +
+        '"end":"2026-07-29T16:30:00+08:00","calendarId":"primary"},' +
+        '"inputFrom":[{"target":"/eventId","stepId":"create",' +
+        '"path":"/data/genericToolResults/0/rows/0/value"}]},' +
+        '{"stepId":"delete","actionId":"calendar.event.delete",' +
+        '"args":{"calendarId":"primary"},' +
+        '"inputFrom":[{"target":"/eventId","stepId":"update",' +
+        '"path":"/data/genericToolResults/0/rows/0/value"}]}]}'
+      ) as ActionPlan;
+      const runContext: ActionPlanRunContext = {
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        surfaceId: 'surface-1',
+        sourceToolId: 'calendar.event.create',
+        planId: 'calendar-lifecycle',
+        runId: 'calendar-lifecycle-run',
+        pageActionId: 'calendar.event.create'
       };
-      const created = await executor.execute(
-        'calendar.event.create', createArgs,
-        pageContext('calendar.event.create', 'calendar.event.create')
+      const initial = await runner.run(actionPlan, runContext);
+      const afterCreate = await runner.resume(actionPlan, runContext, 0, [], 'create');
+      const createPause = afterCreate as ActionPlanPausedOutcome;
+      const afterUpdate = await runner.resume(
+        actionPlan, runContext, createPause.nextStepIndex, createPause.outputs, 'update'
       );
-      let eventId = '';
-      if (created.status === 'success') {
-        const createdOutput = created.output as Record<string, Object | string | number | boolean | null | undefined>;
-        eventId = createdOutput['eventId'] as string;
-      }
-      const updateArgs = object(
-        '{"eventId":"' + eventId + '","title":"Appless QA",' +
-        '"start":"2026-07-29T16:00:00+08:00","end":"2026-07-29T16:30:00+08:00"}'
+      const updatePause = afterUpdate as ActionPlanPausedOutcome;
+      const completed = await runner.resume(
+        actionPlan, runContext, updatePause.nextStepIndex, updatePause.outputs, 'delete'
       );
-      const updateContext = context('calendar.event.create', false);
-      updateContext.stepId = 'step-2';
-      recorder.result = {
-        status: 'success',
-        output: object('{"eventId":"event-provider-real-1","status":"updated"}')
-      };
-      const updated = await executor.execute('calendar.event.update', updateArgs, updateContext);
-      const deleteArgs = object('{"eventId":"' + eventId + '","calendarId":"primary"}');
-      const deleteContext = context('calendar.event.create', false);
-      deleteContext.stepId = 'step-3';
-      recorder.result = {
-        status: 'success',
-        output: object('{"eventId":"event-provider-real-1","status":"deleted"}')
-      };
-      const deleted = await executor.execute('calendar.event.delete', deleteArgs, deleteContext);
 
-      expect(eventId).assertEqual('event-provider-real-1');
-      expect(updated.status).assertEqual('success');
-      expect(deleted.status).assertEqual('success');
-      expect(JSON.stringify(recorder.calls[1].args).indexOf(eventId)).assertLarger(-1);
-      expect(JSON.stringify(recorder.calls[2].args).indexOf(eventId)).assertLarger(-1);
+      expect(initial.status).assertEqual('paused');
+      expect(afterCreate.status).assertEqual('paused');
+      expect(afterUpdate.status).assertEqual('paused');
+      expect(completed.status).assertEqual('success');
+      expect(invoker.calls.length).assertEqual(3);
+      expect(invoker.calls[0].pageActionId).assertEqual('calendar.event.create');
+      expect(invoker.calls[1].pageActionId).assertEqual('calendar.event.update');
+      expect(invoker.calls[2].pageActionId).assertEqual('calendar.event.delete');
+      expect(JSON.stringify(invoker.calls[1].args).indexOf('event-provider-real-1')).assertLarger(-1);
+      expect(JSON.stringify(invoker.calls[2].args).indexOf('event-provider-real-1')).assertLarger(-1);
+    });
+
+    it('stops a Calendar plan after provider error or cancellation without a later provider call', 0, async () => {
+      const createArgs = object(
+        '{"title":"Appless QA","start":"2026-07-29T15:00:00+08:00",' +
+        '"end":"2026-07-29T15:30:00+08:00","calendarId":"primary"}'
+      );
+      const actionPlan = object(
+        '{"planId":"calendar-stop","turnId":"turn-1","surfaceId":"surface-1",' +
+        '"label":"Calendar stop","steps":[' +
+        '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
+        '{"stepId":"update","actionId":"calendar.event.update",' +
+        '"args":{"title":"Appless QA","start":"2026-07-29T16:00:00+08:00",' +
+        '"end":"2026-07-29T16:30:00+08:00"},' +
+        '"inputFrom":[{"target":"/eventId","stepId":"create",' +
+        '"path":"/data/genericToolResults/0/rows/0/value"}]}]}'
+      ) as ActionPlan;
+      const runContext: ActionPlanRunContext = {
+        conversationId: 'conversation-1', turnId: 'turn-1', surfaceId: 'surface-1',
+        sourceToolId: 'calendar.event.create', planId: 'calendar-stop', runId: 'provider-error',
+        pageActionId: 'calendar.event.create'
+      };
+      const errorCatalog = catalog('calendar.event.create', createArgs, 'calendar.event.create');
+      const errorInvoker = new CalendarLifecycleInvoker();
+      errorInvoker.failingToolId = 'calendar.event.create';
+      const errorHandler = new RegisteredPageActionHandler(errorInvoker);
+      const errorExecutor = new AiphoneRegisteredActionExecutor(
+        errorCatalog, new FakeUriOpener(), new DeterministicIds(),
+        (
+          actionId: string, args: Object, executionContext: RegisteredPageActionContext
+        ): Promise<ActionExecutionResult> => errorHandler.execute(actionId, args, executionContext)
+      );
+      const errored = await new ActionPlanRunner(errorCatalog, errorExecutor).resume(
+        actionPlan, runContext, 0, [], 'create'
+      );
+
+      const cancelCatalog = catalog('calendar.event.create', createArgs, 'calendar.event.create');
+      const cancelInvoker = new CalendarLifecycleInvoker();
+      const cancelHandler = new RegisteredPageActionHandler(cancelInvoker);
+      const cancelExecutor = new AiphoneRegisteredActionExecutor(
+        cancelCatalog, new FakeUriOpener(), new DeterministicIds(),
+        async (
+          actionId: string, args: Object, executionContext: RegisteredPageActionContext
+        ): Promise<ActionExecutionResult> => {
+          if (actionId === 'calendar.event.create') {
+            return {
+              status: 'canceled',
+              errorCode: 'CALENDAR_WRITE_CANCELED',
+              message: 'Calendar write canceled.'
+            };
+          }
+          return cancelHandler.execute(actionId, args, executionContext);
+        }
+      );
+      const cancelContext = object(JSON.stringify(runContext)) as ActionPlanRunContext;
+      cancelContext.runId = 'provider-cancel';
+      const canceled = await new ActionPlanRunner(cancelCatalog, cancelExecutor).resume(
+        actionPlan, cancelContext, 0, [], 'create'
+      );
+
+      expect(errored.status).assertEqual('error');
+      expect(errorInvoker.calls.length).assertEqual(1);
+      expect(errorInvoker.calls[0].toolId).assertEqual('calendar.event.create');
+      expect(canceled.status).assertEqual('canceled');
+      expect(cancelInvoker.calls.length).assertEqual(0);
     });
 
     it('rejects unknown Data client-only and review-required write actions', 0, async () => {

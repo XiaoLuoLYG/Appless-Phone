@@ -3,13 +3,17 @@ import {
   ActionExecutionContext,
   ActionExecutionResult,
   ActionFollowUp,
+  ActionStepExecutor,
   ActionValidationResult,
+  CalendarEventArgs,
   HotelBookingOpenArgs,
   HotelNavigateArgs,
   RegisteredActionExecutor,
   ToolDefinition,
   actionAgentToolDefinitions,
-  hotelNavigationUri
+  calendarEventRequiredFields,
+  hotelNavigationUri,
+  validateHotelActionArgs
 } from '@loop/agent-core';
 
 export interface SystemUriOpener {
@@ -51,6 +55,27 @@ function nonempty(value: string): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function argText(values: MailReplyArgRecord, keys: string[]): string {
+  for (let index = 0; index < keys.length; index++) {
+    const value = values[keys[index]];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+    if (typeof value === 'number') {
+      return value.toString();
+    }
+  }
+  return '';
+}
+
+function validation(ok: boolean, code: string, message: string): ActionValidationResult {
+  return {
+    ok,
+    code: ok ? '' : code,
+    message: ok ? '' : message
+  };
+}
+
 export function validateGmailReplyActionArgs(args: Object): ActionValidationResult {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return {
@@ -82,6 +107,68 @@ export function validateGmailReplyActionArgs(args: Object): ActionValidationResu
   };
 }
 
+export function validateRegisteredPageActionArgs(
+  actionId: string,
+  args: Object
+): ActionValidationResult {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return validation(false, 'ACTION_ARGS_INVALID', 'Registered action args are invalid.');
+  }
+  if (actionId.indexOf('hotel.') === 0) {
+    return validateHotelActionArgs(actionId, args);
+  }
+  if (actionId === 'gmail.message.send') {
+    return validateGmailReplyActionArgs(args);
+  }
+  const values = args as MailReplyArgRecord;
+  if (actionId === 'luckin.order.create') {
+    return validation(
+      argText(values, ['deptId']).length > 0 && argText(values, ['productId']).length > 0 &&
+        argText(values, ['skuCode']).length > 0,
+      'LUCKIN_ORDER_ARGS_INVALID', 'Luckin order requires the exact store, product, and SKU.'
+    );
+  }
+  if (actionId === 'calendar.event.create' || actionId === 'calendar.event.update') {
+    return validation(
+      calendarEventRequiredFields(actionId, args as CalendarEventArgs).length === 0,
+      'CALENDAR_EVENT_ARGS_INVALID', 'Calendar write args are incomplete or invalid.'
+    );
+  }
+  if (actionId === 'calendar.event.delete') {
+    return validation(
+      argText(values, ['eventId']).length > 0,
+      'CALENDAR_EVENT_ARGS_INVALID', 'Calendar delete requires the exact Event ID.'
+    );
+  }
+  if (actionId === 'whatsapp.message.send') {
+    return validation(
+      argText(values, ['toNumber']).length > 0 && argText(values, ['text']).length > 0,
+      'WHATSAPP_SEND_ARGS_INVALID', 'WhatsApp send requires the exact target and message.'
+    );
+  }
+  if (actionId === 'ride.order.create') {
+    return validation(
+      argText(values, ['productCategory', 'product_category']).length > 0 &&
+        argText(values, ['estimateTraceId', 'estimate_trace_id', 'traceId']).length > 0,
+      'RIDE_ORDER_ARGS_INVALID', 'Ride create requires the exact vehicle and estimate trace.'
+    );
+  }
+  if (actionId === 'ride.order.cancel') {
+    return validation(
+      argText(values, ['orderId', 'order_id']).length > 0,
+      'RIDE_ORDER_ARGS_INVALID', 'Ride cancel requires the exact order ID.'
+    );
+  }
+  const registered = actionAgentToolDefinitions().some(
+    (definition: ToolDefinition): boolean => definition.toolId === actionId
+  );
+  return validation(
+    registered,
+    'ACTION_NOT_REGISTERED',
+    'Action is not registered for product execution.'
+  );
+}
+
 function validPageResult(result: ActionExecutionResult): boolean {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) {
     return false;
@@ -94,7 +181,7 @@ function validPageResult(result: ActionExecutionResult): boolean {
     typeof result.message === 'string';
 }
 
-export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor {
+export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor, ActionStepExecutor {
   private readonly catalog: ActionCatalog;
   private readonly opener: SystemUriOpener;
   private readonly ids: HotelActionIdFactory;
@@ -129,9 +216,8 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         message: 'Action execution context is invalid.'
       };
     }
-    const registered = actionId === 'hotel.detail' || actionAgentToolDefinitions().some(
-      (definition: ToolDefinition): boolean => definition.toolId === actionId
-    );
+    const registered = actionId === 'hotel.detail' ||
+      validateRegisteredPageActionArgs(actionId, args).code !== 'ACTION_NOT_REGISTERED';
     if (!registered) {
       return {
         status: 'error',
@@ -221,8 +307,9 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
       runId: context.runId,
       stepId: context.stepId,
       isSurfaceEntry: context.isSurfaceEntry,
-      pageActionId: context.pageActionId === undefined || context.pageActionId.length === 0 ?
-        actionId : context.pageActionId,
+      pageActionId: context.isSurfaceEntry === false ? actionId :
+        (context.pageActionId === undefined || context.pageActionId.length === 0 ?
+          actionId : context.pageActionId),
       virtualAction: context.virtualAction
     });
   }
