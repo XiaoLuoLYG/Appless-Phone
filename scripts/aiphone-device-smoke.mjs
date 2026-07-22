@@ -26,7 +26,8 @@ import {
   mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
-  multiAgentTurnEvidence
+  multiAgentTurnEvidence,
+  visibleMailBodyText
 } from './multi-agent-smoke-evidence.mjs';
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -1339,7 +1340,10 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
         hotelActionEvidencePopulated ||
         (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
-      if (customCompletion !== null && done && Date.now() - doneAt > 500) {
+      const customSettleMs = lifecycleOptions !== null &&
+        Number.isFinite(lifecycleOptions.postCompletionWaitMs) ?
+        Math.max(0, lifecycleOptions.postCompletionWaitMs) : 500;
+      if (customCompletion !== null && done && Date.now() - doneAt >= customSettleMs) {
         break;
       }
       if (customCompletion !== null && !done && lifecycleOptions.idleActionTimeoutMs > 0 &&
@@ -1971,14 +1975,24 @@ async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
         hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
       }, {
         completionEvidence: (text) => currentMailReadEvidence(text, sourceToolId, actionContext),
-        idleActionTimeoutMs: 2500
+        idleActionTimeoutMs: 2500,
+        postCompletionWaitMs: 0
       });
-      const expanded = dumpLayout(
-        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout.json`
-      );
-      const text = collectLayoutText(expanded).join('\n');
       const logs = actionLogs.join('\n');
       const evidence = currentMailReadEvidence(logs, sourceToolId, actionContext);
+      let expanded = dumpLayout(
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout.json`
+      );
+      let text = collectLayoutText(expanded).join('\n');
+      for (let poll = 0; poll < 16 && evidence.complete &&
+        !visibleMailBodyText(text) &&
+        !/邮件正文加载失败|正文读取失败|PROVIDER_|AUTH_REQUIRED/.test(text); poll += 1) {
+        await sleep(250);
+        expanded = dumpLayout(
+          `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-poll-${poll + 1}-layout.json`
+        );
+        text = collectLayoutText(expanded).join('\n');
+      }
       const textPath = join(
         outDir,
         `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout-text.txt`
@@ -1989,7 +2003,7 @@ async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
       );
       writeFileSync(textPath, text + '\n');
       writeFileSync(logPath, logs + '\n');
-      const bodyVisible = /正文|发件人|收件人|主题|回复/.test(text) &&
+      const bodyVisible = visibleMailBodyText(text) &&
         !hasTechnicalGmailArgsCard(text);
       if (evidence.ok && evidence.bodyVisible && bodyVisible) {
         return {

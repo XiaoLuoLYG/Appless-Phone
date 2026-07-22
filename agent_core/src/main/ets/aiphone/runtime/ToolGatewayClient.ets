@@ -10947,7 +10947,46 @@ function qqMailConfig(): QqMailConfig {
   };
 }
 
-async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailDetail> {
+export type MailDetailReader = (request: MailDetailRequest) => Promise<MailDetail>;
+
+let mailDetailReaderForTests: MailDetailReader | null = null;
+
+export function configureMailDetailReaderForTests(reader: MailDetailReader | null): void {
+  mailDetailReaderForTests = reader;
+}
+
+interface ConfiguredMailDetailResult {
+  detail: MailDetail;
+  sources: DataSource[];
+}
+
+function mailDetailSource(
+  provider: string,
+  backend: 'oauth_api' | 'imap',
+  operation: string
+): DataSource {
+  return {
+    provider,
+    backend,
+    operation,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+async function readConfiguredGmailDetailWithSource(
+  args: MailDetailRequest
+): Promise<ConfiguredMailDetailResult> {
+  if (gmailMcpClient !== genericMcpClient) {
+    const results = await gmailOAuthFallbackResults('gmail.thread.read', '', args as Object);
+    if (results.length === 0 || results[0].status !== 'success') {
+      const message = results.length === 0 ? 'Gmail OAuth detail is unavailable.' : results[0].summary;
+      throw new Error(message);
+    }
+    return {
+      detail: gmailMailDetailFromPayload(JSON.parse(results[0].rawPreview) as Object, args),
+      sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
+    };
+  }
   try {
     const execution: ComposioRawExecution = await callComposioFixedRaw(
       'Gmail read full thread ' + args.threadId,
@@ -10960,7 +10999,10 @@ async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailD
     const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
       Object.keys(payload).slice(0, 12).join(',') : '';
     aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
-    return gmailMailDetailFromPayload(payload, args);
+    return {
+      detail: gmailMailDetailFromPayload(payload, args),
+      sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
+    };
   } catch (composioError) {
     const message = describeThrown(composioError);
     aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
@@ -10969,8 +11011,33 @@ async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailD
       throw new Error(message);
     }
     aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
-    return readGmailMailDetail(accessToken, args);
+    return {
+      detail: await readGmailMailDetail(accessToken, args),
+      sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
+    };
   }
+}
+
+async function readConfiguredMailDetailWithSource(
+  args: MailDetailRequest
+): Promise<ConfiguredMailDetailResult> {
+  if (mailDetailReaderForTests !== null) {
+    return {
+      detail: await mailDetailReaderForTests(args),
+      sources: []
+    };
+  }
+  const provider = args.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    return {
+      detail: await new QqMailImapClient(qqMailConfig()).readDetail(args),
+      sources: [mailDetailSource('QQ Mail', 'imap', 'thread.read')]
+    };
+  }
+  if (provider === 'gmail') {
+    return readConfiguredGmailDetailWithSource(args);
+  }
+  throw new Error('Mail detail provider is not supported: ' + provider);
 }
 
 export async function readConfiguredMailDetail(args: MailDetailRequest): Promise<MailDetail> {
@@ -10979,14 +11046,7 @@ export async function readConfiguredMailDetail(args: MailDetailRequest): Promise
     ' requestKeyChars=' + args.requestKey.length.toString() +
     ' threadIdChars=' + args.threadId.length.toString() +
     ' messageIdChars=' + args.messageId.length.toString());
-  let detail: MailDetail;
-  if (provider === 'qq') {
-    detail = await new QqMailImapClient(qqMailConfig()).readDetail(args);
-  } else if (provider === 'gmail') {
-    detail = await readConfiguredGmailDetail(args);
-  } else {
-    throw new Error('Mail detail provider is not supported: ' + provider);
-  }
+  const detail = (await readConfiguredMailDetailWithSource(args)).detail;
   aiLogInfo('[AIPhone][MailDetailReadDone] provider=' + provider +
     ' bodyChars=' + detail.bodyText.length.toString() +
     ' to=' + detail.to.length.toString() +
@@ -11237,19 +11297,18 @@ async function callStructuredMailThreadRead(toolId: string, args: Object | null)
   if (identityError !== null) {
     return identityError;
   }
-  if (request.provider === 'gmail') {
-    return callStructuredGmailReadTool(toolId, '', request as Object, 'gmail.thread.read');
-  }
-  const configured = localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0;
-  const sources: DataSource[] = configured ? [{
-    provider: 'QQ Mail', backend: 'imap', operation: 'thread.read', fetchedAt: new Date().toISOString()
-  }] : [];
+  const configured = request.provider === 'qq' ?
+    localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0 :
+    isComposioConfigured() || localProviderConfig.gmailOauthClientId.length > 0;
+  let sources: DataSource[] = [];
   try {
-    const detail = await new QqMailImapClient(qqMailConfig()).readDetail(request);
+    const configuredDetail = await readConfiguredMailDetailWithSource(request);
+    const detail = configuredDetail.detail;
+    sources = configuredDetail.sources;
     if (!mailDetailMatchesRequest(detail, request)) {
       return structuredErrorWithData(
         toolId, 'mailThread', new Object(), 'PROVIDER_IDENTITY_MISMATCH',
-        'QQ Mail returned a stale identity or no full message body.', false, sources
+        'Mail provider returned a stale identity or no full message body.', false, sources
       );
     }
     return successfulDataResult(toolId, 'mailThread', mailThreadStructuredData(detail), sources);
@@ -11483,7 +11542,11 @@ function mailDetailRequestFromArgs(args: Object | null): MailDetailRequest {
 
 function mailDetailIdentityError(toolId: string, outputSchema: string, request: MailDetailRequest): DataResult | null {
   const identity = request.provider === 'gmail' ? request.threadId : request.messageId;
+  const providerIdentityValid = request.provider === 'gmail' ?
+    request.threadId.length > 0 && request.messageId.length > 0 :
+    request.provider === 'qq' && /^\d+$/.test(request.messageId);
   if ((request.provider !== 'gmail' && request.provider !== 'qq') || identity.length === 0 ||
+    !providerIdentityValid ||
     request.requestKey !== request.provider + ':' + identity) {
     return errorDataResult(
       toolId,
@@ -11525,6 +11588,9 @@ async function callStructuredGmailReadTool(
   args: Object | null,
   providerToolId: string = toolId
 ): Promise<DataResult> {
+  if (toolId === 'gmail.thread.read') {
+    return callStructuredMailThreadRead(toolId, args);
+  }
   if (toolId === 'gmail.mail.search') {
     const results = await configuredGmailResults(providerToolId, prompt, args);
     const data: GmailSearchStructuredData = gmailSearchStructuredDataFromResults(results);

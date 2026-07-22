@@ -659,9 +659,14 @@ export function mailThreadReadEvidence(logText, options = {}) {
     item.fields.task === action.taskId && item.fields.run === action.runId);
   if (run === undefined) return failed('missing_action_run');
 
+  const expectedProvider = options.expectedActionId === 'gmail.thread.read' ? 'gmail' : 'qq';
+  if (run.fields.provider !== expectedProvider || !run.fields.identity ||
+    run.fields.identity === 'invalid') return failed('missing_action_identity');
+
   const dataTasks = all.filter((item) => item.index > run.index &&
     item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
-    item.fields.tool === options.expectedActionId);
+    item.index < action.resultIndex && item.fields.tool === options.expectedActionId &&
+    item.fields.provider === run.fields.provider && item.fields.identity === run.fields.identity);
   if (dataTasks.length !== 1) return failed('missing_or_duplicate_data_task');
   const dataTask = dataTasks[0];
   const uiTasks = all.filter((item) => item.index > run.index &&
@@ -686,10 +691,11 @@ export function mailThreadReadEvidence(logText, options = {}) {
   if (uiTerminals.length !== 1) return failed('missing_or_duplicate_ui_terminal');
   const terminal = uiTerminals[0];
   const inPlace = all.filter((item) => item.index > dataTerminal.index &&
-    item.marker === 'MailDetailInPlace' && item.index < terminal.index);
+    item.marker === 'MailDetailInPlace' && item.index < terminal.index &&
+    item.fields.provider === run.fields.provider &&
+    item.fields.identity === run.fields.identity);
   if (inPlace.length !== 1) return failed('missing_or_duplicate_in_place_terminal');
   const provider = inPlace[0].fields.provider || '';
-  const expectedProvider = options.expectedActionId === 'gmail.thread.read' ? 'gmail' : 'qq';
   const status = inPlace[0].fields.status || '';
   const bodyVisible = /^[1-9]\d*$/.test(inPlace[0].fields.bodyChars || '');
   const dataStatus = dataTerminal.marker === 'MultiAgentDataResult' ?
@@ -713,4 +719,17 @@ export function mailThreadReadEvidence(logText, options = {}) {
     uiTaskId: uiTask.fields.task,
     failures: ok || errorComplete ? [] : ['invalid_mail_read_terminal']
   };
+}
+
+export function visibleMailBodyText(value) {
+  if (typeof value !== 'string') return false;
+  const text = value.replace(/\s+/g, ' ').trim();
+  if (text.length === 0 || /正在加载邮件正文|邮件正文加载失败|正文读取失败|PROVIDER_|AUTH_REQUIRED/.test(text)) {
+    return false;
+  }
+  const content = text
+    .replace(/发件人|收件人|抄送|主题|回复|收起|展开|详情\s*\+|生成回复|保存草稿|发送/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return content.length >= 8;
 }

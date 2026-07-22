@@ -20,7 +20,8 @@ import {
 import {
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime,
-  MailDetailInPlaceEvent
+  MailDetailInPlaceEvent,
+  MailDetailWriteLease
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import {
   RegisteredPageAction,
@@ -82,6 +83,15 @@ interface MailThreadDataFixture {
   bodyHtml: string;
 }
 
+interface TestCancelPayload {
+  reason: string;
+}
+
+interface QqMailReadFixture {
+  clicked: A2uiAction;
+  current: RegisteredPageSnapshot;
+}
+
 class QueueModel implements LocalModel {
   private readonly values: string[];
 
@@ -118,6 +128,121 @@ class TrackingBus extends LinkedMessageBus {
   publish(message: AgentMessage): void {
     this.messages.push(message);
     super.publish(message);
+  }
+}
+
+class CancelBeforeMailUiBus extends TrackingBus {
+  cancelBeforeUi: boolean = true;
+
+  publish(message: AgentMessage): void {
+    if (this.cancelBeforeUi && message.type === AgentMessageType.TASK_CREATE_UI &&
+      (JSON.stringify(message.payload).indexOf('mail.thread.read') >= 0 ||
+        JSON.stringify(message.payload).indexOf('gmail.thread.read') >= 0)) {
+      const payload: TestCancelPayload = {
+        reason: 'test_cancel_before_skeleton'
+      };
+      const cancel: AgentMessage = {
+        type: AgentMessageType.TURN_CANCEL,
+        conversationId: message.conversationId,
+        turnId: message.turnId,
+        taskId: 'cancel-before-mail-ui',
+        payload
+      };
+      super.publish(cancel);
+    }
+    super.publish(message);
+  }
+}
+
+class DeferredValue<T> {
+  readonly promise: Promise<T>;
+  private resolveValue: ((value: T) => void) | null = null;
+
+  constructor() {
+    this.promise = new Promise<T>((resolve: (value: T) => void) => {
+      this.resolveValue = resolve;
+    });
+  }
+
+  resolve(value: T): void {
+    const current = this.resolveValue;
+    this.resolveValue = null;
+    if (current !== null) {
+      current(value);
+    }
+  }
+}
+
+async function pause(ms: number = 0): Promise<void> {
+  await new Promise<void>((resolve: () => void) => setTimeout(resolve, ms));
+}
+
+async function waitForMailCalls(executor: DeferredMailReadExecutor, expected: number): Promise<void> {
+  for (let attempt = 0; attempt < 100 && executor.calls.length < expected; attempt++) {
+    await pause(1);
+  }
+  if (executor.calls.length < expected) {
+    throw new Error('Mail Data executor did not receive the expected call.');
+  }
+}
+
+function mailLeaseInactive(value: MailDetailWriteLease | null): boolean {
+  return value === null || !value.isActive();
+}
+
+function successfulMailThreadData(task: CreateDataTaskPayload, body: string): DataResult {
+  const args = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+  const data: MailThreadDataFixture = {
+    requestKey: args['requestKey'] as string,
+    provider: args['provider'] as string,
+    threadId: args['threadId'] as string,
+    messageId: args['messageId'] as string,
+    internetMessageId: '',
+    subject: args['subject'] as string,
+    from: 'Sender <sender@example.com>',
+    replyTo: 'sender@example.com',
+    to: ['qa@example.com'],
+    cc: [],
+    body,
+    bodyHtml: '<p>' + body + '</p>'
+  };
+  return {
+    toolId: task.toolId,
+    outputSchema: 'mailThread',
+    status: 'success',
+    data: data as Object,
+    sources: [{
+      provider: task.toolId === 'gmail.thread.read' ? 'Gmail API' : 'QQ Mail',
+      backend: task.toolId === 'gmail.thread.read' ? 'oauth_api' : 'imap',
+      operation: 'thread.read',
+      fetchedAt: '2026-07-23T00:00:00.000Z'
+    }],
+    warnings: []
+  };
+}
+
+class ImmediateMailReadExecutor implements DataTaskExecutor {
+  calls: number = 0;
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls++;
+    return successfulMailThreadData(task, '真实邮件正文');
+  }
+}
+
+class DeferredMailReadExecutor implements DataTaskExecutor {
+  readonly calls: CreateDataTaskPayload[] = [];
+  readonly values: DeferredValue<DataResult>[] = [];
+
+  execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls.push(task);
+    const value = new DeferredValue<DataResult>();
+    this.values.push(value);
+    return value.promise;
+  }
+
+  succeed(index: number): void {
+    this.values[index].resolve(successfulMailThreadData(this.calls[index], '真实邮件正文'));
   }
 }
 
@@ -425,7 +550,12 @@ function canary(
   currentHostSurface?: () => A2uiSurfaceState | null,
   currentHostGeneration?: () => number,
   dataExecutor: DataTaskExecutor = new RejectDataExecutor(),
-  onMailDetail?: (event: MailDetailInPlaceEvent, generation: number) => Promise<void>
+  onMailDetail?: (
+    event: MailDetailInPlaceEvent,
+    generation: number,
+    lease: MailDetailWriteLease
+  ) => Promise<void>,
+  actionTimeoutMs: number = 1000
 ): MultiAgentCanaryRuntime {
   const options: MultiAgentCanaryOptions = {
     model,
@@ -454,7 +584,7 @@ function canary(
     conversationId: 'registered-page-test',
     bus,
     submitTimeoutMs: 1000,
-    actionTimeoutMs: 1000
+    actionTimeoutMs
   };
   return new MultiAgentCanaryRuntime(options);
 }
@@ -470,6 +600,25 @@ function lastActionResult(bus: TrackingBus): string {
 
 function cloneSnapshot(value: RegisteredPageSnapshot): RegisteredPageSnapshot {
   return JSON.parse(JSON.stringify(value)) as RegisteredPageSnapshot;
+}
+
+function qqMailReadFixture(sequence: number = 1): QqMailReadFixture {
+  const args = JSON.parse('{"requestKey":"qq:101","provider":"qq",' +
+    '"threadId":"","messageId":"101","subject":"QA"}') as Object;
+  const clicked = action('html_mail_detail_read', args, 'client');
+  clicked.label = '加载正文';
+  clicked.prompt = 'qq:101';
+  const surface = pageSurface('mail.search', clicked, sequence);
+  const current: RegisteredPageSnapshot = {
+    surface,
+    document: mailReplyDocument(surface, 'qq', args),
+    generation: sequence
+  };
+  const fixture: QqMailReadFixture = {
+    clicked,
+    current
+  };
+  return fixture;
 }
 
 export default function registeredPageActionMigrationTest() {
@@ -514,10 +663,10 @@ export default function registeredPageActionMigrationTest() {
       const expectedTools: string[] = ['mail.thread.read', 'gmail.thread.read'];
       for (let index = 0; index < providers.length; index++) {
         const provider = providers[index];
-        const identity = provider === 'gmail' ? 'gmail-thread-real-1' : 'qq-message-real-1';
+        const identity = provider === 'gmail' ? 'gmail-thread-real-1' : '101';
         const args = JSON.parse('{"requestKey":"' + provider + ':' + identity + '",' +
           '"provider":"' + provider + '","threadId":"' +
-          (provider === 'gmail' ? identity : 'qq-thread-real-1') + '","messageId":"' +
+          (provider === 'gmail' ? identity : '') + '","messageId":"' +
           (provider === 'gmail' ? 'gmail-message-real-1' : identity) + '","subject":"QA"}') as Object;
         const clicked = action('html_mail_detail_read', args, 'client');
         clicked.label = '加载正文';
@@ -577,11 +726,11 @@ export default function registeredPageActionMigrationTest() {
     });
 
     it('rejects stale or mutated mail body reads before Data execution', 0, async () => {
-      const args = JSON.parse('{"requestKey":"qq:qq-message-real-1","provider":"qq",' +
-        '"threadId":"qq-thread-real-1","messageId":"qq-message-real-1","subject":"QA"}') as Object;
+      const args = JSON.parse('{"requestKey":"qq:101","provider":"qq",' +
+        '"threadId":"","messageId":"101","subject":"QA"}') as Object;
       const clicked = action('html_mail_detail_read', args, 'client');
       clicked.label = '加载正文';
-      clicked.prompt = 'qq:qq-message-real-1';
+      clicked.prompt = 'qq:101';
       const surface = pageSurface('mail.search', clicked, 1);
       let current: RegisteredPageSnapshot = {
         surface,
@@ -602,7 +751,7 @@ export default function registeredPageActionMigrationTest() {
       );
       const mutated = JSON.parse(JSON.stringify(clicked)) as A2uiAction;
       (mutated.args as Record<string, Object | string | number | boolean | null | undefined>)['messageId'] =
-        'qq-message-forged';
+        '102';
       expect(await runtime.runPageAction(mutated)).assertFalse();
       const stale = cloneSnapshot(current);
       stale.surface.surfaceId = 'stale-mail-surface';
@@ -632,11 +781,11 @@ export default function registeredPageActionMigrationTest() {
           };
         }
       }
-      const args = JSON.parse('{"requestKey":"qq:qq-message-real-1","provider":"qq",' +
-        '"threadId":"qq-thread-real-1","messageId":"qq-message-real-1","subject":"QA"}') as Object;
+      const args = JSON.parse('{"requestKey":"qq:101","provider":"qq",' +
+        '"threadId":"","messageId":"101","subject":"QA"}') as Object;
       const clicked = action('html_mail_detail_read', args, 'client');
       clicked.label = '加载正文';
-      clicked.prompt = 'qq:qq-message-real-1';
+      clicked.prompt = 'qq:101';
       const surface = pageSurface('mail.search', clicked, 1);
       const current: RegisteredPageSnapshot = {
         surface,
@@ -661,8 +810,113 @@ export default function registeredPageActionMigrationTest() {
       expect(executor.calls).assertEqual(1);
       expect(events.length).assertEqual(1);
       expect(events[0].status).assertEqual('error');
-      expect(events[0].requestKey).assertEqual('qq:qq-message-real-1');
+      expect(events[0].requestKey).assertEqual('qq:101');
       expect(events[0].error).assertEqual('QQ IMAP timeout');
+      runtime.dispose();
+    });
+
+    it('clears prepared mail state after repeated cancel before skeleton and accepts the next read', 0, async () => {
+      let fixture = qqMailReadFixture();
+      const bus = new CancelBeforeMailUiBus();
+      const executor = new ImmediateMailReadExecutor();
+      const events: MailDetailInPlaceEvent[] = [];
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current,
+        bus,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        executor,
+        async (event: MailDetailInPlaceEvent): Promise<void> => { events.push(event); },
+        20
+      );
+      for (let index = 0; index < 8; index++) {
+        fixture = qqMailReadFixture(index + 1);
+        expect(await runtime.runPageAction(fixture.clicked)).assertFalse();
+      }
+      bus.cancelBeforeUi = false;
+      fixture = qqMailReadFixture(9);
+      expect(await runtime.runPageAction(fixture.clicked)).assertTrue();
+      expect(events.length).assertEqual(1);
+      expect(events[0].requestKey).assertEqual('qq:101');
+      runtime.dispose();
+    });
+
+    it('suppresses late provider and writer completion after cancel and dispose', 0, async () => {
+      let fixture = qqMailReadFixture();
+      const executor = new DeferredMailReadExecutor();
+      const events: MailDetailInPlaceEvent[] = [];
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        executor,
+        async (event: MailDetailInPlaceEvent): Promise<void> => { events.push(event); },
+        1000
+      );
+      const canceled = runtime.runPageAction(fixture.clicked);
+      await waitForMailCalls(executor, 1);
+      runtime.cancelActiveTurn('test_cancel_after_skeleton');
+      expect(await canceled).assertFalse();
+      executor.succeed(0);
+      await pause(20);
+      expect(events.length).assertEqual(0);
+
+      fixture = qqMailReadFixture(2);
+      const disposed = runtime.runPageAction(fixture.clicked);
+      await waitForMailCalls(executor, 2);
+      runtime.dispose();
+      expect(await disposed).assertFalse();
+      executor.succeed(1);
+      await pause(20);
+      expect(events.length).assertEqual(0);
+    });
+
+    it('invalidates the host write lease when callback is slower than the action deadline', 0, async () => {
+      const fixture = qqMailReadFixture();
+      const started = new DeferredValue<boolean>();
+      const release = new DeferredValue<boolean>();
+      let capturedLease: MailDetailWriteLease | null = null;
+      let applied = 0;
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        new ImmediateMailReadExecutor(),
+        async (
+          _event: MailDetailInPlaceEvent,
+          _generation: number,
+          lease: MailDetailWriteLease
+        ): Promise<void> => {
+          capturedLease = lease;
+          started.resolve(true);
+          await release.promise;
+          if (lease.isActive()) {
+            applied++;
+          }
+        },
+        20
+      );
+      const running = runtime.runPageAction(fixture.clicked);
+      await started.promise;
+      expect(await running).assertFalse();
+      expect(mailLeaseInactive(capturedLease)).assertTrue();
+      release.resolve(true);
+      await pause(20);
+      expect(applied).assertEqual(0);
       runtime.dispose();
     });
 

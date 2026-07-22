@@ -75,3 +75,29 @@ The initial focused runs failed for the missing contracts:
 ## Concern and remaining acceptance
 
 This focused task did not install a HAP or claim fresh C05 device PASS. The parent migration task must build the final combined HEAD and rerun C05 on the real device, requiring a real QQ/Gmail body lifecycle or a truthful provider terminal under the final application package. The pre-existing device evidence directories remain unmodified and untracked.
+
+## Follow-up RED / GREEN after independent review
+
+The independent review did not approve the first implementation. The follow-up kept the approved UI and feature behavior unchanged and corrected six runtime/evidence boundaries:
+
+1. QQ Mail now accepts its real IMAP identity contract: an empty `threadId`, a numeric `messageId`, and `requestKey=qq:<messageId>`. Gmail still requires both IDs and `requestKey=gmail:<threadId>`.
+2. The migrated Gmail detail route no longer consumes the truncated Dynamic `rawPreview`. Production uses the full Composio observation and preserves the existing direct Gmail OAuth fallback; QQ remains on the real IMAP client.
+3. The in-place bridge has one hard eight-entry bound across prepared, canceled, and surface state. Cancel, timeout, failed action settlement, dispose, and late writer completion invalidate the write lease and cannot revive a stale body.
+4. The page callback rechecks the same lease and host generation before suggestion work, after its await, and immediately before applying the existing mail-detail event.
+5. Device smoke rejects the loading skeleton and truthful provider-error text as a body, polls bounded UI state instead of sleeping for a fixed 500 ms, and still preserves the existing visible mail layout and controls.
+6. C05 evidence is tied to the exact anonymized `ACTION.RUN -> DataTask -> Data terminal -> in-place event -> UI terminal` identity. Logs contain only the provider and a bounded digest, not the raw request, thread, or message ID.
+
+The follow-up RED was produced by the missing QQ identity rule, full-detail reader seam, write lease, bounded cancellation state, visible-body predicate, and exact mail identity evidence. Production changes were added only after those focused failures.
+
+Fresh follow-up GREEN evidence:
+
+- Authoritative Hypium: `Tests run: 1148, Failure: 0, Error: 0, Pass: 1148, Ignore: 0`.
+- `test_result.txt` timestamp: `2026-07-23T01:52:07+0800`.
+- `test_result.txt` SHA-256: `f82f270855a482bd9008f25e18cf392ebbb9928c859dd50ac8eb17c5ec64b473`.
+- Multi-agent and mail evidence tests: `39/39` pass.
+- Hotel evidence regression: `16/16` pass.
+- Backend verifier/HAR: `255` checks pass; HAR build succeeds.
+- Capability audit: 44 registry tools, 2 runtime tools, 37 actions, and 69 capabilities; `missingMatrix`, `missingDocs`, `registryOnlyTools`, `modelOnlyTools`, and `excludedQueriesInSmoke` are empty.
+- Smoke syntax and `git diff --check` pass.
+
+The existing coverage reporter still emits `00507008 getInitCoverageData failed`; the authoritative result above is the fresh `test_result.txt`. A failed-run coverage log and both pre-existing untracked `.smoke` directories were preserved in place and were not staged, deleted, or moved. Fresh final-device C05 verification remains owned by the parent migration task and must use the combined final HAP.

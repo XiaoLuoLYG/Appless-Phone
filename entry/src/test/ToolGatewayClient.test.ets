@@ -22,7 +22,7 @@ import { build12306BookingUrl, trainLowestAvailablePriceForTest } from '@loop/ag
 import { DynamicGenericToolResult } from '@loop/agent-core';
 import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
-import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
+import { MailDetail, MailDetailRequest, MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
 import { gmailReplyDraftAction } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
@@ -36,6 +36,7 @@ import {
   configureGmailComposioResultForTests,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
+  configureMailDetailReaderForTests,
   configureHotelMcpClientForTests,
   configureHotelTimestampProviderForTests,
   configureLocalPaymentAccountBookJson,
@@ -2736,6 +2737,56 @@ export default function toolGatewayClientTest() {
         configureGmailComposioResultForTests(null);
         configureGmailMcpClientForTests(null);
         configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses the full Gmail detail observation without Dynamic rawPreview truncation', 0, async () => {
+      const body = '完整正文'.repeat(700);
+      let calls = 0;
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.thread.read',
+        title: 'Truncated dynamic preview',
+        status: 'success',
+        summary: 'dynamic path must not be used',
+        rows: [],
+        rawPreview: '{"threadId":"thread-real-1","body":"截断正文"}'
+      });
+      configureMailDetailReaderForTests(async (_request: MailDetailRequest): Promise<MailDetail> => {
+        calls++;
+        return {
+          requestKey: 'gmail:thread-real-1',
+          provider: 'gmail',
+          threadId: 'thread-real-1',
+          messageId: 'message-real-1',
+          internetMessageId: '<message-real-1@example.com>',
+          subject: '真实 Gmail 线程',
+          from: 'Alice <alice@example.com>',
+          replyTo: 'alice@example.com',
+          to: ['qa@example.com'],
+          cc: [],
+          bodyText: body,
+          bodyHtml: '<p>' + body + '</p>'
+        };
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.thread.read',
+          '',
+          looseObject('{"requestKey":"gmail:thread-real-1","provider":"gmail",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"真实 Gmail 线程"}')
+        );
+        const data = result.data as Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(calls).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect((data['body'] as string).length).assertEqual(body.length);
+        expect(data['body'] as string).assertEqual(body);
+        expect(data['threadId'] as string).assertEqual('thread-real-1');
+        expect(data['messageId'] as string).assertEqual('message-real-1');
+      } finally {
+        configureMailDetailReaderForTests(null);
+        configureGmailComposioResultForTests(null);
       }
     });
 

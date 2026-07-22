@@ -135,9 +135,12 @@ export function validateMailThreadReadActionArgs(
   const expectedAction = provider === 'gmail' ? 'gmail.thread.read' :
     provider === 'qq' ? 'mail.thread.read' : '';
   const identity = provider === 'gmail' ? threadId : messageId;
+  const providerIdentityValid = provider === 'gmail' ?
+    threadId.length > 0 && messageId.length > 0 :
+    provider === 'qq' && /^\d+$/.test(messageId);
   return validation(
-    expectedAction === actionId && identity.length > 0 && threadId.length > 0 &&
-      messageId.length > 0 && requestKey === provider + ':' + identity,
+    expectedAction === actionId && identity.length > 0 && providerIdentityValid &&
+      requestKey === provider + ':' + identity,
     'MAIL_THREAD_READ_ARGS_INVALID',
     'Mail read requires the exact current provider, request key, thread, and message.'
   );

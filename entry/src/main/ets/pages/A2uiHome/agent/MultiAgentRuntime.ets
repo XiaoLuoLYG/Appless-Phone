@@ -124,6 +124,50 @@ function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+type MailIdentityValue = Object | string | number | boolean | null | undefined;
+
+function mailIdentityText(value: MailIdentityValue): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function mailIdentityHash(value: string): string {
+  let hash: number = 2166136261;
+  for (let index: number = 0; index < value.length; index++) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+export function mailDetailIdentityDigest(value: Object): string {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+  const record = value as Record<string, MailIdentityValue>;
+  const provider = mailIdentityText(record['provider']).toLowerCase();
+  const requestKey = mailIdentityText(record['requestKey']);
+  const threadId = mailIdentityText(record['threadId']);
+  const messageId = mailIdentityText(record['messageId']);
+  if ((provider !== 'gmail' && provider !== 'qq') || requestKey.length === 0 || messageId.length === 0) {
+    return '';
+  }
+  const material = provider.length.toString() + ':' + provider + '|' +
+    requestKey.length.toString() + ':' + requestKey + '|' +
+    threadId.length.toString() + ':' + threadId + '|' +
+    messageId.length.toString() + ':' + messageId;
+  return mailIdentityHash(material);
+}
+
+function mailEvidenceSuffix(toolId: string, value: Object): string {
+  if (toolId !== 'mail.thread.read' && toolId !== 'gmail.thread.read') {
+    return '';
+  }
+  const record = value as Record<string, MailIdentityValue>;
+  const provider = mailIdentityText(record['provider']).toLowerCase();
+  const digest = mailDetailIdentityDigest(value);
+  return ' provider=' + evidenceAllowed(provider, ['gmail', 'qq']) +
+    ' identity=' + (digest.length > 0 ? digest : 'invalid');
+}
+
 function evidenceAllowed(
   value: string | undefined, values: string[] = [],
   pattern: RegExp = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/
@@ -151,7 +195,8 @@ export class MultiAgentEvidenceFormatter {
         this.rememberEntities(payload.data, this.token('k', message.taskId));
         return '[AIPhone][MultiAgentDataResult]' + identity + ' tool=' + evidenceAllowed(payload.toolId) +
           ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
-          ' sources=' + payload.sources.length.toString() + ' error=' + (payload.error === undefined ? 'false' : 'true');
+          ' sources=' + payload.sources.length.toString() + ' error=' + (payload.error === undefined ? 'false' : 'true') +
+          mailEvidenceSuffix(payload.toolId, payload.data);
       }
       case AgentMessageType.TASK_CREATE_UI: {
         const payload = message.payload as CreateUiTaskPayload;
@@ -177,7 +222,8 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as ActionRunPayload;
         return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
           ' plan=' + this.token('p', 'direct:' + payload.runId) + ' run=' + this.token('r', payload.runId) +
-          ' action=' + evidenceAllowed(payload.actionId) + ' source=' + evidenceAllowed(payload.sourceToolId);
+          ' action=' + evidenceAllowed(payload.actionId) + ' source=' + evidenceAllowed(payload.sourceToolId) +
+          mailEvidenceSuffix(payload.actionId, payload.args);
       }
       case AgentMessageType.ACTION_RESULT: {
         const payload = message.payload as ActionResultPayload;
@@ -213,7 +259,8 @@ export class MultiAgentEvidenceFormatter {
     return '[AIPhone][MultiAgentDataTask]' + identity + ' round=' + round +
       ' tool=' + evidenceAllowed(payload.toolId) + ' predecessor=' + predecessor +
       ' path=' + path + ' target=' + (provenance === undefined ? 'none' : '/placeId') +
-      ' binding=' + (provenance === undefined ? 'false' : 'true');
+      ' binding=' + (provenance === undefined ? 'false' : 'true') +
+      mailEvidenceSuffix(payload.toolId, payload.args);
   }
   private rememberEntities(data: Object, task: string): void {
     if (data === null || typeof data !== 'object' || Array.isArray(data)) return;

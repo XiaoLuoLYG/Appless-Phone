@@ -5,6 +5,7 @@ import {
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   mailThreadReadEvidence,
+  visibleMailBodyText,
   modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
@@ -705,12 +706,12 @@ test('keeps a terminal action error from becoming success', () => {
 
 test('correlates an exact mail read action through one Data and in-place Ui terminal', () => {
   const logs = `
-    [AIPhone][MultiAgentActionRun] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 action=mail.thread.read source=mail.search
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 action=mail.thread.read source=mail.search provider=qq identity=qq-identity-1
     [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1
-    [AIPhone][MultiAgentDataTask] conversation=c1 turn=read-turn task=data1 round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=read-turn task=data1 round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false provider=qq identity=qq-identity-1
     [AIPhone][MultiAgentActionResult] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 status=success
     [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false
-    [AIPhone][MailDetailInPlace] requestKeyChars=20 provider=qq status=success bodyChars=8
+    [AIPhone][MailDetailInPlace] requestKeyChars=20 provider=qq identity=qq-identity-1 status=success bodyChars=8
     [AIPhone][MultiAgentUiResult] conversation=c1 turn=read-turn task=ui1 surface=loop_surface_1 state=result
   `;
   const exact = mailThreadReadEvidence(logs, {
@@ -747,6 +748,31 @@ test('correlates an exact mail read action through one Data and in-place Ui term
       currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
     }
   ).complete, false);
+
+  const interleaved = logs.replace(
+    '[AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1',
+    '[AIPhone][MultiAgentUiTask] conversation=c1 turn=noise-turn task=noise-ui dataTasks=noise-data\n' +
+      '    [AIPhone][MultiAgentDataTask] conversation=c1 turn=noise-turn task=noise-data round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false\n' +
+      '    [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1'
+  );
+  assert.equal(mailThreadReadEvidence(interleaved, {
+    expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+  }).complete, true);
+  assert.equal(mailThreadReadEvidence(
+    logs.replace('provider=qq identity=qq-identity-1 status=success',
+      'provider=qq identity=forged-identity status=success'),
+    {
+      expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+      currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+    }
+  ).complete, false);
+});
+
+test('does not treat the mail loading skeleton as a visible body', () => {
+  assert.equal(visibleMailBodyText('发件人\n主题\n正在加载邮件正文\n回复'), false);
+  assert.equal(visibleMailBodyText('Alice\nalice@example.com 发给 我\n这是供应商返回的真实完整正文\n回复'), true);
+  assert.equal(visibleMailBodyText('邮件正文加载失败。\n重试'), false);
 });
 
 test('correlates a virtual action request with its exact terminal result', () => {

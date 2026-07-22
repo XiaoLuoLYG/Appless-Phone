@@ -114,6 +114,7 @@ import {
 } from './agent/HotelAgentRuntime';
 import {
   MailDetailInPlaceEvent,
+  MailDetailWriteLease,
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime
 } from './agent/MultiAgentCanaryRuntime';
@@ -1270,8 +1271,12 @@ struct Index {
           this.applyPersonaMemoryUpdate(update);
         }
       },
-      onMailDetail: async (result: MailDetailInPlaceEvent, generation: number): Promise<void> => {
-        if (!runtimeCallbackIsCurrent(
+      onMailDetail: async (
+        result: MailDetailInPlaceEvent,
+        generation: number,
+        lease: MailDetailWriteLease
+      ): Promise<void> => {
+        if (!lease.isActive() || !runtimeCallbackIsCurrent(
           this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
         )) {
           throw new Error('Mail detail surface is stale.');
@@ -1279,7 +1284,7 @@ struct Index {
         let event: MailDetailUiEvent;
         if (result.status === 'success' && result.detail !== undefined) {
           const suggestion = await this.extractMailCalendarSuggestion(result.detail);
-          if (!runtimeCallbackIsCurrent(
+          if (!lease.isActive() || !runtimeCallbackIsCurrent(
             this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
           )) {
             throw new Error('Mail detail surface is stale.');
@@ -1301,11 +1306,17 @@ struct Index {
             error: result.error
           };
         }
+        if (!lease.isActive() || !runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+        )) {
+          throw new Error('Mail detail surface is stale.');
+        }
         this.mailDetailEventJson = JSON.stringify(event);
         const bodyChars = result.detail === undefined ? 0 :
           (result.detail.bodyText.length > 0 ? result.detail.bodyText.length : result.detail.bodyHtml.length);
         aiLogInfo('[AIPhone][MailDetailInPlace] requestKeyChars=' + result.requestKey.length.toString() +
           ' provider=' + result.provider +
+          ' identity=' + result.identityDigest +
           ' status=' + result.status + ' bodyChars=' + bodyChars.toString());
       },
       pageAction: (

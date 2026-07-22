@@ -60,7 +60,7 @@ import {
   HotelLocalDateProvider,
   normalizeHotelSearchTaskInput
 } from './HotelLeaderPlanner';
-import { MultiAgentRuntime } from './MultiAgentRuntime';
+import { mailDetailIdentityDigest, MultiAgentRuntime } from './MultiAgentRuntime';
 import { MIGRATED_TOOL_IDS, MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import {
@@ -120,7 +120,11 @@ export interface MultiAgentCanaryOptions {
   currentHostGeneration?: () => number;
   onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => boolean;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest, runtimeGeneration: number) => void;
-  onMailDetail?: (event: MailDetailInPlaceEvent, runtimeGeneration: number) => Promise<void>;
+  onMailDetail?: (
+    event: MailDetailInPlaceEvent,
+    runtimeGeneration: number,
+    lease: MailDetailWriteLease
+  ) => Promise<void>;
   downstreamWriter?: UiSurfaceWriter;
   uiLayoutPlanner?: UiLayoutPlanner;
   settingsFingerprint?: string;
@@ -136,6 +140,7 @@ export interface MultiAgentCanaryOptions {
 export interface MailDetailInPlaceEvent {
   requestKey: string;
   provider: string;
+  identityDigest: string;
   status: 'success' | 'error';
   detail?: MailDetail;
   error: string;
@@ -149,9 +154,15 @@ interface PreparedMailDetail {
 interface MailDetailSurfaceState extends PreparedMailDetail {
   uiTaskId: string;
   event: MailDetailInPlaceEvent | null;
+  epoch: number;
+  canceled: boolean;
 }
 
-const MAIL_DETAIL_PENDING_LIMIT: number = 8;
+export interface MailDetailWriteLease {
+  isActive(): boolean;
+}
+
+const MAIL_DETAIL_STATE_LIMIT: number = 8;
 
 function mailText(value: Object | string | number | boolean | null | undefined): string {
   return typeof value === 'string' ? value : '';
@@ -176,18 +187,26 @@ function mailDetailFromData(
   data: DataResult,
   request: MailDetailRequest
 ): MailDetailInPlaceEvent {
+  const identityDigest = mailDetailIdentityDigest(request);
   const providerError = data.error === undefined ? '' : data.error.message;
   if (data.status === 'error') {
     return {
       requestKey: request.requestKey,
       provider: request.provider,
+      identityDigest,
       status: 'error',
       error: providerError.trim().length > 0 ? providerError : '邮件正文读取失败。'
     };
   }
   if (data.status !== 'success' || data.outputSchema !== 'mailThread' ||
     data.data === null || typeof data.data !== 'object' || Array.isArray(data.data)) {
-    return { requestKey: request.requestKey, provider: request.provider, status: 'error', error: '邮件正文数据无效。' };
+    return {
+      requestKey: request.requestKey,
+      provider: request.provider,
+      identityDigest,
+      status: 'error',
+      error: '邮件正文数据无效。'
+    };
   }
   const values = data.data as Record<string, Object | string | number | boolean | null | undefined>;
   const to = mailStrings(values['to']);
@@ -199,7 +218,13 @@ function mailDetailFromData(
     mailText(values['threadId']) !== request.threadId ||
     mailText(values['messageId']) !== request.messageId ||
     to === null || cc === null || (body.trim().length === 0 && bodyHtml.trim().length === 0)) {
-    return { requestKey: request.requestKey, provider: request.provider, status: 'error', error: '邮件正文身份或内容无效。' };
+    return {
+      requestKey: request.requestKey,
+      provider: request.provider,
+      identityDigest,
+      status: 'error',
+      error: '邮件正文身份或内容无效。'
+    };
   }
   const detail: MailDetail = {
     requestKey: request.requestKey,
@@ -215,7 +240,26 @@ function mailDetailFromData(
     bodyText: body,
     bodyHtml
   };
-  return { requestKey: request.requestKey, provider: request.provider, status: 'success', detail, error: '' };
+  return {
+    requestKey: request.requestKey,
+    provider: request.provider,
+    identityDigest,
+    status: 'success',
+    detail,
+    error: ''
+  };
+}
+
+class MailDetailBridgeLease implements MailDetailWriteLease {
+  private readonly active: () => boolean;
+
+  constructor(active: () => boolean) {
+    this.active = active;
+  }
+
+  isActive(): boolean {
+    return this.active();
+  }
 }
 
 class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDetailFollowUpPreparer {
@@ -223,15 +267,26 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
   private readonly mailRenderer: UiTaskRenderer;
   private readonly writer: UiSurfaceWriter;
   private readonly currentGeneration: () => number;
-  private readonly callback: ((event: MailDetailInPlaceEvent, generation: number) => Promise<void>) | null;
+  private readonly callback: ((
+    event: MailDetailInPlaceEvent,
+    generation: number,
+    lease: MailDetailWriteLease
+  ) => Promise<void>) | null;
   private readonly prepared: Map<string, PreparedMailDetail> = new Map<string, PreparedMailDetail>();
+  private readonly canceledPrepared: Map<string, PreparedMailDetail> = new Map<string, PreparedMailDetail>();
   private readonly surfaces: Map<string, MailDetailSurfaceState> = new Map<string, MailDetailSurfaceState>();
+  private epoch: number = 1;
+  private disposed: boolean = false;
 
   constructor(
     renderer: UiTaskRenderer,
     writer: UiSurfaceWriter,
     currentGeneration: () => number,
-    callback?: (event: MailDetailInPlaceEvent, generation: number) => Promise<void>
+    callback?: (
+      event: MailDetailInPlaceEvent,
+      generation: number,
+      lease: MailDetailWriteLease
+    ) => Promise<void>
   ) {
     this.renderer = renderer;
     this.mailRenderer = new StructuredToolUiRenderer(null, 6000);
@@ -240,10 +295,36 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
     this.callback = callback === undefined ? null : callback;
   }
 
+  private stateCount(): number {
+    return this.prepared.size + this.canceledPrepared.size + this.surfaces.size;
+  }
+
+  private pruneCanceledState(): void {
+    while (this.stateCount() >= MAIL_DETAIL_STATE_LIMIT && this.canceledPrepared.size > 0) {
+      const first = this.canceledPrepared.keys().next();
+      if (first.done) {
+        break;
+      }
+      this.canceledPrepared.delete(first.value);
+    }
+    if (this.stateCount() < MAIL_DETAIL_STATE_LIMIT) {
+      return;
+    }
+    const entries = this.surfaces.entries();
+    let next = entries.next();
+    while (!next.done && this.stateCount() >= MAIL_DETAIL_STATE_LIMIT) {
+      if (next.value[1].canceled) {
+        this.surfaces.delete(next.value[0]);
+      }
+      next = entries.next();
+    }
+  }
+
   prepare(uiTaskId: string, request: MailDetailRequest): boolean {
     const actionId = request.provider === 'gmail' ? 'gmail.thread.read' : 'mail.thread.read';
     const generation = this.currentGeneration();
-    if (this.callback === null || this.prepared.size >= MAIL_DETAIL_PENDING_LIMIT ||
+    this.pruneCanceledState();
+    if (this.disposed || this.callback === null || this.stateCount() >= MAIL_DETAIL_STATE_LIMIT ||
       uiTaskId.trim().length === 0 || !Number.isSafeInteger(generation) || generation <= 0 ||
       !validateRegisteredPageActionArgs(actionId, request).ok) {
       return false;
@@ -263,9 +344,23 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
 
   async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
     const prepared = this.prepared.get(task.taskId);
-    if (prepared === undefined || task.dataTaskIds.length !== 1 ||
-      task.expectedOutputSchema !== 'mailThread' ||
-      (task.intent !== 'mail.thread.read' && task.intent !== 'gmail.thread.read')) {
+    const canceled = this.canceledPrepared.get(task.taskId);
+    const mailTask = task.dataTaskIds.length === 1 && task.expectedOutputSchema === 'mailThread' &&
+      (task.intent === 'mail.thread.read' || task.intent === 'gmail.thread.read');
+    if (prepared === undefined && canceled !== undefined && mailTask) {
+      this.canceledPrepared.delete(task.taskId);
+      this.surfaces.set(surfaceId, {
+        uiTaskId: task.taskId,
+        request: canceled.request,
+        generation: canceled.generation,
+        event: null,
+        epoch: this.epoch,
+        canceled: true
+      });
+      return this.mailRenderer.skeleton(task, surfaceId);
+    }
+    if (prepared === undefined || !mailTask ||
+      this.disposed) {
       return this.renderer.skeleton(task, surfaceId);
     }
     this.prepared.delete(task.taskId);
@@ -273,7 +368,9 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
       uiTaskId: task.taskId,
       request: prepared.request,
       generation: prepared.generation,
-      event: null
+      event: null,
+      epoch: this.epoch,
+      canceled: false
     });
     return this.mailRenderer.skeleton(task, surfaceId);
   }
@@ -292,6 +389,7 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
       state.event = {
         requestKey: state.request.requestKey,
         provider: state.request.provider,
+        identityDigest: mailDetailIdentityDigest(state.request),
         status: 'error',
         error: '邮件正文结果关联无效。'
       };
@@ -311,6 +409,7 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
     state.event = {
       requestKey: state.request.requestKey,
       provider: state.request.provider,
+      identityDigest: mailDetailIdentityDigest(state.request),
       status: 'error',
       error: message.trim().length > 0 ? message : '邮件正文读取失败。'
     };
@@ -329,24 +428,62 @@ class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDe
   ): Promise<void> {
     const state = this.surfaces.get(surfaceId);
     if (state === undefined) {
+      if (!lease.isActive()) {
+        return;
+      }
       return this.writer.write(turnId, surfaceId, jsonl, lease);
     }
-    if (state.event === null || !lease.isActive()) {
+    if (state.canceled || state.event === null || !lease.isActive() || this.disposed) {
+      if (state.canceled || !lease.isActive() || this.disposed) {
+        this.surfaces.delete(surfaceId);
+      }
       return;
     }
     const event = state.event;
-    this.surfaces.delete(surfaceId);
     if (this.callback === null) {
       throw new Error('Mail detail callback is unavailable.');
     }
-    await this.callback(event, state.generation);
-    if (event.status === 'error') {
-      throw new Error(event.error);
+    const expectedEpoch = state.epoch;
+    const writeLease: MailDetailWriteLease = new MailDetailBridgeLease((): boolean =>
+      !this.disposed && this.epoch === expectedEpoch && lease.isActive() &&
+        this.surfaces.get(surfaceId) === state && !state.canceled
+    );
+    try {
+      await this.callback(event, state.generation, writeLease);
+      if (!writeLease.isActive()) {
+        return;
+      }
+      if (event.status === 'error') {
+        throw new Error(event.error);
+      }
+    } finally {
+      if (this.surfaces.get(surfaceId) === state) {
+        this.surfaces.delete(surfaceId);
+      }
     }
   }
 
-  dispose(): void {
+  actionSettled(ok: boolean): void {
+    if (ok) {
+      this.prepared.clear();
+      return;
+    }
+    this.epoch++;
+    this.prepared.forEach((prepared: PreparedMailDetail, taskId: string) => {
+      this.canceledPrepared.set(taskId, prepared);
+    });
     this.prepared.clear();
+    this.surfaces.forEach((surface: MailDetailSurfaceState) => {
+      surface.canceled = true;
+    });
+    this.pruneCanceledState();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.epoch++;
+    this.prepared.clear();
+    this.canceledPrepared.clear();
     this.surfaces.clear();
   }
 }
@@ -987,7 +1124,11 @@ export class MultiAgentCanaryRuntime {
       stepId: '',
       pageActionId: context.pageActionId
     };
-    return this.runtime.runAction(action, execution, this.currentHostGeneration());
+    return this.runtime.runAction(action, execution, this.currentHostGeneration())
+      .then((ok: boolean): boolean => {
+        this.mailDetailBridge.actionSettled(ok);
+        return ok;
+      });
   }
 
   runPageAction(
