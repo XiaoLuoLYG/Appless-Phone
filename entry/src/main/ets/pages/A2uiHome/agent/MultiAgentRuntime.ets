@@ -159,7 +159,7 @@ export class MultiAgentEvidenceFormatter {
       }
       case AgentMessageType.TASK_RESULT_UI: {
         const payload = message.payload as UiRenderResultPayload;
-        return '[AIPhone][MultiAgentUiResult]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+        return '[AIPhone][MultiAgentUiResult]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
           ' state=' + evidenceAllowed(payload.state, ['skeleton', 'result', 'error', 'action']);
       }
       case AgentMessageType.TASK_ERROR: {
@@ -175,13 +175,13 @@ export class MultiAgentEvidenceFormatter {
       }
       case AgentMessageType.ACTION_RUN: {
         const payload = message.payload as ActionRunPayload;
-        return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+        return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
           ' plan=' + this.token('p', 'direct:' + payload.runId) + ' run=' + this.token('r', payload.runId) +
           ' action=' + evidenceAllowed(payload.actionId) + ' source=' + evidenceAllowed(payload.sourceToolId);
       }
       case AgentMessageType.ACTION_RESULT: {
         const payload = message.payload as ActionResultPayload;
-        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + this.token('s', payload.surfaceId) +
+        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
           ' plan=' + this.token('p', payload.planId) + ' run=' + this.token('r', payload.runId) +
           ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']);
       }
@@ -189,7 +189,7 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as TurnResultPayload;
         return '[AIPhone][MultiAgentTurnResult]' + identity + ' status=' +
           evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error', 'canceled']) + ' surface=' +
-          (payload.surfaceId === undefined ? 'none' : this.token('s', payload.surfaceId)) + ' roundCount=' +
+          (payload.surfaceId === undefined ? 'none' : evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/)) + ' roundCount=' +
           payload.roundCount.toString() + ' messageChars=' + payload.message.length.toString();
       }
       default: return '';

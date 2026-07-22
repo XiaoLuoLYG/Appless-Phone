@@ -743,9 +743,20 @@ export default function multiAgentRuntimeTest() {
       };
       const turnPayload: TurnResultPayload = {
         status: 'partial',
-        surfaceId: 'surface-2',
+        surfaceId: 'loop_surface_1784700000000_2',
         roundCount: 2,
         message: 'provider message must not log'
+      };
+      const uiPayload: UiRenderResultPayload = {
+        surfaceId: 'loop_surface_1784700000000_2',
+        state: 'result'
+      };
+      const uiMessage: AgentMessage = {
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        taskId: 'input-1',
+        payload: uiPayload
       };
       const turnMessage: AgentMessage = {
         type: AgentMessageType.TURN_RESULT,
@@ -758,6 +769,7 @@ export default function multiAgentRuntimeTest() {
       const firstDataLine = formatter.line(firstDataMessage);
       const firstResultLine = formatter.line(firstResultMessage);
       const dataLine = formatter.line(dataMessage);
+      const uiLine = formatter.line(uiMessage);
       const turnLine = formatter.line(turnMessage);
 
       expect(inputLine).assertEqual(
@@ -776,9 +788,13 @@ export default function multiAgentRuntimeTest() {
           'round=2 tool=maps.place.details predecessor=k4 ' +
           'path=/places/0/placeId target=/placeId binding=true'
       );
+      expect(uiLine).assertEqual(
+        '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t2 task=k3 ' +
+          'surface=loop_surface_1784700000000_2 state=result'
+      );
       expect(turnLine).assertEqual(
         '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 ' +
-          'status=partial surface=s6 roundCount=2 messageChars=29'
+          'status=partial surface=loop_surface_1784700000000_2 roundCount=2 messageChars=29'
       );
       expect(inputLine.indexOf('secret')).assertEqual(-1);
       expect(inputLine.indexOf('conversation-1')).assertEqual(-1);
@@ -835,6 +851,7 @@ export default function multiAgentRuntimeTest() {
 
       const terminalPayload: TurnResultPayload = {
         status: 'success',
+        surfaceId: longIdentity,
         roundCount: 1,
         message: 'done'
       };
@@ -845,7 +862,10 @@ export default function multiAgentRuntimeTest() {
         taskId: longIdentity,
         payload: terminalPayload
       };
-      formatter.line(terminal);
+      const invalidSurface: string = formatter.line(terminal);
+      expect(invalidSurface.indexOf('surface=invalid')).assertLarger(-1);
+      expect(invalidSurface.indexOf('local@example.com')).assertEqual(-1);
+      expect(invalidSurface.indexOf('\n')).assertEqual(-1);
       formatter.dispose();
       const afterTerminal: string = formatter.line(input);
       expect(afterTerminal).assertEqual(first);

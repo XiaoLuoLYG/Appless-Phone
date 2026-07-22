@@ -117,15 +117,15 @@ test('combines generic turn correlation with specialized hotel provider evidence
     [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
     [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
     [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
-    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=calling_tool components=2
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000000 status=calling_tool components=2
     [AIPhone][RollingGoHotelRequest] operation=searchHotels
     [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
     [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
-    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=skeleton
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000000 state=skeleton
     [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
-    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=result
-    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready components=3
-    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=hotel-search-1 roundCount=1 messageChars=12
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000000 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000000 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=loop_surface_1784700000000 roundCount=1 messageChars=12
   `);
   assert.equal(complete.ok, true);
   assert.equal(complete.lifecycle.toolIds[0], 'hotel.search');
@@ -135,14 +135,14 @@ test('combines generic turn correlation with specialized hotel provider evidence
     [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
     [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
     [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
-    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=stale-provider-surface status=calling_tool components=2
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000001 status=calling_tool components=2
     [AIPhone][RollingGoHotelRequest] operation=searchHotels
     [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
     [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
     [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
-    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=current-lifecycle-surface state=result
-    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=stale-provider-surface status=ready components=3
-    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=current-lifecycle-surface roundCount=1 messageChars=12
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000002 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000001 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=loop_surface_1784700000002 roundCount=1 messageChars=12
   `).ok, false);
   assert.equal(hotelMultiAgentSearchEvidence(`
     [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
