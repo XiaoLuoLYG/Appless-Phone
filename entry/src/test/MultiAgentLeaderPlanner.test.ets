@@ -49,6 +49,10 @@ const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
   0,
   LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
 ) + ',"reasonCode":"greeting"}';
+const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace(
+  '"personaId":"travel_companion",',
+  ''
+);
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -183,6 +187,7 @@ export default function multiAgentLeaderPlannerTest() {
       const decision: LeaderDecision = await planner.plan(inputMessage(), input, planningContext(), 2);
 
       expect(decision.personaId).assertEqual('travel_companion');
+      expect(decision.reasonCode).assertEqual('host_execute');
       expect(decision.dataTasks.length).assertEqual(2);
       expect(decision.dataTasks[0].toolId).assertEqual('flight.search');
       expect(decision.dataTasks[1].toolId).assertEqual('train.search');
@@ -192,6 +197,9 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Omit reasonCode') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('"reasonCode":"string"')).assertEqual(-1);
       expect(model.systemPrompts[0].indexOf(
         'For roundAction answer or clarify, include answer as a non-empty string. ' +
           'For roundAction execute or legacy_handoff, omit answer.'
@@ -218,8 +226,8 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
     });
 
-    it('repairs one completed strict-schema rejection once without exposing its output', 0, async () => {
-      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
+    it('repairs one missing authority field once without exposing its output', 0, async () => {
+      const model = new QueueLocalModel([MISSING_PERSONA_DECISION, LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const planner = new MultiAgentLeaderPlanner(model);
       const input: InputUserPayload = { text: '你好' };
 
@@ -231,7 +239,7 @@ export default function multiAgentLeaderPlannerTest() {
         (): boolean => true
       );
 
-      expect(decision.reasonCode).assertEqual('greeting');
+      expect(decision.reasonCode).assertEqual('host_answer');
       expect(model.prompts.length).assertEqual(2);
       expect(model.prompts[1].indexOf(model.prompts[0])).assertEqual(0);
       expect(model.prompts[1].indexOf('previous decision rejected by strict schema') >= 0).assertTrue();
@@ -241,8 +249,8 @@ export default function multiAgentLeaderPlannerTest() {
     });
 
     it('stops after one invalid or throwing strict-schema repair', 0, async () => {
-      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, LIVE_ANSWER_WITHOUT_REASON_CODE]);
-      const throwingModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const model = new QueueLocalModel([MISSING_PERSONA_DECISION, MISSING_PERSONA_DECISION]);
+      const throwingModel = new QueueLocalModel([MISSING_PERSONA_DECISION]);
       const planner = new MultiAgentLeaderPlanner(model);
       const input: InputUserPayload = { text: '你好' };
       let failed: boolean = false;
@@ -268,8 +276,8 @@ export default function multiAgentLeaderPlannerTest() {
     });
 
     it('does not repair without an active lifecycle signal', 0, async () => {
-      const absentModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
-      const inactiveModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE, VALID_ANSWER_DECISION]);
+      const absentModel = new QueueLocalModel([MISSING_PERSONA_DECISION, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const inactiveModel = new QueueLocalModel([MISSING_PERSONA_DECISION, LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const input: InputUserPayload = { text: '你好' };
       let absentFailed: boolean = false;
       let inactiveFailed: boolean = false;
@@ -311,15 +319,59 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('uses one model call when the first decision is valid', 0, async () => {
-      const model = new QueueLocalModel([VALID_ANSWER_DECISION]);
-      const planner = new MultiAgentLeaderPlanner(model);
+    it('owns diagnostic reason codes for omitted forged and legacy values', 0, async () => {
+      const omittedModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const forgedModel = new QueueLocalModel([VALID_ANSWER_DECISION]);
+      const clarifyModel = new QueueLocalModel(['{"personaId":"travel_companion","skillId":"",' +
+        '"requestedCapabilityIds":[],"roundAction":"clarify","dataTasks":[],' +
+        '"uiIntent":{"purpose":"clarify","preferredDensity":"comfortable","requiredSections":[]},' +
+        '"answer":"请提供城市"}']);
+      const legacyModel = new QueueLocalModel(['{"personaId":"travel_companion","skillId":"",' +
+        '"requestedCapabilityIds":["payment.create"],"roundAction":"legacy_handoff","dataTasks":[],' +
+        '"uiIntent":{"purpose":"handoff","preferredDensity":"comfortable","requiredSections":[]},' +
+        '"reasonCode":"forged_by_model"}']);
       const input: InputUserPayload = { text: '你好' };
 
-      const decision = await planner.plan(inputMessage(), input, planningContext(), 1);
+      const omitted = await new MultiAgentLeaderPlanner(omittedModel).plan(
+        inputMessage(), input, planningContext(), 1
+      );
+      const forged = await new MultiAgentLeaderPlanner(forgedModel).plan(
+        inputMessage(), input, planningContext(), 1
+      );
+      const clarify = await new MultiAgentLeaderPlanner(clarifyModel).plan(
+        inputMessage(), input, planningContext(), 1
+      );
+      const legacy = await new MultiAgentLeaderPlanner(legacyModel).plan(
+        inputMessage(), input, planningContext(), 1
+      );
 
-      expect(decision.reasonCode).assertEqual('greeting');
-      expect(model.prompts.length).assertEqual(1);
+      expect(omitted.reasonCode).assertEqual('host_answer');
+      expect(forged.reasonCode).assertEqual('host_answer');
+      expect(clarify.reasonCode).assertEqual('host_clarify');
+      expect(legacy.reasonCode).assertEqual('unmigrated_tool');
+      expect(omittedModel.prompts.length).assertEqual(1);
+      expect(forgedModel.prompts.length).assertEqual(1);
+      expect(clarifyModel.prompts.length).assertEqual(1);
+      expect(legacyModel.prompts.length).assertEqual(1);
+    });
+
+    it('repairs a present malformed reason code while ignoring a valid model value', 0, async () => {
+      const malformed: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
+        0,
+        LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
+      ) + ',"reasonCode":42}';
+      const model = new QueueLocalModel([malformed, VALID_ANSWER_DECISION]);
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '你好' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.reasonCode).assertEqual('host_answer');
+      expect(model.prompts.length).assertEqual(2);
     });
 
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {

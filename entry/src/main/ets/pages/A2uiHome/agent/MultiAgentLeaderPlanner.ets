@@ -19,18 +19,19 @@ import {
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
 const DECISION_KEYS: string[] = [
-  'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
-  'answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
-  'actionIntent,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent',
-  'actionIntent,answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent'
+  'dataTasks,personaId,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'answer,dataTasks,personaId,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'actionIntent,dataTasks,personaId,requestedCapabilityIds,roundAction,skillId,uiIntent',
+  'actionIntent,answer,dataTasks,personaId,requestedCapabilityIds,roundAction,skillId,uiIntent'
 ];
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute or legacy_handoff, omit answer.';
+const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
-  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE;
+  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly.';
 
@@ -173,9 +174,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
-        '"answer":"required non-empty string for answer|clarify; omit for execute|legacy_handoff",' +
-        '"reasonCode":"string"}.',
+        '"answer":"required non-empty string for answer|clarify; omit for execute|legacy_handoff"}.',
       ANSWER_FIELD_RULE,
+      REASON_CODE_FIELD_RULE,
       'Select one persona and at most one active skill.',
       'requestedCapabilityIds is mandatory, unique, and contains exact registered tool/action IDs. ' +
         'Use [] only for ordinary direct conversation that needs no tool-backed fact.',
@@ -199,8 +200,14 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private decision(parsed: Object, context: LeaderPlanningContext): LeaderDecision {
-    if (parsed === null || Array.isArray(parsed) ||
-      DECISION_KEYS.indexOf(Object.keys(parsed).sort().join(',')) < 0) {
+    if (parsed === null || Array.isArray(parsed)) {
+      throw new Error('Leader decision contains missing or unknown fields.');
+    }
+    const decisionKeys: string = Object.keys(parsed)
+      .filter((key: string): boolean => key !== 'reasonCode')
+      .sort()
+      .join(',');
+    if (DECISION_KEYS.indexOf(decisionKeys) < 0) {
       throw new Error('Leader decision contains missing or unknown fields.');
     }
     const values = parsed as Record<string, Object | string | number | boolean | null | undefined>;
@@ -217,7 +224,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       !Array.isArray(rawTasks) ||
       !Array.isArray(rawRequestedCapabilities) ||
       rawUiIntent === null || typeof rawUiIntent !== 'object' || Array.isArray(rawUiIntent) ||
-      typeof reasonCode !== 'string' || reasonCode.trim().length === 0) {
+      (reasonCode !== undefined &&
+        (typeof reasonCode !== 'string' || reasonCode.trim().length === 0))) {
       throw new Error('Leader decision fields are malformed.');
     }
     if (!this.validPersonaSkill(context, personaId, skillId)) {
@@ -257,7 +265,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       roundAction: selectedAction,
       dataTasks: tasks,
       uiIntent,
-      reasonCode
+      reasonCode: this.hostReasonCode(selectedAction)
     };
     if (typeof answerValue === 'string') {
       decision.answer = answerValue;
@@ -266,6 +274,19 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.actionIntent = actionIntent;
     }
     return decision;
+  }
+
+  private hostReasonCode(action: LeaderRoundAction): string {
+    if (action === 'legacy_handoff') {
+      return 'unmigrated_tool';
+    }
+    if (action === 'execute') {
+      return 'host_execute';
+    }
+    if (action === 'answer') {
+      return 'host_answer';
+    }
+    return 'host_clarify';
   }
 
   private requestedCapabilities(raw: Object[], context: LeaderPlanningContext): string[] {
