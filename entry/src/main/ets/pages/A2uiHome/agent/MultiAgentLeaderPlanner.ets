@@ -15,7 +15,8 @@ import {
   LocalModel,
   ObservationDigest,
   ToolDefinition,
-  dataAgentToolDefinitions
+  dataAgentToolDefinitions,
+  leaderInputHasEntityAuthority
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
@@ -36,10 +37,15 @@ const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly.';
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
+const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
   'or execute only a different tool that depends on real prior output.';
+const UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_UNBOUND_LATER_TOOL. A later-round Data task did not contain any real entity reference ' +
+  'from a successful or partial earlier round. Return answer or clarify from existing observations, or execute ' +
+  'only tasks whose own input contains an exact earlier entity reference.';
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
@@ -53,6 +59,10 @@ const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
   'requires real prior output. Otherwise answer truthfully from the observations.';
+const DATA_SCOPE_CONTRACT: string =
+  'Explicit provider, app, account, source, or independently named source scope belongs in round 1. ' +
+  'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
+  'exact entity reference from a successful or partial earlier current-turn observation.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -101,6 +111,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         decision,
         this.currentTurnCompletedToolIds(message, input, round)
       );
+      this.rejectUnboundLaterTool(
+        decision,
+        this.currentTurnEntityRefs(message, input, round),
+        round
+      );
       return decision;
     } catch (error) {
       if (signal === undefined || !signal()) {
@@ -108,9 +123,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           new Error('Leader decision failed strict validation.');
         throw failure;
       }
-      const correction: string = error instanceof Error &&
-        error.message === COMPLETED_TOOL_REUSE_ERROR ?
-        COMPLETED_TOOL_REPAIR_INSTRUCTION : REPAIR_INSTRUCTION;
+      let correction: string = REPAIR_INSTRUCTION;
+      if (error instanceof Error && error.message === COMPLETED_TOOL_REUSE_ERROR) {
+        correction = COMPLETED_TOOL_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === UNBOUND_LATER_TOOL_ERROR) {
+        correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
+      }
       const repaired: string = await this.model.complete(
         prompt + '\n' + correction,
         undefined,
@@ -121,7 +139,27 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         repairedDecision,
         this.currentTurnCompletedToolIds(message, input, round)
       );
+      this.rejectUnboundLaterTool(
+        repairedDecision,
+        this.currentTurnEntityRefs(message, input, round),
+        round
+      );
       return repairedDecision;
+    }
+  }
+
+  private rejectUnboundLaterTool(
+    decision: LeaderDecision,
+    entityRefs: string[],
+    round: number
+  ): void {
+    if (round <= 1 || decision.roundAction !== 'execute') {
+      return;
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      if (!leaderInputHasEntityAuthority(decision.dataTasks[index].input, entityRefs)) {
+        throw new Error(UNBOUND_LATER_TOOL_ERROR);
+      }
     }
   }
 
@@ -242,6 +280,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       TRAVEL_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
+      DATA_SCOPE_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
       'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +
@@ -277,6 +316,34 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       if (terminal && observationRound > 0 && observationRound < currentRound &&
         this.dataToolIds.has(toolId) && result.indexOf(toolId) < 0) {
         result.push(toolId);
+      }
+    }
+    return result;
+  }
+
+  private currentTurnEntityRefs(
+    message: AgentMessage,
+    input: InputUserPayload,
+    currentRound: number
+  ): string[] {
+    if (currentRound <= 1) {
+      return [];
+    }
+    const observations: ObservationDigest[] = input.recentObservations === undefined ? [] :
+      input.recentObservations;
+    const result: string[] = [];
+    for (let index = 0; index < observations.length; index++) {
+      const observation: ObservationDigest = observations[index];
+      const observationRound: number = this.observationRound(message.taskId, observation.taskId);
+      if ((observation.status !== 'success' && observation.status !== 'partial') ||
+        observationRound <= 0 || observationRound >= currentRound) {
+        continue;
+      }
+      for (let refIndex = 0; refIndex < observation.entityRefs.length; refIndex++) {
+        const ref: string = observation.entityRefs[refIndex];
+        if (typeof ref === 'string' && ref.trim().length > 0 && result.indexOf(ref) < 0) {
+          result.push(ref);
+        }
       }
     }
     return result;

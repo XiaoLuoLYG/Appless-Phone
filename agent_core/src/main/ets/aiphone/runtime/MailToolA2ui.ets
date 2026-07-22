@@ -34,6 +34,7 @@ export interface MailSearchStructuredData {
   threads: MailThreadSummary[];
   statuses: MailProviderStatus[];
   extras: DynamicGenericToolResult[];
+  entityRefs?: string[];
 }
 
 export function mailThreadSummary(thread: MailThreadResult): MailThreadSummary {

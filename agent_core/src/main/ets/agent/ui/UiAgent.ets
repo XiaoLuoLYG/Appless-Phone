@@ -26,8 +26,9 @@ import {
 
 // Retain only recent terminal turn identities; older provider payloads are never retained.
 const TERMINATED_TURN_LIMIT: number = 128;
-// Retain only a tiny pre-UI window, keyed by exact Data task ownership.
-const PENDING_DATA_LIMIT: number = 5;
+// A terminal UI may aggregate several bounded parallel rounds; retain enough
+// exact task-owned entries for the whole Leader turn without retaining history.
+const PENDING_DATA_LIMIT: number = 32;
 const WORKFLOW_RUN_ACTION_ID: string = 'workflow.run';
 
 function containsWorkflowRun(value: JsonValue): boolean {

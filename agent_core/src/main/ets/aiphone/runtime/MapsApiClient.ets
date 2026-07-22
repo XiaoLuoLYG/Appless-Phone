@@ -66,6 +66,7 @@ export interface MapsPlaceProviderResult {
 export interface MapsStructuredData {
   places: MapsPlaceRecord[];
   query: string;
+  entityRefs: string[];
 }
 
 export interface MapsRouteArgs {

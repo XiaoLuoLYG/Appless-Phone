@@ -6,6 +6,9 @@ import {
   ActionExecutionResult,
   ActionOffer,
   ActionOfferContext,
+  ActionPlanCompiler,
+  ActionPlanDraft,
+  ActionPlanReadyPayload,
   ActionPlanRequestPayload,
   ActionResultPayload,
   ActionValidationResult,
@@ -245,6 +248,56 @@ class HotelRoundPlanner implements LeaderPlanner {
   }
 }
 
+class DataBackedActionPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    if (input.recentObservations !== undefined && input.recentObservations.length > 0) {
+      return answerDecision('酒店结果和详情动作已就绪', ['hotel.search', 'hotel.detail']);
+    }
+    const decision = await new HotelRoundPlanner().plan(_message, input, _context, _round);
+    decision.requestedCapabilityIds = ['hotel.search', 'hotel.detail'];
+    decision.actionIntent = {
+      goal: 'Open the selected real hotel detail',
+      allowedActionIds: ['hotel.detail']
+    };
+    return decision;
+  }
+}
+
+class TwoDataRoundPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    const observations = input.recentObservations === undefined ? [] : input.recentObservations;
+    if (observations.length >= 2) {
+      return answerDecision('两轮真实数据已就绪', ['hotel.search']);
+    }
+    if (observations.length === 1) {
+      return {
+        personaId: 'travel_companion', skillId: '',
+        requestedCapabilityIds: ['maps.place.details'], roundAction: 'execute',
+        dataTasks: [{
+          localId: 'place-details', goal: 'Read the selected place',
+          allowedToolIds: ['maps.place.details'], toolId: 'maps.place.details',
+          input: JSON.parse('{"placeId":"hotel-101"}') as Object, required: true
+        }],
+        uiIntent: {
+          purpose: 'combined results', preferredDensity: 'comfortable', requiredSections: ['hotel', 'place']
+        },
+        reasonCode: 'dependent_details'
+      };
+    }
+    return new HotelRoundPlanner().plan(_message, input, _context, _round);
+  }
+}
+
 class PostExecutionHandoffPlanner implements LeaderPlanner {
   async plan(
     _message: AgentMessage,
@@ -348,6 +401,58 @@ class SimpleRenderer implements UiTaskRenderer {
   }
 }
 
+class RecordingRenderer implements UiTaskRenderer {
+  skeletonCalls: number = 0;
+  resultCalls: number = 0;
+  dataTaskIds: string[] = [];
+
+  async skeleton(task: CreateUiTaskPayload, _surfaceId: string): Promise<UiRenderResult> {
+    this.skeletonCalls++;
+    this.dataTaskIds = task.dataTaskIds.slice();
+    return { jsonl: JSON.stringify('skeleton') };
+  }
+
+  async result(
+    _task: CreateUiTaskPayload,
+    data: DataResult[],
+    _offers: ActionOffer[],
+    _surfaceId: string
+  ): Promise<UiRenderResult> {
+    this.resultCalls++;
+    return { jsonl: JSON.stringify('result-' + data.length.toString()) };
+  }
+
+  async error(
+    _task: CreateUiTaskPayload,
+    _message: string,
+    _surfaceId: string
+  ): Promise<UiRenderResult> {
+    return { jsonl: JSON.stringify('error') };
+  }
+
+  async actionStatus(_payload: Object, _surfaceId: string): Promise<UiRenderResult> {
+    return { jsonl: JSON.stringify('action') };
+  }
+}
+
+class RecordingWriter implements UiSurfaceWriter {
+  writes: string[] = [];
+  surfaces: string[] = [];
+
+  async write(
+    _turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    if (!lease.isActive()) {
+      return;
+    }
+    this.writes.push(jsonl);
+    this.surfaces.push(surfaceId);
+  }
+}
+
 class ControlledWriter implements UiSurfaceWriter {
   readonly resultStarted: TestGate = new TestGate();
   private readonly releaseResult: TestGate = new TestGate();
@@ -393,6 +498,20 @@ class TestLookup implements ToolDefinitionLookup {
         actions: ['memory.update']
       };
     }
+    if (toolId === 'hotel.detail') {
+      return {
+        toolId,
+        domain: 'hotel',
+        intent: toolId,
+        riskLevel: 'read',
+        backendPriority: ['local_adapter'],
+        authModes: ['none'],
+        inputSchema: 'hotelDetailRequest',
+        outputSchema: 'hotelRatePlans',
+        a2uiComponent: 'HotelDetails',
+        actions: []
+      };
+    }
     if (toolId !== 'hotel.search') {
       return null;
     }
@@ -406,7 +525,7 @@ class TestLookup implements ToolDefinitionLookup {
       inputSchema: 'hotelSearchRequest',
       outputSchema: 'hotelSearchResults',
       a2uiComponent: 'HotelResults',
-      actions: []
+      actions: ['hotel.detail']
     };
   }
 }
@@ -442,6 +561,31 @@ class NoopRegisteredExecutor implements RegisteredActionExecutor {
     _context: ActionExecutionContext
   ): Promise<ActionExecutionResult> {
     return { status: 'success', output: new Object() };
+  }
+}
+
+class RecordingActionCompiler implements ActionPlanCompiler {
+  offers: ActionOffer[] = [];
+  allowedActionIds: string[] = [];
+
+  async compile(
+    _goal: string,
+    offers: ActionOffer[],
+    allowedActionIds: string[]
+  ): Promise<ActionPlanDraft> {
+    this.offers = offers.slice();
+    this.allowedActionIds = allowedActionIds.slice();
+    const offer: ActionOffer = offers[0];
+    return {
+      planId: 'plan-hotel-detail',
+      runId: 'run-hotel-detail',
+      label: '查看酒店详情',
+      steps: [{
+        stepId: 'step-1',
+        actionId: offer.actionId,
+        args: offer.args
+      }]
+    };
   }
 }
 
@@ -529,7 +673,15 @@ function planningContext(): LeaderPlanningContext {
         riskLevel: 'read',
         inputSchema: 'hotelSearchRequest',
         outputSchema: 'hotelSearchResults',
-        actions: ['legacy.action']
+        actions: ['legacy.action', 'hotel.detail']
+      },
+      {
+        toolId: 'maps.place.details',
+        intent: 'maps.place.details',
+        riskLevel: 'read',
+        inputSchema: 'mapsPlaceDetailsQuery',
+        outputSchema: 'place',
+        actions: []
       },
       {
         toolId: 'memory.update',
@@ -582,6 +734,24 @@ async function noOffers(
   _context: ActionOfferContext
 ): Promise<ActionOffer[]> {
   return [];
+}
+
+async function realHotelDetailOffer(
+  data: DataResult,
+  _context: ActionOfferContext
+): Promise<ActionOffer[]> {
+  const record = data.data as Record<string, Object | string[] | undefined>;
+  const refs = record['entityRefs'];
+  if (!Array.isArray(refs) || refs.length === 0 || refs[0] !== 'hotel-101') {
+    return [];
+  }
+  return [{
+    offerId: 'offer-hotel-detail',
+    actionId: 'hotel.detail',
+    label: '查看酒店详情',
+    variant: 'primary',
+    args: JSON.parse('{"hotelId":"hotel-101"}') as Object
+  }];
 }
 
 function authorize(_task: CreateDataTaskPayload): DataTaskAuthorizationResult {
@@ -964,6 +1134,85 @@ export default function multiAgentRuntimeTest() {
       expect(result.message).assertEqual('酒店结果已就绪');
       expect(writer.resultSurfaceId.length > 0).assertTrue();
       expect(result.surfaceId).assertEqual(writer.resultSurfaceId);
+      runtime.dispose();
+    });
+
+    it('renders two dependent Data rounds with one skeleton one final surface and one TurnResult', 0, async () => {
+      const bus = new CountingBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingWriter();
+      const options = runtimeOptions(bus, new TwoDataRoundPlanner(), new ControlledWriter());
+      options.uiRenderer = renderer;
+      options.surfaceWriter = writer;
+      const runtime = new MultiAgentRuntime(options);
+
+      const outcome = await runtime.submit('search then details', { text: '' }) as MultiAgentSettledOutcome;
+      const uiTasks = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_UI
+      );
+      const dataTasks = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA
+      );
+      const terminals = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_RESULT
+      );
+
+      expect(outcome.status).assertEqual('success');
+      expect(dataTasks.length).assertEqual(2);
+      expect(uiTasks.length).assertEqual(1);
+      expect(terminals.length).assertEqual(1);
+      expect(renderer.skeletonCalls).assertEqual(1);
+      expect(renderer.resultCalls).assertEqual(1);
+      expect(renderer.dataTaskIds.join(',')).assertEqual(dataTasks[0].taskId + ',' + dataTasks[1].taskId);
+      expect(writer.writes.length).assertEqual(2);
+      expect(writer.surfaces[0]).assertEqual(writer.surfaces[1]);
+      expect(outcome.surfaceId).assertEqual(writer.surfaces[1]);
+      runtime.dispose();
+    });
+
+    it('binds a Data-backed actionIntent to the one final UI and real current offer', 0, async () => {
+      const bus = new CountingBus();
+      const compiler = new RecordingActionCompiler();
+      const options = runtimeOptions(
+        bus,
+        new DataBackedActionPlanner(),
+        new ControlledWriter()
+      );
+      options.actionOfferResolver = realHotelDetailOffer;
+      options.actionCompiler = compiler;
+      const runtime = new MultiAgentRuntime(options);
+
+      const outcome = await runtime.submit('search hotel and offer detail', { text: '' }) as
+        MultiAgentSettledOutcome;
+      await settle();
+      const dataTasks = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA
+      );
+      const uiTasks = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_UI
+      );
+      const requests = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      );
+      const readyMessages = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_READY
+      );
+      const request = requests[0].payload as ActionPlanRequestPayload;
+      const ready = readyMessages[0].payload as ActionPlanReadyPayload;
+
+      expect(outcome.status).assertEqual('success');
+      expect(dataTasks.length).assertEqual(1);
+      expect(uiTasks.length).assertEqual(1);
+      expect(requests.length).assertEqual(1);
+      expect(readyMessages.length).assertEqual(1);
+      expect(request.uiTaskId).assertEqual(uiTasks[0].taskId);
+      expect(request.dataTaskIds.join(',')).assertEqual(dataTasks[0].taskId);
+      expect(compiler.allowedActionIds.join(',')).assertEqual('hotel.detail');
+      expect(compiler.offers.length).assertEqual(1);
+      expect(compiler.offers[0].offerId).assertEqual('offer-hotel-detail');
+      expect((compiler.offers[0].args as Record<string, string>)['hotelId']).assertEqual('hotel-101');
+      expect(ready.uiTaskId).assertEqual(uiTasks[0].taskId);
+      expect(ready.surfaceId).assertEqual(outcome.surfaceId);
       runtime.dispose();
     });
 

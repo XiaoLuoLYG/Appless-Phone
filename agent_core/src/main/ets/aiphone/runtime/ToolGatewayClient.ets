@@ -49,7 +49,8 @@ import {
   mailResultsFromDynamicA2ui,
   mailSearchStructuredDataA2ui,
   mailThreadSummary,
-  MailSearchStructuredData
+  MailSearchStructuredData,
+  MailThreadSummary
 } from './MailToolA2ui';
 import {
   MailDetail,
@@ -5733,7 +5734,20 @@ export function remainingReadStructuredDataResult(
 
 export function mapsStructuredDataResult(toolId: string, provider: MapsPlaceProviderResult): DataResult {
   const outputSchema = toolId === 'maps.place.details' ? 'place' : 'places';
-  const data: MapsStructuredData = { places: provider.places, query: provider.query };
+  const entityRefs: string[] = [];
+  if (provider.status === 'success') {
+    for (let index = 0; index < provider.places.length && entityRefs.length < 16; index++) {
+      const placeId: string = provider.places[index].placeId;
+      if (placeId.trim().length > 0 && entityRefs.indexOf(placeId) < 0) {
+        entityRefs.push(placeId);
+      }
+    }
+  }
+  const data: MapsStructuredData = {
+    places: provider.places,
+    query: provider.query,
+    entityRefs
+  };
   const sources: DataSource[] = provider.attempted ? [localAdapterSource('Google Places API',
     toolId === 'maps.place.details' ? 'details' : 'search')] : [];
   if (provider.status === 'error') {
@@ -11058,6 +11072,7 @@ function mailSearchDataResult(
   data: MailSearchStructuredData,
   sources: DataSource[]
 ): DataResult {
+  data.entityRefs = [];
   const actualSources = sources.slice();
   const warnings: string[] = [];
   let failureCount = 0;
@@ -11124,6 +11139,7 @@ function mailSearchDataResult(
     }
   });
   if (entityCount > 0) {
+    data.entityRefs = mailSearchEntityRefs(data.threads);
     return failureCount > 0 ?
       partialDataResult('mail.search', 'mailThreads', data, actualSources, warnings) :
       successfulDataResult('mail.search', 'mailThreads', data, actualSources);
@@ -11143,6 +11159,24 @@ function mailSearchDataResult(
   const empty = successfulDataResult('mail.search', 'mailThreads', data, actualSources);
   empty.status = 'empty';
   return empty;
+}
+
+function mailSearchEntityRefs(threads: MailThreadSummary[]): string[] {
+  const refs: string[] = [];
+  for (let index = 0; index < threads.length && refs.length < 16; index++) {
+    const candidates: string[] = [
+      threads[index].requestKey,
+      threads[index].threadId,
+      threads[index].messageId
+    ];
+    for (let candidateIndex = 0; candidateIndex < candidates.length && refs.length < 16; candidateIndex++) {
+      const candidate: string = candidates[candidateIndex];
+      if (candidate.trim().length > 0 && refs.indexOf(candidate) < 0) {
+        refs.push(candidate);
+      }
+    }
+  }
+  return refs;
 }
 
 export function mailSearchDataResultForTest(data: MailSearchStructuredData, sources: DataSource[]): DataResult {
@@ -11495,6 +11529,8 @@ async function callStructuredGmailReadTool(
     const results = await configuredGmailResults(providerToolId, prompt, args);
     const data: GmailSearchStructuredData = gmailSearchStructuredDataFromResults(results);
     const base = remainingReadStructuredDataResult(toolId, 'mailThreads', results);
+    data.entityRefs = base.status === 'success' || base.status === 'partial' ?
+      mailSearchEntityRefs(data.threads as MailThreadSummary[]) : [];
     base.data = data;
     return base;
   }

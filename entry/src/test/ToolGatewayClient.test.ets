@@ -2250,11 +2250,16 @@ export default function toolGatewayClientTest() {
       );
       expect(mixed.status).assertEqual('partial');
       expect(mixed.sources.length).assertEqual(2);
+      const mixedData = mixed.data as MailSearchStructuredData;
+      expect(mixedData.entityRefs!.indexOf('gmail:gmail-thread-1')).assertLarger(-1);
+      expect(mixedData.entityRefs!.indexOf('gmail-thread-1')).assertLarger(-1);
+      expect(mixedData.entityRefs!.indexOf('gmail-message-1')).assertLarger(-1);
 
       const successfulEmptyWithFailure = mailSearchDataResultForTest(
         { threads: [], statuses: [], extras: [gmailEmpty, outlookTimeout] } as MailSearchStructuredData, []
       );
       expect(successfulEmptyWithFailure.status).assertEqual('empty');
+      expect((successfulEmptyWithFailure.data as MailSearchStructuredData).entityRefs!.length).assertEqual(0);
       expect(successfulEmptyWithFailure.warnings.length).assertLarger(0);
       expect(successfulEmptyWithFailure.sources.length).assertEqual(2);
       expect(successfulEmptyWithFailure.error === undefined).assertTrue();

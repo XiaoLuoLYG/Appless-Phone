@@ -12,6 +12,7 @@ export interface GmailSearchStructuredData {
   threads: GmailThreadSummary[];
   statuses: MailProviderStatus[];
   extras: DynamicGenericToolResult[];
+  entityRefs?: string[];
 }
 
 function providerText(value: GmailProviderJsonValue): string {

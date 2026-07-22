@@ -56,6 +56,21 @@ const MAP_DETAILS_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"input":{"placeId":"place-real-1"},"required":true}],' +
   '"uiIntent":{"purpose":"展示地点详情","preferredDensity":"comfortable",' +
   '"requiredSections":["place"]}}';
+const UNBOUND_FOOD_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"food","goal":"查询附近餐厅",' +
+  '"allowedToolIds":["food.search"],"toolId":"food.search",' +
+  '"input":{"query":"附近餐厅"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示餐厅","preferredDensity":"comfortable",' +
+  '"requiredSections":["food"]}}';
+const MAIL_READ_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["mail.thread.read"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"mail-read","goal":"读取真实邮件正文",' +
+  '"allowedToolIds":["mail.thread.read"],"toolId":"mail.thread.read",' +
+  '"input":{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
+  '"threadId":"thread-real-1","messageId":"message-real-1"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示邮件正文","preferredDensity":"comfortable",' +
+  '"requiredSections":["mail"]}}';
 const EXACT_MULTI_TOOL_ACTION_DECISION: string = PARALLEL_DECISION
   .replace(
     '"requestedCapabilityIds":["flight.search","train.search"]',
@@ -246,6 +261,20 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'place',
       actions: []
     }, {
+      toolId: 'food.search',
+      intent: 'Search food for an explicitly scoped place',
+      riskLevel: 'read',
+      inputSchema: 'foodSearchRequest',
+      outputSchema: 'foodSearchResults',
+      actions: []
+    }, {
+      toolId: 'mail.thread.read',
+      intent: 'Read one exact mail identity',
+      riskLevel: 'read',
+      inputSchema: 'mailThreadReadRequest',
+      outputSchema: 'mailThread',
+      actions: []
+    }, {
       toolId: 'memory.update',
       intent: 'Update persona memory',
       riskLevel: 'draft',
@@ -311,14 +340,14 @@ export default function multiAgentLeaderPlannerTest() {
         recentObservations: []
       };
 
-      const decision: LeaderDecision = await planner.plan(inputMessage(), input, planningContext(), 2);
+      const decision: LeaderDecision = await planner.plan(inputMessage(), input, planningContext(), 1);
 
       expect(decision.personaId).assertEqual('travel_companion');
       expect(decision.reasonCode).assertEqual('host_execute');
       expect(decision.dataTasks.length).assertEqual(2);
       expect(decision.dataTasks[0].toolId).assertEqual('flight.search');
       expect(decision.dataTasks[1].toolId).assertEqual('train.search');
-      expect(model.prompts[0].indexOf('Round: 2') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Round: 1') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('flight.search') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('travel_companion') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
@@ -592,18 +621,133 @@ export default function multiAgentLeaderPlannerTest() {
     it('allows first-round selection and a different dependent tool after completion', 0, async () => {
       const firstRoundModel = new QueueLocalModel([TRAVEL_DECISION]);
       const dependentModel = new QueueLocalModel([MAP_DETAILS_DECISION]);
+      const dependentInput: InputUserPayload = {
+        text: '读取上一轮真实地点详情',
+        recentObservations: [{
+          taskId: 'input-1:round-1:travel',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'real place',
+          entityRefs: ['place-real-1']
+        }]
+      };
 
       const firstRound = await new MultiAgentLeaderPlanner(firstRoundModel).plan(
         inputMessage(), completedTravelInput(), planningContext(), 1
       );
       const dependent = await new MultiAgentLeaderPlanner(dependentModel).plan(
-        inputMessage(), completedTravelInput(), planningContext(), 2
+        inputMessage(), dependentInput, planningContext(), 2
       );
 
       expect(firstRound.dataTasks[0].toolId).assertEqual('travel.search');
       expect(firstRoundModel.prompts.length).assertEqual(1);
       expect(dependent.dataTasks[0].toolId).assertEqual('maps.place.details');
       expect(dependentModel.prompts.length).assertEqual(1);
+    });
+
+    it('repairs one unbound later-round tool into a terminal answer without exposing observations', 0, async () => {
+      const model = new QueueLocalModel([
+        UNBOUND_FOOD_DECISION,
+        ANSWER_FROM_TRAVEL_OBSERVATION
+      ]);
+      const planner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = {
+        text: '继续',
+        recentObservations: [{
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
+          status: 'success',
+          summary: 'OBSERVATION_PRIVATE_SUMMARY',
+          entityRefs: ['place-real-1']
+        }]
+      };
+
+      const decision = await planner.plan(
+        inputMessage(), input, planningContext(), 2, (): boolean => true
+      );
+
+      expect(decision.roundAction).assertEqual('answer');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('LEADER_UNBOUND_LATER_TOOL')).assertLarger(-1);
+      expect(model.prompts[1].substring(model.prompts[0].length).indexOf(
+        'OBSERVATION_PRIVATE_SUMMARY'
+      )).assertEqual(-1);
+    });
+
+    it('accepts a later tool only when its own input contains an earlier successful entity reference', 0, async () => {
+      const successInput: InputUserPayload = {
+        text: '查看这个地点详情',
+        recentObservations: [{
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
+          status: 'success',
+          summary: 'real place',
+          entityRefs: ['place-real-1']
+        }]
+      };
+      const emptyInput: InputUserPayload = {
+        text: successInput.text,
+        recentObservations: [{
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
+          status: 'empty',
+          summary: 'empty',
+          entityRefs: ['place-real-1']
+        }]
+      };
+      const valid = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([MAP_DETAILS_DECISION])
+      ).plan(inputMessage(), successInput, planningContext(), 2);
+      let fakeRejected: boolean = false;
+      let emptyRejected: boolean = false;
+      try {
+        await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([MAP_DETAILS_DECISION.replace('place-real-1', 'place-forged')])
+        ).plan(inputMessage(), successInput, planningContext(), 2);
+      } catch (_error) {
+        fakeRejected = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([MAP_DETAILS_DECISION])
+        ).plan(inputMessage(), emptyInput, planningContext(), 2);
+      } catch (_error) {
+        emptyRejected = true;
+      }
+
+      expect(valid.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(fakeRejected).assertTrue();
+      expect(emptyRejected).assertTrue();
+    });
+
+    it('allows mail search to read only an exact real result identity', 0, async () => {
+      const input: InputUserPayload = {
+        text: '打开第一封邮件',
+        recentObservations: [{
+          taskId: 'input-1:round-1:mail-search',
+          toolId: 'mail.search',
+          status: 'success',
+          summary: 'real mail list',
+          entityRefs: ['gmail:thread-real-1', 'thread-real-1', 'message-real-1']
+        }]
+      };
+      const valid = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([MAIL_READ_DECISION])
+      ).plan(inputMessage(), input, planningContext(), 2);
+      let forgedRejected: boolean = false;
+      try {
+        await new MultiAgentLeaderPlanner(new QueueLocalModel([
+          MAIL_READ_DECISION
+            .replace('gmail:thread-real-1', 'gmail:thread-forged')
+            .replace('thread-real-1', 'thread-forged')
+            .replace('message-real-1', 'message-forged')
+        ])).plan(inputMessage(), input, planningContext(), 2);
+      } catch (_error) {
+        forgedRejected = true;
+      }
+
+      expect(valid.dataTasks[0].toolId).assertEqual('mail.thread.read');
+      expect(forgedRejected).assertTrue();
     });
 
     it('ignores old forged current and future observations for repeat authority', 0, async () => {
@@ -637,11 +781,16 @@ export default function multiAgentLeaderPlannerTest() {
         }]
       };
 
-      const decision = await new MultiAgentLeaderPlanner(model).plan(
-        inputMessage(), input, planningContext(), 2
-      );
+      let rejected: boolean = false;
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), input, planningContext(), 2
+        );
+      } catch (_error) {
+        rejected = true;
+      }
 
-      expect(decision.dataTasks[0].toolId).assertEqual('travel.search');
+      expect(rejected).assertTrue();
       expect(model.prompts.length).assertEqual(1);
       expect(model.prompts[0].indexOf(
         'Current-turn completed Data tool IDs: []'
@@ -661,11 +810,16 @@ export default function multiAgentLeaderPlannerTest() {
         }]
       };
 
-      const decision = await new MultiAgentLeaderPlanner(model).plan(
-        inputMessage(), input, planningContext(), 2
-      );
+      let rejected: boolean = false;
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), input, planningContext(), 2
+        );
+      } catch (_error) {
+        rejected = true;
+      }
 
-      expect(decision.dataTasks[0].toolId).assertEqual('travel.search');
+      expect(rejected).assertTrue();
       expect(model.prompts.length).assertEqual(1);
       const metadataStart: number = model.prompts[0].indexOf(
         'Current-turn completed Data tool IDs:'

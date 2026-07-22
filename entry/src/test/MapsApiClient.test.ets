@@ -48,9 +48,11 @@ export default function mapsApiClientTest() {
       expect(search.status).assertEqual('success');
       expect(search.outputSchema).assertEqual('places');
       expect(searchData.places[0].placeId).assertEqual('place-123');
+      expect(searchData.entityRefs.join(',')).assertEqual('place-123');
       expect(details.status).assertEqual('success');
       expect(details.outputSchema).assertEqual('place');
       expect(detailData.places[0].placeId).assertEqual('place-123');
+      expect(detailData.entityRefs.join(',')).assertEqual('place-123');
       expect(search.sources[0].provider).assertEqual('Google Places API');
       expect(details.sources[0].operation).assertEqual('details');
       expect(JSON.stringify(search.data).indexOf('updateComponents')).assertEqual(-1);
@@ -69,8 +71,10 @@ export default function mapsApiClientTest() {
 
       expect(empty.status).assertEqual('empty');
       expect((empty.data as MapsStructuredData).places.length).assertEqual(0);
+      expect((empty.data as MapsStructuredData).entityRefs.length).assertEqual(0);
       expect(mapsDataResultA2ui('surface_maps_empty', empty).indexOf('没有这个地点')).assertLarger(-1);
       expect(failed.status).assertEqual('error');
+      expect((failed.data as MapsStructuredData).entityRefs.length).assertEqual(0);
       expect(failed.error?.code).assertEqual('MAPS_PROVIDER_ERROR');
       expect(failed.error?.message).assertEqual('Google Places denied the request.');
     });

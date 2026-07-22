@@ -11,6 +11,7 @@ import {
   DataResultStatus,
   InputUserPayload,
   LeaderAgent,
+  LeaderDataTaskInputNormalizer,
   LeaderDataTask,
   LeaderDecision,
   LeaderDecisionDataTask,
@@ -378,6 +379,27 @@ function nineDataPlanningContext(): LeaderPlanningContext {
   };
 }
 
+function dependentDataPlanningContext(): LeaderPlanningContext {
+  const context = nineDataPlanningContext();
+  context.tools.push({
+    toolId: 'maps.place.search',
+    intent: 'maps.place.search',
+    riskLevel: 'read',
+    inputSchema: 'mapsPlaceSearchQuery',
+    outputSchema: 'places',
+    actions: []
+  });
+  context.tools.push({
+    toolId: 'maps.place.details',
+    intent: 'maps.place.details',
+    riskLevel: 'read',
+    inputSchema: 'mapsPlaceDetailsQuery',
+    outputSchema: 'place',
+    actions: []
+  });
+  return context;
+}
+
 function hybridLeaderResult(): LeaderPlannerResult {
   return JSON.parse(
     '{"personaId":"","skillId":"","roundAction":"execute",' +
@@ -467,11 +489,15 @@ async function semanticTerminalStatus(statuses: DataResultStatus[]): Promise<str
   try {
     bus.publish(inputMessage());
     await receive(observer);
-    const uiTask: AgentMessage = await receive(observer);
     const dataTasks: AgentMessage[] = [];
     for (let index = 0; index < statuses.length; index++) {
       dataTasks.push(await receive(observer));
     }
+    for (let index = 0; index < statuses.length; index++) {
+      bus.publish(dataResultMessageWithStatus(dataTasks[index], statuses[index]));
+      await receive(observer);
+    }
+    const uiTask: AgentMessage = await receive(observer);
     const uiResult: UiRenderResultPayload = {
       surfaceId: 'surface-status',
       state: 'result'
@@ -484,10 +510,6 @@ async function semanticTerminalStatus(statuses: DataResultStatus[]): Promise<str
       payload: uiResult
     });
     await receive(observer);
-    for (let index = 0; index < statuses.length; index++) {
-      bus.publish(dataResultMessageWithStatus(dataTasks[index], statuses[index]));
-      await receive(observer);
-    }
     const terminal: AgentMessage = await receive(observer);
     return (terminal.payload as TurnResultPayload).status;
   } finally {
@@ -509,6 +531,38 @@ async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function rejectionAfterNormalizedInput(normalized: Object): Promise<string> {
+  const firstTask = semanticDataTask('place-search', 'maps.place.search');
+  firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+  const secondTask = semanticDataTask('place-details', 'maps.place.details');
+  secondTask.input = new Object();
+  const planner = new RoundScriptedPlanner([
+    semanticDecision([firstTask]),
+    semanticDecision([secondTask])
+  ]);
+  const normalizer: LeaderDataTaskInputNormalizer = (
+    _input: InputUserPayload,
+    task: LeaderDecisionDataTask
+  ): Object => task.toolId === 'maps.place.details' ? normalized : task.input;
+  const bus = new LinkedMessageBus();
+  const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext(), 30000, normalizer);
+  const observer = bus.openReader();
+  leader.start();
+  try {
+    bus.publish(inputMessage());
+    await receive(observer);
+    const firstData = await receive(observer);
+    bus.publish(dataResultMessage(firstData));
+    await receive(observer);
+    const blocked = await receive(observer);
+    return blocked.type === AgentMessageType.TASK_ERROR ?
+      (blocked.payload as TaskErrorPayload).code : 'PUBLISHED_' + blocked.type.toString();
+  } finally {
+    leader.stop();
+    observer.close();
+  }
 }
 
 async function repairCallsAfterTerminal(kind: string): Promise<number> {
@@ -627,8 +681,8 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const semanticTask = await receive(observer);
+      expect(semanticTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       bus.publish(dataResultMessage(semanticTask));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       const error = await receive(observer);
@@ -790,7 +844,7 @@ export default function leaderAgentTest() {
         allowedActionIds: ['hotel.navigate']
       };
       decision.requestedCapabilityIds.push('hotel.navigate');
-      const planner = new RoundScriptedPlanner([decision]);
+      const planner = new RoundScriptedPlanner([decision, semanticDecision([], 'answer')]);
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'flight.search',
@@ -813,9 +867,13 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      const uiMessage = await receive(observer);
       const first = await receive(observer);
       const second = await receive(observer);
+      bus.publish(dataResultMessage(first));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      bus.publish(dataResultMessage(second));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiMessage = await receive(observer);
       const actionMessage = await receive(observer);
       const ui = uiMessage.payload as CreateUiTaskPayload;
       const firstPayload = first.payload as CreateDataTaskPayload;
@@ -826,7 +884,7 @@ export default function leaderAgentTest() {
       expect(first.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       expect(second.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       expect(actionMessage.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
-      expect(uiMessage.taskId).assertEqual('input-1:round-1:ui');
+      expect(uiMessage.taskId).assertEqual('input-1:ui');
       expect(ui.dataTaskIds.join(',')).assertEqual(
         'input-1:round-1:flight,input-1:round-1:train'
       );
@@ -842,7 +900,7 @@ export default function leaderAgentTest() {
       expect(action.allowedActionIds.join(',')).assertEqual('hotel.navigate');
       expect(action.personaId).assertEqual('travel_companion');
       expect(action.inputText).assertEqual('Find a Shenzhen hotel');
-      expect(planner.calls).assertEqual(1);
+      expect(planner.calls).assertEqual(2);
 
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-parallel'));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
@@ -945,8 +1003,10 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
-      const uiTask = await receive(observer);
       const dataTask = await receive(observer);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiTask = await receive(observer);
       const uiResult: UiRenderResultPayload = {
         surfaceId: 'loop_surface_1784723405216',
         state: 'result'
@@ -959,8 +1019,6 @@ export default function leaderAgentTest() {
         payload: uiResult
       });
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
-      bus.publish(dataResultMessage(dataTask));
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       const terminal = await receive(observer);
 
       expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
@@ -983,11 +1041,10 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
-      const uiTask = await receive(observer);
       const dataTask = await receive(observer);
       bus.publish(dataResultMessage(dataTask));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
-      await settle();
+      const uiTask = await receive(observer);
       const uiResult: UiRenderResultPayload = {
         surfaceId: 'loop_surface_data_first',
         state: 'result'
@@ -1010,7 +1067,7 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('lets an exact UI-first error override the Data-derived terminal status', 0, async () => {
+    it('lets an exact terminal UI error override the Data-derived terminal status', 0, async () => {
       const bus = new LinkedMessageBus();
       const planner = new RoundScriptedPlanner([
         semanticDecision([semanticDataTask('travel', 'travel.search')]),
@@ -1022,8 +1079,10 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
-      const uiTask = await receive(observer);
       const dataTask = await receive(observer);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiTask = await receive(observer);
       const uiResult: UiRenderResultPayload = {
         surfaceId: 'loop_surface_ui_error_first',
         state: 'error'
@@ -1036,8 +1095,6 @@ export default function leaderAgentTest() {
         payload: uiResult
       });
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
-      bus.publish(dataResultMessage(dataTask));
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       const terminal = await receive(observer);
       const payload = terminal.payload as TurnResultPayload;
 
@@ -1060,11 +1117,10 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
-      const uiTask = await receive(observer);
       const dataTask = await receive(observer);
       bus.publish(dataResultMessage(dataTask));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
-      await settle();
+      const uiTask = await receive(observer);
       const uiResult: UiRenderResultPayload = {
         surfaceId: 'loop_surface_data_error_first',
         state: 'error'
@@ -1235,8 +1291,8 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const task = await receive(observer);
+      expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       bus.publish(dataResultMessage(task));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       await settle();
@@ -1251,6 +1307,140 @@ export default function leaderAgentTest() {
 
       leader.stop();
       observer.close();
+    });
+
+    it('delays one UI task until two dependent Data rounds are terminal', 0, async () => {
+      const firstTask = semanticDataTask('place-search', 'maps.place.search');
+      firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+      const secondTask = semanticDataTask('place-details', 'maps.place.details');
+      secondTask.input = JSON.parse('{"placeId":"entity-1"}') as Object;
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([firstTask]),
+        semanticDecision([secondTask]),
+        semanticDecision([], 'answer')
+      ]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const firstData = await receive(observer);
+      expect(firstData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(firstData));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const secondData = await receive(observer);
+      expect(secondData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(secondData));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const uiTask = await receive(observer);
+      expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      const uiPayload = uiTask.payload as CreateUiTaskPayload;
+      expect(uiPayload.dataTaskIds.join(',')).assertEqual(firstData.taskId + ',' + secondData.taskId);
+      expect(uiTask.taskId).assertEqual('input-1:ui');
+
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: { surfaceId: 'surface-two-rounds', state: 'result' } as UiRenderResultPayload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const terminal = await receive(observer);
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual('surface-two-rounds');
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects an unbound different Data tool after input normalization and before publication', 0, async () => {
+      const firstTask = semanticDataTask('place-search', 'maps.place.search');
+      firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+      const unbound = semanticDataTask('food', 'food.search');
+      unbound.input = JSON.parse('{"query":"附近餐厅"}') as Object;
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([firstTask]),
+        semanticDecision([unbound])
+      ]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const firstData = await receive(observer);
+      expect(firstData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(firstData));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const blocked = await receive(observer);
+
+      expect(blocked.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_UNBOUND_LATER_TOOL');
+      leader.stop();
+      observer.close();
+    });
+
+    it('authorizes a later Data task from its safe normalized real entity reference', 0, async () => {
+      const firstTask = semanticDataTask('place-search', 'maps.place.search');
+      firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+      const secondTask = semanticDataTask('place-details', 'maps.place.details');
+      secondTask.input = new Object();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([firstTask]),
+        semanticDecision([secondTask])
+      ]);
+      const normalizer: LeaderDataTaskInputNormalizer = (
+        _input: InputUserPayload,
+        task: LeaderDecisionDataTask
+      ): Object => task.toolId === 'maps.place.details' ?
+        JSON.parse('{"selection":{"placeId":"entity-1"}}') as Object : task.input;
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        planner,
+        dependentDataPlanningContext(),
+        30000,
+        normalizer
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const firstData = await receive(observer);
+      bus.publish(dataResultMessage(firstData));
+      await receive(observer);
+      const secondData = await receive(observer);
+      const args = (secondData.payload as CreateDataTaskPayload).args as
+        Record<string, Record<string, string>>;
+
+      expect(secondData.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect(args['selection']['placeId']).assertEqual('entity-1');
+      bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-normalized'));
+      await receive(observer);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects cyclic dangerous and over-depth normalized authority inputs', 0, async () => {
+      const cyclic = new Object() as Record<string, Object>;
+      cyclic['self'] = cyclic;
+      const dangerous = JSON.parse('{"constructor":{"placeId":"entity-1"}}') as Object;
+      let deepJson: string = '{"placeId":"entity-1"}';
+      for (let index = 0; index < 14; index++) {
+        deepJson = '{"next":' + deepJson + '}';
+      }
+      const deep = JSON.parse(deepJson) as Object;
+
+      expect(await rejectionAfterNormalizedInput(cyclic as Object))
+        .assertEqual('LEADER_UNBOUND_LATER_TOOL');
+      expect(await rejectionAfterNormalizedInput(dangerous))
+        .assertEqual('LEADER_UNBOUND_LATER_TOOL');
+      expect(await rejectionAfterNormalizedInput(deep))
+        .assertEqual('LEADER_UNBOUND_LATER_TOOL');
     });
 
     it('blocks a completed tool omitted from the bounded planner observations', 0, async () => {
@@ -1280,7 +1470,6 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const tasks: AgentMessage[] = [];
       for (let index = 0; index < ids.length; index++) {
         const task: AgentMessage = await receive(observer);
@@ -1334,7 +1523,6 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const malformedTask = await receive(observer);
       const wrongSchemaTask = await receive(observer);
       const nullPayloadTask = await receive(observer);
@@ -1387,10 +1575,15 @@ export default function leaderAgentTest() {
 
     it('rejects planning a fourth semantic round without publishing another task', 0, async () => {
       const bus = new LinkedMessageBus();
+      const roundOne = semanticDataTask('round-1', 'travel.search');
+      const roundTwo = semanticDataTask('round-2', 'train.search');
+      const roundThree = semanticDataTask('round-3', 'flight.search');
+      roundTwo.input = JSON.parse('{"entityId":"entity-1"}') as Object;
+      roundThree.input = JSON.parse('{"entityId":"entity-1"}') as Object;
       const planner = new RoundScriptedPlanner([
-        semanticDecision([semanticDataTask('round-1', 'travel.search')]),
-        semanticDecision([semanticDataTask('round-2', 'train.search')]),
-        semanticDecision([semanticDataTask('round-3', 'flight.search')])
+        semanticDecision([roundOne]),
+        semanticDecision([roundTwo]),
+        semanticDecision([roundThree])
       ]);
       const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
       const observer = bus.openReader();
@@ -1399,7 +1592,6 @@ export default function leaderAgentTest() {
       bus.publish(inputMessage());
       await receive(observer);
       for (let round = 1; round <= 3; round++) {
-        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
         const task = await receive(observer);
         expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
         expect((task.payload as CreateDataTaskPayload).roundId.indexOf(round.toString()) >= 0).assertTrue();
@@ -1427,8 +1619,8 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       const task = await receive(observer);
+      expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-semantic'));
       bus.publish(dataResultMessage(task));
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
@@ -1451,7 +1643,6 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       await receive(observer);
-      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_UI);
       expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
       const timeout = await receive(observer);
 

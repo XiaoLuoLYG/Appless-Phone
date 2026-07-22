@@ -29,6 +29,7 @@ import {
   LeaderToolMetadata,
   LeaderUiTask
 } from './LeaderTypes';
+import { leaderInputHasEntityAuthority } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
@@ -46,6 +47,10 @@ interface LeaderTurnState {
   semantic: boolean;
   planning: boolean;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
+  dataTaskIds: string[];
+  expectedOutputSchema: string;
+  uiIntent: string;
+  pendingActionDecision: LeaderDecision | null;
   observations: ObservationDigest[];
   turnObservations: ObservationDigest[];
   skillId: string;
@@ -220,13 +225,17 @@ export class LeaderAgent extends MessageDrivenAgent {
       conversationId: message.conversationId,
       turnId: message.turnId,
       inputTaskId: message.taskId,
-      uiTaskId: '',
+      uiTaskId: message.taskId + ':ui',
       dataTaskId: '',
       input,
       round: 1,
       semantic: false,
       planning: false,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
+      dataTaskIds: [],
+      expectedOutputSchema: '',
+      uiIntent: '',
+      pendingActionDecision: null,
       observations: input.recentObservations as ObservationDigest[],
       turnObservations: [],
       skillId: '',
@@ -334,26 +343,17 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
     }
-    if (this.reusesCompletedDataTool(state, decision)) {
-      this.finishTurn(state);
-      this.publishError(
-        message,
-        'LEADER_COMPLETED_TOOL_REUSE',
-        'Leader cannot execute a completed Data tool again in the same turn'
-      );
-      return;
-    }
-    if (this.decisionObserver !== null) {
-      this.decisionObserver(
-        message.conversationId,
-        message.turnId,
-        message.taskId,
-        decision.requestedCapabilityIds.slice()
-      );
-    }
     const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
     const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
     if (ownership.owner === 'legacy') {
+      if (this.decisionObserver !== null) {
+        this.decisionObserver(
+          message.conversationId,
+          message.turnId,
+          message.taskId,
+          decision.requestedCapabilityIds.slice()
+        );
+      }
       if (executionStarted) {
         this.publishError(
           message,
@@ -393,11 +393,48 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
       return;
     }
+    if (this.reusesCompletedDataTool(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_COMPLETED_TOOL_REUSE',
+        'Leader cannot execute a completed Data tool again in the same turn'
+      );
+      return;
+    }
+    if (this.hasUnboundLaterDataTask(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_UNBOUND_LATER_TOOL',
+        'Every later-round Data task must bind one real successful prior entity reference'
+      );
+      return;
+    }
+    if (this.decisionObserver !== null) {
+      this.decisionObserver(
+        message.conversationId,
+        message.turnId,
+        message.taskId,
+        decision.requestedCapabilityIds.slice()
+      );
+    }
     state.semantic = true;
     state.skillId = decision.skillId;
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
-      if (state.uiTaskId.length > 0 && !state.uiDone) {
+      if (state.dataTaskIds.length > 0) {
         state.pendingAnswer = decision.answer as string;
+        state.uiIntent = decision.uiIntent.purpose;
+        this.publishAccumulatedUiTask(message, state);
+        if (state.pendingActionDecision !== null) {
+          this.publishActionPlanRequest(
+            message,
+            state.pendingActionDecision,
+            state.uiTaskId,
+            state.dataTaskIds,
+            false
+          );
+        }
         return;
       }
       this.publishTurnResult(message, state, decision.answer as string);
@@ -407,13 +444,23 @@ export class LeaderAgent extends MessageDrivenAgent {
     const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
     let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
     if (dataTaskIds.length > 0) {
-      uiTaskId = state.inputTaskId + ':round-' + state.round.toString() + ':ui';
-      this.publishDecisionUiTask(message, state, decision, uiTaskId, dataTaskIds);
+      uiTaskId = state.uiTaskId;
+      for (let index = 0; index < dataTaskIds.length; index++) {
+        state.dataTaskIds.push(dataTaskIds[index]);
+      }
+      if (state.expectedOutputSchema.length === 0) {
+        const first: LeaderDecisionDataTask = decision.dataTasks[0];
+        state.expectedOutputSchema = (this.toolMetadata(first.toolId) as LeaderToolMetadata).outputSchema;
+      }
+      state.uiIntent = decision.uiIntent.purpose;
+      if (decision.actionIntent !== undefined) {
+        state.pendingActionDecision = decision;
+      }
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
       this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
     }
-    if (decision.actionIntent !== undefined) {
+    if (decision.actionIntent !== undefined && dataTaskIds.length === 0) {
       this.publishActionPlanRequest(
         message,
         decision,
@@ -422,6 +469,32 @@ export class LeaderAgent extends MessageDrivenAgent {
         dataTaskIds.length === 0
       );
     }
+  }
+
+  private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
+      decision.dataTasks.length === 0) {
+      return false;
+    }
+    const refs: string[] = [];
+    for (let index = 0; index < state.turnObservations.length; index++) {
+      const observation: ObservationDigest = state.turnObservations[index];
+      if (observation.status !== 'success' && observation.status !== 'partial') {
+        continue;
+      }
+      for (let refIndex = 0; refIndex < observation.entityRefs.length; refIndex++) {
+        const ref: string = observation.entityRefs[refIndex];
+        if (refs.indexOf(ref) < 0) {
+          refs.push(ref);
+        }
+      }
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      if (!leaderInputHasEntityAuthority(decision.dataTasks[index].input, refs)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private reusesCompletedDataTool(state: LeaderTurnState, decision: LeaderDecision): boolean {
@@ -1082,23 +1155,17 @@ export class LeaderAgent extends MessageDrivenAgent {
     return ids;
   }
 
-  private publishDecisionUiTask(
+  private publishAccumulatedUiTask(
     input: AgentMessage,
     state: LeaderTurnState,
-    decision: LeaderDecision,
-    taskId: string,
-    dataTaskIds: string[]
   ): void {
-    const first: LeaderDecisionDataTask = decision.dataTasks[0];
-    const definition: LeaderToolMetadata = this.toolMetadata(first.toolId) as LeaderToolMetadata;
     const payload: CreateUiTaskPayload = {
-      taskId,
-      dataTaskIds: dataTaskIds.slice(),
+      taskId: state.uiTaskId,
+      dataTaskIds: state.dataTaskIds.slice(),
       skillId: state.skillId,
-      intent: decision.uiIntent.purpose,
-      expectedOutputSchema: definition.outputSchema
+      intent: state.uiIntent,
+      expectedOutputSchema: state.expectedOutputSchema
     };
-    state.uiTaskId = taskId;
     state.uiDone = false;
     state.uiState = '';
     state.uiSurfaceId = '';
@@ -1106,7 +1173,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
       turnId: input.turnId,
-      taskId,
+      taskId: state.uiTaskId,
       payload
     });
   }
