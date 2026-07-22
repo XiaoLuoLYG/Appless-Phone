@@ -6,6 +6,7 @@
 - Product baseline: `93a3bcb834f7b22d5228333557864dac56823385`.
 - Product commit: `1c9353957560808e36bfa9add08228600278a554` (`feat: enforce full multi-agent turn ownership`).
 - Review-fix commit: `94a8363d599e0a6687d1e4976e4a13d40eca94bb` (`fix: close runtime ownership races`).
+- Surface-transition review-fix commit: `eaeb3fa540af2deaa2c411e48c71301e72b07545` (`fix: fence hotel surface transitions`).
 - All 44 fixed ToolDefinition IDs are multi-agent owned from the canonical registry. There is no migration-wave allowlist or `verifiedMigrationWave` / `MIGRATED_WAVE` state.
 - `dynamic.search` is a bounded read-only virtual MultiAgent Data capability in addition to the 44 fixed definitions. `memory.update` remains the existing runtime-local virtual capability. Tests use an unknown ID only when exercising the legacy handoff boundary.
 - Existing UI components, renderers, provider adapters, ActionCatalog, and four-role framework were preserved. No coordinator, second framework, or second registry was added.
@@ -35,6 +36,9 @@
 - `Index` assigns one owner and generation to each turn, captures that generation in multi-agent, legacy-model, legacy-tool, memory, panel, and busy-state callbacks, and drops late updates from another owner or generation. Reentrant virtual callbacks resolve their generation from the originating runtime turn rather than mutable current state.
 - Typed handoff switches the host owner to legacy without starting a second generation. A settled multi-agent error never enters the legacy model path.
 - Registered page actions require exact equality across the current host surface and retained snapshot for `surfaceId`, owner, and runtime generation. Gmail, payment, ride, and hotel provider writes therefore reject stale or owner-mutated snapshots. Hotel navigate and booking-open actions are terminal registered candidates; hotel detail remains the only legacy-special hotel action.
+- Hotel detail now has the same exact host/snapshot fence in both `Index` and `MultiAgentCanaryRuntime`: the current host, retained page snapshot, action context, source tool, owner, runtime generation, surface ID, and rendered document must still describe the exact current `hotel.search` surface before provider execution can begin.
+- Hotel surface callbacks carry the originating turn ID through one bounded authoritative `turnId -> hostGeneration` mapping. The host callback returns whether it accepted the surface; rejection preserves the current host surface and the runtime's existing visibility and action authority.
+- Search restoration retains only a payload whose actual source is `hotel.search`, so later `hotel.navigate` or other action-status payloads cannot overwrite the original search snapshot. A restore rejected by a newer generation or legacy owner returns `false`; an accepted restore reapplies that exact original search surface and search action context.
 - Legacy provider callbacks are generation fenced, so a late result cannot replace the current runtime surface or complete a newer turn.
 
 ## TDD Evidence
@@ -54,13 +58,19 @@ Tests were added first. The authoritative command failed ArkTS compilation on th
 
 ### Integrated GREEN
 
-The first compiled integrated run registered 1079 tests and reported nine behavioral failures. They identified stale pre-cutover expectations: unowned page-action fixtures, known fixed-capability handoff assumptions, and one post-execution fixture that now used an owned mail tool. Fixtures were given the exact multi-agent owner, known-capability expectations were changed to settled errors, and the post-execution test was changed to the explicit unmigrated `dynamic.search` capability. No production ownership check was relaxed.
+The first compiled integrated run registered 1079 tests and reported nine behavioral failures. They identified stale pre-cutover expectations: unowned page-action fixtures, known fixed-capability handoff assumptions, and one post-execution fixture that now used an owned mail tool. Fixtures were given the exact multi-agent owner, known-capability expectations were changed to settled errors, and the post-execution boundary is now exercised with the truly unknown `unknown.search` capability. No production ownership check was relaxed.
 
 The initial product suite added seven regressions over the 1072-test baseline covering registry equality, exact typed handoff, mixed-plan atomicity, generic-handoff rejection, concurrent isolation, a real two-tool turn, and surface owner/generation fencing.
 
 ### Review-fix RED/GREEN
 
 The review-fix tests first failed compilation on the absent exact host/snapshot helpers and generation-aware canary options. The first behavioral run then reported three failures covering both dynamic virtual allowlists and the stricter handoff expectation. A final reentrancy regression deliberately started host generation `202` from inside an old generation `101` memory callback; before the fix it failed with `expect 202 equals 101`. The runtime now captures host generation by originating turn, and the same complete suite passes without relaxing any ownership gate.
+
+### Surface-transition review RED/GREEN
+
+The second review tests were added before the production fence. The behavioral RED run showed that a search restore was accepted after the host had advanced to generation `202`, and that stale `hotel.detail` still reached the provider after its generation `101` search surface was replaced. The corrected post-provider handoff regression also uses a genuinely unknown capability and requires the exact `LEADER_RUNTIME_OWNERSHIP_VIOLATION` code.
+
+During the GREEN cycle, the exact-current positive restore test exposed a separate concrete defect: action-status payloads such as `hotel.navigate` were replacing the retained search snapshot because the record still carried its earlier `hotel.search` source field. Snapshot retention now checks the actual surface payload source. The final complete suite proves stale/newer-owner rejection, no provider call on rejected detail, preserved authority after rejected restore, and restoration of the original `hotel.search` surface.
 
 ## Final Verification
 
@@ -72,13 +82,13 @@ DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
   --mode module -p module=entry@default -p product=default test --no-daemon
 ```
 
-Fresh exact-tree artifact: `entry/.test/default/intermediates/test/coverage_data/test_result.txt`, timestamp `2026-07-22T12:55:49+0800`, SHA-256 `7aa6dfa9a210f39184cb6a6c47e9bc18f3b409bf5238a112df3004fe05f0efb4`.
+Fresh exact-tree artifact: `entry/.test/default/intermediates/test/coverage_data/test_result.txt`, timestamp `2026-07-22T13:40:04+0800`, SHA-256 `cc726bbf7e22e297d95318165152434b16d4f28b59a9fa219cadcc602f03be98`.
 
 ```text
-Tests run: 1086, Failure: 0, Error: 0, Pass: 1086, Ignore: 0
+Tests run: 1087, Failure: 0, Error: 0, Pass: 1087, Ignore: 0
 ```
 
-- Full Hypium: **1086/1086 passed**, zero failures and zero errors.
+- Full Hypium: **1087/1087 passed**, zero failures and zero errors.
 - `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, including a successful `agent_core` HAR build.
 - `node scripts/hotel-smoke-evidence.test.mjs`: **15/15 passed**.
 - Appless repository audit on this exact worktree: **44 registry tools**, **2 runtime tools**, **37 actions**, and **69 capabilities**. `missingMatrix`, `missingDocs`, `registryOnlyTools`, `modelOnlyTools`, and `excludedQueriesInSmoke` are empty; only the existing ten review-required social/work/knowledge entries remain.
