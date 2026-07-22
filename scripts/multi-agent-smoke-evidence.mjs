@@ -1,6 +1,7 @@
 const TURN_STATUSES = new Set(['success', 'partial', 'empty', 'error', 'canceled']);
 const DATA_STATUSES = new Set(['success', 'partial', 'empty', 'error']);
 const ACTION_STATUSES = new Set(['success', 'error', 'canceled']);
+const GENERATED_SURFACE = /^loop_surface_[0-9]+(?:_[0-9]+)?$/;
 const LIFECYCLE_MARKERS = new Set([
   'MultiAgentInput', 'MultiAgentDataTask', 'MultiAgentDataResult',
   'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
@@ -18,6 +19,24 @@ function records(logText) {
     }
     return [{ marker: marker[1], fields, index, line }];
   });
+}
+
+export function latestMultiAgentUiSurface(logText, options = {}) {
+  let latest = null;
+  for (const item of records(logText)) {
+    if (item.marker === 'MultiAgentUiResult' && item.fields.state === 'result' &&
+      GENERATED_SURFACE.test(item.fields.surface || '') && item.index > (options.afterIndex ?? -1) &&
+      (!options.expectedConversationId || item.fields.conversation === options.expectedConversationId) &&
+      (!options.expectedTurnId || item.fields.turn === options.expectedTurnId)) {
+      latest = {
+        conversationId: item.fields.conversation,
+        turnId: item.fields.turn,
+        taskId: item.fields.task,
+        surfaceId: item.fields.surface
+      };
+    }
+  }
+  return latest;
 }
 
 function list(value) {

@@ -21,6 +21,7 @@ import {
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
 import {
+  latestMultiAgentUiSurface,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
 } from './multi-agent-smoke-evidence.mjs';
@@ -1968,19 +1969,6 @@ async function verifySocialDraftAction(layout, index) {
     currentLayout = dumpLayout(`query-${index + 1}-social-draft-scroll-${attempt + 1}.json`);
   }
   return { ok: false, capability: 'social.reply.draft', reason: '生成草稿 button not found' };
-}
-
-function latestMultiAgentUiSurface(logText, options = {}) {
-  let latest = null;
-  String(logText || '').split('\n').forEach((line, index) => {
-    const match = /\[AIPhone\]\[MultiAgentUiResult] conversation=(c\d+) turn=(t\d+) task=(k\d+) surface=(s\d+) state=result(?:\s|$)/.exec(line);
-    if (match !== null && index > (options.afterIndex ?? -1) &&
-      (!options.expectedConversationId || match[1] === options.expectedConversationId) &&
-      (!options.expectedTurnId || match[2] === options.expectedTurnId)) {
-      latest = { conversationId: match[1], turnId: match[2], taskId: match[3], surfaceId: match[4] };
-    }
-  });
-  return latest;
 }
 
 function exactActionOptions(actionId, sourceToolId, context) {

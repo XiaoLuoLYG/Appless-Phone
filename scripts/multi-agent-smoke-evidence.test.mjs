@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
+  latestMultiAgentUiSurface,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
 } from './multi-agent-smoke-evidence.mjs';
@@ -46,6 +47,30 @@ test('requires one strictly correlated successful multi-agent turn', () => {
   assert.equal(multiAgentTurnEvidence(earlyUi, {
     expectedToolIds: ['travel.search']
   }).complete, false);
+});
+
+test('extracts only the latest exact generated UI result surface', () => {
+  const logs = [
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=k1 surface=s6 state=result',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=k2 surface=loop_surface_1784700000000 state=result',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t2 task=k3 surface=loop_surface_1784700000001 state=result',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=k4 surface=loop_surface_1784700000002_3 state=result'
+  ].join('\n');
+  assert.deepEqual(latestMultiAgentUiSurface(logs, {
+    expectedConversationId: 'c1',
+    expectedTurnId: 't1'
+  }), {
+    conversationId: 'c1',
+    turnId: 't1',
+    taskId: 'k4',
+    surfaceId: 'loop_surface_1784700000002_3'
+  });
+  assert.equal(latestMultiAgentUiSurface(logs, {
+    expectedConversationId: 'c1',
+    expectedTurnId: 't1',
+    afterIndex: 3
+  }), null);
+  assert.equal(latestMultiAgentUiSurface(logs.split('\n')[0]), null);
 });
 
 test('keeps partial, empty, error, and canceled terminal truth', () => {
