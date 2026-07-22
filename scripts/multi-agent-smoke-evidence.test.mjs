@@ -310,12 +310,37 @@ test('collapses adjacent identical lifecycle copies from the two HiLog channels'
   assert.deepEqual(evidence.failures, []);
 });
 
-test('preserves opposite-channel lifecycle events with different HiLog timestamps', () => {
-  const differentTimestamp = dualChannelTurn.replace(
+test('collapses adjacent identical lifecycle copies one millisecond apart across HiLog channels', () => {
+  const oneMillisecondApart = dualChannelTurn.replace(
     '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP:',
     '07-22 09:41:13.010  4821  4821 I A03D00/JSAPP:'
   );
-  const evidence = multiAgentTurnEvidence(differentTimestamp, {
+  const evidence = multiAgentTurnEvidence(oneMillisecondApart, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.status, 'partial');
+  assert.deepEqual(evidence.toolIds, ['travel.search', 'travel.search']);
+});
+
+test('preserves opposite-channel lifecycle events separated by more than one millisecond', () => {
+  const laterTimestamp = dualChannelTurn.replace(
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP:',
+    '07-22 09:41:13.020  4821  4821 I A03D00/JSAPP:'
+  );
+  const evidence = multiAgentTurnEvidence(laterTimestamp, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+  assert.equal(evidence.complete, false);
+  assert.ok(evidence.failures.includes('missing_or_duplicate_data_terminal'));
+});
+
+test('preserves adjacent opposite-channel lifecycle events with different normalized content', () => {
+  const differentContent = dualChannelTurn.replace(
+    'A03D00/JSAPP: [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false',
+    'A03D00/JSAPP: [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=2 error=false'
+  );
+  const evidence = multiAgentTurnEvidence(differentContent, {
     expectedToolIds: ['travel.search', 'travel.search']
   });
   assert.equal(evidence.complete, false);

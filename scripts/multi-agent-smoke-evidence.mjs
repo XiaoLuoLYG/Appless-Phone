@@ -9,6 +9,16 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentTurnResult'
 ]);
 const DUPLICATE_HILOG_CHANNELS = new Set(['A00000/AIPHONE', 'A03D00/JSAPP']);
+const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
+
+function duplicateHilogTimestamp(left, right) {
+  if (left === right) return true;
+  const milliseconds = (value) => Date.parse(`2000-${value.replace(/\s+/, 'T')}Z`);
+  const leftMs = milliseconds(left);
+  const rightMs = milliseconds(right);
+  return Number.isFinite(leftMs) && Number.isFinite(rightMs) &&
+    Math.abs(leftMs - rightMs) <= DUPLICATE_HILOG_MAX_SKEW_MS;
+}
 
 function records(logText) {
   const result = [];
@@ -27,7 +37,8 @@ function records(logText) {
     const normalized = line.slice(marker.index).trim();
     const previous = result.at(-1);
     if (LIFECYCLE_MARKERS.has(marker[1]) && previous?.index === index - 1 &&
-      timestamp.length > 0 && previous.timestamp === timestamp &&
+      timestamp.length > 0 && previous.timestamp.length > 0 &&
+      duplicateHilogTimestamp(previous.timestamp, timestamp) &&
       previous.normalized === normalized && previous.channel !== channel &&
       DUPLICATE_HILOG_CHANNELS.has(previous.channel) && DUPLICATE_HILOG_CHANNELS.has(channel)) {
       continue;
