@@ -17,6 +17,7 @@ import {
   DataTaskAuthorizationResult,
   DynamicGenericToolResult,
   InputUserPayload,
+  JsonValue,
   LeaderDecisionDataTask,
   LeaderPlanningContext,
   LeaderToolMetadata,
@@ -37,6 +38,7 @@ import {
   genericToolResultsA2ui,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
+  setJsonPointer,
   toolDefinitionForToolId
 } from '@loop/agent-core';
 import { leaderPersonaContext } from '../../../model/LeaderPersonaContext';
@@ -205,16 +207,13 @@ function normalizeCanaryTaskInput(
   }
   if (task.toolId === 'travel.search' || task.toolId === 'train.search' ||
     task.toolId === 'flight.search') {
-    const source = task.input as Record<string, Object | string | number | boolean | null | undefined>;
-    const normalized: Record<string, Object | string | number | boolean | null> = {};
-    Object.keys(source).forEach((key: string) => {
-      const value = source[key];
-      if (value !== undefined) {
-        normalized[key] = value as Object | string | number | boolean | null;
-      }
-    });
-    normalized['query'] = input.text;
-    return normalized;
+    const normalized = setJsonPointer(task.input as JsonValue, '/query', input.text);
+    if (!normalized.ok || normalized.value === undefined || normalized.value === null ||
+      typeof normalized.value !== 'object' || Array.isArray(normalized.value)) {
+      throw new Error(normalized.errorCode.length > 0 ?
+        normalized.errorCode : 'TRAVEL_TASK_INPUT_INVALID');
+    }
+    return normalized.value as Object;
   }
   if (task.toolId !== 'calendar.events.search') {
     return task.input;

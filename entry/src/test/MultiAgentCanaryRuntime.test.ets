@@ -17,13 +17,15 @@ import {
   HotelSearchItem,
   HotelSearchRequest,
   HotelSearchResult,
+  JsonValue,
   LocalModel,
   LinkedMessageBus,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   createSeedA2uiSurface,
   hotelSearchDataResult,
-  parseHotelSearchRequest
+  parseHotelSearchRequest,
+  setJsonPointer
 } from '@loop/agent-core';
 import { PersonaMemoryUpdateRequest } from '../main/ets/model/PersonaMemoryUpdate';
 import {
@@ -346,6 +348,17 @@ interface StructuredToolCallRecord {
   toolId: string;
   prompt: string;
   args: Object;
+}
+
+type CanaryJsonRecord = Record<string, JsonValue | undefined>;
+
+function c02DecisionWithInput(inputJson: string): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["travel.search"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"travel","goal":"搜索从北京到上海的出行方案",' +
+    '"allowedToolIds":["travel.search"],"toolId":"travel.search","input":' + inputJson +
+    ',"required":true}],"uiIntent":{"purpose":"travel.search",' +
+    '"preferredDensity":"comfortable","requiredSections":["travel"]}}';
 }
 
 function canaryStructuredResult(toolId: string, outputSchema: string): DataResult {
@@ -769,6 +782,85 @@ export default function multiAgentCanaryRuntimeTest() {
         expect(dynamicArgs['qualifiedName']).assertEqual('NOTION_SEARCH');
         runtime.dispose();
       });
+
+    it('rejects prototype member names in travel inputs before the structured provider', 0, async () => {
+      const unsafeInputs: string[] = [
+        '{"query":"forged","__proto__":{"polluted":"yes"}}',
+        '{"query":"forged","nested":{"__proto__":{"polluted":"yes"}}}',
+        '{"query":"forged","constructor":{"polluted":"yes"}}',
+        '{"query":"forged","nested":{"constructor":{"polluted":"yes"}}}',
+        '{"query":"forged","prototype":{"polluted":"yes"}}',
+        '{"query":"forged","nested":{"prototype":{"polluted":"yes"}}}'
+      ];
+      let providerCalls: number = 0;
+      for (let index: number = 0; index < unsafeInputs.length; index++) {
+        const options: MultiAgentCanaryOptions = canaryOptions(
+          new QueueModel([c02DecisionWithInput(unsafeInputs[index]), C02_QUERY_DONE]),
+          new CanaryHotelExecutor(),
+          new RecordingOpener(),
+          [],
+          []
+        );
+        options.dataExecutor = undefined;
+        options.structuredToolCall = async (
+          toolId: string,
+          _prompt: string,
+          _args: Object
+        ): Promise<DataResult> => {
+          providerCalls += 1;
+          return canaryStructuredResult(toolId, 'travelOptions');
+        };
+        const runtime: MultiAgentCanaryRuntime = new MultiAgentCanaryRuntime(options);
+
+        const outcome = await runtime.submit(C02_QUERY, { text: '' }) as MultiAgentSettledOutcome;
+
+        expect(outcome.status).assertEqual('error');
+        runtime.dispose();
+      }
+      const clean: CanaryJsonRecord = {};
+      expect(providerCalls).assertEqual(0);
+      expect(clean['polluted'] === undefined).assertTrue();
+    });
+
+    it('uses the shared JSON Pointer boundary for deep clones and non-JSON shapes', 0, () => {
+      const shared = JSON.parse('{"value":"shared"}') as CanaryJsonRecord;
+      const source = JSON.parse(
+        '{"query":"forged","nested":{"keep":true},"list":[{"name":"first"}]}'
+      ) as CanaryJsonRecord;
+      source['left'] = shared;
+      source['right'] = shared;
+      const assigned = setJsonPointer(source, '/query', C02_QUERY);
+
+      expect(assigned.ok).assertTrue();
+      const cloned = assigned.value as CanaryJsonRecord;
+      expect(cloned['query'] as string).assertEqual(C02_QUERY);
+      expect(JSON.stringify(cloned['nested'])).assertEqual('{"keep":true}');
+      expect(JSON.stringify(cloned['list'])).assertEqual('[{"name":"first"}]');
+      expect(cloned['nested'] === source['nested']).assertFalse();
+      expect(cloned['list'] === source['list']).assertFalse();
+      expect(cloned['left'] === cloned['right']).assertFalse();
+      (source['nested'] as CanaryJsonRecord)['keep'] = false;
+      expect(JSON.stringify(cloned['nested'])).assertEqual('{"keep":true}');
+
+      const namedArray: JsonValue[] = ['safe'];
+      (namedArray as Object as CanaryJsonRecord)['named'] = 'unsafe';
+      const namedSource = JSON.parse('{}') as CanaryJsonRecord;
+      namedSource['values'] = namedArray;
+      expect(setJsonPointer(namedSource, '/query', C02_QUERY).ok).assertFalse();
+
+      const sparseArray: JsonValue[] = [];
+      sparseArray.length = 2;
+      sparseArray[1] = 'unsafe';
+      const sparseSource = JSON.parse('{}') as CanaryJsonRecord;
+      sparseSource['values'] = sparseArray;
+      expect(setJsonPointer(sparseSource, '/query', C02_QUERY).ok).assertFalse();
+
+      const cyclic: CanaryJsonRecord = {};
+      cyclic['self'] = cyclic;
+      expect(setJsonPointer(cyclic, '/query', C02_QUERY).ok).assertFalse();
+      const clean: CanaryJsonRecord = {};
+      expect(clean['polluted'] === undefined).assertTrue();
+    });
 
     it('keeps C13 dynamic read in MultiAgent Data and executes only the selected read slug', 0, async () => {
       const executor = new RecordingDynamicExecutor();
