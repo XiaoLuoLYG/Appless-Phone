@@ -4,6 +4,7 @@
 
 - Base commit: `c52e718d0783f399ea748f32fcc99dbc1a80004e`.
 - Product commit: `70882b7d` (`feat: complete multi-agent action ownership`).
+- Review-fix product commit: `38abc3bfef410882e6d063917dc36877317e189f` (`fix: close action ownership review gaps`).
 - All **20 fixed Action Agent definitions** now have an explicit registered owner route; the Task 8 deferred allowlist and `ACTION_ROUTE_DEFERRED` result are removed.
 - Migrated the seven remaining external writes: `luckin.order.create`, `calendar.event.create`, `calendar.event.update`, `calendar.event.delete`, `whatsapp.message.send`, `ride.order.create`, and `ride.order.cancel`.
 - Preserved the existing rendered UI IDs, labels, card lifecycle, provider adapters, and public optional `calendar.event.update` input schema.
@@ -77,6 +78,35 @@ Tests run: 1054, Failure: 0, Error: 0, Pass: 1054, Ignore: 0
 - Ride exact current trace/order authorization, app-link separation, provider order receipt, and positive cancel status.
 - Seven-write provider completion evidence, including malformed and explicit inner-failure rejection.
 - Public/runtime registry semantic equality, 44/24/20 counts, optional Calendar update contract, dynamic-write rejection, and unchanged work/knowledge review boundaries.
+
+## Review-Fix Addendum (2026-07-22)
+
+The review follow-up closes the remaining ownership and provider-truth gaps without changing the 20 fixed Action definitions:
+
+- Legacy ReAct no longer exposes Calendar create/update/delete to the model. The guard is enforced again at the public tool-gateway boundary, including configured HTTP gateways, so a model-originated Calendar write is blocked before auth or provider execution.
+- Calendar delete authority now requires the exact currently rendered confirm action. The former row-ID-only HTML exception and the unreachable legacy selector/confirm implementation were removed.
+- The registered executor is the concrete `ActionStepExecutor`. Each subsequent plan step uses its own action identity and must pass domain-specific arguments before a page/provider callback. The seven migrated writes reject incomplete `{}` arguments.
+- Calendar create/update/delete now propagate the real create result through the production handler and ActionPlan JSON Pointer binding. Provider error and turn cancellation are terminal; later provider steps are not called.
+- Calendar, Ride, and Luckin parsers reject nested negative provider truth. Calendar delete additionally requires an explicit positive provider acknowledgement; Ride cancel accepts only exact positive terminal states.
+- Final write completion is action-specific and source-specific. A generic receipt/status row, wrong tool result, wrong provider source, malformed raw JSON, or nested `success:false` cannot produce success.
+
+Review-fix TDD checkpoints:
+
+1. The first RED run failed compilation because `validateRegisteredPageActionArgs` and injectable `LoopBackend` model support did not yet exist.
+2. The first integrated run executed 1061 tests and reported 1057 passes, three failures, and one error. Each failure exposed a now-invalid legacy assumption or an invalid fixture; no assertion was weakened.
+3. A final self-review RED proved that the local authority check alone did not cover an HTTP tool-gateway URL. The public gateway regression failed before the transport guard was added, then passed without making a network/provider call.
+
+Exact-HEAD verification for `38abc3bfef410882e6d063917dc36877317e189f`:
+
+- Fresh authoritative artifact timestamp: `2026-07-22T09:40:00+0800`.
+- Artifact SHA-256: `558c05a8f5bc3ee05b0fc5beb80dc102d70813b0dec3849f3649789deb67b979`.
+- Hypium: **1062/1062 passed**, zero failures and zero errors.
+- `node scripts/verify-loopy-backend.mjs`: **245 checks passed**, with successful HAR and HAP builds.
+- Appless audit: **44 registry tools**, **2 runtime tools**, **36 actions**, and **69 capabilities**; all missing/drift arrays are empty and only the existing ten review-required social/work/knowledge entries remain.
+- `node scripts/aiphone-device-smoke.mjs --list-cases` listed the deterministic smoke catalog only. No device, connected account, or live provider write was exercised.
+- `git diff --check` passed. Hvigor's known coverage reporter `00507008` parse message remained non-authoritative noise after Hypium completed and wrote the complete green result file.
+
+This addendum supersedes the earlier 1054-test completion count. The Calendar lifecycle uses deterministic provider fixtures solely to prove production handler/plan binding; it is not evidence of a live provider mutation or a real Event ID.
 
 ## Evidence Boundary
 
