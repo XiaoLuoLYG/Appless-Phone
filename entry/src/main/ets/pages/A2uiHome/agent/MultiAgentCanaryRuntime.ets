@@ -12,6 +12,7 @@ import {
   CalendarEventArgs,
   ClientActionAuthorizer,
   CreateDataTaskPayload,
+  CreateUiTaskPayload,
   DataResult,
   DataTaskExecutor,
   DataTaskAuthorizationResult,
@@ -23,12 +24,17 @@ import {
   LeaderToolMetadata,
   LinkedMessageBus,
   LocalModel,
+  MailDetail,
+  MailDetailRequest,
   RegisteredActionExecutor,
   SurfaceActionAuthorizer,
   ToolDefinition,
   ToolDefinitionLookup,
   UiLayoutPlanner,
+  UiRenderResult,
+  UiSurfaceWriteLease,
   UiSurfaceWriter,
+  UiTaskRenderer,
   UserInputPayload,
   VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
   VirtualActionIntent,
@@ -69,6 +75,7 @@ import {
 import { StructuredToolUiRenderer } from './StructuredToolUiRenderer';
 import {
   AiphoneRegisteredActionExecutor,
+  MailDetailFollowUpPreparer,
   RegisteredPageAction,
   SystemUriOpener,
   validateRegisteredPageActionArgs
@@ -113,6 +120,7 @@ export interface MultiAgentCanaryOptions {
   currentHostGeneration?: () => number;
   onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => boolean;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest, runtimeGeneration: number) => void;
+  onMailDetail?: (event: MailDetailInPlaceEvent, runtimeGeneration: number) => Promise<void>;
   downstreamWriter?: UiSurfaceWriter;
   uiLayoutPlanner?: UiLayoutPlanner;
   settingsFingerprint?: string;
@@ -123,6 +131,224 @@ export interface MultiAgentCanaryOptions {
   structuredToolCall?: (toolId: string, prompt: string, args: Object) => Promise<DataResult>;
   bus?: LinkedMessageBus;
   conversationId?: string;
+}
+
+export interface MailDetailInPlaceEvent {
+  requestKey: string;
+  provider: string;
+  status: 'success' | 'error';
+  detail?: MailDetail;
+  error: string;
+}
+
+interface PreparedMailDetail {
+  request: MailDetailRequest;
+  generation: number;
+}
+
+interface MailDetailSurfaceState extends PreparedMailDetail {
+  uiTaskId: string;
+  event: MailDetailInPlaceEvent | null;
+}
+
+const MAIL_DETAIL_PENDING_LIMIT: number = 8;
+
+function mailText(value: Object | string | number | boolean | null | undefined): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function mailStrings(value: Object | string | number | boolean | null | undefined): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const values = value as (Object | string | number | boolean | null | undefined)[];
+  const result: string[] = [];
+  for (let index = 0; index < values.length; index++) {
+    if (typeof values[index] !== 'string') {
+      return null;
+    }
+    result.push(values[index] as string);
+  }
+  return result;
+}
+
+function mailDetailFromData(
+  data: DataResult,
+  request: MailDetailRequest
+): MailDetailInPlaceEvent {
+  const providerError = data.error === undefined ? '' : data.error.message;
+  if (data.status === 'error') {
+    return {
+      requestKey: request.requestKey,
+      provider: request.provider,
+      status: 'error',
+      error: providerError.trim().length > 0 ? providerError : '邮件正文读取失败。'
+    };
+  }
+  if (data.status !== 'success' || data.outputSchema !== 'mailThread' ||
+    data.data === null || typeof data.data !== 'object' || Array.isArray(data.data)) {
+    return { requestKey: request.requestKey, provider: request.provider, status: 'error', error: '邮件正文数据无效。' };
+  }
+  const values = data.data as Record<string, Object | string | number | boolean | null | undefined>;
+  const to = mailStrings(values['to']);
+  const cc = mailStrings(values['cc']);
+  const body = mailText(values['body']);
+  const bodyHtml = mailText(values['bodyHtml']);
+  if (mailText(values['requestKey']) !== request.requestKey ||
+    mailText(values['provider']) !== request.provider ||
+    mailText(values['threadId']) !== request.threadId ||
+    mailText(values['messageId']) !== request.messageId ||
+    to === null || cc === null || (body.trim().length === 0 && bodyHtml.trim().length === 0)) {
+    return { requestKey: request.requestKey, provider: request.provider, status: 'error', error: '邮件正文身份或内容无效。' };
+  }
+  const detail: MailDetail = {
+    requestKey: request.requestKey,
+    provider: request.provider,
+    threadId: request.threadId,
+    messageId: request.messageId,
+    internetMessageId: mailText(values['internetMessageId']),
+    subject: mailText(values['subject']),
+    from: mailText(values['from']),
+    replyTo: mailText(values['replyTo']),
+    to,
+    cc,
+    bodyText: body,
+    bodyHtml
+  };
+  return { requestKey: request.requestKey, provider: request.provider, status: 'success', detail, error: '' };
+}
+
+class MailDetailInPlaceBridge implements UiTaskRenderer, UiSurfaceWriter, MailDetailFollowUpPreparer {
+  private readonly renderer: UiTaskRenderer;
+  private readonly mailRenderer: UiTaskRenderer;
+  private readonly writer: UiSurfaceWriter;
+  private readonly currentGeneration: () => number;
+  private readonly callback: ((event: MailDetailInPlaceEvent, generation: number) => Promise<void>) | null;
+  private readonly prepared: Map<string, PreparedMailDetail> = new Map<string, PreparedMailDetail>();
+  private readonly surfaces: Map<string, MailDetailSurfaceState> = new Map<string, MailDetailSurfaceState>();
+
+  constructor(
+    renderer: UiTaskRenderer,
+    writer: UiSurfaceWriter,
+    currentGeneration: () => number,
+    callback?: (event: MailDetailInPlaceEvent, generation: number) => Promise<void>
+  ) {
+    this.renderer = renderer;
+    this.mailRenderer = new StructuredToolUiRenderer(null, 6000);
+    this.writer = writer;
+    this.currentGeneration = currentGeneration;
+    this.callback = callback === undefined ? null : callback;
+  }
+
+  prepare(uiTaskId: string, request: MailDetailRequest): boolean {
+    const actionId = request.provider === 'gmail' ? 'gmail.thread.read' : 'mail.thread.read';
+    const generation = this.currentGeneration();
+    if (this.callback === null || this.prepared.size >= MAIL_DETAIL_PENDING_LIMIT ||
+      uiTaskId.trim().length === 0 || !Number.isSafeInteger(generation) || generation <= 0 ||
+      !validateRegisteredPageActionArgs(actionId, request).ok) {
+      return false;
+    }
+    this.prepared.set(uiTaskId, {
+      request: {
+        requestKey: request.requestKey,
+        provider: request.provider,
+        threadId: request.threadId,
+        messageId: request.messageId,
+        subject: request.subject
+      },
+      generation
+    });
+    return true;
+  }
+
+  async skeleton(task: CreateUiTaskPayload, surfaceId: string): Promise<UiRenderResult> {
+    const prepared = this.prepared.get(task.taskId);
+    if (prepared === undefined || task.dataTaskIds.length !== 1 ||
+      task.expectedOutputSchema !== 'mailThread' ||
+      (task.intent !== 'mail.thread.read' && task.intent !== 'gmail.thread.read')) {
+      return this.renderer.skeleton(task, surfaceId);
+    }
+    this.prepared.delete(task.taskId);
+    this.surfaces.set(surfaceId, {
+      uiTaskId: task.taskId,
+      request: prepared.request,
+      generation: prepared.generation,
+      event: null
+    });
+    return this.mailRenderer.skeleton(task, surfaceId);
+  }
+
+  async result(
+    task: CreateUiTaskPayload,
+    data: DataResult[],
+    offers: ActionOffer[],
+    surfaceId: string
+  ): Promise<UiRenderResult> {
+    const state = this.surfaces.get(surfaceId);
+    if (state === undefined || state.uiTaskId !== task.taskId) {
+      return this.renderer.result(task, data, offers, surfaceId);
+    }
+    if (data.length !== 1 || data[0].toolId !== task.intent) {
+      state.event = {
+        requestKey: state.request.requestKey,
+        provider: state.request.provider,
+        status: 'error',
+        error: '邮件正文结果关联无效。'
+      };
+      return this.mailRenderer.error(task, state.event.error, surfaceId);
+    }
+    state.event = mailDetailFromData(data[0], state.request);
+    return state.event.status === 'success' ?
+      this.mailRenderer.result(task, data, [], surfaceId) :
+      this.mailRenderer.error(task, state.event.error, surfaceId);
+  }
+
+  async error(task: CreateUiTaskPayload, message: string, surfaceId: string): Promise<UiRenderResult> {
+    const state = this.surfaces.get(surfaceId);
+    if (state === undefined || state.uiTaskId !== task.taskId) {
+      return this.renderer.error(task, message, surfaceId);
+    }
+    state.event = {
+      requestKey: state.request.requestKey,
+      provider: state.request.provider,
+      status: 'error',
+      error: message.trim().length > 0 ? message : '邮件正文读取失败。'
+    };
+    return this.mailRenderer.error(task, state.event.error, surfaceId);
+  }
+
+  actionStatus(payload: Object, surfaceId: string): Promise<UiRenderResult> {
+    return this.renderer.actionStatus(payload, surfaceId);
+  }
+
+  async write(
+    turnId: string,
+    surfaceId: string,
+    jsonl: string,
+    lease: UiSurfaceWriteLease
+  ): Promise<void> {
+    const state = this.surfaces.get(surfaceId);
+    if (state === undefined) {
+      return this.writer.write(turnId, surfaceId, jsonl, lease);
+    }
+    if (state.event === null || !lease.isActive()) {
+      return;
+    }
+    const event = state.event;
+    this.surfaces.delete(surfaceId);
+    if (this.callback === null) {
+      throw new Error('Mail detail callback is unavailable.');
+    }
+    await this.callback(event, state.generation);
+    if (event.status === 'error') {
+      throw new Error(event.error);
+    }
+  }
+
+  dispose(): void {
+    this.prepared.clear();
+    this.surfaces.clear();
+  }
 }
 
 export interface MultiAgentCanaryActionContext {
@@ -608,6 +834,7 @@ export class MultiAgentCanaryRuntime {
   private readonly surfaceWriter: HotelRuntimeSurfaceWriter;
   private readonly conversationId: string;
   private readonly aiphoneExecutor: AiphoneRegisteredActionExecutor;
+  private readonly mailDetailBridge: MailDetailInPlaceBridge;
   private readonly currentPageSnapshot: () => RegisteredPageSnapshot | null;
   private readonly currentHostSurface: () => A2uiSurfaceState | null;
   private readonly currentHostGeneration: () => number;
@@ -668,11 +895,23 @@ export class MultiAgentCanaryRuntime {
       true
     );
     this.surfaceWriter = writer;
+    const structuredRenderer = new StructuredToolUiRenderer(
+      options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
+      6000
+    );
+    const mailDetailBridge = new MailDetailInPlaceBridge(
+      structuredRenderer,
+      writer,
+      this.currentHostGeneration,
+      options.onMailDetail
+    );
+    this.mailDetailBridge = mailDetailBridge;
     const aiphoneExecutor = new AiphoneRegisteredActionExecutor(
       catalog,
       options.opener,
       followUpIds,
-      options.pageAction === undefined ? rejectPageAction : options.pageAction
+      options.pageAction === undefined ? rejectPageAction : options.pageAction,
+      mailDetailBridge
     );
     this.aiphoneExecutor = aiphoneExecutor;
     const initialContext = canaryPlanningContext(options.selectedPersonaId());
@@ -688,11 +927,8 @@ export class MultiAgentCanaryRuntime {
       dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
         new CanaryStructuredDataExecutor(options.structuredToolCall) : options.dataExecutor,
-      uiRenderer: new StructuredToolUiRenderer(
-        options.uiLayoutPlanner === undefined ? null : options.uiLayoutPlanner,
-        6000
-      ),
-      surfaceWriter: writer,
+      uiRenderer: mailDetailBridge,
+      surfaceWriter: mailDetailBridge,
       actionCatalog: catalog,
       actionCompiler: new MultiAgentActionPlanCompiler(options.model),
       actionExecutor: new CanaryRegisteredExecutor(
@@ -835,6 +1071,7 @@ export class MultiAgentCanaryRuntime {
   dispose(): void {
     this.runtime.dispose();
     this.aiphoneExecutor.dispose();
+    this.mailDetailBridge.dispose();
     this.pageGeneration = 0;
     this.pageFingerprint = '';
     this.surfaceGeneration = 0;

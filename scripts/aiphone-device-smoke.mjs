@@ -23,6 +23,7 @@ import {
 import {
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
+  mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
@@ -1313,13 +1314,17 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
         hasPopulatedHotelActionEvidence(hotelActionEvidence);
       const hotelToolLifecycle = hotelToolLifecycleFromLogs(text);
       const hotelToolLifecycleComplete = hotelToolLifecycle.ok;
-      const multiAgentLifecycle = lifecycleOptions === null ? null :
+      const customCompletion = lifecycleOptions !== null &&
+        typeof lifecycleOptions.completionEvidence === 'function' ?
+        lifecycleOptions.completionEvidence(text) : null;
+      const multiAgentLifecycle = lifecycleOptions === null || customCompletion !== null ? null :
         multiAgentTurnEvidence(text, lifecycleOptions);
       const hasTerminalOutcome =
         /\[AIPhone\]\[(ToolResult|A2uiHomeToolResult)\] ok=/.test(text) ||
         /\[AIPhone\]\[(ToolRequest|A2uiHomeToolRequest)\] none/.test(text) ||
         /\[AIPhone\]\[PersonaMemoryUpdate\]/.test(text);
-      const done = lifecycleOptions === null ?
+      const done = customCompletion !== null ? customCompletion.complete :
+        lifecycleOptions === null ?
         (hotelActionEvidencePopulated || hotelToolLifecycleComplete || hasTerminalOutcome) :
         multiAgentLifecycle.complete;
       const hotelActionRequested =
@@ -1329,11 +1334,20 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
       if (done && doneAt === 0) {
         doneAt = Date.now();
       }
-      const hotelUiReady = lifecycleOptions !== null ? multiAgentLifecycle.complete :
+      const hotelUiReady = customCompletion !== null ? customCompletion.complete :
+        lifecycleOptions !== null ? multiAgentLifecycle.complete :
         hotelActionEvidencePopulated ||
         (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
-      if (done && (!hotelRuntimeRequested || hotelUiReady) &&
+      if (customCompletion !== null && done && Date.now() - doneAt > 500) {
+        break;
+      }
+      if (customCompletion !== null && !done && lifecycleOptions.idleActionTimeoutMs > 0 &&
+        Date.now() - started > lifecycleOptions.idleActionTimeoutMs &&
+        !/\[AIPhone\]\[MultiAgentActionRun\][^\n]*action=(?:mail|gmail)\.thread\.read\b/.test(text)) {
+        break;
+      }
+      if (customCompletion === null && done && (!hotelRuntimeRequested || hotelUiReady) &&
         (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
@@ -1936,24 +1950,63 @@ function expandMatchesForTarget(layout, targetMarker) {
     });
 }
 
-async function verifyMailExpandedBody(layout, index) {
+function currentMailReadEvidence(logText, sourceToolId, actionContext) {
+  const actionIds = ['mail.thread.read', 'gmail.thread.read'];
+  const results = actionIds.map((actionId) => mailThreadReadEvidence(
+    logText,
+    exactActionOptions(actionId, sourceToolId, actionContext)
+  ));
+  return results.find((result) => result.complete) || results[0];
+}
+
+async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
   let currentLayout = layout;
+  const sourceToolId = visibleSourceToolId(actionContext);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const matches = expandMatchesForTarget(currentLayout, '');
-    if (matches.length > 0) {
-      const target = matches[0].bounds;
-      hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
-      await sleep(900);
-      const expanded = dumpLayout(`query-${index + 1}-mail-body-layout.json`);
+    for (let candidate = 0; candidate < matches.length; candidate += 1) {
+      const target = matches[candidate].bounds;
+      clearHilog();
+      const actionLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(target.x), String(target.y)]);
+      }, {
+        completionEvidence: (text) => currentMailReadEvidence(text, sourceToolId, actionContext),
+        idleActionTimeoutMs: 2500
+      });
+      const expanded = dumpLayout(
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout.json`
+      );
       const text = collectLayoutText(expanded).join('\n');
-      const textPath = join(outDir, `query-${index + 1}-mail-body-layout-text.txt`);
+      const logs = actionLogs.join('\n');
+      const evidence = currentMailReadEvidence(logs, sourceToolId, actionContext);
+      const textPath = join(
+        outDir,
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-layout-text.txt`
+      );
+      const logPath = join(
+        outDir,
+        `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}.log`
+      );
       writeFileSync(textPath, text + '\n');
-      return {
-        ok: /正文|发件人|收件人|主题|回复/.test(text) && !hasTechnicalGmailArgsCard(text),
-        capability: 'mail.thread.read',
-        textPath,
-        screenPath: captureScreen(`query-${index + 1}-mail-body-screen.png`)
-      };
+      writeFileSync(logPath, logs + '\n');
+      const bodyVisible = /正文|发件人|收件人|主题|回复/.test(text) &&
+        !hasTechnicalGmailArgsCard(text);
+      if (evidence.ok && evidence.bodyVisible && bodyVisible) {
+        return {
+          ok: true,
+          capability: evidence.dataToolId,
+          evidence,
+          textPath,
+          logPath,
+          screenPath: captureScreen(`query-${index + 1}-mail-body-screen.png`)
+        };
+      }
+      const collapse = findTextMatches(expanded, '收起')
+        .sort((left, right) => Math.abs(left.bounds.y - target.y) - Math.abs(right.bounds.y - target.y))[0];
+      if (collapse !== undefined) {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(collapse.bounds.x), String(collapse.bounds.y)]);
+        await sleep(400);
+      }
     }
     swipeResultsUp();
     await sleep(800);
@@ -2986,7 +3039,7 @@ async function runQuery(query, index, expectedTool) {
       draftVisible: true
     };
   summary.mailExpandedBody = expectedCase.verifyMailBody === true
-    ? await verifyMailExpandedBody(evidenceLayout, index)
+    ? await verifyMailExpandedBody(evidenceLayout, index, appPid, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
   summary.socialDraftAction = expectedCase.verifySocialDraft === true
     ? await verifySocialDraftAction(evidenceLayout, index)

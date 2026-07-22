@@ -37,7 +37,8 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'ride.order.confirm',
   'ride.order.cancel',
   'hotel.navigate',
-  'hotel.booking.open'
+  'hotel.booking.open',
+  'html_mail_detail_read'
 ];
 
 export interface RegisteredPageActionResolution {
@@ -119,6 +120,23 @@ function isGmailReplySendCandidate(action: A2uiAction): boolean {
   const values = action.args as Record<string, Object | string | number | boolean | null | undefined>;
   const provider = values['provider'];
   return typeof provider === 'string' && provider.trim().toLowerCase() === 'gmail';
+}
+
+function mailDetailReadTarget(sourceToolId: string, clicked: A2uiAction): string {
+  if (clicked.id !== 'html_mail_detail_read' || clicked.kind !== 'client' ||
+    clicked.args === undefined || clicked.args === null || Array.isArray(clicked.args) ||
+    (sourceToolId !== 'mail.search' && sourceToolId !== 'mail.thread.read' &&
+      sourceToolId !== 'gmail.mail.search' && sourceToolId !== 'gmail.thread.read')) {
+    return '';
+  }
+  const values = clicked.args as Record<string, Object | string | number | boolean | null | undefined>;
+  const provider = values['provider'];
+  if (typeof provider !== 'string') {
+    return '';
+  }
+  const normalized = provider.trim().toLowerCase();
+  return normalized === 'gmail' ? 'gmail.thread.read' :
+    normalized === 'qq' ? 'mail.thread.read' : '';
 }
 
 function cloneSnapshot(snapshot: RegisteredPageSnapshot): RegisteredPageSnapshot | null {
@@ -230,7 +248,10 @@ export function resolveRegisteredPageAction(
     return null;
   }
   let targetId = '';
-  if ((source.actions.indexOf(clicked.id) >= 0 || sourceToolId === clicked.id) &&
+  const mailReadTarget = mailDetailReadTarget(sourceToolId, clicked);
+  if (mailReadTarget.length > 0) {
+    targetId = mailReadTarget;
+  } else if ((source.actions.indexOf(clicked.id) >= 0 || sourceToolId === clicked.id) &&
     registeredProductAction(clicked.id)) {
     targetId = clicked.id;
   } else if (sourceToolId === 'luckin.order.preview' && clicked.id === 'luckin.order.preview') {
@@ -241,7 +262,8 @@ export function resolveRegisteredPageAction(
       targetId = adaptedTarget(sourceToolId, clicked.id);
     }
   }
-  if (!registeredProductAction(targetId)) {
+  if (!registeredProductAction(targetId) &&
+    targetId !== 'mail.thread.read' && targetId !== 'gmail.thread.read') {
     return null;
   }
   return {

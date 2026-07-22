@@ -89,12 +89,10 @@ import { buildSystemFoodNavigationUri } from '@loop/agent-core';
 import { officialMediaVideoPlaybackUrl } from '@loop/agent-core';
 import {
   MailDetail,
-  MailDetailRequest,
   MailCalendarSuggestion,
   MailReplyCommand,
   MailReplyOperationResult,
   addHuaweiCalendarEvent,
-  readConfiguredMailDetail,
   saveConfiguredMailDraft,
   sendConfiguredMailReply
 } from '@loop/agent-core';
@@ -115,6 +113,7 @@ import {
   HotelTurnStatus
 } from './agent/HotelAgentRuntime';
 import {
+  MailDetailInPlaceEvent,
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime
 } from './agent/MultiAgentCanaryRuntime';
@@ -1270,6 +1269,44 @@ struct Index {
         )) {
           this.applyPersonaMemoryUpdate(update);
         }
+      },
+      onMailDetail: async (result: MailDetailInPlaceEvent, generation: number): Promise<void> => {
+        if (!runtimeCallbackIsCurrent(
+          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+        )) {
+          throw new Error('Mail detail surface is stale.');
+        }
+        let event: MailDetailUiEvent;
+        if (result.status === 'success' && result.detail !== undefined) {
+          const suggestion = await this.extractMailCalendarSuggestion(result.detail);
+          if (!runtimeCallbackIsCurrent(
+            this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+          )) {
+            throw new Error('Mail detail surface is stale.');
+          }
+          this.mailCalendarSuggestions[result.requestKey] = suggestion;
+          event = {
+            sequence: Date.now(),
+            requestKey: result.requestKey,
+            status: 'success',
+            detail: result.detail,
+            calendarSuggestion: suggestion,
+            error: ''
+          };
+        } else {
+          event = {
+            sequence: Date.now(),
+            requestKey: result.requestKey,
+            status: 'error',
+            error: result.error
+          };
+        }
+        this.mailDetailEventJson = JSON.stringify(event);
+        const bodyChars = result.detail === undefined ? 0 :
+          (result.detail.bodyText.length > 0 ? result.detail.bodyText.length : result.detail.bodyHtml.length);
+        aiLogInfo('[AIPhone][MailDetailInPlace] requestKeyChars=' + result.requestKey.length.toString() +
+          ' provider=' + result.provider +
+          ' status=' + result.status + ' bodyChars=' + bodyChars.toString());
       },
       pageAction: (
         actionId: string,
@@ -3600,44 +3637,6 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
-    if (action.id === 'html_mail_detail_read') {
-      if (action.args === undefined) {
-        this.logHtmlHomeActionError(action, 'missing_mail_detail_args');
-        return;
-      }
-      const request = action.args as MailDetailRequest;
-      const requestKey = this.actionText(request.requestKey).trim();
-      if (requestKey.length === 0 || this.actionText(request.provider).trim().length === 0) {
-        this.logHtmlHomeActionError(action, 'invalid_mail_detail_args');
-        return;
-      }
-      try {
-        const detail = await readConfiguredMailDetail(request);
-        const suggestion = await this.extractMailCalendarSuggestion(detail);
-        this.mailCalendarSuggestions[requestKey] = suggestion;
-        const event: MailDetailUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          status: 'success',
-          detail: detail,
-          calendarSuggestion: suggestion,
-          error: ''
-        };
-        this.mailDetailEventJson = JSON.stringify(event);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : JSON.stringify(error);
-        const event: MailDetailUiEvent = {
-          sequence: Date.now(),
-          requestKey: requestKey,
-          status: 'error',
-          error: message
-        };
-        this.mailDetailEventJson = JSON.stringify(event);
-        aiLogError('[AIPhone][MailDetailReadFailed] provider=' + this.actionText(request.provider) +
-          ' error=' + message.substring(0, 240));
-      }
-      return;
-    }
     if (action.id === 'html_mail_calendar_add') {
       await this.addSuggestedMailCalendarEvent(action);
       return;

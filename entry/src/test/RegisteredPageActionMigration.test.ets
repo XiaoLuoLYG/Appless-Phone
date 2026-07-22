@@ -19,7 +19,8 @@ import {
 } from '@loop/agent-core';
 import {
   MultiAgentCanaryOptions,
-  MultiAgentCanaryRuntime
+  MultiAgentCanaryRuntime,
+  MailDetailInPlaceEvent
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import {
   RegisteredPageAction,
@@ -64,6 +65,21 @@ interface ToolInvocationRecord {
   prompt: string;
   pageActionId: string;
   args: Object;
+}
+
+interface MailThreadDataFixture {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  internetMessageId: string;
+  subject: string;
+  from: string;
+  replyTo: string;
+  to: string[];
+  cc: string[];
+  body: string;
+  bodyHtml: string;
 }
 
 class QueueModel implements LocalModel {
@@ -407,7 +423,9 @@ function canary(
   pageAction?: RegisteredPageAction,
   opener: RecordingOpener = new RecordingOpener(),
   currentHostSurface?: () => A2uiSurfaceState | null,
-  currentHostGeneration?: () => number
+  currentHostGeneration?: () => number,
+  dataExecutor: DataTaskExecutor = new RejectDataExecutor(),
+  onMailDetail?: (event: MailDetailInPlaceEvent, generation: number) => Promise<void>
 ): MultiAgentCanaryRuntime {
   const options: MultiAgentCanaryOptions = {
     model,
@@ -430,7 +448,8 @@ function canary(
     } : currentHostGeneration,
     onSurface: (_surface: A2uiSurfaceState): boolean => true,
     onMemoryUpdate: (): void => {},
-    dataExecutor: new RejectDataExecutor(),
+    dataExecutor,
+    onMailDetail,
     currentLocalDate: (): string => '2026-07-22',
     conversationId: 'registered-page-test',
     bus,
@@ -455,6 +474,198 @@ function cloneSnapshot(value: RegisteredPageSnapshot): RegisteredPageSnapshot {
 
 export default function registeredPageActionMigrationTest() {
   describe('registeredPageActionMigration', () => {
+    it('routes exact current QQ and Gmail body reads through Action and Data agents in place', 0, async () => {
+      class MailReadDataExecutor implements DataTaskExecutor {
+        readonly calls: CreateDataTaskPayload[] = [];
+
+        async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+          this.calls.push(task);
+          const args = task.args as Record<string, Object | string | number | boolean | null | undefined>;
+          const data: MailThreadDataFixture = {
+            requestKey: args['requestKey'] as string,
+            provider: args['provider'] as string,
+            threadId: args['threadId'] as string,
+            messageId: args['messageId'] as string,
+            internetMessageId: '',
+            subject: args['subject'] as string,
+            from: 'Sender <sender@example.com>',
+            replyTo: 'sender@example.com',
+            to: ['qa@example.com'],
+            cc: [],
+            body: '真实邮件正文',
+            bodyHtml: '<p>真实邮件正文</p>'
+          };
+          return {
+            toolId: task.toolId,
+            outputSchema: 'mailThread',
+            status: 'success',
+            data: data as Object,
+            sources: [{
+              provider: task.toolId === 'gmail.thread.read' ? 'Gmail API' : 'QQ Mail',
+              backend: task.toolId === 'gmail.thread.read' ? 'oauth_api' : 'imap',
+              operation: 'thread.read',
+              fetchedAt: '2026-07-23T00:00:00.000Z'
+            }],
+            warnings: []
+          };
+        }
+      }
+      const providers: string[] = ['qq', 'gmail'];
+      const expectedTools: string[] = ['mail.thread.read', 'gmail.thread.read'];
+      for (let index = 0; index < providers.length; index++) {
+        const provider = providers[index];
+        const identity = provider === 'gmail' ? 'gmail-thread-real-1' : 'qq-message-real-1';
+        const args = JSON.parse('{"requestKey":"' + provider + ':' + identity + '",' +
+          '"provider":"' + provider + '","threadId":"' +
+          (provider === 'gmail' ? identity : 'qq-thread-real-1') + '","messageId":"' +
+          (provider === 'gmail' ? 'gmail-message-real-1' : identity) + '","subject":"QA"}') as Object;
+        const clicked = action('html_mail_detail_read', args, 'client');
+        clicked.label = '加载正文';
+        clicked.prompt = provider + ':' + identity;
+        const surface = pageSurface(provider === 'gmail' ? 'gmail.mail.search' : 'mail.search', clicked, index + 1);
+        const current: RegisteredPageSnapshot = {
+          surface,
+          document: mailReplyDocument(surface, provider, args),
+          generation: index + 1
+        };
+        const bus = new TrackingBus();
+        const executor = new MailReadDataExecutor();
+        const events: MailDetailInPlaceEvent[] = [];
+        const runtime = canary(
+          new QueueModel([]),
+          new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+          (): RegisteredPageSnapshot | null => current,
+          bus,
+          undefined,
+          new RecordingOpener(),
+          undefined,
+          undefined,
+          executor,
+          async (event: MailDetailInPlaceEvent, generation: number): Promise<void> => {
+            expect(generation).assertEqual(index + 1);
+            events.push(event);
+          }
+        );
+        let legacyCalls = 0;
+        const result = await dispatchRegisteredPageActionCandidate(
+          clicked,
+          (candidate: A2uiAction): Promise<boolean> => runtime.runPageAction(candidate),
+          async (_legacy: A2uiAction): Promise<void> => { legacyCalls++; }
+        );
+
+        expect(result.candidate).assertTrue();
+        expect(result.ok).assertTrue();
+        expect(legacyCalls).assertEqual(0);
+        expect(executor.calls.length).assertEqual(1);
+        expect(executor.calls[0].toolId).assertEqual(expectedTools[index]);
+        expect(JSON.stringify(executor.calls[0].args)).assertEqual(JSON.stringify(args));
+        expect(events.length).assertEqual(1);
+        expect(events[0].status).assertEqual('success');
+        expect(events[0].requestKey).assertEqual(provider + ':' + identity);
+        expect(events[0].detail?.bodyText).assertEqual('真实邮件正文');
+        expect(bus.messages.filter((message: AgentMessage): boolean =>
+          message.type === AgentMessageType.INPUT_USER
+        ).length).assertEqual(0);
+        expect(bus.messages.filter((message: AgentMessage): boolean =>
+          message.type === AgentMessageType.TASK_CREATE_DATA
+        ).length).assertEqual(1);
+        expect(bus.messages.filter((message: AgentMessage): boolean =>
+          message.type === AgentMessageType.TASK_RESULT_DATA
+        ).length).assertEqual(1);
+        runtime.dispose();
+      }
+    });
+
+    it('rejects stale or mutated mail body reads before Data execution', 0, async () => {
+      const args = JSON.parse('{"requestKey":"qq:qq-message-real-1","provider":"qq",' +
+        '"threadId":"qq-thread-real-1","messageId":"qq-message-real-1","subject":"QA"}') as Object;
+      const clicked = action('html_mail_detail_read', args, 'client');
+      clicked.label = '加载正文';
+      clicked.prompt = 'qq:qq-message-real-1';
+      const surface = pageSurface('mail.search', clicked, 1);
+      let current: RegisteredPageSnapshot = {
+        surface,
+        document: mailReplyDocument(surface, 'qq', args),
+        generation: 1
+      };
+      const executor = new RejectDataExecutor();
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => current,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        executor
+      );
+      const mutated = JSON.parse(JSON.stringify(clicked)) as A2uiAction;
+      (mutated.args as Record<string, Object | string | number | boolean | null | undefined>)['messageId'] =
+        'qq-message-forged';
+      expect(await runtime.runPageAction(mutated)).assertFalse();
+      const stale = cloneSnapshot(current);
+      stale.surface.surfaceId = 'stale-mail-surface';
+      current = stale;
+      expect(await runtime.runPageAction(clicked)).assertFalse();
+      runtime.dispose();
+    });
+
+    it('returns the exact provider error in place with one Data call and no legacy host read', 0, async () => {
+      class FailingMailReadExecutor implements DataTaskExecutor {
+        calls: number = 0;
+
+        async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+          this.calls++;
+          return {
+            toolId: task.toolId,
+            outputSchema: 'mailThread',
+            status: 'error',
+            data: new Object(),
+            sources: [],
+            warnings: [],
+            error: {
+              code: 'PROVIDER_ERROR',
+              message: 'QQ IMAP timeout',
+              retryable: true
+            }
+          };
+        }
+      }
+      const args = JSON.parse('{"requestKey":"qq:qq-message-real-1","provider":"qq",' +
+        '"threadId":"qq-thread-real-1","messageId":"qq-message-real-1","subject":"QA"}') as Object;
+      const clicked = action('html_mail_detail_read', args, 'client');
+      clicked.label = '加载正文';
+      clicked.prompt = 'qq:qq-message-real-1';
+      const surface = pageSurface('mail.search', clicked, 1);
+      const current: RegisteredPageSnapshot = {
+        surface,
+        document: mailReplyDocument(surface, 'qq', args),
+        generation: 1
+      };
+      const executor = new FailingMailReadExecutor();
+      const events: MailDetailInPlaceEvent[] = [];
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => current,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        executor,
+        async (event: MailDetailInPlaceEvent): Promise<void> => { events.push(event); }
+      );
+      expect(await runtime.runPageAction(clicked)).assertFalse();
+      expect(executor.calls).assertEqual(1);
+      expect(events.length).assertEqual(1);
+      expect(events[0].status).assertEqual('error');
+      expect(events[0].requestKey).assertEqual('qq:qq-message-real-1');
+      expect(events[0].error).assertEqual('QQ IMAP timeout');
+      runtime.dispose();
+    });
+
     it('routes the exact current Gmail Send click once without a second confirmation pause', 0, async () => {
       const invoker = new RecordingPageToolInvoker();
       const handler = new RegisteredPageActionHandler(invoker);

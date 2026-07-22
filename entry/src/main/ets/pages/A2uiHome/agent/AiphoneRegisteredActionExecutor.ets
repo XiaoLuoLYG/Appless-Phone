@@ -8,6 +8,7 @@ import {
   CalendarEventArgs,
   HotelBookingOpenArgs,
   HotelNavigateArgs,
+  MailDetailRequest,
   RegisteredActionExecutor,
   calendarEventRequiredFields,
   hotelNavigationUri,
@@ -20,6 +21,10 @@ export interface SystemUriOpener {
 
 export interface HotelActionIdFactory {
   nextId(prefix: string): string;
+}
+
+export interface MailDetailFollowUpPreparer {
+  prepare(uiTaskId: string, request: MailDetailRequest): boolean;
 }
 
 export interface RegisteredPageActionContext extends ActionExecutionContext {
@@ -115,6 +120,29 @@ export function validateGmailReplyActionArgs(args: Object): ActionValidationResu
   };
 }
 
+export function validateMailThreadReadActionArgs(
+  actionId: string,
+  args: Object
+): ActionValidationResult {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return validation(false, 'MAIL_THREAD_READ_ARGS_INVALID', 'Mail read command is invalid.');
+  }
+  const values = args as MailReplyArgRecord;
+  const provider = argText(values, ['provider']).toLowerCase();
+  const requestKey = argText(values, ['requestKey']);
+  const threadId = argText(values, ['threadId']);
+  const messageId = argText(values, ['messageId']);
+  const expectedAction = provider === 'gmail' ? 'gmail.thread.read' :
+    provider === 'qq' ? 'mail.thread.read' : '';
+  const identity = provider === 'gmail' ? threadId : messageId;
+  return validation(
+    expectedAction === actionId && identity.length > 0 && threadId.length > 0 &&
+      messageId.length > 0 && requestKey === provider + ':' + identity,
+    'MAIL_THREAD_READ_ARGS_INVALID',
+    'Mail read requires the exact current provider, request key, thread, and message.'
+  );
+}
+
 export function validateRegisteredPageActionArgs(
   actionId: string,
   args: Object
@@ -124,6 +152,9 @@ export function validateRegisteredPageActionArgs(
   }
   if (actionId.indexOf('hotel.') === 0) {
     return validateHotelActionArgs(actionId, args);
+  }
+  if (actionId === 'mail.thread.read' || actionId === 'gmail.thread.read') {
+    return validateMailThreadReadActionArgs(actionId, args);
   }
   if (actionId === 'gmail.message.send') {
     return validateGmailReplyActionArgs(args);
@@ -257,6 +288,7 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
   private readonly opener: SystemUriOpener;
   private readonly ids: HotelActionIdFactory;
   private readonly pageAction: RegisteredPageAction;
+  private readonly mailDetailFollowUp: MailDetailFollowUpPreparer | null;
   private readonly runs: Set<string> = new Set<string>();
   private activeScopeKey: string = '';
 
@@ -264,12 +296,14 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
     catalog: ActionCatalog,
     opener: SystemUriOpener,
     ids: HotelActionIdFactory,
-    pageAction: RegisteredPageAction
+    pageAction: RegisteredPageAction,
+    mailDetailFollowUp?: MailDetailFollowUpPreparer
   ) {
     this.catalog = catalog;
     this.opener = opener;
     this.ids = ids;
     this.pageAction = pageAction;
+    this.mailDetailFollowUp = mailDetailFollowUp === undefined ? null : mailDetailFollowUp;
   }
 
   async execute(
@@ -368,6 +402,9 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
         (args as HotelBookingOpenArgs).bookingUrl,
         'RollingGo booking opened in App.'
       );
+    }
+    if (actionId === 'mail.thread.read' || actionId === 'gmail.thread.read') {
+      return this.mailDetailRead(actionId, args as MailDetailRequest);
     }
     return this.executePageAction(actionId, args, {
       conversationId: context.conversationId,
@@ -473,6 +510,50 @@ export class AiphoneRegisteredActionExecutor implements RegisteredActionExecutor
       status: 'success',
       output: output,
       followUp: followUp
+    };
+    return result;
+  }
+
+  private mailDetailRead(actionId: string, request: MailDetailRequest): ActionExecutionResult {
+    const dataTaskId = this.ids.nextId('mail-detail-data');
+    const uiTaskId = this.ids.nextId('mail-detail-ui');
+    if (dataTaskId.trim().length === 0 || uiTaskId.trim().length === 0 ||
+      dataTaskId === uiTaskId || this.mailDetailFollowUp === null ||
+      !this.mailDetailFollowUp.prepare(uiTaskId, request)) {
+      return {
+        status: 'error',
+        errorCode: 'MAIL_THREAD_FOLLOW_UP_INVALID',
+        message: 'Mail read follow-up could not be prepared.'
+      };
+    }
+    const followUp: ActionFollowUp = {
+      dataTask: {
+        taskId: dataTaskId,
+        roundId: dataTaskId,
+        skillId: '',
+        goal: actionId,
+        allowedToolIds: [actionId],
+        toolId: actionId,
+        outputSchema: 'mailThread',
+        args: request,
+        required: true
+      },
+      uiTask: {
+        taskId: uiTaskId,
+        dataTaskIds: [dataTaskId],
+        skillId: '',
+        intent: actionId,
+        expectedOutputSchema: 'mailThread'
+      }
+    };
+    const output: HotelFollowUpCreated = {
+      actionId,
+      status: 'follow_up_created'
+    };
+    const result: ActionExecutionResult = {
+      status: 'success',
+      output,
+      followUp
     };
     return result;
   }

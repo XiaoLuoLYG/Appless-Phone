@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
+  mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
@@ -700,6 +701,52 @@ test('keeps a terminal action error from becoming success', () => {
   assert.equal(result.complete, true);
   assert.equal(result.ok, false);
   assert.equal(result.status, 'error');
+});
+
+test('correlates an exact mail read action through one Data and in-place Ui terminal', () => {
+  const logs = `
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 action=mail.thread.read source=mail.search
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=read-turn task=data1 round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 status=success
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false
+    [AIPhone][MailDetailInPlace] requestKeyChars=20 provider=qq status=success bodyChars=8
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=read-turn task=ui1 surface=loop_surface_1 state=result
+  `;
+  const exact = mailThreadReadEvidence(logs, {
+    expectedActionId: 'mail.thread.read',
+    expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 's1',
+    expectedConversationId: 'c1',
+    expectedTurnId: 'page-turn-1'
+  });
+  assert.equal(exact.complete, true);
+  assert.equal(exact.ok, true);
+  assert.equal(exact.dataToolId, 'mail.thread.read');
+  assert.equal(exact.provider, 'qq');
+  assert.equal(exact.bodyVisible, true);
+  const providerErrorFirst = ['', logs].map((attempt) => mailThreadReadEvidence(attempt, {
+    expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+  }));
+  assert.equal(providerErrorFirst[0].complete, false);
+  assert.equal(providerErrorFirst.find((attempt) => attempt.ok)?.dataToolId, 'mail.thread.read');
+
+  assert.equal(mailThreadReadEvidence(
+    logs.replace('task=data1 tool=mail.thread.read status=success',
+      'task=data1 tool=mail.thread.read status=success\n    [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false'),
+    {
+      expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+      currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+    }
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs.replace('surface=s1 plan=p1', 'surface=stale plan=p1'),
+    {
+      expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+      currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+    }
+  ).complete, false);
 });
 
 test('correlates a virtual action request with its exact terminal result', () => {

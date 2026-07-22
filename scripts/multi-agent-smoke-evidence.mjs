@@ -633,3 +633,84 @@ export function multiAgentActionEvidence(logText, options = {}) {
   }
   return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['missing_action_chain'] };
 }
+
+export function mailThreadReadEvidence(logText, options = {}) {
+  const all = records(logText);
+  const action = multiAgentActionEvidence(logText, {
+    expectedActionId: options.expectedActionId,
+    expectedSourceToolId: options.expectedSourceToolId,
+    currentSurfaceId: options.currentSurfaceId,
+    expectedConversationId: options.expectedConversationId,
+    expectedTurnId: options.expectedTurnId,
+    expectedVirtual: false
+  });
+  const failed = (reason) => ({
+    complete: false,
+    ok: false,
+    status: '',
+    dataToolId: '',
+    provider: '',
+    bodyVisible: false,
+    failures: [reason]
+  });
+  if (!action.complete || !action.ok) return failed('missing_action_chain');
+  const run = all.find((item) => item.marker === 'MultiAgentActionRun' &&
+    item.fields.conversation === action.conversationId && item.fields.turn === action.turnId &&
+    item.fields.task === action.taskId && item.fields.run === action.runId);
+  if (run === undefined) return failed('missing_action_run');
+
+  const dataTasks = all.filter((item) => item.index > run.index &&
+    item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
+    item.fields.tool === options.expectedActionId);
+  if (dataTasks.length !== 1) return failed('missing_or_duplicate_data_task');
+  const dataTask = dataTasks[0];
+  const uiTasks = all.filter((item) => item.index > run.index &&
+    item.marker === 'MultiAgentUiTask' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn &&
+    list(item.fields.dataTasks).length === 1 && list(item.fields.dataTasks)[0] === dataTask.fields.task);
+  if (uiTasks.length !== 1) return failed('missing_or_duplicate_ui_task');
+  const uiTask = uiTasks[0];
+  const dataTerminals = all.filter((item) => item.index > dataTask.index &&
+    item.fields.conversation === action.conversationId && item.fields.turn === dataTask.fields.turn &&
+    item.fields.task === dataTask.fields.task &&
+    (item.marker === 'MultiAgentDataResult' || item.marker === 'MultiAgentTaskError'));
+  if (dataTerminals.length !== 1) return failed('missing_or_duplicate_data_terminal');
+  const dataTerminal = dataTerminals[0];
+  if (dataTerminal.marker === 'MultiAgentDataResult' &&
+    dataTerminal.fields.tool !== dataTask.fields.tool) return failed('mismatched_data_terminal');
+  const uiTerminals = all.filter((item) => item.index > uiTask.index &&
+    item.fields.conversation === action.conversationId && item.fields.turn === uiTask.fields.turn &&
+    item.fields.task === uiTask.fields.task &&
+    ((item.marker === 'MultiAgentUiResult' && ['result', 'error'].includes(item.fields.state)) ||
+      item.marker === 'MultiAgentTaskError'));
+  if (uiTerminals.length !== 1) return failed('missing_or_duplicate_ui_terminal');
+  const terminal = uiTerminals[0];
+  const inPlace = all.filter((item) => item.index > dataTerminal.index &&
+    item.marker === 'MailDetailInPlace' && item.index < terminal.index);
+  if (inPlace.length !== 1) return failed('missing_or_duplicate_in_place_terminal');
+  const provider = inPlace[0].fields.provider || '';
+  const expectedProvider = options.expectedActionId === 'gmail.thread.read' ? 'gmail' : 'qq';
+  const status = inPlace[0].fields.status || '';
+  const bodyVisible = /^[1-9]\d*$/.test(inPlace[0].fields.bodyChars || '');
+  const dataStatus = dataTerminal.marker === 'MultiAgentDataResult' ?
+    dataTerminal.fields.status : 'error';
+  const uiSucceeded = terminal.marker === 'MultiAgentUiResult' && terminal.fields.state === 'result';
+  const ok = action.ok && dataStatus === 'success' && uiSucceeded &&
+    status === 'success' && provider === expectedProvider && bodyVisible;
+  const errorComplete = dataStatus === 'error' && !uiSucceeded && status === 'error' &&
+    provider === expectedProvider && !bodyVisible;
+  return {
+    complete: ok || errorComplete,
+    ok,
+    status,
+    dataToolId: dataTask.fields.tool,
+    provider,
+    bodyVisible,
+    conversationId: action.conversationId,
+    actionTurnId: action.turnId,
+    followUpTurnId: dataTask.fields.turn,
+    dataTaskId: dataTask.fields.task,
+    uiTaskId: uiTask.fields.task,
+    failures: ok || errorComplete ? [] : ['invalid_mail_read_terminal']
+  };
+}
