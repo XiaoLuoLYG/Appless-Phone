@@ -149,6 +149,49 @@ function hasNamedPlanStepCap(source) {
     /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(source);
 }
 
+function maskCommentsAndStrings(source) {
+  return source.replace(
+    /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
+    (token) => token.replace(/[^\r\n]/g, ' ')
+  );
+}
+
+function hasProductionCanarySubmitTimeout(source) {
+  const code = maskCommentsAndStrings(source);
+  const declaration = 'const options: MultiAgentCanaryOptions = {';
+  const optionsStart = code.indexOf(declaration);
+  if (optionsStart < 0) {
+    return false;
+  }
+  const bodyStart = code.indexOf('{', optionsStart);
+  let depth = 0;
+  let directProperties = 0;
+  let exactProperties = 0;
+  for (let index = bodyStart; index < code.length; index++) {
+    const char = code.charAt(index);
+    if (char === '{') {
+      depth++;
+      continue;
+    }
+    if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return directProperties === 1 && exactProperties === 1;
+      }
+      continue;
+    }
+    if (depth !== 1 || !code.startsWith('submitTimeoutMs', index)) {
+      continue;
+    }
+    directProperties++;
+    if (/^submitTimeoutMs\s*:\s*45000\s*[,}]/.test(code.slice(index))) {
+      exactProperties++;
+    }
+    index += 'submitTimeoutMs'.length - 1;
+  }
+  return false;
+}
+
 function hasLiveToken(source, token) {
   return source.includes(token);
 }
@@ -322,6 +365,29 @@ function verifyArchitectureVerifier() {
   assert(
     !hasNamedPlanStepCap('const MAX_ACTION_PLAN_STEPS: number = 5; plan.steps.length > 5'),
     'verifier rejects an unused action-plan cap'
+  );
+
+  const canaryOptionsFixture = (property) => `
+    const options: MultiAgentCanaryOptions = {
+      model: model,
+      ${property}
+    };
+  `;
+  assert(
+    hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 45000,')),
+    'verifier accepts a live direct production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('// submitTimeoutMs: 45000,')),
+    'verifier rejects a commented production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture("label: 'submitTimeoutMs: 45000',")),
+    'verifier rejects a string production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('nested: { submitTimeoutMs: 45000 },')),
+    'verifier rejects a nested production timeout decoy'
   );
 
   const commentedRuntime = stripComments('// BATCH_PENDING\n/* class Coordinator {} */');
@@ -501,9 +567,6 @@ function runHarBuild() {
 
 function verifySourceContracts() {
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
-  const canaryOptionsStart = a2uiHome.indexOf('const options: MultiAgentCanaryOptions = {');
-  const canaryOptions = canaryOptionsStart < 0 ? '' :
-    a2uiHome.slice(canaryOptionsStart, a2uiHome.indexOf('\n    };', canaryOptionsStart));
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
@@ -614,7 +677,7 @@ function verifySourceContracts() {
     'hotel opener only authorizes Petal Maps for navigation'
   );
   assert(
-    /\bsubmitTimeoutMs:\s*45000\b/.test(canaryOptions),
+    hasProductionCanarySubmitTimeout(a2uiHome),
     'production multi-agent turn deadline is 45000 ms'
   );
   assert(!a2uiHome.includes("this.openExternalUrl(uri, ['tel'"), 'hotel opener does not authorize dialer schemes');
