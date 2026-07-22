@@ -29,7 +29,7 @@ import {
   LeaderToolMetadata,
   LeaderUiTask
 } from './LeaderTypes';
-import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
+import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
 import { ToolDefinition } from '../../aiphone/runtime/ToolDefinitionTypes';
@@ -50,6 +50,8 @@ interface LeaderTurnState {
   turnObservations: ObservationDigest[];
   skillId: string;
   uiDone: boolean;
+  uiSurfaceId: string;
+  pendingAnswer: string | null;
   dataDone: boolean;
   terminal: boolean;
   timerId: number;
@@ -152,7 +154,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (state.semantic) {
-      if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+      if (message.type === AgentMessageType.TASK_RESULT_UI && message.taskId === state.uiTaskId) {
+        this.handleSemanticUiResult(state, message);
+      } else if (message.type === AgentMessageType.TASK_RESULT_DATA ||
         message.type === AgentMessageType.TASK_ERROR) {
         this.handleSemanticObservation(state, message);
       }
@@ -226,6 +230,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       turnObservations: [],
       skillId: '',
       uiDone: false,
+      uiSurfaceId: '',
+      pendingAnswer: null,
       dataDone: false,
       terminal: false,
       timerId: -1,
@@ -388,6 +394,10 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.semantic = true;
     state.skillId = decision.skillId;
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
+      if (state.uiTaskId.length > 0 && !state.uiDone) {
+        state.pendingAnswer = decision.answer as string;
+        return;
+      }
       this.publishTurnResult(message, state, decision.answer as string);
       this.finishTurn(state);
       return;
@@ -472,6 +482,25 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.round++;
     state.input = this.inputWithObservations(state.input, state.observations);
     this.startPlanning(this.inputMessage(state), state.input, state);
+  }
+
+  private handleSemanticUiResult(state: LeaderTurnState, message: AgentMessage): void {
+    const payload = message.payload as UiRenderResultPayload | null;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload) ||
+      typeof payload.surfaceId !== 'string' || payload.surfaceId.trim().length === 0 ||
+      (payload.state !== 'result' && payload.state !== 'error')) {
+      return;
+    }
+    state.uiDone = true;
+    state.uiSurfaceId = payload.surfaceId.trim();
+    if (state.pendingAnswer === null) {
+      return;
+    }
+    const answer: string = state.pendingAnswer;
+    state.pendingAnswer = null;
+    const input: AgentMessage = this.inputMessage(state);
+    this.publishTurnResult(input, state, answer);
+    this.finishTurn(state);
   }
 
   private resultDigest(message: AgentMessage, pending: LeaderPendingDataTask): ObservationDigest {
@@ -1067,6 +1096,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       expectedOutputSchema: definition.outputSchema
     };
     state.uiTaskId = taskId;
+    state.uiDone = false;
+    state.uiSurfaceId = '';
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
@@ -1114,6 +1145,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       roundCount: state.round,
       message: answer
     };
+    if (state.uiSurfaceId.length > 0) {
+      payload.surfaceId = state.uiSurfaceId;
+    }
     this.bus.publish({
       type: AgentMessageType.TURN_RESULT,
       conversationId: input.conversationId,

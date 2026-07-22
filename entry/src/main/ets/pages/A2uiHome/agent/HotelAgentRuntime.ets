@@ -1247,6 +1247,20 @@ export class HotelRuntimeSurfaceWriter implements UiSurfaceWriter {
     if (record.generation === 0) {
       record.generation = this.visibility.generationFor(turnId);
     }
+    let replacesSurfaceSnapshot: boolean = false;
+    for (let index = 0; index < parsed.envelopes.length; index++) {
+      const createSurface = parsed.envelopes[index].createSurface;
+      if (createSurface !== undefined && createSurface !== null &&
+        createSurface.surfaceId === surfaceId) {
+        replacesSurfaceSnapshot = true;
+        break;
+      }
+    }
+    if (record.revision > 0 && replacesSurfaceSnapshot) {
+      const retainedState: A2uiSurfaceState = record.store.getSurface();
+      retainedState.components = [];
+      record.store.seed(retainedState);
+    }
     parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
       const applied: A2uiApplyResult = (record as HotelSurfaceRecord).store.apply(envelope);
       if (!applied.ok) {

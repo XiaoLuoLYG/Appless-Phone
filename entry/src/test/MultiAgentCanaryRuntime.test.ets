@@ -790,12 +790,13 @@ export default function multiAgentCanaryRuntimeTest() {
         C02_QUERY_DONE
       ]);
       const bus = new TrackingBus();
+      const surfaces: A2uiSurfaceState[] = [];
       let providerCalls: number = 0;
       const options: MultiAgentCanaryOptions = canaryOptions(
         model,
         new CanaryHotelExecutor(),
         new RecordingOpener(),
-        [],
+        surfaces,
         [],
         bus
       );
@@ -818,6 +819,15 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(providerCalls).assertEqual(1);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
       expect(model.prompts.length).assertEqual(3);
+      const finalSurface = surfaces[surfaces.length - 1];
+      let retainedSkeleton: boolean = false;
+      for (let index = 0; index < finalSurface.components.length; index++) {
+        const component = finalSurface.components[index];
+        retainedSkeleton = retainedSkeleton || component.title === '正在准备结果' ||
+          component.text === '正在准备结果' || component.body === '正在准备结果';
+      }
+      expect(outcome.surfaceId).assertEqual(finalSurface.surfaceId);
+      expect(retainedSkeleton).assertFalse();
       runtime.dispose();
     });
 

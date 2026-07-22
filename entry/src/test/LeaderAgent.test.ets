@@ -24,7 +24,8 @@ import {
   LinkedMessageBus,
   LocalModel,
   TaskErrorPayload,
-  TurnResultPayload
+  TurnResultPayload,
+  UiRenderResultPayload
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
@@ -466,11 +467,23 @@ async function semanticTerminalStatus(statuses: DataResultStatus[]): Promise<str
   try {
     bus.publish(inputMessage());
     await receive(observer);
-    await receive(observer);
+    const uiTask: AgentMessage = await receive(observer);
     const dataTasks: AgentMessage[] = [];
     for (let index = 0; index < statuses.length; index++) {
       dataTasks.push(await receive(observer));
     }
+    const uiResult: UiRenderResultPayload = {
+      surfaceId: 'surface-status',
+      state: 'result'
+    };
+    bus.publish({
+      type: AgentMessageType.TASK_RESULT_UI,
+      conversationId: uiTask.conversationId,
+      turnId: uiTask.turnId,
+      taskId: uiTask.taskId,
+      payload: uiResult
+    });
+    await receive(observer);
     for (let index = 0; index < statuses.length; index++) {
       bus.publish(dataResultMessageWithStatus(dataTasks[index], statuses[index]));
       await receive(observer);
@@ -916,6 +929,83 @@ export default function leaderAgentTest() {
           message.type === AgentMessageType.TASK_CREATE_UI ||
           message.type === AgentMessageType.ACTION_PLAN_REQUEST
       ).length).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('attaches the exact rendered surface to a capability-backed semantic answer', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('travel', 'travel.search')]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const uiTask = await receive(observer);
+      const dataTask = await receive(observer);
+      const uiResult: UiRenderResultPayload = {
+        surfaceId: 'loop_surface_1784723405216',
+        state: 'result'
+      };
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: uiResult
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const terminal = await receive(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual(
+        'loop_surface_1784723405216'
+      );
+      leader.stop();
+      observer.close();
+    });
+
+    it('waits for the exact rendered surface when Data completes before UI', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('travel', 'travel.search')]),
+        semanticDecision([], 'answer')
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const uiTask = await receive(observer);
+      const dataTask = await receive(observer);
+      bus.publish(dataResultMessage(dataTask));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      await settle();
+      const uiResult: UiRenderResultPayload = {
+        surfaceId: 'loop_surface_data_first',
+        state: 'result'
+      };
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: uiResult
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const terminal = await receive(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual(
+        'loop_surface_data_first'
+      );
       leader.stop();
       observer.close();
     });
