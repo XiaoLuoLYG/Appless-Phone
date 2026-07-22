@@ -229,6 +229,33 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('Coffee')).assertLarger(-1);
     });
 
+    it('drops_completed_thinking_blocks_even_while_busy', 0, () => {
+      const thinking: A2uiComponent = {
+        id: 'thinking',
+        component: 'ThinkingStream',
+        title: 'AIPhone 正在处理',
+        body: '正在调用工具',
+        status: 'calling_tool',
+        dataPath: '/thoughts'
+      };
+      const food: A2uiComponent = {
+        id: 'food',
+        component: 'FoodChoices',
+        dataPath: '/foods'
+      };
+      const doc = createHtmlHomeDocument({
+        surface: surface('food', 'ready', [root('food'), thinking, food],
+          '{"foods":[{"name":"Coffee","category":"Cafe","address":"Road","distance":"800m","location":"22,113"}]}'),
+        messages: [],
+        isBusy: true,
+        isAwaitingFirstSurface: false
+      });
+      const serialized = JSON.stringify(doc.blocks);
+
+      expect(serialized.indexOf('AIPhone 正在处理')).assertEqual(-1);
+      expect(serialized.indexOf('Coffee')).assertLarger(-1);
+    });
+
     it('maps aggregate search data into media and post blocks', 0, () => {
       const aggregateComponent: A2uiComponent = {
         id: 'aggregate_search',

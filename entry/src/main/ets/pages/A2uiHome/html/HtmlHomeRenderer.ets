@@ -1,4 +1,5 @@
 import { HtmlHomeDocument } from './HtmlHomeTypes';
+import { renderMultiTaskHomeDocument, shouldRenderMultiTaskHomeDocument } from './HtmlMultiTaskHomeRenderer';
 import { renderAggregateSearchHomeDocument, shouldRenderAggregateSearchHomeDocument } from './HtmlAggregateSearchHomeRenderer';
 import { renderCalendarHomeDocument, shouldRenderCalendarHomeDocument } from './HtmlCalendarHomeRenderer';
 import { renderFoodHomeDocument, shouldRenderFoodHomeDocument } from './HtmlFoodHomeRenderer';
@@ -5352,7 +5353,33 @@ const HTML_HOME_JS: string = `
     setLuckinOptionPanelUpdating(false);
     return true;
   }
+  function refreshLuckinPaymentStatusHeader(patch) {
+    var statusText = text(patch && patch.statusText);
+    if (statusText.length === 0) { statusText = '待支付'; }
+    var header = document.querySelector('.luckin-payment-card .luckin-payment-header');
+    if (!header) { return false; }
+    var title = header.querySelector('h3');
+    if (title) {
+      title.textContent = statusText;
+    }
+    var countdown = header.querySelector('.luckin-payment-countdown');
+    if (countdown) {
+      var pending = statusText.indexOf('待支付') >= 0 || statusText.indexOf('未支付') >= 0;
+      countdown.style.display = pending ? '' : 'none';
+      if (!pending) {
+        countdown.setAttribute('data-running', 'false');
+      }
+    }
+    return true;
+  }
   window.AIPhoneHome = window.AIPhoneHome || {};
+  window.AIPhoneHome.patchLuckinPaymentStatus = function (patchJson) {
+    try {
+      return refreshLuckinPaymentStatusHeader(JSON.parse(patchJson));
+    } catch (error) {
+      return false;
+    }
+  };
   window.AIPhoneHome.patchLuckinConfirm = function (blockJson) {
     try {
       return refreshLuckinConfirmBlock(JSON.parse(blockJson));
@@ -5369,6 +5396,9 @@ const HTML_HOME_JS: string = `
 `;
 
 export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boolean = false): string {
+  if (shouldRenderMultiTaskHomeDocument(document)) {
+    return renderMultiTaskHomeDocument(document, isBusy);
+  }
   if (shouldRenderCalendarHomeDocument(document)) {
     return renderCalendarHomeDocument(document, isBusy);
   }
@@ -5432,7 +5462,7 @@ export function renderHtmlHomeDocument(document: HtmlHomeDocument, isBusy: boole
 </html>`;
 }
 
-function escapeScriptJson(json: string): string {
+export function escapeScriptJson(json: string): string {
   return json
     .split('&').join('\\u0026')
     .split('<').join('\\u003c')

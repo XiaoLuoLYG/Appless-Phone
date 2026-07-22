@@ -135,6 +135,20 @@ function clientToolRequest(toolCalls: LoopToolTrace[], prompt: string, actionId:
   return null;
 }
 
+function multiTaskSectionCount(surface: A2uiSurfaceState): number {
+  try {
+    const parsed = JSON.parse(surface.dataModelJson.length > 0 ? surface.dataModelJson : '{}') as Record<string, Object | null | undefined>;
+    const board = parsed.multiTask as Record<string, Object | null | undefined> | undefined;
+    if (board === undefined || board === null) {
+      return 0;
+    }
+    const sectionList = board.sections;
+    return Array.isArray(sectionList) ? sectionList.length : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
 function attachToolRequest(surface: A2uiSurfaceState, request: A2uiToolRequestData | null): A2uiSurfaceState {
   if (request === null) {
     return surface;
@@ -225,6 +239,7 @@ export async function callLocalModel(
   let error = '';
   let loopDebug = '';
   let receivedLiveToolSurface = false;
+  let lastLiveSurface: A2uiSurfaceState | null = null;
   const preparedPersona = preparePersonaPrompt(prompt);
   const runtimePersona = a2uiPersonaData(preparedPersona.runtime);
   const runtimePersonaMemory = a2uiPersonaMemoryData(preparedPersona.memoryRuntime);
@@ -262,6 +277,7 @@ export async function callLocalModel(
       },
       onA2uiSurface: (surface: A2uiSurfaceState, toolRaw: string): void => {
         receivedLiveToolSurface = true;
+        lastLiveSurface = surface;
         onSurface(surfaceWithPersona(surface), toolRaw, { thinkClosed: true });
       },
       onA2uiJsonl: (line: string): void => {
@@ -319,7 +335,14 @@ export async function callLocalModel(
         surface: updateSurface
       };
     }
-    const resultSurface = attachToolRequest(surfaceWithPersona(store.getSurface()), clientRequest);
+    const baseSurface = receivedLiveToolSurface && lastLiveSurface !== null ?
+      lastLiveSurface : store.getSurface();
+    aiLogInfo('[AIPhone][MultiTask] resultSurface source=' +
+      (receivedLiveToolSurface && lastLiveSurface !== null ? 'live' : 'store') +
+      ' intent=' + baseSurface.intent +
+      ' status=' + baseSurface.status +
+      ' sections=' + multiTaskSectionCount(baseSurface).toString());
+    const resultSurface = attachToolRequest(surfaceWithPersona(baseSurface), clientRequest);
     return {
       ok: result.ok && error.length === 0,
       raw: raw,

@@ -35,6 +35,8 @@ class HtmlHomeActionBridge {
 @Component
 export struct HtmlHomeSurfaceView {
   @Prop @Watch('onHtmlOrBusyChange') html: string = '';
+  @Prop @Watch('onMultiTaskPayloadChange') multiTaskPayloadJson: string = '';
+  @Prop @Watch('onMultiTaskPayloadChange') multiTaskPayloadTick: number = 0;
   @Prop @Watch('onMailDetailEventChange') mailDetailEventJson: string = '';
   @Prop @Watch('onMailReplyEventChange') mailReplyEventJson: string = '';
   @Prop @Watch('onMailCalendarEventChange') mailCalendarEventJson: string = '';
@@ -51,6 +53,8 @@ export struct HtmlHomeSurfaceView {
   private lastMailDetailEventJson: string = '';
   private lastMailReplyEventJson: string = '';
   private lastMailCalendarEventJson: string = '';
+  private lastMultiTaskPayloadJson: string = '';
+  private lastMultiTaskPayloadTick: number = -1;
   private appliedLuckinPatchTick: number = -1;
   @State private popupVisible: boolean = false;
   @State private popupTitle: string = '支付确认';
@@ -79,6 +83,8 @@ export struct HtmlHomeSurfaceView {
       this.lastMailDetailEventJson = '';
       this.lastMailReplyEventJson = '';
       this.lastMailCalendarEventJson = '';
+      this.lastMultiTaskPayloadJson = '';
+      this.lastMultiTaskPayloadTick = -1;
       this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
       aiLogInfo('[AIPhone][HtmlHomeSurfaceLoad] chars=' + this.html.length.toString() +
         ' renderTick=' + this.renderTick.toString() +
@@ -90,6 +96,27 @@ export struct HtmlHomeSurfaceView {
 
   onHtmlOrBusyChange(): void {
     this.loadHtmlIfNeeded();
+  }
+
+  onMultiTaskPayloadChange(): void {
+    this.pushMultiTaskPayloadIfNeeded();
+  }
+
+  private pushMultiTaskPayloadIfNeeded(): void {
+    if (!this.webReady || this.multiTaskPayloadJson.length === 0 ||
+      (this.multiTaskPayloadJson === this.lastMultiTaskPayloadJson &&
+        this.multiTaskPayloadTick === this.lastMultiTaskPayloadTick)) {
+      return;
+    }
+    try {
+      this.controller.runJavaScript(
+        'if (window.__aiphoneApplyMultiTaskUpdate) { window.__aiphoneApplyMultiTaskUpdate(' + this.multiTaskPayloadJson + '); }'
+      );
+      this.lastMultiTaskPayloadJson = this.multiTaskPayloadJson;
+      this.lastMultiTaskPayloadTick = this.multiTaskPayloadTick;
+    } catch (error) {
+      aiLogError('[AIPhone][HtmlHomeMultiTaskPushError] ' + JSON.stringify(error));
+    }
   }
 
   private pushMailDetailEventIfNeeded(): void {
@@ -162,8 +189,26 @@ export struct HtmlHomeSurfaceView {
       return false;
     }
     this.appliedLuckinPatchTick = this.luckinInlinePatchTick;
-    const script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinConfirm){AIPhoneHome.patchLuckinConfirm(' +
-      JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+    let script = '';
+    try {
+      const parsed = JSON.parse(this.luckinInlinePatchJson) as Record<string, Object | string | number | boolean | null | undefined>;
+      if (parsed.kind === 'payment-status') {
+        const sectionId = typeof parsed.sectionId === 'string' ? parsed.sectionId.trim() : '';
+        if (sectionId.length > 0) {
+          script = 'try{if(window.__aiphonePatchEmbeddedLuckinPaymentStatus){window.__aiphonePatchEmbeddedLuckinPaymentStatus(' +
+            JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+        } else {
+          script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinPaymentStatus){AIPhoneHome.patchLuckinPaymentStatus(' +
+            JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+        }
+      } else {
+        script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinConfirm){AIPhoneHome.patchLuckinConfirm(' +
+          JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+      }
+    } catch (_error) {
+      script = 'try{if(window.AIPhoneHome&&AIPhoneHome.patchLuckinConfirm){AIPhoneHome.patchLuckinConfirm(' +
+        JSON.stringify(this.luckinInlinePatchJson) + ');}}catch(e){}';
+    }
     try {
       this.controller.runJavaScript(script);
       aiLogInfo('[AIPhone][HtmlHomeLuckinPatch] tick=' + this.luckinInlinePatchTick.toString());
@@ -203,6 +248,7 @@ export struct HtmlHomeSurfaceView {
         .onPageEnd(() => {
           this.webReady = true;
           this.loadHtmlIfNeeded();
+          this.pushMultiTaskPayloadIfNeeded();
           this.pushMailDetailEventIfNeeded();
           this.pushMailReplyEventIfNeeded();
           this.pushMailCalendarEventIfNeeded();

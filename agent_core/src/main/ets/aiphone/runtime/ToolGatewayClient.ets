@@ -6464,7 +6464,31 @@ function luckinProductSearchQuery(prompt: string, request: LuckinOrderActionArgs
   if (previewPrompt.length > 0) {
     return previewPrompt;
   }
+  const argsPrompt = firstText([request.prompt, request.query]).trim();
+  if (argsPrompt.length > 0) {
+    return luckinPromptKeyword(argsPrompt);
+  }
   return luckinPromptKeyword(prompt);
+}
+
+function luckinRelevantPromptSegment(prompt: string): string {
+  const normalized = prompt.trim();
+  if (normalized.length === 0) {
+    return normalized;
+  }
+  if (!/打车|叫车|出租车|滴滴|转账|google\s*pay|paypal|支付|美元|usd|ride\.|payment\./iu.test(normalized)) {
+    return normalized;
+  }
+  const parts = normalized.split(/[，,；;。]+/u)
+    .map((part: string) => part.trim())
+    .filter((part: string) => part.length > 0);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (/瑞幸|luckin|ruixing|咖啡|拿铁|美式|生椰|澳瑞白|橙C|椰云|丝绒|冰萃|厚乳/iu.test(part)) {
+      return part;
+    }
+  }
+  return normalized;
 }
 
 function luckinApplyAttrChoice(
@@ -6945,6 +6969,8 @@ interface LuckinOrderActionArgs {
   productName?: string;
   skuCode?: string;
   pictureUrl?: string;
+  prompt?: string;
+  query?: string;
   previewPrompt?: string;
   attrGroup?: string;
   attrChoice?: string;
@@ -6971,11 +6997,12 @@ function luckinMoney(value: Object | string | number | boolean | null | undefine
 }
 
 function luckinPromptKeyword(prompt: string): string {
-  const preset = /(生椰拿铁|冰美式|拿铁|美式|葡萄冰萃|澳瑞白|厚乳拿铁|橙C美式|椰云拿铁|丝绒拿铁)/u.exec(prompt);
+  const scopedPrompt = luckinRelevantPromptSegment(prompt);
+  const preset = /(生椰拿铁|冰美式|拿铁|美式|葡萄冰萃|澳瑞白|厚乳拿铁|橙C美式|椰云拿铁|丝绒拿铁)/u.exec(scopedPrompt);
   if (preset !== null) {
     return preset[0];
   }
-  const cleaned = prompt
+  const cleaned = scopedPrompt
     .replace(/瑞幸|luckin|ruixing/ig, '')
     .replace(/帮我|请|来|点|下一杯|下单|咖啡|饮品|一杯|两杯|2杯|杯|自取|外送|配送|附近|门店|使用优惠券|用优惠券/g, ' ')
     .replace(/\s+/g, ' ')
@@ -6995,12 +7022,158 @@ function luckinQuantityFromPrompt(prompt: string): number {
   return 1;
 }
 
-function luckinRemarkFromPrompt(prompt: string): string {
+function luckinChoiceSynonyms(choiceName: string): string[] {
+  const synonyms: string[] = [choiceName];
+  if (choiceName === '热') {
+    synonyms.push('热饮');
+  }
+  if (choiceName === '标准甜') {
+    synonyms.push('全糖', '正常甜');
+  }
+  if (choiceName === '无糖') {
+    synonyms.push('0糖', '零糖');
+  }
+  return synonyms;
+}
+
+function luckinChoiceMatchesPrompt(groupName: string, choiceName: string, prompt: string): boolean {
+  if (choiceName.length === 0) {
+    return false;
+  }
+  if (prompt.indexOf(choiceName) >= 0) {
+    return true;
+  }
+  const synonyms = luckinChoiceSynonyms(choiceName);
+  for (let index = 0; index < synonyms.length; index += 1) {
+    const synonym = synonyms[index];
+    if (synonym !== choiceName && prompt.indexOf(synonym) >= 0) {
+      return true;
+    }
+  }
+  if (groupName.indexOf('糖') >= 0 && choiceName === '半糖' && prompt.indexOf('少糖') >= 0) {
+    return true;
+  }
+  return false;
+}
+
+function luckinSelectableChoicesForGroup(attr: LuckinProductAttr): string[] {
+  const choices: string[] = [];
+  const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+  for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+    const child = children[childIndex];
+    const choiceName = textOf(child.attributeName).trim();
+    if (choiceName.length === 0) {
+      continue;
+    }
+    const canSelected = child.canSelected;
+    if (canSelected !== undefined && canSelected !== null && Number(canSelected) === 0) {
+      continue;
+    }
+    choices.push(choiceName);
+  }
+  choices.sort((left: string, right: string) => right.length - left.length);
+  return choices;
+}
+
+function luckinSelectedChoice(product: LuckinProductRecord, groupName: string): string {
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    if (textOf(attr.attributeName) !== groupName) {
+      continue;
+    }
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        return textOf(child.attributeName).trim();
+      }
+    }
+  }
+  return '';
+}
+
+function luckinAttrSelectionsFromPrompt(product: LuckinProductRecord, prompt: string): string[][] {
+  const normalizedPrompt = prompt.trim();
+  if (normalizedPrompt.length === 0) {
+    return [];
+  }
+  const selections: string[][] = [];
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    const groupName = textOf(attr.attributeName).trim();
+    if (groupName.length === 0) {
+      continue;
+    }
+    const choices = luckinSelectableChoicesForGroup(attr);
+    for (let choiceIndex = 0; choiceIndex < choices.length; choiceIndex += 1) {
+      const choiceName = choices[choiceIndex];
+      if (luckinChoiceMatchesPrompt(groupName, choiceName, normalizedPrompt)) {
+        selections.push([groupName, choiceName]);
+        break;
+      }
+    }
+  }
+  return selections;
+}
+
+function luckinAppliedChoiceNames(selections: string[][]): string[] {
+  const names: string[] = [];
+  for (let index = 0; index < selections.length; index += 1) {
+    const choiceName = selections[index][1];
+    if (choiceName.length > 0 && names.indexOf(choiceName) < 0) {
+      names.push(choiceName);
+    }
+  }
+  return names;
+}
+
+async function luckinApplyPromptPreferencesToProduct(
+  shop: LuckinShopRecord,
+  product: LuckinProductRecord,
+  prompt: string,
+  quantity: number,
+  token: string
+): Promise<LuckinProductRecord> {
+  const selections = luckinAttrSelectionsFromPrompt(product, prompt);
+  if (selections.length === 0) {
+    return product;
+  }
+  let result = product;
+  const applied: string[][] = [];
+  for (let index = 0; index < selections.length; index += 1) {
+    const groupName = selections[index][0];
+    const choiceName = selections[index][1];
+    if (luckinSelectedChoice(result, groupName) === choiceName) {
+      applied.push([groupName, choiceName]);
+      continue;
+    }
+    const switched = await luckinTrySwitchProduct(shop, result, groupName, choiceName, quantity, token);
+    if (switched !== null) {
+      result = luckinFinalizeSwitchedProduct(result, switched, applied, groupName, choiceName);
+    } else {
+      result = luckinApplyAttrSelections(result, applied, '');
+      result = luckinApplyAttrChoice(result, groupName, choiceName);
+    }
+    applied.push([groupName, choiceName]);
+  }
+  return result;
+}
+
+function luckinRemarkFromPrompt(prompt: string, excludeChoices: string[] = []): string {
   const remarks: string[] = [];
   ['无糖', '少少甜', '少甜', '半糖', '标准甜', '热饮', '热', '少冰', '去冰', '正常冰', '多冰', '少奶', '加奶'].forEach((word: string) => {
-    if (prompt.indexOf(word) >= 0 && remarks.indexOf(word) < 0) {
-      remarks.push(word);
+    if (prompt.indexOf(word) < 0 || remarks.indexOf(word) >= 0) {
+      return;
     }
+    for (let index = 0; index < excludeChoices.length; index += 1) {
+      const choice = excludeChoices[index];
+      if (choice === word || choice.indexOf(word) >= 0 || word.indexOf(choice) >= 0) {
+        return;
+      }
+    }
+    remarks.push(word);
   });
   return remarks.join('，');
 }
@@ -7253,6 +7426,20 @@ export function resolveLuckinLocationForTest(requestLocation: string, prompt: st
   return parseCoordinatePair(defaultLocation);
 }
 
+export function luckinProductSearchKeywordForTest(prompt: string, args: Object | null = null): string {
+  return luckinProductSearchQuery(prompt, luckinActionArgs(args));
+}
+
+export function luckinAttrSelectionsFromPromptForTest(product: Object, prompt: string): string[][] {
+  return luckinAttrSelectionsFromPrompt(product as LuckinProductRecord, prompt);
+}
+
+export function luckinApplyPromptPreferencesLocallyForTest(product: Object, prompt: string): Object {
+  const record = product as LuckinProductRecord;
+  const selections = luckinAttrSelectionsFromPrompt(record, prompt);
+  return luckinApplyAttrSelections(record, selections, '');
+}
+
 function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): string {
   return resolveLuckinLocationForTest(textOf(request.location), prompt, localProviderConfig.amapDefaultLocation);
 }
@@ -7378,9 +7565,18 @@ function luckinErrorA2ui(surfaceId: string, toolId: string, title: string, messa
   return luckinGenericResultA2ui(surfaceId, toolId, title, message, [{ label: '错误', value: message }], '', []);
 }
 
+function luckinEffectivePreviewPrompt(prompt: string, request: LuckinOrderActionArgs): string {
+  const argsPrompt = firstText([request.prompt, request.query]).trim();
+  if (argsPrompt.length > 0) {
+    return argsPrompt;
+  }
+  return luckinRelevantPromptSegment(prompt);
+}
+
 async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   const token = localProviderConfig.luckinMcpToken;
   const request = luckinActionArgs(args);
+  const effectivePrompt = luckinEffectivePreviewPrompt(prompt, request);
   if (token.length === 0) {
     return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '瑞幸点单需要登录', '未配置 LUCKIN_MCP_TOKEN。请在瑞幸 AI 开放平台登录复制 Token 后同步到 HAP rawfile。');
   }
@@ -7408,25 +7604,25 @@ async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: O
         value: luckinShopAddress(candidate)
       });
     }
-    return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '选择瑞幸门店', '请选择要在哪家门店自取，选定后会继续查询商品并核价。', shopRows, '', luckinShopSelectActions(shops, location, prompt));
+    return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '选择瑞幸门店', '请选择要在哪家门店自取，选定后会继续查询商品并核价。', shopRows, '', luckinShopSelectActions(shops, location, effectivePrompt));
   }
   const shop = luckinSelectedShop(shops, textOf(request.deptId));
   if (shop === null || textOf(shop.deptId).length === 0) {
     return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单门店', '瑞幸 MCP 没有返回可用门店。请换一个地点或门店名称。');
   }
-  const quantity = luckinQuantityFromPrompt(prompt);
+  const quantity = luckinQuantityFromPrompt(effectivePrompt);
   const groupName = textOf(request.attrGroup);
   const choiceName = textOf(request.attrChoice);
   const isOptionSwitch = groupName.length > 0 && choiceName.length > 0 && textOf(request.productId).length > 0;
   let product: LuckinProductRecord;
   if (isOptionSwitch) {
-    const switchedProduct = await luckinLoadProductForOptionSwitch(shop, request, prompt, token);
+    const switchedProduct = await luckinLoadProductForOptionSwitch(shop, request, effectivePrompt, token);
     if (switchedProduct === null) {
       return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '规格切换失败', '暂时无法切换「' + groupName + '」到「' + choiceName + '」。请稍后重试。');
     }
     product = switchedProduct;
   } else {
-    const keyword = luckinProductSearchQuery(prompt, request);
+    const keyword = luckinProductSearchQuery(effectivePrompt, request);
     const productSearchArgs: LuckinProductSearchArgs = {
       deptId: Number(textOf(shop.deptId)),
       query: keyword
@@ -7438,13 +7634,15 @@ async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: O
     }
     const searchProduct = products[0];
     product = await luckinLoadProductForPreview(shop, searchProduct, token);
+    product = await luckinApplyPromptPreferencesToProduct(shop, product, effectivePrompt, quantity, token);
   }
+  const promptAttrSelections = luckinAttrSelectionsFromPrompt(product, effectivePrompt);
   const previewArgs: LuckinOrderRequestArgs = {
     deptId: Number(textOf(shop.deptId)),
     productList: [luckinOrderProduct(product, quantity)],
     longitude: Number(locationLongitude(location)),
     latitude: Number(locationLatitude(location)),
-    remark: luckinRemarkFromPrompt(prompt)
+    remark: luckinRemarkFromPrompt(effectivePrompt, luckinAppliedChoiceNames(promptAttrSelections))
   };
   const previewPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'previewOrder', previewArgs);
   const preview = luckinOrderRecordFromPayload(previewPayload);
@@ -7461,7 +7659,7 @@ async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: O
     productName: luckinProductName(product),
     skuCode: luckinProductSku(product),
     pictureUrl: productPictureUrl,
-    previewPrompt: luckinPreviewPromptFromProduct(prompt, product, quantity),
+    previewPrompt: luckinPreviewPromptFromProduct(effectivePrompt, product, quantity),
     quantity: quantity,
     price: firstText([preview.discountPrice, product.discountPrice, product.price, product.initPrice]),
     couponCodeList: preview.couponCodeList === undefined ? [] : preview.couponCodeList,

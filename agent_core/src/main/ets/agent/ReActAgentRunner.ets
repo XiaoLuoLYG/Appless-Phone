@@ -1,6 +1,11 @@
 import { AgentEvent, AgentEventKind } from './AgentEvent';
 import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
+import { MultiToolSurfaceComposer } from './MultiToolSurfaceComposer';
+import { MultiToolSlotCall } from './MultiToolTypes';
+import { AgentToolRunOptions } from './AgentToolRunOptions';
+import { LoopBackendRequest } from '../aiphone/LoopBackendTypes';
+import { A2uiSurfaceState } from '../aiphone/runtime/A2uiTypes';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
 import { skillLogInfo, skillLogWarn } from '../skill/SkillLog';
@@ -8,6 +13,13 @@ import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
+export const MAX_PARALLEL_SLOTS: number = 4;
+
+export interface ReActBatchHost {
+  request: LoopBackendRequest;
+  emitSurface: (surface: A2uiSurfaceState, raw: string) => void;
+  emitJsonlLine: (line: string) => void;
+}
 
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
@@ -53,12 +65,14 @@ class ProcessedObservation {
   shouldStop: boolean;
   failureKey: string;
   finalText: string;
+  isA2ui: boolean;
 
-  constructor(text: string, shouldStop: boolean, failureKey: string, finalText: string) {
+  constructor(text: string, shouldStop: boolean, failureKey: string, finalText: string, isA2ui: boolean = false) {
     this.text = text;
     this.shouldStop = shouldStop;
     this.failureKey = failureKey;
     this.finalText = finalText;
+    this.isA2ui = isA2ui;
   }
 }
 
@@ -66,11 +80,13 @@ class ParallelToolFinish {
   index: number;
   call: ToolCall;
   observation: string | null;
+  failed: boolean;
 
-  constructor(index: number, call: ToolCall, observation: string | null) {
+  constructor(index: number, call: ToolCall, observation: string | null, failed: boolean = false) {
     this.index = index;
     this.call = call;
     this.observation = observation;
+    this.failed = failed;
   }
 }
 
@@ -81,6 +97,7 @@ export class ReActAgentRunner {
   private skillsInSystemPrompt: boolean;
   private maxSteps: number;
   private uiHandler: UiRenderHandler | null;
+  private batchHost: ReActBatchHost | null;
 
   constructor(
     model: LocalModel,
@@ -88,7 +105,8 @@ export class ReActAgentRunner {
     maxSteps: number,
     uiHandler?: UiRenderHandler,
     skillSnapshot?: SkillSnapshot,
-    skillsInSystemPrompt: boolean = false
+    skillsInSystemPrompt: boolean = false,
+    batchHost?: ReActBatchHost
   ) {
     this.model = model;
     this.tools = tools;
@@ -96,6 +114,7 @@ export class ReActAgentRunner {
     this.skillsInSystemPrompt = skillsInSystemPrompt;
     this.maxSteps = maxSteps;
     this.uiHandler = uiHandler ?? null;
+    this.batchHost = batchHost ?? null;
   }
 
   async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
@@ -134,12 +153,12 @@ export class ReActAgentRunner {
       const observationsForModel: string[] = [];
       try {
         if (plan.mode === 'parallel' && plan.calls.length > 1) {
-          const parallelObservations = await this.executeParallelToolCalls(plan.calls, listener);
-          if (parallelObservations === null) {
+          const batchObservations = await this.executeBatchToolCalls(plan.calls, listener);
+          if (batchObservations === null) {
             return;
           }
-          for (let index = 0; index < parallelObservations.length; index++) {
-            observationsForModel.push(parallelObservations[index]);
+          for (let index = 0; index < batchObservations.length; index++) {
+            observationsForModel.push(batchObservations[index]);
           }
         } else {
           for (let index = 0; index < plan.calls.length; index++) {
@@ -172,46 +191,161 @@ export class ReActAgentRunner {
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
   }
 
-  private async executeParallelToolCalls(
+  private async executeBatchToolCalls(
     calls: ToolCall[],
     listener: AgentListener
   ): Promise<string[] | null> {
-    const observationsForModel: string[] = [];
-    const pending = new Map<number, Promise<ParallelToolFinish>>();
-
-    for (let index = 0; index < calls.length; index++) {
-      const call = calls[index];
-      const finished = this.executeToolCall(call, listener).then(
-        (value: string | null): ParallelToolFinish => new ParallelToolFinish(index, call, value),
-        (reason: Error | Object | string | number | boolean | null | undefined): ParallelToolFinish => {
-          const message = reason instanceof Error ? reason.message : `${reason}`;
-          return new ParallelToolFinish(index, call, `Tool ${call.name} failed: ${message}`);
-        }
-      );
-      pending.set(index, finished);
+    const composer = this.createBatchComposer(calls, listener);
+    const useComposer = composer !== null;
+    if (useComposer && composer !== null) {
+      const slotCalls: MultiToolSlotCall[] = [];
+      for (let index = 0; index < calls.length; index++) {
+        slotCalls.push({ name: calls[index].name, input: calls[index].input });
+      }
+      composer.registerSlots(slotCalls);
+      composer.emitShell();
     }
 
-    while (pending.size > 0) {
-      const result = await Promise.race(pending.values());
-      pending.delete(result.index);
+    const pending: Promise<ParallelToolFinish>[] = [];
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const slotId = 'slot_' + index.toString();
+      pending.push(this.executeBatchSlot(call, index, slotId, composer, listener));
+    }
 
-      if (result.observation === null) {
+    const results = await Promise.all(pending);
+
+    if (useComposer && composer !== null) {
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        if (result.observation === null && !result.failed) {
+          this.clearBatchExecution(composer);
+          return null;
+        }
+        listener(new AgentEvent(AgentEventKind.ACTION, `${result.call.name}(${result.call.input})`));
+      }
+      this.emitDigestFinal(new ProcessedObservation(
+        composer.buildBatchObservationText(),
+        true,
+        composer.batchFailureKey(),
+        composer.buildFinalText()
+      ), listener);
+      this.clearBatchExecution(composer);
+      return null;
+    }
+
+    const observationsForModel: string[] = [];
+    let sawA2ui = false;
+    let mergedFailureKey = '';
+    let mergedFinalText = '';
+
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.observation === null && !result.failed) {
+        this.clearBatchExecution(composer);
         return null;
       }
 
       listener(new AgentEvent(AgentEventKind.ACTION, `${result.call.name}(${result.call.input})`));
-      const processed = this.processObservation(result.observation, listener);
+      const observation = result.observation ?? `Tool ${result.call.name} failed.`;
+      const processed = this.processObservation(observation, listener, true);
       observationsForModel.push(processed.text);
-      if (processed.shouldStop) {
-        this.emitDigestFinal(processed, listener);
-        return null;
+      if (processed.isA2ui) {
+        sawA2ui = true;
+      }
+      if (mergedFailureKey.length === 0 && processed.failureKey.length > 0) {
+        mergedFailureKey = processed.failureKey;
+      }
+      if (processed.finalText.length > 0) {
+        mergedFinalText = processed.finalText;
       }
     }
 
+    if (sawA2ui) {
+      this.emitDigestFinal(new ProcessedObservation(
+        observationsForModel.join('\n\n'),
+        true,
+        mergedFailureKey,
+        mergedFinalText
+      ), listener);
+      this.clearBatchExecution(composer);
+      return null;
+    }
+
+    this.clearBatchExecution(composer);
     return observationsForModel;
   }
 
-  private async executeToolCall(call: ToolCall, listener: AgentListener): Promise<string | null> {
+  private async executeBatchSlot(
+    call: ToolCall,
+    index: number,
+    slotId: string,
+    composer: MultiToolSurfaceComposer | null,
+    listener: AgentListener
+  ): Promise<ParallelToolFinish> {
+    if (composer !== null) {
+      composer.markRunning(slotId);
+    }
+    const batchOptions = this.batchToolRunOptions(composer, slotId);
+    try {
+      const observation = await this.executeToolCall(call, listener, batchOptions);
+      if (composer !== null && observation !== null && observation.length > 0) {
+        composer.ingestSlotObservation(slotId, observation);
+      } else if (composer !== null && observation === null) {
+        composer.markSlotError(slotId, `Tool ${call.name} returned no observation.`);
+      }
+      return new ParallelToolFinish(index, call, observation, false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      if (composer !== null) {
+        composer.markSlotError(slotId, message);
+      }
+      return new ParallelToolFinish(index, call, `Tool ${call.name} failed: ${message}`, true);
+    }
+  }
+
+  private batchToolRunOptions(
+    composer: MultiToolSurfaceComposer | null,
+    slotId: string
+  ): AgentToolRunOptions | undefined {
+    if (composer === null || this.batchHost === null) {
+      return undefined;
+    }
+    return {
+      batchSlotId: slotId,
+      batchComposer: composer,
+      compositeSurfaceId: this.batchHost.request.surfaceId
+    };
+  }
+
+  private createBatchComposer(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): MultiToolSurfaceComposer | null {
+    if (this.batchHost === null) {
+      return null;
+    }
+    const host = this.batchHost;
+    const composer = new MultiToolSurfaceComposer(host.request.surfaceId, (surface: A2uiSurfaceState, raw: string): void => {
+      host.emitSurface(surface, raw);
+    });
+    host.request.batchComposer = composer;
+    return composer;
+  }
+
+  private clearBatchExecution(composer: MultiToolSurfaceComposer | null): void {
+    if (this.batchHost === null) {
+      return;
+    }
+    this.batchHost.request.batchComposer = null;
+    composer?.cancel();
+  }
+
+  private async executeToolCall(
+    call: ToolCall,
+    listener: AgentListener,
+    options?: AgentToolRunOptions
+  ): Promise<string | null> {
     if (call.name === UI_TOOL_NAME && this.tools.has(UI_TOOL_NAME)) {
       if (this.uiHandler === null) {
         listener(new AgentEvent(AgentEventKind.FINAL, call.input));
@@ -226,7 +360,7 @@ export class ReActAgentRunner {
 
     let observation: string;
     try {
-      observation = await this.tools.run(call.name, call.input);
+      observation = await this.tools.run(call.name, call.input, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : `${error}`;
       throw new Error(`Tool ${call.name} failed: ${message}`);
@@ -238,15 +372,17 @@ export class ReActAgentRunner {
     return observation;
   }
 
-  private processObservation(observation: string, listener: AgentListener): ProcessedObservation {
+  private processObservation(observation: string, listener: AgentListener, batchMode: boolean = false): ProcessedObservation {
     const digest = summarizeA2uiObservation(observation);
     const text = digest.isA2ui ? digest.text : `Observation: ${observation}`;
     listener(new AgentEvent(AgentEventKind.OBSERVATION, text));
+    const shouldStop = batchMode ? false : digest.isA2ui && digest.shouldStop;
     return new ProcessedObservation(
       text,
-      digest.isA2ui && digest.shouldStop,
+      shouldStop,
       digest.failureKey,
-      digest.finalText
+      digest.finalText,
+      digest.isA2ui
     );
   }
 
@@ -330,6 +466,7 @@ export class ReActAgentRunner {
       prompt += 'Never invent a ModelScope qualifiedName. If ModelScope blocks an unsafe or unannotated tool, stop and explain that a real confirmation flow is required.\n';
     }
     prompt += 'Calendar write rule: when the requested end state creates, updates, moves, or deletes a Google Calendar event, use the matching calendar.event.* write tool, never calendar.events.search. For an update or move with an incomplete destination time, call calendar.event.update with the existing-event query/timeMin/timeMax selector and omit missing new start or end; the client will keep real matches visible and ask for the missing time without writing. Never ask the user for an Event ID.\n';
+    prompt += 'Ride-hailing rule: default to ride.estimate for any 打车/叫车/出租车 request so the UI can show vehicle types and prices. Use ride.app.link only when the user clearly asks for App handoff links without fare estimates.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
@@ -357,10 +494,15 @@ export class ReActAgentRunner {
 
   private buildParallelExecutionRules(): string {
     return 'Before calling tools, decide whether they can run in parallel. Add Execution: parallel or Execution: serial on its own line after Thought:.\n'
-      + 'Use Execution: parallel only when every Action in this reply is independent (no output from one is needed by another). Good examples: time[] plus note[...].\n'
-      + 'Use Execution: serial when tools depend on each other, when using read or ui, or when modelscope needs search then execute across steps.\n'
-      + 'For parallel execution, emit multiple Action: lines (one tool per line). For serial execution with multiple tools, also emit multiple Action: lines in the required order.\n'
-      + 'For a single independent tool, use Execution: serial with one Action: line.\n';
+      + 'Use Execution: parallel only when every Action in this reply is independent (no output from one is needed by another). Good examples: time[] plus note[...], or flight.search plus food.search.\n'
+      + 'Use Execution: serial when tools depend on each other, or when modelscope needs search then execute across steps.\n'
+      + 'For parallel execution, emit up to ' + MAX_PARALLEL_SLOTS.toString() + ' Action: lines (one tool per line). More than '
+      + MAX_PARALLEL_SLOTS.toString() + ' parallel actions will run serially.\n'
+      + 'For serial execution with multiple tools, also emit multiple Action: lines in the required order.\n'
+      + 'For a single independent tool, use Execution: serial with one Action: line.\n'
+      + 'Parallel ride-hailing rule: if the user asks to 打车/叫车/出租车/滴滴 (alone or together with other tasks), always use ride.estimate, never ride.app.link, unless the user explicitly says they only want App links and do not want prices or vehicle options.\n'
+      + 'Every parallel Action must still include complete JSON args when the tool requires them. For ride.estimate, always pass {"origin":"...","destination":"...","city":"..."} in the Action input; never emit ride.estimate[] or ride.app.link[] without origin and destination.\n'
+      + 'For luckin.order.preview in parallel batches, pass only the Luckin-specific clause in args.prompt or args.query, for example {"prompt":"帮我点一杯瑞幸咖啡"}; never pass the full multi-task user text or unrelated ride/payment clauses.\n';
   }
 
   private emitResponse(response: string, listener: AgentListener): void {
@@ -433,9 +575,10 @@ export class ReActAgentRunner {
     const calls: ToolCall[] = [];
     for (let index = 0; index < actionTexts.length; index++) {
       const call = this.parseActionText(actionTexts[index]);
-      if (call !== null) {
-        calls.push(call);
+      if (call === null) {
+        return null;
       }
+      calls.push(call);
     }
     if (calls.length === 0) {
       return null;
@@ -451,20 +594,13 @@ export class ReActAgentRunner {
     }
 
     const normalized = raw.trim().toLowerCase();
-    if (normalized === 'parallel' && calls.length > 1 && !this.hasParallelUnsafeTools(calls)) {
+    if (normalized === 'parallel' && calls.length > 1) {
+      if (calls.length > MAX_PARALLEL_SLOTS) {
+        return 'serial';
+      }
       return 'parallel';
     }
     return 'serial';
-  }
-
-  private hasParallelUnsafeTools(calls: ToolCall[]): boolean {
-    for (let index = 0; index < calls.length; index++) {
-      const name = calls[index].name;
-      if (name === READ_TOOL_NAME || name === UI_TOOL_NAME || name === 'composio' || name === 'modelscope') {
-        return true;
-      }
-    }
-    return false;
   }
 
   private extractTaggedLines(text: string, prefix: string): string[] {

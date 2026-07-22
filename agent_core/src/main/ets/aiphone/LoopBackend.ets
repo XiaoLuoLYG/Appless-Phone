@@ -1,7 +1,7 @@
 import { AgentEvent, AgentEventKind } from '../agent/AgentEvent';
 import { AgentTool } from '../agent/AgentTool';
 import { ConversationContext } from '../agent/ConversationContext';
-import { ReActAgentRunner } from '../agent/ReActAgentRunner';
+import { ReActAgentRunner, ReActBatchHost } from '../agent/ReActAgentRunner';
 import { ToolRegistry } from '../agent/ToolRegistry';
 import { LlmProvider } from '../model/LlmProvider';
 import { LocalModel } from '../model/LocalModel';
@@ -10,6 +10,8 @@ import { ScriptedLocalModel } from '../model/ScriptedLocalModel';
 import { aiphoneInfoJsonl, splitJsonl } from './AiphoneA2ui';
 import { allToolDefinitions, ToolDefinition } from './AiphoneToolDefinitions';
 import { runAiphoneTool } from './AiphoneToolExecutor';
+import { A2uiSurfaceState } from './runtime/A2uiTypes';
+import { AgentToolRunOptions } from '../agent/AgentToolRunOptions';
 import { LoopBackendCallbacks, LoopBackendRequest, LoopRunResult, LoopToolTrace } from './LoopBackendTypes';
 
 class AiphoneTool implements AgentTool {
@@ -33,7 +35,7 @@ class AiphoneTool implements AgentTool {
     return this.descriptionText;
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, options?: AgentToolRunOptions): Promise<string> {
     if (this.toolId === 'memory.update') {
       return this.runMemoryUpdate(input);
     }
@@ -41,19 +43,33 @@ class AiphoneTool implements AgentTool {
       return 'Client intent accepted: worldcup.open. The app will open the World Cup experience.';
     }
     const parsedArgs = this.parseInputArgs(input);
-    const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
-    const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
+    const promptForTool = this.resolvePromptForTool(input, parsedArgs);
+    const composer = options?.batchComposer ?? this.request.batchComposer ?? null;
+    const batchSlotId = options?.batchSlotId ?? '';
+    let surfaceId = options?.compositeSurfaceId ?? this.request.surfaceId;
+    let onSurface = this.callbacks.onA2uiSurface === undefined ? null : this.callbacks.onA2uiSurface;
+    const inBatchSlot = batchSlotId.length > 0 && composer !== null;
+    if (inBatchSlot) {
+      surfaceId = composer!.childSurfaceId(batchSlotId);
+      const slotId = batchSlotId;
+      const activeComposer = composer!;
+      onSurface = (surface: A2uiSurfaceState, raw: string): void => {
+        activeComposer.ingestPartial(slotId, raw, surface);
+      };
+    }
     const jsonl = await runAiphoneTool(
       this.toolId,
       promptForTool,
-      this.request.surfaceId,
+      surfaceId,
       this.request.actionId,
       this.mergeArgs(this.request.args, parsedArgs),
-      this.request.ignoreToolSurfaceUpdates === true,
-      this.callbacks.onA2uiSurface === undefined ? null : this.callbacks.onA2uiSurface
+      this.request.ignoreToolSurfaceUpdates === true && !inBatchSlot,
+      onSurface
     );
-    for (const line of splitJsonl(jsonl)) {
-      this.callbacks.onA2uiJsonl?.(line);
+    if (!inBatchSlot) {
+      for (const line of splitJsonl(jsonl)) {
+        this.callbacks.onA2uiJsonl?.(line);
+      }
     }
     return jsonl;
   }
@@ -75,6 +91,38 @@ class AiphoneTool implements AgentTool {
 
   private parseInputArgs(input: string): Object | null {
     return parseLoopToolInputArgs(input);
+  }
+
+  private resolvePromptForTool(input: string, parsedArgs: Object | null): string {
+    const scopedPrompt = this.scopedPromptFromArgs(parsedArgs);
+    if (scopedPrompt.length > 0) {
+      return scopedPrompt;
+    }
+    const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt.trim();
+    if (userPrompt.length > 0) {
+      return userPrompt;
+    }
+    const trimmedInput = input.trim();
+    if (trimmedInput.length > 0) {
+      return trimmedInput;
+    }
+    return this.request.prompt;
+  }
+
+  private scopedPromptFromArgs(parsedArgs: Object | null): string {
+    if (parsedArgs === null || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+      return '';
+    }
+    const record = parsedArgs as Record<string, Object | string | number | boolean | null | undefined>;
+    const prompt = typeof record.prompt === 'string' ? record.prompt.trim() : '';
+    if (prompt.length > 0) {
+      return prompt;
+    }
+    const query = typeof record.query === 'string' ? record.query.trim() : '';
+    if (query.length > 0) {
+      return query;
+    }
+    return '';
   }
 
   private runMemoryUpdate(input: string): string {
@@ -203,7 +251,15 @@ export class LoopBackend {
         callbacks.onA2uiJsonl?.(line);
       }
     };
-    const runner = new ReActAgentRunner(model, this.buildToolRegistry(request, a2uiCallbacks), request.maxSteps > 0 ? request.maxSteps : 6);
+    const runner = new ReActAgentRunner(
+      model,
+      this.buildToolRegistry(request, a2uiCallbacks),
+      request.maxSteps > 0 ? request.maxSteps : 6,
+      undefined,
+      undefined,
+      false,
+      this.buildBatchHost(request, callbacks)
+    );
     const toolCalls: LoopToolTrace[] = [];
     let finalAnswer = '';
     let error = '';
@@ -276,6 +332,18 @@ export class LoopBackend {
     const settings = request.modelSettings;
     const provider = new LlmProvider(settings.provider, settings.apiKey, settings.baseUrl, settings.model, settings.customParametersJson);
     return provider.isConfigured() ? new OpenAiCompatibleModel(provider) : new ScriptedLocalModel();
+  }
+
+  private buildBatchHost(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): ReActBatchHost {
+    return {
+      request: request,
+      emitSurface: (surface: A2uiSurfaceState, raw: string): void => {
+        callbacks.onA2uiSurface?.(surface, raw);
+      },
+      emitJsonlLine: (line: string): void => {
+        callbacks.onA2uiJsonl?.(line);
+      }
+    };
   }
 
   private buildToolRegistry(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): ToolRegistry {
@@ -374,9 +442,9 @@ export class LoopBackend {
     } else if (definition.toolId === 'payment.account.setup') {
       description += '. Use when the user wants to create, bind, open, verify, or refresh the current agent Stripe receiving account. Do not use this for paying someone; payment.send handles payments.';
     } else if (definition.toolId === 'ride.estimate') {
-      description += '. Use for taxi/ride-hailing fare estimate requests. Shows Didi price estimates only and also returns Didi/Amap app ride links. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. If origin, destination, or city is missing, ask for it; never guess coordinates. Never create, cancel, query, or track ride orders, even if the user says "直接帮我叫车".';
+      description += '. Use for taxi/ride-hailing fare estimate requests. Shows Didi price estimates only and also returns Didi/Amap app ride links. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. If origin, destination, or city is missing, ask for it; never guess coordinates. Never create, cancel, query, or track ride orders, even if the user says "直接帮我叫车". In parallel multi-task replies, always choose ride.estimate for any 打车/叫车 task; do not substitute ride.app.link.';
     } else if (definition.toolId === 'ride.app.link') {
-      description += '. Use when the user wants taxi/ride-hailing app links without prices. Returns Didi and Amap app ride links for user-tapped handoff only. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. Do not describe Amap as a price estimate provider. Never create, cancel, query, or track ride orders.';
+      description += '. Use only when the user explicitly wants taxi/ride-hailing app links without prices or vehicle options. Returns Didi and Amap app ride links for user-tapped handoff only. Required input must include args.origin/from, args.destination/to, and args.city when the city is known or inferable from the user text. Do not describe Amap as a price estimate provider. Never create, cancel, query, or track ride orders. Do not use this tool in parallel batches when the user also wants 打车 fare estimates; use ride.estimate instead.';
     }
     return description;
   }

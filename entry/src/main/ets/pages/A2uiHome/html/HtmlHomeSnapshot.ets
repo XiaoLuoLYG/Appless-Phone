@@ -1,3 +1,4 @@
+import { aiLogInfo } from '@loop/agent-core';
 import {
   A2UI_COMPONENT_ACTION_BAR,
   A2UI_COMPONENT_AGGREGATE_SEARCH,
@@ -17,6 +18,7 @@ import {
   A2UI_COMPONENT_TOOL_CONNECT_CARD,
   A2UI_COMPONENT_TRAVEL_OPTIONS,
   A2UI_COMPONENT_TRAIN_OPTIONS,
+  A2UI_COMPONENT_MULTI_TASK_BOARD,
   A2uiAction,
   A2uiComponent,
   A2uiDynamicToolConnectData,
@@ -183,6 +185,12 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
   };
   const document: HtmlHomeDocument = withBusy(baseDocument, params.isBusy);
 
+  if (kind === 'multi-task') {
+    appendMultiTaskBlocks(document, surface);
+    dropCompletedThinkingBlocks(document, params.isBusy);
+    return document;
+  }
+
   surface.components.forEach((component: A2uiComponent) => {
     appendComponentActions(document.actions, component);
     appendBlocksForComponent(document, surface, component);
@@ -245,7 +253,173 @@ function pendingDocument(params: CreateHtmlHomeDocumentParams, prompt: string): 
   return withBusy(document, params.isBusy);
 }
 
+function parseEmbeddedSurface(value: HtmlHomeTextValue): A2uiSurfaceState | null {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, HtmlHomeTextValue | A2uiComponent[]>;
+  const surfaceId = firstText(record.surfaceId as string, '');
+  if (surfaceId.length === 0) {
+    return null;
+  }
+  const components = Array.isArray(record.components) ? record.components as A2uiComponent[] : [];
+  return {
+    surfaceId: surfaceId,
+    rootId: firstText(record.rootId as string, 'root'),
+    title: firstText(record.title as string, ''),
+    intent: firstText(record.intent as string, 'general'),
+    status: firstText(record.status as string, 'ready'),
+    components: components,
+    dataModelJson: firstText(record.dataModelJson as string, '{}'),
+    error: firstText(record.error as string, ''),
+    sequence: typeof record.sequence === 'number' ? record.sequence as number : 0
+  };
+}
+
+function embeddedKindForSection(toolId: string, surface: A2uiSurfaceState): HtmlHomeKind {
+  if (toolId.indexOf('luckin.') === 0) {
+    return 'luckin';
+  }
+  if (toolId === 'flight.search' || toolId === 'train.search' || toolId === 'travel.search') {
+    return 'travel';
+  }
+  if (toolId === 'food.search') {
+    return 'food';
+  }
+  if (toolId === 'hotel.search') {
+    return 'hotel';
+  }
+  return kindOf(surface);
+}
+
+function buildEmbeddedDocumentFromSurface(
+  embedded: A2uiSurfaceState,
+  kind: HtmlHomeKind,
+  persona: HtmlHomePersona,
+  personaMemory: HtmlHomePersonaMemory
+): HtmlHomeDocument {
+  const root = findA2uiComponent(embedded, embedded.rootId.length > 0 ? embedded.rootId : 'root');
+  const document: HtmlHomeDocument = {
+    version: HTML_HOME_VERSION,
+    source: 'tool',
+    kind: kind,
+    title: firstText(embedded.title, embedded.surfaceId),
+    subtitle: firstText(embedded.error),
+    chips: [],
+    metrics: [],
+    timeline: [],
+    blocks: [],
+    actions: [],
+    history: [],
+    persona: persona,
+    personaMemory: personaMemory,
+    rawSurfaceRoot: root,
+    generatedAt: new Date().toISOString()
+  };
+  embedded.components.forEach((component: A2uiComponent) => {
+    appendComponentActions(document.actions, component);
+    appendBlocksForComponent(document, embedded, component);
+  });
+  dropCompletedThinkingBlocks(document, false);
+  return document;
+}
+
+function multiTaskSectionTitle(toolId: string, title: string): string {
+  const normalizedTitle = title.trim();
+  if (normalizedTitle.length > 0 && normalizedTitle !== toolId) {
+    return normalizedTitle;
+  }
+  if (toolId === 'flight.search') {
+    return '航班';
+  }
+  if (toolId === 'food.search') {
+    return '美食';
+  }
+  if (toolId === 'train.search') {
+    return '高铁';
+  }
+  if (toolId === 'travel.search') {
+    return '出行';
+  }
+  if (toolId.indexOf('luckin.') === 0) {
+    return '瑞幸点单';
+  }
+  if (toolId === 'ride.estimate') {
+    return '打车';
+  }
+  if (toolId === 'payment.send') {
+    return '支付';
+  }
+  return normalizedTitle.length > 0 ? normalizedTitle : toolId;
+}
+
+function appendMultiTaskBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState): void {
+  let board: Record<string, Object | string | number | boolean | null | undefined> | null = null;
+  let sections: Record<string, Object | string | number | boolean | null | undefined> | null = null;
+  try {
+    const parsed = JSON.parse(surface.dataModelJson) as Record<string, Object | string | number | boolean | null | undefined>;
+    const boardValue = parsed.multiTask;
+    if (boardValue !== undefined && boardValue !== null && typeof boardValue === 'object' && !Array.isArray(boardValue)) {
+      board = boardValue as Record<string, Object | string | number | boolean | null | undefined>;
+    }
+    const sectionValue = parsed.sections;
+    if (sectionValue !== undefined && sectionValue !== null && typeof sectionValue === 'object' && !Array.isArray(sectionValue)) {
+      sections = sectionValue as Record<string, Object | string | number | boolean | null | undefined>;
+    }
+  } catch (_error) {
+  }
+  if (board !== null) {
+    document.activeSectionId = firstText(board.activeSectionId as string, document.activeSectionId ?? '');
+    const sectionList = board.sections;
+    if (Array.isArray(sectionList)) {
+      for (let index = 0; index < sectionList.length; index++) {
+        const meta = sectionList[index] as Record<string, Object | string | number | boolean | null | undefined>;
+        const slotId = firstText(meta.slotId as string, 'slot_' + index.toString());
+        const toolId = firstText(meta.toolId as string);
+        const block = newBlock(
+          slotId,
+          'multi-task-section',
+          multiTaskSectionTitle(toolId, firstText(meta.title as string, toolId, slotId))
+        );
+        block.sectionId = slotId;
+        block.toolId = toolId;
+        block.status = firstText(meta.status as string, 'loading');
+        block.subtitle = firstText(meta.summary as string);
+        if (sections !== null) {
+          const sectionContent = sections[slotId] as Record<string, Object | string | number | boolean | null | undefined> | undefined;
+          if (sectionContent !== undefined) {
+            block.rawPreview = firstText(sectionContent.observationDigest as string, sectionContent.summary as string);
+            block.subtitle = firstText(sectionContent.summary as string, block.subtitle);
+            const embedded = parseEmbeddedSurface(sectionContent.embeddedSurface as HtmlHomeTextValue);
+            if (embedded !== null) {
+              const embeddedKind = embeddedKindForSection(firstText(block.toolId), embedded);
+              block.embeddedDocument = buildEmbeddedDocumentFromSurface(
+                embedded,
+                embeddedKind,
+                document.persona,
+                document.personaMemory
+              );
+              if (block.embeddedDocument.blocks.length > 0) {
+                block.subtitle = firstText(block.embeddedDocument.blocks[0].subtitle, block.subtitle);
+              }
+            }
+            block.title = multiTaskSectionTitle(
+              firstText(block.toolId),
+              firstText(sectionContent.title as string, block.title)
+            );
+          }
+        }
+        document.blocks.push(block);
+      }
+    }
+  }
+}
+
 function appendBlocksForComponent(document: HtmlHomeDocument, surface: A2uiSurfaceState, component: A2uiComponent): void {
+  if (component.component === A2UI_COMPONENT_MULTI_TASK_BOARD) {
+    appendMultiTaskBlocks(document, surface);
+    return;
+  }
   if (component.component === A2UI_COMPONENT_AGGREGATE_SEARCH) {
     appendAggregateSearchBlocks(document, surface, component);
     return;
@@ -1024,8 +1198,8 @@ function removeStripeReceivingActions(actions: HtmlHomeAction[]): void {
   }
 }
 
-function dropCompletedThinkingBlocks(document: HtmlHomeDocument, isBusy: boolean): void {
-  if (isBusy || !hasNonThinkingBlock(document.blocks)) {
+function dropCompletedThinkingBlocks(document: HtmlHomeDocument, _isBusy: boolean): void {
+  if (!hasNonThinkingBlock(document.blocks)) {
     return;
   }
   document.blocks = document.blocks.filter((block: HtmlHomeBlock) => !isThinkingBlock(block));
@@ -1046,6 +1220,9 @@ function isThinkingBlock(block: HtmlHomeBlock): boolean {
 }
 
 function kindOf(surface: A2uiSurfaceState): HtmlHomeKind {
+  if (surface.intent === 'multi-task' || hasComponent(surface, A2UI_COMPONENT_MULTI_TASK_BOARD)) {
+    return 'multi-task';
+  }
   if (hasComponent(surface, A2UI_COMPONENT_SOCIAL_HUB) || surface.intent === 'social') {
     return 'social';
   }
@@ -1094,7 +1271,7 @@ function sourceOf(kind: HtmlHomeKind, surface: A2uiSurfaceState, isBusy: boolean
   if (kind === 'thinking' || isBusy && surface.status !== 'ready') {
     return 'pending';
   }
-  if (kind === 'travel' || kind === 'hotel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin') {
+  if (kind === 'travel' || kind === 'hotel' || kind === 'food' || kind === 'social' || kind === 'dynamic-tools' || kind === 'gmail' || kind === 'media' || kind === 'payment' || kind === 'aggregate-search' || kind === 'luckin' || kind === 'multi-task') {
     return 'tool';
   }
   return 'model';

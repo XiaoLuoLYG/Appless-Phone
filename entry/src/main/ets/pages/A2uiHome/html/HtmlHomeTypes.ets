@@ -1,7 +1,7 @@
 import { A2uiComponent } from '@loop/agent-core';
 
 export type HtmlHomeSource = 'welcome' | 'pending' | 'model' | 'tool';
-export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'hotel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'payment' | 'aggregate-search' | 'luckin' | 'generic';
+export type HtmlHomeKind = 'welcome' | 'thinking' | 'travel' | 'hotel' | 'food' | 'social' | 'dynamic-tools' | 'gmail' | 'media' | 'payment' | 'aggregate-search' | 'luckin' | 'multi-task' | 'generic';
 
 export interface HtmlHomeChip {
   label: string;
@@ -55,6 +55,7 @@ export interface HtmlHomeBlock {
   credentialName?: string;
   credentialRef?: string;
   toolId?: string;
+  sectionId?: string;
   prompt?: string;
   metrics: HtmlHomeMetric[];
   rows: HtmlHomeMetric[];
@@ -62,6 +63,7 @@ export interface HtmlHomeBlock {
   rawPreview?: string;
   mediaEmbed?: HtmlHomeMediaEmbed;
   stripeReceiving?: HtmlHomeStripeReceiving;
+  embeddedDocument?: HtmlHomeDocument;
 }
 
 export interface HtmlHomeHistoryItem {
@@ -98,5 +100,6 @@ export interface HtmlHomeDocument {
   persona: HtmlHomePersona;
   personaMemory: HtmlHomePersonaMemory;
   rawSurfaceRoot: A2uiComponent | null;
+  activeSectionId?: string;
   generatedAt: string;
 }

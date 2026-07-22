@@ -13,6 +13,8 @@ import {
   A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
+  A2uiMultiTaskBoardData,
+  A2uiMultiTaskSectionValue,
   A2uiPersonaData,
   A2uiPersonaMemoryData,
   A2uiRowGroupsData,
@@ -496,7 +498,9 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
       stripeReceivingAccount: normalizeStripeReceivingAccount(parsed, fallback.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : fallback.stripeReceivingAccount),
-      toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
+      toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : [],
+      multiTask: parsed.multiTask === undefined || parsed.multiTask === null ? undefined : parsed.multiTask as A2uiMultiTaskBoardData,
+      sections: parsed.sections === undefined || parsed.sections === null ? undefined : parsed.sections as Record<string, A2uiMultiTaskSectionValue>
     };
   } catch (_error) {
     return fallback;
@@ -620,6 +624,10 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.genericToolResults = value as A2uiGenericToolResultData[];
   } else if (path === '/aggregateSearch') {
     next.aggregateSearch = value as AggregateSearchResult;
+  } else if (path === '/multiTask') {
+    next.multiTask = value as A2uiMultiTaskBoardData;
+  } else if (path === '/sections') {
+    next.sections = value as Record<string, A2uiMultiTaskSectionValue>;
   } else if (path === '/persona') {
     next.persona = value as A2uiPersonaData;
   } else if (path === '/personaMemory') {

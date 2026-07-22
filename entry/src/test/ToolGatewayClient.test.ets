@@ -60,6 +60,9 @@ import {
   whatsAppSendConfirmedForTest,
   whatsAppProviderFailureSummaryForTest,
   resolveLuckinLocationForTest,
+  luckinProductSearchKeywordForTest,
+  luckinAttrSelectionsFromPromptForTest,
+  luckinApplyPromptPreferencesLocallyForTest,
   saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
@@ -183,6 +186,60 @@ export default function toolGatewayClientTest() {
     it('falls back to the configured location for Luckin preview', 0, () => {
       expect(resolveLuckinLocationForTest('', '点一杯咖啡', '114.029506,22.609878'))
         .assertEqual('114.029506,22.609878');
+    });
+
+    it('extracts luckin product keyword from multi-task prompts', 0, () => {
+      const fullPrompt = '我要打车从坂田到秋港花园，给googlepay给罗一格转5美元，帮我点一杯瑞幸咖啡';
+      const scopedArgs: Record<string, string> = {
+        prompt: '帮我点一杯瑞幸咖啡'
+      };
+      const keywordFromArgs = luckinProductSearchKeywordForTest(fullPrompt, scopedArgs);
+      const keywordFromFullPrompt = luckinProductSearchKeywordForTest(fullPrompt, null);
+      expect(keywordFromArgs).assertEqual('生椰拿铁');
+      expect(keywordFromFullPrompt).assertEqual('生椰拿铁');
+      expect(keywordFromFullPrompt.indexOf('坂田')).assertEqual(-1);
+      expect(keywordFromFullPrompt.indexOf('google')).assertEqual(-1);
+    });
+
+    it('maps luckin preview options from user query preferences', 0, () => {
+      const product: LuckinProductFixture = {
+        productName: '生椰拿铁',
+        price: 19,
+        skuCode: 'SKU001',
+        pictureUrl: '',
+        tags: [],
+        productAttrs: [
+          {
+            attributeName: '糖度',
+            productSubAttrs: [
+              { attributeName: '标准甜', selected: true },
+              { attributeName: '半糖', selected: false },
+              { attributeName: '少甜', selected: false }
+            ]
+          },
+          {
+            attributeName: '温度',
+            productSubAttrs: [
+              { attributeName: '冰', selected: true },
+              { attributeName: '少冰', selected: false },
+              { attributeName: '热', selected: false }
+            ]
+          }
+        ]
+      };
+      const prompt = '帮我点一杯瑞幸生椰拿铁，半糖少冰';
+      const selections = luckinAttrSelectionsFromPromptForTest(product, prompt);
+      expect(selections.length).assertEqual(2);
+      expect(selections[0][0]).assertEqual('糖度');
+      expect(selections[0][1]).assertEqual('半糖');
+      expect(selections[1][0]).assertEqual('温度');
+      expect(selections[1][1]).assertEqual('少冰');
+
+      const applied = luckinApplyPromptPreferencesLocallyForTest(product, prompt) as LuckinProductFixture;
+      expect(applied.productAttrs[0].productSubAttrs[0].selected).assertFalse();
+      expect(applied.productAttrs[0].productSubAttrs[1].selected).assertTrue();
+      expect(applied.productAttrs[1].productSubAttrs[0].selected).assertFalse();
+      expect(applied.productAttrs[1].productSubAttrs[1].selected).assertTrue();
     });
 
     it('defaults to the in-app local tool route', 0, () => {

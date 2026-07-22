@@ -4,6 +4,7 @@ import {
   AgentEventKind,
   AgentSkill,
   AgentTool,
+  AgentToolRunOptions,
   aiphoneToolSurfaceCallback,
   A2uiEnvelope,
   A2uiSurfaceState,
@@ -43,7 +44,7 @@ class CaptureTool implements AgentTool {
     return 'capture tool input';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     this.called = true;
     this.input = input;
     return 'captured';
@@ -83,7 +84,7 @@ class FixedTool implements AgentTool {
     return 'fixed tool output';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     this.calls.push(input);
     return this.output;
   }
@@ -583,7 +584,38 @@ export default function reActAgentRunnerTest() {
       expect(actions[1].indexOf('tool.b')).assertLarger(-1);
     });
 
-    it('downgrades parallel to serial when read is included', 0, async () => {
+    it('waits for all parallel A2UI tools before emitting final', 0, async () => {
+      const first = new FixedTool('tool.a', componentOnlyStatusJsonl('ready', 'surface_a'));
+      const second = new FixedTool('tool.b', componentOnlyStatusJsonl('ready', 'surface_b'));
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: two independent A2UI tools\nExecution: parallel\nAction: tool.a[]\nAction: tool.b[]'
+        ),
+        registry,
+        1
+      );
+      let finalCount = 0;
+      let observationCount = 0;
+
+      await runner.run('parallel a2ui', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalCount++;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observationCount++;
+        }
+      });
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(1);
+      expect(observationCount).assertEqual(2);
+      expect(finalCount).assertEqual(1);
+    });
+
+    it('runs read and time in parallel when Execution is parallel', 0, async () => {
       const readTool = new FixedTool('read', '# Skill: weather\n\nUse weather API.');
       const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
       const registry = new ToolRegistry();
@@ -596,11 +628,68 @@ export default function reActAgentRunnerTest() {
         registry,
         1
       );
+      const actions: string[] = [];
 
-      await runner.run('read and time', (_event: AgentEvent): void => {});
+      await runner.run('read and time', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
 
       expect(readTool.calls.length).assertEqual(1);
       expect(timeTool.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+    });
+
+    it('rejects malformed action plans without executing tools', 0, async () => {
+      const first = new FixedTool('tool.a', 'result-a');
+      const second = new FixedTool('tool.b', 'result-b');
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      let errorText = '';
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: broken plan\nExecution: serial\nAction: tool.a({})\nAction: tool.b[{invalid json}]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('broken plan', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ERROR) {
+          errorText = event.text;
+        }
+      });
+
+      expect(first.calls.length).assertEqual(0);
+      expect(second.calls.length).assertEqual(0);
+      expect(errorText.indexOf('Action or Final')).assertLarger(-1);
+    });
+
+    it('downgrades parallel to serial when more than four actions are requested', 0, async () => {
+      const tools: FixedTool[] = [];
+      const registry = new ToolRegistry();
+      for (let index = 0; index < 5; index++) {
+        const tool = new FixedTool('tool.' + index.toString(), 'result-' + index.toString());
+        tools.push(tool);
+        registry.register(tool);
+      }
+      const response =
+        'Thought: too many parallel actions\nExecution: parallel\n' +
+        'Action: tool.0[]\nAction: tool.1[]\nAction: tool.2[]\nAction: tool.3[]\nAction: tool.4[]';
+      const runner = new ReActAgentRunner(new SingleActionModel(response), registry, 1);
+      const actions: string[] = [];
+
+      await runner.run('too many tools', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(actions.length).assertEqual(5);
+      expect(actions[0].indexOf('tool.0')).assertLarger(-1);
+      expect(actions[4].indexOf('tool.4')).assertLarger(-1);
     });
   });
 }

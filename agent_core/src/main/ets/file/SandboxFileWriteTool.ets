@@ -2,6 +2,7 @@ import fs from '@ohos.file.fs';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { AgentTool } from '../agent/AgentTool';
+import { AgentToolRunOptions } from '../agent/AgentToolRunOptions';
 
 const LOG_DOMAIN = 0x0000;
 const LOG_TAG = 'SandboxFile';
@@ -29,7 +30,7 @@ export class SandboxFileWriteTool implements AgentTool {
       'The path must be relative and cannot contain .. .';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     try {
       const request = JSON.parse(input.trim()) as SandboxFileWriteRequest;
       const relativePath = this.validateRelativePath(`${request.relativePath ?? ''}`);
