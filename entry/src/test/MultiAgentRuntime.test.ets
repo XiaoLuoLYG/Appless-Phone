@@ -352,10 +352,11 @@ class ControlledWriter implements UiSurfaceWriter {
   readonly resultStarted: TestGate = new TestGate();
   private readonly releaseResult: TestGate = new TestGate();
   blockResult: boolean = false;
+  resultSurfaceId: string = '';
 
   async write(
     _turnId: string,
-    _surfaceId: string,
+    surfaceId: string,
     jsonl: string,
     lease: UiSurfaceWriteLease
   ): Promise<void> {
@@ -365,6 +366,9 @@ class ControlledWriter implements UiSurfaceWriter {
     }
     if (!lease.isActive()) {
       return;
+    }
+    if (jsonl.indexOf('result') >= 0) {
+      this.resultSurfaceId = surfaceId;
     }
   }
 
@@ -924,6 +928,7 @@ export default function multiAgentRuntimeTest() {
       expect(result.kind).assertEqual('settled');
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('我会保留上轮地点上下文。');
+      expect(result.surfaceId).assertEqual('');
       const input = planner.lastInput as InputUserPayload;
       expect(input.text).assertEqual('查询天气');
       expect(input.recentMessages!.length).assertEqual(8);
@@ -953,7 +958,8 @@ export default function multiAgentRuntimeTest() {
       expect(result.kind).assertEqual('settled');
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('酒店结果已就绪');
-      expect(result.surfaceId.length > 0).assertTrue();
+      expect(writer.resultSurfaceId.length > 0).assertTrue();
+      expect(result.surfaceId).assertEqual(writer.resultSurfaceId);
       runtime.dispose();
     });
 

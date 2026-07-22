@@ -836,7 +836,7 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('publishes a correlated semantic answer result without Data, UI, or Action tasks', 0, async () => {
+    it('does not attach an inherited surface to a direct semantic answer', 0, async () => {
       const bus = new LinkedMessageBus();
       const direct = semanticDecision([], 'answer');
       direct.requestedCapabilityIds = [];
@@ -878,7 +878,7 @@ export default function leaderAgentTest() {
       expect(turnResults[0].taskId).assertEqual('input-1');
       const result = turnResults[0].payload as TurnResultPayload;
       expect(result.status).assertEqual('success');
-      expect(result.surfaceId).assertEqual('surface-previous');
+      expect(result.surfaceId).assertEqual(undefined);
       expect(result.roundCount).assertEqual(1);
       expect(result.message).assertEqual('Enough observations');
       expect(beforeMarker.filter(
@@ -886,6 +886,38 @@ export default function leaderAgentTest() {
           message.type === AgentMessageType.TASK_CREATE_UI ||
           message.type === AgentMessageType.ACTION_PLAN_REQUEST
       ).length).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('does not attach an inherited surface to a direct clarification', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const direct = semanticDecision([], 'answer');
+      direct.roundAction = 'clarify';
+      direct.answer = 'Please provide a city.';
+      direct.requestedCapabilityIds = [];
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([direct]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+      const input = inputMessage();
+      (input.payload as InputUserPayload).currentSurfaceSummary = {
+        surfaceId: 'surface-previous',
+        kind: 'hotelSearchResults',
+        status: 'result',
+        entityRefs: ['hotel-101'],
+        actionOfferIds: []
+      };
+
+      bus.publish(input);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const terminal = await receive(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual(undefined);
       leader.stop();
       observer.close();
     });

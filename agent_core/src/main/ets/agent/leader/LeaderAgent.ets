@@ -1078,10 +1078,6 @@ export class LeaderAgent extends MessageDrivenAgent {
       roundCount: state.round,
       message: answer
     };
-    const surfaceId: string = state.input.currentSurfaceSummary?.surfaceId as string;
-    if (typeof surfaceId === 'string' && surfaceId.length > 0) {
-      payload.surfaceId = surfaceId;
-    }
     this.bus.publish({
       type: AgentMessageType.TURN_RESULT,
       conversationId: input.conversationId,
