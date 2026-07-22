@@ -135,6 +135,19 @@ test('combines generic turn correlation with specialized hotel provider evidence
     [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
     [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
     [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=stale-provider-surface status=calling_tool components=2
+    [AIPhone][RollingGoHotelRequest] operation=searchHotels
+    [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=current-lifecycle-surface state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=stale-provider-surface status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=current-lifecycle-surface roundCount=1 messageChars=12
+  `).ok, false);
+  assert.equal(hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
     [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=calling_tool components=2
     com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
     [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false

@@ -215,7 +215,13 @@ const retainedFullCases = [
     expectsTool: true,
     expectedToolId: 'maps.place.search',
     expectedToolIds: ['maps.place.search', 'maps.place.details'],
-    minimumDataRounds: 2
+    minimumDataRounds: 2,
+    expectedDependencies: [{
+      toolId: 'maps.place.details',
+      predecessorToolId: 'maps.place.search',
+      path: '/places/0/placeId',
+      target: '/placeId'
+    }]
   },
   { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
   { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
@@ -231,6 +237,16 @@ const retainedFullCases = [
 ];
 
 const fullRegressionCases = [...coreRegressionCases, ...retainedFullCases];
+
+function lifecycleOptions(testCase) {
+  const expectedToolId = testCase.expectedToolId || '';
+  return {
+    expectedToolIds: testCase.expectedToolIds ||
+      (expectedToolId.length > 0 ? [expectedToolId] : []),
+    minimumDataRounds: testCase.minimumDataRounds || 0,
+    expectedDependencies: testCase.expectedDependencies || []
+  };
+}
 
 const coreScenarioManifest = [
   ['C01', []], ['C02', ['travel.search']], ['C03', ['food.search']],
@@ -249,7 +265,9 @@ const coreScenarioManifest = [
 const fullScenarioManifest = retainedFullCases.map((testCase) => ({
   id: testCase.id,
   expectedToolIds: testCase.expectedToolIds ||
-    (testCase.expectedToolId.length > 0 ? [testCase.expectedToolId] : [])
+    (testCase.expectedToolId.length > 0 ? [testCase.expectedToolId] : []),
+  minimumDataRounds: testCase.minimumDataRounds || 0,
+  expectedDependencies: testCase.expectedDependencies || []
 }));
 
 const forbiddenSocialHubLegacyMarkers = [
@@ -1460,12 +1478,14 @@ function analyze(
   expectedToolId = '',
   expectedDiscoveredToolId = '',
   expectedToolIds = [],
-  minimumDataRounds = 0
+  minimumDataRounds = 0,
+  expectedDependencies = []
 ) {
   const text = logs.join('\n');
   const multiAgentLifecycle = multiAgentTurnEvidence(text, {
     expectedToolIds,
-    minimumDataRounds
+    minimumDataRounds,
+    expectedDependencies
   });
   const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
   const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
@@ -2752,9 +2772,10 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
 async function runQuery(query, index, expectedTool) {
   const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
-  const expectedToolIds = expectedCase.expectedToolIds ||
-    (expectedToolId.length > 0 ? [expectedToolId] : []);
-  const minimumDataRounds = expectedCase.minimumDataRounds || 0;
+  const lifecycle = lifecycleOptions(expectedCase);
+  const expectedToolIds = lifecycle.expectedToolIds;
+  const minimumDataRounds = lifecycle.minimumDataRounds;
+  const expectedDependencies = lifecycle.expectedDependencies;
   clearHilog();
   hdc(['shell', 'aa', 'force-stop', 'com.example.aiphonedemo']);
   if (cleanData) {
@@ -2784,7 +2805,7 @@ async function runQuery(query, index, expectedTool) {
     }
     const submitControls = await waitForControls(`query-${index + 1}-submit-layout.json`, 2);
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
-  }, { expectedToolIds, minimumDataRounds });
+  }, { expectedToolIds, minimumDataRounds, expectedDependencies });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
   const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
@@ -2798,7 +2819,8 @@ async function runQuery(query, index, expectedTool) {
     expectedToolId,
     expectedDiscoveredToolId,
     expectedToolIds,
-    minimumDataRounds
+    minimumDataRounds,
+    expectedDependencies
   );
   summary.caseId = expectedCase.id || '';
   summary.expectedPersonaMemory = expectedPersonaMemory;

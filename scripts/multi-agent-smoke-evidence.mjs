@@ -191,6 +191,8 @@ export function multiAgentTurnEvidence(logText, options = {}) {
     const terminal = terminals[0] || taskErrors[0];
     if (terminals.length + taskErrors.length !== 1 || terminal === undefined ||
       terminal.index <= task.index ||
+      task.dependencies.some((taskId) => (dataById.get(taskId)?.terminalIndex ??
+        Number.MAX_SAFE_INTEGER) >= terminal.index) ||
       results.some((item) => item.index <= task.index ||
         !['skeleton', 'result', 'error', 'action'].includes(item.fields.state))) {
       failures.push('invalid_ui_terminal');
@@ -257,7 +259,14 @@ export function multiAgentTurnEvidence(logText, options = {}) {
     }
   }
 
-  const action = multiAgentActionEvidence(events.map((item) => item.line).join('\n'));
+  const virtualActions = virtualPlans.flatMap((item) => list(item.fields.actions));
+  const action = multiAgentActionEvidence(events.map((item) => item.line).join('\n'),
+    virtualPlans.length > 0 ? {
+      expectedActionId: virtualActions.length === 1 ? virtualActions[0] : 'invalid',
+      expectedConversationId: selected?.fields.conversation || 'invalid',
+      expectedTurnId: selected?.fields.turn || 'invalid',
+      expectedVirtual: true
+    } : {});
   const dataStatus = aggregateStatus(terminalResults);
   const expectedTurnStatus = uiFailed ? 'error' : dataStatus;
   if (dataTasks.length > 0 && status !== 'canceled' && expectedTurnStatus !== status) {

@@ -207,6 +207,7 @@ export function hotelMultiAgentSearchEvidence(logText) {
   }
   const orderedProviderChain = rawProvider.ok &&
     rawProvider.operation === 'searchHotels' &&
+    rawProvider.surfaceId === lifecycle.surfaceId &&
     rawProvider.requestIndex < rawProvider.responseIndex &&
     rawProvider.responseIndex < rawProvider.documentIndex &&
     rawProvider.documentIndex < rawProvider.readyIndex &&
@@ -215,8 +216,7 @@ export function hotelMultiAgentSearchEvidence(logText) {
     finalUiIndex < lifecycle.terminalIndex;
   const provider = {
     ...rawProvider,
-    rawSurfaceId: rawProvider.surfaceId,
-    surfaceId: orderedProviderChain ? lifecycle.surfaceId : ''
+    rawSurfaceId: rawProvider.surfaceId
   };
   return {
     ok: lifecycle.ok && orderedProviderChain && provider.blocks > 0 &&

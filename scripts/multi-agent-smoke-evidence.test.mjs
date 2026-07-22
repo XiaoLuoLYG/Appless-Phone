@@ -38,6 +38,14 @@ test('requires one strictly correlated successful multi-agent turn', () => {
   assert.equal(evidence.ok, true);
   assert.equal(evidence.status, 'success');
   assert.deepEqual(evidence.toolIds, ['travel.search']);
+  const earlyUi = successTurn
+    .replace('[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false\n', '')
+    .replace('[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result',
+      '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result\n' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false');
+  assert.equal(multiAgentTurnEvidence(earlyUi, {
+    expectedToolIds: ['travel.search']
+  }).complete, false);
 });
 
 test('keeps partial, empty, error, and canceled terminal truth', () => {
@@ -406,6 +414,16 @@ test('requires a virtual action request before its exact result', () => {
     expectedTurnId: 't1',
     expectedVirtual: true
   }).complete, false);
+  const unrelatedDirect = `
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=k1
+    [AIPhone][MultiAgentActionPlan] conversation=c1 turn=t1 task=k1 uiTask=k1 dataTasks=none actions=payment.send virtual=true
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t1 task=k2 surface=s1 plan=p1 run=r1 action=hotel.navigate source=hotel.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t1 task=k2 surface=s1 plan=p1 run=r1 status=success
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=k1 status=success surface=s1 roundCount=1 messageChars=4
+  `;
+  assert.equal(multiAgentTurnEvidence(unrelatedDirect, {
+    expectedToolIds: ['payment.send']
+  }).complete, false);
 });
 
 test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
@@ -418,6 +436,12 @@ test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
     ...Array.from({ length: 16 }, (_value, index) => `F${String(index + 1).padStart(2, '0')}`)
   ]);
   const serialized = JSON.stringify(full);
+  assert.deepEqual(full.find((item) => item.id === 'F12')?.expectedDependencies, [{
+    toolId: 'maps.place.details',
+    predecessorToolId: 'maps.place.search',
+    path: '/places/0/placeId',
+    target: '/placeId'
+  }]);
   assert.doesNotMatch(serialized, /不确认直接发送|gmail\.message\.send/);
 });
 
