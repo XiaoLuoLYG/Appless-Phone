@@ -6,7 +6,8 @@ import {
   InputUserPayload,
   LeaderDecision,
   LeaderPlanningContext,
-  LocalModel
+  LocalModel,
+  ObservationDigest
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 
@@ -117,10 +118,17 @@ class TravelPromptAwareModel implements LocalModel {
   async complete(prompt: string): Promise<string> {
     this.prompts.push(prompt);
     const hasAggregateContract: boolean = prompt.indexOf(
-      'Broad or multimodal requests such as 出行方案, 怎么去, or 比较 must select exactly one travel.search Data task.'
+      'For requests that do not explicitly name those concrete modes, broad or multimodal wording such as ' +
+        '出行方案, 怎么去, or 综合比较 means exactly one travel.search Data task.'
+    ) >= 0;
+    const hasExplicitPairPrecedence: boolean = prompt.indexOf(
+      'Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words such as 比较.'
     ) >= 0;
     if (prompt.indexOf('我明天要从北京去上海，帮我搜索出行方案') >= 0) {
       return hasAggregateContract ? TRAVEL_DECISION : PARALLEL_DECISION;
+    }
+    if (prompt.indexOf('比较明天北京到上海的航班和高铁') >= 0) {
+      return hasExplicitPairPrecedence ? PARALLEL_DECISION : TRAVEL_DECISION;
     }
     if (prompt.indexOf('帮我查明天北京到上海的航班') >= 0) {
       return FLIGHT_DECISION;
@@ -348,6 +356,12 @@ export default function multiAgentLeaderPlannerTest() {
         planningContext(),
         1
       );
+      const comparisonPair: LeaderDecision = await planner.plan(
+        inputMessage(),
+        { text: '比较明天北京到上海的航班和高铁' },
+        planningContext(),
+        1
+      );
 
       expect(c02.dataTasks.length).assertEqual(1);
       expect(c02.dataTasks[0].toolId).assertEqual('travel.search');
@@ -361,6 +375,9 @@ export default function multiAgentLeaderPlannerTest() {
       expect(both.dataTasks.length).assertEqual(2);
       expect(both.dataTasks[0].toolId).assertEqual('flight.search');
       expect(both.dataTasks[1].toolId).assertEqual('train.search');
+      expect(comparisonPair.dataTasks.length).assertEqual(2);
+      expect(comparisonPair.dataTasks[0].toolId).assertEqual('flight.search');
+      expect(comparisonPair.dataTasks[1].toolId).assertEqual('train.search');
     });
 
     it('tells later rounds not to repeat completed tools while allowing a different dependent tool', 0, async () => {
@@ -422,6 +439,124 @@ export default function multiAgentLeaderPlannerTest() {
       expect(dependentModel.prompts[0].indexOf(
         'A different later-round tool is allowed only when it requires real prior output.'
       ) >= 0).assertTrue();
+    });
+
+    it('accepts only exact earlier-round task identities and bounds the completed tool list', 0, async () => {
+      const probeInput: InputUserPayload = {
+        text: '根据真实结果继续',
+        recentObservations: [{
+          taskId: 'input-1:round-1:travel-a',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'must-not-enter-completed-tool-metadata',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-2:flight-a',
+          toolId: 'flight.search',
+          status: 'partial',
+          summary: 'valid prior round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-2:travel-b',
+          toolId: 'travel.search',
+          status: 'empty',
+          summary: 'duplicate tool',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-forged:train',
+          toolId: 'train.search',
+          status: 'success',
+          summary: 'forged round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-0:hotel',
+          toolId: 'hotel.search',
+          status: 'success',
+          summary: 'zero round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-99:maps',
+          toolId: 'maps.place.details',
+          status: 'success',
+          summary: 'future round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-3:current',
+          toolId: 'current.search',
+          status: 'success',
+          summary: 'current round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-4:future',
+          toolId: 'future.search',
+          status: 'success',
+          summary: 'future round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-2:',
+          toolId: 'missing-local.search',
+          status: 'success',
+          summary: 'missing local ID',
+          entityRefs: []
+        }, {
+          taskId: 'other-input:round-1:travel',
+          toolId: 'other.search',
+          status: 'success',
+          summary: 'other input task',
+          entityRefs: []
+        }]
+      };
+      const roundThreeModel: QueueLocalModel = new QueueLocalModel([ANSWER_FROM_TRAVEL_OBSERVATION]);
+
+      await new MultiAgentLeaderPlanner(roundThreeModel).plan(
+        inputMessage(), probeInput, planningContext(), 3
+      );
+
+      expect(roundThreeModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: ["travel.search","flight.search"]'
+      ) >= 0).assertTrue();
+      const metadataStart: number = roundThreeModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs:'
+      );
+      const metadataEnd: number = roundThreeModel.prompts[0].indexOf('\n', metadataStart);
+      const metadataLine: string = roundThreeModel.prompts[0].substring(metadataStart, metadataEnd);
+      expect(metadataLine.indexOf('must-not-enter-completed-tool-metadata')).assertEqual(-1);
+      expect(roundThreeModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: ["travel.search","flight.search","train.search"'
+      )).assertEqual(-1);
+
+      const firstRoundModel: QueueLocalModel = new QueueLocalModel([ANSWER_FROM_TRAVEL_OBSERVATION]);
+      await new MultiAgentLeaderPlanner(firstRoundModel).plan(
+        inputMessage(), probeInput, planningContext(), 1
+      );
+      expect(firstRoundModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: []'
+      ) >= 0).assertTrue();
+
+      const many: ObservationDigest[] = [];
+      for (let index = 0; index < 10; index++) {
+        many.push({
+          taskId: 'input-1:round-1:local-' + index.toString(),
+          toolId: 'bounded.tool.' + index.toString(),
+          status: 'success',
+          summary: 'summary-' + index.toString(),
+          entityRefs: []
+        });
+      }
+      const boundedModel: QueueLocalModel = new QueueLocalModel([ANSWER_FROM_TRAVEL_OBSERVATION]);
+      await new MultiAgentLeaderPlanner(boundedModel).plan(
+        inputMessage(), { text: '继续', recentObservations: many }, planningContext(), 2
+      );
+      expect(boundedModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: ["bounded.tool.0","bounded.tool.1",' +
+          '"bounded.tool.2","bounded.tool.3","bounded.tool.4","bounded.tool.5",' +
+          '"bounded.tool.6","bounded.tool.7"]'
+      ) >= 0).assertTrue();
+      expect(boundedModel.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: ["bounded.tool.0","bounded.tool.1",' +
+          '"bounded.tool.2","bounded.tool.3","bounded.tool.4","bounded.tool.5",' +
+          '"bounded.tool.6","bounded.tool.7","bounded.tool.8"'
+      )).assertEqual(-1);
     });
 
     it('repairs one missing authority field once without exposing its output', 0, async () => {

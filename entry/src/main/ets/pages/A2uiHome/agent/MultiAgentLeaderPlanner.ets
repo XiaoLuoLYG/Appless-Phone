@@ -35,13 +35,15 @@ const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly.';
+const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
-  'Travel selection contract: Broad or multimodal requests such as 出行方案, 怎么去, or 比较 must select ' +
-  'exactly one travel.search Data task. Use flight.search only when the user explicitly asks only for ' +
-  'flights. Use train.search only when the user explicitly asks only for trains or high-speed rail. ' +
-  'When the user explicitly asks for both flights and trains, select flight.search and train.search as ' +
-  'two independent tasks in the same round. Preserve route fields and relative date wording such as 明天 ' +
-  'in the selected task input; do not drop or silently replace them.';
+  'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
+  'such as 比较. In that case, select flight.search and train.search as two independent tasks in the same round. ' +
+  'Use flight.search only when the user explicitly asks only for flight/航班/飞机. Use train.search only when the ' +
+  'user explicitly asks only for train/高铁/火车. For requests that do not explicitly name those concrete modes, ' +
+  'broad or multimodal wording such as 出行方案, 怎么去, or 综合比较 means exactly ' +
+  'one travel.search Data task. Preserve route fields and relative date wording such as 明天 in the selected ' +
+  'task input; do not drop or silently replace them.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -181,7 +183,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     context: LeaderPlanningContext,
     round: number
   ): string {
-    const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input);
+    const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input, round);
     return [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
@@ -220,21 +222,54 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     ].join('\n');
   }
 
-  private currentTurnCompletedToolIds(message: AgentMessage, input: InputUserPayload): string[] {
+  private currentTurnCompletedToolIds(
+    message: AgentMessage,
+    input: InputUserPayload,
+    currentRound: number
+  ): string[] {
+    if (currentRound <= 1) {
+      return [];
+    }
     const observations: ObservationDigest[] = input.recentObservations === undefined ? [] :
       input.recentObservations;
-    const taskPrefix: string = message.taskId + ':round-';
     const result: string[] = [];
-    for (let index = 0; index < observations.length; index++) {
+    for (let index = 0; index < observations.length && result.length < MAX_COMPLETED_TOOL_IDS; index++) {
       const observation: ObservationDigest = observations[index];
       const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
         observation.status === 'empty' || observation.status === 'error';
-      if (terminal && observation.taskId.startsWith(taskPrefix) &&
-        observation.toolId.trim().length > 0 && result.indexOf(observation.toolId) < 0) {
-        result.push(observation.toolId);
+      const observationRound: number = this.observationRound(message.taskId, observation.taskId);
+      const toolId: string = observation.toolId.trim();
+      if (terminal && observationRound > 0 && observationRound < currentRound &&
+        toolId.length > 0 && result.indexOf(toolId) < 0) {
+        result.push(toolId);
       }
     }
     return result;
+  }
+
+  private observationRound(inputTaskId: string, observationTaskId: string): number {
+    const prefix: string = inputTaskId + ':round-';
+    if (!observationTaskId.startsWith(prefix)) {
+      return 0;
+    }
+    const suffix: string = observationTaskId.substring(prefix.length);
+    const separator: number = suffix.indexOf(':');
+    if (separator <= 0 || separator >= suffix.length - 1 ||
+      suffix.substring(separator + 1).trim().length === 0) {
+      return 0;
+    }
+    const roundText: string = suffix.substring(0, separator);
+    if (roundText[0] === '0') {
+      return 0;
+    }
+    for (let index = 0; index < roundText.length; index++) {
+      const code: number = roundText.charCodeAt(index);
+      if (code < 48 || code > 57) {
+        return 0;
+      }
+    }
+    const round: number = Number(roundText);
+    return Number.isInteger(round) && round > 0 ? round : 0;
   }
 
   private decision(parsed: Object, context: LeaderPlanningContext): LeaderDecision {
