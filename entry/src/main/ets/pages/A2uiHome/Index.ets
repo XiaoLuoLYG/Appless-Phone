@@ -1257,10 +1257,12 @@ struct Index {
       model: model,
       selectedPersonaId: (): string => this.selectedPersonaId,
       opener: opener,
-      onSurface: (surface: A2uiSurfaceState, generation: number): void => {
-        if (this.applyRuntimeSurface(surface, 'multi_agent', generation)) {
+      onSurface: (surface: A2uiSurfaceState, generation: number): boolean => {
+        const accepted = this.applyRuntimeSurface(surface, 'multi_agent', generation);
+        if (accepted) {
           this.isAwaitingFirstSurface = false;
         }
+        return accepted;
       },
       onMemoryUpdate: (update: PersonaMemoryUpdateRequest, generation: number): void => {
         if (runtimeCallbackIsCurrent(
@@ -4101,12 +4103,23 @@ struct Index {
     document: HtmlHomeDocument
   ): Promise<void> {
     if (this.multiAgentRuntime !== null && this.activeRuntimeOwner === 'multi_agent' &&
-      runtimeOwnerAllowsSurfaceAction(this.currentSurface, 'multi_agent') &&
       action.id === 'hotel.detail') {
       const runtime = this.multiAgentRuntime;
       const actionGeneration = this.runtimeGeneration;
+      const snapshot = this.registeredPageSnapshotStore.current();
       const context = runtime.currentActionContext();
-      if (context === null || !isHtmlHomeActionAllowed(document, action)) {
+      if (snapshot === null || context === null ||
+        !runtimeSurfaceIdentityMatches(
+          this.currentSurface,
+          snapshot.surface,
+          this.activeRuntimeOwner,
+          actionGeneration
+        ) ||
+        context.surfaceId !== snapshot.surface.surfaceId ||
+        context.sourceToolId !== 'hotel.search' ||
+        document.surfaceId !== snapshot.document.surfaceId ||
+        document.generatedAt !== snapshot.document.generatedAt ||
+        !isHtmlHomeActionAllowed(document, action)) {
         this.logHtmlHomeActionError(action, 'hotel_context_not_current');
         return;
       }

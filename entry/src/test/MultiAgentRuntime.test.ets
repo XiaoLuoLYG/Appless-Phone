@@ -242,6 +242,54 @@ class HotelRoundPlanner implements LeaderPlanner {
   }
 }
 
+class PostExecutionHandoffPlanner implements LeaderPlanner {
+  async plan(
+    _message: AgentMessage,
+    input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    if (input.recentObservations !== undefined && input.recentObservations.length > 0) {
+      return {
+        personaId: 'travel_companion',
+        skillId: '',
+        requestedCapabilityIds: ['unknown.search'],
+        roundAction: 'legacy_handoff',
+        dataTasks: [],
+        uiIntent: {
+          purpose: 'unknown.search',
+          preferredDensity: 'comfortable',
+          requiredSections: []
+        },
+        reasonCode: 'unmigrated_tool'
+      };
+    }
+    const task: LeaderDecisionDataTask = {
+      localId: 'hotel-search',
+      goal: 'Search real hotels',
+      allowedToolIds: ['hotel.search'],
+      toolId: 'hotel.search',
+      input: JSON.parse(
+        '{"city":"Shenzhen","checkIn":"2026-07-21","checkOut":"2026-07-22","guests":2}'
+      ) as Object,
+      required: true
+    };
+    return {
+      personaId: 'travel_companion',
+      skillId: '',
+      requestedCapabilityIds: ['hotel.search'],
+      roundAction: 'execute',
+      dataTasks: [task],
+      uiIntent: {
+        purpose: 'hotel.search',
+        preferredDensity: 'comfortable',
+        requiredSections: ['hotels']
+      },
+      reasonCode: 'hotel_search'
+    };
+  }
+}
+
 class HangingPlanner implements LeaderPlanner {
   async plan(
     _message: AgentMessage,
@@ -905,6 +953,36 @@ export default function multiAgentRuntimeTest() {
           message.type === AgentMessageType.TASK_CREATE_UI ||
           message.type === AgentMessageType.ACTION_RUN
       ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('rejects a truly unknown handoff after owned provider execution starts', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new SuccessDataExecutor();
+      const options = runtimeOptions(
+        bus,
+        new PostExecutionHandoffPlanner(),
+        new ControlledWriter()
+      );
+      options.dataExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+
+      const outcome = await runtime.submit('search then hand off', { text: '' }) as
+        MultiAgentSettledOutcome;
+      const errors = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_ERROR
+      );
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(outcome.status).assertEqual('error');
+      expect(outcome.message).assertEqual('Leader cannot hand off after runtime execution has started');
+      expect(executor.calls).assertEqual(1);
+      expect(bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_HANDOFF
+      ).length).assertEqual(0);
+      expect(errors.length).assertEqual(1);
+      expect((errors[0].payload as TaskErrorPayload).code)
+        .assertEqual('LEADER_RUNTIME_OWNERSHIP_VIOLATION');
       runtime.dispose();
     });
 

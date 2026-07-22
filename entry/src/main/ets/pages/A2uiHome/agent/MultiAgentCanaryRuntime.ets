@@ -58,7 +58,6 @@ import {
   authorizeHotelDataTask,
   HotelRuntimeSurfaceWriter,
   HotelSurfaceAuthority,
-  HotelSurfaceCallback,
   HotelVisibility,
   IgnoreHotelSurfaceWriter,
   MonotonicHotelIds,
@@ -81,6 +80,7 @@ import {
 
 const MEMORY_ACTION_ID: string = 'memory.update';
 const MEMORY_SUMMARY_LIMIT: number = 240;
+const TURN_HOST_GENERATION_LIMIT: number = 32;
 
 interface CalendarReviewOutput {
   surfaceId: string;
@@ -108,7 +108,7 @@ export interface MultiAgentCanaryOptions {
   currentPageSnapshot?: () => RegisteredPageSnapshot | null;
   currentHostSurface?: () => A2uiSurfaceState | null;
   currentHostGeneration?: () => number;
-  onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => void;
+  onSurface: (surface: A2uiSurfaceState, runtimeGeneration: number) => boolean;
   onMemoryUpdate: (update: PersonaMemoryUpdateRequest, runtimeGeneration: number) => void;
   downstreamWriter?: UiSurfaceWriter;
   uiLayoutPlanner?: UiLayoutPlanner;
@@ -573,8 +573,8 @@ export class MultiAgentCanaryRuntime {
   private readonly currentPageSnapshot: () => RegisteredPageSnapshot | null;
   private readonly currentHostSurface: () => A2uiSurfaceState | null;
   private readonly currentHostGeneration: () => number;
-  private readonly hostGenerations: Map<number, number> = new Map<number, number>();
   private readonly turnHostGenerations: Map<string, number> = new Map<string, number>();
+  private readonly turnHostGenerationOrder: string[] = [];
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
   private surfaceGeneration: number = 0;
@@ -600,18 +600,18 @@ export class MultiAgentCanaryRuntime {
     const followUpIds = new PreparedHotelFollowUpIds(ids);
     this.authority = new HotelSurfaceAuthority();
     const visibility = new HotelVisibility();
-    const onOwnedSurface = (surface: A2uiSurfaceState, generation?: number): void => {
-      const internalGeneration = generation === undefined ? 0 : generation;
-      if (internalGeneration <= 0) {
-        return;
-      }
-      const hostGeneration = this.hostGenerations.get(internalGeneration);
+    const onOwnedSurface = (
+      surface: A2uiSurfaceState,
+      _generation: number,
+      turnId: string
+    ): boolean => {
+      const hostGeneration = this.turnHostGenerations.get(turnId);
       if (hostGeneration === undefined || hostGeneration <= 0) {
-        return;
+        return false;
       }
       surface.runtimeOwner = 'multi_agent';
       surface.runtimeGeneration = hostGeneration;
-      options.onSurface(surface, hostGeneration);
+      return options.onSurface(surface, hostGeneration);
     };
     const lookup = new CanaryToolLookup();
     const catalog = new ActionCatalog(
@@ -679,18 +679,11 @@ export class MultiAgentCanaryRuntime {
       actionTimeoutMs: options.actionTimeoutMs,
       settingsFingerprint: options.settingsFingerprint,
       surfaceTurnActivator: (turnId: string, hostGeneration: number): void => {
-        const generation = writer.activateAutomaticTurn(turnId);
-        if (generation > 0) {
-          this.hostGenerations.set(generation, hostGeneration > 0 ? hostGeneration : generation);
-        }
+        this.rememberTurnHostGeneration(turnId, hostGeneration);
+        writer.activateAutomaticTurn(turnId);
       },
       turnGenerationObserver: (turnId: string, hostGeneration: number): void => {
-        let capturedGeneration = hostGeneration;
-        if (!Number.isSafeInteger(capturedGeneration) || capturedGeneration <= 0) {
-          this.surfaceGeneration++;
-          capturedGeneration = this.surfaceGeneration;
-        }
-        this.turnHostGenerations.set(turnId, capturedGeneration);
+        this.rememberTurnHostGeneration(turnId, hostGeneration);
       }
     });
   }
@@ -706,6 +699,9 @@ export class MultiAgentCanaryRuntime {
   }
 
   runAction(action: A2uiAction, context: MultiAgentCanaryActionContext): Promise<boolean> {
+    if (action.id === 'hotel.detail' && !this.currentHotelDetailContext(context)) {
+      return Promise.resolve(false);
+    }
     const execution: ActionExecutionContext = {
       conversationId: context.conversationId,
       turnId: context.turnId,
@@ -803,5 +799,54 @@ export class MultiAgentCanaryRuntime {
     this.pageGeneration = 0;
     this.pageFingerprint = '';
     this.surfaceGeneration = 0;
+    this.turnHostGenerations.clear();
+    this.turnHostGenerationOrder.splice(0, this.turnHostGenerationOrder.length);
+  }
+
+  private currentHotelDetailContext(context: MultiAgentCanaryActionContext): boolean {
+    const snapshot = this.currentPageSnapshot();
+    const currentHost = this.currentHostSurface();
+    const hostGeneration = this.currentHostGeneration();
+    if (snapshot === null || currentHost === null ||
+      !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0 ||
+      !Number.isSafeInteger(snapshot.generation) || snapshot.generation <= 0) {
+      return false;
+    }
+    const surface = snapshot.surface;
+    const exact = currentHost.runtimeOwner === 'multi_agent' &&
+      surface.runtimeOwner === 'multi_agent' &&
+      currentHost.runtimeGeneration === hostGeneration &&
+      surface.runtimeGeneration === hostGeneration &&
+      currentHost.surfaceId === surface.surfaceId &&
+      surface.surfaceId === context.surfaceId &&
+      snapshot.document.surfaceId === surface.surfaceId &&
+      context.sourceToolId === 'hotel.search' &&
+      registeredPageSourceToolId(surface) === context.sourceToolId;
+    return exact;
+  }
+
+  private rememberTurnHostGeneration(turnId: string, hostGeneration: number): void {
+    if (turnId.trim().length === 0) {
+      return;
+    }
+    let capturedGeneration = hostGeneration;
+    if (!Number.isSafeInteger(capturedGeneration) || capturedGeneration <= 0) {
+      const retained = this.turnHostGenerations.get(turnId);
+      if (retained !== undefined && retained > 0) {
+        capturedGeneration = retained;
+      } else {
+        this.surfaceGeneration++;
+        capturedGeneration = this.surfaceGeneration;
+      }
+    }
+    if (!this.turnHostGenerations.has(turnId)) {
+      this.turnHostGenerationOrder.push(turnId);
+    }
+    this.turnHostGenerations.set(turnId, capturedGeneration);
+    while (this.turnHostGenerationOrder.length > TURN_HOST_GENERATION_LIMIT) {
+      const removedTurnId = this.turnHostGenerationOrder[0];
+      this.turnHostGenerationOrder.splice(0, 1);
+      this.turnHostGenerations.delete(removedTurnId);
+    }
   }
 }

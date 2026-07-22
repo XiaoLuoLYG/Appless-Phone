@@ -19,7 +19,6 @@ import {
   HotelSearchResult,
   LocalModel,
   LinkedMessageBus,
-  TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   createSeedA2uiSurface,
@@ -40,7 +39,10 @@ import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegiste
 import { MultiAgentSettledOutcome } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
-import { RegisteredPageSnapshot } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
+import {
+  RegisteredPageSnapshot,
+  registeredPageSourceToolId
+} from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 
 const SEARCH_TEXT: string = '帮我找深圳酒店';
 const SEARCH_INPUT: string = '{"originQuery":"帮我找深圳酒店","place":"深圳",' +
@@ -488,8 +490,9 @@ function canaryOptions(
     model,
     selectedPersonaId: (): string => 'travel_companion',
     opener,
-    onSurface: (surface: A2uiSurfaceState): void => {
+    onSurface: (surface: A2uiSurfaceState): boolean => {
       surfaces.push(surface);
+      return true;
     },
     onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
       updates.push(update);
@@ -567,6 +570,36 @@ function pageSurface(
   }];
   surface.dataModelJson = JSON.stringify(model);
   return surface;
+}
+
+function pageSnapshot(surface: A2uiSurfaceState, generation: number): RegisteredPageSnapshot {
+  return {
+    surface,
+    document: createHtmlHomeDocument({
+      surface,
+      messages: [],
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    }),
+    generation
+  };
+}
+
+function useLastRenderedSurfaceAsHost(
+  options: MultiAgentCanaryOptions,
+  surfaces: A2uiSurfaceState[]
+): void {
+  options.currentPageSnapshot = (): RegisteredPageSnapshot | null => surfaces.length === 0 ?
+    null : pageSnapshot(surfaces[surfaces.length - 1], surfaces.length);
+  options.currentHostSurface = (): A2uiSurfaceState | null => surfaces.length === 0 ?
+    null : surfaces[surfaces.length - 1];
+  options.currentHostGeneration = (): number => {
+    if (surfaces.length === 0) {
+      return 0;
+    }
+    const generation = surfaces[surfaces.length - 1].runtimeGeneration;
+    return generation === undefined ? 0 : generation;
+  };
 }
 
 export default function multiAgentCanaryRuntimeTest() {
@@ -715,43 +748,6 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('fails inside the canary instead of handing off after owned provider execution', 0, async () => {
-      const model = new QueueModel([HOTEL_DECISION, WEATHER_HANDOFF_DECISION]);
-      const executor = new CanaryHotelExecutor();
-      const bus = new TrackingBus();
-      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
-        model,
-        executor,
-        new RecordingOpener(),
-        [],
-        [],
-        bus
-      ));
-
-      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
-      const input = bus.messages.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.INPUT_USER
-      )[0];
-      const errors = bus.messages.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TASK_ERROR &&
-          message.conversationId === input.conversationId &&
-          message.turnId === input.turnId &&
-          message.taskId === input.taskId
-      );
-
-      expect(outcome.kind).assertEqual('settled');
-      expect(outcome.status).assertEqual('error');
-      expect(outcome.message).assertEqual('Legacy handoff requires at least one unmigrated capability');
-      expect(executor.calls.join(',')).assertEqual('hotel.search');
-      expect(model.prompts.length).assertEqual(2);
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
-      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
-      expect(errors.length).assertEqual(1);
-      expect((errors[0].payload as TaskErrorPayload).code)
-        .assertEqual('LEADER_HANDOFF_INVALID');
-      runtime.dispose();
-    });
-
     it('rejects malformed hotel destination date year guests and origin before task publication', 0, async () => {
       const mutations: string[] = [
         SEARCH_INPUT.replace('"place":"深圳"', '"place":""'),
@@ -819,8 +815,9 @@ export default function multiAgentCanaryRuntimeTest() {
       );
       let runtime: MultiAgentCanaryRuntime;
       let newerTurn: Promise<MultiAgentSettledOutcome> | null = null;
-      options.onSurface = (_surface: A2uiSurfaceState, runtimeGeneration: number): void => {
+      options.onSurface = (_surface: A2uiSurfaceState, runtimeGeneration: number): boolean => {
         surfaceGenerations.push(runtimeGeneration);
+        return true;
       };
       options.onMemoryUpdate = (
         _update: PersonaMemoryUpdateRequest,
@@ -906,7 +903,7 @@ export default function multiAgentCanaryRuntimeTest() {
         surfaces,
         []
       );
-      options.onSurface = (surface: A2uiSurfaceState): void => {
+      options.onSurface = (surface: A2uiSurfaceState): boolean => {
         surfaces.push(surface);
         generation++;
         current = {
@@ -919,6 +916,7 @@ export default function multiAgentCanaryRuntimeTest() {
           }),
           generation
         };
+        return true;
       };
       options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
       options.pageAction = async (
@@ -968,7 +966,7 @@ export default function multiAgentCanaryRuntimeTest() {
         surfaces,
         []
       );
-      options.onSurface = (surface: A2uiSurfaceState): void => {
+      options.onSurface = (surface: A2uiSurfaceState): boolean => {
         surfaces.push(surface);
         current = {
           surface,
@@ -980,6 +978,7 @@ export default function multiAgentCanaryRuntimeTest() {
           }),
           generation: 1
         };
+        return true;
       };
       options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
       options.pageAction = async (
@@ -1091,17 +1090,41 @@ export default function multiAgentCanaryRuntimeTest() {
       const opener = new RecordingOpener();
       const bus = new TrackingBus();
       const surfaces: A2uiSurfaceState[] = [];
-      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+      let currentHost: A2uiSurfaceState | null = null;
+      let currentSnapshot: RegisteredPageSnapshot | null = null;
+      let renderGeneration = 0;
+      const options = canaryOptions(
         new QueueModel([HOTEL_DECISION, HOTEL_DONE_DECISION]),
         executor,
         opener,
         surfaces,
         [],
         bus
-      ));
+      );
+      options.onSurface = (
+        surface: A2uiSurfaceState,
+        runtimeGeneration: number
+      ): boolean => {
+        if (currentHost !== null &&
+          (currentHost.runtimeOwner !== 'multi_agent' ||
+            currentHost.runtimeGeneration !== runtimeGeneration)) {
+          return false;
+        }
+        surfaces.push(surface);
+        currentHost = surface;
+        renderGeneration++;
+        currentSnapshot = pageSnapshot(surface, renderGeneration);
+        return true;
+      };
+      options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
+      options.currentHostGeneration = (): number => currentHost === null ||
+        currentHost.runtimeGeneration === undefined ? 0 : currentHost.runtimeGeneration;
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
+      const runtime = new MultiAgentCanaryRuntime(options);
 
       const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
       const searchContext = runtime.currentActionContext();
+      const originalSearchSurfaceId = surfaces[surfaces.length - 1].surfaceId;
       expect(outcome.status).assertEqual('success');
       expect(searchContext?.sourceToolId).assertEqual('hotel.search');
       expect(executor.calls.join(',')).assertEqual('hotel.search');
@@ -1124,6 +1147,8 @@ export default function multiAgentCanaryRuntimeTest() {
       detailPending.then((_ok: boolean): void => {
         detailSettled = true;
       });
+      await flush();
+      expect(executor.calls.join(',')).assertEqual('hotel.search,hotel.detail');
       await executor.detailStarted.promise;
       await flush();
       expect(bus.count(AgentMessageType.TASK_CREATE_UI)).assertEqual(2);
@@ -1139,8 +1164,83 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(await runtime.runAction(booking!, detailContext!)).assertTrue();
       expect(opener.uris[opener.uris.length - 1].indexOf('https://rollinggo.cn/')).assertEqual(0);
 
+      const visibleDetail = surfaces[surfaces.length - 1];
+      const newerHost = pageSurface('hotel.detail', booking!, 202);
+      currentHost = newerHost;
+      currentSnapshot = pageSnapshot(newerHost, renderGeneration + 1);
+      expect(runtime.restoreSearchSurface()).assertFalse();
+      expect(surfaces[surfaces.length - 1].surfaceId).assertEqual(visibleDetail.surfaceId);
+      const legacyHost = pageSurface('hotel.detail', booking!, 101);
+      legacyHost.runtimeOwner = 'legacy';
+      currentHost = legacyHost;
+      currentSnapshot = pageSnapshot(legacyHost, renderGeneration + 2);
+      expect(runtime.restoreSearchSurface()).assertFalse();
+      expect(runtime.currentActionContext()?.sourceToolId).assertEqual('hotel.detail');
+      currentHost = visibleDetail;
+      currentSnapshot = pageSnapshot(visibleDetail, renderGeneration + 3);
       expect(runtime.restoreSearchSurface()).assertTrue();
+      expect(surfaces[surfaces.length - 1].surfaceId).assertEqual(originalSearchSurfaceId);
+      expect(registeredPageSourceToolId(surfaces[surfaces.length - 1])).assertEqual('hotel.search');
       expect(runtime.currentActionContext()?.sourceToolId).assertEqual('hotel.search');
+      runtime.dispose();
+    });
+
+    it('runs hotel detail only for the exact current host search surface', 0, async () => {
+      const executor = new CanaryHotelExecutor();
+      const surfaces: A2uiSurfaceState[] = [];
+      let currentHost: A2uiSurfaceState | null = null;
+      let currentSnapshot: RegisteredPageSnapshot | null = null;
+      let renderGeneration = 0;
+      const options = canaryOptions(
+        new QueueModel([HOTEL_DECISION, HOTEL_DONE_DECISION]),
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.onSurface = (
+        surface: A2uiSurfaceState,
+        runtimeGeneration: number
+      ): boolean => {
+        if (currentHost !== null &&
+          (currentHost.runtimeOwner !== 'multi_agent' ||
+            currentHost.runtimeGeneration !== runtimeGeneration)) {
+          return false;
+        }
+        surfaces.push(surface);
+        currentHost = surface;
+        renderGeneration++;
+        currentSnapshot = pageSnapshot(surface, renderGeneration);
+        return true;
+      };
+      options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
+      options.currentHostGeneration = (): number => currentHost === null ||
+        currentHost.runtimeGeneration === undefined ? 0 : currentHost.runtimeGeneration;
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }, 101) as MultiAgentSettledOutcome;
+      const searchSurface = surfaces[surfaces.length - 1];
+      const searchSnapshot = pageSnapshot(searchSurface, renderGeneration);
+      const context = runtime.currentActionContext();
+      const detail = renderedAction(searchSurface, 'hotel.detail');
+      const newerSurface = pageSurface('hotel.search', detail!, 202);
+      currentHost = newerSurface;
+      currentSnapshot = pageSnapshot(newerSurface, renderGeneration + 1);
+
+      expect(outcome.status).assertEqual('success');
+      expect(await runtime.runAction(detail!, context!)).assertFalse();
+      expect(executor.calls.join(',')).assertEqual('hotel.search');
+      expect(executor.tasks.length).assertEqual(1);
+
+      currentHost = searchSurface;
+      currentSnapshot = searchSnapshot;
+      const detailPending = runtime.runAction(detail!, context!);
+      await executor.detailStarted.promise;
+      expect(executor.calls.join(',')).assertEqual('hotel.search,hotel.detail');
+      expect(executor.tasks.length).assertEqual(2);
+      executor.detailRelease.open();
+      expect(await detailPending).assertTrue();
       runtime.dispose();
     });
 
@@ -1346,7 +1446,7 @@ export default function multiAgentCanaryRuntimeTest() {
       const timeoutExecutor = new CanaryHotelExecutor();
       const timeoutBus = new TrackingBus();
       const timeoutSurfaces: A2uiSurfaceState[] = [];
-      const timeoutRuntime = new MultiAgentCanaryRuntime(canaryOptions(
+      const timeoutOptions = canaryOptions(
         new QueueModel([HOTEL_DECISION, HOTEL_DONE_DECISION]),
         timeoutExecutor,
         new RecordingOpener(),
@@ -1354,7 +1454,9 @@ export default function multiAgentCanaryRuntimeTest() {
         [],
         timeoutBus,
         20
-      ));
+      );
+      useLastRenderedSurfaceAsHost(timeoutOptions, timeoutSurfaces);
+      const timeoutRuntime = new MultiAgentCanaryRuntime(timeoutOptions);
       await timeoutRuntime.submit(SEARCH_TEXT, { text: '' });
       const timeoutDetail = renderedAction(
         timeoutSurfaces[timeoutSurfaces.length - 1],
@@ -1374,14 +1476,16 @@ export default function multiAgentCanaryRuntimeTest() {
       const cancelExecutor = new CanaryHotelExecutor();
       const cancelBus = new TrackingBus();
       const cancelSurfaces: A2uiSurfaceState[] = [];
-      const cancelRuntime = new MultiAgentCanaryRuntime(canaryOptions(
+      const cancelOptions = canaryOptions(
         new QueueModel([HOTEL_DECISION, HOTEL_DONE_DECISION]),
         cancelExecutor,
         new RecordingOpener(),
         cancelSurfaces,
         [],
         cancelBus
-      ));
+      );
+      useLastRenderedSurfaceAsHost(cancelOptions, cancelSurfaces);
+      const cancelRuntime = new MultiAgentCanaryRuntime(cancelOptions);
       await cancelRuntime.submit(SEARCH_TEXT, { text: '' });
       const cancelDetail = renderedAction(
         cancelSurfaces[cancelSurfaces.length - 1],

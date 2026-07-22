@@ -428,7 +428,7 @@ function canary(
       const generation = snapshot === null ? undefined : snapshot.surface.runtimeGeneration;
       return generation === undefined ? 0 : generation;
     } : currentHostGeneration,
-    onSurface: (_surface: A2uiSurfaceState): void => {},
+    onSurface: (_surface: A2uiSurfaceState): boolean => true,
     onMemoryUpdate: (): void => {},
     dataExecutor: new RejectDataExecutor(),
     currentLocalDate: (): string => '2026-07-22',
