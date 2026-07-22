@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: host implementation and gates PASS; the reviewer withdrew the prior approval for one Important follow-up parser mismatch, now corrected, and re-review is pending. No device or provider PASS is claimed.
+Status: host implementation and gates PASS; stable same-reviewer re-review APPROVED with zero Critical, Important, or Minor findings. No device or provider PASS is claimed.
 
 Implementation commits:
 
@@ -58,9 +58,9 @@ Second-review RED cases additionally cover missing F12 dependency options in the
 - Authoritative Hypium: `Tests run: 1089, Failure: 0, Error: 0, Pass: 1089, Ignore: 0`.
 - `git diff --check`: PASS.
 - Generated `agent_core/BuildProfile.ets`: restored to `debug` and absent from the final diff.
-- Same-reviewer verdict: prior approval withdrawn for one Important caller mismatch; corrective re-review pending.
+- Same-reviewer verdict: stable APPROVE, 0 Critical / 0 Important / 0 Minor, after closing the withdrawn-approval caller mismatch.
 
-Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:52:20+0800` has zero failures and errors.
+Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:54:39+0800` has zero failures and errors.
 
 ## Matrix and scope
 
