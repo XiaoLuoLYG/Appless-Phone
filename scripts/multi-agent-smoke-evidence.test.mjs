@@ -710,7 +710,7 @@ test('correlates an exact mail read action through one Data and in-place Ui term
     [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1
     [AIPhone][MultiAgentDataTask] conversation=c1 turn=read-turn task=data1 round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false provider=qq identity=qq-identity-1
     [AIPhone][MultiAgentActionResult] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 status=success
-    [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false provider=qq identity=qq-identity-1
     [AIPhone][MailDetailInPlace] requestKeyChars=20 provider=qq identity=qq-identity-1 status=success bodyChars=8
     [AIPhone][MultiAgentUiResult] conversation=c1 turn=read-turn task=ui1 surface=loop_surface_1 state=result
   `;
@@ -741,6 +741,25 @@ test('correlates an exact mail read action through one Data and in-place Ui term
       currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
     }
   ).complete, false);
+
+  assert.equal(mailThreadReadEvidence(
+    logs.replace(
+      'status=success sources=1 error=false provider=qq identity=qq-identity-1',
+      'status=success sources=1 error=false provider=gmail identity=wrong-identity'
+    ),
+    {
+      expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+      currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+    }
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs.replace(' provider=qq identity=qq-identity-1\n    [AIPhone][MailDetailInPlace]',
+      '\n    [AIPhone][MailDetailInPlace]'),
+    {
+      expectedActionId: 'mail.thread.read', expectedSourceToolId: 'mail.search',
+      currentSurfaceId: 's1', expectedConversationId: 'c1', expectedTurnId: 'page-turn-1'
+    }
+  ).complete, false);
   assert.equal(mailThreadReadEvidence(
     logs.replace('surface=s1 plan=p1', 'surface=stale plan=p1'),
     {
@@ -752,7 +771,8 @@ test('correlates an exact mail read action through one Data and in-place Ui term
   const interleaved = logs.replace(
     '[AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1',
     '[AIPhone][MultiAgentUiTask] conversation=c1 turn=noise-turn task=noise-ui dataTasks=noise-data\n' +
-      '    [AIPhone][MultiAgentDataTask] conversation=c1 turn=noise-turn task=noise-data round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false\n' +
+      '    [AIPhone][MultiAgentDataTask] conversation=c1 turn=noise-turn task=noise-data round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false provider=gmail identity=noise-identity\n' +
+      '    [AIPhone][MultiAgentDataResult] conversation=c1 turn=noise-turn task=noise-data tool=mail.thread.read status=success sources=1 error=false provider=gmail identity=noise-identity\n' +
       '    [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1'
   );
   assert.equal(mailThreadReadEvidence(interleaved, {

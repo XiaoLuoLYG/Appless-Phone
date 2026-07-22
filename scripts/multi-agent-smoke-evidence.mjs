@@ -682,7 +682,9 @@ export function mailThreadReadEvidence(logText, options = {}) {
   if (dataTerminals.length !== 1) return failed('missing_or_duplicate_data_terminal');
   const dataTerminal = dataTerminals[0];
   if (dataTerminal.marker === 'MultiAgentDataResult' &&
-    dataTerminal.fields.tool !== dataTask.fields.tool) return failed('mismatched_data_terminal');
+    (dataTerminal.fields.tool !== dataTask.fields.tool ||
+      dataTerminal.fields.provider !== run.fields.provider ||
+      dataTerminal.fields.identity !== run.fields.identity)) return failed('mismatched_data_terminal');
   const uiTerminals = all.filter((item) => item.index > uiTask.index &&
     item.fields.conversation === action.conversationId && item.fields.turn === uiTask.fields.turn &&
     item.fields.task === uiTask.fields.task &&

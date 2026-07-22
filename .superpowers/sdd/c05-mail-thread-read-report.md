@@ -101,3 +101,34 @@ Fresh follow-up GREEN evidence:
 - Smoke syntax and `git diff --check` pass.
 
 The existing coverage reporter still emits `00507008 getInitCoverageData failed`; the authoritative result above is the fresh `test_result.txt`. A failed-run coverage log and both pre-existing untracked `.smoke` directories were preserved in place and were not staged, deleted, or moved. Fresh final-device C05 verification remains owned by the parent migration task and must use the combined final HAP.
+
+## Third RED / GREEN after second independent review
+
+The second independent review found two remaining acceptance gaps. The correction remains limited to the existing C05 body event and smoke evidence; it does not change the UI, copy, action deadline, tools, confirmation policy, or provider behavior.
+
+RED evidence:
+
+- A deferred calendar-suggestion promise reproduced the body being held behind optional model work. The new test requires the registered mail action to settle successfully while that promise is still unresolved.
+- A forged trace with the exact Action/Data task identity but a `gmail/wrong` DataResult followed by a plausible `qq/good` in-place event was accepted by the old evidence parser.
+- Missing DataResult identity and interleaved unrelated mail task/result traces were added as explicit negative/positive correlation fixtures.
+
+GREEN implementation:
+
+1. The existing `MailDetailUiEvent` is emitted with the real body while the original write lease is active. Optional calendar extraction is then detached from the action lifecycle and cannot consume the unchanged 15-second action deadline.
+2. A completed suggestion is written through the same existing `mailDetailEventJson` UI event with the same detail. It does not call the mail provider again and does not publish another action.
+3. Async enrichment is authorized by the exact mail request epoch, captured surface ID, runtime owner, and runtime generation. A newer mail request, a new surface, a new runtime turn, or runtime disposal invalidates it before any late suggestion/cache write.
+4. Suggestion rejection leaves the already-visible body intact and does not turn the registered action into an error.
+5. `mailThreadReadEvidence` now requires the exact `MultiAgentDataResult` provider and identity digest to match the ActionRun, DataTask, and in-place terminal; missing or mismatched identity fails closed.
+
+Fresh third-round evidence:
+
+- Authoritative Hypium: `Tests run: 1150, Failure: 0, Error: 0, Pass: 1150, Ignore: 0`.
+- `test_result.txt` timestamp: `2026-07-23T02:08:04+0800`.
+- `test_result.txt` SHA-256: `7df8cd497d697e7e7d265577951cf7222dcba8b9f623ffec008ac9a010c1d53d`.
+- Multi-agent and mail evidence tests: `39/39` pass.
+- Backend verifier/HAR: `255` checks pass; HAR build succeeds.
+- Hotel evidence regression: `16/16` pass.
+- Capability audit remains 44 registry tools, 2 runtime tools, 37 actions, and 69 capabilities with all missing/registry-only/model-only/excluded arrays empty.
+- Smoke syntax and `git diff --check` pass.
+
+The coverage reporter's existing `00507008` JSON parsing noise remains separate from the authoritative `test_result.txt`. The two pre-existing untracked `.smoke` directories remain untouched and unstaged.

@@ -119,6 +119,10 @@ import {
   MultiAgentCanaryRuntime
 } from './agent/MultiAgentCanaryRuntime';
 import {
+  MailDetailUiEvent,
+  publishMailDetailThenSuggest
+} from './agent/MailDetailInPlaceUpdater';
+import {
   MultiAgentSettledOutcome,
   MultiAgentTurnOutcome
 } from './agent/MultiAgentRuntimeTypes';
@@ -297,15 +301,6 @@ interface HtmlDynamicCredentialPayload {
   credentialValue?: HtmlActionValue;
   toolId?: HtmlActionValue;
   prompt?: HtmlActionValue;
-}
-
-interface MailDetailUiEvent {
-  sequence: number;
-  requestKey: string;
-  status: string;
-  detail?: MailDetail;
-  calendarSuggestion?: MailCalendarSuggestion;
-  error: string;
 }
 
 interface MailCalendarUiEvent {
@@ -611,6 +606,7 @@ struct Index {
   private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
   private hotelAgentRuntimeFingerprint: string = '';
   private runtimeGeneration: number = 0;
+  private mailDetailSuggestionEpoch: number = 0;
   private activeRuntimeOwner: RuntimeOwner = 'legacy';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
@@ -1276,42 +1272,29 @@ struct Index {
         generation: number,
         lease: MailDetailWriteLease
       ): Promise<void> => {
-        if (!lease.isActive() || !runtimeCallbackIsCurrent(
-          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
-        )) {
-          throw new Error('Mail detail surface is stale.');
-        }
-        let event: MailDetailUiEvent;
-        if (result.status === 'success' && result.detail !== undefined) {
-          const suggestion = await this.extractMailCalendarSuggestion(result.detail);
-          if (!lease.isActive() || !runtimeCallbackIsCurrent(
-            this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
-          )) {
-            throw new Error('Mail detail surface is stale.');
+        const suggestionEpoch = ++this.mailDetailSuggestionEpoch;
+        const surfaceId = this.currentSurface.surfaceId;
+        const enrichmentIsCurrent = (): boolean =>
+          this.mailDetailSuggestionEpoch === suggestionEpoch &&
+            this.currentSurface.surfaceId === surfaceId &&
+            runtimeCallbackIsCurrent(
+              this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
+            );
+        await publishMailDetailThenSuggest(result, {
+          initialIsCurrent: (): boolean => lease.isActive() && enrichmentIsCurrent(),
+          enrichmentIsCurrent,
+          writeEvent: (event: MailDetailUiEvent): void => {
+            this.mailDetailEventJson = JSON.stringify(event);
+          },
+          saveSuggestion: (requestKey: string, suggestion: MailCalendarSuggestion): void => {
+            this.mailCalendarSuggestions[requestKey] = suggestion;
+          },
+          suggest: (detail: MailDetail): Promise<MailCalendarSuggestion> =>
+            this.extractMailCalendarSuggestion(detail),
+          onSuggestionError: (message: string): void => {
+            aiLogError('[AIPhone][MailCalendarSuggestionFailed] ' + message.substring(0, 240));
           }
-          this.mailCalendarSuggestions[result.requestKey] = suggestion;
-          event = {
-            sequence: Date.now(),
-            requestKey: result.requestKey,
-            status: 'success',
-            detail: result.detail,
-            calendarSuggestion: suggestion,
-            error: ''
-          };
-        } else {
-          event = {
-            sequence: Date.now(),
-            requestKey: result.requestKey,
-            status: 'error',
-            error: result.error
-          };
-        }
-        if (!lease.isActive() || !runtimeCallbackIsCurrent(
-          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
-        )) {
-          throw new Error('Mail detail surface is stale.');
-        }
-        this.mailDetailEventJson = JSON.stringify(event);
+        });
         const bodyChars = result.detail === undefined ? 0 :
           (result.detail.bodyText.length > 0 ? result.detail.bodyText.length : result.detail.bodyHtml.length);
         aiLogInfo('[AIPhone][MailDetailInPlace] requestKeyChars=' + result.requestKey.length.toString() +
@@ -1342,6 +1325,7 @@ struct Index {
   }
 
   private disposeHotelRuntime(): void {
+    this.mailDetailSuggestionEpoch++;
     if (this.multiAgentRuntime !== null) {
       this.multiAgentRuntime.dispose();
       this.multiAgentRuntime = null;
@@ -1418,6 +1402,7 @@ struct Index {
   }
 
   private beginRuntimeTurn(owner: RuntimeOwner): number {
+    this.mailDetailSuggestionEpoch++;
     this.runtimeGeneration++;
     this.activeRuntimeOwner = owner;
     return this.runtimeGeneration;

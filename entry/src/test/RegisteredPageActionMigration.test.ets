@@ -12,6 +12,7 @@ import {
   DataResult,
   DataTaskExecutor,
   DynamicGenericToolResult,
+  MailCalendarSuggestion,
   LocalModel,
   LinkedMessageBus,
   createSeedA2uiSurface,
@@ -23,6 +24,10 @@ import {
   MailDetailInPlaceEvent,
   MailDetailWriteLease
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
+import {
+  MailDetailUiEvent,
+  publishMailDetailThenSuggest
+} from '../main/ets/pages/A2uiHome/agent/MailDetailInPlaceUpdater';
 import {
   RegisteredPageAction,
   RegisteredPageActionContext,
@@ -621,6 +626,26 @@ function qqMailReadFixture(sequence: number = 1): QqMailReadFixture {
   return fixture;
 }
 
+function mailCalendarSuggestion(requestKey: string = 'qq:101'): MailCalendarSuggestion {
+  return {
+    requestKey,
+    provider: 'qq',
+    threadId: '',
+    messageId: '101',
+    isWorkRelated: true,
+    hasMeeting: true,
+    title: '项目同步',
+    start: '2026-07-24T10:00:00+08:00',
+    end: '2026-07-24T10:30:00+08:00',
+    displayTime: '明天 10:00',
+    timezone: 'Asia/Shanghai',
+    location: '',
+    description: '项目同步',
+    confidence: 'high',
+    reason: '正文包含明确会议时间。'
+  };
+}
+
 export default function registeredPageActionMigrationTest() {
   describe('registeredPageActionMigration', () => {
     it('routes exact current QQ and Gmail body reads through Action and Data agents in place', 0, async () => {
@@ -722,6 +747,105 @@ export default function registeredPageActionMigrationTest() {
           message.type === AgentMessageType.TASK_RESULT_DATA
         ).length).assertEqual(1);
         runtime.dispose();
+      }
+    });
+
+    it('settles the mail body before a deferred calendar suggestion and enriches later without another provider or action', 0, async () => {
+      const fixture = qqMailReadFixture();
+      const executor = new ImmediateMailReadExecutor();
+      const bus = new TrackingBus();
+      const suggestion = new DeferredValue<MailCalendarSuggestion>();
+      const events: MailDetailUiEvent[] = [];
+      let current = true;
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current,
+        bus,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        executor,
+        async (
+          event: MailDetailInPlaceEvent,
+          _generation: number,
+          lease: MailDetailWriteLease
+        ): Promise<void> => publishMailDetailThenSuggest(event, {
+          initialIsCurrent: (): boolean => current && lease.isActive(),
+          enrichmentIsCurrent: (): boolean => current,
+          writeEvent: (next: MailDetailUiEvent): void => { events.push(next); },
+          saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
+          suggest: (_detail): Promise<MailCalendarSuggestion> => suggestion.promise
+        }),
+        20
+      );
+
+      expect(await runtime.runPageAction(fixture.clicked)).assertTrue();
+      expect(events.length).assertEqual(1);
+      expect(events[0].detail?.bodyText).assertEqual('真实邮件正文');
+      expect(events[0].calendarSuggestion === undefined).assertTrue();
+      expect(executor.calls).assertEqual(1);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_RUN
+      ).length).assertEqual(1);
+
+      suggestion.resolve(mailCalendarSuggestion());
+      await pause(5);
+      expect(events.length).assertEqual(2);
+      expect(events[1].detail?.bodyText).assertEqual('真实邮件正文');
+      expect(events[1].calendarSuggestion?.title).assertEqual('项目同步');
+      expect(executor.calls).assertEqual(1);
+      expect(bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_RUN
+      ).length).assertEqual(1);
+      current = false;
+      runtime.dispose();
+    });
+
+    it('keeps one body event when calendar suggestion rejects or becomes stale', 0, async () => {
+      const detailEvent: MailDetailInPlaceEvent = {
+        requestKey: 'qq:101',
+        provider: 'qq',
+        identityDigest: 'identity-101',
+        status: 'success',
+        detail: {
+          requestKey: 'qq:101', provider: 'qq', threadId: '', messageId: '101',
+          internetMessageId: '', subject: 'QA', from: 'sender@example.com',
+          replyTo: 'sender@example.com', to: ['qa@example.com'], cc: [],
+          bodyText: '真实邮件正文', bodyHtml: '<p>真实邮件正文</p>'
+        },
+        error: ''
+      };
+      const rejected: MailDetailUiEvent[] = [];
+      await publishMailDetailThenSuggest(detailEvent, {
+        initialIsCurrent: (): boolean => true,
+        enrichmentIsCurrent: (): boolean => true,
+        writeEvent: (event: MailDetailUiEvent): void => { rejected.push(event); },
+        saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
+        suggest: (_detail): Promise<MailCalendarSuggestion> => Promise.reject(new Error('suggestion timeout'))
+      });
+      await pause(5);
+      expect(rejected.length).assertEqual(1);
+      expect(rejected[0].detail?.bodyText).assertEqual('真实邮件正文');
+
+      const staleModes: string[] = ['new_surface', 'new_generation', 'dispose'];
+      for (let index = 0; index < staleModes.length; index++) {
+        const deferred = new DeferredValue<MailCalendarSuggestion>();
+        const events: MailDetailUiEvent[] = [];
+        let current = true;
+        await publishMailDetailThenSuggest(detailEvent, {
+          initialIsCurrent: (): boolean => current,
+          enrichmentIsCurrent: (): boolean => current,
+          writeEvent: (event: MailDetailUiEvent): void => { events.push(event); },
+          saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
+          suggest: (_detail): Promise<MailCalendarSuggestion> => deferred.promise
+        });
+        current = false;
+        deferred.resolve(mailCalendarSuggestion());
+        await pause(5);
+        expect(events.length).assertEqual(1);
+        expect(events[0].detail?.bodyText).assertEqual('真实邮件正文');
       }
     });
 
