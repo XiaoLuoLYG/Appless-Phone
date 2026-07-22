@@ -1282,6 +1282,7 @@ struct Index {
       currentHostSurface: (): A2uiSurfaceState | null => this.surfaceSnapshot(this.currentSurface),
       currentHostGeneration: (): number => this.runtimeGeneration,
       currentLocalDate: (): string => this.currentLocalDate(),
+      submitTimeoutMs: 45000,
       settingsFingerprint: fingerprint
     };
     if (provider.isConfigured()) {

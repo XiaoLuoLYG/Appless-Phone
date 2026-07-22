@@ -501,6 +501,9 @@ function runHarBuild() {
 
 function verifySourceContracts() {
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  const canaryOptionsStart = a2uiHome.indexOf('const options: MultiAgentCanaryOptions = {');
+  const canaryOptions = canaryOptionsStart < 0 ? '' :
+    a2uiHome.slice(canaryOptionsStart, a2uiHome.indexOf('\n    };', canaryOptionsStart));
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
@@ -609,6 +612,10 @@ function verifySourceContracts() {
     a2uiHome,
     "this.openExternalUrl(uri, ['petalmaps'])",
     'hotel opener only authorizes Petal Maps for navigation'
+  );
+  assert(
+    /\bsubmitTimeoutMs:\s*45000\b/.test(canaryOptions),
+    'production multi-agent turn deadline is 45000 ms'
   );
   assert(!a2uiHome.includes("this.openExternalUrl(uri, ['tel'"), 'hotel opener does not authorize dialer schemes');
   assert(

@@ -1157,6 +1157,51 @@ export default function multiAgentRuntimeTest() {
       runtime.dispose();
     });
 
+    it('completes final UI after the old proportional deadline but before the configured deadline', 1000, async () => {
+      const oldProportionalDeadlineMs: number = 80;
+      const configuredDeadlineMs: number = 120;
+      const bus = new CountingBus();
+      const writer = new ControlledWriter();
+      writer.blockResult = true;
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HotelRoundPlanner(),
+        writer,
+        configuredDeadlineMs
+      ));
+      let resolved: boolean = false;
+      const pending = runtime.submit('bounded delayed UI', { text: '' });
+      pending.then((): void => {
+        resolved = true;
+      });
+
+      await writer.resultStarted.promise;
+      await new Promise<void>((resolve: () => void) =>
+        setTimeout(resolve, oldProportionalDeadlineMs + 5));
+      expect(resolved).assertFalse();
+      writer.release();
+      const result = await pending as MultiAgentSettledOutcome;
+      const correlated = bus.published.filter((message: AgentMessage): boolean =>
+        message.turnId === (bus.input as AgentMessage).turnId
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.surfaceId).assertEqual(writer.resultSurfaceId);
+      expect(correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA
+      ).length).assertEqual(1);
+      expect(correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_UI
+      ).length).assertEqual(1);
+      expect(correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_CANCEL
+      ).length).assertEqual(0);
+      expect(correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_RESULT
+      ).length).assertEqual(1);
+      runtime.dispose();
+    });
+
     it('renders two dependent Data rounds with one skeleton one final surface and one TurnResult', 0, async () => {
       const bus = new CountingBus();
       const renderer = new RecordingRenderer();
@@ -1603,6 +1648,47 @@ export default function multiAgentRuntimeTest() {
 
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('exact answer');
+      runtime.dispose();
+    });
+
+    it('rejects a final UI writer released after the fixed turn deadline', 1000, async () => {
+      const bus = new CountingBus();
+      const writer = new ControlledWriter();
+      writer.blockResult = true;
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HotelRoundPlanner(),
+        writer,
+        30
+      ));
+      const pending = runtime.submit('late final UI', { text: '' });
+
+      await writer.resultStarted.promise;
+      const result = await pending as MultiAgentSettledOutcome;
+      writer.release();
+      await settle();
+      const input = bus.input as AgentMessage;
+      const correlated = bus.published.filter((message: AgentMessage): boolean =>
+        message.turnId === input.turnId
+      );
+      const terminals = correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_RESULT
+      );
+      const finalUiResults = correlated.filter((message: AgentMessage): boolean => {
+        if (message.type !== AgentMessageType.TASK_RESULT_UI) {
+          return false;
+        }
+        return (message.payload as UiRenderResultPayload).state === 'result';
+      });
+
+      expect(result.status).assertEqual('error');
+      expect(writer.resultSurfaceId).assertEqual('');
+      expect(finalUiResults.length).assertEqual(0);
+      expect(correlated.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TURN_CANCEL
+      ).length).assertEqual(1);
+      expect(terminals.length).assertEqual(1);
+      expect((terminals[0].payload as TurnResultPayload).status).assertEqual('error');
       runtime.dispose();
     });
 
