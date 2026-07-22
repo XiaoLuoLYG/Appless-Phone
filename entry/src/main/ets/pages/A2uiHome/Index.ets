@@ -119,6 +119,7 @@ import {
   MultiAgentCanaryRuntime
 } from './agent/MultiAgentCanaryRuntime';
 import {
+  MailDetailSuggestionGuard,
   MailDetailUiEvent,
   publishMailDetailThenSuggest
 } from './agent/MailDetailInPlaceUpdater';
@@ -606,7 +607,8 @@ struct Index {
   private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
   private hotelAgentRuntimeFingerprint: string = '';
   private runtimeGeneration: number = 0;
-  private mailDetailSuggestionEpoch: number = 0;
+  private readonly mailDetailSuggestionGuard: MailDetailSuggestionGuard =
+    new MailDetailSuggestionGuard();
   private activeRuntimeOwner: RuntimeOwner = 'legacy';
   @State luckinInlinePatchJson: string = '';
   @State luckinInlinePatchTick: number = 0;
@@ -1272,10 +1274,10 @@ struct Index {
         generation: number,
         lease: MailDetailWriteLease
       ): Promise<void> => {
-        const suggestionEpoch = ++this.mailDetailSuggestionEpoch;
+        const suggestionToken = this.mailDetailSuggestionGuard.beginDetail();
         const surfaceId = this.currentSurface.surfaceId;
         const enrichmentIsCurrent = (): boolean =>
-          this.mailDetailSuggestionEpoch === suggestionEpoch &&
+          this.mailDetailSuggestionGuard.isCurrent(suggestionToken) &&
             this.currentSurface.surfaceId === surfaceId &&
             runtimeCallbackIsCurrent(
               this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', generation
@@ -1325,7 +1327,7 @@ struct Index {
   }
 
   private disposeHotelRuntime(): void {
-    this.mailDetailSuggestionEpoch++;
+    this.mailDetailSuggestionGuard.invalidate();
     if (this.multiAgentRuntime !== null) {
       this.multiAgentRuntime.dispose();
       this.multiAgentRuntime = null;
@@ -1402,7 +1404,7 @@ struct Index {
   }
 
   private beginRuntimeTurn(owner: RuntimeOwner): number {
-    this.mailDetailSuggestionEpoch++;
+    this.mailDetailSuggestionGuard.invalidate();
     this.runtimeGeneration++;
     this.activeRuntimeOwner = owner;
     return this.runtimeGeneration;
@@ -4014,6 +4016,7 @@ struct Index {
   }
 
   private async sendAction(action: A2uiAction): Promise<void> {
+    this.mailDetailSuggestionGuard.invalidateForPageAction(action.id);
     if (this.isLuckinPaymentActionId(action.id)) {
       this.logLuckinPaymentAction(action, 'received');
     }

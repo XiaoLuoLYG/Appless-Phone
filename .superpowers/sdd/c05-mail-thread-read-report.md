@@ -132,3 +132,33 @@ Fresh third-round evidence:
 - Smoke syntax and `git diff --check` pass.
 
 The coverage reporter's existing `00507008` JSON parsing noise remains separate from the authoritative `test_result.txt`. The two pre-existing untracked `.smoke` directories remain untouched and unstaged.
+
+## Fourth RED / GREEN after third independent review
+
+The third independent review found one final ordering gap: a second `html_mail_detail_read` attempt invalidated the first request's optional suggestion only when the second body callback arrived. If the second provider stayed pending or the second action was rejected before runtime execution, the first suggestion could still arrive late.
+
+RED integration evidence covered both cases while preserving the already-rendered first body:
+
+- A body visible with a deferred suggestion, followed by B entering a provider-pending read; releasing A's suggestion must not emit an enrichment event.
+- A body visible with a deferred suggestion, followed by a stale/mutated B rejected before Data execution; releasing A's suggestion must not emit an enrichment event.
+- The normal single-mail path still emits the initial body and the later existing calendar-suggestion enrichment.
+
+GREEN implementation:
+
+- `MailDetailSuggestionGuard` owns the page-local request epoch.
+- `sendAction` invalidates the guard for the exact `html_mail_detail_read` ID before busy, policy, snapshot, or runtime checks. Accepted, pending, stale, mutated, and pre-runtime-rejected attempts therefore share the same start boundary.
+- Invalidation changes only the optional suggestion token. It does not clear or rewrite the existing body event, add a provider call, publish an action, or alter the 15-second deadline.
+- New runtime turns and runtime disposal continue to invalidate the same guard; normal body callbacks begin a new exact token.
+
+Fresh fourth-round evidence:
+
+- Authoritative Hypium: `Tests run: 1152, Failure: 0, Error: 0, Pass: 1152, Ignore: 0`.
+- `test_result.txt` timestamp: `2026-07-23T02:14:53+0800`.
+- `test_result.txt` SHA-256: `3d1ab2e1d1d4f320f7458c8156f125be7ed7358ed3b9fdddb31a0cf5579d6710`.
+- Multi-agent and mail evidence tests: `39/39` pass.
+- Backend verifier/HAR: `255` checks pass; HAR build succeeds.
+- Hotel evidence regression: `16/16` pass.
+- Capability audit remains 44 registry tools, 2 runtime tools, 37 actions, and 69 capabilities with all missing/registry-only/model-only/excluded arrays empty.
+- Smoke syntax and `git diff --check` pass.
+
+No `.smoke` directory or other retained evidence was changed, staged, deleted, or moved.

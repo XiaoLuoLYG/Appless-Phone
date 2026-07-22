@@ -19,6 +19,29 @@ export interface MailDetailSuggestionCallbacks {
   onSuggestionError?: (message: string) => void;
 }
 
+export class MailDetailSuggestionGuard {
+  private epoch: number = 0;
+
+  beginDetail(): number {
+    this.epoch++;
+    return this.epoch;
+  }
+
+  invalidateForPageAction(actionId: string): void {
+    if (actionId === 'html_mail_detail_read') {
+      this.invalidate();
+    }
+  }
+
+  invalidate(): void {
+    this.epoch++;
+  }
+
+  isCurrent(token: number): boolean {
+    return Number.isSafeInteger(token) && token > 0 && token === this.epoch;
+  }
+}
+
 function successEvent(
   result: MailDetailInPlaceEvent,
   detail: MailDetail,

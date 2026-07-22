@@ -25,6 +25,7 @@ import {
   MailDetailWriteLease
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import {
+  MailDetailSuggestionGuard,
   MailDetailUiEvent,
   publishMailDetailThenSuggest
 } from '../main/ets/pages/A2uiHome/agent/MailDetailInPlaceUpdater';
@@ -756,7 +757,8 @@ export default function registeredPageActionMigrationTest() {
       const bus = new TrackingBus();
       const suggestion = new DeferredValue<MailCalendarSuggestion>();
       const events: MailDetailUiEvent[] = [];
-      let current = true;
+      const guard = new MailDetailSuggestionGuard();
+      const suggestionToken = guard.beginDetail();
       const runtime = canary(
         new QueueModel([]),
         new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
@@ -772,8 +774,8 @@ export default function registeredPageActionMigrationTest() {
           _generation: number,
           lease: MailDetailWriteLease
         ): Promise<void> => publishMailDetailThenSuggest(event, {
-          initialIsCurrent: (): boolean => current && lease.isActive(),
-          enrichmentIsCurrent: (): boolean => current,
+          initialIsCurrent: (): boolean => guard.isCurrent(suggestionToken) && lease.isActive(),
+          enrichmentIsCurrent: (): boolean => guard.isCurrent(suggestionToken),
           writeEvent: (next: MailDetailUiEvent): void => { events.push(next); },
           saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
           suggest: (_detail): Promise<MailCalendarSuggestion> => suggestion.promise
@@ -799,7 +801,99 @@ export default function registeredPageActionMigrationTest() {
       expect(bus.messages.filter((message: AgentMessage): boolean =>
         message.type === AgentMessageType.ACTION_RUN
       ).length).assertEqual(1);
-      current = false;
+      guard.invalidate();
+      runtime.dispose();
+    });
+
+    it('invalidates the previous suggestion when the next mail read starts but its provider remains pending', 0, async () => {
+      const detailEvent: MailDetailInPlaceEvent = {
+        requestKey: 'qq:101', provider: 'qq', identityDigest: 'identity-101',
+        status: 'success',
+        detail: {
+          requestKey: 'qq:101', provider: 'qq', threadId: '', messageId: '101',
+          internetMessageId: '', subject: 'A', from: 'sender@example.com',
+          replyTo: 'sender@example.com', to: ['qa@example.com'], cc: [],
+          bodyText: 'A 的真实邮件正文', bodyHtml: '<p>A 的真实邮件正文</p>'
+        },
+        error: ''
+      };
+      const guard = new MailDetailSuggestionGuard();
+      const token = guard.beginDetail();
+      const suggestion = new DeferredValue<MailCalendarSuggestion>();
+      const events: MailDetailUiEvent[] = [];
+      await publishMailDetailThenSuggest(detailEvent, {
+        initialIsCurrent: (): boolean => guard.isCurrent(token),
+        enrichmentIsCurrent: (): boolean => guard.isCurrent(token),
+        writeEvent: (event: MailDetailUiEvent): void => { events.push(event); },
+        saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
+        suggest: (_detail): Promise<MailCalendarSuggestion> => suggestion.promise
+      });
+
+      const fixture = qqMailReadFixture(2);
+      const blockedProvider = new DeferredMailReadExecutor();
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current,
+        undefined,
+        undefined,
+        new RecordingOpener(),
+        undefined,
+        undefined,
+        blockedProvider,
+        async (_event: MailDetailInPlaceEvent): Promise<void> => {},
+        1000
+      );
+      guard.invalidateForPageAction(fixture.clicked.id);
+      const pending = runtime.runPageAction(fixture.clicked);
+      await waitForMailCalls(blockedProvider, 1);
+      suggestion.resolve(mailCalendarSuggestion('qq:101'));
+      await pause(5);
+      expect(events.length).assertEqual(1);
+      expect(events[0].detail?.bodyText).assertEqual('A 的真实邮件正文');
+      runtime.cancelActiveTurn('blocked_provider_test_done');
+      expect(await pending).assertFalse();
+      runtime.dispose();
+    });
+
+    it('invalidates the previous suggestion even when the next mail read is rejected before runtime execution', 0, async () => {
+      const detailEvent: MailDetailInPlaceEvent = {
+        requestKey: 'qq:101', provider: 'qq', identityDigest: 'identity-101',
+        status: 'success',
+        detail: {
+          requestKey: 'qq:101', provider: 'qq', threadId: '', messageId: '101',
+          internetMessageId: '', subject: 'A', from: 'sender@example.com',
+          replyTo: 'sender@example.com', to: ['qa@example.com'], cc: [],
+          bodyText: 'A 的真实邮件正文', bodyHtml: '<p>A 的真实邮件正文</p>'
+        },
+        error: ''
+      };
+      const guard = new MailDetailSuggestionGuard();
+      const token = guard.beginDetail();
+      const suggestion = new DeferredValue<MailCalendarSuggestion>();
+      const events: MailDetailUiEvent[] = [];
+      await publishMailDetailThenSuggest(detailEvent, {
+        initialIsCurrent: (): boolean => guard.isCurrent(token),
+        enrichmentIsCurrent: (): boolean => guard.isCurrent(token),
+        writeEvent: (event: MailDetailUiEvent): void => { events.push(event); },
+        saveSuggestion: (_requestKey: string, _value: MailCalendarSuggestion): void => {},
+        suggest: (_detail): Promise<MailCalendarSuggestion> => suggestion.promise
+      });
+
+      const fixture = qqMailReadFixture(2);
+      const mutated = JSON.parse(JSON.stringify(fixture.clicked)) as A2uiAction;
+      (mutated.args as Record<string, Object | string | number | boolean | null | undefined>)['messageId'] = '102';
+      const runtime = canary(
+        new QueueModel([]),
+        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
+        (): RegisteredPageSnapshot | null => fixture.current
+      );
+      guard.invalidateForPageAction(mutated.id);
+      expect(await runtime.runPageAction(mutated)).assertFalse();
+      suggestion.resolve(mailCalendarSuggestion('qq:101'));
+      await pause(5);
+      expect(events.length).assertEqual(1);
+      expect(events[0].detail?.bodyText).assertEqual('A 的真实邮件正文');
       runtime.dispose();
     });
 
