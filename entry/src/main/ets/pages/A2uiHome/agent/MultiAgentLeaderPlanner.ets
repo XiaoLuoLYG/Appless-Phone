@@ -26,8 +26,10 @@ const DECISION_KEYS: string[] = [
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
+const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
+  'For roundAction execute or legacy_handoff, omit answer.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
-  'Do not include Thought, markdown, or code fences.';
+  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE;
 
 interface JsonContainerFrame {
   object: boolean;
@@ -148,7 +150,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
-        '"answer":"string" optional,"reasonCode":"string"}.',
+        '"answer":"required non-empty string for answer|clarify; omit for execute|legacy_handoff",' +
+        '"reasonCode":"string"}.',
+      ANSWER_FIELD_RULE,
       'Select one persona and at most one active skill.',
       'requestedCapabilityIds is mandatory, unique, and contains exact registered tool/action IDs. ' +
         'Use [] only for ordinary direct conversation that needs no tool-backed fact.',

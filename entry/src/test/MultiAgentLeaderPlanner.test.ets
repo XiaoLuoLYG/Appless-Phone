@@ -37,6 +37,10 @@ const HOTEL_WITH_EXTRA_DECISION: string = '{"personaId":"travel_companion","skil
   '"toolId":"hotel.search","input":{},"required":true}],' +
   '"uiIntent":{"purpose":"展示酒店","preferredDensity":"comfortable",' +
   '"requiredSections":["hotel"]},"reasonCode":"hotel_search"}';
+const ANSWER_WITHOUT_ANSWER_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"reply","preferredDensity":"comfortable","requiredSections":[]},' +
+  '"reasonCode":"greeting"}';
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
@@ -180,6 +184,14 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
       expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf(
+        'For roundAction answer or clarify, include answer as a non-empty string. ' +
+          'For roundAction execute or legacy_handoff, omit answer.'
+      ) >= 0).assertTrue();
+      expect(model.prompts[0].indexOf(
+        'For roundAction answer or clarify, include answer as a non-empty string. ' +
+          'For roundAction execute or legacy_handoff, omit answer.'
+      ) >= 0).assertTrue();
     });
 
     it('carries the old hotel date and anti-invention contract in the shared prompt', 0, async () => {
@@ -235,6 +247,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails(duplicateLocalId)).assertTrue();
       expect(await fails(extraTask)).assertTrue();
       expect(await fails(duplicateNested)).assertTrue();
+      expect(await fails(ANSWER_WITHOUT_ANSWER_DECISION)).assertTrue();
       expect(await failsAtRound(PARALLEL_DECISION, 4)).assertTrue();
     });
 
