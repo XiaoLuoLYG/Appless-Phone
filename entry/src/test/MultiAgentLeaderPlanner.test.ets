@@ -45,6 +45,17 @@ const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion",
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
   '"requiredSections":["travel"]},"answer":"根据上一轮真实结果继续回答。"}';
+const MODEL_OWNED_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"模型选择的真实出行总结","preferredDensity":"compact",' +
+  '"requiredSections":["travel","next-step"]},"answer":"根据上一轮真实出行结果回答。"}';
+const MODEL_OWNED_UNBOUND_REPAIR: string = MODEL_OWNED_TERMINAL_REPAIR
+  .replace('"travel.search"', '"maps.place.search"')
+  .replace('模型选择的真实出行总结', '模型选择的真实地点总结')
+  .replace('"travel","next-step"', '"place","next-step"');
+const SPARSE_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["travel.search"],"roundAction":"answer",' +
+  '"answer":"根据上一轮真实出行结果回答。"}';
 const REPEATED_TRAVEL_PRIVATE_DECISION: string = TRAVEL_DECISION.replace(
   '"goal":"我明天要从北京去上海，帮我搜索出行方案"',
   '"goal":"FIRST_MODEL_PRIVATE_MARKER"'
@@ -239,6 +250,39 @@ class ObservationPromptAwareModel implements LocalModel {
       return MAP_DETAILS_DECISION;
     }
     return ANSWER_FROM_TRAVEL_OBSERVATION;
+  }
+}
+
+class TerminalRepairPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+  private readonly firstDecision: string;
+  private readonly repairedDecision: string;
+
+  constructor(firstDecision: string, repairedDecision: string = MODEL_OWNED_TERMINAL_REPAIR) {
+    this.firstDecision = firstDecision;
+    this.repairedDecision = repairedDecision;
+  }
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    if (this.prompts.length === 1) {
+      return this.firstDecision;
+    }
+    const hasMandatoryFields: boolean = prompt.indexOf(
+      'including a correction or repair, must include personaId, skillId, requestedCapabilityIds, ' +
+        'roundAction, dataTasks, and uiIntent'
+    ) >= 0;
+    const hasTerminalShape: boolean = prompt.indexOf(
+      'For answer or clarify, set dataTasks to [] and include a non-empty answer.'
+    ) >= 0;
+    const hasModelOwnedUi: boolean = prompt.indexOf(
+      'Choose purpose, preferredDensity, and requiredSections'
+    ) >= 0;
+    const hasObservationGrounding: boolean = prompt.indexOf(
+      'real recentObservations'
+    ) >= 0;
+    return hasMandatoryFields && hasTerminalShape && hasModelOwnedUi && hasObservationGrounding ?
+      this.repairedDecision : SPARSE_TERMINAL_REPAIR;
   }
 }
 
@@ -714,6 +758,22 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.systemPrompts[1]).assertEqual(model.systemPrompts[0]);
     });
 
+    it('gives completed-tool repair enough contract to return a full model-owned terminal decision', 0,
+      async () => {
+        const model = new TerminalRepairPromptAwareModel(REPEATED_TRAVEL_PRIVATE_DECISION);
+
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), completedTravelInput(), planningContext(), 2, (): boolean => true
+        );
+
+        expect(model.prompts.length).assertEqual(2);
+        expect(decision.roundAction).assertEqual('answer');
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.uiIntent.purpose).assertEqual('模型选择的真实出行总结');
+        expect(decision.uiIntent.preferredDensity).assertEqual('compact');
+        expect(decision.uiIntent.requiredSections.join(',')).assertEqual('travel,next-step');
+      });
+
     it('treats every terminal Data status and repeated authority as completed', 0, async () => {
       const terminalStatuses: string[] = ['success', 'partial', 'empty', 'error'];
       for (let index = 0; index < terminalStatuses.length; index++) {
@@ -857,6 +917,36 @@ export default function multiAgentLeaderPlannerTest() {
         'OBSERVATION_PRIVATE_SUMMARY'
       )).assertEqual(-1);
     });
+
+    it('gives unbound-tool repair the same full terminal contract and keeps model-owned UI intent', 0,
+      async () => {
+        const model = new TerminalRepairPromptAwareModel(
+          UNBOUND_FOOD_DECISION,
+          MODEL_OWNED_UNBOUND_REPAIR
+        );
+        const input: InputUserPayload = {
+          text: '继续',
+          recentObservations: [{
+            taskId: 'input-1:round-1:place',
+            toolId: 'maps.place.search',
+            status: 'success',
+            summary: 'real place result',
+            entityRefs: ['place-real-1']
+          }]
+        };
+
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), input, planningContext(), 2, (): boolean => true
+        );
+
+        expect(model.prompts.length).assertEqual(2);
+        expect(decision.roundAction).assertEqual('answer');
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+        expect(decision.uiIntent.purpose).assertEqual('模型选择的真实地点总结');
+        expect(decision.uiIntent.preferredDensity).assertEqual('compact');
+        expect(decision.uiIntent.requiredSections.join(',')).assertEqual('place,next-step');
+      });
 
     it('accepts a later tool only when its own input contains an earlier successful entity reference', 0, async () => {
       const successInput: InputUserPayload = {

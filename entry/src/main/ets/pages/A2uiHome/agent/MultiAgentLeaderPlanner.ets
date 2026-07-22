@@ -35,25 +35,34 @@ const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
   'For roundAction execute or legacy_handoff, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
+const FULL_DECISION_CONTRACT: string =
+  'Every decision, including a correction or repair, must include personaId, skillId, requestedCapabilityIds, ' +
+  'roundAction, dataTasks, and uiIntent. For answer or clarify, set dataTasks to [] and include a non-empty answer. ' +
+  'uiIntent must contain exactly purpose, preferredDensity, and requiredSections. Choose purpose, preferredDensity, ' +
+  'and requiredSections from the current user request and real recentObservations when present; never omit them.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
-  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE;
+  'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
+  FULL_DECISION_CONTRACT;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
-  'Return one corrected decision matching the schema exactly.';
+  'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
-  'or execute only a different tool that depends on real prior output.';
+  'or execute only a different tool that depends on real prior output. Base any terminal summary only on real ' +
+  'recentObservations; do not reschedule a completed tool or invent provider facts. ' + FULL_DECISION_CONTRACT;
 const UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_UNBOUND_LATER_TOOL. A later-round Data task did not contain any real entity reference ' +
   'from a successful or partial earlier round. Return answer or clarify from existing observations, or execute ' +
-  'only tasks whose own input contains an exact earlier entity reference.';
+  'only tasks whose own input contains an exact earlier entity reference. Base any terminal summary only on real ' +
+  'recentObservations; do not reschedule a completed tool or invent provider facts. ' + FULL_DECISION_CONTRACT;
 const SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_SAME_ROUND_DEPENDENCY. The decision put a producer and its entity-dependent consumer ' +
   'in the same round. Return execute with only the producer task. Wait until a later round after a successful ' +
-  'or partial producer observation supplies the exact entity reference before scheduling the consumer.';
+  'or partial producer observation supplies the exact entity reference before scheduling the consumer. ' +
+  FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
