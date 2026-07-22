@@ -410,6 +410,98 @@ export function modelTransportEvidence(logText, options = {}) {
     sameAppIdentity(line, identity) && streamingCloudResponse(line));
 }
 
+const DIRECT_TEXT_FORBIDDEN_MARKERS = new Set([
+  'MultiAgentDataTask', 'MultiAgentDataResult', 'MultiAgentUiTask', 'MultiAgentUiResult',
+  'MultiAgentTaskError', 'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
+  'ToolRequestByIntent', 'A2uiHomeToolRequestByIntent', 'ToolRequest', 'A2uiHomeToolRequest',
+  'A2uiHomeToolRequestFromModel', 'LocalToolRequest', 'ToolResult', 'A2uiHomeToolResult'
+]);
+
+function nodeTextValues(node, values) {
+  if (node === null || typeof node !== 'object') return;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  for (const key of ['text', 'content', 'description', 'hint']) {
+    const value = attributes[key];
+    if (typeof value === 'string' && value.trim().length > 0) values.push(value.trim());
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    nodeTextValues(child, values);
+  }
+}
+
+function semanticMessages(layout) {
+  const messages = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (node.attributes?.type === 'article') {
+      const values = [];
+      nodeTextValues(node, values);
+      const roleIndex = values.findIndex((value) => value === 'user' || value === 'assistant');
+      if (roleIndex >= 0) {
+        messages.push({
+          role: values[roleIndex],
+          text: values.slice(roleIndex + 1)
+            .filter((value) => value !== 'user' && value !== 'assistant')
+            .join('')
+        });
+      }
+      return;
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  return messages;
+}
+
+export function directTextVisibleEvidence(logText, layout, query, options = {}) {
+  const text = String(logText || '');
+  const lifecycle = multiAgentTurnEvidence(text, options);
+  const failures = [];
+  if (!lifecycle.complete || !lifecycle.ok || lifecycle.status !== 'success' ||
+    !lifecycle.textResult || lifecycle.surfaceId !== 'none' ||
+    lifecycle.finalUiSurfaceId !== '' || lifecycle.toolIds.length !== 0 ||
+    lifecycle.dataTasks.length !== 0 || lifecycle.surfaceIds.length !== 0) {
+    failures.push('invalid_direct_lifecycle');
+  }
+
+  const all = records(text);
+  const { selected, window } = targetRecords(all, options);
+  const terminal = selected === null ? undefined : all.find((item) =>
+    item.index > selected.index && item.marker === 'MultiAgentTurnResult' &&
+    item.fields.conversation === selected.fields.conversation &&
+    item.fields.turn === selected.fields.turn && item.fields.task === selected.fields.task);
+  if (selected === null || terminal === undefined || terminal.index !== lifecycle.terminalIndex) {
+    failures.push('missing_current_terminal');
+  } else {
+    const currentText = text.split('\n').slice(selected.index, terminal.index + 1).join('\n');
+    if (!modelTransportEvidence(currentText, options)) failures.push('missing_current_transport');
+  }
+  if (window.some((item) => DIRECT_TEXT_FORBIDDEN_MARKERS.has(item.marker))) {
+    failures.push('non_direct_work');
+  }
+  if (externalOrSyntheticError(window)) failures.push('error_or_synthetic');
+
+  const messages = semanticMessages(layout);
+  const expectedQuery = String(query || '').trim();
+  const userIndex = messages.findLastIndex((message) =>
+    message.role === 'user' && message.text === expectedQuery);
+  const assistant = userIndex >= 0 ? messages[userIndex + 1] : undefined;
+  const expectedChars = Number(terminal?.fields.messageChars || 0);
+  if (expectedQuery.length === 0 || userIndex !== messages.length - 2 ||
+    assistant?.role !== 'assistant' || assistant.text.length === 0 ||
+    assistant.text === expectedQuery || assistant.text.length !== expectedChars) {
+    failures.push('missing_current_visible_reply');
+  }
+
+  return {
+    ok: failures.length === 0,
+    replyText: assistant?.text || '',
+    replyChars: assistant?.text.length || 0,
+    failures
+  };
+}
+
 function optionMismatch(item, options, expectedSurface) {
   return Boolean(
     (options.expectedActionId && item.fields.action !== options.expectedActionId) ||

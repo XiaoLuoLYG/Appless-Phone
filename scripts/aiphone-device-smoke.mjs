@@ -21,6 +21,7 @@ import {
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
 import {
+  directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   modelTransportEvidence,
   multiAgentActionEvidence,
@@ -1547,15 +1548,25 @@ function analyze(
     syntheticFallback: forbiddenSyntheticMarkers.some((marker) => text.includes(marker))
   };
   const modelPassed = multiAgentLifecycle.ok;
+  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
+  const directTextLifecycle = expectsDirectText && multiAgentLifecycle.complete &&
+    multiAgentLifecycle.ok && multiAgentLifecycle.status === 'success' &&
+    multiAgentLifecycle.textResult && multiAgentLifecycle.surfaceId === 'none' &&
+    multiAgentLifecycle.finalUiSurfaceId === '' && multiAgentLifecycle.toolIds.length === 0 &&
+    multiAgentLifecycle.dataTasks.length === 0 && multiAgentLifecycle.surfaceIds.length === 0 &&
+    result.model200 && !result.directIntent && !result.syntheticFallback;
   const htmlDocumentPassed = result.htmlHomeDocument.ok ||
     (isSocialHubExpectedToolId(expectedToolId) && result.htmlHomeDocument.count > 0) ||
     (expectedToolId === 'worldcup.open' && result.worldCupOpened);
-  const baseWithoutTransport = !result.htmlLoadError &&
-    result.htmlHomeSurfaceLoad.ok &&
-    !result.syntheticFallback &&
-    (!result.directIntent || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
-    htmlDocumentPassed;
+  const baseWithoutTransport = expectsDirectText ?
+    !result.htmlLoadError && directTextLifecycle :
+    !result.htmlLoadError &&
+      result.htmlHomeSurfaceLoad.ok &&
+      !result.syntheticFallback &&
+      (!result.directIntent || (expectedToolId === 'worldcup.open' && result.worldCupOpened)) &&
+      htmlDocumentPassed;
   result.modelPassed = modelPassed;
+  result.directTextLifecycle = directTextLifecycle;
   result.transportPassed = !result.failedConnect && !result.providerFailed;
   result.basePassedWithoutTransport = baseWithoutTransport;
   const basePassed = result.transportPassed && baseWithoutTransport;
@@ -2824,6 +2835,19 @@ async function runQuery(query, index, expectedTool) {
   const layoutText = layoutTextValues.join('\n');
   const layoutTextPath = join(outDir, `query-${index + 1}-final-layout-text.txt`);
   writeFileSync(layoutTextPath, layoutText + '\n');
+  const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
+  const directTextEvidence = expectsDirectText ? directTextVisibleEvidence(
+    safeLogText,
+    layout,
+    query,
+    { expectedToolIds, minimumDataRounds, expectedDependencies }
+  ) : { ok: true, replyChars: 0, failures: [], skipped: true };
+  summary.directTextVisible = {
+    ok: directTextEvidence.ok,
+    replyChars: directTextEvidence.replyChars,
+    failures: directTextEvidence.failures,
+    skipped: directTextEvidence.skipped === true
+  };
   const expectedMarkers = layoutExpectationsForQuery(query);
   const scrollEvidence = await collectScrolledLayoutEvidence(
     layout,
@@ -2911,13 +2935,15 @@ async function runQuery(query, index, expectedTool) {
   summary.layoutBlockingHits = layoutBlockingHits;
   summary.gmailEccvKeywordVisible = !isGmailEccvQuery(query) || /eccv/i.test(evidenceText);
   const aggregateMediaMarkersOk = expectedToolId !== 'media.aggregate.search' || expectedMisses.length === 0;
-  summary.layoutTextExposed = isSocialHubCase ?
-    socialHubVisibleOutput :
-    (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
-    calendarMarkersOk &&
-    composioCardMarkersOk &&
-    aggregateMediaMarkersOk &&
-    summary.gmailEccvKeywordVisible;
+  summary.layoutTextExposed = expectsDirectText ?
+    summary.directTextVisible.ok :
+    (isSocialHubCase ?
+      socialHubVisibleOutput :
+      (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
+      calendarMarkersOk &&
+      composioCardMarkersOk &&
+      aggregateMediaMarkersOk &&
+      summary.gmailEccvKeywordVisible);
   if (expectedPersonaMemory === 'luckin_only') {
     summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
     summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
@@ -2986,7 +3012,7 @@ async function runQuery(query, index, expectedTool) {
   } else {
     summary.layoutTextExposed = summary.layoutTextExposed && summary.mailAggregateVisible;
   }
-  const allowsHtmlDocumentOnly = !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' &&
+  const allowsHtmlDocumentOnly = !expectsDirectText && !isSocialHubCase && !expectsMailDraftAction && expectedToolId !== 'mail.search' &&
     expectedToolId !== 'media.aggregate.search' && summary.htmlHomeDocument.ok;
   summary.layoutOk = layoutBlockingHits.length === 0 &&
     forbiddenSocialHubLegacyHits.length === 0 &&
@@ -3451,6 +3477,30 @@ if (finalSummary !== null && finalSummary.expectedToolId === 'gmail.draft.create
 }
 const finalLayoutRouteHits = finalLayoutRouteMarkers.filter((marker) => finalLayoutText.includes(marker));
 const hilogProcesses = activeHilogProcesses();
+const finalExpectsDirectText = finalSummary !== null && finalSummary.expectedTool === false &&
+  !isPersonaMemoryUpdateQuery(finalQuery);
+let finalDirectTextVisible = { ok: false, replyChars: 0, failures: ['not_direct_text'], skipped: true };
+if (finalExpectsDirectText && typeof finalSummary.logPath === 'string') {
+  const evidence = directTextVisibleEvidence(
+    readFileSync(finalSummary.logPath, 'utf8'),
+    finalLayout,
+    finalQuery,
+    { expectedToolIds: finalSummary.expectedToolIds || [] }
+  );
+  finalDirectTextVisible = {
+    ok: evidence.ok,
+    replyChars: evidence.replyChars,
+    failures: evidence.failures,
+    skipped: false
+  };
+}
+const finalOutputPresent = finalExpectsDirectText ? finalDirectTextVisible.ok :
+  (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate ||
+    finalLayoutDomainHits.length > 0 ||
+    (finalSummary !== null &&
+      !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
+      finalSummary.htmlHomeDocument !== undefined &&
+      finalSummary.htmlHomeDocument.ok === true));
 const visibleOutput = {
   layoutPath: join(outDir, 'final-layout.json'),
   screenPath: finalScreenPath,
@@ -3460,11 +3510,8 @@ const visibleOutput = {
   syntheticHits: finalLayoutSyntheticHits,
   forbiddenActionHits: finalLayoutForbiddenActionHits,
   blockingHits: finalLayoutBlockingHits,
-  ok: (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate || finalLayoutDomainHits.length > 0 ||
-    (finalSummary !== null &&
-      !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
-      finalSummary.htmlHomeDocument !== undefined &&
-      finalSummary.htmlHomeDocument.ok === true)) &&
+  directTextVisible: finalDirectTextVisible,
+  ok: finalOutputPresent &&
     finalLayoutSyntheticHits.length === 0 &&
     finalLayoutForbiddenActionHits.length === 0 &&
     finalLayoutBlockingHits.length === 0

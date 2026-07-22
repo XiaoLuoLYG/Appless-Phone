@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
+  directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   modelTransportEvidence,
   multiAgentActionEvidence,
@@ -58,6 +59,85 @@ const cloudStreamTurn = `
 07-22 18:00:12.798 44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK: LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}
 07-22 18:00:12.801 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 status=success surface=none roundCount=1 messageChars=14
 `;
+
+function textNode(type, text) {
+  return { attributes: { type, text }, children: [] };
+}
+
+function messageArticle(role, text) {
+  return {
+    attributes: { type: 'article', text: '' },
+    children: [textNode('genericContainer', role), textNode('paragraph', text)]
+  };
+}
+
+function directTextLayout(messages) {
+  return {
+    attributes: { type: 'root', text: '' },
+    children: messages.map((message) => messageArticle(message.role, message.text))
+  };
+}
+
+test('requires the current direct reply as the final semantic user-assistant pair', () => {
+  const layout = directTextLayout([
+    { role: 'user', text: '你好' },
+    { role: 'assistant', text: '你好！有什么可以帮助你的吗？' }
+  ]);
+  const evidence = directTextVisibleEvidence(cloudStreamTurn, layout, '你好');
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.replyText, '你好！有什么可以帮助你的吗？');
+
+  const invalidLayouts = [
+    directTextLayout([
+      { role: 'user', text: '旧问题' },
+      { role: 'assistant', text: '你好！有什么可以帮助你的吗？' }
+    ]),
+    directTextLayout([
+      { role: 'assistant', text: '你好！有什么可以帮助你的吗？' },
+      { role: 'user', text: '你好' }
+    ]),
+    directTextLayout([
+      { role: 'user', text: '你好' },
+      { role: 'assistant', text: '旧回答' },
+      { role: 'user', text: '你好' }
+    ]),
+    directTextLayout([{ role: 'user', text: '你好' }]),
+    directTextLayout([
+      { role: 'user', text: '你好' },
+      { role: 'assistant', text: '长度错误' }
+    ]),
+    { attributes: { type: 'root', text: '你好！有什么可以帮助你的吗？' }, children: [] },
+    { attributes: { type: 'root', text: '' }, children: [] }
+  ];
+  invalidLayouts.forEach((candidate) => {
+    assert.equal(directTextVisibleEvidence(cloudStreamTurn, candidate, '你好').ok, false);
+  });
+});
+
+test('rejects non-direct, failed, synthetic, and transport-free visible replies', () => {
+  const layout = directTextLayout([
+    { role: 'user', text: '你好' },
+    { role: 'assistant', text: '你好！有什么可以帮助你的吗？' }
+  ]);
+  const beforeTerminal = (line) => cloudStreamTurn.replace(
+    '07-22 18:00:12.801 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentTurnResult]',
+    `${line}\n07-22 18:00:12.801 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentTurnResult]`
+  );
+  const invalidLogs = [
+    cloudStreamTurn.replace('status=success', 'status=error'),
+    cloudStreamTurn.replace('surface=none', 'surface=surface-1'),
+    cloudStreamTurn.replace(/[^\n]*\[AIPhone\]\[MultiAgentTurnResult\][^\n]*\n/, ''),
+    cloudStreamTurn.replace(/[^\n]*\/NETSTACK:[^\n]*\n/, ''),
+    beforeTerminal('07-22 18:00:12.750 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=data-1 round=1 tool=travel.search predecessor=none path=none target=none binding=false'),
+    beforeTerminal('07-22 18:00:12.750 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiResult] conversation=c1 turn=t2 task=ui-1 surface=surface-1 state=result'),
+    beforeTerminal('07-22 18:00:12.750 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentActionRun] conversation=c1 turn=t2 task=a1 surface=s1 plan=p1 run=r1 action=payment.send source=payment.send'),
+    beforeTerminal('07-22 18:00:12.750 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ToolRequestByIntent] toolId=travel.search'),
+    beforeTerminal('07-22 18:00:12.750 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][SyntheticFallback] source=synthetic')
+  ];
+  invalidLogs.forEach((logs) => {
+    assert.equal(directTextVisibleEvidence(logs, layout, '你好').ok, false);
+  });
+});
 
 test('accepts only a correlated app-owned cloud streaming model lifecycle', () => {
   assert.equal(modelTransportEvidence(cloudStreamTurn), true);
