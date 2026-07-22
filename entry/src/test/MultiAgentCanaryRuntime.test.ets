@@ -783,6 +783,44 @@ export default function multiAgentCanaryRuntimeTest() {
         runtime.dispose();
       });
 
+    it('executes C02 travel Data only once when round two repeats it before repair', 0, async () => {
+      const model = new QueueModel([
+        C02_QUERY_DECISION,
+        C02_QUERY_DECISION,
+        C02_QUERY_DONE
+      ]);
+      const bus = new TrackingBus();
+      let providerCalls: number = 0;
+      const options: MultiAgentCanaryOptions = canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        _args: Object
+      ): Promise<DataResult> => {
+        providerCalls += 1;
+        expect(toolId).assertEqual('travel.search');
+        expect(prompt).assertEqual(C02_QUERY);
+        return canaryStructuredResult(toolId, 'travelOptions');
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(C02_QUERY, { text: '' }) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(providerCalls).assertEqual(1);
+      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(1);
+      expect(model.prompts.length).assertEqual(3);
+      runtime.dispose();
+    });
+
     it('rejects prototype member names in travel inputs before the structured provider', 0, async () => {
       const unsafeInputs: string[] = [
         '{"query":"forged","__proto__":{"polluted":"yes"}}',

@@ -35,6 +35,11 @@ const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly.';
+const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
+const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
+  'Correction: previous decision repeated a completed Data tool. ' +
+  'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
+  'or execute only a different tool that depends on real prior output.';
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
@@ -91,19 +96,49 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       LEADER_SYSTEM_PROMPT
     );
     try {
-      return this.parseDecision(output, context);
+      const decision: LeaderDecision = this.parseDecision(output, context);
+      this.rejectCompletedToolReuse(
+        decision,
+        this.currentTurnCompletedToolIds(message, input, round)
+      );
+      return decision;
     } catch (error) {
       if (signal === undefined || !signal()) {
         const failure: Error = error instanceof Error ? error :
           new Error('Leader decision failed strict validation.');
         throw failure;
       }
+      const correction: string = error instanceof Error &&
+        error.message === COMPLETED_TOOL_REUSE_ERROR ?
+        COMPLETED_TOOL_REPAIR_INSTRUCTION : REPAIR_INSTRUCTION;
       const repaired: string = await this.model.complete(
-        prompt + '\n' + REPAIR_INSTRUCTION,
+        prompt + '\n' + correction,
         undefined,
         LEADER_SYSTEM_PROMPT
       );
-      return this.parseDecision(repaired, context);
+      const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+      this.rejectCompletedToolReuse(
+        repairedDecision,
+        this.currentTurnCompletedToolIds(message, input, round)
+      );
+      return repairedDecision;
+    }
+  }
+
+  private rejectCompletedToolReuse(decision: LeaderDecision, completedToolIds: string[]): void {
+    if (decision.roundAction !== 'execute' || completedToolIds.length === 0) {
+      return;
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
+      if (completedToolIds.indexOf(task.toolId) >= 0) {
+        throw new Error(COMPLETED_TOOL_REUSE_ERROR);
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (completedToolIds.indexOf(task.allowedToolIds[allowedIndex]) >= 0) {
+          throw new Error(COMPLETED_TOOL_REUSE_ERROR);
+        }
+      }
     }
   }
 

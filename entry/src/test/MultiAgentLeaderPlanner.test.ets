@@ -45,6 +45,10 @@ const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion",
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
   '"requiredSections":["travel"]},"answer":"根据上一轮真实结果继续回答。"}';
+const REPEATED_TRAVEL_PRIVATE_DECISION: string = TRAVEL_DECISION.replace(
+  '"goal":"我明天要从北京去上海，帮我搜索出行方案"',
+  '"goal":"FIRST_MODEL_PRIVATE_MARKER"'
+);
 const MAP_DETAILS_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["maps.place.details"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"place-details","goal":"读取上一轮真实地点的详情",' +
@@ -169,6 +173,19 @@ function inputMessage(): AgentMessage {
     turnId: 'turn-1',
     taskId: 'input-1',
     payload
+  };
+}
+
+function completedTravelInput(status: string = 'success'): InputUserPayload {
+  return {
+    text: '根据上一轮结果继续回答',
+    recentObservations: [{
+      taskId: 'input-1:round-1:travel',
+      toolId: 'travel.search',
+      status,
+      summary: 'OBSERVATION_PRIVATE_SUMMARY',
+      entityRefs: ['ENTITY_PRIVATE_MARKER']
+    }]
   };
 }
 
@@ -438,6 +455,184 @@ export default function multiAgentLeaderPlannerTest() {
       expect(dependent.dataTasks[0].toolId).assertEqual('maps.place.details');
       expect(dependentModel.prompts[0].indexOf(
         'A different later-round tool is allowed only when it requires real prior output.'
+      ) >= 0).assertTrue();
+    });
+
+    it('repairs one repeated completed C02 tool into a model-owned terminal answer', 0, async () => {
+      const model = new QueueLocalModel([
+        REPEATED_TRAVEL_PRIVATE_DECISION,
+        ANSWER_FROM_TRAVEL_OBSERVATION
+      ]);
+      const planner = new MultiAgentLeaderPlanner(model);
+
+      const decision = await planner.plan(
+        inputMessage(),
+        completedTravelInput(),
+        planningContext(),
+        2,
+        (): boolean => true
+      );
+
+      expect(decision.roundAction).assertEqual('answer');
+      expect(decision.dataTasks.length).assertEqual(0);
+      expect(decision.answer as string).assertEqual('根据上一轮真实结果继续回答。');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf(
+        'previous decision repeated a completed Data tool'
+      ) >= 0).assertTrue();
+      expect(model.prompts[1].indexOf(model.prompts[0])).assertEqual(0);
+      expect(model.prompts[1].indexOf('FIRST_MODEL_PRIVATE_MARKER')).assertEqual(-1);
+      const repairSuffix: string = model.prompts[1].substring(model.prompts[0].length);
+      expect(repairSuffix.indexOf('OBSERVATION_PRIVATE_SUMMARY')).assertEqual(-1);
+      expect(repairSuffix.indexOf('ENTITY_PRIVATE_MARKER')).assertEqual(-1);
+      expect(repairSuffix.toLowerCase().indexOf('credential')).assertEqual(-1);
+      expect(model.systemPrompts[1]).assertEqual(model.systemPrompts[0]);
+    });
+
+    it('treats every terminal Data status and repeated authority as completed', 0, async () => {
+      const terminalStatuses: string[] = ['success', 'partial', 'empty', 'error'];
+      for (let index = 0; index < terminalStatuses.length; index++) {
+        const repeatedAuthority: string = MAP_DETAILS_DECISION
+          .replace(
+            '"requestedCapabilityIds":["maps.place.details"]',
+            '"requestedCapabilityIds":["maps.place.details","travel.search"]'
+          )
+          .replace(
+            '"allowedToolIds":["maps.place.details"]',
+            '"allowedToolIds":["maps.place.details","travel.search"]'
+          );
+        const model = new QueueLocalModel([
+          index === 0 ? repeatedAuthority : TRAVEL_DECISION,
+          ANSWER_FROM_TRAVEL_OBSERVATION
+        ]);
+
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          completedTravelInput(terminalStatuses[index]),
+          planningContext(),
+          2,
+          (): boolean => true
+        );
+
+        expect(decision.roundAction).assertEqual('answer');
+        expect(model.prompts.length).assertEqual(2);
+      }
+    });
+
+    it('fails closed after one repeated repair or repair transport error', 0, async () => {
+      const repeatedModel = new QueueLocalModel([
+        TRAVEL_DECISION,
+        TRAVEL_DECISION,
+        ANSWER_FROM_TRAVEL_OBSERVATION
+      ]);
+      const throwingModel = new QueueLocalModel([TRAVEL_DECISION]);
+      let repeatedFailed: boolean = false;
+      let throwingFailed: boolean = false;
+
+      try {
+        await new MultiAgentLeaderPlanner(repeatedModel).plan(
+          inputMessage(), completedTravelInput(), planningContext(), 2, (): boolean => true
+        );
+      } catch (_error) {
+        repeatedFailed = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(throwingModel).plan(
+          inputMessage(), completedTravelInput(), planningContext(), 2, (): boolean => true
+        );
+      } catch (_error) {
+        throwingFailed = true;
+      }
+
+      expect(repeatedFailed).assertTrue();
+      expect(throwingFailed).assertTrue();
+      expect(repeatedModel.prompts.length).assertEqual(2);
+      expect(throwingModel.prompts.length).assertEqual(2);
+    });
+
+    it('does not repair repeated tools without an active lifecycle signal', 0, async () => {
+      const absentModel = new QueueLocalModel([TRAVEL_DECISION, ANSWER_FROM_TRAVEL_OBSERVATION]);
+      const inactiveModel = new QueueLocalModel([TRAVEL_DECISION, ANSWER_FROM_TRAVEL_OBSERVATION]);
+      let absentFailed: boolean = false;
+      let inactiveFailed: boolean = false;
+
+      try {
+        await new MultiAgentLeaderPlanner(absentModel).plan(
+          inputMessage(), completedTravelInput(), planningContext(), 2
+        );
+      } catch (_error) {
+        absentFailed = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(inactiveModel).plan(
+          inputMessage(), completedTravelInput(), planningContext(), 2, (): boolean => false
+        );
+      } catch (_error) {
+        inactiveFailed = true;
+      }
+
+      expect(absentFailed).assertTrue();
+      expect(inactiveFailed).assertTrue();
+      expect(absentModel.prompts.length).assertEqual(1);
+      expect(inactiveModel.prompts.length).assertEqual(1);
+    });
+
+    it('allows first-round selection and a different dependent tool after completion', 0, async () => {
+      const firstRoundModel = new QueueLocalModel([TRAVEL_DECISION]);
+      const dependentModel = new QueueLocalModel([MAP_DETAILS_DECISION]);
+
+      const firstRound = await new MultiAgentLeaderPlanner(firstRoundModel).plan(
+        inputMessage(), completedTravelInput(), planningContext(), 1
+      );
+      const dependent = await new MultiAgentLeaderPlanner(dependentModel).plan(
+        inputMessage(), completedTravelInput(), planningContext(), 2
+      );
+
+      expect(firstRound.dataTasks[0].toolId).assertEqual('travel.search');
+      expect(firstRoundModel.prompts.length).assertEqual(1);
+      expect(dependent.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(dependentModel.prompts.length).assertEqual(1);
+    });
+
+    it('ignores old forged current and future observations for repeat authority', 0, async () => {
+      const model = new QueueLocalModel([TRAVEL_DECISION]);
+      const input: InputUserPayload = {
+        text: '继续查询出行方案',
+        recentObservations: [{
+          taskId: 'other-input:round-1:old',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'old turn',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-forged:fake',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'forged round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-2:current',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'current round',
+          entityRefs: []
+        }, {
+          taskId: 'input-1:round-3:future',
+          toolId: 'travel.search',
+          status: 'success',
+          summary: 'future round',
+          entityRefs: []
+        }]
+      };
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), input, planningContext(), 2
+      );
+
+      expect(decision.dataTasks[0].toolId).assertEqual('travel.search');
+      expect(model.prompts.length).assertEqual(1);
+      expect(model.prompts[0].indexOf(
+        'Current-turn completed Data tool IDs: []'
       ) >= 0).assertTrue();
     });
 
