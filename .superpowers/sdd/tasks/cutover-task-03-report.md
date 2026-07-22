@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 
-Status: host implementation and gates PASS; same-reviewer re-review APPROVED with zero Critical, Important, or Minor findings. No device or provider PASS is claimed.
+Status: host implementation and gates PASS; the reviewer withdrew the prior approval for one Important follow-up parser mismatch, now corrected, and re-review is pending. No device or provider PASS is claimed.
 
 Implementation commits:
 
@@ -10,6 +10,7 @@ Implementation commits:
 - `f9c994ea` — reviewer-requested correlation hardening
 - `4770ec1af8c8e8f2d6daa068a79829f2ab099424` — second-review false-positive closure
 - `cffb4953bbbd990e92988793ccf5a9473f0c068f` — generated-surface evidence correlation
+- `56320c9d6ab4331dff1843ae733f00f27acee3f0` — generated follow-up surface parsing
 
 ## Corrective scope
 
@@ -30,6 +31,8 @@ The second independent review found four remaining executable false positives. `
 
 The same-reviewer check then found that exact C20 comparison would reject the live runtime because lifecycle surfaces were still opaque while `A2uiHomeSurfaceUpdate` logged the generated surface. `cffb4953` closes that false negative without a second alias map or any new state. The generation audit found one Multi-Agent UI source: `UiAgent.uniqueSurfaceId()` uses `newSurfaceId()` and can only append a numeric collision suffix. The evidence formatter therefore preserves exactly `^loop_surface_[0-9]+(?:_[0-9]+)?$` and fails every other surface shape closed.
 
+The reviewer subsequently withdrew approval because C20's detail and restore caller still parsed only the obsolete `sN` lifecycle surface. `56320c9d` moves that parser into the import-safe evidence module, makes the real device-smoke caller consume it, accepts only the exact generated-surface grammar, and keeps `sN` rejected. Conversation, turn, terminal-result state, and after-index filters remain mandatory where supplied. No device CLI import or device action is needed to test this path.
+
 ## Production boundary
 
 The allowlist, formatter, and emitter occupy 149 physical lines in `MultiAgentRuntime.ets`. The file's corrective diff is `+138/-71`. Production state added by the logger is limited to one 128-entry bounded map, its FIFO keys, and one scalar sequence; `dispose()` clears all three. Provider instrumentation adds only privacy-safe RollingGo operation/status/source-count markers, including truthful error terminals for provider and exception paths. Parser complexity remains in the Mac smoke scripts.
@@ -43,11 +46,11 @@ Reviewer-derived RED cases covered:
 - generic NETSTACK-only hotel evidence, reversed RollingGo response/request order, and mismatched/uncombined provider chains;
 - raw email/phone/newline/long IDs, unsafe registry IDs, raw prompt/provider/entity values, true Maps entity provenance, and no-provenance fail-closed behavior.
 
-Second-review RED cases additionally cover missing F12 dependency options in the executable case manifest, UI result before its Data dependency terminal, a virtual plan without a result plus an unrelated direct action result, a stale raw C20 provider surface, and the real generated surface shape shared by lifecycle and A2UI logs. The generated-surface logger expectation was observed RED at 1088/1089 before the strict allowlist change; malformed/user-shaped surfaces remain `invalid` without leaking their value.
+Second-review RED cases additionally cover missing F12 dependency options in the executable case manifest, UI result before its Data dependency terminal, a virtual plan without a result plus an unrelated direct action result, a stale raw C20 provider surface, the real generated surface shape shared by lifecycle and A2UI logs, and C20 follow-up extraction of that generated surface. The logger expectation was observed RED at 1088/1089; the extracted caller/parser test was separately observed RED before its export existed. Malformed/user-shaped surfaces and obsolete `sN` remain rejected.
 
 ## Final host gates
 
-- Focused Node lifecycle/hotel suites: PASS, 38/38 in 0.4 seconds.
+- Focused Node lifecycle/hotel suites: PASS, 39/39 in 0.4 seconds.
 - Changed-script syntax checks: PASS.
 - Case lists: PASS, exactly C01-C20 and C01-C20 plus F01-F16; M01 remains list-only behind both safe variables and X02 remains excluded.
 - Backend verifier: PASS, 245 checks including HAR build.
@@ -55,9 +58,9 @@ Second-review RED cases additionally cover missing F12 dependency options in the
 - Authoritative Hypium: `Tests run: 1089, Failure: 0, Error: 0, Pass: 1089, Ignore: 0`.
 - `git diff --check`: PASS.
 - Generated `agent_core/BuildProfile.ets`: restored to `debug` and absent from the final diff.
-- Same-reviewer verdict: APPROVE, 0 Critical / 0 Important / 0 Minor.
+- Same-reviewer verdict: prior approval withdrawn for one Important caller mismatch; corrective re-review pending.
 
-Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:46:04+0800` has zero failures and errors.
+Hvigor still emits the known coverage-report JSON parsing warning (`00507008`) after tests; the fresh authoritative `test_result.txt` at `2026-07-22T15:52:20+0800` has zero failures and errors.
 
 ## Matrix and scope
 
