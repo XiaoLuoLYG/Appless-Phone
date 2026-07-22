@@ -346,6 +346,70 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   };
 }
 
+function appLogIdentity(line) {
+  const match = /^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+(\d+)\s+\d+\s+\S+\s+[^/\s]+\/([^/\s:]+)(?:\/[^:\s]+)*:/.exec(line);
+  return match === null ? null : { pid: match[1], process: match[2] };
+}
+
+function sameAppIdentity(line, expected) {
+  const actual = appLogIdentity(line);
+  return actual !== null && expected !== null &&
+    actual.pid === expected.pid && actual.process === expected.process;
+}
+
+function streamingCloudResponse(line) {
+  if (!/\/NETSTACK:/.test(line)) return false;
+  const httpInfo = /"response_code"\s*:\s*200/.test(line) &&
+    /"dst_port"\s*:\s*443/.test(line) &&
+    /"content_type"\s*:\s*"text\/event-stream(?:;[^"\s]*)?"/i.test(line);
+  const streamInfo = /\bRespCode\s*:\s*200\b/.test(line) &&
+    /\bdport\s*:\s*443\b/.test(line) &&
+    /\bisStream\s*:\s*true\b/i.test(line);
+  return httpInfo || streamInfo;
+}
+
+export function modelTransportEvidence(logText, options = {}) {
+  const text = String(logText || '');
+  if (/\[AIPhone\]\[(?:ModelStreamResponse|ModelRawResponse)\] code=200\b/.test(text)) {
+    return true;
+  }
+  if (/"response_code"\s*:\s*200[^\n]*"dst_port"\s*:\s*11434\b/.test(text)) {
+    return true;
+  }
+
+  const lifecycle = multiAgentTurnEvidence(text, options);
+  if (!lifecycle.complete || !lifecycle.ok) return false;
+  const all = records(text);
+  const { selected } = targetRecords(all, options);
+  if (selected === null || selected.fields.conversation !== lifecycle.conversationId ||
+    selected.fields.turn !== lifecycle.turnId) return false;
+  const identity = appLogIdentity(selected.line);
+  if (identity === null) return false;
+  const terminal = all.find((item) => item.index > selected.index &&
+    item.marker === 'MultiAgentTurnResult' &&
+    item.fields.conversation === selected.fields.conversation &&
+    item.fields.turn === selected.fields.turn &&
+    item.fields.task === selected.fields.task);
+  if (terminal === undefined || terminal.index !== lifecycle.terminalIndex ||
+    !sameAppIdentity(terminal.line, identity)) return false;
+  const plannedWork = all.find((item) => item.index > selected.index &&
+    item.index < terminal.index && LIFECYCLE_MARKERS.has(item.marker));
+  const modelEndIndex = plannedWork?.index ?? terminal.index;
+
+  const request = all.find((item) => item.index > selected.index && item.index < modelEndIndex &&
+    item.marker === 'ModelRequestStart' && item.fields.stream === 'true' &&
+    /^https:\/\//.test(item.fields.endpoint || '') && sameAppIdentity(item.line, identity));
+  if (request === undefined) return false;
+  const chunk = all.find((item) => item.index > request.index && item.index < modelEndIndex &&
+    item.marker === 'ModelResponseChunk' && /^[1-9]\d*$/.test(item.fields.seq || '') &&
+    sameAppIdentity(item.line, identity));
+  if (chunk === undefined) return false;
+
+  const lines = text.split('\n');
+  return lines.some((line, index) => index > chunk.index && index < modelEndIndex &&
+    sameAppIdentity(line, identity) && streamingCloudResponse(line));
+}
+
 function optionMismatch(item, options, expectedSurface) {
   return Boolean(
     (options.expectedActionId && item.fields.action !== options.expectedActionId) ||

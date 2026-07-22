@@ -22,6 +22,7 @@ import {
 } from './hotel-smoke-evidence.mjs';
 import {
   latestMultiAgentUiSurface,
+  modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
 } from './multi-agent-smoke-evidence.mjs';
@@ -1521,7 +1522,11 @@ function analyze(
     personaMemoryUpdateProof,
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
     localToolRequest: /\[AIPhone\]\[LocalToolRequest\] endpoint=local:\/\/aiphone-tools toolId=/.test(text),
-    model200: /\[AIPhone\]\[(ModelStreamResponse|ModelRawResponse)\] code=200/.test(text) || /response_code":200[\s\S]*dst_port":11434/.test(text),
+    model200: modelTransportEvidence(text, {
+      expectedToolIds,
+      minimumDataRounds,
+      expectedDependencies
+    }),
     modelOk: multiAgentLifecycle.ok,
     toolRequested: multiAgentLifecycle.toolIds.length > 0,
     toolOk: multiAgentLifecycle.ok && multiAgentLifecycle.toolIds.length > 0,

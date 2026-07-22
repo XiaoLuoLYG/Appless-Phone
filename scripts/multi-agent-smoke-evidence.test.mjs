@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import {
   latestMultiAgentUiSurface,
+  modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence
 } from './multi-agent-smoke-evidence.mjs';
@@ -49,6 +50,79 @@ const dualChannelTurn = `
 07-22 09:41:13.015  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=partial surface=surface-1 roundCount=1 messageChars=12
 07-22 09:41:13.015  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=partial surface=surface-1 roundCount=1 messageChars=12
 `;
+
+const cloudStreamTurn = `
+07-22 18:00:05.198 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentInput] conversation=c1 turn=t2 task=k3
+07-22 18:00:05.199 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true
+07-22 18:00:12.700 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelResponseChunk] seq=1 chars=12
+07-22 18:00:12.798 44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK: LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}
+07-22 18:00:12.801 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 status=success surface=none roundCount=1 messageChars=14
+`;
+
+test('accepts only a correlated app-owned cloud streaming model lifecycle', () => {
+  assert.equal(modelTransportEvidence(cloudStreamTurn), true);
+
+  const mutations = [
+    cloudStreamTurn.replace('[AIPhone][ModelResponseChunk] seq=1 chars=12\n', ''),
+    cloudStreamTurn.replace('[AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true\n', ''),
+    cloudStreamTurn.replace(
+      '[AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true\n' +
+        '07-22 18:00:12.700 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelResponseChunk] seq=1 chars=12',
+      '[AIPhone][ModelResponseChunk] seq=1 chars=12\n' +
+        '07-22 18:00:12.700 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true'
+    ),
+    cloudStreamTurn.replace(
+      '07-22 18:00:12.798 44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK: LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}\n',
+      ''
+    ) +
+      '07-22 18:00:12.900 44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK: LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}\n',
+    cloudStreamTurn.replace(
+      '44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK',
+      '99999 45467 I C015B0/com.example.aiphonedemo/NETSTACK'
+    ),
+    cloudStreamTurn.replace(
+      'C015B0/com.example.aiphonedemo/NETSTACK',
+      'C015B0/com.example.other/NETSTACK'
+    ),
+    cloudStreamTurn.replace(
+      '"content_type":"text/event-stream;charset=utf-8"',
+      '"content_type":"application/json"'
+    ),
+    cloudStreamTurn.replace('status=success', 'status=error')
+  ];
+  mutations.forEach((logs) => assert.equal(modelTransportEvidence(logs), false));
+});
+
+test('does not treat an arbitrary app 443 response as streamed model evidence', () => {
+  const providerResponse = cloudStreamTurn.replace(
+    'LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}',
+    'LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"application/json"},TCP_INFO:{"dst_port":443}}'
+  );
+  assert.equal(modelTransportEvidence(providerResponse), false);
+});
+
+test('does not reuse a provider streaming response after tool planning', () => {
+  const providerStream = `
+07-22 18:00:05.198 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentInput] conversation=c1 turn=t2 task=k3
+07-22 18:00:05.199 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true
+07-22 18:00:06.000 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelResponseChunk] seq=1 chars=12
+07-22 18:00:06.100 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=data-1 round=1 tool=travel.search predecessor=none path=none target=none binding=false
+07-22 18:00:06.101 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiTask] conversation=c1 turn=t2 task=ui-1 dataTasks=data-1
+07-22 18:00:07.000 44325 45467 I C015B0/com.example.aiphonedemo/NETSTACK: LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}
+07-22 18:00:07.100 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentDataResult] conversation=c1 turn=t2 task=data-1 tool=travel.search status=success sources=1 error=false
+07-22 18:00:07.200 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiResult] conversation=c1 turn=t2 task=ui-1 surface=surface-1 state=result
+07-22 18:00:07.300 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 status=success surface=surface-1 roundCount=1 messageChars=14
+`;
+  assert.equal(modelTransportEvidence(providerStream), false);
+});
+
+test('preserves explicit model responses and local 11434 transport evidence', () => {
+  assert.equal(modelTransportEvidence('[AIPhone][ModelStreamResponse] code=200'), true);
+  assert.equal(modelTransportEvidence('[AIPhone][ModelRawResponse] code=200'), true);
+  assert.equal(modelTransportEvidence(
+    'NETSTACK {"response_code":200,"dst_port":11434}'
+  ), true);
+});
 
 test('requires one strictly correlated successful multi-agent turn', () => {
   const evidence = multiAgentTurnEvidence(successTurn, {
