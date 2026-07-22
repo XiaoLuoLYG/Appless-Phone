@@ -931,6 +931,49 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('rejects a custom planner same-round dependency after normalization and before observation or tasks', 0, async () => {
+      const search = semanticDataTask('place-search', 'maps.place.search');
+      search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+      const details = semanticDataTask('place-details', 'maps.place.details');
+      details.input = JSON.parse('{"placeId":"place-forged"}') as Object;
+      const planner = new RoundScriptedPlanner([semanticDecision([details, search])]);
+      let normalized: number = 0;
+      let observed: number = 0;
+      const normalizer: LeaderDataTaskInputNormalizer = (
+        _input: InputUserPayload,
+        task: LeaderDecisionDataTask
+      ): Object => {
+        normalized++;
+        return task.input;
+      };
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        planner,
+        dependentDataPlanningContext(),
+        30000,
+        normalizer,
+        (): void => {
+          observed++;
+        }
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const blocked = await receive(observer);
+
+      expect(blocked.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      expect(normalized).assertEqual(2);
+      expect(observed).assertEqual(0);
+      bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'same-round-marker'));
+      expect((await receive(observer)).taskId).assertEqual('same-round-marker');
+      leader.stop();
+      observer.close();
+    });
+
     it('rejects an owned requested capability outside the exact execution union', 0, async () => {
       const bus = new LinkedMessageBus();
       const decision = semanticDecision([semanticDataTask('hotel')]);

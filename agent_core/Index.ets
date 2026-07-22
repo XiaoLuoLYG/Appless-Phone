@@ -7,7 +7,11 @@ export { AgentMessageReader, LinkedMessageBus } from './src/main/ets/agent/messa
 export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
 export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';
 export * from './src/main/ets/agent/leader/LeaderTypes';
-export { leaderInputHasEntityAuthority } from './src/main/ets/agent/leader/LeaderDependencyAuthority';
+export {
+  leaderInputHasEntityAuthority,
+  leaderSameRoundDependencyProducerToolIds,
+  leaderTasksHaveSameRoundDependency
+} from './src/main/ets/agent/leader/LeaderDependencyAuthority';
 export { DataAgent } from './src/main/ets/agent/data/DataAgent';
 export * from './src/main/ets/agent/data/DataAgentTypes';
 export { UiAgent } from './src/main/ets/agent/ui/UiAgent';

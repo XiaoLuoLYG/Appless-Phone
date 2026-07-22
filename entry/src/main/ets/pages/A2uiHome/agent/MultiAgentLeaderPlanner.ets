@@ -17,7 +17,9 @@ import {
   ObservationDigest,
   ToolDefinition,
   dataAgentToolDefinitions,
-  leaderInputHasEntityAuthority
+  leaderInputHasEntityAuthority,
+  leaderSameRoundDependencyProducerToolIds,
+  leaderTasksHaveSameRoundDependency
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
 
@@ -39,6 +41,7 @@ const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by st
   'Return one corrected decision matching the schema exactly.';
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
+const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -47,6 +50,10 @@ const UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_UNBOUND_LATER_TOOL. A later-round Data task did not contain any real entity reference ' +
   'from a successful or partial earlier round. Return answer or clarify from existing observations, or execute ' +
   'only tasks whose own input contains an exact earlier entity reference.';
+const SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_SAME_ROUND_DEPENDENCY. The decision put a producer and its entity-dependent consumer ' +
+  'in the same round. Return execute with only the producer task. Wait until a later round after a successful ' +
+  'or partial producer observation supplies the exact entity reference before scheduling the consumer.';
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
@@ -106,8 +113,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       undefined,
       LEADER_SYSTEM_PROMPT
     );
+    let sameRoundProducerToolIds: string[] = [];
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
+      sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
+      this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
         decision,
         this.currentTurnCompletedToolIds(message, input, round)
@@ -129,6 +139,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = COMPLETED_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === UNBOUND_LATER_TOOL_ERROR) {
         correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
+        correction = SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION;
       }
       const repaired: string = await this.model.complete(
         prompt + '\n' + correction,
@@ -136,6 +148,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         LEADER_SYSTEM_PROMPT
       );
       const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+      if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
+        !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
+        throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+      }
+      this.rejectSameRoundDependency(repairedDecision);
       this.rejectCompletedToolReuse(
         repairedDecision,
         this.currentTurnCompletedToolIds(message, input, round)
@@ -147,6 +164,39 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       );
       return repairedDecision;
     }
+  }
+
+  private rejectSameRoundDependency(decision: LeaderDecision): void {
+    if (decision.roundAction === 'execute' &&
+      leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+    }
+  }
+
+  private producerOnlyRepair(decision: LeaderDecision, producerToolIds: string[]): boolean {
+    if (decision.roundAction !== 'execute' || decision.dataTasks.length === 0 ||
+      producerToolIds.length === 0) {
+      return false;
+    }
+    const expected: Set<string> = new Set<string>(producerToolIds);
+    const actual: Set<string> = new Set<string>();
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
+      actual.add(task.toolId);
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        actual.add(task.allowedToolIds[allowedIndex]);
+      }
+    }
+    if (actual.size !== expected.size) {
+      return false;
+    }
+    const actualIds: string[] = Array.from(actual);
+    for (let index = 0; index < actualIds.length; index++) {
+      if (!expected.has(actualIds[index])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private rejectUnboundLaterTool(

@@ -1,6 +1,7 @@
 import { JsonValue } from '../action/ActionPlanTypes';
 import { cloneJsonValue } from '../action/JsonPointer';
 import { ObservationDigest } from '../message/AgentMessage';
+import { LeaderDecisionDataTask } from './LeaderTypes';
 
 interface LeaderDependencyContract {
   sourceToolIds: string[];
@@ -25,6 +26,35 @@ function dependencyContract(toolId: string): LeaderDependencyContract | null {
     };
   }
   return null;
+}
+
+export function leaderSameRoundDependencyProducerToolIds(tasks: LeaderDecisionDataTask[]): string[] {
+  const roundToolIds: Set<string> = new Set<string>();
+  for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+    const task: LeaderDecisionDataTask = tasks[taskIndex];
+    roundToolIds.add(task.toolId.trim());
+    for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+      roundToolIds.add(task.allowedToolIds[allowedIndex].trim());
+    }
+  }
+  const toolIds: string[] = Array.from(roundToolIds);
+  const producerToolIds: Set<string> = new Set<string>();
+  for (let index = 0; index < toolIds.length; index++) {
+    const contract: LeaderDependencyContract | null = dependencyContract(toolIds[index]);
+    if (contract === null) {
+      continue;
+    }
+    for (let sourceIndex = 0; sourceIndex < contract.sourceToolIds.length; sourceIndex++) {
+      if (roundToolIds.has(contract.sourceToolIds[sourceIndex])) {
+        producerToolIds.add(contract.sourceToolIds[sourceIndex]);
+      }
+    }
+  }
+  return Array.from(producerToolIds);
+}
+
+export function leaderTasksHaveSameRoundDependency(tasks: LeaderDecisionDataTask[]): boolean {
+  return leaderSameRoundDependencyProducerToolIds(tasks).length > 0;
 }
 
 function inputString(values: Record<string, JsonValue | undefined>, key: string): string {

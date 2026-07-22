@@ -31,7 +31,10 @@ import {
   MAX_LEADER_DATA_TASKS_PER_ROUND,
   MAX_LEADER_DATA_TASKS_PER_TURN
 } from './LeaderTypes';
-import { leaderInputHasEntityAuthority } from './LeaderDependencyAuthority';
+import {
+  leaderInputHasEntityAuthority,
+  leaderTasksHaveSameRoundDependency
+} from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
 import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
@@ -403,6 +406,16 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.finishTurn(state);
       const detail: string = error instanceof Error ? error.message : `${error}`;
       this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
+      return;
+    }
+    if (decision.roundAction === 'execute' &&
+      leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_SAME_ROUND_DEPENDENCY',
+        'Leader cannot execute an entity producer and its dependent consumer in the same round'
+      );
       return;
     }
     if (this.reusesCompletedDataTool(state, decision)) {

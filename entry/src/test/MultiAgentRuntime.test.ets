@@ -1181,6 +1181,13 @@ export default function multiAgentRuntimeTest() {
       expect(dataTasks.length).assertEqual(2);
       expect(uiTasks.length).assertEqual(1);
       expect(terminals.length).assertEqual(1);
+      const searchPayload = dataTasks[0].payload as CreateDataTaskPayload;
+      const detailsPayload = dataTasks[1].payload as CreateDataTaskPayload;
+      expect(searchPayload.toolId).assertEqual('maps.place.search');
+      expect(searchPayload.roundId.endsWith(':round-1')).assertTrue();
+      expect(detailsPayload.toolId).assertEqual('maps.place.details');
+      expect(detailsPayload.roundId.endsWith(':round-2')).assertTrue();
+      expect((detailsPayload.args as Record<string, string>)['placeId']).assertEqual('hotel-101');
       expect(renderer.skeletonCalls).assertEqual(1);
       expect(renderer.resultCalls).assertEqual(1);
       expect(renderer.dataTaskIds.join(',')).assertEqual(dataTasks[0].taskId + ',' + dataTasks[1].taskId);

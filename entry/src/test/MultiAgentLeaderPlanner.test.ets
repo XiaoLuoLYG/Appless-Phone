@@ -111,6 +111,35 @@ const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
   0,
   LIVE_ANSWER_WITHOUT_REASON_CODE.length - 1
 ) + ',"reasonCode":"greeting"}';
+
+function sameRoundDependencyDecision(
+  sourceToolId: string,
+  consumerToolId: string,
+  consumerInput: string,
+  reversed: boolean = false
+): string {
+  const source: string = '{"localId":"source","goal":"read source",' +
+    '"allowedToolIds":["' + sourceToolId + '"],"toolId":"' + sourceToolId + '",' +
+    '"input":{},"required":true}';
+  const consumer: string = '{"localId":"consumer","goal":"read dependent detail",' +
+    '"allowedToolIds":["' + consumerToolId + '"],"toolId":"' + consumerToolId + '",' +
+    '"input":' + consumerInput + ',"required":true}';
+  const tasks: string = reversed ? consumer + ',' + source : source + ',' + consumer;
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["' + sourceToolId + '","' + consumerToolId + '"],' +
+    '"roundAction":"execute","dataTasks":[' + tasks + '],"uiIntent":{' +
+    '"purpose":"read source and dependent detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["source","detail"]}}';
+}
+
+function sourceOnlyDecision(toolId: string): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"source","goal":"read source",' +
+    '"allowedToolIds":["' + toolId + '"],"toolId":"' + toolId + '",' +
+    '"input":{},"required":true}],"uiIntent":{"purpose":"read source",' +
+    '"preferredDensity":"comfortable","requiredSections":["source"]}}';
+}
 const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace(
   '"personaId":"travel_companion",',
   ''
@@ -275,6 +304,13 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'hotelNavigateResult',
       actions: []
     }, {
+      toolId: 'maps.place.search',
+      intent: 'Search real places',
+      riskLevel: 'read',
+      inputSchema: 'mapsPlaceSearchQuery',
+      outputSchema: 'places',
+      actions: []
+    }, {
       toolId: 'maps.place.details',
       intent: 'Read details for one real place ID',
       riskLevel: 'read',
@@ -289,11 +325,25 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'foodSearchResults',
       actions: []
     }, {
+      toolId: 'mail.search',
+      intent: 'Search real mail',
+      riskLevel: 'read',
+      inputSchema: 'mailSearchRequest',
+      outputSchema: 'mailSearchResults',
+      actions: []
+    }, {
       toolId: 'mail.thread.read',
       intent: 'Read one exact mail identity',
       riskLevel: 'read',
       inputSchema: 'mailThreadReadRequest',
       outputSchema: 'mailThread',
+      actions: []
+    }, {
+      toolId: 'gmail.mail.search',
+      intent: 'Search real Gmail',
+      riskLevel: 'read',
+      inputSchema: 'gmailSearchRequest',
+      outputSchema: 'mailSearchResults',
       actions: []
     }, {
       toolId: 'gmail.thread.read',
@@ -359,6 +409,97 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('repairs same-round producer consumer pairs to the producer regardless of input or order', 0, async () => {
+      const invalid: string[] = [
+        sameRoundDependencyDecision('maps.place.search', 'maps.place.details', '{}'),
+        sameRoundDependencyDecision(
+          'maps.place.search', 'maps.place.details', '{"placeId":"place-forged"}'
+        ),
+        sameRoundDependencyDecision(
+          'maps.place.search', 'maps.place.details', '{"placeId":"place-real-1"}', true
+        ),
+        sameRoundDependencyDecision(
+          'mail.search', 'mail.thread.read', '{"requestKey":"gmail:thread-forged"}'
+        ),
+        sameRoundDependencyDecision(
+          'gmail.mail.search', 'gmail.thread.read', '{"requestKey":"gmail:thread-forged"}'
+        ),
+        '{"personaId":"travel_companion","skillId":"",' +
+          '"requestedCapabilityIds":["maps.place.search","maps.place.details"],' +
+          '"roundAction":"execute","dataTasks":[{"localId":"consumer","goal":"read detail",' +
+          '"allowedToolIds":["maps.place.search","maps.place.details"],' +
+          '"toolId":"maps.place.details","input":{},"required":true}],' +
+          '"uiIntent":{"purpose":"detail","preferredDensity":"comfortable",' +
+          '"requiredSections":["detail"]}}'
+      ];
+      const producers: string[] = [
+        'maps.place.search', 'maps.place.search', 'maps.place.search',
+        'mail.search', 'gmail.mail.search', 'maps.place.search'
+      ];
+
+      for (let index = 0; index < invalid.length; index++) {
+        const model = new QueueLocalModel([invalid[index], sourceOnlyDecision(producers[index])]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
+          (): boolean => true
+        );
+
+        expect(decision.dataTasks.length).assertEqual(1);
+        expect(decision.dataTasks[0].toolId).assertEqual(producers[index]);
+        expect(model.prompts.length).assertEqual(2);
+        expect(model.prompts[1].indexOf('LEADER_SAME_ROUND_DEPENDENCY')).assertLarger(-1);
+        expect(model.prompts[1].indexOf('successful or partial')).assertLarger(-1);
+      }
+    });
+
+    it('fails closed when the one repair still contains a same-round dependency pair', 0, async () => {
+      const invalid = sameRoundDependencyDecision(
+        'maps.place.search', 'maps.place.details', '{"placeId":"place-forged"}'
+      );
+      const model = new QueueLocalModel([invalid, invalid, sourceOnlyDecision('maps.place.search')]);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'search then details' }, planningContext(), 1,
+          (): boolean => true
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      expect(model.prompts.length).assertEqual(2);
+
+      const consumerOnlyModel = new QueueLocalModel([invalid, MAP_DETAILS_DECISION]);
+      let consumerOnlyError: string = '';
+      try {
+        await new MultiAgentLeaderPlanner(consumerOnlyModel).plan(
+          inputMessage(), { text: 'search then details' }, planningContext(), 1,
+          (): boolean => true
+        );
+      } catch (error) {
+        consumerOnlyError = error instanceof Error ? error.message : 'unknown';
+      }
+      expect(consumerOnlyError).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      expect(consumerOnlyModel.prompts.length).assertEqual(2);
+    });
+
+    it('keeps direct details with an explicit ID and independent flight train tasks valid', 0, async () => {
+      const direct = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([MAP_DETAILS_DECISION])
+      ).plan(inputMessage(), { text: 'place-real-1 的详情' }, planningContext(), 1);
+      const parallel = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([PARALLEL_DECISION])
+      ).plan(inputMessage(), { text: '查航班和高铁' }, planningContext(), 1);
+
+      expect(direct.dataTasks.length).assertEqual(1);
+      expect(direct.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(parallel.dataTasks.length).assertEqual(2);
+      expect(parallel.dataTasks[0].toolId).assertEqual('flight.search');
+      expect(parallel.dataTasks[1].toolId).assertEqual('train.search');
+    });
+
     it('rejects a model decision that exceeds the per-round Data task budget', 0, async () => {
       const model = new QueueLocalModel([manyTravelDecision(33)]);
       let errorCode: string = '';
@@ -738,6 +879,16 @@ export default function multiAgentLeaderPlannerTest() {
           entityRefs: ['place-real-1']
         }]
       };
+      const errorInput: InputUserPayload = {
+        text: successInput.text,
+        recentObservations: [{
+          taskId: 'input-1:round-1:place',
+          toolId: 'maps.place.search',
+          status: 'error',
+          summary: 'provider error',
+          entityRefs: ['place-real-1']
+        }]
+      };
       const valid = await new MultiAgentLeaderPlanner(
         new QueueLocalModel([MAP_DETAILS_DECISION])
       ).plan(inputMessage(), successInput, planningContext(), 2);
@@ -751,6 +902,7 @@ export default function multiAgentLeaderPlannerTest() {
       ).plan(inputMessage(), successInput, planningContext(), 2);
       let fakeRejected: boolean = false;
       let emptyRejected: boolean = false;
+      let errorRejected: boolean = false;
       try {
         await new MultiAgentLeaderPlanner(
           new QueueLocalModel([MAP_DETAILS_DECISION.replace('place-real-1', 'place-forged')])
@@ -765,11 +917,19 @@ export default function multiAgentLeaderPlannerTest() {
       } catch (_error) {
         emptyRejected = true;
       }
+      try {
+        await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([MAP_DETAILS_DECISION])
+        ).plan(inputMessage(), errorInput, planningContext(), 2);
+      } catch (_error) {
+        errorRejected = true;
+      }
 
       expect(valid.dataTasks[0].toolId).assertEqual('maps.place.details');
       expect(validFallbackId.dataTasks[0].toolId).assertEqual('maps.place.details');
       expect(fakeRejected).assertTrue();
       expect(emptyRejected).assertTrue();
+      expect(errorRejected).assertTrue();
     });
 
     it('rejects real references hidden in unused fields forged consumed fields and cross-tool sources', 0, async () => {
