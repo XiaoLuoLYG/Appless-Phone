@@ -149,15 +149,15 @@ function hasNamedPlanStepCap(source) {
     /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(source);
 }
 
-function maskCommentsAndStrings(source) {
+function maskNonCode(source) {
   return source.replace(
-    /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
+    /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\/(?:\\.|[^/\\\r\n])+\/[dgimsuvy]*|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
     (token) => token.replace(/[^\r\n]/g, ' ')
   );
 }
 
 function hasProductionCanarySubmitTimeout(source) {
-  const code = maskCommentsAndStrings(source);
+  const code = maskNonCode(source);
   const declaration = 'const options: MultiAgentCanaryOptions = {';
   const optionsStart = code.indexOf(declaration);
   if (optionsStart < 0) {
@@ -165,6 +165,9 @@ function hasProductionCanarySubmitTimeout(source) {
   }
   const bodyStart = code.indexOf('{', optionsStart);
   let depth = 0;
+  let parentheses = 0;
+  let brackets = 0;
+  let propertyStart = bodyStart + 1;
   let directProperties = 0;
   let exactProperties = 0;
   for (let index = bodyStart; index < code.length; index++) {
@@ -180,7 +183,29 @@ function hasProductionCanarySubmitTimeout(source) {
       }
       continue;
     }
-    if (depth !== 1 || !code.startsWith('submitTimeoutMs', index)) {
+    if (char === '(') {
+      parentheses++;
+      continue;
+    }
+    if (char === ')') {
+      parentheses--;
+      continue;
+    }
+    if (char === '[') {
+      brackets++;
+      continue;
+    }
+    if (char === ']') {
+      brackets--;
+      continue;
+    }
+    if (depth === 1 && parentheses === 0 && brackets === 0 && char === ',') {
+      propertyStart = index + 1;
+      continue;
+    }
+    if (depth !== 1 || parentheses !== 0 || brackets !== 0 ||
+      code.slice(propertyStart, index).trim().length > 0 ||
+      !/^submitTimeoutMs(?![A-Za-z0-9_$])\s*:/.test(code.slice(index))) {
       continue;
     }
     directProperties++;
@@ -388,6 +413,30 @@ function verifyArchitectureVerifier() {
   assert(
     !hasProductionCanarySubmitTimeout(canaryOptionsFixture('nested: { submitTimeoutMs: 45000 },')),
     'verifier rejects a nested production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('not_submitTimeoutMs: 45000,')),
+    'verifier rejects a longer identifier production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
+      'settingsFingerprint: /submitTimeoutMs: 45000,/.source,'
+    )),
+    'verifier rejects a regex expression production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('settingsFingerprint: fingerprint,')),
+    'verifier rejects a missing production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 30000,')),
+    'verifier rejects a wrong production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
+      'submitTimeoutMs: 45000,\n      submitTimeoutMs: 45000,'
+    )),
+    'verifier rejects duplicate direct production timeouts'
   );
 
   const commentedRuntime = stripComments('// BATCH_PENDING\n/* class Coordinator {} */');

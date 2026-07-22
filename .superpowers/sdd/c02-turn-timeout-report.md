@@ -129,3 +129,60 @@ The follow-up changes only the static verifier and this report; production sourc
 - C01-C20 list-only catalog: PASS.
 - `git diff --check`: PASS.
 - Known non-authoritative Hvigor coverage reporter error `00507008` remains; the complete fresh Hypium result above is green.
+
+## Second reviewer Important follow-up
+
+The second review found two more raw-text false positives: a longer identifier such as `not_submitTimeoutMs`, and the target text inside a regular-expression literal used by another direct property. The verifier contract was expanded before implementation to cover those mutations plus explicit missing, wrong-value, and duplicate-property cases.
+
+### Second follow-up RED
+
+With the new mutation fixtures and the prior scanner still in place, the actual verifier reported:
+
+```text
+PASS verifier accepts a live direct production timeout
+PASS verifier rejects a commented production timeout decoy
+PASS verifier rejects a string production timeout decoy
+PASS verifier rejects a nested production timeout decoy
+FAIL verifier rejects a longer identifier production timeout decoy
+FAIL verifier rejects a regex expression production timeout decoy
+PASS verifier rejects a missing production timeout
+PASS verifier rejects a wrong production timeout
+PASS verifier rejects duplicate direct production timeouts
+PASS production multi-agent turn deadline is 45000 ms
+2 verification check(s) failed.
+```
+
+### Second follow-up GREEN
+
+The dependency-free masker now removes regular-expression literals as well as strings and comments while preserving source positions and line endings. The object scanner requires an exact identifier boundary and accepts the property only at a direct top-level property position: immediately after the options-object opening brace or a top-level comma, with whitespace only before `submitTimeoutMs`. Parentheses and brackets are tracked so commas inside expressions cannot establish a false property boundary. Exactly one direct property must exist and its value must be exactly `45000`.
+
+The final verifier passed all nine timeout-contract fixtures:
+
+```text
+PASS verifier accepts a live direct production timeout
+PASS verifier rejects a commented production timeout decoy
+PASS verifier rejects a string production timeout decoy
+PASS verifier rejects a nested production timeout decoy
+PASS verifier rejects a longer identifier production timeout decoy
+PASS verifier rejects a regex expression production timeout decoy
+PASS verifier rejects a missing production timeout
+PASS verifier rejects a wrong production timeout
+PASS verifier rejects duplicate direct production timeouts
+PASS production multi-agent turn deadline is 45000 ms
+AIPhone Loopy backend smoke passed (255 checks).
+```
+
+This follow-up changes only the static verifier and this report; production source and runtime behavior are unchanged.
+
+### Second follow-up gates
+
+- `node --check scripts/verify-loopy-backend.mjs`: PASS.
+- Full Hypium rerun: `Tests run: 1140, Failure: 0, Error: 0, Pass: 1140, Ignore: 0`.
+- Fresh `test_result.txt`: `2026-07-23T00:34:16+0800`, SHA-256 `ab32aa0a23b5eb76917544c624700690977c9932725e037f4ef5785af828bcef`.
+- Multi-agent evidence: 37/37 passed.
+- Hotel evidence: 16/16 passed.
+- Capability audit: 44 registry tools, 2 runtime virtual tools, 37 actions, 69 capabilities; all drift/missing arrays empty and the same ten review-required entries retained.
+- C01-C20 list-only catalog: PASS.
+- The pre-existing untracked evidence directory remained untouched.
+- Known non-authoritative Hvigor coverage reporter error `00507008` remains; the complete fresh Hypium result above is green.
+- The parent acceptance flow still needs the C02 live-device rerun.
