@@ -26,6 +26,8 @@ const DECISION_KEYS: string[] = [
 const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolId';
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
+const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
+  'Do not include Thought, markdown, or code fences.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -61,7 +63,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
     }
-    const output: string = await this.model.complete(this.prompt(input, context, round));
+    const output: string = await this.model.complete(
+      this.prompt(input, context, round),
+      undefined,
+      LEADER_SYSTEM_PROMPT
+    );
     const trimmed: string = output.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Leader planner requires exactly one JSON object.');

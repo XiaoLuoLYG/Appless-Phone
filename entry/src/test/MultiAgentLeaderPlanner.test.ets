@@ -2,6 +2,7 @@ import { describe, expect, it } from '@ohos/hypium';
 import {
   AgentMessage,
   AgentMessageType,
+  ConversationContext,
   InputUserPayload,
   LeaderDecision,
   LeaderPlanningContext,
@@ -39,14 +40,20 @@ const HOTEL_WITH_EXTRA_DECISION: string = '{"personaId":"travel_companion","skil
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
+  systemPrompts: string[] = [];
   private readonly outputs: string[];
 
   constructor(outputs: string[]) {
     this.outputs = outputs.slice();
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
     this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt ?? '');
     if (this.outputs.length === 0) {
       throw new Error('No scripted Leader output');
     }
@@ -170,6 +177,9 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('Round: 2') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('flight.search') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('travel_companion') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('exactly one JSON object') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('Do not include Thought') >= 0).assertTrue();
+      expect(model.systemPrompts[0].indexOf('markdown') >= 0).assertTrue();
     });
 
     it('carries the old hotel date and anti-invention contract in the shared prompt', 0, async () => {
