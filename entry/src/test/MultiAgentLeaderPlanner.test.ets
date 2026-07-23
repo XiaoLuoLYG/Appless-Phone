@@ -41,6 +41,36 @@ const TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"departureAfter":"18:00"},"required":true}],' +
   '"uiIntent":{"purpose":"展示高铁","preferredDensity":"comfortable",' +
   '"requiredSections":["train"]},"reasonCode":"train_search"}';
+const OVERLAPPING_VIDEO_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["media.video.search","youtube.video.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"task1","goal":"搜索 B 站上的 Qwen 官方视频",' +
+  '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
+  '"input":{"query":"Qwen 官方视频","platform":"B站"},"required":true},' +
+  '{"localId":"task2","goal":"搜索 YouTube 上的 Qwen 官方视频",' +
+  '"allowedToolIds":["youtube.video.search"],"toolId":"youtube.video.search",' +
+  '"input":{"query":"Qwen 官方视频"},"required":true}],' +
+  '"uiIntent":{"purpose":"search","preferredDensity":"medium","requiredSections":["results"]}}';
+const AGGREGATE_VIDEO_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"videos","goal":"搜索 B 站和 YouTube 上的 Qwen 官方视频",' +
+  '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
+  '"input":{"query":"Qwen 官方视频","sources":["youtube","bilibili"]},"required":true}],' +
+  '"uiIntent":{"purpose":"展示多源视频","preferredDensity":"comfortable",' +
+  '"requiredSections":["video"]}}';
+const YOUTUBE_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["youtube.video.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"youtube","goal":"搜索 YouTube 视频",' +
+  '"allowedToolIds":["youtube.video.search"],"toolId":"youtube.video.search",' +
+  '"input":{"query":"世界杯"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 YouTube 视频","preferredDensity":"comfortable",' +
+  '"requiredSections":["video"]}}';
+const BILIBILI_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["media.video.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"bilibili","goal":"搜索 B 站视频",' +
+  '"allowedToolIds":["media.video.search"],"toolId":"media.video.search",' +
+  '"input":{"query":"Qwen","sources":["bilibili"]},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 B 站视频","preferredDensity":"comfortable",' +
+  '"requiredSections":["video"]}}';
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
@@ -397,6 +427,20 @@ function planningContext(): LeaderPlanningContext {
       outputSchema: 'mailThread',
       actions: []
     }, {
+      toolId: 'media.video.search',
+      intent: 'Search real Bilibili or multi-source videos',
+      riskLevel: 'read',
+      inputSchema: 'mediaVideoSearchQuery',
+      outputSchema: 'videoSearchResults',
+      actions: []
+    }, {
+      toolId: 'youtube.video.search',
+      intent: 'Search real YouTube-only videos',
+      riskLevel: 'read',
+      inputSchema: 'youtubeVideoSearchQuery',
+      outputSchema: 'videoSearchResults',
+      actions: []
+    }, {
       toolId: 'memory.update',
       intent: 'Update persona memory',
       riskLevel: 'draft',
@@ -664,6 +708,75 @@ export default function multiAgentLeaderPlannerTest() {
       expect(comparisonPair.dataTasks.length).assertEqual(2);
       expect(comparisonPair.dataTasks[0].toolId).assertEqual('flight.search');
       expect(comparisonPair.dataTasks[1].toolId).assertEqual('train.search');
+    });
+
+    it('repairs the real C07 overlapping video decision to one aggregate task', 0, async () => {
+      const model = new QueueLocalModel([
+        OVERLAPPING_VIDEO_DECISION,
+        AGGREGATE_VIDEO_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '帮我在 B 站和 YouTube 里搜索 Qwen 的官方视频' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('media.video.search');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[0].indexOf(
+        'YouTube and Bilibili means exactly one media.video.search Data task'
+      ) >= 0).assertTrue();
+      expect(model.prompts[1].indexOf('LEADER_OVERLAPPING_VIDEO_TOOLS') >= 0).assertTrue();
+    });
+
+    it('fails closed when the one video overlap repair still overlaps', 0, async () => {
+      const model = new QueueLocalModel([
+        OVERLAPPING_VIDEO_DECISION,
+        OVERLAPPING_VIDEO_DECISION,
+        AGGREGATE_VIDEO_DECISION
+      ]);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '帮我在 B 站和 YouTube 里搜索 Qwen 的官方视频' },
+          planningContext(),
+          1,
+          (): boolean => true
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_OVERLAPPING_VIDEO_TOOLS');
+      expect(model.prompts.length).assertEqual(2);
+    });
+
+    it('keeps YouTube-only Bilibili-only and unrelated parallel decisions valid', 0, async () => {
+      const youtubeModel = new QueueLocalModel([YOUTUBE_ONLY_DECISION]);
+      const bilibiliModel = new QueueLocalModel([BILIBILI_ONLY_DECISION]);
+      const parallelModel = new QueueLocalModel([PARALLEL_DECISION]);
+
+      const youtube = await new MultiAgentLeaderPlanner(youtubeModel).plan(
+        inputMessage(), { text: '帮我在 YouTube 搜世界杯视频' }, planningContext(), 1
+      );
+      const bilibili = await new MultiAgentLeaderPlanner(bilibiliModel).plan(
+        inputMessage(), { text: '帮我在 B 站搜 Qwen 视频' }, planningContext(), 1
+      );
+      const parallel = await new MultiAgentLeaderPlanner(parallelModel).plan(
+        inputMessage(), { text: '查航班和高铁' }, planningContext(), 1
+      );
+
+      expect(youtube.dataTasks[0].toolId).assertEqual('youtube.video.search');
+      expect(bilibili.dataTasks[0].toolId).assertEqual('media.video.search');
+      expect(parallel.dataTasks.length).assertEqual(2);
+      expect(youtubeModel.prompts.length).assertEqual(1);
+      expect(bilibiliModel.prompts.length).assertEqual(1);
+      expect(parallelModel.prompts.length).assertEqual(1);
     });
 
     it('tells later rounds not to repeat completed tools while allowing a different dependent tool', 0, async () => {

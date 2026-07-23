@@ -48,6 +48,7 @@ const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by st
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
+const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -63,6 +64,10 @@ const SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION: string =
   'in the same round. Return execute with only the producer task. Wait until a later round after a successful ' +
   'or partial producer observation supplies the exact entity reference before scheduling the consumer. ' +
   FULL_DECISION_CONTRACT;
+const OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_OVERLAPPING_VIDEO_TOOLS. media.video.search already covers both YouTube and Bilibili. ' +
+  'For a request naming both sources, return exactly one media.video.search Data task with sources ' +
+  '["youtube","bilibili"]; do not also schedule youtube.video.search. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
@@ -72,6 +77,12 @@ const TRAVEL_SELECTION_CONTRACT: string =
   'broad or multimodal wording such as 出行方案, 怎么去, or 综合比较 means exactly ' +
   'one travel.search Data task. Preserve route fields and relative date wording such as 明天 in the selected ' +
   'task input; do not drop or silently replace them.';
+const VIDEO_SELECTION_CONTRACT: string =
+  'Video selection contract: A video-only request that explicitly names both YouTube and Bilibili means exactly ' +
+  'one media.video.search Data task with sources ["youtube","bilibili"]. Never schedule youtube.video.search in ' +
+  'the same decision as media.video.search. Use youtube.video.search only for explicit YouTube-only requests. ' +
+  'Use media.video.search for Bilibili-only or multi-source video requests. Other independent tools may still run ' +
+  'in parallel when the user actually requested them.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -126,6 +137,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
       sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
+      this.rejectOverlappingVideoTools(decision);
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
         decision,
@@ -150,6 +162,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
         correction = SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
+        correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       }
       const repaired: string = await this.model.complete(
         prompt + '\n' + correction,
@@ -161,6 +175,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
         throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
       }
+      this.rejectOverlappingVideoTools(repairedDecision);
       this.rejectSameRoundDependency(repairedDecision);
       this.rejectCompletedToolReuse(
         repairedDecision,
@@ -172,6 +187,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         round
       );
       return repairedDecision;
+    }
+  }
+
+  private rejectOverlappingVideoTools(decision: LeaderDecision): void {
+    if (decision.roundAction !== 'execute') {
+      return;
+    }
+    let aggregate: boolean = false;
+    let youtubeOnly: boolean = false;
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
+      const toolIds: string[] = [task.toolId].concat(task.allowedToolIds);
+      aggregate = aggregate || toolIds.indexOf('media.video.search') >= 0;
+      youtubeOnly = youtubeOnly || toolIds.indexOf('youtube.video.search') >= 0;
+    }
+    if (aggregate && youtubeOnly) {
+      throw new Error(OVERLAPPING_VIDEO_TOOLS_ERROR);
     }
   }
 
@@ -343,6 +375,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Tasks in this round must be independent. Put dependent work in a later round.',
       'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
       TRAVEL_SELECTION_CONTRACT,
+      VIDEO_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
