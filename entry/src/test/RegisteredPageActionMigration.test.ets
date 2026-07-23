@@ -1466,8 +1466,8 @@ export default function registeredPageActionMigrationTest() {
       );
       const cases: Array<[string, A2uiAction]> = [
         ['gmail.draft.create', action('gmail.draft.apply', JSON.parse(
-          '{"threadId":"thread-1","to":"a@example.com","subject":"QA",' +
-            '"replyMode":"reply","body":"exact"}'
+          '{"provider":"gmail_oauth","draftId":"draft-1","threadId":"thread-1",' +
+            '"to":"a@example.com","subject":"QA","body":"exact"}'
         ) as Object)],
         ['payment.send', action('payment.confirm', JSON.parse(
           '{"provider":"stripe","recipient":"real-user","amountText":"5.00",' +

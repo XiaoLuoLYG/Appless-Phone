@@ -6,6 +6,7 @@ import {
   GmailCreateDraftArgs,
   GmailGetThreadArgs,
   GmailSearchThreadsArgs,
+  GmailUpdateDraftArgs,
   gmailMcpArgsForPrompt
 } from './GmailOAuthClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
@@ -795,6 +796,60 @@ async function createDraft(accessToken: string, prompt: string, args: Object | n
   }];
 }
 
+async function updateDraft(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
+  const gmailArgs = gmailMcpArgsForPrompt('gmail.draft.apply', prompt, args) as GmailUpdateDraftArgs;
+  if (gmailArgs.draftId.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing Gmail draft ID.')];
+  }
+  if (gmailArgs.to.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing recipient email address.')];
+  }
+  if (gmailArgs.body.trim().length === 0) {
+    return [errorResult('users.drafts.update', 'Missing email body.')];
+  }
+  const threadId = gmailArgs.threadId.trim();
+  const draftBody: GmailDraftCreateRequest = {
+    message: {
+      raw: bytesToBase64Url(utf8Bytes(rfc2822Message(gmailArgs)))
+    }
+  };
+  if (threadId.length > 0) {
+    draftBody.message.threadId = threadId;
+  }
+  const updated = await requestJson(
+    http.RequestMethod.PUT,
+    GMAIL_API_BASE_URL + '/drafts/' + encodeURIComponent(gmailArgs.draftId),
+    accessToken,
+    draftBody
+  ) as GmailDraftResponse;
+  const returnedDraftId = textOf(updated.id);
+  if (returnedDraftId.length === 0 || returnedDraftId !== gmailArgs.draftId) {
+    return [errorResult('users.drafts.update', 'Gmail returned a mismatched draft ID.')];
+  }
+  const messageId = updated.message === undefined ? '' : textOf(updated.message.id);
+  const resultThreadId = threadId.length > 0 ?
+    threadId : (updated.message === undefined ? '' : textOf(updated.message.threadId));
+  const rows: A2uiLabelValueData[] = [
+    { label: 'To', value: gmailArgs.to.join(', ') },
+    { label: 'Subject', value: gmailArgs.subject },
+    { label: 'Draft ID', value: returnedDraftId },
+    { label: 'Message ID', value: messageId }
+  ];
+  if (resultThreadId.length > 0) {
+    rows.push({ label: 'Thread ID', value: resultThreadId });
+  }
+  return [{
+    sourceTag: 'Gmail API',
+    toolName: 'users.drafts.update',
+    title: 'Gmail 草稿已更新',
+    status: 'success',
+    summary: '已在真实 Gmail 账号中更新原草稿；尚未发送。',
+    rows: rows,
+    rawPreview: 'draftId=' + returnedDraftId + ' messageId=' + messageId +
+      (resultThreadId.length > 0 ? ' threadId=' + resultThreadId : '')
+  }];
+}
+
 export async function searchGmailThreadsForMail(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
   return await searchThreads(accessToken, prompt, args);
 }
@@ -811,8 +866,11 @@ export async function callGmailApiTool(toolId: string, prompt: string, accessTok
     if (toolId === 'gmail.thread.read') {
       return await readThread(accessToken, prompt, args);
     }
-    if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+    if (toolId === 'gmail.draft.create') {
       return await createDraft(accessToken, prompt, args);
+    }
+    if (toolId === 'gmail.draft.apply') {
+      return await updateDraft(accessToken, prompt, args);
     }
     return [errorResult(toolId, 'Unsupported Gmail API tool.')];
   } catch (error) {

@@ -41,6 +41,18 @@ interface GmailReplyDraftActionArgs {
   contextSummary: string;
 }
 
+export interface GmailDraftApplyActionArgs {
+  provider: string;
+  draftId: string;
+  to: string[];
+  subject: string;
+  body: string;
+  threadId: string;
+}
+
+type GmailDraftValue = Object | string | number | boolean | null | undefined;
+type GmailDraftRecord = Record<string, GmailDraftValue>;
+
 function action(id: string, label: string, prompt: string, variant: string, kind: string, args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
     id: id,
@@ -145,6 +157,115 @@ function resultFromDynamic(result: DynamicGenericToolResult): A2uiGenericToolRes
     rows: result.rows,
     rawPreview: ''
   };
+}
+
+function gmailDraftRecord(value: GmailDraftValue): GmailDraftRecord | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ?
+    value as GmailDraftRecord : null;
+}
+
+function gmailDraftText(value: GmailDraftValue): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function gmailDraftIdFromJson(rawPreview: string): string {
+  if (rawPreview.trim().length === 0 || rawPreview.trim().charAt(0) !== '{') {
+    return '';
+  }
+  try {
+    const root = gmailDraftRecord(JSON.parse(rawPreview) as Object);
+    if (root === null) {
+      return '';
+    }
+    const containers: GmailDraftRecord[] = [root];
+    ['data', 'result', 'draft'].forEach((key: string) => {
+      const nested = gmailDraftRecord(root[key]);
+      if (nested !== null) {
+        containers.push(nested);
+      }
+    });
+    for (let index = 0; index < containers.length; index++) {
+      const record = containers[index];
+      const candidate = gmailDraftText(record['draftId']).length > 0 ?
+        gmailDraftText(record['draftId']) :
+        gmailDraftText(record['draft_id']);
+      if (candidate.length > 0) {
+        return candidate;
+      }
+    }
+  } catch (_error) {
+    return '';
+  }
+  return '';
+}
+
+function gmailDraftIdFromResult(result: DynamicGenericToolResult): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    const row = result.rows[index];
+    const label = row.label.trim().toLowerCase().replace(/[_\s-]/g, '');
+    if (label === 'draftid' && row.value.trim().length > 0) {
+      return row.value.trim();
+    }
+  }
+  return gmailDraftIdFromJson(result.rawPreview);
+}
+
+function gmailDraftProvider(result: DynamicGenericToolResult): string {
+  const source = result.sourceTag.trim().toLowerCase();
+  if (source.indexOf('composio') >= 0) {
+    return 'composio';
+  }
+  if (source.indexOf('gmail api') >= 0 || source.indexOf('gmail oauth') >= 0) {
+    return 'gmail_oauth';
+  }
+  return '';
+}
+
+function gmailDraftRecipients(value: GmailDraftValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const recipients: string[] = [];
+  value.forEach((item: GmailDraftValue) => {
+    if (typeof item === 'string' && item.trim().length > 0) {
+      recipients.push(item.trim());
+    }
+  });
+  return recipients;
+}
+
+export function gmailDraftApplyAction(
+  result: DynamicGenericToolResult,
+  originalArgs: Object | null
+): A2uiAction | null {
+  if (result.status !== 'success' || originalArgs === null || Array.isArray(originalArgs) ||
+    typeof originalArgs !== 'object') {
+    return null;
+  }
+  const provider = gmailDraftProvider(result);
+  const draftId = gmailDraftIdFromResult(result);
+  const args = originalArgs as GmailDraftRecord;
+  const to = gmailDraftRecipients(args['to']);
+  const body = typeof args['body'] === 'string' ? args['body'] as string : '';
+  if (provider.length === 0 || draftId.length === 0 || to.length === 0 || body.trim().length === 0) {
+    return null;
+  }
+  const actionArgs: GmailDraftApplyActionArgs = {
+    provider: provider,
+    draftId: draftId,
+    to: to,
+    subject: typeof args['subject'] === 'string' ? args['subject'] as string : '',
+    body: body,
+    threadId: typeof args['threadId'] === 'string' ? (args['threadId'] as string).trim() : ''
+  };
+  return action(
+    'gmail.draft.apply',
+    '应用 Gmail 草稿',
+    '确认应用刚才的 Gmail 草稿',
+    'primary',
+    'prompt',
+    actionArgs
+  );
 }
 
 function genericResultsA2ui(
@@ -416,15 +537,35 @@ export function gmailThreadResultsA2ui(surfaceId: string, toolId: string, result
   );
 }
 
-export function gmailDraftPreviewA2ui(surfaceId: string, result: DynamicGenericToolResult): string {
-  const mapped = genericResultsFromDynamic([result]);
+export function gmailDraftPreviewA2ui(
+  surfaceId: string,
+  result: DynamicGenericToolResult,
+  originalArgs: Object | null = null,
+  sourceToolId: string = result.toolName
+): string {
+  const draftApply = gmailDraftApplyAction(result, originalArgs);
+  const rendered: DynamicGenericToolResult = {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview,
+    registration: result.registration,
+    providerPhase: result.providerPhase
+  };
+  const mapped = genericResultsFromDynamic([rendered]);
+  if (draftApply !== null && mapped.length > 0) {
+    mapped[0].actions = [draftApply];
+  }
   return genericResultsA2ui(
     surfaceId,
     'Gmail Draft Preview',
     'ready',
     'draft',
     mapped,
-    summary('Draft prepared for review. It has not been sent.', result.toolName, 1)
+    summary('Draft prepared for review. It has not been sent.', sourceToolId, 1)
   );
 }
 

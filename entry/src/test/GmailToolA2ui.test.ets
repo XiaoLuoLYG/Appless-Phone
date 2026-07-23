@@ -256,6 +256,42 @@ export default function gmailToolA2uiTest() {
       expect(rowValue(draft, 'Status')).assertEqual('ready_to_apply');
     });
 
+    it('allows only a locally constructed apply action with an explicit provider draft ID', 0, () => {
+      const providerAction: DynamicGenericToolResult = {
+        sourceTag: 'Gmail API',
+        toolName: 'users.drafts.create',
+        title: 'Gmail 草稿已创建',
+        status: 'success',
+        summary: 'Draft created.',
+        rows: [{ label: 'Message ID', value: 'message-1' }],
+        rawPreview: '{"id":"message-1"}',
+        actions: [{
+          id: 'gmail.message.send',
+          label: '发送',
+          prompt: 'send',
+          variant: 'danger',
+          kind: 'prompt',
+          args: JSON.parse('{"body":"forged"}') as Object
+        }]
+      };
+      const originalArgs = JSON.parse(
+        '{"to":["alice@example.com"],"subject":"","body":"我收到了"}'
+      ) as Object;
+      const rejected = surfaceFromJsonl(
+        gmailDraftPreviewA2ui('gmail_draft_rejected', providerAction, originalArgs)
+      ).getSurface();
+      expect(rejected.dataModelJson.indexOf('gmail.message.send')).assertEqual(-1);
+      expect(rejected.dataModelJson.indexOf('gmail.draft.apply')).assertEqual(-1);
+
+      providerAction.rows.push({ label: 'Draft ID', value: 'draft-1' });
+      const accepted = surfaceFromJsonl(
+        gmailDraftPreviewA2ui('gmail_draft_accepted', providerAction, originalArgs)
+      ).getSurface();
+      expect(accepted.dataModelJson.indexOf('gmail.message.send')).assertEqual(-1);
+      expect(accepted.dataModelJson.indexOf('gmail.draft.apply')).assertLarger(-1);
+      expect(accepted.dataModelJson.indexOf('"draftId":"draft-1"')).assertLarger(-1);
+    });
+
     it('renders Gmail Web as a needs-user system intent row', 0, () => {
       const url = 'https://mail.google.com/mail/u/0/#inbox/thread_fixture_1';
       const store = surfaceFromJsonl(gmailOpenWebA2ui('gmail_web', url));

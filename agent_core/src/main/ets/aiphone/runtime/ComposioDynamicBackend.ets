@@ -149,8 +149,7 @@ function isSafeGmailDraftCreateSlug(slug: string): boolean {
 }
 
 function isSafeGmailDraftApplySlug(slug: string): boolean {
-  return isSafeGmailDraftMutationSlug(slug) &&
-    slugContainsAny(slug, ['create', 'upsert', 'save', 'update', 'edit', 'apply']);
+  return slug.trim().toLowerCase() === 'gmail_update_draft';
 }
 
 function rowsForSearch(payload: ComposioSearchObservation): A2uiLabelValueData[] {
@@ -388,7 +387,8 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
     return 'List my YouTube subscriptions for the authenticated user';
   }
   if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
-    return 'Create a Gmail draft for review';
+    return fixedToolId === 'gmail.draft.apply' ?
+      'Update an existing Gmail draft for review' : 'Create a Gmail draft for review';
   }
   if (fixedToolId === 'gmail.reply.send') {
     return 'Reply to an existing Gmail thread';
@@ -499,6 +499,7 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
   }
   if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
     return [
+      { source: 'draftId', targets: ['draft_id', 'draftId'] },
       { source: 'to', targets: ['to', 'to_addresses', 'recipients', 'emails'] },
       { source: 'recipientEmail', targets: ['recipient_email'] },
       { source: 'subject', targets: ['subject', 'title'] },
@@ -608,8 +609,11 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
 }
 
 function fixedWritePreservedArgs(toolId: string): string[] {
-  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+  if (toolId === 'gmail.draft.create') {
     return ['to', 'subject', 'body', 'threadId', 'replyMode'];
+  }
+  if (toolId === 'gmail.draft.apply') {
+    return ['draftId', 'to', 'subject', 'body', 'threadId'];
   }
   if (toolId === 'gmail.reply.send') {
     return ['recipientEmail', 'body', 'threadId'];
@@ -660,7 +664,7 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
   }
   if (fixedToolId === 'gmail.draft.apply') {
     const missing: string[] = [];
-    ['threadId', 'to', 'subject', 'replyMode', 'body'].forEach((name: string) => {
+    ['draftId', 'to', 'body'].forEach((name: string) => {
       if (!hasMeaningfulValue(record[name])) {
         missing.push(name);
       }
@@ -734,6 +738,7 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'calendar.event.update') return 'GOOGLECALENDAR_PATCH_EVENT';
   if (fixedToolId === 'calendar.event.delete') return 'GOOGLECALENDAR_DELETE_EVENT';
   if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';
+  if (fixedToolId === 'gmail.draft.apply') return 'GMAIL_UPDATE_DRAFT';
   return '';
 }
 

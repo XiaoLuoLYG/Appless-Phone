@@ -11487,6 +11487,22 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
+  let pinnedProvider = '';
+  if (toolId === 'gmail.draft.apply' && args !== null && !Array.isArray(args) && typeof args === 'object') {
+    const values = args as ToolArgRecord;
+    pinnedProvider = textOf(values.provider).trim().toLowerCase();
+    if (pinnedProvider !== 'gmail_oauth' && pinnedProvider !== 'composio') {
+      return [gmailErrorResult(toolId, 'Gmail draft provider is missing or invalid.')];
+    }
+  }
+  if (pinnedProvider === 'gmail_oauth') {
+    const pinnedFallback = await gmailOAuthFallbackResults(toolId, prompt, args);
+    pinnedFallback.forEach((result: DynamicGenericToolResult) => {
+      result.providerPhase = 'execution';
+    });
+    return pinnedFallback.length > 0 ?
+      pinnedFallback : [gmailErrorResult(toolId, 'Gmail OAuth draft provider is unavailable.')];
+  }
   const composioResult = gmailComposioResultForTests === null ?
     await composioFixedAppResult(
       toolId,
@@ -11495,6 +11511,9 @@ async function configuredGmailResults(
       toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
       args
     ) : clonedGmailResult(gmailComposioResultForTests);
+  if (pinnedProvider === 'composio') {
+    return [composioResult];
+  }
   if (composioResult.status === 'success' && composioResult.providerPhase === 'execution') {
     return [composioResult];
   }
@@ -12254,7 +12273,12 @@ async function callLocalGmailTool(
     }
     const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-      return gmailDraftPreviewA2ui(surfaceId, results[0]);
+      return gmailDraftPreviewA2ui(
+        surfaceId,
+        results[0],
+        toolId === 'gmail.draft.create' ? args : null,
+        toolId
+      );
     }
     return gmailThreadResultsA2ui(surfaceId, toolId, results);
   } catch (error) {

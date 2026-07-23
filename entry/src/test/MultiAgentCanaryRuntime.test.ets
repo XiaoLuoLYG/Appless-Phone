@@ -863,7 +863,12 @@ function providerGmailDraftSurface(sequence: number): A2uiSurfaceState {
     rawPreview: 'draftId=draft-provider-1 messageId=message-provider-1'
   };
   const parsed = parseA2uiJsonl(
-    gmailDraftPreviewA2ui('gmail-provider-draft', providerResult)
+    gmailDraftPreviewA2ui(
+      'gmail-provider-draft',
+      providerResult,
+      JSON.parse('{"to":["alice@example.com"],"subject":"","body":"我收到了"}') as Object,
+      'gmail.draft.create'
+    )
   );
   const store = new A2uiSurfaceStore();
   parsed.envelopes.forEach((envelope) => store.apply(envelope));
@@ -1886,7 +1891,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(malformed === null).assertTrue();
     });
 
-    it('blocks F08 after the real F07 provider surface when no exact apply action exists', 0, async () => {
+    it('applies the exact real F07 provider draft in place without a second create or send', 0, async () => {
       const calls: RecordedPageAction[] = [];
       let currentHost: A2uiSurfaceState | null = null;
       let currentSnapshot: RegisteredPageSnapshot | null = null;
@@ -1910,6 +1915,17 @@ export default function multiAgentCanaryRuntimeTest() {
         if (actionId === 'gmail.draft.create') {
           currentHost = providerGmailDraftSurface(hostGeneration);
           currentSnapshot = pageSnapshot(currentHost, 1);
+        } else if (actionId === 'gmail.draft.apply') {
+          const updated = pageSurface('gmail.draft.apply', {
+            id: 'gmail.open.web',
+            label: '跳转到Gmail',
+            prompt: 'https://mail.google.com/mail/u/0/#drafts',
+            variant: 'secondary',
+            kind: 'client',
+            args: JSON.parse('{"url":"https://mail.google.com/mail/u/0/#drafts"}') as Object
+          }, hostGeneration);
+          currentHost = updated;
+          currentSnapshot = pageSnapshot(updated, 2);
         }
         return {
           status: 'success',
@@ -1923,30 +1939,38 @@ export default function multiAgentCanaryRuntimeTest() {
         { text: '' },
         hostGeneration
       ) as MultiAgentSettledOutcome;
+      const f07Document = currentSnapshot === null ?
+        null : (currentSnapshot as RegisteredPageSnapshot).document;
       const applied = await runtime.submit(
         '确认应用刚才的 Gmail 草稿',
         { text: '' },
         hostGeneration
       ) as MultiAgentSettledOutcome;
-      const document = currentSnapshot === null ?
-        null : (currentSnapshot as RegisteredPageSnapshot).document;
-      const actions: HtmlHomeAction[] = document === null ? [] : document.actions.slice();
-      if (document !== null) {
-        document.blocks.forEach((block) => actions.push(...block.actions));
+      const actions: HtmlHomeAction[] = f07Document === null ? [] : f07Document.actions.slice();
+      if (f07Document !== null) {
+        f07Document.blocks.forEach((block) => actions.push(...block.actions));
       }
 
       expect(created.status).assertEqual('success');
-      expect(applied.status).assertEqual('error');
-      expect(calls.length).assertEqual(1);
+      expect(applied.status).assertEqual('success');
+      expect(calls.length).assertEqual(2);
       expect(calls[0].actionId).assertEqual('gmail.draft.create');
       expect(JSON.stringify(calls[0].args)).assertEqual(
         '{"to":["alice@example.com"],"subject":"","body":"我收到了"}'
       );
+      expect(calls[1].actionId).assertEqual('gmail.draft.apply');
+      expect(JSON.stringify(calls[1].args)).assertEqual(
+        '{"provider":"gmail_oauth","draftId":"draft-provider-1","to":["alice@example.com"],' +
+          '"subject":"","body":"我收到了","threadId":""}'
+      );
       expect(actions.filter((action): boolean =>
         action.id === 'gmail.draft.apply'
-      ).length).assertEqual(0);
+      ).length).assertEqual(1);
       expect(actions.filter((action): boolean =>
         action.id === 'gmail.open.web'
+      ).length).assertEqual(1);
+      expect(calls.filter((call: RecordedPageAction): boolean =>
+        call.actionId === 'gmail.draft.create'
       ).length).assertEqual(1);
       expect(calls.filter((call: RecordedPageAction): boolean =>
         call.actionId === 'gmail.message.send'
@@ -1961,8 +1985,8 @@ export default function multiAgentCanaryRuntimeTest() {
       let currentSnapshot: RegisteredPageSnapshot | null;
       let hostGeneration = 41;
       const applyArgs = JSON.parse(
-        '{"threadId":"thread-provider-1","to":["alice@example.com"],"subject":"Provider draft subject",' +
-          '"replyMode":"reply","body":"我收到了"}'
+        '{"provider":"gmail_oauth","draftId":"draft-provider-1","threadId":"thread-provider-1",' +
+          '"to":["alice@example.com"],"subject":"Provider draft subject","body":"我收到了"}'
       ) as Object;
       const applyAction: A2uiAction = {
         id: 'gmail.draft.apply',
@@ -2049,8 +2073,8 @@ export default function multiAgentCanaryRuntimeTest() {
     it('rejects F08 when the Gmail draft host generation is stale', 0, async () => {
       const calls: RecordedPageAction[] = [];
       const args = JSON.parse(
-        '{"threadId":"thread-provider-2","to":["alice@example.com"],"subject":"QA",' +
-          '"replyMode":"reply","body":"Exact"}'
+        '{"provider":"gmail_oauth","draftId":"draft-provider-2","threadId":"thread-provider-2",' +
+          '"to":["alice@example.com"],"subject":"QA","body":"Exact"}'
       ) as Object;
       const action: A2uiAction = {
         id: 'gmail.draft.apply',
@@ -2615,8 +2639,8 @@ export default function multiAgentCanaryRuntimeTest() {
         ['gmail.thread.read', 'gmail.draft.create', 'gmail.draft.create',
           JSON.parse('{"to":"a@example.com","subject":"QA","body":"draft"}') as Object, 'prompt'],
         ['gmail.draft.create', 'gmail.draft.apply', 'gmail.draft.apply',
-          JSON.parse('{"threadId":"thread-1","to":"a@example.com","subject":"QA",' +
-            '"replyMode":"reply","body":"exact"}') as Object, 'prompt'],
+          JSON.parse('{"provider":"gmail_oauth","draftId":"draft-1","threadId":"thread-1",' +
+            '"to":"a@example.com","subject":"QA","body":"exact"}') as Object, 'prompt'],
         ['gmail.draft.apply', 'gmail.open.web', 'gmail.open.web',
           JSON.parse('{"url":"https://mail.google.com/"}') as Object, 'client'],
         ['luckin.order.preview', 'luckin.order.preview', 'luckin.order.preview',

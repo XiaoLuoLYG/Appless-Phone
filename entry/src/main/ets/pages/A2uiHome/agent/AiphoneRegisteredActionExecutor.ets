@@ -199,11 +199,13 @@ export function validateRegisteredPageActionArgs(
     );
   }
   if (actionId === 'gmail.draft.apply') {
+    const provider = argText(values, ['provider']).toLowerCase();
     return validation(
-      argText(values, ['threadId']).length > 0 && recipientsValid(values['to']) &&
-        argText(values, ['subject']).length > 0 && argText(values, ['replyMode']) === 'reply' &&
+      (provider === 'gmail_oauth' || provider === 'composio') &&
+        argText(values, ['draftId']).length > 0 && recipientsValid(values['to']) &&
         argText(values, ['body']).length > 0,
-      'GMAIL_DRAFT_ARGS_INVALID', 'Gmail apply requires the exact thread, recipients, subject, mode, and body.'
+      'GMAIL_DRAFT_ARGS_INVALID',
+      'Gmail apply requires the exact provider draft, recipients, and body.'
     );
   }
   if (actionId === 'gmail.open.web') {

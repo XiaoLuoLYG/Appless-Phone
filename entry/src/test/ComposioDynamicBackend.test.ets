@@ -448,6 +448,7 @@ export default function composioDynamicBackendTest() {
       expect(composioExactToolSlugForFixedTool('calendar.event.update')).assertEqual('GOOGLECALENDAR_PATCH_EVENT');
       expect(composioExactToolSlugForFixedTool('calendar.event.delete')).assertEqual('GOOGLECALENDAR_DELETE_EVENT');
       expect(composioExactToolSlugForFixedTool('gmail.reply.send')).assertEqual('GMAIL_REPLY_TO_THREAD');
+      expect(composioExactToolSlugForFixedTool('gmail.draft.apply')).assertEqual('GMAIL_UPDATE_DRAFT');
       expect(normalizedComposioUseCase('', 'calendar.event.delete')).assertEqual(
         'Delete a Google Calendar event by event ID');
     });
@@ -495,6 +496,26 @@ export default function composioDynamicBackendTest() {
       expect(result.status).assertEqual('success');
       expect(client.executedSlugs.length).assertEqual(1);
       expect(client.executedSlugs[0]).assertEqual('GMAIL_REPLY_TO_THREAD');
+    });
+
+    it('rejects non-update Gmail draft tools for the apply contract', 0, async () => {
+      const searchObservation = '{"source":"Composio","authorizedToolkits":["gmail"],"tools":[' +
+        '{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft","inputSchema":"{}"},' +
+        '{"toolSlug":"GMAIL_EDIT_DRAFT","description":"Edit Gmail draft","inputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservation,
+        '{"successful":true,"data":{"draft_id":"draft-1"}}'
+      );
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '确认应用刚才的 Gmail 草稿',
+        'gmail.draft.apply',
+        looseObject('{"draftId":"draft-1","to":["alice@example.com"],"subject":"","body":"我收到了"}')
+      );
+      expect(result.status).assertEqual('error');
+      expect(result.summary.indexOf('GMAIL_UPDATE_DRAFT')).assertLarger(-1);
+      expect(client.executedSlugs.length).assertEqual(0);
     });
 
     it('maps WhatsApp and Calendar args to exact provider schemas', 0, () => {
@@ -638,7 +659,8 @@ export default function composioDynamicBackendTest() {
 
         const blankRecipientResult = await callComposioDynamic(
           '确认应用刚才的 Gmail 草稿',
-          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["   "],"subject":"Re: Demo","replyMode":"reply","body":"Got it."}}')
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"draftId":"draft-123",' +
+            '"to":["   "],"subject":"Re: Demo","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(blankRecipientResult.toolName).assertEqual('gmail.draft.apply');
         expect(blankRecipientResult.status).assertEqual('error');
@@ -648,11 +670,12 @@ export default function composioDynamicBackendTest() {
 
         const draftResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
-          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["alice@example.com"],"subject":"Re: Demo","body":"Got it."}}')
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"to":["alice@example.com"],' +
+            '"subject":"Re: Demo","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(draftResult.toolName).assertEqual('gmail.draft.apply');
         expect(draftResult.status).assertEqual('error');
-        expect(draftResult.summary.indexOf('replyMode')).assertLarger(-1);
+        expect(draftResult.summary.indexOf('draftId')).assertLarger(-1);
         expect(draftResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
         expect(JSON.stringify(draftResult.rows).indexOf('Missing')).assertLarger(-1);
 
@@ -717,14 +740,14 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', editDraft, 'gmail.draft.create'));
       expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', applyDraft, 'gmail.draft.create'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
       expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
         .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', editDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', editDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', applyDraft, 'gmail.draft.apply'));
     });
 
     it('keeps configured app user id for Composio dynamic calls', 0, () => {

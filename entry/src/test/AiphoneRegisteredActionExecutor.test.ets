@@ -375,8 +375,8 @@ function fixedActionArgs(actionId: string): Object {
     return object('{"to":["qa@example.com"],"subject":"QA","body":"Draft"}');
   }
   if (actionId === 'gmail.draft.apply') {
-    return object('{"threadId":"thread-1","to":["qa@example.com"],"subject":"Re: QA",' +
-      '"replyMode":"reply","body":"Approved draft"}');
+    return object('{"provider":"gmail_oauth","draftId":"draft-1","threadId":"thread-1",' +
+      '"to":["qa@example.com"],"subject":"Re: QA","body":"Approved draft"}');
   }
   if (actionId === 'gmail.open.web') {
     return object('{"url":"https://mail.google.com/"}');

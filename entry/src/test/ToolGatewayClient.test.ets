@@ -146,6 +146,36 @@ class ScriptedGmailMcpClient extends GenericMcpClient {
   }
 }
 
+class RecordingGmailDraftMcpClient extends GenericMcpClient {
+  operations: string[] = [];
+  argsJson: string[] = [];
+
+  async callTool(
+    registration: DynamicToolRegistration,
+    _credentialValue: string,
+    args: Object
+  ): Promise<DynamicGenericToolResult> {
+    this.operations.push(registration.mcpToolName);
+    this.argsJson.push(JSON.stringify(args));
+    const updating = registration.mcpToolName === 'update_draft';
+    return {
+      sourceTag: 'Gmail OAuth',
+      toolName: registration.mcpToolName,
+      title: updating ? 'Gmail 草稿已更新' : 'Gmail 草稿已创建',
+      status: 'success',
+      summary: updating ? 'Updated exact Gmail draft.' : 'Created exact Gmail draft.',
+      rows: [
+        { label: 'To', value: 'alice@example.com' },
+        { label: 'Subject', value: '' },
+        { label: 'Draft ID', value: 'draft-provider-1' },
+        { label: 'Message ID', value: 'message-provider-1' }
+      ],
+      rawPreview: '{"draftId":"draft-provider-1"}',
+      providerPhase: 'execution'
+    };
+  }
+}
+
 class ThrowingGmailMcpClient extends GenericMcpClient {
   callCount: number = 0;
 
@@ -824,6 +854,55 @@ export default function toolGatewayClientTest() {
         expect(serialized.indexOf('message-once-1')).assertLarger(-1);
         expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
         expect(serialized.indexOf('FULL BODY MUST NOT ENTER SEARCH DATA')).assertEqual(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('updates the exact OAuth Gmail draft in place without a second create or send', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new RecordingGmailDraftMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const created = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+          'surface_gmail_exact_draft_create',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"to":["alice@example.com"],"subject":"","body":"我收到了"}')
+        );
+        const createResult = genericToolResults(created.surface)[0];
+        const applyActions = createResult.actions === undefined ? [] :
+          createResult.actions.filter((action): boolean => action.id === 'gmail.draft.apply');
+        expect(applyActions.length).assertEqual(1);
+        const applyArgs = applyActions[0].args as Object;
+        const applied = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.apply',
+          '确认应用刚才的 Gmail 草稿',
+          'surface_gmail_exact_draft_apply',
+          'registered_action',
+          noop,
+          null,
+          applyArgs
+        );
+        expect(genericToolResults(applied.surface)[0].status).assertEqual('success');
+        expect(client.operations.join(',')).assertEqual('create_draft,update_draft');
+        expect(client.operations.filter((operation: string): boolean =>
+          operation === 'create_draft'
+        ).length).assertEqual(1);
+        expect(client.operations.indexOf('send_draft')).assertEqual(-1);
+        expect(client.argsJson[1].indexOf('"draftId":"draft-provider-1"')).assertLarger(-1);
+        expect(client.argsJson[1].indexOf('"body":"我收到了"')).assertLarger(-1);
       } finally {
         configureGmailMcpClientForTests(null);
         configureGmailCredentialStoreForTests(null);
@@ -3010,13 +3089,14 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later.","threadId":"thread-345","replyMode":"reply"}')
+          looseObject('{"provider":"composio","draftId":"draft-345","to":["alice@example.com"],' +
+            '"subject":"AIPhoneDemo","body":"Please send later.","threadId":"thread-345"}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('needs_auth');
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('draft-345')).assertLarger(-1);
         expect(JSON.stringify(rendered[0].rows).indexOf('Please send later.')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -3094,14 +3174,14 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"threadId":"thread-345"}')
+          looseObject('{"provider":"composio","draftId":"draft-345","to":["alice@example.com"]}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('error');
         expect(rendered[0].summary.indexOf('body')).assertLarger(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('draft-345')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -3109,7 +3189,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('blocks Gmail draft-apply when reply context is missing even if body is present', 0, async () => {
+    it('blocks Gmail draft-apply when provider draft identity is missing even if body is present', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -3122,15 +3202,16 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"threadId":"thread-345","to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later."}')
+          looseObject('{"provider":"composio","to":["alice@example.com"],' +
+            '"subject":"AIPhoneDemo","body":"Please send later."}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('error');
-        expect(rendered[0].summary.indexOf('replyMode')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('draftId')).assertLarger(-1);
         expect(rendered[0].summary.indexOf('Composio 未配置')).assertEqual(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('gmail.draft.apply')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
