@@ -11,11 +11,14 @@ import {
   AgentMessageType,
   CreateDataTaskPayload,
   DataResult,
+  DataStepDecision,
   DataTaskExecutor,
+  DataTaskPlanner,
   DynamicGenericToolResult,
   MailCalendarSuggestion,
   LocalModel,
   LinkedMessageBus,
+  ObservationDigest,
   createSeedA2uiSurface,
   whatsAppProviderResultFromObservationForTest
 } from '@loop/agent-core';
@@ -118,6 +121,29 @@ class QueueModel implements LocalModel {
 class RejectDataExecutor implements DataTaskExecutor {
   async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
     throw new Error('No Data task expected.');
+  }
+}
+
+class PassthroughDataPlanner implements DataTaskPlanner {
+  async next(
+    task: CreateDataTaskPayload,
+    observations: ObservationDigest[],
+    _step: number
+  ): Promise<DataStepDecision> {
+    if (observations.length === 0) {
+      return {
+        kind: 'call',
+        toolId: task.toolId,
+        args: task.args,
+        summary: 'execute registered read'
+      };
+    }
+    return {
+      kind: 'finish',
+      toolId: task.toolId,
+      args: JSON.parse('{}') as Object,
+      summary: 'return observed read result'
+    };
   }
 }
 
@@ -646,6 +672,7 @@ function canary(
     } : currentHostGeneration,
     onSurface: (_surface: A2uiSurfaceState): boolean => true,
     onMemoryUpdate: (): void => {},
+    dataPlanner: new PassthroughDataPlanner(),
     dataExecutor,
     onMailDetail,
     currentLocalDate: (): string => '2026-07-22',

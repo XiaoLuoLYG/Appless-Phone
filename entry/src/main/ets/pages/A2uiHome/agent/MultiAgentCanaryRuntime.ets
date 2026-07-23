@@ -15,6 +15,7 @@ import {
   CreateUiTaskPayload,
   DataResult,
   DataTaskExecutor,
+  DataTaskPlanner,
   DataTaskAuthorizationResult,
   DynamicGenericToolResult,
   InputUserPayload,
@@ -60,6 +61,7 @@ import {
 } from '../../../model/PersonaMemoryUpdate';
 import { personaPackForId } from '../../../model/PersonaStore';
 import { MultiAgentLeaderPlanner } from './MultiAgentLeaderPlanner';
+import { ReadOnlyDataPlanner } from './ReadOnlyDataPlanner';
 import { MultiAgentActionPlanCompiler } from './MultiAgentActionPlanCompiler';
 import {
   HotelLocalDateProvider,
@@ -155,6 +157,7 @@ export interface MultiAgentCanaryOptions {
   submitTimeoutMs?: number;
   actionTimeoutMs?: number;
   currentLocalDate?: HotelLocalDateProvider;
+  dataPlanner?: DataTaskPlanner;
   dataExecutor?: DataTaskExecutor;
   structuredToolCall?: (toolId: string, prompt: string, args: Object) => Promise<DataResult>;
   bus?: LinkedMessageBus;
@@ -1178,6 +1181,8 @@ function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): 
     .filter((definition: ToolDefinition): boolean =>
       definition.toolId !== 'gmail.message.send' &&
         definition.toolId !== 'social.reply.draft' &&
+        definition.toolId !== 'hotel.navigate' &&
+        definition.toolId !== 'hotel.booking.open' &&
         isLuckinOrderToolVisible(definition.toolId, prompt)
     )
     .map(
@@ -1374,6 +1379,8 @@ export class MultiAgentCanaryRuntime {
       currentLocalDateProvider: options.currentLocalDate,
       dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,
+      dataPlanner: options.dataPlanner === undefined ?
+        new ReadOnlyDataPlanner(options.model) : options.dataPlanner,
       dataExecutor: options.dataExecutor === undefined ?
         new CanaryStructuredDataExecutor(options.structuredToolCall) : options.dataExecutor,
       uiRenderer: mailDetailBridge,

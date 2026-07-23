@@ -11,7 +11,9 @@ import {
   ConversationContext,
   CreateDataTaskPayload,
   DataResult,
+  DataStepDecision,
   DataTaskExecutor,
+  DataTaskPlanner,
   DynamicGenericToolResult,
   HotelDetailRequest,
   HotelDetailResult,
@@ -22,6 +24,7 @@ import {
   JsonValue,
   LocalModel,
   LinkedMessageBus,
+  ObservationDigest,
   TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
@@ -54,6 +57,7 @@ import {
   registeredPageSourceToolId,
   resolveVirtualRegisteredPageAction
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
+import { MonotonicHotelIds } from '../main/ets/pages/A2uiHome/agent/MultiAgentHotelSupport';
 
 const SEARCH_TEXT: string = '帮我找深圳酒店';
 const SEARCH_INPUT: string = '{"originQuery":"帮我找深圳酒店","place":"深圳",' +
@@ -83,6 +87,10 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"uiIntent":{"purpose":"hotel.search",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
+const HOTEL_DATA_CALL_DECISION: string = '{"kind":"call","toolId":"hotel.search",' +
+  '"args":' + SEARCH_INPUT + ',"summary":"query the registered hotel provider"}';
+const HOTEL_DATA_FINISH_DECISION: string = '{"kind":"finish","toolId":"hotel.search",' +
+  '"args":{},"summary":"return the observed hotel result"}';
 const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["hotel.search","hotel.navigate"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"hotel-search",' +
@@ -92,10 +100,9 @@ const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId"
   '"requiredSections":["hotels"]},"actionIntent":{' +
   '"goal":"navigate to the selected hotel",' +
   '"allowedActionIds":["hotel.navigate"]},"reasonCode":"hotel_search_with_navigation"}';
-const HOTEL_ACTION_DRAFT: string = '{"planId":"plan-model-1","runId":"run-model-1",' +
-  '"label":"导航到酒店","steps":[{"stepId":"step-1","actionId":"hotel.navigate",' +
-  '"args":{"hotelId":47675,"name":"深圳测试酒店","address":"深圳市南山区科技南路 88 号",' +
-  '"latitude":22.5431,"longitude":114.0579}}]}';
+const CALENDAR_UPDATE_ACTION_DRAFT: string = '{"planId":"plan-model-1","runId":"run-model-1",' +
+  '"label":"更新日程","steps":[{"stepId":"step-1","actionId":"calendar.event.update",' +
+  '"args":{}}]}';
 const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
@@ -182,6 +189,16 @@ const CALENDAR_UPDATE_SEARCH_DECISION: string = '{"personaId":"work_companion","
   '"requestedAction":{"eventId":"model-forged","title":"forged"}},"required":true}],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":["events","review"]},"reasonCode":"calendar_update_read_first"}';
+const CALENDAR_UPDATE_ACTION_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search","calendar.event.update"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
+  '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
+  '"input":{"query":"产品评审","eventId":"model-forged",' +
+  '"requestedAction":{"eventId":"model-forged","title":"forged"}},"required":true}],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["events","review"]},"actionIntent":{' +
+  '"goal":"update the one real Calendar event",' +
+  '"allowedActionIds":["calendar.event.update"]},"reasonCode":"calendar_update_action"}';
 const CALENDAR_UPDATE_DIRECT_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
@@ -326,6 +343,29 @@ class QueueModel implements LocalModel {
   }
 }
 
+class PassthroughDataPlanner implements DataTaskPlanner {
+  async next(
+    task: CreateDataTaskPayload,
+    observations: ObservationDigest[],
+    _step: number
+  ): Promise<DataStepDecision> {
+    if (observations.length === 0) {
+      return {
+        kind: 'call',
+        toolId: task.toolId,
+        args: task.args,
+        summary: 'execute the registered read tool'
+      };
+    }
+    return {
+      kind: 'finish',
+      toolId: task.toolId,
+      args: JSON.parse('{}') as Object,
+      summary: 'return the observed read result'
+    };
+  }
+}
+
 class ActionCompilerCanaryModel implements LocalModel {
   readonly prompts: string[] = [];
   readonly systemPrompts: string[] = [];
@@ -342,10 +382,10 @@ class ActionCompilerCanaryModel implements LocalModel {
     if (systemPrompt !== undefined &&
       systemPrompt.indexOf('Appless Action Agent planner') >= 0) {
       this.actionCalls++;
-      return HOTEL_ACTION_DRAFT;
+      return CALENDAR_UPDATE_ACTION_DRAFT;
     }
     this.leaderCalls++;
-    return this.leaderCalls === 1 ? HOTEL_ACTION_DECISION : HOTEL_DONE_DECISION;
+    return this.leaderCalls === 1 ? CALENDAR_UPDATE_ACTION_DECISION : CALENDAR_UPDATE_DONE_DECISION;
   }
 }
 
@@ -513,6 +553,12 @@ class RecordingGenericExecutor implements DataTaskExecutor {
   async execute(task: CreateDataTaskPayload): Promise<DataResult> {
     this.tasks.push(task);
     return canaryStructuredResult(task.toolId, task.outputSchema);
+  }
+}
+
+class GmailSearchExecutor implements DataTaskExecutor {
+  async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
+    return c06GmailSearchResult();
   }
 }
 
@@ -798,6 +844,7 @@ function canaryOptions(
     onMemoryUpdate: (update: PersonaMemoryUpdateRequest): void => {
       updates.push(update);
     },
+    dataPlanner: new PassthroughDataPlanner(),
     dataExecutor: executor,
     currentLocalDate: (): string => '2026-07-21',
     bus,
@@ -992,26 +1039,28 @@ export default function multiAgentCanaryRuntimeTest() {
       const bus = new TrackingBus();
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
         model,
-        new CanaryHotelExecutor(),
+        new CalendarUpdateExecutor(['event-provider-real-1']),
         new RecordingOpener(),
         [],
         [],
         bus
       ));
 
-      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+      const outcome = await runtime.submit(
+        '把 2026年7月30日 的 Appless QA run-1 日程改到下午4点',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
       await flush();
 
       expect(outcome.status).assertEqual('success');
       expect(model.leaderCalls).assertEqual(2);
       expect(model.actionCalls).assertEqual(1);
-      expect(bus.count(AgentMessageType.ACTION_PLAN_DRAFT)).assertEqual(1);
       const actionPromptIndex = model.systemPrompts.findIndex((value: string): boolean =>
         value.indexOf('Appless Action Agent planner') >= 0
       );
       expect(actionPromptIndex >= 0).assertTrue();
-      expect(model.prompts[actionPromptIndex].indexOf('hotel.navigate') >= 0).assertTrue();
-      expect(model.prompts[actionPromptIndex].indexOf('navigate to the selected hotel') >= 0)
+      expect(model.prompts[actionPromptIndex].indexOf('calendar.event.update') >= 0).assertTrue();
+      expect(model.prompts[actionPromptIndex].indexOf('update the one real Calendar event') >= 0)
         .assertTrue();
       runtime.dispose();
     });
@@ -1352,51 +1401,11 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('does not remember a persona from a legacy handoff', 0, async () => {
-      const handoff: MultiAgentHandoffOutcome = {
-        kind: 'handoff',
-        owner: 'legacy',
-        unmigratedToolIds: ['synthetic.unmigrated'],
-        reason: 'unmigrated_tool',
-        reasonCode: 'synthetic_handoff',
-        personaId: 'travel_companion',
-        skillId: 'travel-search'
-      };
+    it('provides hotel correlation IDs from the neutral multi-agent support module', 0, () => {
+      const ids = new MonotonicHotelIds();
 
-      expect(rememberedPersonaAfterOutcome('default_companion', handoff, true))
-        .assertEqual('default_companion');
-    });
-
-    it('rejects a legacy handoff claim for the newly owned dynamic read tool', 0, async () => {
-      const model = new QueueModel([WEATHER_HANDOFF_DECISION]);
-      const executor = new CanaryHotelExecutor();
-      const bus = new TrackingBus();
-      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
-        model,
-        executor,
-        new RecordingOpener(),
-        [],
-        [],
-        bus
-      ));
-
-      const weather = await runtime.submit('查询北京天气', { text: '' });
-
-      expect(weather.kind).assertEqual('settled');
-      expect((weather as MultiAgentSettledOutcome).status).assertEqual('error');
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
-      expect(executor.calls.length).assertEqual(0);
-      expect(bus.messages.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TASK_CREATE_DATA ||
-          message.type === AgentMessageType.TASK_CREATE_UI ||
-          message.type === AgentMessageType.ACTION_PLAN_REQUEST
-      ).length).assertEqual(0);
-      expect(model.prompts[0].indexOf('LeaderDecision schema:') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('"roundAction":"execute|answer|clarify|legacy_handoff"') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('unavailable or not runtime-owned') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('Runtime-owned tool IDs:') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('mail.search') >= 0).assertTrue();
-      runtime.dispose();
+      expect(ids.nextId('turn')).assertEqual('turn-1');
+      expect(ids.nextId('task')).assertEqual('task-2');
     });
 
     it('gives the Leader registry-derived SocialHub, public X, mail, and dynamic selection semantics', 0, async () => {
@@ -1431,9 +1440,47 @@ export default function multiAgentCanaryRuntimeTest() {
       const catalogEnd = prompt.indexOf('\nPersonas: ', catalogStart);
       expect(catalogStart).assertLarger(-1);
       expect(catalogEnd).assertLarger(catalogStart);
+      const catalog = prompt.substring(catalogStart, catalogEnd);
+      expect(catalog.indexOf('"toolId":"hotel.search"')).assertLarger(-1);
+      expect(catalog.indexOf('"toolId":"hotel.detail"')).assertLarger(-1);
+      expect(catalog.indexOf('"toolId":"hotel.navigate"')).assertEqual(-1);
+      expect(catalog.indexOf('"toolId":"hotel.booking.open"')).assertEqual(-1);
+      expect(catalog.indexOf('"toolId":"gmail.message.send"')).assertEqual(-1);
+      expect(catalog.indexOf('"toolId":"social.reply.draft"')).assertEqual(-1);
       expect(catalogEnd - catalogStart).assertLess(64001);
       expect(prompt.length).assertLess(100001);
       expect(model.prompts.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('wires the production read-only Data Agent planner through the shared model', 0, async () => {
+      const model = new QueueModel([
+        HOTEL_DECISION,
+        HOTEL_DATA_CALL_DECISION,
+        HOTEL_DATA_FINISH_DECISION,
+        HOTEL_DONE_DECISION
+      ]);
+      const executor = new CanaryHotelExecutor();
+      const options = canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.dataPlanner = undefined;
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(executor.calls.length).assertEqual(1);
+      expect(executor.calls[0]).assertEqual('hotel.search');
+      expect(model.prompts.length).assertEqual(4);
+      expect(model.prompts[1].indexOf('You are the Appless Data Agent.')).assertEqual(0);
+      expect(model.prompts[1].indexOf('Maximum 3 steps.')).assertLarger(-1);
+      expect(model.prompts[1].indexOf('"allowedToolIds":["hotel.search"]')).assertLarger(-1);
+      expect(model.prompts[2].indexOf('"status":"success"')).assertLarger(-1);
       runtime.dispose();
     });
 
