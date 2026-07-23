@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  ConversationContext,
   CreateDataTaskPayload,
   DataStepDecision,
   LocalModel,
@@ -9,14 +10,20 @@ import { ReadOnlyDataPlanner } from '../main/ets/pages/A2uiHome/agent/ReadOnlyDa
 
 class QueueLocalModel implements LocalModel {
   prompts: string[] = [];
+  systemPrompts: string[] = [];
   private readonly outputs: string[];
 
   constructor(outputs: string[]) {
     this.outputs = outputs.slice();
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
     this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt === undefined ? '' : systemPrompt);
     if (this.outputs.length === 0) {
       throw new Error('No scripted Data planner output');
     }
@@ -84,6 +91,9 @@ export default function readOnlyDataPlannerTest() {
         .assertLarger(-1);
       expect(model.prompts[0].indexOf('Do not execute writes, system intents, web sessions, client actions, or code.'))
         .assertLarger(-1);
+      expect(model.systemPrompts[0].indexOf('You are the Appless Data Agent.')).assertEqual(0);
+      expect(model.systemPrompts[0].indexOf('Return only DataStepDecision JSON.')).assertLarger(-1);
+      expect(model.systemPrompts[0].indexOf('Thought')).assertEqual(-1);
       const observationText: string = model.prompts[0].split('\nObservations: ')[1];
       const bounded: ObservationDigest[] = JSON.parse(observationText) as ObservationDigest[];
       expect(bounded.length).assertEqual(8);
@@ -102,8 +112,12 @@ export default function readOnlyDataPlannerTest() {
       const extra: string = valid.substring(0, valid.length - 1) + ',"providerResult":{}}';
       const badKind: string = valid.replace('"finish"', '"write"');
       const badArgs: string = valid.replace('"args":{}', '"args":[]');
+      const realDeviceLegacyOutput: string = 'Thought: 根据任务要求，需要使用 travel.search 工具。' +
+        '\nAction: {"tool":"travel.search","args":{"origin":"北京","destination":"上海",' +
+        '"date":"2026-07-25","query":"我明天要从北京去上海，帮我搜索出行方案"}}';
 
       expect(await fails('model says ' + valid)).assertTrue();
+      expect(await fails(realDeviceLegacyOutput)).assertTrue();
       expect(await fails('[' + valid + ']')).assertTrue();
       expect(await fails(valid + valid)).assertTrue();
       expect(await fails(duplicateTop)).assertTrue();

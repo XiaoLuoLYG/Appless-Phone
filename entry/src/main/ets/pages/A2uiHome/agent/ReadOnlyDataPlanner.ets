@@ -7,6 +7,14 @@ import {
 } from '@loop/agent-core';
 
 const DECISION_KEYS: string = 'args,kind,summary,toolId';
+const DATA_SYSTEM_PROMPT: string =
+  'You are the Appless Data Agent. Return only DataStepDecision JSON. ' +
+  'Return exactly one JSON object with exactly kind, toolId, args, and summary. ' +
+  'Use kind "call" to request one allowed read tool and kind "finish" to select the completed task result. ' +
+  'Do not include reasoning, markdown, code fences, or any text outside the JSON object. ' +
+  'Use only the allowed read-only tools supplied for this DataTask. Plan at most 3 read steps. ' +
+  'Preserve provider identity and all real entity IDs. Do not execute writes, system intents, web sessions, ' +
+  'client actions, or generated code. Do not convert errors or empty results into synthetic success.';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -27,7 +35,11 @@ export class ReadOnlyDataPlanner implements DataTaskPlanner {
     _step: number
   ): Promise<DataStepDecision> {
     const safeObservations: ObservationDigest[] = this.boundedObservations(observations);
-    const output: string = await this.model.complete(this.prompt(task, safeObservations));
+    const output: string = await this.model.complete(
+      this.prompt(task, safeObservations),
+      undefined,
+      DATA_SYSTEM_PROMPT
+    );
     const trimmed: string = output.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Data planner requires exactly one JSON object.');
