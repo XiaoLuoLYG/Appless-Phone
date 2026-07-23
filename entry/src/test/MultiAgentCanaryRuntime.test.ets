@@ -194,6 +194,11 @@ const WEATHER_HANDOFF_DECISION: string = '{"personaId":"default_companion","skil
   '"requestedCapabilityIds":["dynamic.search"],"roundAction":"legacy_handoff","dataTasks":[],' +
   '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"reasonCode":"capability_unavailable"}';
+const GMAIL_REGISTERED_CAPABILITY_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["gmail.thread.read","gmail.draft.create","gmail.open.web"],' +
+  '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"mail.actions",' +
+  '"preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"邮件操作由当前四 Agent runtime 负责。","reasonCode":"registered_mail_actions"}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
   '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
@@ -1082,6 +1087,30 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(model.prompts[0].indexOf('unavailable or not runtime-owned') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Runtime-owned tool IDs:') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('mail.search') >= 0).assertTrue();
+      runtime.dispose();
+    });
+
+    it('keeps registered Gmail tool and action capabilities inside the canary runtime', 0, async () => {
+      const model = new QueueModel([GMAIL_REGISTERED_CAPABILITY_ANSWER]);
+      const bus = new TrackingBus();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit('继续处理当前 Gmail 邮件', { text: '' });
+
+      expect(outcome.kind).assertEqual('settled');
+      expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      expect(model.prompts[0].indexOf('gmail.thread.read') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('gmail.draft.create') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('gmail.open.web') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('gmail.authorize') >= 0).assertFalse();
       runtime.dispose();
     });
 

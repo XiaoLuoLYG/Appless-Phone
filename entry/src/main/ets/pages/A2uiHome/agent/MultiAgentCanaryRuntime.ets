@@ -920,7 +920,9 @@ interface MemorySurfaceOutput {
 function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext {
   const tools: LeaderToolMetadata[] = allToolDefinitions().map(
     (definition: ToolDefinition): LeaderToolMetadata => {
-      const actions = definition.actions.slice();
+      const actions = definition.actions.filter(
+        (actionId: string): boolean => toolDefinitionForToolId(actionId) !== null
+      );
       if ((definition.toolId === 'worldcup.open' || definition.toolId === 'maps.route.open' ||
         definition.toolId === 'calendar.event.create') &&
         actions.indexOf(definition.toolId) < 0) {
