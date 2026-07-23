@@ -114,10 +114,11 @@ function consumerTaskDefinitelyLacksEntityInput(task: LeaderDecisionDataTask): b
     return optionalEntityInputDefinitelyEmpty(values, 'placeId') &&
       optionalEntityInputDefinitelyEmpty(values, 'id');
   }
-  // mail.thread.read resolves its consumed entity from provider/threadId or
-  // provider/messageId; requestKey also binds that entity. Any supplied value
-  // is ambiguous without an earlier observation, so it must not be erased.
-  return optionalEntityInputDefinitelyEmpty(values, 'threadId') &&
+  // mail.thread.read normalizes provider before choosing threadId or
+  // messageId; requestKey also binds that entity. Any supplied value is
+  // ambiguous without an earlier observation, so it must not be erased.
+  return optionalEntityInputDefinitelyEmpty(values, 'provider') &&
+    optionalEntityInputDefinitelyEmpty(values, 'threadId') &&
     optionalEntityInputDefinitelyEmpty(values, 'messageId') &&
     optionalEntityInputDefinitelyEmpty(values, 'requestKey');
 }

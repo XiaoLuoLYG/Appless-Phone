@@ -995,6 +995,56 @@ export default function multiAgentLeaderPlannerTest() {
       }
     });
 
+    it('fails closed for mail and Gmail consumers with a supplied provider', 0, async () => {
+      const sources: string[] = ['mail.search', 'gmail.mail.search'];
+      const consumers: string[] = ['mail.thread.read', 'gmail.thread.read'];
+      const providerInputs: string[] = [
+        '{"provider":"qq"}',
+        '{"provider":7}',
+        '{"provider":null}',
+        '{"provider":{}}'
+      ];
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+        for (let inputIndex = 0; inputIndex < providerInputs.length; inputIndex++) {
+          expect(await sameRoundDependencyError(
+            sameRoundDependencyDecision(
+              sources[sourceIndex],
+              consumers[sourceIndex],
+              providerInputs[inputIndex]
+            )
+          )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+        }
+      }
+    });
+
+    it('normalizes mail and Gmail consumers only when provider and entities are blank or absent', 0, async () => {
+      const sources: string[] = ['mail.search', 'gmail.mail.search'];
+      const consumers: string[] = ['mail.thread.read', 'gmail.thread.read'];
+      const emptyInputs: string[] = [
+        '{}',
+        '{"provider":"  ","threadId":"","messageId":"","requestKey":""}'
+      ];
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+        for (let inputIndex = 0; inputIndex < emptyInputs.length; inputIndex++) {
+          const model = new QueueLocalModel([
+            sameRoundDependencyDecision(
+              sources[sourceIndex],
+              consumers[sourceIndex],
+              emptyInputs[inputIndex]
+            )
+          ]);
+          const decision = await new MultiAgentLeaderPlanner(model).plan(
+            inputMessage(), { text: 'read source then details' }, planningContext(), 1,
+            (): boolean => true
+          );
+          expect(decision.requestedCapabilityIds.join(',')).assertEqual(sources[sourceIndex]);
+          expect(decision.dataTasks.length).assertEqual(1);
+          expect(decision.dataTasks[0].toolId).assertEqual(sources[sourceIndex]);
+          expect(model.prompts.length).assertEqual(1);
+        }
+      }
+    });
+
     it('fails closed when one same-round Maps consumer is unbound and another has a placeId', 0, async () => {
       expect(await sameRoundDependencyError(
         sameRoundDependencyDecisionWithConsumers(
