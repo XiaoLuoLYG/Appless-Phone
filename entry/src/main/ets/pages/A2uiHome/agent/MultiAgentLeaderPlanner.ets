@@ -228,7 +228,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
         correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === ACTION_OWNED_DATA_TASK_ERROR) {
-        correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION;
+        correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR) {
         correction = SKILL_CAPABILITY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       }

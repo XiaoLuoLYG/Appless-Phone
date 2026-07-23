@@ -2431,6 +2431,27 @@ export default function multiAgentLeaderPlannerTest() {
       )).assertLarger(-1);
     });
 
+    it('includes the rejected Action-owned decision without private observations in its repair prompt', 0,
+      async () => {
+      const rejected: string = actionAsDataDecision('worldcup.open');
+      const model = new QueueLocalModel([
+        rejected,
+        actionDecision('worldcup.open')
+      ]);
+      await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '查看世界杯比赛信息' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('Rejected decision: ' + rejected)).assertLarger(-1);
+      expect(model.prompts[1].indexOf('OBSERVATION_PRIVATE_SUMMARY')).assertEqual(-1);
+      expect(model.prompts[1].indexOf('ENTITY_PRIVATE_MARKER')).assertEqual(-1);
+    });
+
     it('rejects Action ownership repair that changes UI or moves multiple Action capabilities', 0,
       async () => {
       const changedUi: string = actionDecision('memory.update').replace(
