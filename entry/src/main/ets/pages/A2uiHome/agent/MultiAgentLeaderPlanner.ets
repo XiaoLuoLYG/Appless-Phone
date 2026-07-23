@@ -119,6 +119,12 @@ const VIDEO_SELECTION_CONTRACT: string =
   'the same decision as media.video.search. Use youtube.video.search only for explicit YouTube-only requests. ' +
   'Use media.video.search for Bilibili-only or multi-source video requests. Other independent tools may still run ' +
   'in parallel when the user actually requested them.';
+const C10_C11_SELECTION_CONTRACT: string =
+  'C10/C11 selection contract: Explicit X/Twitter public post searches use x.post.search. X or Slack inbox/message ' +
+  'requests use social.feed.search. A generic request to 点一杯咖啡 uses food.search. Stable preference text such as ' +
+  '我只喝瑞幸咖啡, 以后只喝..., or an explicit remember-preference request uses only memory.update. Use ' +
+  'luckin.order.preview only for an explicit Luckin/Ruixing order request with a concrete product or specification, ' +
+  'for example 帮我点一杯瑞幸生椰拿铁，半糖少冰; do not infer it from generic coffee or saved preference text.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -243,8 +249,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const repaired: string = await this.completeBounded(prompt + '\n' + correction);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
-        if (repairedScope === null ||
-          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop)) {
+        const actionOwnedRepair: boolean = error instanceof Error &&
+          error.message === ACTION_OWNED_DATA_TASK_ERROR;
+        if (repairedScope === null || (actionOwnedRepair ?
+          !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
+          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
@@ -445,6 +454,117 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
       repaired.dataCapabilityIds.length === 0 &&
       repaired.actionCapabilityIds.length === 0;
+  }
+
+  private sameActionOwnedRepair(
+    originalOutput: string,
+    repairedOutput: string,
+    context: LeaderPlanningContext,
+    originalScope: LeaderRepairScope,
+    repairedScope: LeaderRepairScope
+  ): boolean {
+    const original = this.rawDecisionObject(originalOutput);
+    const repaired = this.rawDecisionObject(repairedOutput);
+    if (original === null || repaired === null ||
+      original['personaId'] !== repaired['personaId'] ||
+      original['skillId'] !== repaired['skillId'] ||
+      original['roundAction'] !== repaired['roundAction'] ||
+      original['answer'] !== repaired['answer'] ||
+      !this.sameJsonValue(original['uiIntent'], repaired['uiIntent']) ||
+      !this.sameStringSet(originalScope.requestedCapabilityIds, repairedScope.requestedCapabilityIds)) {
+      return false;
+    }
+    const rawOriginalTasks = original['dataTasks'];
+    const rawRepairedTasks = repaired['dataTasks'];
+    if (!Array.isArray(rawOriginalTasks) || !Array.isArray(rawRepairedTasks)) {
+      return false;
+    }
+    const misplacedIds: string[] = [];
+    let misplacedGoal: string = '';
+    const preservedTasks: LeaderDecisionDataTask[] = [];
+    const originalTasks = rawOriginalTasks as Object[];
+    for (let index = 0; index < originalTasks.length; index++) {
+      const value: Object = originalTasks[index];
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+      }
+      const task = value as Record<string, Object | string | number | boolean | null | undefined>;
+      const toolId = task['toolId'];
+      const rawAllowed = task['allowedToolIds'];
+      const localId = task['localId'];
+      const goal = task['goal'];
+      const input = task['input'];
+      const required = task['required'];
+      if (typeof toolId !== 'string' || typeof localId !== 'string' || typeof goal !== 'string' ||
+        input === null || typeof input !== 'object' || Array.isArray(input) ||
+        typeof required !== 'boolean' || !Array.isArray(rawAllowed)) {
+        return false;
+      }
+      const allowed: string[] = [];
+      const rawAllowedIds = rawAllowed as Object[];
+      for (let allowedIndex = 0; allowedIndex < rawAllowedIds.length; allowedIndex++) {
+        const allowedId: Object = rawAllowedIds[allowedIndex];
+        if (typeof allowedId !== 'string') {
+          return false;
+        }
+        if (this.actionOnlyCapability(context, allowedId)) {
+          this.rememberScopeId(allowedId, misplacedIds);
+          misplacedGoal = goal;
+        } else {
+          allowed.push(allowedId);
+        }
+      }
+      if (this.actionOnlyCapability(context, toolId)) {
+        this.rememberScopeId(toolId, misplacedIds);
+        misplacedGoal = goal;
+        continue;
+      }
+      preservedTasks.push({
+        localId: localId,
+        goal: goal,
+        allowedToolIds: allowed,
+        toolId: toolId,
+        input: input,
+        required: required
+      });
+    }
+    if (misplacedIds.length !== 1 ||
+      originalScope.requestedCapabilityIds.indexOf(misplacedIds[0]) < 0 ||
+      !this.sameJsonValue(preservedTasks, rawRepairedTasks as Object[])) {
+      return false;
+    }
+    const originalAction = original['actionIntent'];
+    const repairedAction = repaired['actionIntent'];
+    if (repairedAction === null || typeof repairedAction !== 'object' || Array.isArray(repairedAction)) {
+      return false;
+    }
+    const repairedActionRecord = repairedAction as
+      Record<string, Object | string | number | boolean | null | undefined>;
+    if (originalAction === undefined) {
+      if (repairedActionRecord['goal'] !== misplacedGoal) {
+        return false;
+      }
+    } else {
+      if (originalAction === null || typeof originalAction !== 'object' || Array.isArray(originalAction)) {
+        return false;
+      }
+      const originalActionRecord = originalAction as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      if (repairedActionRecord['goal'] !== originalActionRecord['goal']) {
+        return false;
+      }
+    }
+    const expectedDataIds: string[] = originalScope.dataCapabilityIds.filter(
+      (toolId: string): boolean => toolId !== misplacedIds[0]
+    );
+    const expectedActionIds: string[] = originalScope.actionCapabilityIds.slice();
+    this.rememberScopeId(misplacedIds[0], expectedActionIds);
+    return this.sameStringSet(expectedDataIds, repairedScope.dataCapabilityIds) &&
+      this.sameStringSet(expectedActionIds, repairedScope.actionCapabilityIds);
+  }
+
+  private actionOnlyCapability(context: LeaderPlanningContext, toolId: string): boolean {
+    return !leaderIsDataCapability(context, toolId) && leaderIsActionCapability(context, toolId);
   }
 
   private sameStringSet(original: string[], repaired: string[]): boolean {
@@ -775,6 +895,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
       TRAVEL_SELECTION_CONTRACT,
       VIDEO_SELECTION_CONTRACT,
+      C10_C11_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,

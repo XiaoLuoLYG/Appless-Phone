@@ -95,6 +95,20 @@ const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"toolId":"mail.search","input":{"providers":["gmail","qq","outlook"],"query":"","pageSize":10},' +
   '"required":true}],"uiIntent":{"purpose":"展示消息和邮件","preferredDensity":"comfortable",' +
   '"requiredSections":["social","mail"]}}';
+const X_POST_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["x.post.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"x-posts","goal":"查看 OpenAI 最近的公开 post",' +
+  '"allowedToolIds":["x.post.search"],"toolId":"x.post.search",' +
+  '"input":{"query":"OpenAI"},"required":true}],"uiIntent":{' +
+  '"purpose":"展示 X 公开 post","preferredDensity":"comfortable",' +
+  '"requiredSections":["posts"]}}';
+const FOOD_COFFEE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"coffee","goal":"点一杯咖啡",' +
+  '"allowedToolIds":["food.search"],"toolId":"food.search",' +
+  '"input":{"query":"咖啡"},"required":true}],"uiIntent":{' +
+  '"purpose":"展示咖啡选择","preferredDensity":"comfortable",' +
+  '"requiredSections":["food"]}}';
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
@@ -317,6 +331,30 @@ class RequestScopePromptAwareModel implements LocalModel {
       'The current user request defines a closed capability and source set.'
     ) >= 0 && prompt.indexOf('silently scope-check') >= 0;
     return explicitMultiDomain || !scoped ? SOCIAL_MAIL_DECISION : SOCIAL_ONLY_DECISION;
+  }
+}
+
+class C10C11PromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const hasSelectionContract: boolean = prompt.indexOf(
+      'C10/C11 selection contract: Explicit X/Twitter public post searches use x.post.search.'
+    ) >= 0;
+    if (prompt.indexOf('"text":"帮我查看 X 上 OpenAI 最近的公开 post"') >= 0) {
+      return hasSelectionContract ? X_POST_DECISION : SOCIAL_ONLY_DECISION;
+    }
+    if (prompt.indexOf('"text":"帮我查看我今天 X 和 Slack 上的消息"') >= 0) {
+      return hasSelectionContract ? SOCIAL_ONLY_DECISION : X_POST_DECISION;
+    }
+    if (prompt.indexOf('"text":"点一杯咖啡"') >= 0) {
+      return hasSelectionContract ? FOOD_COFFEE_DECISION : actionDecision('luckin.order.preview');
+    }
+    if (prompt.indexOf('"text":"帮我点一杯瑞幸生椰拿铁，半糖少冰"') >= 0) {
+      return hasSelectionContract ? actionDecision('luckin.order.preview') : FOOD_COFFEE_DECISION;
+    }
+    return hasSelectionContract ? actionDecision('memory.update') : FOOD_COFFEE_DECISION;
   }
 }
 
@@ -596,6 +634,21 @@ function actionOwnerContext(): LeaderPlanningContext {
       context.tools[index].actions = [];
     }
   }
+  return context;
+}
+
+function c10C11Context(): LeaderPlanningContext {
+  const context = actionOwnerContext();
+  context.tools.push({
+    toolId: 'x.post.search',
+    domain: 'x',
+    intent: 'Search real public X posts',
+    riskLevel: 'read',
+    registeredBackends: ['local_adapter'],
+    inputSchema: 'xPostSearchQuery',
+    outputSchema: 'xPostSearchResults',
+    actions: []
+  });
   return context;
 }
 
@@ -988,6 +1041,59 @@ export default function multiAgentLeaderPlannerTest() {
       expect(comparisonPair.dataTasks.length).assertEqual(2);
       expect(comparisonPair.dataTasks[0].toolId).assertEqual('flight.search');
       expect(comparisonPair.dataTasks[1].toolId).assertEqual('train.search');
+    });
+
+    it('lets the model select C10/C11 public posts messages coffee preferences and Luckin orders', 0,
+      async () => {
+      const model = new C10C11PromptAwareModel();
+      const planner = new MultiAgentLeaderPlanner(model);
+      const context = c10C11Context();
+      const publicPosts = await planner.plan(
+        inputMessage(),
+        { text: '帮我查看 X 上 OpenAI 最近的公开 post' },
+        context,
+        1
+      );
+      const messages = await planner.plan(
+        inputMessage(),
+        { text: '帮我查看我今天 X 和 Slack 上的消息' },
+        context,
+        1
+      );
+      const genericCoffee = await planner.plan(
+        inputMessage(),
+        { text: '点一杯咖啡' },
+        context,
+        1
+      );
+      const preferenceTexts: string[] = [
+        '我只喝瑞幸咖啡',
+        '以后只喝燕麦拿铁',
+        '请记住我只喝美式咖啡'
+      ];
+      for (let index = 0; index < preferenceTexts.length; index++) {
+        const preference = await planner.plan(
+          inputMessage(),
+          { text: preferenceTexts[index] },
+          context,
+          1
+        );
+        expect(preference.dataTasks.length).assertEqual(0);
+        expect(preference.actionIntent!.allowedActionIds.join(',')).assertEqual('memory.update');
+      }
+      const luckinOrder = await planner.plan(
+        inputMessage(),
+        { text: '帮我点一杯瑞幸生椰拿铁，半糖少冰' },
+        context,
+        1
+      );
+
+      expect(publicPosts.dataTasks[0].toolId).assertEqual('x.post.search');
+      expect(messages.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(genericCoffee.dataTasks[0].toolId).assertEqual('food.search');
+      expect(luckinOrder.dataTasks.length).assertEqual(0);
+      expect(luckinOrder.actionIntent!.allowedActionIds.join(',')).assertEqual('luckin.order.preview');
+      expect(model.prompts[0].indexOf('C10/C11 selection contract:')).assertLarger(-1);
     });
 
     it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
@@ -2268,7 +2374,7 @@ export default function multiAgentLeaderPlannerTest() {
       }
     });
 
-    it('fails closed when repair moves an Action-owned capability out of its original Data position', 0,
+    it('repairs exactly one Action-owned capability from Data into Action intent', 0,
       async () => {
       const actionIds: string[] = [
         'memory.update',
@@ -2280,14 +2386,49 @@ export default function multiAgentLeaderPlannerTest() {
       ];
       for (let index = 0; index < actionIds.length; index++) {
         const actionId = actionIds[index];
-        const errorCode: string = await repairErrorCode(
+        const model = new QueueLocalModel([
           actionAsDataDecision(actionId),
-          actionDecision(actionId),
+          actionDecision(actionId)
+        ]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '执行 ' + actionId },
           actionOwnerContext(),
+          1,
+          (): boolean => true
         );
 
-        expect(errorCode).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+        expect(model.prompts.length).assertEqual(2);
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent!.allowedActionIds[0]).assertEqual(actionId);
       }
+    });
+
+    it('rejects Action ownership repair that changes UI or moves multiple Action capabilities', 0,
+      async () => {
+      const changedUi: string = actionDecision('memory.update').replace(
+        '"purpose":"perform requested action"',
+        '"purpose":"changed purpose"'
+      );
+      const twoMisplaced: string = actionAsDataDecision('memory.update').replace(
+        '"requestedCapabilityIds":["memory.update"]',
+        '"requestedCapabilityIds":["memory.update","payment.send"]'
+      ).replace(
+        '],"uiIntent"',
+        '},{"localId":"second","goal":"second","allowedToolIds":["payment.send"],' +
+          '"toolId":"payment.send","input":{},"required":true}],"uiIntent"'
+      );
+
+      expect(await repairFails(
+        actionAsDataDecision('memory.update'),
+        changedUi,
+        actionOwnerContext()
+      )).assertTrue();
+      expect(await repairFails(
+        twoMisplaced,
+        actionDecision('memory.update'),
+        actionOwnerContext()
+      )).assertTrue();
     });
 
     it('freezes Data and Action positions independently for a declared dual-role capability', 0,
