@@ -372,6 +372,183 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   };
 }
 
+export function toolExecutionEvidence(logText, options = {}) {
+  const expectedToolIds = Array.isArray(options.expectedToolIds) ?
+    options.expectedToolIds.filter((toolId) => typeof toolId === 'string' && toolId.length > 0) : [];
+  const all = records(logText);
+  const hasMultiAgentInput = all.some((item) => item.marker === 'MultiAgentInput');
+  const lifecycle = multiAgentTurnEvidence(logText, {
+    ...options,
+    expectedToolIds
+  });
+  const exactMultiAgentLifecycle = expectedToolIds.length > 0 &&
+    lifecycle.complete && lifecycle.ok;
+  const legacyToolIds = all
+    .filter((item) => item.marker === 'LocalToolRequest' &&
+      item.fields.endpoint === 'local://aiphone-tools')
+    .map((item) => item.fields.toolId)
+    .filter(Boolean);
+  const legacyLocalToolRequest = !hasMultiAgentInput && expectedToolIds.length > 0 &&
+    expectedToolIds.every((toolId) => legacyToolIds.includes(toolId));
+  return {
+    observed: exactMultiAgentLifecycle || legacyLocalToolRequest,
+    exactMultiAgentLifecycle,
+    legacyLocalToolRequest,
+    hasMultiAgentInput,
+    lifecycle
+  };
+}
+
+function socialRawValues(value) {
+  if (typeof value === 'string') return [value.trim()].filter(Boolean);
+  const values = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    for (const key of ['text', 'content', 'description', 'hint']) {
+      if (typeof attributes[key] === 'string' && attributes[key].trim().length > 0) {
+        values.push(attributes[key].trim());
+      }
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(value);
+  return values;
+}
+
+function socialLines(value) {
+  return socialRawValues(value)
+    .flatMap((item) => item.split('\n'))
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function socialSuffix(lines, prefix) {
+  const value = lines.find((line) => line.startsWith(prefix));
+  if (value === undefined) return '';
+  const suffix = value.slice(prefix.length).trim();
+  return suffix.length > 0 &&
+    !/^(?:未知(?:来源|发信人)?|unknown(?:\s+(?:source|sender))?|暂无|无|不明|未提供|不可用|当前.*不提供|读取失败|尚未连接|没有可读消息|暂无可读消息)$/i.test(suffix) ?
+    suffix : '';
+}
+
+function socialMessageCards(layout) {
+  const cards = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return false;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    let nestedCard = false;
+    for (const child of Array.isArray(node.children) ? node.children : []) {
+      nestedCard = visit(child) || nestedCard;
+    }
+    const clickableColumn = attributes.type === 'Column' &&
+      (attributes.clickable === true || attributes.clickable === 'true');
+    const lines = clickableColumn ? socialLines(node) : [];
+    const candidate = clickableColumn && (lines.some((line) => line.startsWith('来源 ·')) ||
+      lines.some((line) => line.startsWith('发信人 ·')));
+    if (candidate && !nestedCard) {
+      cards.push({ node, lines });
+    }
+    return nestedCard || candidate;
+  };
+  visit(layout);
+  return cards;
+}
+
+function validSocialCard(card) {
+  const source = socialSuffix(card.lines, '来源 ·');
+  const author = socialSuffix(card.lines, '发信人 ·');
+  return source.length > 0 && author.length > 0 &&
+    source.toLowerCase() !== author.toLowerCase();
+}
+
+function exactSocialTextNode(node, expected) {
+  if (node === null || typeof node !== 'object') return null;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  if (['text', 'content', 'description', 'hint']
+    .some((key) => typeof attributes[key] === 'string' && attributes[key].trim() === expected)) {
+    return node;
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    const match = exactSocialTextNode(child, expected);
+    if (match !== null) return match;
+  }
+  return null;
+}
+
+function socialReplyInputNode(node) {
+  if (node === null || typeof node !== 'object') return null;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  if (attributes.type === 'TextInput' &&
+    typeof attributes.hint === 'string' &&
+    attributes.hint.trim() === '输入回复') {
+    return node;
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    const match = socialReplyInputNode(child);
+    if (match !== null) return match;
+  }
+  return null;
+}
+
+function socialReplyControlTextNodes(node, matches = []) {
+  if (node === null || typeof node !== 'object') return matches;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  const clickable = attributes.clickable === true || attributes.clickable === 'true';
+  const lines = clickable ? socialLines(node) : [];
+  if (clickable && lines.length === 1 && lines[0] === '回复') {
+    const textNode = exactSocialTextNode(node, '回复');
+    if (textNode !== null && textNode.attributes?.type === 'Text') matches.push(textNode);
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    socialReplyControlTextNodes(child, matches);
+  }
+  return matches;
+}
+
+function socialBoundsCenter(bounds) {
+  const match = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/.exec(bounds || '');
+  if (match === null) return null;
+  return {
+    x: Math.floor((Number(match[1]) + Number(match[3])) / 2),
+    y: Math.floor((Number(match[2]) + Number(match[4])) / 2)
+  };
+}
+
+export function socialReplyButtonCenter(layout) {
+  for (const card of socialMessageCards(layout)) {
+    if (!validSocialCard(card) || socialReplyInputNode(card.node) !== null) continue;
+    const replies = socialReplyControlTextNodes(card.node);
+    if (replies.length !== 1) continue;
+    const center = socialBoundsCenter(replies[0]?.attributes?.bounds);
+    if (center !== null) return center;
+  }
+  return null;
+}
+
+export function socialDraftUiEvidence(layoutOrText) {
+  const lines = socialLines(layoutOrText);
+  const text = lines.join('\n');
+  const unsent = !/(?:已发送|发送成功)/.test(text);
+  const localDraftPreview = false;
+  const replyComposer = unsent &&
+    lines.includes('SocialHub') &&
+    socialMessageCards(layoutOrText).some((card) =>
+      validSocialCard(card) &&
+      socialReplyInputNode(card.node) !== null &&
+      socialReplyControlTextNodes(card.node).length === 1);
+  return {
+    ok: localDraftPreview || replyComposer,
+    localDraftPreview,
+    replyComposer
+  };
+}
+
 function appLogIdentity(line) {
   const match = /^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+(\d+)\s+\d+\s+\S+\s+[^/\s]+\/([^/\s:]+)(?:\/[^:\s]+)*:/.exec(line);
   return match === null ? null : { pid: match[1], process: match[2] };

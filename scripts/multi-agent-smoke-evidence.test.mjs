@@ -8,7 +8,10 @@ import {
   visibleMailBodyText,
   modelTransportEvidence,
   multiAgentActionEvidence,
-  multiAgentTurnEvidence
+  multiAgentTurnEvidence,
+  socialDraftUiEvidence,
+  socialReplyButtonCenter,
+  toolExecutionEvidence
 } from './multi-agent-smoke-evidence.mjs';
 
 function listedCases(args = [], env = {}) {
@@ -34,6 +37,198 @@ const successTurn = `
 [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result
 [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=surface-1 roundCount=1 messageChars=12
 `;
+
+test('accepts a complete exact multi-agent tool lifecycle as execution evidence', () => {
+  const evidence = toolExecutionEvidence(successTurn, {
+    expectedToolIds: ['travel.search']
+  });
+  assert.equal(evidence.observed, true);
+  assert.equal(evidence.exactMultiAgentLifecycle, true);
+  assert.equal(evidence.legacyLocalToolRequest, false);
+});
+
+test('rejects incomplete failed canceled and wrong multi-agent tool lifecycles', () => {
+  const invalid = [
+    successTurn.replace(
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=travel.search status=success sources=1 error=false\n',
+      ''
+    ),
+    successTurn.replace(
+      '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=surface-1 state=result\n',
+      ''
+    ),
+    successTurn.replace(
+      '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=surface-1 roundCount=1 messageChars=12\n',
+      ''
+    ),
+    successTurn.replace(
+      'status=success surface=surface-1 roundCount=1',
+      'status=error surface=surface-1 roundCount=1'
+    ),
+    successTurn.replace(
+      'status=success surface=surface-1 roundCount=1',
+      'status=canceled surface=surface-1 roundCount=1'
+    )
+  ];
+  invalid.forEach((logs) => {
+    assert.equal(toolExecutionEvidence(logs, {
+      expectedToolIds: ['travel.search']
+    }).observed, false);
+  });
+  assert.equal(toolExecutionEvidence(successTurn, {
+    expectedToolIds: ['food.search']
+  }).observed, false);
+  assert.equal(toolExecutionEvidence(successTurn, {
+    expectedToolIds: []
+  }).observed, false);
+});
+
+test('uses legacy local tool evidence only when no multi-agent input exists', () => {
+  const legacy =
+    '[AIPhone][LocalToolRequest] endpoint=local://aiphone-tools toolId=travel.search\n';
+  const evidence = toolExecutionEvidence(legacy, {
+    expectedToolIds: ['travel.search']
+  });
+  assert.equal(evidence.observed, true);
+  assert.equal(evidence.exactMultiAgentLifecycle, false);
+  assert.equal(evidence.legacyLocalToolRequest, true);
+
+  const wrongMultiAgentWithForgedLegacy = successTurn.replaceAll(
+    'travel.search',
+    'food.search'
+  ) + legacy;
+  assert.equal(toolExecutionEvidence(wrongMultiAgentWithForgedLegacy, {
+    expectedToolIds: ['travel.search']
+  }).observed, false);
+});
+
+function socialCard({
+  source = 'Slack',
+  author = 'Alice',
+  composer = false,
+  inputHint = '输入回复',
+  reply = '回复',
+  replyCount = 1,
+  body = '真实消息正文',
+  bounds = '[900,400][1100,500]'
+} = {}) {
+  const children = [
+    textNode('Text', source === null ? '' : `来源 · ${source}`),
+    textNode('Text', author === null ? '' : `发信人 · ${author}`),
+    textNode('Text', body)
+  ];
+  if (composer) children.push({ attributes: { type: 'TextInput', hint: inputHint }, children: [] });
+  for (let index = 0; index < replyCount; index += 1) {
+    children.push({
+      attributes: { type: '__Common__', clickable: 'true' },
+      children: [{
+        attributes: { type: 'Text', text: reply, bounds },
+        children: []
+      }]
+    });
+  }
+  return {
+    attributes: { type: 'Column', clickable: 'true' },
+    children
+  };
+}
+
+function socialLayout(cards, extra = []) {
+  return {
+    attributes: { type: 'root' },
+    children: [textNode('Text', 'SocialHub'), ...cards, ...extra]
+  };
+}
+
+test('accepts only one real-card reply composer, never matching provider body text', () => {
+  assert.equal(socialDraftUiEvidence(socialLayout([
+    socialCard({ composer: true })
+  ])).ok, true);
+
+  [
+    '回复',
+    '本地草稿预览（未发送）：\n\n我会基于这条真实消息回复：你好',
+    '本地草稿预览（未发送）：无法生成草稿',
+    '本地草稿预览（未发送）：加载失败',
+    '本地草稿预览（未发送）：当前不可用',
+    '本地草稿预览（未发送）：你好\n发送成功'
+  ].forEach((text) => {
+    assert.equal(socialDraftUiEvidence(text).ok, false);
+  });
+  assert.equal(socialDraftUiEvidence(socialLayout([
+    socialCard({
+      body: '本地草稿预览（未发送）：\n\n我会基于这条真实消息回复：伪造正文'
+    })
+  ])).ok, false);
+  assert.equal(socialDraftUiEvidence(socialLayout([
+    socialCard({ body: '输入回复\n回复' })
+  ])).ok, false);
+  assert.equal(socialDraftUiEvidence(socialLayout([
+    socialCard({ composer: true, replyCount: 2 })
+  ])).ok, false);
+});
+
+test('rejects unknown and cross-card SocialHub reply evidence', () => {
+  [
+    socialLayout([socialCard({ source: '' })]),
+    socialLayout([socialCard({ source: '未知来源' })]),
+    socialLayout([socialCard({ author: '' })]),
+    socialLayout([socialCard({ author: 'unknown sender' })]),
+    socialLayout([socialCard({ source: 'Slack', author: 'Slack', composer: true })]),
+    socialLayout([socialCard({ source: 'X', author: 'X', composer: true })]),
+    socialLayout([socialCard({ composer: true, inputHint: '输入内容' })]),
+    socialLayout([
+      socialCard(),
+      socialCard({ source: null, author: null, composer: true })
+    ]),
+    socialLayout([
+      socialCard(),
+      socialCard({
+        source: 'Slack',
+        author: '真实成员',
+        composer: true,
+        reply: '回复全部'
+      })
+    ]),
+    socialLayout([
+      socialCard({ author: null, composer: true }),
+      socialCard({ source: null })
+    ]),
+    socialLayout([{
+      attributes: { type: 'Column', clickable: 'true' },
+      children: [
+        socialCard({ author: null, composer: true }),
+        socialCard({ source: null })
+      ]
+    }]),
+    socialLayout([socialCard({ composer: true, reply: '回复全部' })]),
+    socialLayout([socialCard({ composer: true })], [textNode('Text', '已发送')])
+  ].forEach((layout) => {
+    assert.equal(socialDraftUiEvidence(layout).ok, false);
+  });
+});
+
+test('locates only an unopened real-message reply and never the composer send control', () => {
+  assert.deepEqual(socialReplyButtonCenter(socialLayout([
+    socialCard({ bounds: '[900,400][1100,500]' })
+  ])), { x: 1000, y: 450 });
+  assert.equal(socialReplyButtonCenter(socialLayout([
+    socialCard({ composer: true })
+  ])), null);
+  assert.equal(socialReplyButtonCenter(socialLayout([
+    socialCard({ source: '未知', composer: false })
+  ])), null);
+  assert.equal(socialReplyButtonCenter(socialLayout([
+    socialCard({ source: 'Slack', author: 'Slack' })
+  ])), null);
+  assert.equal(socialReplyButtonCenter(socialLayout([
+    socialCard({ replyCount: 2 })
+  ])), null);
+  assert.equal(socialReplyButtonCenter(socialLayout([
+    socialCard({ author: null }),
+    socialCard({ source: null })
+  ])), null);
+});
 
 const dualChannelTurn = `
 07-22 09:41:13.001  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1

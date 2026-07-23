@@ -27,6 +27,9 @@ import {
   modelTransportEvidence,
   multiAgentActionEvidence,
   multiAgentTurnEvidence,
+  socialDraftUiEvidence,
+  socialReplyButtonCenter,
+  toolExecutionEvidence,
   visibleMailBodyText
 } from './multi-agent-smoke-evidence.mjs';
 
@@ -1508,6 +1511,11 @@ function analyze(
     minimumDataRounds,
     expectedDependencies
   });
+  const executionEvidence = toolExecutionEvidence(text, {
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies
+  });
   const htmlHomeDocument = htmlHomeDocumentEvidence(logs);
   const htmlHomeSurfaceLoad = htmlHomeSurfaceLoadEvidence(logs);
   const escapedToolId = escapeRegExp(expectedToolId);
@@ -1518,9 +1526,12 @@ function analyze(
     null;
   const hasExpectedDiscoveredToolId = discoveryPattern === null ? true : discoveryPattern.test(text);
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
-  const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
+  const rawModelSelectedExpectedToolId = expectedToolId.length === 0 ||
     new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
     new RegExp(`toolId=${escapedToolId}`).test(text);
+  const modelSelectedExpectedToolId = expectedToolId.length === 0 ||
+    executionEvidence.exactMultiAgentLifecycle ||
+    (!executionEvidence.hasMultiAgentInput && rawModelSelectedExpectedToolId);
   const personaCoffeeProof = !isPersonaCoffeeQuery(query) || /饮食搭子上线|饮食搭子/.test(text);
   const personaMemoryUpdateProof = !isPersonaMemoryUpdateQuery(query) ||
     /\[AIPhone\]\[PersonaMemoryUpdate\][^\n]*ok=true[^\n]*personaId=food_companion/.test(text);
@@ -1537,6 +1548,8 @@ function analyze(
     htmlHomeSurfaceLoad,
     htmlLoadError: /\[AIPhone\]\[HtmlHomeSurfaceLoadError\]/.test(text),
     modelSelectedExpectedToolId,
+    exactMultiAgentToolLifecycle: executionEvidence.exactMultiAgentLifecycle,
+    toolExecutionObserved: executionEvidence.observed,
     personaCoffeeProof,
     personaMemoryUpdateProof,
     directIntent: /\[AIPhone\]\[(ToolRequestByIntent|A2uiHomeToolRequestByIntent)\] toolId=/.test(text),
@@ -2032,7 +2045,19 @@ async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
 async function verifySocialDraftAction(layout, index) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const center = findTextCenter(currentLayout, '生成草稿');
+    const currentText = collectLayoutText(currentLayout).join('\n');
+    const currentEvidence = socialDraftUiEvidence(currentLayout);
+    if (currentEvidence.ok) {
+      const textPath = join(outDir, `query-${index + 1}-social-draft-layout-text.txt`);
+      writeFileSync(textPath, currentText + '\n');
+      return {
+        ...currentEvidence,
+        capability: 'social.reply.draft',
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-social-draft-screen.png`)
+      };
+    }
+    const center = socialReplyButtonCenter(currentLayout);
     if (center !== null) {
       hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       await sleep(1000);
@@ -2040,8 +2065,9 @@ async function verifySocialDraftAction(layout, index) {
       const text = collectLayoutText(resultLayout).join('\n');
       const textPath = join(outDir, `query-${index + 1}-social-draft-layout-text.txt`);
       writeFileSync(textPath, text + '\n');
+      const evidence = socialDraftUiEvidence(resultLayout);
       return {
-        ok: /回复草稿|本地草稿预览|尚未生成草稿/.test(text) && !/已发送|发送成功/.test(text),
+        ...evidence,
         capability: 'social.reply.draft',
         textPath,
         screenPath: captureScreen(`query-${index + 1}-social-draft-screen.png`)
@@ -2051,7 +2077,7 @@ async function verifySocialDraftAction(layout, index) {
     await sleep(800);
     currentLayout = dumpLayout(`query-${index + 1}-social-draft-scroll-${attempt + 1}.json`);
   }
-  return { ok: false, capability: 'social.reply.draft', reason: '生成草稿 button not found' };
+  return { ok: false, capability: 'social.reply.draft', reason: 'safe draft or reply composer not found' };
 }
 
 function exactActionOptions(actionId, sourceToolId, context) {
@@ -2954,7 +2980,7 @@ async function runQuery(query, index, expectedTool) {
       summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
@@ -3135,7 +3161,7 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.basePassedWithoutTransport === true &&
       summary.modelPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
@@ -3155,7 +3181,7 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.modelPassed === true &&
       summary.transportPassed === true &&
       summary.toolRequested &&
-      summary.localToolRequest &&
+      summary.toolExecutionObserved &&
       summary.toolOk &&
       summary.hasExpectedToolId &&
       summary.hasExpectedDiscoveredToolId &&
