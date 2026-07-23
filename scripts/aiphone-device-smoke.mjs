@@ -2060,7 +2060,7 @@ function exactActionOptions(actionId, sourceToolId, context) {
     expectedSourceToolId: sourceToolId || 'invalid',
     currentSurfaceId: context?.surfaceId || 'invalid',
     expectedConversationId: context?.conversationId || 'invalid',
-    originTurnId: context?.turnId || 'invalid',
+    expectedTurnId: context?.turnId || 'invalid',
     expectedVirtual: false
   };
 }

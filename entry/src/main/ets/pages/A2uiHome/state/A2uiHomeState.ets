@@ -87,10 +87,6 @@ export function runtimeSurfaceIdentityMatches(
     current.surfaceId === retained.surfaceId;
 }
 
-export function shouldPreserveHtmlHomeForPageAction(actionId: string): boolean {
-  return actionId === 'html_mail_detail_read';
-}
-
 export function nextSendSpinnerRotation(current: number, isBusy: boolean): number {
   if (!isBusy) {
     return 0;

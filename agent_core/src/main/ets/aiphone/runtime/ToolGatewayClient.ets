@@ -109,12 +109,7 @@ import {
   parseHotelDetailRequest,
   parseHotelSearchRequest
 } from './HotelToolTypes';
-import {
-  callGmailApiTool,
-  gmailMailDetailFromComposioObservation,
-  gmailMailDetailFromPayload,
-  readGmailMailDetail
-} from './GmailApiClient';
+import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
@@ -9731,12 +9726,6 @@ const socialHubClient: SocialHubClient = new SocialHubClient();
 let dynamicReadExecutor: DynamicReadExecutor = defaultDynamicReadExecutor;
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let gmailComposioResultForTests: DynamicGenericToolResult | null = null;
-export type GmailComposioRawReader = (
-  prompt: string,
-  fixedToolId: string,
-  fixedArgs: Object
-) => Promise<ComposioRawExecution>;
-let gmailComposioRawReaderForTests: GmailComposioRawReader | null = null;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
 export type HotelTimestampProvider = () => string;
@@ -9749,10 +9738,6 @@ export function configureGmailMcpClientForTests(client: GenericMcpClient | null)
 
 export function configureGmailComposioResultForTests(result: DynamicGenericToolResult | null): void {
   gmailComposioResultForTests = result;
-}
-
-export function configureGmailComposioRawReaderForTests(reader: GmailComposioRawReader | null): void {
-  gmailComposioRawReaderForTests = reader;
 }
 
 export function configureDynamicReadExecutorForTests(executor: DynamicReadExecutor | null): void {
@@ -10988,21 +10973,10 @@ function mailDetailSource(
   };
 }
 
-async function readGmailComposioRaw(
-  prompt: string,
-  fixedToolId: string,
-  args: Object
-): Promise<ComposioRawExecution> {
-  if (gmailComposioRawReaderForTests !== null) {
-    return gmailComposioRawReaderForTests(prompt, fixedToolId, args);
-  }
-  return callComposioFixedRaw(prompt, fixedToolId, args);
-}
-
 async function readConfiguredGmailDetailWithSource(
   args: MailDetailRequest
 ): Promise<ConfiguredMailDetailResult> {
-  if (gmailMcpClient !== genericMcpClient && gmailComposioRawReaderForTests === null) {
+  if (gmailMcpClient !== genericMcpClient) {
     const results = await gmailOAuthFallbackResults('gmail.thread.read', '', args as Object);
     if (results.length === 0 || results[0].status !== 'success') {
       const message = results.length === 0 ? 'Gmail OAuth detail is unavailable.' : results[0].summary;
@@ -11013,64 +10987,35 @@ async function readConfiguredGmailDetailWithSource(
       sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
     };
   }
-  let composioFailure = '';
-  if (args.messageId.trim().length > 0) {
-    try {
-      const execution: ComposioRawExecution = await readGmailComposioRaw(
-        'Gmail read exact message by message ID',
-        'gmail.message.read',
-        args as Object
-      );
-      aiLogInfo('[AIPhone][GmailDetailComposio] mode=message tool=' + execution.toolSlug +
-        ' responseChars=' + execution.observation.length.toString());
-      return {
-        detail: gmailMailDetailFromComposioObservation(execution.observation, args),
-        sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
-      };
-    } catch (messageError) {
-      composioFailure = describeThrown(messageError);
-      aiLogError('[AIPhone][GmailDetailComposioMessageFailed] ' + composioFailure.substring(0, 240));
-    }
-  }
-  if (args.threadId.trim().length > 0) {
-    try {
-      const execution: ComposioRawExecution = await readGmailComposioRaw(
-        'Gmail read full thread by thread ID',
-        'gmail.thread.read',
-        args as Object
-      );
-      aiLogInfo('[AIPhone][GmailDetailComposio] mode=thread_fallback tool=' + execution.toolSlug +
-        ' responseChars=' + execution.observation.length.toString());
-      return {
-        detail: gmailMailDetailFromComposioObservation(execution.observation, args),
-        sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
-      };
-    } catch (threadError) {
-      composioFailure = describeThrown(threadError);
-      aiLogError('[AIPhone][GmailDetailComposioThreadFailed] ' + composioFailure.substring(0, 240));
-    }
-  }
-  if (gmailMcpClient !== genericMcpClient) {
-    const results = await gmailOAuthFallbackResults('gmail.thread.read', '', args as Object);
-    if (results.length === 0 || results[0].status !== 'success') {
-      const message = results.length === 0 ? 'Gmail OAuth detail is unavailable.' : results[0].summary;
-      throw new Error(message.length > 0 ? message : composioFailure);
-    }
+  try {
+    const execution: ComposioRawExecution = await callComposioFixedRaw(
+      'Gmail read full thread ' + args.threadId,
+      'gmail.thread.read',
+      args as Object
+    );
+    aiLogInfo('[AIPhone][GmailDetailComposio] tool=' + execution.toolSlug +
+      ' responseChars=' + execution.observation.length.toString());
+    const payload = JSON.parse(execution.observation) as Object;
+    const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
+      Object.keys(payload).slice(0, 12).join(',') : '';
+    aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
     return {
-      detail: gmailMailDetailFromPayload(JSON.parse(results[0].rawPreview) as Object, args),
+      detail: gmailMailDetailFromPayload(payload, args),
+      sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
+    };
+  } catch (composioError) {
+    const message = describeThrown(composioError);
+    aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
+    const accessToken = await gmailAccessTokenForMcp();
+    if (accessToken.length === 0) {
+      throw new Error(message);
+    }
+    aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
+    return {
+      detail: await readGmailMailDetail(accessToken, args),
       sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
     };
   }
-  const accessToken = await gmailAccessTokenForMcp();
-  if (accessToken.length === 0) {
-    throw new Error(composioFailure.length > 0 ? composioFailure :
-      'Gmail detail requires a message ID or thread ID.');
-  }
-  aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
-  return {
-    detail: await readGmailMailDetail(accessToken, args),
-    sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
-  };
 }
 
 async function readConfiguredMailDetailWithSource(

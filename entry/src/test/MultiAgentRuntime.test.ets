@@ -969,16 +969,6 @@ export default function multiAgentRuntimeTest() {
       const dataLine = formatter.line(dataMessage);
       const uiLine = formatter.line(uiMessage);
       const turnLine = formatter.line(turnMessage);
-      const dispatchFormatter = new MultiAgentEvidenceFormatter(32);
-      const dispatchLine = dispatchFormatter.pageActionDispatchLine(
-        'conversation-private',
-        'origin-turn-private',
-        'action-turn-private',
-        'loop_surface_1784700000000_2',
-        'mail.search',
-        'mail.thread.read',
-        'action-run-private'
-      );
 
       expect(inputLine).assertEqual(
         '[AIPhone][MultiAgentInput] conversation=c1 turn=t2 task=k3'
@@ -1004,18 +994,12 @@ export default function multiAgentRuntimeTest() {
         '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 ' +
           'status=partial surface=loop_surface_1784700000000_2 roundCount=2 messageChars=29'
       );
-      expect(dispatchLine).assertEqual(
-        '[AIPhone][MultiAgentPageActionDispatch] conversation=c1 origin=t2 turn=t3 ' +
-          'surface=loop_surface_1784700000000_2 source=mail.search ' +
-          'action=mail.thread.read dispatch=r4'
-      );
       expect(inputLine.indexOf('secret')).assertEqual(-1);
       expect(inputLine.indexOf('conversation-1')).assertEqual(-1);
       expect(inputLine.indexOf('turn-1')).assertEqual(-1);
       expect(inputLine.indexOf('input-1')).assertEqual(-1);
       expect(dataLine.indexOf('private-place-id')).assertEqual(-1);
       expect(turnLine.indexOf('provider message')).assertEqual(-1);
-      expect(dispatchLine.indexOf('private')).assertEqual(-1);
       expect(inputLine.indexOf('\n')).assertEqual(-1);
       expect(dataLine.length < 320).assertTrue();
 

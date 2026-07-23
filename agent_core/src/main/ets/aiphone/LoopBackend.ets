@@ -12,13 +12,6 @@ import { allToolDefinitions, ToolDefinition } from './AiphoneToolDefinitions';
 import { runAiphoneTool } from './AiphoneToolExecutor';
 import { LoopBackendCallbacks, LoopBackendRequest, LoopRunResult, LoopToolTrace } from './LoopBackendTypes';
 
-const GMAIL_SEARCH_MODEL_INSTRUCTIONS: string = '. Use for searching, listing, or viewing Gmail messages, inboxes, ' +
-  'important mail, or keyword-based mail queries. Required input is JSON with args.query and args.pageSize. ' +
-  'Build args.query only from exact keywords explicitly present in the current user request. Never add synonyms, ' +
-  'translations, inferred topics, or likely related terms. Preserve explicit acronyms and names exactly. ' +
-  'For an ECCV request use "ECCV", never "ECCV OR paper OR manuscript OR review OR conference". ' +
-  'If the user wants latest or recent Gmail without a keyword, set query to "". Never fabricate Gmail messages.';
-
 class AiphoneTool implements AgentTool {
   private toolId: string;
   private descriptionText: string;
@@ -177,9 +170,6 @@ function calendarToolDescription(definition: ToolDefinition): string {
   }
   if (definition.toolId === 'calendar.event.delete') {
     return description + '. For a natural-language delete request, call calendar.event.delete directly with structured args.query, args.timeMin, args.timeMax, args.timezone, and optional args.calendarId. query contains only event title text; use an empty query when the request specifies only a date or time. Resolve relative dates into RFC3339 and never pass phrases such as tomorrow or 明天. The client searches real events internally: exactly one match proceeds to confirmation, while zero or multiple matches are shown for user selection. When the user selected a visible event, pass its internal args.eventId. Never ask the user to type or know an Event ID. The client requires explicit delete confirmation before the Provider call.';
-  }
-  if (definition.toolId === 'gmail.mail.search') {
-    return description + GMAIL_SEARCH_MODEL_INSTRUCTIONS;
   }
   if (definition.toolId === 'hotel.search') {
     return description + '. Use for real hotel discovery through RollingGo. Input must be JSON with originQuery, place, placeType, countryCode, checkInDate in YYYY-MM-DD, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and optional size. Never omit place or dates: the provider otherwise defaults to unrelated inventory. This tool is read-only and does not create a reservation.';
@@ -390,7 +380,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += GMAIL_SEARCH_MODEL_INSTRUCTIONS;
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query and args.pageSize; do not pass plain keywords. Always include query; if the user wants latest/recent Gmail and is not searching by keyword, set query to "". Use pageSize for requested count; do not use count, limit, or maxResults. Generate args.query from the user request only when the user is searching by keyword; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {

@@ -396,9 +396,6 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
   if (fixedToolId === 'gmail.thread.read') {
     return 'Read the full Gmail thread content by thread ID';
   }
-  if (fixedToolId === 'gmail.message.read') {
-    return 'Fetch exactly one Gmail email message by its message ID, not the entire thread';
-  }
   if (toolkit === 'gmail') {
     return 'Search Gmail messages for ' + keyword;
   }
@@ -499,9 +496,6 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
   }
   if (toolId === 'gmail.thread.read') {
     return [{ source: 'threadId', targets: ['threadId', 'thread_id', 'id'] }];
-  }
-  if (toolId === 'gmail.message.read') {
-    return [{ source: 'messageId', targets: ['messageId', 'message_id', 'id'] }];
   }
   if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
     return [
@@ -740,8 +734,6 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'calendar.event.update') return 'GOOGLECALENDAR_PATCH_EVENT';
   if (fixedToolId === 'calendar.event.delete') return 'GOOGLECALENDAR_DELETE_EVENT';
   if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';
-  if (fixedToolId === 'gmail.mail.search') return 'GMAIL_FETCH_EMAILS';
-  if (fixedToolId === 'gmail.message.read') return 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID';
   return '';
 }
 
@@ -851,17 +843,6 @@ export function composioPreferredToolScore(prompt: string, tool: ComposioSearchT
   }
   if (fixedToolId === 'gmail.thread.read' && slug === 'gmail_fetch_emails') {
     score -= 900;
-  }
-  if (fixedToolId === 'gmail.message.read' &&
-    (slugContainsAny(slug, ['get', 'read', 'fetch']) && slugContainsAny(slug, ['gmail', 'message']))) {
-    score += 400;
-  }
-  if (fixedToolId === 'gmail.message.read' && slug === 'gmail_fetch_message_by_message_id') {
-    score += 1200;
-  }
-  if (fixedToolId === 'gmail.message.read' &&
-    (slug === 'gmail_fetch_message_by_thread_id' || slug === 'gmail_fetch_emails')) {
-    score -= 1000;
   }
   if (fixedToolId === 'gmail.draft.create' && isSafeGmailDraftCreateSlug(slug)) {
     score += 700;
@@ -1097,11 +1078,6 @@ function specialArgumentsForTool(toolSlug: string, prompt: string, schema: Compo
     setIfSupported(args, schema, 'max_results', 5);
     setIfSupported(args, schema, 'include_payload', false);
     setIfSupported(args, schema, 'verbose', true);
-    return args;
-  }
-  if (lower === 'gmail_fetch_message_by_message_id') {
-    setIfSupported(args, schema, 'user_id', 'me');
-    setIfSupported(args, schema, 'format', 'full');
     return args;
   }
   if (lower === 'slack_search_messages') {

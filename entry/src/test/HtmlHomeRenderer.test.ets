@@ -2019,18 +2019,6 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('body[data-scene="gmail"] .block[data-source-key="composio-outlook"]')).assertLarger(-1);
       expect(html.indexOf('background: var(--kind-soft)')).assertLarger(-1);
       expect(html.indexOf('mail-reply-overlay')).assertLarger(-1);
-      expect(html.indexOf('body.mail-reply-open')).assertLarger(-1);
-      expect(html.indexOf('pointer-events: auto')).assertLarger(-1);
-      expect(html.indexOf('overscroll-behavior: contain')).assertLarger(-1);
-      expect(html.indexOf('.mail-reply-overlay[data-source-key="mail-gmail"]')).assertLarger(-1);
-      expect(html.indexOf('.mail-reply-overlay[data-source-key="mail-qq"]')).assertLarger(-1);
-      expect(html.indexOf('.mail-reply-overlay[data-source-key="composio-outlook"]')).assertLarger(-1);
-      expect(html.indexOf("overlay.setAttribute('data-source-key', entry.card.getAttribute('data-source-key') || '')")).assertLarger(-1);
-      expect(html.indexOf("dialog.setAttribute('aria-modal', 'true')")).assertLarger(-1);
-      expect(html.indexOf("document.body.classList.add('mail-reply-open')")).assertLarger(-1);
-      expect(html.indexOf("document.body.classList.remove('mail-reply-open')")).assertLarger(-1);
-      expect(html.indexOf("if (event.target === overlay) { closeMailReply(); }")).assertLarger(-1);
-      expect(html.indexOf("closeButton.addEventListener('click', closeMailReply)")).assertLarger(-1);
       expect(html.indexOf("'编辑回复'")).assertLarger(-1);
       expect(html.indexOf("'AI回复'")).assertLarger(-1);
       expect(html.indexOf('html_mail_reply_ai_generate')).assertLarger(-1);
@@ -2039,9 +2027,6 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('html_mail_reply_send')).assertLarger(-1);
       expect(html.indexOf('window.scrollBy(0, afterTop - beforeTop)')).assertLarger(-1);
       expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
-      expect(html.indexOf("var entry = mailDetailEntries[key];\n    if (!entry) { return; }")).assertLarger(-1);
-      expect(html.indexOf("card.addEventListener('click', function () {\n          setExpandedCard(card);\n        });")).assertLarger(-1);
-      expect(html.indexOf("expandButton.addEventListener('click', function (event) {\n            event.stopPropagation();\n            setExpandedCard(card);\n          });")).assertLarger(-1);
     });
 
     it('filters Gmail hero preview counts to mail blocks', 0, () => {

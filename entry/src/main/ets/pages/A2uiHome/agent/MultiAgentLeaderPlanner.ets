@@ -48,7 +48,6 @@ const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by st
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
-const GMAIL_QUERY_SCOPE_ERROR: string = 'LEADER_GMAIL_QUERY_SCOPE';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -64,10 +63,6 @@ const SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION: string =
   'in the same round. Return execute with only the producer task. Wait until a later round after a successful ' +
   'or partial producer observation supplies the exact entity reference before scheduling the consumer. ' +
   FULL_DECISION_CONTRACT;
-const GMAIL_QUERY_SCOPE_REPAIR_INSTRUCTION: string =
-  'Correction: LEADER_GMAIL_QUERY_SCOPE. For gmail.mail.search, use only exact keyword text present in the ' +
-  'current user request. Do not add OR, synonyms, translations, topics, or Gmail operators. Use an empty query ' +
-  'for latest or recent Gmail without an explicit keyword. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
@@ -85,10 +80,6 @@ const DATA_SCOPE_CONTRACT: string =
   'Explicit provider, app, account, source, or independently named source scope belongs in round 1. ' +
   'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
   'exact entity reference from a successful or partial earlier current-turn observation.';
-const GMAIL_SEARCH_CONTRACT: string =
-  'Gmail query only from exact keywords explicitly present in the current user request. ' +
-  'Never add synonyms, translations, inferred topics, or likely related terms. Preserve explicit acronyms and ' +
-  'names exactly. An ECCV request uses query "ECCV", never "ECCV OR paper OR manuscript OR review OR conference".';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -134,7 +125,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     let sameRoundProducerToolIds: string[] = [];
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
-      this.rejectUnscopedGmailQuery(decision, input.text);
       sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
@@ -160,8 +150,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
         correction = SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION;
-      } else if (error instanceof Error && error.message === GMAIL_QUERY_SCOPE_ERROR) {
-        correction = GMAIL_QUERY_SCOPE_REPAIR_INSTRUCTION;
       }
       const repaired: string = await this.model.complete(
         prompt + '\n' + correction,
@@ -169,7 +157,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         LEADER_SYSTEM_PROMPT
       );
       const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-      this.rejectUnscopedGmailQuery(repairedDecision, input.text);
       if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
         !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
         throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
@@ -186,57 +173,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       );
       return repairedDecision;
     }
-  }
-
-  private rejectUnscopedGmailQuery(decision: LeaderDecision, userText: string): void {
-    if (decision.roundAction !== 'execute') {
-      return;
-    }
-    for (let index = 0; index < decision.dataTasks.length; index++) {
-      const task: LeaderDecisionDataTask = decision.dataTasks[index];
-      if (task.toolId !== 'gmail.mail.search') {
-        continue;
-      }
-      const values = task.input as Record<string, Object | string | number | boolean | null | undefined>;
-      const query = values['query'];
-      if (query === undefined) {
-        values['query'] = '';
-        continue;
-      }
-      if (typeof query !== 'string' || !this.gmailQueryUsesOnlyExplicitText(query, userText)) {
-        throw new Error(GMAIL_QUERY_SCOPE_ERROR);
-      }
-    }
-  }
-
-  private gmailQueryUsesOnlyExplicitText(query: string, userText: string): boolean {
-    const trimmed: string = query.trim();
-    if (trimmed.length === 0) {
-      return true;
-    }
-    const tokens: string[] = trimmed.split(/\s+/);
-    for (let index = 0; index < tokens.length; index++) {
-      const token: string = tokens[index].replace(/^[{[("']+|[}\])"']+$/g, '');
-      if (token.length === 0) {
-        return false;
-      }
-      if (token === 'OR') {
-        if (!/(^|\s)OR($|\s)/.test(userText) && userText.indexOf('或') < 0) {
-          return false;
-        }
-        continue;
-      }
-      if (token === 'AND') {
-        if (!/(^|\s)AND($|\s)/.test(userText) && userText.indexOf('且') < 0) {
-          return false;
-        }
-        continue;
-      }
-      if (userText.indexOf(token) < 0) {
-        return false;
-      }
-    }
-    return true;
   }
 
   private rejectSameRoundDependency(decision: LeaderDecision): void {
@@ -410,7 +346,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
-      GMAIL_SEARCH_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
       'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +

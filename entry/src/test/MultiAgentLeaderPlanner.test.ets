@@ -151,16 +151,6 @@ function sourceOnlyDecision(toolId: string): string {
     '"input":{},"required":true}],"uiIntent":{"purpose":"read source",' +
     '"preferredDensity":"comfortable","requiredSections":["source"]}}';
 }
-
-function gmailSearchDecision(query: string): string {
-  return '{"personaId":"travel_companion","skillId":"",' +
-    '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"execute",' +
-    '"dataTasks":[{"localId":"gmail-search","goal":"查询 Gmail",' +
-    '"allowedToolIds":["gmail.mail.search"],"toolId":"gmail.mail.search",' +
-    '"input":{"query":' + JSON.stringify(query) + ',"pageSize":10},"required":true}],' +
-    '"uiIntent":{"purpose":"展示 Gmail 邮件","preferredDensity":"comfortable",' +
-    '"requiredSections":["mail"]}}';
-}
 const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace(
   '"personaId":"travel_companion",',
   ''
@@ -618,61 +608,6 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('originQuery, place, placeType, countryCode') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Do not invent missing destination, date, year, guest') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
-    });
-
-    it('keeps Gmail search input limited to exact user keywords in the shared prompt', 0, async () => {
-      const model: QueueLocalModel = new QueueLocalModel([VALID_ANSWER_DECISION]);
-      const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
-      const input: InputUserPayload = { text: 'Find my ECCV Gmail messages' };
-
-      await planner.plan(inputMessage(), input, planningContext(), 1);
-
-      expect(model.prompts[0].indexOf('Gmail query only from exact keywords') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('Never add synonyms, translations, inferred topics') >= 0).assertTrue();
-      expect(model.prompts[0].indexOf('ECCV OR paper OR manuscript OR review OR conference') >= 0).assertTrue();
-    });
-
-    it('rejects model-added Gmail OR synonyms outside the current user request', 0, async () => {
-      const model = new QueueLocalModel([
-        gmailSearchDecision('ECCV OR paper OR manuscript OR review OR conference')
-      ]);
-      let errorCode: string = '';
-
-      try {
-        await new MultiAgentLeaderPlanner(model).plan(
-          inputMessage(), { text: '帮我查看 Gmail 里和 ECCV 相关的邮件' }, planningContext(), 1
-        );
-      } catch (error) {
-        errorCode = error instanceof Error ? error.message : 'unknown';
-      }
-
-      expect(errorCode).assertEqual('LEADER_GMAIL_QUERY_SCOPE');
-      expect(model.prompts.length).assertEqual(1);
-    });
-
-    it('preserves exact empty and explicit multi-keyword Gmail query semantics', 0, async () => {
-      const exact = await new MultiAgentLeaderPlanner(
-        new QueueLocalModel([gmailSearchDecision('ECCV')])
-      ).plan(
-        inputMessage(), { text: '帮我查看 Gmail 里和 ECCV 相关的邮件' }, planningContext(), 1
-      );
-      const empty = await new MultiAgentLeaderPlanner(
-        new QueueLocalModel([gmailSearchDecision('')])
-      ).plan(
-        inputMessage(), { text: '帮我查看 Gmail 里最新的邮件' }, planningContext(), 1
-      );
-      const multiple = await new MultiAgentLeaderPlanner(
-        new QueueLocalModel([gmailSearchDecision('ECCV CVPR')])
-      ).plan(
-        inputMessage(), { text: '帮我查看 Gmail 里同时包含 ECCV CVPR 的邮件' }, planningContext(), 1
-      );
-
-      const exactInput = exact.dataTasks[0].input as Record<string, Object | string | number | boolean | null>;
-      const emptyInput = empty.dataTasks[0].input as Record<string, Object | string | number | boolean | null>;
-      const multipleInput = multiple.dataTasks[0].input as Record<string, Object | string | number | boolean | null>;
-      expect(exactInput['query'] as string).assertEqual('ECCV');
-      expect(emptyInput['query'] as string).assertEqual('');
-      expect(multipleInput['query'] as string).assertEqual('ECCV CVPR');
     });
 
     it('lets the model distinguish aggregate travel explicit modes and an explicit pair', 0, async () => {

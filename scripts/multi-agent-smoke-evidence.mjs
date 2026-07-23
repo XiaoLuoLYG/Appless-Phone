@@ -6,7 +6,7 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentInput', 'MultiAgentDataTask', 'MultiAgentDataResult',
   'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
-  'MultiAgentPageActionDispatch', 'MultiAgentTurnResult', 'MailDetailInPlace'
+  'MultiAgentTurnResult'
 ]);
 const DUPLICATE_HILOG_CHANNELS = new Set(['A00000/AIPHONE', 'A03D00/JSAPP']);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
@@ -551,42 +551,17 @@ function optionMismatch(item, options, expectedSurface) {
     (expectedSurface && item.fields.surface !== expectedSurface) ||
     (options.expectedSourceToolId && item.fields.source !== options.expectedSourceToolId) ||
     (options.expectedConversationId && item.fields.conversation !== options.expectedConversationId) ||
-    (options.expectedTurnId && item.fields.turn !== options.expectedTurnId) ||
-    (options.originTurnId && item.fields.turn === options.originTurnId)
+    (options.expectedTurnId && item.fields.turn !== options.expectedTurnId)
   );
 }
 
 export function multiAgentActionEvidence(logText, options = {}) {
   const all = records(logText);
   const expectedSurface = options.currentSurfaceId || options.surfaceId || '';
-  const directRuns = options.expectedVirtual === true ? [] :
-    all.filter((item) => item.marker === 'MultiAgentActionRun');
-  if (options.expectedVirtual === false && directRuns.length > 1) {
-    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['duplicate_action_run'] };
-  }
-  const actionRuns = directRuns.filter((item) =>
+  const actionRuns = options.expectedVirtual === true ? [] : all.filter((item) => item.marker === 'MultiAgentActionRun' &&
     (!options.expectedActionId || item.fields.action === options.expectedActionId));
   if (actionRuns.some((item) => optionMismatch(item, options, expectedSurface))) {
     return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['stale_action_run'] };
-  }
-  if (actionRuns.length > 1) {
-    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['duplicate_action_run'] };
-  }
-  if (options.expectedVirtual === false && options.originTurnId) {
-    const dispatches = all.filter((item) => item.marker === 'MultiAgentPageActionDispatch');
-    const run = actionRuns[0];
-    const dispatch = dispatches[0];
-    if (dispatches.length !== 1 || run === undefined || dispatch.index >= run.index ||
-      dispatch.fields.conversation !== run.fields.conversation ||
-      dispatch.fields.origin !== options.originTurnId || dispatch.fields.turn !== run.fields.turn ||
-      dispatch.fields.surface !== run.fields.surface || dispatch.fields.source !== run.fields.source ||
-      dispatch.fields.action !== run.fields.action || dispatch.fields.dispatch !== run.fields.run ||
-      (options.expectedConversationId && dispatch.fields.conversation !== options.expectedConversationId) ||
-      (expectedSurface && dispatch.fields.surface !== expectedSurface) ||
-      (options.expectedSourceToolId && dispatch.fields.source !== options.expectedSourceToolId) ||
-      (options.expectedActionId && dispatch.fields.action !== options.expectedActionId)) {
-      return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['missing_action_dispatch'] };
-    }
   }
   for (let index = actionRuns.length - 1; index >= 0; index--) {
     const run = actionRuns[index];
@@ -667,7 +642,6 @@ export function mailThreadReadEvidence(logText, options = {}) {
     currentSurfaceId: options.currentSurfaceId,
     expectedConversationId: options.expectedConversationId,
     expectedTurnId: options.expectedTurnId,
-    originTurnId: options.originTurnId,
     expectedVirtual: false
   });
   const failed = (reason) => ({

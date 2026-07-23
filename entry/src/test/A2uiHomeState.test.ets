@@ -10,7 +10,6 @@ import {
   runtimeCallbackIsCurrent,
   runtimeOwnerAllowsSurfaceAction,
   runtimeSurfaceIdentityMatches,
-  shouldPreserveHtmlHomeForPageAction,
   shouldShowWelcome,
   shouldShowQueryPendingSurface,
   shouldApplySurfaceUpdate,
@@ -147,34 +146,6 @@ export default function a2uiHomeStateTest() {
         9
       )).assertFalse();
       expect(runtimeSurfaceIdentityMatches(current, retained, 'legacy', 9)).assertFalse();
-    });
-
-    it('keeps the loaded mail result document while a detail event updates the expanded card', 0, () => {
-      const resultHtml = '<html data-result="mail">expanded card</html>';
-      const busyHtml = '<html data-result="mail" data-busy="true">collapsed card</html>';
-      let loadedHtml: string = resultHtml;
-      let loadDataCount: number = 1;
-      const preserve: boolean = shouldPreserveHtmlHomeForPageAction('html_mail_detail_read');
-
-      const htmlWhileReading: string = preserve ? loadedHtml : busyHtml;
-      if (htmlWhileReading !== loadedHtml) {
-        loadedHtml = htmlWhileReading;
-        loadDataCount++;
-      }
-
-      const detailEventJson: string = '{"requestKey":"qq:thread-1","status":"success","bodyChars":412}';
-      const htmlAfterDetailEvent: string = preserve ? loadedHtml : resultHtml + detailEventJson;
-      if (htmlAfterDetailEvent !== loadedHtml) {
-        loadedHtml = htmlAfterDetailEvent;
-        loadDataCount++;
-      }
-
-      expect(preserve).assertTrue();
-      expect(loadDataCount).assertEqual(1);
-      expect(loadedHtml).assertEqual(resultHtml);
-      expect(detailEventJson.indexOf('qq:thread-1')).assertLarger(-1);
-      expect(shouldPreserveHtmlHomeForPageAction('html_mail_reply_send')).assertFalse();
-      expect(shouldPreserveHtmlHomeForPageAction('html_mail_detail_read_stale')).assertFalse();
     });
 
     it('keeps send spinner rotation monotonic while loading', 0, () => {

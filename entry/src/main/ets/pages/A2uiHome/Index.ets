@@ -158,7 +158,6 @@ import {
   runtimeCallbackIsCurrent,
   runtimeOwnerAllowsSurfaceAction,
   runtimeSurfaceIdentityMatches,
-  shouldPreserveHtmlHomeForPageAction,
   shouldApplySurfaceUpdate,
   shouldShowQueryPendingSurface,
   shouldShowWelcome,
@@ -598,7 +597,6 @@ struct Index {
     new RegisteredPageSnapshotStore();
   private registeredPageRenderGeneration: number = 0;
   @State htmlHomeStableHtml: string = '';
-  private preserveHtmlHomeForPageAction: boolean = false;
   private voiceSession: VoiceInputSession | null = null;
   private voiceSessionSeq: number = 0;
   private voiceBaseInputText: string = '';
@@ -685,7 +683,7 @@ struct Index {
     if (this.currentSurface.intent === 'social') {
       return '';
     }
-    if (this.shouldKeepLuckinConfirmWebHtmlStable() || this.preserveHtmlHomeForPageAction) {
+    if (this.shouldKeepLuckinConfirmWebHtmlStable()) {
       return this.htmlHomeStableHtml.length > 0 ? this.htmlHomeStableHtml : this.currentHtmlHomeHtml();
     }
     return this.currentHtmlHomeHtml();
@@ -4073,12 +4071,6 @@ struct Index {
       return false;
     }
     const runtime = this.canaryRuntime();
-    const preserveHtml: boolean = shouldPreserveHtmlHomeForPageAction(action.id);
-    if (preserveHtml) {
-      const loadedHtml: string = this.currentHtmlHomeHtml();
-      this.preserveHtmlHomeForPageAction = true;
-      this.htmlHomeStableHtml = loadedHtml;
-    }
     this.isBusy = true;
     try {
       const ok = await runtime.runPageAction(action);
@@ -4101,9 +4093,6 @@ struct Index {
         this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
       )) {
         this.isBusy = false;
-      }
-      if (preserveHtml) {
-        this.preserveHtmlHomeForPageAction = false;
       }
     }
   }
