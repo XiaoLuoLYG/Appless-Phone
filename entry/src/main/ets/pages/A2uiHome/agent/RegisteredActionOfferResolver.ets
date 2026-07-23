@@ -11,6 +11,7 @@ import {
   MailThreadSummary,
   SocialHubItemData,
   ToolDefinition,
+  calendarDeleteTargetFromResults,
   calendarEventRequiredFields,
   calendarUpdateArgsFromResults,
   hotelActionsFor,
@@ -44,6 +45,12 @@ interface SocialDraftArgs {
   itemId: string;
   platform: string;
   instruction: string;
+}
+
+interface CalendarDeleteActionArgs {
+  eventId: string;
+  calendarId: string;
+  sendUpdates: string;
 }
 
 interface CanonicalState {
@@ -184,6 +191,37 @@ function calendarUpdateCandidates(record: OfferRecord): CandidateOffer[] {
   }];
 }
 
+function calendarDeleteCandidates(record: OfferRecord): CandidateOffer[] {
+  const rawResults = record['results'];
+  const requested = recordOf(record['requestedAction']);
+  if (!Array.isArray(rawResults) || requested === null ||
+    requested['actionId'] !== 'calendar.event.delete') {
+    return [];
+  }
+  const results = rawResults as DynamicGenericToolResult[];
+  const query = typeof requested['query'] === 'string' ? requested['query'].trim() : '';
+  const calendarId = typeof requested['calendarId'] === 'string' ?
+    requested['calendarId'].trim() : '';
+  if (query.length === 0 || results.length !== 1 || results[0].status !== 'success' ||
+    results[0].sourceTag !== 'Composio Google Calendar' ||
+    results[0].toolName !== 'calendar.events.search' ||
+    results[0].title.trim() !== query) {
+    return [];
+  }
+  const target = calendarDeleteTargetFromResults(results);
+  if (target === null || target.eventId === undefined || target.eventId.trim().length === 0) {
+    return [];
+  }
+  const args: CalendarDeleteActionArgs = {
+    eventId: target.eventId.trim(),
+    calendarId: calendarId.length > 0 ? calendarId : 'primary',
+    sendUpdates: 'none'
+  };
+  return [{
+    action: action('calendar.event.delete', '删除日程', 'danger', args)
+  }];
+}
+
 function candidatesFor(data: DataResult): CandidateOffer[] {
   const record = recordOf(data.data);
   if (data.toolId === 'hotel.search' && record !== null && record['ok'] === true &&
@@ -226,7 +264,8 @@ function candidatesFor(data: DataResult): CandidateOffer[] {
     return candidates;
   }
   if (data.toolId === 'calendar.events.search' && record !== null) {
-    return calendarUpdateCandidates(record);
+    const update = calendarUpdateCandidates(record);
+    return update.length > 0 ? update : calendarDeleteCandidates(record);
   }
   return [];
 }

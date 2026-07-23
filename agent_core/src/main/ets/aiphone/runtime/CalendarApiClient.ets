@@ -754,7 +754,7 @@ function calendarResultRow(result: DynamicGenericToolResult, label: string): str
   return '';
 }
 
-export function calendarDeleteTargetFromResultsForTest(results: DynamicGenericToolResult[]): CalendarEventArgs | null {
+export function calendarDeleteTargetFromResults(results: DynamicGenericToolResult[]): CalendarEventArgs | null {
   if (results.length !== 1 || results[0].status !== 'success') {
     return null;
   }
@@ -770,11 +770,17 @@ export function calendarDeleteTargetFromResultsForTest(results: DynamicGenericTo
   };
 }
 
+export function calendarDeleteTargetFromResultsForTest(
+  results: DynamicGenericToolResult[]
+): CalendarEventArgs | null {
+  return calendarDeleteTargetFromResults(results);
+}
+
 export function calendarUpdateArgsFromResults(
   args: CalendarEventArgs,
   results: DynamicGenericToolResult[]
 ): CalendarEventArgs | null {
-  const target = calendarDeleteTargetFromResultsForTest(results);
+  const target = calendarDeleteTargetFromResults(results);
   if (target === null) {
     return null;
   }

@@ -404,7 +404,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: 'calendarEventsSearchQuery',
     outputSchema: 'calendarEvents',
     a2uiComponent: 'GenericToolResults',
-    actions: ['calendar.authorize', 'calendar.event.update']
+    actions: ['calendar.authorize', 'calendar.event.update', 'calendar.event.delete']
   },
   {
     toolId: 'calendar.event.create',

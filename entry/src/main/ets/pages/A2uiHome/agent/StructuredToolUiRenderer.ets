@@ -229,8 +229,11 @@ function genericDataWithOffers(
     if (actions.some((current: A2uiAction): boolean => current.id === offer.actionId)) {
       continue;
     }
+    const actionId = data.toolId === 'calendar.events.search' &&
+      offer.actionId === 'calendar.event.delete' ?
+      'calendar.event.delete.confirm' : offer.actionId;
     actions.push({
-      id: offer.actionId,
+      id: actionId,
       label: offer.label,
       prompt: offer.label,
       variant: offer.variant,

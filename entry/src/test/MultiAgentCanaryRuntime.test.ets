@@ -174,6 +174,19 @@ const CALENDAR_UPDATE_DONE_DECISION: string = '{"personaId":"work_companion","sk
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认更新。",' +
   '"reasonCode":"calendar_update_review_ready"}';
+const CALENDAR_DELETE_SEARCH_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"calendar-delete-search","goal":"find the exact event before delete",' +
+  '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
+  '"input":{"query":"forged title","eventId":"model-forged",' +
+  '"requestedAction":{"actionId":"calendar.event.delete","eventId":"model-forged"}},"required":true}],' +
+  '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
+  '"requiredSections":["events","review"]},"reasonCode":"calendar_delete_read_first"}';
+const CALENDAR_DELETE_DONE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认删除。",' +
+  '"reasonCode":"calendar_delete_review_ready"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"mail-search",' +
@@ -1955,6 +1968,113 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(calls[0].actionId).assertEqual('calendar.event.update');
       expect(JSON.stringify(calls[0].args).indexOf('event-provider-real-1')).assertLarger(-1);
       runtime.dispose();
+    });
+
+    it('searches C19e first and binds delete confirmation only to the exact provider event', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-delete-1']);
+      const model = new QueueModel([CALENDAR_DELETE_SEARCH_DECISION, CALENDAR_DELETE_DONE_DECISION]);
+      const surfaces: A2uiSurfaceState[] = [];
+      const calls: RecordedPageAction[] = [];
+      let current: RegisteredPageSnapshot | null = null;
+      const options = canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.onSurface = (surface: A2uiSurfaceState): boolean => {
+        surfaces.push(surface);
+        current = pageSnapshot(surface, surfaces.length);
+        return true;
+      };
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => current;
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return {
+          status: 'success',
+          output: JSON.parse('{"eventId":"event-provider-delete-1","status":"deleted"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '删除 2026年7月30日 标题为 Appless QA run-1 的 Google Calendar 日程',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const exact = renderedAction(
+        surfaces[surfaces.length - 1], 'calendar.event.delete.confirm'
+      );
+      const taskJson = JSON.stringify(executor.tasks[0]);
+      expect(exact === null).assertFalse();
+      if (exact === null) {
+        runtime.dispose();
+        return;
+      }
+      const forged = JSON.parse(JSON.stringify(exact)) as A2uiAction;
+      (forged.args as Record<string, Object | string | number | boolean | null | undefined>)['eventId'] =
+        'event-model-forged';
+
+      expect(outcome.status).assertEqual('success');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('calendar.events.search');
+      expect(model.prompts[0].indexOf(
+        'Calendar delete contract: for a natural-language delete without a real Event ID'
+      )).assertLarger(-1);
+      expect(taskJson.indexOf('Appless QA run-1')).assertLarger(-1);
+      expect(taskJson.indexOf('2026-07-30T00:00:00+08:00')).assertLarger(-1);
+      expect(taskJson.indexOf('2026-07-31T00:00:00+08:00')).assertLarger(-1);
+      expect(taskJson.indexOf('model-forged')).assertEqual(-1);
+      expect(JSON.stringify(exact.args).indexOf('event-provider-delete-1'))
+        .assertLarger(-1);
+      expect(calls.length).assertEqual(0);
+      expect(await runtime.runPageAction(forged)).assertFalse();
+      expect(calls.length).assertEqual(0);
+      expect(await runtime.runPageAction(exact)).assertTrue();
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].actionId).assertEqual('calendar.event.delete');
+      expect(calls[0].context.pageActionId).assertEqual('calendar.event.delete.confirm');
+      expect(JSON.stringify(calls[0].args).indexOf('event-provider-delete-1')).assertLarger(-1);
+      current = null;
+      expect(await runtime.runPageAction(exact)).assertFalse();
+      expect(calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('does not offer C19e delete for zero or multiple provider matches', 0, async () => {
+      const matches: string[][] = [[], ['event-provider-delete-1', 'event-provider-delete-2']];
+      for (let index = 0; index < matches.length; index++) {
+        const surfaces: A2uiSurfaceState[] = [];
+        let providerCalls = 0;
+        const options = canaryOptions(
+          new QueueModel([CALENDAR_DELETE_SEARCH_DECISION, CALENDAR_DELETE_DONE_DECISION]),
+          new CalendarUpdateExecutor(matches[index]),
+          new RecordingOpener(),
+          surfaces,
+          []
+        );
+        options.pageAction = async (): Promise<ActionExecutionResult> => {
+          providerCalls++;
+          return { status: 'success', output: JSON.parse('{"status":"deleted"}') as Object };
+        };
+        const runtime = new MultiAgentCanaryRuntime(options);
+
+        const outcome = await runtime.submit(
+          '删除 2026年7月30日 标题为 Appless QA run-1 的 Google Calendar 日程',
+          { text: '' }
+        ) as MultiAgentSettledOutcome;
+
+        expect(outcome.status).assertEqual(matches[index].length === 0 ? 'empty' : 'success');
+        expect(renderedAction(
+          surfaces[surfaces.length - 1], 'calendar.event.delete.confirm'
+        )).assertNull();
+        expect(providerCalls).assertEqual(0);
+        runtime.dispose();
+      }
     });
 
     it('cancels Calendar create planning before review without a provider call or late surface', 0, async () => {

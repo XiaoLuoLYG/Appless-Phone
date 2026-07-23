@@ -112,6 +112,22 @@ interface CalendarUpdateSearchArgs {
   requestedAction: CalendarUpdateRequestArgs;
 }
 
+interface CalendarDeleteRequestArgs {
+  actionId: string;
+  query: string;
+  calendarId: string;
+}
+
+interface CalendarDeleteSearchArgs {
+  query: string;
+  date: string;
+  timeMin: string;
+  timeMax: string;
+  timezone: string;
+  calendarId: string;
+  requestedAction: CalendarDeleteRequestArgs;
+}
+
 interface SocialFeedTaskInput {
   platforms: string[];
 }
@@ -581,6 +597,51 @@ function calendarUpdateSearchArgs(input: string, now: Date): CalendarUpdateSearc
   };
 }
 
+function calendarDeleteSearchArgs(input: string, now: Date): CalendarDeleteSearchArgs | null {
+  if (input.indexOf('删除') < 0) {
+    return null;
+  }
+  const titleMatch = /标题为\s*(.+?)\s*的\s*Google\s+Calendar\s*日程/i.exec(input);
+  const chineseDate = /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/.exec(input);
+  const isoDate = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(input);
+  const dateMatch = chineseDate === null ? isoDate : chineseDate;
+  if (titleMatch === null || dateMatch === null) {
+    return null;
+  }
+  const title = titleMatch[1].trim();
+  const month = Number(dateMatch[2]);
+  const day = Number(dateMatch[3]);
+  const year = Number(dateMatch[1]);
+  const checked = new Date(Date.UTC(year, month - 1, day));
+  if (title.length === 0 || title.length > 240 || year < 2000 || year > 2100 ||
+    month < 1 || month > 12 || day < 1 ||
+    checked.getUTCFullYear() !== year || checked.getUTCMonth() + 1 !== month ||
+    checked.getUTCDate() !== day) {
+    return null;
+  }
+  const date = year.toString().padStart(4, '0') + '-' +
+    month.toString().padStart(2, '0') + '-' + day.toString().padStart(2, '0');
+  const normalized = normalizedCalendarArgsForPrompt('calendar.events.search', input, {
+    query: title,
+    date,
+    timezone: 'Asia/Shanghai',
+    calendarId: 'primary'
+  }, now);
+  return {
+    query: title,
+    date,
+    timeMin: normalized.timeMin === undefined ? '' : normalized.timeMin,
+    timeMax: normalized.timeMax === undefined ? '' : normalized.timeMax,
+    timezone: normalized.timezone === undefined ? '' : normalized.timezone,
+    calendarId: normalized.calendarId === undefined ? 'primary' : normalized.calendarId,
+    requestedAction: {
+      actionId: 'calendar.event.delete',
+      query: title,
+      calendarId: normalized.calendarId === undefined ? 'primary' : normalized.calendarId
+    }
+  };
+}
+
 function unwrapSingleArgsEnvelope(input: Object): Object {
   const source = input as Record<string, Object | string | number | boolean | null | undefined>;
   const keys = Object.keys(source);
@@ -664,6 +725,10 @@ function normalizeCanaryTaskInput(
   const update = calendarUpdateSearchArgs(input.text, now);
   if (update !== null) {
     return update as Object;
+  }
+  const remove = calendarDeleteSearchArgs(input.text, now);
+  if (remove !== null) {
+    return remove as Object;
   }
   const source = task.input as Record<string, Object | string | number | boolean | null | undefined>;
   const safe: Record<string, Object | string | number | boolean> = {};

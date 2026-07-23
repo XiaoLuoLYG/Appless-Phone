@@ -90,6 +90,11 @@ const TASK_INPUT_REPAIR_INSTRUCTION: string =
   'registered input shape. Keep personaId, skillId, requestedCapabilityIds, roundAction, each Data task localId, ' +
   'goal, allowedToolIds, toolId and required value, uiIntent, actionIntent, answer, and Data task order exactly ' +
   'unchanged. The only permitted difference is inside dataTasks[].input. ' + FULL_DECISION_CONTRACT;
+const CALENDAR_DELETE_SELECTION_CONTRACT: string =
+  'Calendar delete contract: for a natural-language delete without a real Event ID on the current surface, ' +
+  'select calendar.events.search as the read-first Data task. Do not select calendar.event.delete as a zero-Data ' +
+  'Action or include a delete actionIntent in the search round. The host offers the existing delete confirmation ' +
+  'only after one exact provider result.';
 const ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_ACTION_OWNED_DATA_TASK. An Action-owned capability was placed in dataTasks. ' +
   'Keep the same requested capability and current-user intent. Remove Action-owned IDs from dataTasks and put ' +
@@ -901,6 +906,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       TRAVEL_SELECTION_CONTRACT,
       VIDEO_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
+      CALENDAR_DELETE_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
