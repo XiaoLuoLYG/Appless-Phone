@@ -598,6 +598,17 @@ export class ReActAgentRunner {
       if (calls.length > MAX_PARALLEL_SLOTS) {
         return 'serial';
       }
+      const families: string[] = [];
+      for (let index = 0; index < calls.length; index++) {
+        if (!this.tools.isParallelSafe(calls[index].name)) {
+          return 'serial';
+        }
+        const family = calls[index].name.split('.')[0];
+        if (families.indexOf(family) >= 0) {
+          return 'serial';
+        }
+        families.push(family);
+      }
       return 'parallel';
     }
     return 'serial';

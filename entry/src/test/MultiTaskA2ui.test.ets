@@ -1,5 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiSurfaceState, A2uiSurfaceStore } from '@loop/agent-core';
+import {
+  A2uiAction,
+  A2uiMultiTaskSectionValue,
+  A2uiSurfaceState,
+  A2uiSurfaceStore,
+  MultiTaskBoardData
+} from '@loop/agent-core';
 import {
   childSurfaceIdForMultiTaskSlot,
   mergeSlotObservationIntoMultiTaskSurface,
@@ -9,8 +15,39 @@ import {
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { multiTaskHomePayloadJson, renderMultiTaskHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
 
-function luckinShopEmbeddedSurface(): object {
+interface LuckinShopArgsFixture {
+  deptId: string;
+  deptName: string;
+  address: string;
+  distance: string;
+  status: string;
+}
+
+function sectionValues(values: A2uiMultiTaskSectionValue[]): Record<string, A2uiMultiTaskSectionValue> {
+  const sections: Record<string, A2uiMultiTaskSectionValue> = {};
+  for (let index = 0; index < values.length; index++) {
+    sections[values[index].slotId] = values[index];
+  }
+  return sections;
+}
+
+function luckinShopEmbeddedSurface(): A2uiSurfaceState {
   const store = new A2uiSurfaceStore();
+  const shopArgs: LuckinShopArgsFixture = {
+    deptId: '1001',
+    deptName: '瑞幸咖啡 深圳科技园店',
+    address: '深圳市南山区科技园',
+    distance: '120m',
+    status: '营业中'
+  };
+  const shopAction: A2uiAction = {
+    id: 'luckin.order.preview',
+    label: '科技园店',
+    prompt: '生椰拿铁',
+    variant: 'primary',
+    kind: 'prompt',
+    args: shopArgs
+  };
   store.apply({
     version: 'v0.9.1',
     createSurface: {
@@ -41,19 +78,7 @@ function luckinShopEmbeddedSurface(): object {
           body: '',
           status: 'ready',
           dataPath: '/genericToolResults',
-          actions: [{
-            id: 'luckin.order.preview',
-            label: '科技园店',
-            prompt: '生椰拿铁',
-            kind: 'prompt',
-            args: {
-              deptId: '1001',
-              deptName: '瑞幸咖啡 深圳科技园店',
-              address: '深圳市南山区科技园',
-              distance: '120m',
-              status: '营业中'
-            }
-          }]
+          actions: [shopAction]
         }
       ]
     }
@@ -74,10 +99,11 @@ function luckinShopEmbeddedSurface(): object {
       }]
     }
   });
-  return store.getSurface() as object;
+  return store.getSurface();
 }
 
-describe('MultiTaskA2uiTest', () => {
+export default function multiTaskA2uiTest() {
+  describe('MultiTaskA2uiTest', () => {
   it('persists_multiTask_and_sections_in_surface_store', 0, () => {
     const store = new A2uiSurfaceStore();
     store.apply({
@@ -130,7 +156,7 @@ describe('MultiTaskA2uiTest', () => {
             status: 'ready',
             summary: '请补充出发时间'
           }]
-        }
+        } as MultiTaskBoardData
       }
     });
     store.apply({
@@ -138,8 +164,8 @@ describe('MultiTaskA2uiTest', () => {
       updateDataModel: {
         surfaceId: 'surface_model',
         path: '/sections',
-        value: {
-          slot_0: {
+        value: sectionValues([
+          {
             slotId: 'slot_0',
             toolId: 'flight.search',
             title: '机票',
@@ -149,7 +175,7 @@ describe('MultiTaskA2uiTest', () => {
             failureKey: '',
             embeddedSurface: null
           }
-        }
+        ])
       }
     });
     const parsed = JSON.parse(store.getSurface().dataModelJson) as Record<string, Object>;
@@ -215,7 +241,7 @@ describe('MultiTaskA2uiTest', () => {
             status: 'ready',
             summary: '附近餐厅'
           }]
-        }
+        } as MultiTaskBoardData
       }
     });
     store.apply({
@@ -293,7 +319,7 @@ describe('MultiTaskA2uiTest', () => {
             status: 'ready',
             summary: '请选择门店'
           }]
-        }
+        } as MultiTaskBoardData
       }
     });
     store.apply({
@@ -301,8 +327,8 @@ describe('MultiTaskA2uiTest', () => {
       updateDataModel: {
         surfaceId: 'surface_model',
         path: '/sections',
-        value: {
-          slot_0: {
+        value: sectionValues([
+          {
             slotId: 'slot_0',
             toolId: 'luckin.order.preview',
             title: '瑞幸点单',
@@ -312,7 +338,7 @@ describe('MultiTaskA2uiTest', () => {
             failureKey: '',
             embeddedSurface: luckinShopEmbeddedSurface()
           }
-        }
+        ])
       }
     });
     const document = createHtmlHomeDocument({
@@ -394,7 +420,7 @@ describe('MultiTaskA2uiTest', () => {
             status: 'ready',
             summary: '请补充出发时间'
           }]
-        }
+        } as MultiTaskBoardData
       }
     });
     store.apply({
@@ -402,8 +428,8 @@ describe('MultiTaskA2uiTest', () => {
       updateDataModel: {
         surfaceId: 'surface_model',
         path: '/sections',
-        value: {
-          slot_0: {
+        value: sectionValues([
+          {
             slotId: 'slot_0',
             toolId: 'luckin.order.preview',
             title: '瑞幸点单',
@@ -412,8 +438,7 @@ describe('MultiTaskA2uiTest', () => {
             observationDigest: 'ObservationDigest\ntoolId: luckin.order.preview',
             failureKey: '',
             embeddedSurface: luckinShopEmbeddedSurface()
-          },
-          slot_1: {
+          }, {
             slotId: 'slot_1',
             toolId: 'flight.search',
             title: '机票',
@@ -423,7 +448,7 @@ describe('MultiTaskA2uiTest', () => {
             failureKey: '',
             embeddedSurface: null
           }
-        }
+        ])
       }
     });
     const document = createHtmlHomeDocument({
@@ -497,7 +522,7 @@ describe('MultiTaskA2uiTest', () => {
             status: 'ready',
             summary: '请补充出发时间'
           }]
-        }
+        } as MultiTaskBoardData
       }
     });
     store.apply({
@@ -505,8 +530,8 @@ describe('MultiTaskA2uiTest', () => {
       updateDataModel: {
         surfaceId: 'surface_model',
         path: '/sections',
-        value: {
-          slot_0: {
+        value: sectionValues([
+          {
             slotId: 'slot_0',
             toolId: 'luckin.order.preview',
             title: '瑞幸点单',
@@ -515,8 +540,7 @@ describe('MultiTaskA2uiTest', () => {
             observationDigest: 'ObservationDigest\ntoolId: luckin.order.preview',
             failureKey: '',
             embeddedSurface: luckinShopEmbeddedSurface()
-          },
-          slot_1: {
+          }, {
             slotId: 'slot_1',
             toolId: 'flight.search',
             title: '机票',
@@ -526,13 +550,13 @@ describe('MultiTaskA2uiTest', () => {
             failureKey: '',
             embeddedSurface: null
           }
-        }
+        ])
       }
     });
     const composite = store.getSurface();
     expect(resolveMultiTaskSlotId(composite, 'luckin.order.preview')).assertEqual('slot_0');
     expect(childSurfaceIdForMultiTaskSlot('surface_model', 'slot_0')).assertEqual('surface_model_slot_0');
-    const followUpRaw = luckinShopEmbeddedSurface() as object;
+    const followUpRaw = luckinShopEmbeddedSurface();
     const merged = mergeSlotObservationIntoMultiTaskSurface(
       composite,
       'slot_0',
@@ -593,6 +617,22 @@ describe('MultiTaskA2uiTest', () => {
     expect(document.blocks[2].sectionId).assertEqual('slot_0');
   });
 
+  it('preserves slot errors and settles the composite surface', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_batch', (surface) => {
+      latestSurface = surface;
+    });
+    composer.registerSlots([{ name: 'flight.search', input: '{}' }]);
+    composer.emitShell();
+    composer.ingestSlotObservation('slot_0', 'not-a2ui-json');
+
+    expect(latestSurface !== null).assertTrue();
+    const parsed = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const sections = parsed.sections as Record<string, Record<string, string>>;
+    expect(sections.slot_0.status).assertEqual('error');
+    expect(latestSurface!.status).assertEqual('ready');
+  });
+
   it('builds_multi_task_inline_patch_payload_json', 0, () => {
     let latestSurface: A2uiSurfaceState | null = null;
     const composer = new MultiToolSurfaceComposer('surface_batch', (surface) => {
@@ -617,4 +657,5 @@ describe('MultiTaskA2uiTest', () => {
     expect(payload.indexOf('"isBusy":true')).assertLarger(-1);
     expect(payload.indexOf('slot_1')).assertLarger(-1);
   });
-});
+  });
+}

@@ -359,7 +359,7 @@ export class LoopBackend {
         this.describeAiphoneTool(definition),
         request,
         callbacks
-      ));
+      ), definition.riskLevel === 'read');
     }
     registry.register(new AiphoneTool(
       'memory.update',

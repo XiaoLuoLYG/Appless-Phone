@@ -139,7 +139,8 @@ export class MultiToolSurfaceComposer {
       this.markSlotError(slotId, '工具没有返回 observation。');
       return;
     }
-    this.applySlotContent(slotId, ingestToolObservation(slotId, this.toolIdForSlot(slotId), raw), 'ready');
+    const content = ingestToolObservation(slotId, this.toolIdForSlot(slotId), raw);
+    this.applySlotContent(slotId, content, content.status);
   }
 
   markSlotError(slotId: string, message: string): void {
@@ -389,7 +390,8 @@ export class MultiToolSurfaceComposer {
     const surface = this.store.getSurface();
     const envelopes: A2uiEnvelope[] = [];
     const includeSections = reason !== 'status';
-    if (surface.surfaceId.length === 0 || reason === 'shell') {
+    const needsShell = surface.surfaceId.length === 0 || reason === 'shell';
+    if (needsShell || this.isBatchTerminal()) {
       envelopes.push({
         createSurface: {
           surfaceId: this.compositeSurfaceId,
@@ -400,6 +402,8 @@ export class MultiToolSurfaceComposer {
           sendDataModel: true
         }
       });
+    }
+    if (needsShell) {
       envelopes.push({
         updateComponents: {
           surfaceId: this.compositeSurfaceId,

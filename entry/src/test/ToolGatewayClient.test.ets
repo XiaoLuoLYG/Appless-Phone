@@ -181,6 +181,10 @@ interface LuckinProductsPayloadFixture {
   data: LuckinProductFixture[];
 }
 
+interface LuckinPromptArgsFixture {
+  prompt: string;
+}
+
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
     it('falls back to the configured location for Luckin preview', 0, () => {
@@ -190,7 +194,7 @@ export default function toolGatewayClientTest() {
 
     it('extracts luckin product keyword from multi-task prompts', 0, () => {
       const fullPrompt = '我要打车从坂田到秋港花园，给googlepay给罗一格转5美元，帮我点一杯瑞幸咖啡';
-      const scopedArgs: Record<string, string> = {
+      const scopedArgs: LuckinPromptArgsFixture = {
         prompt: '帮我点一杯瑞幸咖啡'
       };
       const keywordFromArgs = luckinProductSearchKeywordForTest(fullPrompt, scopedArgs);

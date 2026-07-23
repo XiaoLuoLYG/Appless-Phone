@@ -45,19 +45,29 @@ class TimeTool implements AgentTool {
 
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
+  private parallelSafeTools: Set<string> = new Set();
   private closeHandlers: ToolRegistryCloseHandler[] = [];
 
   constructor() {
-    this.register(new NoteTool());
-    this.register(new TimeTool());
+    this.register(new NoteTool(), true);
+    this.register(new TimeTool(), true);
   }
 
-  register(tool: AgentTool): void {
+  register(tool: AgentTool, parallelSafe: boolean = false): void {
     this.tools.set(tool.name(), tool);
+    if (parallelSafe) {
+      this.parallelSafeTools.add(tool.name());
+    } else {
+      this.parallelSafeTools.delete(tool.name());
+    }
   }
 
   has(name: string): boolean {
     return this.tools.has(name);
+  }
+
+  isParallelSafe(name: string): boolean {
+    return this.parallelSafeTools.has(name);
   }
 
   registerCloseHandler(handler: ToolRegistryCloseHandler): void {
@@ -113,7 +123,7 @@ export function createLoopToolRegistry(skillSnapshot?: SkillSnapshot | null): To
   const registry = new ToolRegistry();
   registry.register(new UiTool());
   if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
-    registry.register(new SkillReadTool(skillSnapshot));
+    registry.register(new SkillReadTool(skillSnapshot), true);
   }
   return registry;
 }

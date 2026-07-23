@@ -69,11 +69,13 @@ class SequenceModel implements LocalModel {
 class FixedTool implements AgentTool {
   private toolName: string;
   private output: string;
+  private timeline: string[] | null;
   calls: string[] = [];
 
-  constructor(toolName: string, output: string) {
+  constructor(toolName: string, output: string, timeline: string[] | null = null) {
     this.toolName = toolName;
     this.output = output;
+    this.timeline = timeline;
   }
 
   name(): string {
@@ -86,6 +88,11 @@ class FixedTool implements AgentTool {
 
   async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     this.calls.push(input);
+    if (this.timeline !== null) {
+      this.timeline.push(this.toolName + ':start');
+      await Promise.resolve();
+      this.timeline.push(this.toolName + ':end');
+    }
     return this.output;
   }
 }
@@ -531,11 +538,12 @@ export default function reActAgentRunnerTest() {
     });
 
     it('runs independent tools in parallel when Execution is parallel', 0, async () => {
-      const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
-      const noteTool = new FixedTool('note', 'shopping list');
+      const timeline: string[] = [];
+      const timeTool = new FixedTool('time', '2026-07-21T10:00:00', timeline);
+      const noteTool = new FixedTool('note', 'shopping list', timeline);
       const registry = new ToolRegistry();
-      registry.register(timeTool);
-      registry.register(noteTool);
+      registry.register(timeTool, true);
+      registry.register(noteTool, true);
       const runner = new ReActAgentRunner(
         new SingleActionModel(
           'Thought: need time and note independently\nExecution: parallel\nAction: time[]\nAction: note[shopping list]'
@@ -554,6 +562,49 @@ export default function reActAgentRunnerTest() {
       expect(timeTool.calls.length).assertEqual(1);
       expect(noteTool.calls.length).assertEqual(1);
       expect(actions.length).assertEqual(2);
+      expect(timeline.join(',')).assertEqual('time:start,note:start,time:end,note:end');
+    });
+
+    it('falls back to serial for tools not marked parallel-safe', 0, async () => {
+      const timeline: string[] = [];
+      const first = new FixedTool('tool.a', 'result-a', timeline);
+      const second = new FixedTool('tool.b', 'result-b', timeline);
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: requested parallel writes\nExecution: parallel\nAction: tool.a[]\nAction: tool.b[]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('unsafe tools', (_event: AgentEvent): void => {});
+
+      expect(timeline.join(',')).assertEqual('tool.a:start,tool.a:end,tool.b:start,tool.b:end');
+    });
+
+    it('falls back to serial for parallel-safe tools from the same family', 0, async () => {
+      const timeline: string[] = [];
+      const estimate = new FixedTool('ride.estimate', 'estimate', timeline);
+      const location = new FixedTool('ride.driver.location', 'location', timeline);
+      const registry = new ToolRegistry();
+      registry.register(estimate, true);
+      registry.register(location, true);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: two ride calls\nExecution: parallel\nAction: ride.estimate[]\nAction: ride.driver.location[]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('ride calls', (_event: AgentEvent): void => {});
+
+      expect(timeline.join(',')).assertEqual(
+        'ride.estimate:start,ride.estimate:end,ride.driver.location:start,ride.driver.location:end'
+      );
     });
 
     it('runs multiple actions serially in declaration order', 0, async () => {
@@ -586,13 +637,13 @@ export default function reActAgentRunnerTest() {
 
     it('waits for all parallel A2UI tools before emitting final', 0, async () => {
       const first = new FixedTool('tool.a', componentOnlyStatusJsonl('ready', 'surface_a'));
-      const second = new FixedTool('tool.b', componentOnlyStatusJsonl('ready', 'surface_b'));
+      const second = new FixedTool('service.b', componentOnlyStatusJsonl('ready', 'surface_b'));
       const registry = new ToolRegistry();
-      registry.register(first);
-      registry.register(second);
+      registry.register(first, true);
+      registry.register(second, true);
       const runner = new ReActAgentRunner(
         new SingleActionModel(
-          'Thought: two independent A2UI tools\nExecution: parallel\nAction: tool.a[]\nAction: tool.b[]'
+          'Thought: two independent A2UI tools\nExecution: parallel\nAction: tool.a[]\nAction: service.b[]'
         ),
         registry,
         1
@@ -619,8 +670,8 @@ export default function reActAgentRunnerTest() {
       const readTool = new FixedTool('read', '# Skill: weather\n\nUse weather API.');
       const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
       const registry = new ToolRegistry();
-      registry.register(readTool);
-      registry.register(timeTool);
+      registry.register(readTool, true);
+      registry.register(timeTool, true);
       const runner = new ReActAgentRunner(
         new SingleActionModel(
           'Thought: read skill and get time\nExecution: parallel\nAction: read[weather]\nAction: time[]'
@@ -650,7 +701,7 @@ export default function reActAgentRunnerTest() {
       let errorText = '';
       const runner = new ReActAgentRunner(
         new SingleActionModel(
-          'Thought: broken plan\nExecution: serial\nAction: tool.a({})\nAction: tool.b[{invalid json}]'
+          'Thought: broken plan\nExecution: serial\nAction: tool.a({})\nAction: tool.b[{invalid json}'
         ),
         registry,
         1
@@ -673,7 +724,7 @@ export default function reActAgentRunnerTest() {
       for (let index = 0; index < 5; index++) {
         const tool = new FixedTool('tool.' + index.toString(), 'result-' + index.toString());
         tools.push(tool);
-        registry.register(tool);
+        registry.register(tool, true);
       }
       const response =
         'Thought: too many parallel actions\nExecution: parallel\n' +
