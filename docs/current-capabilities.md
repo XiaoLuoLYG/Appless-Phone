@@ -32,6 +32,8 @@
 | `luckin.order.create` | Action Agent | manual-only | 当前预览的精确“确认下单”；不接受自然语言或变更参数 |
 | `luckin.order.status` | Data Agent | manual-only | 需要真实 orderId |
 | `social.feed.search` | Data Agent | core | 无 |
+| `social.community.search` | Data Agent | review-required | 无；只展示真实 provider 返回的公共社区内容或真实授权/网络/无结果状态 |
+| `social.post.preview` | Action Agent | review-required | 读取真实 provider 账号后只生成发布预览；不提供发布动作、不调用 provider 写入 |
 | `social.reply.draft` | Action Agent | core | 当前真实 item 的草稿动作；不发送 |
 | `x.post.search` | Data Agent | core | 无 |
 | `mail.search` | Data Agent | core | 无 |
@@ -81,6 +83,8 @@
 | 瑞幸 | `luckin.order.create` | 从 C15 确认页执行确认动作 | 仅显式确认后创建真实订单；自动回归不点击 | `write` | `LUCKIN_MCP_TOKEN` + 完整门店/商品/规格 ID | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 瑞幸 | `luckin.order.status` | 使用真实订单号查询 | 仅查询真实已创建订单；无订单时不执行 | `read` | `LUCKIN_MCP_TOKEN` + 真实订单号 | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 社交 | `social.feed.search` | `帮我查看我今天 X 和 Slack 上的消息` / `帮我查看今天的社交聚合消息` | SocialHub 只展示各 app 私信/提及和连接状态；公开 post 不进入 SocialHub | `read` | Composio connected account；企业微信仍为本地回调/缓存 | X/Slack/Discord/LinkedIn/WhatsApp/Instagram 通常需要外网/VPN | 是 | 默认 smoke；`--composio-tools` 社交聚合 |
+| 社交 | `social.community.search` | `帮我搜索 Reddit 上最近关于 Qwen 的社区讨论` | 只展示 X、LinkedIn、Instagram 或 Reddit 的真实公共内容；保留 provider 的授权、网络、权限和无结果状态，不伪造帖子 | `read` | Composio 配置 + 对应平台 connected account；LinkedIn 单帖读取还需真实 resource ID | 通常需要外网/VPN | 是 | review-required R01 |
+| 社交 | `social.post.preview` | `帮我为 X 起草一条介绍 Appless 新版本的帖子` | 读取真实 provider 账号身份后只生成发布预览；账号读取失败显示真实错误，不提供发布按钮、不调用发布接口、不生成发布回执 | `draft` | Composio 配置 + X/LinkedIn/Instagram/Reddit connected account | 通常需要外网/VPN | 是 | review-required R02 |
 | 社交 | `social.reply.draft` | `帮我给这条 Slack 消息起草回复` | 对已选真实 SocialHub item 生成本地草稿，不发送 | `draft` | 需要已有真实 item 上下文 | 起草本身不需要；来源读取按平台 | 否 | 单元/动作链路 |
 | 社交 | SocialHub Slack 回复动作 | 在真实 Slack 消息草稿上点击发送 | 使用原消息的 channel/thread ID，经当前用户 Composio 执行 `SLACK_CHAT_POST_MESSAGE`；provider 未确认时不显示成功 | `write` | Composio Slack connected account + 可写 scope | 通常需要外网/VPN | 是 | 参数映射单测；真实发送 manual-only |
 | X | `x.post.search` | `帮我查看 X 上 openai 最近的公开 post` | X 公开 post 结果或真实 Composio/provider 错误；不进入 SocialHub | `read` | Composio X/Twitter connected account | 通常需要外网/VPN | 是 | 默认 smoke |
