@@ -174,6 +174,18 @@ function mailEvidenceSuffix(toolId: string, value: Object): string {
     ' identity=' + (digest.length > 0 ? digest : 'invalid');
 }
 
+function calendarEvidenceSuffix(toolId: string, value: Object): string {
+  if (toolId !== 'calendar.events.search') {
+    return '';
+  }
+  const record = value as Record<string, MailIdentityValue>;
+  const title = mailIdentityText(record['query']);
+  const date = mailIdentityText(record['date']);
+  const scope = title.length === 0 ? '' : mailIdentityHash(title);
+  return ' calendarScope=' + (scope.length > 0 ? scope : 'invalid') +
+    ' calendarDate=' + evidenceAllowed(date, [], /^\d{4}-\d{2}-\d{2}$/);
+}
+
 function evidenceAllowed(
   value: string | undefined, values: string[] = [],
   pattern: RegExp = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/
@@ -226,14 +238,14 @@ export class MultiAgentEvidenceFormatter {
       }
       case AgentMessageType.ACTION_RUN: {
         const payload = message.payload as ActionRunPayload;
-        return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
+        return '[AIPhone][MultiAgentActionRun]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*)$/) +
           ' plan=' + this.token('p', 'direct:' + payload.runId) + ' run=' + this.token('r', payload.runId) +
           ' action=' + evidenceAllowed(payload.actionId) + ' source=' + evidenceAllowed(payload.sourceToolId) +
           mailEvidenceSuffix(payload.actionId, payload.args);
       }
       case AgentMessageType.ACTION_RESULT: {
         const payload = message.payload as ActionResultPayload;
-        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
+        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*)$/) +
           ' plan=' + this.token('p', payload.planId) + ' run=' + this.token('r', payload.runId) +
           ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']);
       }
@@ -266,7 +278,7 @@ export class MultiAgentEvidenceFormatter {
       ' tool=' + evidenceAllowed(payload.toolId) + ' predecessor=' + predecessor +
       ' path=' + path + ' target=' + (provenance === undefined ? 'none' : '/placeId') +
       ' binding=' + (provenance === undefined ? 'false' : 'true') +
-      mailEvidenceSuffix(payload.toolId, payload.args);
+      mailEvidenceSuffix(payload.toolId, payload.args) + calendarEvidenceSuffix(payload.toolId, payload.args);
   }
   private rememberEntities(data: Object, task: string): void {
     if (data === null || typeof data !== 'object' || Array.isArray(data)) return;

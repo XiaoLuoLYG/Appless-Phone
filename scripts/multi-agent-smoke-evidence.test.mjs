@@ -5,6 +5,8 @@ import test from 'node:test';
 import * as smokeLifecycle from './multi-agent-smoke-evidence.mjs';
 import {
   composioAuthEvidence,
+  calendarProviderActionEvidence,
+  calendarProviderAbsenceEvidence,
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   mailThreadReadEvidence,
@@ -86,14 +88,37 @@ test('holds ordinary C20 multi-agent capture until its bounded settlement window
   }), true);
 });
 
-test('keeps C19 write smoke on the exact confirmation and provider-receipt path', () => {
-  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
-  assert.match(source, /id: 'C19b'[\s\S]*verifyCalendarCreate: true/);
-  assert.match(source, /id: 'C19c'[\s\S]*expectedToolId: 'calendar\.events\.search'[\s\S]*verifyCalendarUpdate: true/);
-  assert.match(source, /summary\.calendarCreateAction = expectedCase\.verifyCalendarCreate === true/);
-  assert.match(source, /summary\.calendarUpdateAction = expectedCase\.verifyCalendarUpdate === true/);
-  assert.match(source, /async function verifyCalendarWriteAction\(/);
-  assert.match(source, /C19 create did not produce a real provider Event ID; later C19 writes were not attempted/);
+test('accepts C19 writes only from a correlated provider result and rejects invalid surfaces or forged IDs', () => {
+  const action = {
+    ok: true, actionId: 'calendar.event.update', conversationId: 'c19', turnId: 'page-turn-7',
+    surfaceId: 'calendar-review:1', resultIndex: 8
+  };
+  const good = [
+    '[AIPhone][MultiAgentActionRun] conversation=c19 turn=page-turn-7 task=a surface=calendar-review:1 plan=p1 run=r1 action=calendar.event.update source=calendar.events.search',
+    '[AIPhone][MultiAgentActionResult] conversation=c19 turn=page-turn-7 task=a surface=calendar-review:1 plan=p1 run=r1 status=success',
+    '[AIPhone][CalendarProviderAction] conversation=c19 turn=page-turn-7 surface=calendar-review:1 action=calendar.event.update event=provider-1 requested=provider-1 status=updated start=2026-07-30T16%3A00%3A00%2B08%3A00'
+  ].join('\n');
+  assert.equal(calendarProviderActionEvidence(good, action, { expectedTime: '16:00' }).ok, true);
+  assert.equal(calendarProviderActionEvidence(good.replace('surface=calendar-review:1 action=calendar.event.update event=provider-1 requested=provider-1 status=updated start=', 'surface=invalid action=calendar.event.update event=provider-1 requested=provider-1 status=updated start='), action, { expectedTime: '16:00' }).ok, false);
+  assert.equal(calendarProviderActionEvidence(good.replace('requested=provider-1', 'requested=model-forged'), action, { expectedTime: '16:00' }).ok, false);
+  assert.equal(calendarProviderActionEvidence(good.replace('status=updated', 'status=error'), action, { expectedTime: '16:00' }).ok, false);
+});
+
+test('requires an exact provider-correlated empty C19f search, not generic absent UI text', () => {
+  const context = { conversationId: 'c19', turnId: 't-final' };
+  const good = [
+    '[AIPhone][MultiAgentDataTask] conversation=c19 turn=t-final task=d1 round=1 tool=calendar.events.search predecessor=none path=none target=none binding=false calendarScope=6b6f311e calendarDate=2026-07-30',
+    '[AIPhone][MultiAgentDataResult] conversation=c19 turn=t-final task=d1 tool=calendar.events.search status=empty sources=1 error=false'
+  ].join('\n');
+  assert.equal(calendarProviderAbsenceEvidence(good, context, {
+    title: 'Appless QA run-1', date: '2026-07-30'
+  }).ok, true);
+  assert.equal(calendarProviderAbsenceEvidence('没有找到日程', context, {
+    title: 'Appless QA run-1', date: '2026-07-30'
+  }).ok, false);
+  assert.equal(calendarProviderAbsenceEvidence(good.replace('calendarScope=6b6f311e', 'calendarScope=other'), context, {
+    title: 'Appless QA run-1', date: '2026-07-30'
+  }).ok, false);
 });
 
 test('stops F16 external collection after a failed return and retains failure evidence', async () => {

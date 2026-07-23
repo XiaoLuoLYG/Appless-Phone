@@ -25,6 +25,8 @@ import {
   captureCompletionSettled,
   collectExternalAuthJumps,
   composioAuthEvidence,
+  calendarProviderActionEvidence,
+  calendarProviderAbsenceEvidence,
   directTextVisibleEvidence,
   mailThreadReadEvidence,
   modelTransportEvidence,
@@ -2104,7 +2106,7 @@ function visibleSourceToolId(lifecycle) {
     : '';
 }
 
-async function verifyCalendarWriteAction(layout, index, appPid, actionContext, actionId, label, expectedTime = '') {
+async function verifyCalendarWriteAction(layout, index, appPid, _actionContext, actionId, label, expectedTime = '') {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const center = findExactTextCenter(currentLayout, label);
@@ -2114,32 +2116,22 @@ async function verifyCalendarWriteAction(layout, index, appPid, actionContext, a
         hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       });
       const resultLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-layout.json`);
-      const text = collectLayoutText(resultLayout).join('\n');
       const logs = actionLogs.join('\n');
-      const combined = `${text}\n${logs}`;
       const actionEvidence = multiAgentActionEvidence(
-        logs, exactActionOptions(actionId, visibleSourceToolId(actionContext), actionContext)
+        logs, { expectedActionId: actionId, expectedVirtual: false }
       );
-      const receipt = /(?:Event ID|eventId)\s*[:：=]\s*["']?[^\s"']+/i.test(combined);
-      const success = actionId === 'calendar.event.create' ?
-        /已直接写入真实 Google Calendar|已写入 Google Calendar/.test(combined) :
-        /已直接更新真实 Google Calendar|已更新 Google Calendar/.test(combined);
-      const timeMatches = expectedTime.length === 0 || combined.includes(expectedTime);
+      const providerEvidence = calendarProviderActionEvidence(logs, actionEvidence, { expectedTime });
       const suffix = actionId.replaceAll('.', '-');
       const logPath = join(outDir, `query-${index + 1}-${suffix}.log`);
       const textPath = join(outDir, `query-${index + 1}-${suffix}-layout-text.txt`);
       writeFileSync(logPath, logs + '\n');
-      writeFileSync(textPath, text + '\n');
+      writeFileSync(textPath, collectLayoutText(resultLayout).join('\n') + '\n');
       return {
-        ok: Boolean(actionContext?.surfaceId) && Boolean(visibleSourceToolId(actionContext)) &&
-          actionEvidence.ok && receipt && success && timeMatches &&
-          !/status":"error"|创建失败|更新失败/.test(combined),
+        ok: actionEvidence.ok && providerEvidence.ok,
         capability: actionId,
         actionEvidence,
-        providerReceipt: receipt,
-        visibleSuccess: success,
+        providerEvidence,
         expectedTime,
-        timeMatches,
         logPath,
         textPath,
         screenPath: captureScreen(`query-${index + 1}-${suffix}-screen.png`)
@@ -2152,7 +2144,7 @@ async function verifyCalendarWriteAction(layout, index, appPid, actionContext, a
   return { ok: false, capability: actionId, reason: `${label} button not found` };
 }
 
-async function verifyCalendarDeleteAction(layout, index, appPid, actionContext) {
+async function verifyCalendarDeleteAction(layout, index, appPid, _actionContext) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const center = findTextCenter(currentLayout, '确认删除');
@@ -2162,22 +2154,20 @@ async function verifyCalendarDeleteAction(layout, index, appPid, actionContext) 
         hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       });
       const resultLayout = dumpLayout(`query-${index + 1}-calendar-delete-layout.json`);
-      const text = collectLayoutText(resultLayout).join('\n');
       const logs = actionLogs.join('\n');
       const actionEvidence = multiAgentActionEvidence(
-        logs,
-        exactActionOptions('calendar.event.delete', visibleSourceToolId(actionContext), actionContext)
+        logs, { expectedActionId: 'calendar.event.delete', expectedVirtual: false }
       );
+      const providerEvidence = calendarProviderActionEvidence(logs, actionEvidence);
       const logPath = join(outDir, `query-${index + 1}-calendar-delete.log`);
       const textPath = join(outDir, `query-${index + 1}-calendar-delete-layout-text.txt`);
       writeFileSync(logPath, logs + '\n');
-      writeFileSync(textPath, text + '\n');
+      writeFileSync(textPath, collectLayoutText(resultLayout).join('\n') + '\n');
       return {
-        ok: Boolean(actionContext?.surfaceId) && Boolean(visibleSourceToolId(actionContext)) &&
-          actionEvidence.ok && /calendar\.event\.delete/.test(`${text}\n${logs}`) &&
-          !/status":"error"|删除失败/.test(`${text}\n${logs}`),
+        ok: actionEvidence.ok && providerEvidence.ok,
         capability: 'calendar.event.delete.confirm',
         actionEvidence,
+        providerEvidence,
         logPath,
         textPath,
         screenPath: captureScreen(`query-${index + 1}-calendar-delete-screen.png`)
@@ -2927,8 +2917,8 @@ async function verifyMailExpandedActions(layout, index, appPid, targetMarker = '
   };
 }
 
-async function runQuery(query, index, expectedTool) {
-  const expectedCase = useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query);
+async function runQuery(query, index, expectedTool, expectedCaseOverride = null) {
+  const expectedCase = expectedCaseOverride || (useDefaultCases ? selectedDefaultCases[index] : expectedCaseForQuery(query));
   const expectsDirectText = expectedTool === false && !isPersonaMemoryUpdateQuery(query);
   const expectedToolId = expectedCase.expectedToolId || '';
   const lifecycle = lifecycleOptions(expectedCase);
@@ -3176,9 +3166,12 @@ async function runQuery(query, index, expectedTool) {
   summary.hotelProviderEvidence = combinedHotelSearchEvidence?.provider ||
     { requested: false, ok: false, surfaceId: '', providerResponse: false, blocks: 0 };
   summary.expectedAbsentText = expectedCase.expectAbsentText || '';
-  summary.absenceVerified = summary.expectedAbsentText.length === 0 ||
-    !evidenceText.includes(summary.expectedAbsentText) ||
-    /无结果|没有找到|不存在|0 条|0个/.test(evidenceText);
+  summary.absenceEvidence = summary.expectedAbsentText.length === 0 ? { ok: true, skipped: true } :
+    calendarProviderAbsenceEvidence(safeLogText, summary.multiAgentLifecycle, {
+      title: summary.expectedAbsentText,
+      date: qaDate
+    });
+  summary.absenceVerified = summary.absenceEvidence.ok;
   if (isPersonaMemoryUpdateQuery(query)) {
     summary.mailAggregateVisible = true;
     summary.layoutTextExposed = summary.personaMemoryUpdateProof === true;
@@ -3514,6 +3507,8 @@ console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 const summaries = [];
 let c19CreateSucceeded = true;
 let c19UpdateSucceeded = true;
+let c19CleanupRequired = false;
+const c19Requested = useDefaultCases && selectedDefaultCases.some((testCase) => /^C19/.test(testCase.id || ''));
 let personaMemoryBackup = null;
 let personaMemoryRestore = { ok: true, skipped: true };
 if (useDefaultCases && selectedDefaultCases.some((testCase) => /^C11/.test(testCase.id || ''))) {
@@ -3615,9 +3610,13 @@ for (let index = 0; index < queries.length; index += 1) {
   console.log(JSON.stringify(summary, null, 2));
   if (inferredCase.id === 'C19b') {
     c19CreateSucceeded = summary.calendarCreateAction?.ok === true;
+    c19CleanupRequired = c19CreateSucceeded;
   }
   if (inferredCase.id === 'C19c') {
     c19UpdateSucceeded = summary.calendarUpdateAction?.ok === true;
+  }
+  if (inferredCase.id === 'C19e' && summary.calendarDeleteAction?.ok === true) {
+    c19CleanupRequired = false;
   }
   if (inferredCase.id === 'C11c' && personaMemoryBackup !== null) {
     personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
@@ -3625,6 +3624,43 @@ for (let index = 0; index < queries.length; index += 1) {
   }
 }
 } finally {
+  if (c19Requested) {
+    const cleanupDelete = coreRegressionCases.find((testCase) => testCase.id === 'C19e');
+    const cleanupAbsence = coreRegressionCases.find((testCase) => testCase.id === 'C19f');
+    if (c19CleanupRequired && cleanupDelete !== undefined) {
+      try {
+        const cleanup = await runQuery(cleanupDelete.query, queries.length, cleanupDelete.expectsTool, cleanupDelete);
+        cleanup.caseId = 'C19e-cleanup';
+        cleanup.status = cleanup.ok ? 'PASS' : (cleanup.providerFailed ? 'BLOCKED' : 'FAIL');
+        summaries.push(cleanup);
+        c19CleanupRequired = cleanup.calendarDeleteAction?.ok !== true;
+        console.log(JSON.stringify(cleanup, null, 2));
+      } catch (error) {
+        const cleanup = {
+          caseId: 'C19e-cleanup', status: 'FAIL', ok: false,
+          reason: error instanceof Error ? error.message : String(error)
+        };
+        summaries.push(cleanup);
+        console.log(JSON.stringify(cleanup, null, 2));
+      }
+    }
+    if (cleanupAbsence !== undefined) {
+      try {
+        const absence = await runQuery(cleanupAbsence.query, queries.length + 1, cleanupAbsence.expectsTool, cleanupAbsence);
+        absence.caseId = 'C19f-final-cleanup';
+        absence.status = absence.ok ? 'PASS' : (absence.providerFailed ? 'BLOCKED' : 'FAIL');
+        summaries.push(absence);
+        console.log(JSON.stringify(absence, null, 2));
+      } catch (error) {
+        const absence = {
+          caseId: 'C19f-final-cleanup', status: 'FAIL', ok: false,
+          reason: error instanceof Error ? error.message : String(error)
+        };
+        summaries.push(absence);
+        console.log(JSON.stringify(absence, null, 2));
+      }
+    }
+  }
   if (personaMemoryBackup !== null) {
     personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
     personaMemoryBackup = null;

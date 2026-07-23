@@ -809,7 +809,7 @@ export function multiAgentActionEvidence(logText, options = {}) {
       item.fields.plan === run.fields.plan && item.fields.run === run.fields.run);
     const result = matchingResults[0];
     if (!run.fields.conversation || !run.fields.turn || !run.fields.task ||
-      !run.fields.surface || run.fields.surface === 'none' || !run.fields.plan ||
+      !run.fields.surface || run.fields.surface === 'none' || run.fields.surface === 'invalid' || !run.fields.plan ||
       !run.fields.run || !run.fields.action || !run.fields.source ||
       matchingResults.length !== 1 || result.index <= run.index ||
       !ACTION_STATUSES.has(result.fields.status)) continue;
@@ -853,7 +853,7 @@ export function multiAgentActionEvidence(logText, options = {}) {
     if (!plan.fields.conversation || !plan.fields.turn || !plan.fields.task ||
       plan.fields.uiTask !== plan.fields.task || actions.length !== 1 ||
       fabricatedRun || matchingResults.length !== 1 || result.index <= plan.index ||
-      !result.fields.surface || result.fields.surface === 'none' || !result.fields.plan ||
+      !result.fields.surface || result.fields.surface === 'none' || result.fields.surface === 'invalid' || !result.fields.plan ||
       !result.fields.run || !ACTION_STATUSES.has(result.fields.status)) continue;
     const chain = all.filter((item) => item.index >= plan.index && item.index <= result.index);
     const truthful = !externalOrSyntheticError(chain) || result.fields.status !== 'success';
@@ -873,6 +873,93 @@ export function multiAgentActionEvidence(logText, options = {}) {
     };
   }
   return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['missing_action_chain'] };
+}
+
+function decodedEvidenceValue(value) {
+  try {
+    return decodeURIComponent(value || '');
+  } catch (_error) {
+    return '';
+  }
+}
+
+function calendarScope(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function validCalendarSurface(value) {
+  return Boolean(value) && value !== 'none' && value !== 'invalid';
+}
+
+export function calendarProviderActionEvidence(logText, action, options = {}) {
+  const failures = [];
+  if (!action?.ok || !validCalendarSurface(action.surfaceId) || !action.actionId ||
+    !action.conversationId || !action.turnId) {
+    failures.push('invalid_action_chain');
+  }
+  const candidates = records(logText).filter((item) =>
+    item.marker === 'CalendarProviderAction' &&
+    item.fields.conversation === action?.conversationId && item.fields.turn === action?.turnId &&
+    item.fields.surface === action?.surfaceId && item.fields.action === action?.actionId);
+  const provider = candidates.at(-1);
+  if (provider === undefined) {
+    failures.push('missing_correlated_provider_result');
+  } else {
+    const eventId = decodedEvidenceValue(provider.fields.event);
+    const requestedId = decodedEvidenceValue(provider.fields.requested);
+    const status = decodedEvidenceValue(provider.fields.status).toLowerCase();
+    const start = decodedEvidenceValue(provider.fields.start);
+    if (!validCalendarSurface(provider.fields.surface)) failures.push('invalid_provider_surface');
+    if (!eventId) failures.push('missing_provider_event_id');
+    if (!['success', 'created', 'updated', 'deleted', 'ok'].includes(status)) {
+      failures.push('provider_write_not_success');
+    }
+    if (action.actionId === 'calendar.event.update' && (!requestedId || requestedId !== eventId)) {
+      failures.push('provider_event_id_mismatch');
+    }
+    if (action.actionId === 'calendar.event.update' && options.expectedTime &&
+      !start.includes(options.expectedTime)) {
+      failures.push('provider_time_mismatch');
+    }
+    if (action.actionId === 'calendar.event.delete' && (!eventId || !status)) {
+      failures.push('provider_delete_receipt_missing');
+    }
+  }
+  return {
+    ok: failures.length === 0,
+    providerEventId: provider === undefined ? '' : decodedEvidenceValue(provider.fields.event),
+    providerStatus: provider === undefined ? '' : decodedEvidenceValue(provider.fields.status),
+    failures
+  };
+}
+
+export function calendarProviderAbsenceEvidence(logText, context, options = {}) {
+  const title = String(options.title || '').trim();
+  const date = String(options.date || '').trim();
+  const all = records(logText);
+  const tasks = all.filter((item) => item.marker === 'MultiAgentDataTask' &&
+    item.fields.conversation === context?.conversationId && item.fields.turn === context?.turnId &&
+    item.fields.tool === 'calendar.events.search' && item.fields.calendarScope === calendarScope(title) &&
+    item.fields.calendarDate === date);
+  const task = tasks.at(-1);
+  const provider = task === undefined ? undefined : all.find((item) =>
+    item.marker === 'MultiAgentDataResult' && item.fields.conversation === task.fields.conversation &&
+    item.fields.turn === task.fields.turn && item.fields.task === task.fields.task &&
+    item.fields.tool === 'calendar.events.search');
+  const failures = [];
+  if (!context?.conversationId || !context?.turnId) failures.push('invalid_search_context');
+  if (provider === undefined) {
+    failures.push('missing_correlated_provider_search');
+  } else {
+    if (provider.fields.status !== 'empty' || provider.fields.sources !== '1' || provider.fields.error !== 'false') {
+      failures.push('provider_search_not_empty');
+    }
+  }
+  return { ok: failures.length === 0, failures };
 }
 
 export function mailThreadReadEvidence(logText, options = {}) {

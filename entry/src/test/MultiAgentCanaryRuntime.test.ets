@@ -183,6 +183,11 @@ const CALENDAR_UPDATE_SEARCH_DECISION: string = '{"personaId":"work_companion","
   '"requestedAction":{"eventId":"model-forged","title":"forged"}},"required":true}],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
   '"requiredSections":["events","review"]},"reasonCode":"calendar_update_read_first"}';
+const CALENDAR_UPDATE_DIRECT_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"actionIntent":{"goal":"update without a provider event",' +
+  '"allowedActionIds":["calendar.event.update"]},"reasonCode":"calendar_update_zero_data"}';
 const CALENDAR_UPDATE_DONE_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
@@ -2457,6 +2462,31 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(calls.length).assertEqual(1);
       expect(calls[0].actionId).assertEqual('calendar.event.update');
       expect(JSON.stringify(calls[0].args).indexOf('event-provider-real-1')).assertLarger(-1);
+      runtime.dispose();
+    });
+
+    it('rejects a zero-Data Calendar update decision without host semantic replacement', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
+      const surfaces: A2uiSurfaceState[] = [];
+      let providerCalls: number = 0;
+      const options = canaryOptions(
+        new QueueModel([CALENDAR_UPDATE_DIRECT_DECISION]), executor, new RecordingOpener(), surfaces, []
+      );
+      options.pageAction = async (): Promise<ActionExecutionResult> => {
+        providerCalls++;
+        return { status: 'success', output: JSON.parse('{"eventId":"event-provider-real-1"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '把 2026年7月30日 的 Appless QA run-1 日程改到下午4点', { text: '' }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('error');
+      expect(executor.tasks.length).assertEqual(0);
+      expect(providerCalls).assertEqual(0);
+      expect(surfaces.some((surface: A2uiSurfaceState): boolean =>
+        surface.intent === 'calendar.event.update')).assertFalse();
       runtime.dispose();
     });
 

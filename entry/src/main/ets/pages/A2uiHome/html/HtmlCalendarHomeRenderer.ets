@@ -945,6 +945,11 @@ function isCreateDocument(events: CalendarHomeEvent[], document: HtmlHomeDocumen
   return false;
 }
 
+function isUpdateDocument(events: CalendarHomeEvent[]): boolean {
+  return events.some((event: CalendarHomeEvent): boolean =>
+    event.toolName === 'calendar.event.update' && event.status === 'success');
+}
+
 function isPendingCalendarWrite(events: CalendarHomeEvent[]): boolean {
   return events.some((event: CalendarHomeEvent): boolean =>
     (event.toolName === 'calendar.event.create' || event.toolName === 'calendar.event.update') &&
@@ -987,12 +992,12 @@ function stat(label: string, value: string): string {
     escapeHtmlText(value) + '</strong></div>';
 }
 
-function confirmation(event: CalendarHomeEvent | null, pending: boolean): string {
+function confirmation(event: CalendarHomeEvent | null, pending: boolean, updated: boolean): string {
   if (event === null) {
     return '';
   }
   return '<aside class="calendar-confirmation">' +
-    '<div><h2>' + (pending ? '等待确认' : '已写入 Google Calendar') + '</h2><p>' +
+    '<div><h2>' + (pending ? '等待确认' : (updated ? '已更新 Google Calendar' : '已写入 Google Calendar')) + '</h2><p>' +
     escapeHtmlText(event.title) + '</p></div>' +
     '<div class="calendar-time-capsule"><strong>' + escapeHtmlText(event.startLabel) + '</strong><strong>' +
     escapeHtmlText(event.endLabel) + '</strong><span>' + escapeHtmlText(event.durationLabel) + '</span></div>' +
@@ -1023,8 +1028,9 @@ function hasNeedsInput(document: HtmlHomeDocument): boolean {
 function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate: boolean, isPending: boolean, isBusy: boolean): string {
   const first = primaryEvent(events);
   const target = targetDate(events, document.generatedAt);
+  const updated = isUpdateDocument(events);
   const state = isBusy ? '同步中' : (isPending ? '等待确认' : (hasNeedsInput(document) ? '待补充' :
-    (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步')))));
+    (isCreate ? (updated ? '已更新' : '已写入') : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步')))));
   return '<header class="calendar-hero">' +
     '<section class="calendar-hero-copy">' +
     '<span class="calendar-kicker">Google Calendar API · ' + escapeHtmlText(state) + '</span>' +
@@ -1035,7 +1041,7 @@ function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate:
     stat('结果', eventCountLabel(events)) +
     stat('下一项', first === null ? '暂无' : first.timeRange) +
     '</div></section>' +
-    (isCreate || isPending ? confirmation(first, isPending) : '') +
+    (isCreate || isPending ? confirmation(first, isPending, updated) : '') +
     '</header>';
 }
 

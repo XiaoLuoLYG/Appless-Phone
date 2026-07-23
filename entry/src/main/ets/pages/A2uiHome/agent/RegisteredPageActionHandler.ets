@@ -4,7 +4,8 @@ import {
   A2uiRuntimeDataModel,
   ActionExecutionResult,
   ToolDefinition,
-  actionAgentToolDefinitions
+  actionAgentToolDefinitions,
+  aiLogInfo
 } from '@loop/agent-core';
 import { RegisteredPageActionContext } from './AiphoneRegisteredActionExecutor';
 
@@ -226,6 +227,40 @@ function hasPositiveWriteEvidence(model: A2uiRuntimeDataModel, actionId: string)
   return false;
 }
 
+function encodedEvidenceValue(value: string): string {
+  return encodeURIComponent(value.trim().length > 0 ? value.trim() : 'none');
+}
+
+function calendarProviderWriteEvidence(
+  model: A2uiRuntimeDataModel,
+  actionId: string,
+  args: Object,
+  context: RegisteredPageActionContext,
+  surfaceId: string
+): void {
+  if (actionId.indexOf('calendar.event.') !== 0) {
+    return;
+  }
+  for (let index = 0; index < model.genericToolResults.length; index++) {
+    const result = model.genericToolResults[index];
+    if (result.toolName !== actionId || result.sourceTag !== 'Composio Google Calendar' ||
+      result.status !== 'success' || rawProviderFailed(result.rawPreview)) {
+      continue;
+    }
+    const values = args as HandlerArgRecord;
+    const eventId = evidenceRow(result.rows, ['event id']);
+    const start = evidenceRow(result.rows, ['start', 'start time', 'starts at', '开始时间']);
+    const requested = typeof values['eventId'] === 'string' ? values['eventId'] : '';
+    aiLogInfo('[AIPhone][CalendarProviderAction] conversation=' + encodedEvidenceValue(context.conversationId) +
+      ' turn=' + encodedEvidenceValue(context.turnId) + ' surface=' + encodedEvidenceValue(surfaceId) +
+      ' action=' + encodedEvidenceValue(actionId) + ' event=' + encodedEvidenceValue(eventId) +
+      ' requested=' + encodedEvidenceValue(requested) + ' status=' + encodedEvidenceValue(
+        actionId === 'calendar.event.delete' ? evidenceRow(result.rows, ['status', '状态']) || result.status : result.status
+      ) + ' start=' + encodedEvidenceValue(start));
+    return;
+  }
+}
+
 function hasVirtualWhatsAppConfirmation(
   model: A2uiRuntimeDataModel,
   args: Object
@@ -397,6 +432,7 @@ export class RegisteredPageActionHandler {
       status: result.surface.status,
       data: model
     };
+    calendarProviderWriteEvidence(model, actionId, args, context, context.surfaceId);
     return { status: 'success', output };
   }
 }

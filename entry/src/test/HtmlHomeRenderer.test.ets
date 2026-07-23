@@ -1954,6 +1954,16 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('已写入')).assertLarger(-1);
     });
 
+    it('labels a successful Google Calendar update as updated rather than written', 0, () => {
+      const update = calendarCreateDocumentFixture();
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('已更新 Google Calendar')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已更新')).assertLarger(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
     it('keeps Calendar create and update reviews visibly pending until provider success', 0, () => {
       const create = calendarCreateDocumentFixture();
       create.subtitle = '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。';
