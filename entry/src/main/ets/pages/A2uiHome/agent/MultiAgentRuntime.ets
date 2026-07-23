@@ -183,6 +183,21 @@ export class MultiAgentEvidenceFormatter {
   private sequence: number = 0;
   constructor(limit: number = 128) { this.limit = Number.isInteger(limit) && limit >= 8 ? Math.min(limit, 512) : 128; }
   dispose(): void { this.tokens.clear(); this.order.splice(0, this.order.length); this.sequence = 0; }
+  pageActionDispatchLine(
+    conversationId: string,
+    originTurnId: string,
+    turnId: string,
+    surfaceId: string,
+    sourceToolId: string,
+    actionId: string,
+    runId: string
+  ): string {
+    return '[AIPhone][MultiAgentPageActionDispatch] conversation=' + this.token('c', conversationId) +
+      ' origin=' + this.token('t', originTurnId) + ' turn=' + this.token('t', turnId) +
+      ' surface=' + evidenceAllowed(surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/) +
+      ' source=' + evidenceAllowed(sourceToolId) + ' action=' + evidenceAllowed(actionId) +
+      ' dispatch=' + this.token('r', runId);
+  }
   line(message: AgentMessage): string {
     const identity: string = ' conversation=' + this.token('c', message.conversationId) +
       ' turn=' + this.token('t', message.turnId) +
@@ -551,6 +566,19 @@ export class MultiAgentRuntime {
     )) {
       return Promise.resolve(false);
     }
+    try {
+      const originTurnId: string = this.activeConversationId === context.conversationId &&
+        this.activeSurfaceId === context.surfaceId ? this.activeTurnId : '';
+      aiLogInfo(this.evidenceFormatter.pageActionDispatchLine(
+        context.conversationId,
+        originTurnId,
+        context.turnId,
+        context.surfaceId,
+        context.sourceToolId,
+        action.id,
+        runId
+      ));
+    } catch (_error) {}
     return new Promise<boolean>((resolve: (ok: boolean) => void) => {
       const pending: PendingAction = {
         conversationId: context.conversationId,
