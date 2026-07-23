@@ -211,13 +211,14 @@ function sameRoundDependencyDecision(
     '"requiredSections":["source","detail"]}}';
 }
 
-function sourceOnlyDecision(toolId: string): string {
+function producerOnlyRepairDecision(toolId: string): string {
   return '{"personaId":"travel_companion","skillId":"",' +
     '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute",' +
     '"dataTasks":[{"localId":"source","goal":"read source",' +
     '"allowedToolIds":["' + toolId + '"],"toolId":"' + toolId + '",' +
-    '"input":{},"required":true}],"uiIntent":{"purpose":"read source",' +
-    '"preferredDensity":"comfortable","requiredSections":["source"]}}';
+    '"input":{},"required":true}],"uiIntent":{' +
+    '"purpose":"read source and dependent detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["source","detail"]}}';
 }
 const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace(
   '"personaId":"travel_companion",',
@@ -827,49 +828,80 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('fails closed when same-round dependency repair would remove requested capability scope', 0, async () => {
-      const invalid: string[] = [
-        sameRoundDependencyDecision('maps.place.search', 'maps.place.details', '{}'),
-        sameRoundDependencyDecision(
-          'maps.place.search', 'maps.place.details', '{"placeId":"place-forged"}'
-        ),
-        sameRoundDependencyDecision(
-          'maps.place.search', 'maps.place.details', '{"placeId":"place-real-1"}', true
-        ),
-        sameRoundDependencyDecision(
-          'mail.search', 'mail.thread.read', '{"requestKey":"gmail:thread-forged"}'
-        ),
-        sameRoundDependencyDecision(
-          'gmail.mail.search', 'gmail.thread.read', '{"requestKey":"gmail:thread-forged"}'
-        ),
-        '{"personaId":"travel_companion","skillId":"",' +
-          '"requestedCapabilityIds":["maps.place.search","maps.place.details"],' +
-          '"roundAction":"execute","dataTasks":[{"localId":"consumer","goal":"read detail",' +
-          '"allowedToolIds":["maps.place.search","maps.place.details"],' +
-          '"toolId":"maps.place.details","input":{},"required":true}],' +
-          '"uiIntent":{"purpose":"detail","preferredDensity":"comfortable",' +
-          '"requiredSections":["detail"]}}'
+    it('repairs every registered same-round dependency to the exact producer current-round scope', 0, async () => {
+      const sources: string[] = [
+        'maps.place.search',
+        'mail.search',
+        'gmail.mail.search'
       ];
-      const producers: string[] = [
-        'maps.place.search', 'maps.place.search', 'maps.place.search',
-        'mail.search', 'gmail.mail.search', 'maps.place.search'
+      const consumers: string[] = [
+        'maps.place.details',
+        'mail.thread.read',
+        'gmail.thread.read'
       ];
-      for (let index = 0; index < invalid.length; index++) {
-        const model = new QueueLocalModel([invalid[index], sourceOnlyDecision(producers[index])]);
-        let errorCode: string = '';
-        try {
-          await new MultiAgentLeaderPlanner(model).plan(
-            inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
-            (): boolean => true
-          );
-        } catch (error) {
-          errorCode = error instanceof Error ? error.message : 'unknown';
-        }
+      for (let index = 0; index < sources.length; index++) {
+        const invalid = sameRoundDependencyDecision(
+          sources[index], consumers[index], '{}', index === 0
+        );
+        const repaired = producerOnlyRepairDecision(sources[index]);
+        const model = new QueueLocalModel([invalid, repaired]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
+          (): boolean => true
+        );
 
-        expect(errorCode).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual(sources[index]);
+        expect(decision.dataTasks.length).assertEqual(1);
+        expect(decision.dataTasks[0].localId).assertEqual('source');
+        expect(decision.dataTasks[0].goal).assertEqual('read source');
+        expect(decision.dataTasks[0].allowedToolIds.join(',')).assertEqual(sources[index]);
+        expect(decision.dataTasks[0].toolId).assertEqual(sources[index]);
+        expect(JSON.stringify(decision.dataTasks[0].input)).assertEqual('{}');
+        expect(decision.dataTasks[0].required).assertTrue();
+        expect(decision.personaId).assertEqual('travel_companion');
+        expect(decision.skillId).assertEqual('');
+        expect(decision.uiIntent.purpose).assertEqual('read source and dependent detail');
+        expect(decision.uiIntent.preferredDensity).assertEqual('comfortable');
+        expect(decision.uiIntent.requiredSections.join(',')).assertEqual('source,detail');
+        expect(decision.actionIntent === undefined).assertTrue();
         expect(model.prompts.length).assertEqual(2);
+        expect(model.prompts[0].indexOf(
+          'requestedCapabilityIds is the exact current-round execution union'
+        )).assertLarger(-1);
         expect(model.prompts[1].indexOf('LEADER_SAME_ROUND_DEPENDENCY')).assertLarger(-1);
         expect(model.prompts[1].indexOf('successful or partial')).assertLarger(-1);
+      }
+    });
+
+    it('rejects producer-only repair that changes any retained field or capability scope', 0, async () => {
+      const invalid = sameRoundDependencyDecision(
+        'maps.place.search', 'maps.place.details', '{}'
+      );
+      const exact = producerOnlyRepairDecision('maps.place.search');
+      const changed: string[] = [
+        exact.replace('"localId":"source"', '"localId":"changed-source"'),
+        exact.replace('"goal":"read source"', '"goal":"changed goal"'),
+        exact.replace('"input":{}', '"input":{"query":"forged"}'),
+        exact.replace('"required":true', '"required":false'),
+        exact.replace('"personaId":"travel_companion"', '"personaId":"unknown-persona"'),
+        exact.replace('"skillId":""', '"skillId":"travel-planning"'),
+        exact.replace(
+          '"purpose":"read source and dependent detail"',
+          '"purpose":"changed purpose"'
+        ),
+        exact.replace('"roundAction":"execute"', '"roundAction":"answer"')
+          .replace('"dataTasks":[', '"answer":"changed","dataTasks":['),
+        producerOnlyRepairDecision('travel.search'),
+        exact.replace(
+          '"requestedCapabilityIds":["maps.place.search"]',
+          '"requestedCapabilityIds":["maps.place.search","memory.update"]'
+        ).replace(
+          ',"uiIntent":',
+          ',"actionIntent":{"goal":"changed action","allowedActionIds":["memory.update"]},"uiIntent":'
+        )
+      ];
+      for (let index = 0; index < changed.length; index++) {
+        expect(await repairFails(invalid, changed[index], planningContext())).assertTrue();
       }
     });
 
@@ -877,7 +909,11 @@ export default function multiAgentLeaderPlannerTest() {
       const invalid = sameRoundDependencyDecision(
         'maps.place.search', 'maps.place.details', '{"placeId":"place-forged"}'
       );
-      const model = new QueueLocalModel([invalid, invalid, sourceOnlyDecision('maps.place.search')]);
+      const model = new QueueLocalModel([
+        invalid,
+        invalid,
+        producerOnlyRepairDecision('maps.place.search')
+      ]);
       let errorCode: string = '';
 
       try {

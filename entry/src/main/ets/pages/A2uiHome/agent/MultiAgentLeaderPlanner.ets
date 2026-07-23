@@ -239,6 +239,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
       const actionOwnedRepair: boolean = error instanceof Error &&
         error.message === ACTION_OWNED_DATA_TASK_ERROR;
+      const sameRoundDependencyRepair: boolean = error instanceof Error &&
+        error.message === SAME_ROUND_DEPENDENCY_ERROR;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
           error.message === UNBOUND_LATER_TOOL_ERROR);
@@ -253,6 +255,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
           'Do not add, remove, reorder, or change any other field or capability.' :
+        sameRoundDependencyRepair ?
+        '\nSame-round dependency repair freeze: preserve personaId, skillId, roundAction, answer, uiIntent, ' +
+          'actionIntent, and every retained producer task exactly. Remove every dependent consumer task from this ' +
+          'round. Set requestedCapabilityIds to the exact current-round union of the retained producer and unchanged ' +
+          'Action IDs. Do not add, substitute, reorder, or change a retained field or capability.' :
         allowsTerminalExecutionDrop ?
         '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
@@ -263,7 +270,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
-          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
+          sameRoundDependencyRepair ?
+            !this.sameProducerOnlyRepairScope(
+              frozenScope, repairedScope, sameRoundProducerToolIds
+            ) :
+            !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
@@ -277,7 +288,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           throw new Error(TASK_INPUT_INVALID_ERROR);
         }
         if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
-          !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
+          (rejectedDecision === null ||
+            !this.producerOnlyRepair(
+              rejectedDecision, repairedDecision, sameRoundProducerToolIds
+            ))) {
           throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
         }
         this.rejectOverlappingVideoTools(repairedDecision);
@@ -464,6 +478,25 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
       repaired.dataCapabilityIds.length === 0 &&
       repaired.actionCapabilityIds.length === 0;
+  }
+
+  private sameProducerOnlyRepairScope(
+    original: LeaderRepairScope,
+    repaired: LeaderRepairScope,
+    producerToolIds: string[]
+  ): boolean {
+    if (repaired.roundAction !== 'execute' || producerToolIds.length === 0 ||
+      !this.sameStringSet(original.actionCapabilityIds, repaired.actionCapabilityIds)) {
+      return false;
+    }
+    if (this.sameRepairScope(original, repaired, false)) {
+      return true;
+    }
+    if (!this.sameStringSet(producerToolIds, repaired.dataCapabilityIds)) {
+      return false;
+    }
+    const expectedRequested: string[] = producerToolIds.concat(original.actionCapabilityIds);
+    return this.sameStringSet(expectedRequested, repaired.requestedCapabilityIds);
   }
 
   private sameActionOwnedRepair(
@@ -725,28 +758,71 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private producerOnlyRepair(decision: LeaderDecision, producerToolIds: string[]): boolean {
-    if (decision.roundAction !== 'execute' || decision.dataTasks.length === 0 ||
+  private producerOnlyRepair(
+    original: LeaderDecision,
+    repaired: LeaderDecision,
+    producerToolIds: string[]
+  ): boolean {
+    if (original.roundAction !== 'execute' || repaired.roundAction !== 'execute' ||
+      original.personaId !== repaired.personaId ||
+      original.skillId !== repaired.skillId ||
+      original.answer !== repaired.answer ||
+      original.uiIntent.purpose !== repaired.uiIntent.purpose ||
+      original.uiIntent.preferredDensity !== repaired.uiIntent.preferredDensity ||
+      !this.sameStrings(original.uiIntent.requiredSections, repaired.uiIntent.requiredSections) ||
+      !this.sameActionIntent(original.actionIntent, repaired.actionIntent) ||
       producerToolIds.length === 0) {
       return false;
     }
     const expected: Set<string> = new Set<string>(producerToolIds);
-    const actual: Set<string> = new Set<string>();
-    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
-      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
-      actual.add(task.toolId);
-      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
-        actual.add(task.allowedToolIds[allowedIndex]);
+    const retained: LeaderDecisionDataTask[] = [];
+    for (let taskIndex = 0; taskIndex < original.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = original.dataTasks[taskIndex];
+      if (expected.has(task.toolId)) {
+        retained.push(task);
       }
     }
-    if (actual.size !== expected.size) {
+    if (retained.length === 0 || retained.length !== repaired.dataTasks.length) {
       return false;
     }
-    const actualIds: string[] = Array.from(actual);
-    for (let index = 0; index < actualIds.length; index++) {
-      if (!expected.has(actualIds[index])) {
+    for (let index = 0; index < retained.length; index++) {
+      const first: LeaderDecisionDataTask = retained[index];
+      const second: LeaderDecisionDataTask = repaired.dataTasks[index];
+      if (first.localId !== second.localId ||
+        first.goal !== second.goal ||
+        first.toolId !== second.toolId ||
+        first.required !== second.required ||
+        !this.sameStrings(first.allowedToolIds, second.allowedToolIds) ||
+        !this.sameJsonValue(first.input, second.input)) {
         return false;
       }
+    }
+    const retainedCapabilities: Set<string> = new Set<string>();
+    for (let index = 0; index < retained.length; index++) {
+      retainedCapabilities.add(retained[index].toolId);
+      for (let allowedIndex = 0;
+        allowedIndex < retained[index].allowedToolIds.length;
+        allowedIndex++) {
+        retainedCapabilities.add(retained[index].allowedToolIds[allowedIndex]);
+      }
+    }
+    if (retainedCapabilities.size !== expected.size) {
+      return false;
+    }
+    const retainedIds: string[] = Array.from(retainedCapabilities);
+    for (let index = 0; index < retainedIds.length; index++) {
+      if (!expected.has(retainedIds[index])) {
+        return false;
+      }
+    }
+    const actionIds: string[] = original.actionIntent === undefined ?
+      [] : original.actionIntent.allowedActionIds;
+    const expectedRequested: string[] = original.requestedCapabilityIds.filter(
+      (capabilityId: string): boolean =>
+        expected.has(capabilityId) || actionIds.indexOf(capabilityId) >= 0
+    );
+    if (!this.sameStrings(expectedRequested, repaired.requestedCapabilityIds)) {
+      return false;
     }
     return true;
   }
@@ -892,7 +968,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'Use [] only for ordinary direct conversation that needs no tool-backed fact.',
       'Mail, weather, travel, and other capability-backed answer or clarify decisions must name ' +
         'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
-        'the unique union of every selected Data tool, allowed tool, and Action ID.',
+        'the unique union of every selected Data tool, allowed tool, and Action ID. In other words, ' +
+        'requestedCapabilityIds is the exact current-round execution union, not a list of future-round tools.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
       'Ownership contract: Data-owned capability IDs belong in dataTasks toolId and allowedToolIds. ' +
         'Action-owned capability IDs belong in actionIntent.allowedActionIds. A Data-owned ID may also appear in ' +
