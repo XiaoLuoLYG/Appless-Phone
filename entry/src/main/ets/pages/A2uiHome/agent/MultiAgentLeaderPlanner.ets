@@ -92,6 +92,11 @@ const CALENDAR_DELETE_SELECTION_CONTRACT: string =
   'select calendar.events.search as the read-first Data task. Do not select calendar.event.delete as a zero-Data ' +
   'Action or include a delete actionIntent in the search round. The host offers the existing delete confirmation ' +
   'only after one exact provider result.';
+const CALENDAR_UPDATE_SELECTION_CONTRACT: string =
+  'Calendar update contract: for a natural-language update or move without a real Event ID on the current surface, ' +
+  'select calendar.events.search as the read-first Data task. Do not select calendar.event.update as a zero-Data ' +
+  'Action or include an update actionIntent in the search round. The host offers the existing update confirmation ' +
+  'only after one exact provider result.';
 const ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_ACTION_OWNED_DATA_TASK. An Action-owned capability was placed in dataTasks. ' +
   'Keep the same requested capability and current-user intent. Remove Action-owned IDs from dataTasks and put ' +
@@ -954,6 +959,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       VIDEO_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
       SOCIAL_SELECTION_CONTRACT,
+      CALENDAR_UPDATE_SELECTION_CONTRACT,
       CALENDAR_DELETE_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,

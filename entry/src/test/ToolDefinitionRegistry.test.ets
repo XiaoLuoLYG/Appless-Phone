@@ -293,8 +293,8 @@ export default function toolDefinitionRegistryTest() {
 
       expect(searchDescription.indexOf('timeMin')).assertLarger(-1);
       expect(searchDescription.indexOf('timeMax')).assertLarger(-1);
-      expect(searchDescription.indexOf('first step before update or delete')).assertEqual(-1);
-      expect(searchDescription.indexOf('NEVER use calendar.events.search for a write request')).assertLarger(-1);
+      expect(searchDescription.indexOf('first step for a natural-language update')).assertLarger(-1);
+      expect(searchDescription.indexOf('lacks a current trusted Event ID')).assertLarger(-1);
       expect(searchDescription.indexOf('query contains only event title text')).assertLarger(-1);
       expect(createDescription).assertEqual('');
       expect(updateDescription).assertEqual('');

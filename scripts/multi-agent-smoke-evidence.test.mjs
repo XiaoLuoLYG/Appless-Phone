@@ -86,6 +86,16 @@ test('holds ordinary C20 multi-agent capture until its bounded settlement window
   }), true);
 });
 
+test('keeps C19 write smoke on the exact confirmation and provider-receipt path', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  assert.match(source, /id: 'C19b'[\s\S]*verifyCalendarCreate: true/);
+  assert.match(source, /id: 'C19c'[\s\S]*expectedToolId: 'calendar\.events\.search'[\s\S]*verifyCalendarUpdate: true/);
+  assert.match(source, /summary\.calendarCreateAction = expectedCase\.verifyCalendarCreate === true/);
+  assert.match(source, /summary\.calendarUpdateAction = expectedCase\.verifyCalendarUpdate === true/);
+  assert.match(source, /async function verifyCalendarWriteAction\(/);
+  assert.match(source, /C19 create did not produce a real provider Event ID; later C19 writes were not attempted/);
+});
+
 test('stops F16 external collection after a failed return and retains failure evidence', async () => {
   assert.equal(typeof smokeLifecycle.collectExternalAuthJumps, 'function');
   const calls = [];

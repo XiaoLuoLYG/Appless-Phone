@@ -239,7 +239,7 @@ export class ReActAgentRunner {
     }
     if (this.tools.has('calendar.event.create') || this.tools.has('calendar.event.update') ||
       this.tools.has('calendar.event.delete')) {
-      prompt += 'Calendar write rule: when the requested end state creates, updates, moves, or deletes a Google Calendar event, use the matching calendar.event.* write tool, never calendar.events.search. For an update or move with an incomplete destination time, call calendar.event.update with the existing-event query/timeMin/timeMax selector and omit missing new start or end; the client will keep real matches visible and ask for the missing time without writing. Never ask the user for an Event ID.\n';
+      prompt += 'Calendar write rule: create uses calendar.event.create. A natural-language update, move, or delete without a current trusted Event ID must call calendar.events.search first; only the exact current provider-backed confirmation may invoke calendar.event.update or calendar.event.delete. Never invent or ask the user for an Event ID.\n';
     }
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 

@@ -2398,11 +2398,12 @@ export default function multiAgentCanaryRuntimeTest() {
 
     it('binds Calendar update to one real search event before review and never trusts a model eventId', 0, async () => {
       const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
+      const model = new QueueModel([CALENDAR_UPDATE_SEARCH_DECISION, CALENDAR_UPDATE_DONE_DECISION]);
       const surfaces: A2uiSurfaceState[] = [];
       const calls: RecordedPageAction[] = [];
       let current: RegisteredPageSnapshot | null = null;
       const options = canaryOptions(
-        new QueueModel([CALENDAR_UPDATE_SEARCH_DECISION, CALENDAR_UPDATE_DONE_DECISION]),
+        model,
         executor,
         new RecordingOpener(),
         surfaces,
@@ -2445,6 +2446,10 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(outcome.status).assertEqual('success');
       expect(review === null).assertFalse();
+      expect(model.prompts[0].indexOf(
+        'Calendar update contract: for a natural-language update or move without a real Event ID'
+      )).assertLarger(-1);
+      expect(executor.tasks[0].toolId).assertEqual('calendar.events.search');
       expect(taskJson.indexOf('model-forged')).assertEqual(-1);
       expect(JSON.stringify((review as A2uiAction).args).indexOf('event-provider-real-1')).assertLarger(-1);
       expect(calls.length).assertEqual(0);

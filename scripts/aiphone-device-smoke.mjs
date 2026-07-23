@@ -194,10 +194,10 @@ const coreRegressionCases = [
     blockedWithoutWhatsAppTestTo: true
   },
   { id: 'C19a', query: `帮我查询 ${qaDate} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
-  { id: 'C19b', query: `帮我在 ${qaDate} 下午3点创建标题为 ${qaTitle} 的30分钟日程`, expectsTool: true, expectedToolId: 'calendar.event.create' },
-  { id: 'C19c', query: `把 ${qaDate} 的 ${qaTitle} 日程改到下午4点，保持30分钟`, expectsTool: true, expectedToolId: 'calendar.event.update' },
+  { id: 'C19b', query: `帮我在 ${qaDate} 下午3点创建标题为 ${qaTitle} 的30分钟日程`, expectsTool: true, expectedToolId: 'calendar.event.create', verifyCalendarCreate: true },
+  { id: 'C19c', query: `把 ${qaDate} 的 ${qaTitle} 日程改到下午4点，保持30分钟`, expectsTool: true, expectedToolId: 'calendar.events.search', verifyCalendarUpdate: true },
   { id: 'C19d', query: `帮我查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search' },
-  { id: 'C19e', query: `删除 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.event.delete', verifyCalendarDelete: true },
+  { id: 'C19e', query: `删除 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程`, expectsTool: true, expectedToolId: 'calendar.events.search', verifyCalendarDelete: true },
   { id: 'C19f', query: `再次查询 ${qaDate} 标题为 ${qaTitle} 的 Google Calendar 日程，确认它不存在`, expectsTool: true, expectedToolId: 'calendar.events.search', expectAbsentText: qaTitle },
   {
     id: 'C20',
@@ -2104,6 +2104,54 @@ function visibleSourceToolId(lifecycle) {
     : '';
 }
 
+async function verifyCalendarWriteAction(layout, index, appPid, actionContext, actionId, label, expectedTime = '') {
+  let currentLayout = layout;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const center = findExactTextCenter(currentLayout, label);
+    if (center !== null) {
+      clearHilog();
+      const actionLogs = await captureWhile(appPid, async () => {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
+      });
+      const resultLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-layout.json`);
+      const text = collectLayoutText(resultLayout).join('\n');
+      const logs = actionLogs.join('\n');
+      const combined = `${text}\n${logs}`;
+      const actionEvidence = multiAgentActionEvidence(
+        logs, exactActionOptions(actionId, visibleSourceToolId(actionContext), actionContext)
+      );
+      const receipt = /(?:Event ID|eventId)\s*[:：=]\s*["']?[^\s"']+/i.test(combined);
+      const success = actionId === 'calendar.event.create' ?
+        /已直接写入真实 Google Calendar|已写入 Google Calendar/.test(combined) :
+        /已直接更新真实 Google Calendar|已更新 Google Calendar/.test(combined);
+      const timeMatches = expectedTime.length === 0 || combined.includes(expectedTime);
+      const suffix = actionId.replaceAll('.', '-');
+      const logPath = join(outDir, `query-${index + 1}-${suffix}.log`);
+      const textPath = join(outDir, `query-${index + 1}-${suffix}-layout-text.txt`);
+      writeFileSync(logPath, logs + '\n');
+      writeFileSync(textPath, text + '\n');
+      return {
+        ok: Boolean(actionContext?.surfaceId) && Boolean(visibleSourceToolId(actionContext)) &&
+          actionEvidence.ok && receipt && success && timeMatches &&
+          !/status":"error"|创建失败|更新失败/.test(combined),
+        capability: actionId,
+        actionEvidence,
+        providerReceipt: receipt,
+        visibleSuccess: success,
+        expectedTime,
+        timeMatches,
+        logPath,
+        textPath,
+        screenPath: captureScreen(`query-${index + 1}-${suffix}-screen.png`)
+      };
+    }
+    swipeResultsUp();
+    await sleep(800);
+    currentLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-scroll-${attempt + 1}.json`);
+  }
+  return { ok: false, capability: actionId, reason: `${label} button not found` };
+}
+
 async function verifyCalendarDeleteAction(layout, index, appPid, actionContext) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -3102,6 +3150,18 @@ async function runQuery(query, index, expectedTool) {
   summary.socialDraftAction = expectedCase.verifySocialDraft === true
     ? await verifySocialDraftAction(evidenceLayout, index)
     : { ok: true, skipped: true };
+  summary.calendarCreateAction = expectedCase.verifyCalendarCreate === true
+    ? await verifyCalendarWriteAction(
+      evidenceLayout, index, appPid, summary.multiAgentLifecycle,
+      'calendar.event.create', '确认创建'
+    )
+    : { ok: true, skipped: true };
+  summary.calendarUpdateAction = expectedCase.verifyCalendarUpdate === true
+    ? await verifyCalendarWriteAction(
+      evidenceLayout, index, appPid, summary.multiAgentLifecycle,
+      'calendar.event.update', '确认更新', '16:00'
+    )
+    : { ok: true, skipped: true };
   summary.calendarDeleteAction = expectedCase.verifyCalendarDelete === true
     ? await verifyCalendarDeleteAction(evidenceLayout, index, appPid, summary.multiAgentLifecycle)
     : { ok: true, skipped: true };
@@ -3128,6 +3188,8 @@ async function runQuery(query, index, expectedTool) {
     summary.ok = summary.ok && summary.layoutOk &&
       summary.mailExpandedBody.ok &&
       summary.socialDraftAction.ok &&
+      summary.calendarCreateAction.ok &&
+      summary.calendarUpdateAction.ok &&
       summary.calendarDeleteAction.ok &&
       summary.hotelDetailAction.ok &&
       summary.absenceVerified;
@@ -3211,6 +3273,8 @@ async function runQuery(query, index, expectedTool) {
   summary.ok = summary.ok &&
     summary.mailExpandedBody.ok &&
     summary.socialDraftAction.ok &&
+    summary.calendarCreateAction.ok &&
+    summary.calendarUpdateAction.ok &&
     summary.calendarDeleteAction.ok &&
     summary.hotelDetailAction.ok &&
     summary.absenceVerified;
@@ -3448,6 +3512,8 @@ const modelHealth = await ensureLocalModel();
 console.log(`modelHealth: ${JSON.stringify(modelHealth, null, 2)}`);
 
 const summaries = [];
+let c19CreateSucceeded = true;
+let c19UpdateSucceeded = true;
 let personaMemoryBackup = null;
 let personaMemoryRestore = { ok: true, skipped: true };
 if (useDefaultCases && selectedDefaultCases.some((testCase) => /^C11/.test(testCase.id || ''))) {
@@ -3507,6 +3573,25 @@ for (let index = 0; index < queries.length; index += 1) {
     console.log(JSON.stringify(settingsSummary, null, 2));
     continue;
   }
+  const blockedC19Write = (['C19c', 'C19d', 'C19e'].includes(inferredCase.id || '') && !c19CreateSucceeded) ||
+    (['C19d', 'C19e'].includes(inferredCase.id || '') && !c19UpdateSucceeded);
+  if (blockedC19Write) {
+    const reason = !c19CreateSucceeded ?
+      'C19 create did not produce a real provider Event ID; later C19 writes were not attempted.' :
+      'C19 update did not produce a real provider Event ID; later C19 writes were not attempted.';
+    const blockedSummary = {
+      caseId: inferredCase.id || '',
+      query,
+      expectedTool: inferredCase.expectsTool,
+      expectedToolId: inferredCase.expectedToolId || '',
+      status: 'BLOCKED',
+      ok: false,
+      reason
+    };
+    summaries.push(blockedSummary);
+    console.log(JSON.stringify(blockedSummary, null, 2));
+    continue;
+  }
   const expectedTool = inferredCase.expectsTool;
   let summary = null;
   for (let attempt = 0; attempt <= queryRetryLimit; attempt += 1) {
@@ -3528,6 +3613,12 @@ for (let index = 0; index < queries.length; index += 1) {
   summary.status = summary.ok ? 'PASS' : (summary.providerFailed ? 'BLOCKED' : 'FAIL');
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
+  if (inferredCase.id === 'C19b') {
+    c19CreateSucceeded = summary.calendarCreateAction?.ok === true;
+  }
+  if (inferredCase.id === 'C19c') {
+    c19UpdateSucceeded = summary.calendarUpdateAction?.ok === true;
+  }
   if (inferredCase.id === 'C11c' && personaMemoryBackup !== null) {
     personaMemoryRestore = restorePersonaMemoryStore(personaMemoryBackup);
     personaMemoryBackup = null;

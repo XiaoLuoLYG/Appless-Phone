@@ -936,15 +936,19 @@ function primaryEvent(events: CalendarHomeEvent[]): CalendarHomeEvent | null {
 }
 
 function isCreateDocument(events: CalendarHomeEvent[], document: HtmlHomeDocument): boolean {
-  if (document.subtitle.indexOf('已直接写入真实 Google Calendar') >= 0) {
-    return true;
-  }
   for (let index = 0; index < events.length; index++) {
-    if (events[index].toolName === 'calendar.event.create') {
+    if ((events[index].toolName === 'calendar.event.create' ||
+      events[index].toolName === 'calendar.event.update') && events[index].status === 'success') {
       return true;
     }
   }
   return false;
+}
+
+function isPendingCalendarWrite(events: CalendarHomeEvent[]): boolean {
+  return events.some((event: CalendarHomeEvent): boolean =>
+    (event.toolName === 'calendar.event.create' || event.toolName === 'calendar.event.update') &&
+    event.status === 'confirm_required');
 }
 
 function eventCountLabel(events: CalendarHomeEvent[]): string {
@@ -983,12 +987,13 @@ function stat(label: string, value: string): string {
     escapeHtmlText(value) + '</strong></div>';
 }
 
-function confirmation(event: CalendarHomeEvent | null): string {
+function confirmation(event: CalendarHomeEvent | null, pending: boolean): string {
   if (event === null) {
     return '';
   }
   return '<aside class="calendar-confirmation">' +
-    '<div><h2>已写入 Google Calendar</h2><p>' + escapeHtmlText(event.title) + '</p></div>' +
+    '<div><h2>' + (pending ? '等待确认' : '已写入 Google Calendar') + '</h2><p>' +
+    escapeHtmlText(event.title) + '</p></div>' +
     '<div class="calendar-time-capsule"><strong>' + escapeHtmlText(event.startLabel) + '</strong><strong>' +
     escapeHtmlText(event.endLabel) + '</strong><span>' + escapeHtmlText(event.durationLabel) + '</span></div>' +
     '</aside>';
@@ -1015,11 +1020,11 @@ function hasNeedsInput(document: HtmlHomeDocument): boolean {
   return document.blocks.some((block: HtmlHomeBlock): boolean => textOf(block.status).toLowerCase() === 'needs_input');
 }
 
-function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate: boolean, isBusy: boolean): string {
+function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate: boolean, isPending: boolean, isBusy: boolean): string {
   const first = primaryEvent(events);
   const target = targetDate(events, document.generatedAt);
-  const state = isBusy ? '同步中' : (hasNeedsInput(document) ? '待补充' :
-    (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步'))));
+  const state = isBusy ? '同步中' : (isPending ? '等待确认' : (hasNeedsInput(document) ? '待补充' :
+    (isCreate ? '已写入' : (hasAuthFailure(document) ? '待授权' : (hasSyncFailure(document) ? '同步失败' : '已同步')))));
   return '<header class="calendar-hero">' +
     '<section class="calendar-hero-copy">' +
     '<span class="calendar-kicker">Google Calendar API · ' + escapeHtmlText(state) + '</span>' +
@@ -1030,7 +1035,7 @@ function hero(document: HtmlHomeDocument, events: CalendarHomeEvent[], isCreate:
     stat('结果', eventCountLabel(events)) +
     stat('下一项', first === null ? '暂无' : first.timeRange) +
     '</div></section>' +
-    (isCreate ? confirmation(first) : '') +
+    (isCreate || isPending ? confirmation(first, isPending) : '') +
     '</header>';
 }
 
@@ -1161,11 +1166,12 @@ function calendarHtml(document: HtmlHomeDocument, events: CalendarHomeEvent[], i
   const target = targetDate(events, document.generatedAt);
   const createMode = isCreateDocument(events, document) && !hasNeedsInput(document) &&
     !hasAuthFailure(document) && !hasSyncFailure(document);
+  const pendingWrite = isPendingCalendarWrite(events);
   return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8" />\n' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />\n' +
     '<title>' + escapeHtmlText(title) + '</title>\n<style>' + CALENDAR_HOME_CSS + '</style>\n</head>\n<body>\n' +
     '<main class="calendar-shell">' +
-    hero(document, events, createMode, isBusy) +
+    hero(document, events, createMode, pendingWrite, isBusy) +
     viewSwitch() +
     '<section class="calendar-board">' +
     dayView(events, target) +

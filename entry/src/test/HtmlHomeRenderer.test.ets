@@ -1954,6 +1954,25 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('已写入')).assertLarger(-1);
     });
 
+    it('keeps Calendar create and update reviews visibly pending until provider success', 0, () => {
+      const create = calendarCreateDocumentFixture();
+      create.subtitle = '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。';
+      create.blocks[0].status = 'confirm_required';
+      create.blocks[0].subtitle = create.subtitle;
+      const update = calendarCreateDocumentFixture();
+      update.subtitle = create.subtitle;
+      update.blocks[0].status = 'confirm_required';
+      update.blocks[0].subtitle = update.subtitle;
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+
+      [create, update].forEach((doc: HtmlHomeDocument): void => {
+        const html = renderHtmlHomeDocument(doc);
+        expect(html.indexOf('等待确认')).assertLarger(-1);
+        expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+        expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
+      });
+    });
+
     it('does not show a write confirmation for a failed Calendar create', 0, () => {
       const doc = calendarCreateDocumentFixture();
       doc.subtitle = '缺少字段：title, start, end。固定写工具不会从 prompt 补全这些参数。';
