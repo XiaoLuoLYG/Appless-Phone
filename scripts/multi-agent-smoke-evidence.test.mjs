@@ -44,6 +44,8 @@ test('requires strict F16 provider cards and rejects ambiguous, leaked, and inco
   });
   [
     { ...connected, textValues: ['应用授权', '当前用户', '刷新'] },
+    { ...connected, textValues: [...connected.textValues, 'auth_config'] },
+    { ...connected, textValues: [...connected.textValues, 'provider rejected auth_config'] },
     { ...connected, textValues: [...connected.textValues, 'auth_config_github'] },
     { ...connected, textValues: [...connected.textValues, 'provider rejected auth_config_github'] },
     { ...connected, externalAuthJumps: f16ExternalReturns.map((jump, index) =>
