@@ -747,6 +747,9 @@ export default function actionAgentTest() {
 
       expect(result.status).assertEqual('error');
       expect(result.errorCode).assertEqual('ACTION_VIRTUAL_INTENT_UNAVAILABLE');
+      expect(result.surfaceId).assertEqual('virtual:unowned-virtual-request');
+      expect(result.planId).assertEqual('direct:virtual:unowned-virtual-request');
+      expect(result.runId).assertEqual('virtual:unowned-virtual-request');
       expect(executor.actionIds.length).assertEqual(0);
       agent.stop();
       observer.close();

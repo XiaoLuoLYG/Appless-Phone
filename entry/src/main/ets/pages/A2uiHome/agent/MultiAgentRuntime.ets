@@ -245,7 +245,7 @@ export class MultiAgentEvidenceFormatter {
       }
       case AgentMessageType.ACTION_RESULT: {
         const payload = message.payload as ActionResultPayload;
-        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + evidenceAllowed(payload.surfaceId, [], /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*)$/) +
+        return '[AIPhone][MultiAgentActionResult]' + identity + ' surface=' + this.surfaceEvidence(this.actionResultSurfaceId(payload)) +
           ' plan=' + this.token('p', payload.planId) + ' run=' + this.token('r', payload.runId) +
           ' status=' + evidenceAllowed(payload.status, ['success', 'error', 'canceled', 'paused']);
       }
@@ -253,11 +253,31 @@ export class MultiAgentEvidenceFormatter {
         const payload = message.payload as TurnResultPayload;
         return '[AIPhone][MultiAgentTurnResult]' + identity + ' status=' +
           evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error', 'canceled']) + ' surface=' +
-          (payload.surfaceId === undefined ? 'none' : evidenceAllowed(payload.surfaceId, [], /^loop_surface_[0-9]+(?:_[0-9]+)?$/)) + ' roundCount=' +
+          (payload.surfaceId === undefined ? 'none' : this.surfaceEvidence(payload.surfaceId)) + ' roundCount=' +
           payload.roundCount.toString() + ' messageChars=' + payload.message.length.toString();
       }
       default: return '';
     }
+  }
+
+  private actionResultSurfaceId(payload: ActionResultPayload): string {
+    if (payload.outputs !== undefined && payload.outputs.length > 0) {
+      const output = payload.outputs[payload.outputs.length - 1].output;
+      if (output !== null && typeof output === 'object' && !Array.isArray(output)) {
+        const surfaceId = (output as Record<string, Object | string | number | boolean | null | undefined>)['surfaceId'];
+        if (typeof surfaceId === 'string' && surfaceId.length > 0) {
+          return surfaceId;
+        }
+      }
+    }
+    return payload.surfaceId;
+  }
+
+  private surfaceEvidence(surfaceId: string): string {
+    if (surfaceId.startsWith('virtual:')) {
+      return 'virtual-' + this.token('v', surfaceId);
+    }
+    return evidenceAllowed(surfaceId, [], /^(?:loop_surface_[0-9]+(?:_[0-9]+)?|calendar-review:[1-9]\d*|surface_seed)$/);
   }
   dynamicDiscoveryLine(message: AgentMessage): string {
     if (message.type !== AgentMessageType.TASK_RESULT_DATA) return '';

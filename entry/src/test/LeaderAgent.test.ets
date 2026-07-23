@@ -3,6 +3,7 @@ import {
   AgentMessage,
   AgentMessageReader,
   AgentMessageType,
+  ActionResultPayload,
   ActionPlanRequestPayload,
   ConversationContext,
   CreateDataTaskPayload,
@@ -1463,6 +1464,113 @@ export default function leaderAgentTest() {
       expect(request.personaId).assertEqual('travel_companion');
       expect(request.inputText).assertEqual('我在北京');
       expect(request.virtual).assertTrue();
+      leader.stop();
+      observer.close();
+    });
+
+    it('closes a zero-Data virtual Action turn on its exact terminal result', 1000, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Remember the explicit user statement',
+        allowedActionIds: ['memory.update']
+      };
+      decision.requestedCapabilityIds = ['memory.update'];
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'memory.update', domain: 'persona', intent: 'memory.update', riskLevel: 'draft',
+        registeredBackends: ['local_adapter'], inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult', actions: ['memory.update']
+      });
+      context.runtimeOwnedToolIds = ['memory.update'];
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context, 10);
+      const observer = bus.openReader();
+      leader.start();
+      const input = inputMessage('conversation-virtual', 'turn-virtual', 'input-virtual', '我在北京');
+
+      bus.publish(input);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const request = await receive(observer);
+      expect(request.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      const payload: ActionResultPayload = {
+        surfaceId: 'virtual:' + request.taskId,
+        planId: 'direct:virtual:' + request.taskId,
+        runId: 'virtual:' + request.taskId,
+        status: 'success',
+        completedStepIds: ['step-1']
+      };
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: request.taskId,
+        payload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RESULT);
+      setTimeout(() => {
+        bus.publish(inputMessage('marker-conversation', 'marker-turn', 'marker-task', 'marker'));
+      }, 30);
+      expect((await receive(observer)).taskId).assertEqual('marker-task');
+
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects forged virtual Action terminals before closing the Leader turn', 1000, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Remember the explicit user statement',
+        allowedActionIds: ['memory.update']
+      };
+      decision.requestedCapabilityIds = ['memory.update'];
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'memory.update', domain: 'persona', intent: 'memory.update', riskLevel: 'draft',
+        registeredBackends: ['local_adapter'], inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult', actions: ['memory.update']
+      });
+      context.runtimeOwnedToolIds = ['memory.update'];
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context, 20);
+      const observer = bus.openReader();
+      leader.start();
+      const input = inputMessage('conversation-forged', 'turn-forged', 'input-forged', '我在北京');
+
+      bus.publish(input);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const request = await receive(observer);
+      expect(request.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      const forgedStatus = JSON.parse('{"surfaceId":"virtual:' + request.taskId +
+        '","planId":"direct:virtual:' + request.taskId +
+        '","runId":"virtual:' + request.taskId +
+        '","status":"unexpected","completedStepIds":["step-1"]}') as ActionResultPayload;
+      const forgedIdentity: ActionResultPayload = {
+        surfaceId: 'virtual:' + request.taskId + ':forged',
+        planId: 'direct:virtual:' + request.taskId,
+        runId: 'virtual:' + request.taskId,
+        status: 'success',
+        completedStepIds: ['step-1']
+      };
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: request.taskId,
+        payload: forgedStatus
+      });
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: request.taskId,
+        payload: forgedIdentity
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RESULT);
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.ACTION_RESULT);
+      const timeout = await receive(observer);
+      expect(timeout.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((timeout.payload as TaskErrorPayload).code).assertEqual('LEADER_TURN_TIMEOUT');
+
       leader.stop();
       observer.close();
     });

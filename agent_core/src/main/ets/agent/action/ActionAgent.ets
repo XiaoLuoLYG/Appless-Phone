@@ -801,8 +801,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       if (this.virtualResolver === null) {
         this.pendingPlanRequests.delete(key);
         this.rememberTerminalPlanRequest(key);
-        this.publishInputError(
-          message, '', '', '', 'ACTION_VIRTUAL_INTENT_UNAVAILABLE',
+        this.publishVirtualInputError(
+          message, 'ACTION_VIRTUAL_INTENT_UNAVAILABLE',
           'No virtual Action resolver owns this request.'
         );
         return;
@@ -854,8 +854,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       intent.autoRun !== true || !nonempty(intent.sourceToolId) ||
       intent.offer === null || typeof intent.offer !== 'object' || Array.isArray(intent.offer) ||
       stored.request.allowedActionIds.indexOf(intent.offer.actionId) < 0) {
-      this.publishInputError(
-        stored.message, '', '', '', 'ACTION_VIRTUAL_INTENT_INVALID',
+      this.publishVirtualInputError(
+        stored.message, 'ACTION_VIRTUAL_INTENT_INVALID',
         'Virtual Action resolver returned an invalid intent.'
       );
       return;
@@ -869,8 +869,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       offer = placed.length === 1 ? placed[0] : null;
     }
     if (offer === null) {
-      this.publishInputError(
-        stored.message, '', '', '', 'ACTION_VIRTUAL_INTENT_INVALID',
+      this.publishVirtualInputError(
+        stored.message, 'ACTION_VIRTUAL_INTENT_INVALID',
         'Virtual Action resolver returned an unauthorized offer.'
       );
       return;
@@ -1731,6 +1731,22 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       taskId: message.taskId,
       payload
     });
+  }
+
+  private publishVirtualInputError(
+    message: AgentMessage,
+    errorCode: string,
+    detail: string
+  ): void {
+    const virtualRunId = 'virtual:' + message.taskId;
+    this.publishInputError(
+      message,
+      'direct:' + virtualRunId,
+      virtualRunId,
+      virtualRunId,
+      errorCode,
+      detail
+    );
   }
 
   private publishProgress(

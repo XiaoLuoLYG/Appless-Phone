@@ -38,7 +38,7 @@ import {
 } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { ActionPlanRequestPayload } from '../action/ActionAgentTypes';
+import { ActionPlanRequestPayload, ActionResultPayload } from '../action/ActionAgentTypes';
 import {
   leaderIsActionCapability,
   leaderIsDataCapability
@@ -66,6 +66,7 @@ interface LeaderTurnState {
   uiDone: boolean;
   uiState: '' | 'result' | 'error';
   uiSurfaceId: string;
+  virtualActionTaskId: string;
   pendingAnswer: string | null;
   dataDone: boolean;
   terminal: boolean;
@@ -175,6 +176,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (message.type === AgentMessageType.ACTION_RESULT) {
+      this.handleVirtualActionResult(state, message);
       return;
     }
     if (message.type === AgentMessageType.TASK_ERROR && message.taskId === state.inputTaskId) {
@@ -265,6 +267,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       uiDone: false,
       uiState: '',
       uiSurfaceId: '',
+      virtualActionTaskId: '',
       pendingAnswer: null,
       dataDone: false,
       terminal: false,
@@ -553,6 +556,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
     }
     if (decision.actionIntent !== undefined && dataTaskIds.length === 0) {
+      state.virtualActionTaskId = uiTaskId;
       this.publishActionPlanRequest(
         message,
         decision,
@@ -1459,6 +1463,23 @@ export class LeaderAgent extends MessageDrivenAgent {
       taskId: uiTaskId,
       payload
     });
+  }
+
+  private handleVirtualActionResult(state: LeaderTurnState, message: AgentMessage): void {
+    if (state.virtualActionTaskId.length === 0 || message.taskId !== state.virtualActionTaskId) {
+      return;
+    }
+    const result: ActionResultPayload = message.payload as ActionResultPayload;
+    if (result === null || typeof result !== 'object' || Array.isArray(result) ||
+      (result.status !== 'success' && result.status !== 'error' && result.status !== 'canceled')) {
+      return;
+    }
+    const virtualRunId = 'virtual:' + state.virtualActionTaskId;
+    if (result.surfaceId !== virtualRunId || result.planId !== 'direct:' + virtualRunId ||
+      result.runId !== virtualRunId) {
+      return;
+    }
+    this.finishTurn(state);
   }
 
   private publishTurnResult(

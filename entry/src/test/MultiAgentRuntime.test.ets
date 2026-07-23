@@ -959,6 +959,28 @@ export default function multiAgentRuntimeTest() {
       expect(invalid.indexOf('surface=invalid')).assertLarger(-1);
     });
 
+    it('formats a virtual client Action terminal with its returned current surface', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
+      const payload: ActionResultPayload = {
+        surfaceId: 'virtual:input-1:round-1:virtual',
+        planId: 'direct:virtual:input-1:round-1:virtual',
+        runId: 'virtual:input-1:round-1:virtual',
+        status: 'success',
+        completedStepIds: ['step-1'],
+        outputs: [{
+          stepId: 'step-1',
+          output: JSON.parse('{"surfaceId":"surface_seed"}') as Object
+        }]
+      };
+      const line = formatter.line({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: 'conversation-virtual', turnId: 'turn-virtual', taskId: 'virtual-task', payload
+      });
+
+      expect(line.indexOf('surface=surface_seed')).assertLarger(-1);
+      expect(line.indexOf('surface=invalid')).assertEqual(-1);
+    });
+
     it('formats bounded opaque lifecycle evidence without raw identities or values', 0, () => {
       const formatter = new MultiAgentEvidenceFormatter(32);
       const inputPayload: InputUserPayload = {
