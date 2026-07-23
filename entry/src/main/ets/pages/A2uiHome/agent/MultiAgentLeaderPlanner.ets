@@ -232,6 +232,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       } else if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR) {
         correction = SKILL_CAPABILITY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       }
+      const actionOwnedRepair: boolean = error instanceof Error &&
+        error.message === ACTION_OWNED_DATA_TASK_ERROR;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
           error.message === UNBOUND_LATER_TOOL_ERROR);
@@ -241,7 +243,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         JSON.stringify(frozenScope.dataCapabilityIds) +
         '\nFrozen actionIntent-position capability IDs: ' +
         JSON.stringify(frozenScope.actionCapabilityIds);
-      correction += allowsTerminalExecutionDrop ?
+      correction += actionOwnedRepair ?
+        '\nAction-owned repair freeze: preserve personaId, skillId, requestedCapabilityIds, roundAction, answer, ' +
+          'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
+          'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
+          'Do not add, remove, reorder, or change any other field or capability.' :
+        allowsTerminalExecutionDrop ?
         '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
         '\nThe corrected decision must preserve all three frozen sets exactly and must not move a ' +
@@ -249,8 +256,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const repaired: string = await this.completeBounded(prompt + '\n' + correction);
       try {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
-        const actionOwnedRepair: boolean = error instanceof Error &&
-          error.message === ACTION_OWNED_DATA_TASK_ERROR;
         if (repairedScope === null || (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
           !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {

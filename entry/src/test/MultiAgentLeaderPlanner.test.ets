@@ -2404,6 +2404,33 @@ export default function multiAgentLeaderPlannerTest() {
       }
     });
 
+    it('gives Action ownership repair its one permitted Data-to-Action move', 0, async () => {
+      const model = new QueueLocalModel([
+        actionAsDataDecision('memory.update'),
+        actionDecision('memory.update')
+      ]);
+      await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '记住我的偏好' },
+        actionOwnerContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf(
+        'The corrected decision must preserve all three frozen sets exactly and must not move a ' +
+          'capability between Data and actionIntent positions.'
+      )).assertEqual(-1);
+      expect(model.prompts[1].indexOf(
+        'Action-owned repair freeze: preserve personaId, skillId, requestedCapabilityIds, roundAction, answer, ' +
+          'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly.'
+      )).assertLarger(-1);
+      expect(model.prompts[1].indexOf(
+        'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds.'
+      )).assertLarger(-1);
+    });
+
     it('rejects Action ownership repair that changes UI or moves multiple Action capabilities', 0,
       async () => {
       const changedUi: string = actionDecision('memory.update').replace(
