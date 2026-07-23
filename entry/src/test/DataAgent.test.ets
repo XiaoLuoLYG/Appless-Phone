@@ -580,6 +580,30 @@ export default function dataAgentTest() {
       observer.close();
     });
 
+    it('returns a primary provider error to Leader without requiring a model finish', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const providerError: DataResult = genericDataResult('maps.place.search', 'places');
+      providerError.status = 'error';
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([providerError]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'maps.place.search'),
+        decision('finish', '')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-primary-error', 'maps.place.search', 'places'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((terminal.payload as DataResult).status).assertEqual('error');
+      expect(executor.calls).assertEqual(1);
+      expect(planner.steps.join(',')).assertEqual('1');
+      agent.stop();
+      observer.close();
+    });
+
     it('rejects an attempted fourth read before invoking the executor', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SequenceDataExecutor = new SequenceDataExecutor([
@@ -595,9 +619,11 @@ export default function dataAgentTest() {
         return allowDataTask(task);
       }, executor, planner);
       const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage('data-step-limit', 'travel.search', 'travelOptions');
+      (task.payload as CreateDataTaskPayload).allowedToolIds = ['dynamic.search', 'travel.search'];
       agent.start();
 
-      bus.publish(dynamicDataTaskMessage('data-step-limit'));
+      bus.publish(task);
       const errorMessage: AgentMessage = await receiveType(observer, AgentMessageType.TASK_ERROR);
       const error: TaskErrorPayload = errorMessage.payload as TaskErrorPayload;
 
