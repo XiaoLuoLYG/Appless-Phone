@@ -490,6 +490,52 @@ export function dynamicToolDiscoveryEvidence(logText, options = {}) {
   };
 }
 
+const DYNAMIC_AUTH_CARD_TITLES = {
+  github_find_pull_requests: 'Composio GitHub 结果',
+  googledrive_find_file: 'Composio Google Drive 结果',
+  googledocs_search_documents: 'Composio Google Docs 结果'
+};
+
+export function dynamicAuthOutcomeAssessment({
+  discovery = null,
+  lifecycle = null,
+  expectedQualifiedName = '',
+  layoutText = ''
+} = {}) {
+  const failures = [];
+  const expectedCardTitle = DYNAMIC_AUTH_CARD_TITLES[expectedQualifiedName] || '';
+  if (expectedCardTitle.length === 0) failures.push('unsupported_dynamic_auth_case');
+  if (discovery === null || discovery.ok !== true) failures.push('uncorrelated_dynamic_discovery');
+  if (discovery?.selectedToolId !== 'dynamic.search') failures.push('wrong_selected_tool');
+  if (discovery?.provider !== 'composio') failures.push('wrong_provider');
+  if (discovery?.qualifiedName !== 'dynamic.search') failures.push('wrong_auth_qualified_name');
+  if (discovery?.status !== 'error' || discovery?.auth !== true || discovery?.source !== true) {
+    failures.push('not_truthful_auth_terminal');
+  }
+  if (discovery?.receipt !== 'absent' && discovery?.receipt !== 'matched') {
+    failures.push('invalid_receipt');
+  }
+  if (lifecycle === null || lifecycle.complete !== true || lifecycle.status !== 'error' ||
+    !Array.isArray(lifecycle.toolIds) || lifecycle.toolIds.length !== 1 ||
+    lifecycle.toolIds[0] !== 'dynamic.search') {
+    failures.push('invalid_auth_lifecycle');
+  }
+  const visibleText = String(layoutText || '');
+  if (expectedCardTitle.length > 0 && !visibleText.includes(expectedCardTitle)) {
+    failures.push('missing_provider_auth_card');
+  }
+  if (!/(?:Composio 未配置|尚未授权|未授权|需要授权|授权后|needs_auth|auth_required|待授权)/i.test(visibleText)) {
+    failures.push('missing_auth_ui_state');
+  }
+  const allowsCorrelatedDynamicAuth = failures.length === 0;
+  return {
+    allowsCorrelatedDynamicAuth,
+    ok: false,
+    status: allowsCorrelatedDynamicAuth ? 'BLOCKED' : 'FAIL',
+    failures
+  };
+}
+
 export function toolExecutionEvidence(logText, options = {}) {
   const expectedToolIds = Array.isArray(options.expectedToolIds) ?
     options.expectedToolIds.filter((toolId) => typeof toolId === 'string' && toolId.length > 0) : [];

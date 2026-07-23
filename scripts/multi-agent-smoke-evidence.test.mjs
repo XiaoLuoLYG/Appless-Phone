@@ -203,6 +203,110 @@ test('accepts only the exact F13 F14 F15 provider tool or a correlated auth stat
   ).ok, false);
 });
 
+function dynamicAuthLifecycle({
+  qualifiedName = 'dynamic.search',
+  status = 'error',
+  auth = true,
+  receipt = 'absent',
+  provider = 'composio',
+  source = true,
+  conversation = 'c1',
+  markerConversation = conversation
+} = {}) {
+  return [
+    `[AIPhone][MultiAgentInput] conversation=${conversation} turn=t1 task=input1`,
+    `[AIPhone][MultiAgentDataTask] conversation=${conversation} turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false`,
+    `[AIPhone][DynamicToolDiscovery] conversation=${markerConversation} turn=t1 task=d1 selectedToolId=dynamic.search provider=${provider} qualifiedName=${qualifiedName} status=${status} source=${source} auth=${auth} receipt=${receipt}`,
+    `[AIPhone][MultiAgentDataResult] conversation=${conversation} turn=t1 task=d1 tool=dynamic.search status=${status} sources=${source ? 1 : 0} error=${status === 'error'}`,
+    `[AIPhone][MultiAgentUiTask] conversation=${conversation} turn=t1 task=u1 dataTasks=d1`,
+    `[AIPhone][MultiAgentUiResult] conversation=${conversation} turn=t1 task=u1 surface=loop_surface_1 state=result`,
+    `[AIPhone][MultiAgentTurnResult] conversation=${conversation} turn=t1 task=input1 status=${status} surface=loop_surface_1 roundCount=1 messageChars=4`
+  ].join('\n');
+}
+
+test('accepts strict F13 F14 F15 current-turn Composio authorization as BLOCKED, never PASS', () => {
+  assert.equal(typeof smokeLifecycle.dynamicAuthOutcomeAssessment, 'function');
+  const cases = [
+    ['github_find_pull_requests', 'Composio GitHub 结果'],
+    ['googledrive_find_file', 'Composio Google Drive 结果'],
+    ['googledocs_search_documents', 'Composio Google Docs 结果']
+  ];
+  for (const [expectedQualifiedName, cardTitle] of cases) {
+    for (const receipt of ['absent', 'matched']) {
+      const logs = dynamicAuthLifecycle({ receipt });
+      const discovery = smokeLifecycle.dynamicToolDiscoveryEvidence(logs, {
+        expectedSelectedToolId: 'dynamic.search',
+        expectedProvider: 'composio',
+        expectedQualifiedName
+      });
+      const lifecycle = multiAgentTurnEvidence(logs, {
+        expectedToolIds: ['dynamic.search']
+      });
+      const assessment = smokeLifecycle.dynamicAuthOutcomeAssessment({
+        discovery,
+        lifecycle,
+        expectedQualifiedName,
+        layoutText: `${cardTitle}\n状态 needs_auth\nComposio 未配置，请完成授权后重试`
+      });
+      assert.equal(assessment.allowsCorrelatedDynamicAuth, true);
+      assert.equal(assessment.ok, false);
+      assert.equal(assessment.status, 'BLOCKED');
+      assert.deepEqual(assessment.failures, []);
+    }
+  }
+});
+
+test('rejects forged stale empty and success-copy-only dynamic authorization outcomes', () => {
+  assert.equal(typeof smokeLifecycle.dynamicAuthOutcomeAssessment, 'function');
+  const expectedQualifiedName = 'googledocs_search_documents';
+  const authUi = 'Composio Google Docs 结果\n状态 needs_auth\nGoogle Docs 尚未授权';
+  const assess = (logs, layoutText = authUi) => smokeLifecycle.dynamicAuthOutcomeAssessment({
+    discovery: smokeLifecycle.dynamicToolDiscoveryEvidence(logs, {
+      expectedSelectedToolId: 'dynamic.search',
+      expectedProvider: 'composio',
+      expectedQualifiedName
+    }),
+    lifecycle: multiAgentTurnEvidence(logs, {
+      expectedToolIds: ['dynamic.search']
+    }),
+    expectedQualifiedName,
+    layoutText
+  });
+  const rejected = [
+    dynamicAuthLifecycle({ markerConversation: 'old' }),
+    dynamicAuthLifecycle({ provider: 'github' }),
+    dynamicAuthLifecycle({ qualifiedName: 'invalid' }),
+    dynamicAuthLifecycle({ source: false }),
+    dynamicAuthLifecycle({ receipt: 'mismatch' }),
+    dynamicAuthLifecycle({
+      qualifiedName: expectedQualifiedName,
+      status: 'empty',
+      auth: false
+    })
+  ];
+  rejected.forEach((logs) => {
+    const assessment = assess(logs);
+    assert.equal(assessment.allowsCorrelatedDynamicAuth, false);
+    assert.equal(assessment.ok, false);
+    assert.equal(assessment.status, 'FAIL');
+  });
+  const successCopyOnly = assess(
+    dynamicAuthLifecycle(),
+    'Composio 工具结果\nComposio Google Docs 结果\nGOOGLEDOCS_SEARCH_DOCUMENTS\nAIPhoneDemo'
+  );
+  assert.equal(successCopyOnly.allowsCorrelatedDynamicAuth, false);
+  assert.equal(successCopyOnly.ok, false);
+  assert.equal(successCopyOnly.status, 'FAIL');
+});
+
+test('wires strict dynamic authorization into layout and terminal BLOCKED verdict without feature PASS', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  assert.match(source, /dynamicAuthOutcomeAssessment/);
+  assert.match(source, /allowsCorrelatedDynamicAuth/);
+  assert.match(source, /summary\.status\s*=\s*summary\.ok\s*\?\s*'PASS'\s*:\s*\(summary\.allowsCorrelatedDynamicAuth\s*\?\s*'BLOCKED'/);
+  assert.doesNotMatch(source, /summary\.ok\s*=\s*summary\.allowsCorrelatedDynamicAuth/);
+});
+
 test('deduplicates a real dual-channel DynamicToolDiscovery marker pair', () => {
   const paired = [
     '07-24 09:41:13.001 4821 4821 I A00000/AIPhone: [AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=success source=true auth=false receipt=matched',

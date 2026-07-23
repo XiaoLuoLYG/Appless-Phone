@@ -30,6 +30,7 @@ import {
   normalizeCalendarQaDate,
   runC19CleanupFinalizer,
   directTextVisibleEvidence,
+  dynamicAuthOutcomeAssessment,
   dynamicToolDiscoveryEvidence,
   mailThreadReadEvidence,
   modelTransportEvidence,
@@ -3068,8 +3069,17 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
   }
   const expectedHits = expectedMarkers.filter((marker) => evidenceText.includes(marker));
   const expectedMisses = expectedMarkers.filter((marker) => !evidenceText.includes(marker));
+  const dynamicAuthOutcome = dynamicAuthOutcomeAssessment({
+    discovery: summary.dynamicDiscovery,
+    lifecycle: summary.multiAgentLifecycle,
+    expectedQualifiedName: expectedDynamicQualifiedName,
+    layoutText: evidenceText
+  });
+  summary.dynamicAuthOutcome = dynamicAuthOutcome;
+  summary.allowsCorrelatedDynamicAuth = dynamicAuthOutcome.allowsCorrelatedDynamicAuth;
   const calendarMarkersOk = !isCalendarQuery(query) || expectedMisses.length === 0;
-  const composioCardMarkersOk = !isComposioCardQuery(query) || expectedMisses.length === 0;
+  const composioCardMarkersOk = summary.allowsCorrelatedDynamicAuth ||
+    !isComposioCardQuery(query) || expectedMisses.length === 0;
   const forbiddenSocialHubLegacyHits = forbiddenSocialHubLegacyMarkers.filter((marker) => evidenceText.includes(marker));
   const isSocialHubCase = isSocialHubExpectedToolId(expectedToolId);
   const socialHubVisibleOutput = isSocialHubCase && hasVisibleSocialHubOutput(evidenceText, expectedToolId);
@@ -3131,13 +3141,14 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
   const aggregateMediaMarkersOk = expectedToolId !== 'media.aggregate.search' || expectedMisses.length === 0;
   summary.layoutTextExposed = expectsDirectText ?
     summary.directTextVisible.ok :
-    (isSocialHubCase ?
-      socialHubVisibleOutput :
-      (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
-      calendarMarkersOk &&
-      composioCardMarkersOk &&
-      aggregateMediaMarkersOk &&
-      summary.gmailEccvKeywordVisible);
+    (summary.allowsCorrelatedDynamicAuth ||
+      (isSocialHubCase ?
+        socialHubVisibleOutput :
+        (worldCupVisibleOutput || expectedMarkers.length === 0 || expectedHits.length > 0) &&
+        calendarMarkersOk &&
+        composioCardMarkersOk &&
+        aggregateMediaMarkersOk &&
+        summary.gmailEccvKeywordVisible));
   if (expectedPersonaMemory === 'luckin_only') {
     summary.personaExpectedMemoryProof = hasLuckinMemoryEvidence(evidenceText);
     summary.layoutTextExposed = summary.layoutTextExposed && summary.personaExpectedMemoryProof;
@@ -3619,7 +3630,7 @@ for (let index = 0; index < queries.length; index += 1) {
       Array.isArray(summary.layoutScrolledFoundMarkers) &&
       summary.layoutScrolledRequiredMarkers.some((marker) => !summary.layoutScrolledFoundMarkers.includes(marker));
     const retryableFailure = summary.providerFailed || summary.modelFailed || missingScrolledMarkers;
-    if (summary.ok || !retryableFailure || attempt === queryRetryLimit) {
+    if (summary.ok || summary.allowsCorrelatedDynamicAuth || !retryableFailure || attempt === queryRetryLimit) {
       break;
     }
     console.warn(`retryable failure for query ${index + 1}, retrying attempt ${attempt + 2}/${queryRetryLimit + 1}`);
@@ -3627,7 +3638,8 @@ for (let index = 0; index < queries.length; index += 1) {
   if (summary === null) {
     throw new Error(`No summary produced for query: ${query}`);
   }
-  summary.status = summary.ok ? 'PASS' : (summary.providerFailed ? 'BLOCKED' : 'FAIL');
+  summary.status = summary.ok ? 'PASS' : (summary.allowsCorrelatedDynamicAuth ? 'BLOCKED' :
+    (summary.providerFailed ? 'BLOCKED' : 'FAIL'));
   summaries.push(summary);
   console.log(JSON.stringify(summary, null, 2));
   if (inferredCase.id === 'C19b') {
@@ -3698,6 +3710,9 @@ const finalAllowsPersonaMemoryUpdate = finalSummary !== null && finalSummary.per
 const finalAllowsExternalGmailWeb = isGmailWebQuery(finalQuery) &&
   finalSummary !== null &&
   finalSummary.gmailWebOpened === true;
+const finalAllowsCorrelatedDynamicAuth =
+  finalSummary !== null &&
+  finalSummary.allowsCorrelatedDynamicAuth === true;
 const finalAllowsSocialHubTruthfulState =
   finalSummary !== null &&
   isSocialHubExpectedToolId(finalSummary.expectedToolId) &&
@@ -3718,6 +3733,10 @@ const finalAllowsSourceFailure =
   (finalLayoutText.includes('来源状态') || finalLayoutText.includes('飞常准')) &&
   finalLayoutText.includes('耗时');
 const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {
+  if (finalAllowsCorrelatedDynamicAuth &&
+    (marker === '需要供应商配置' || marker === '需要配置：')) {
+    return false;
+  }
   if (finalAllowsPartialTravel && (marker === '需要供应商配置' || marker === '需要配置：')) {
     return false;
   }
@@ -3798,7 +3817,8 @@ if (finalExpectsDirectText && typeof finalSummary.logPath === 'string' &&
   }
 }
 const finalOutputPresent = finalExpectsDirectText ? finalDirectTextVisible.ok :
-  (finalAllowsSocialHubTruthfulState || finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate ||
+  (finalAllowsCorrelatedDynamicAuth || finalAllowsSocialHubTruthfulState ||
+    finalAllowsExternalGmailWeb || finalAllowsPersonaMemoryUpdate ||
     finalLayoutDomainHits.length > 0 ||
     (finalSummary !== null &&
       !isSocialHubExpectedToolId(finalSummary.expectedToolId) &&

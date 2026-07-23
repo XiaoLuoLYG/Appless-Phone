@@ -35,6 +35,12 @@ behavior was added or changed.
   `GOOGLEDOCS_SEARCH_DOCUMENTS`. A generic empty result cannot satisfy them.
 - A truthful authorization state may omit the selected provider operation only
   when the same correlated Composio result explicitly reports `needs_auth`.
+- The top-level F13/F14/F15 assessment combines that correlated trace with the
+  rendered provider-specific authorization card. Only this exact state may
+  bypass success-lifecycle and success-card requirements, and its scenario
+  verdict is always `BLOCKED` with `ok=false`, never feature `PASS`.
+- Stale or wrong correlation, provider, qualified name, source, or receipt;
+  ordinary empty output; and success-copy-only UI remain rejected.
 - Receipt evidence is `absent`, `matched`, or `mismatch`; mismatch fails.
   `DynamicToolDiscovery` participates in the existing dual-channel HiLog
   de-duplication.
@@ -57,7 +63,7 @@ Executable RED was captured before production edits:
 Final GREEN evidence:
 
 - `node --test scripts/multi-agent-smoke-evidence.test.mjs`
-  - 66 passed, 0 failed.
+  - 69 passed, 0 failed.
 - DevEco `hvigorw --mode module -p module=entry@default -p product=default test --no-daemon`
   - authoritative
     `entry/.test/default/intermediates/test/coverage_data/test_result.txt`:
@@ -78,6 +84,16 @@ Review repair RED was also captured before its production changes:
   `Tests run: 1269, Failure: 1, Error: 1, Pass: 1267, Ignore: 0`.
   The failure covered formatter auth/receipt fields; the error proved a thrown
   provider call still lacked a renderable dynamic result.
+
+Final assessment repair RED was captured before its production changes:
+
+- Node: 69 tests, 66 passed, 3 failed. The failures were exactly the missing
+  pure dynamic-auth assessment, hostile/empty/success-copy rejection, and
+  top-level smoke wiring.
+- The final GREEN keeps a strict correlated authorization outcome internally
+  consistent: real authorization UI is usable evidence, the provider outcome
+  is `BLOCKED`, `summary.ok` remains false, and the full regression remains
+  non-zero until the provider is actually authorized.
 
 ## Truth boundary
 
