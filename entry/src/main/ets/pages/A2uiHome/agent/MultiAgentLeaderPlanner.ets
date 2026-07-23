@@ -67,6 +67,7 @@ const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
+const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
@@ -109,6 +110,13 @@ const SKILL_CAPABILITY_REPAIR_INSTRUCTION: string =
   'unchanged. Choose an active skill only when that one skill declares every requested Data and Action ' +
   'capability in its toolIds. Otherwise set skillId to the empty string. Do not change, add, remove, or move ' +
   'any capability while correcting skillId. ' + FULL_DECISION_CONTRACT;
+const EXPLICIT_MAPS_SELECTION_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_EXPLICIT_MAPS_SELECTION. The user explicitly named Google Maps, Google Places, GMap, ' +
+  'or 谷歌地图, but the rejected decision substituted food.search. Ask no routing heuristic to choose for you: ' +
+  'make one new Leader decision that uses maps.place.search for that requested place search and does not use ' +
+  'food.search as its substitute. Preserve every unrelated requested Data or Action capability exactly. ' +
+  'You may change personaId, skillId, the mistaken place-search task, and uiIntent only as needed for this ' +
+  'correction. Do not add an unrelated capability. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
 const MAX_LEADER_PROMPT_CHARS: number = 100000;
@@ -211,6 +219,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       sameRoundConsumerTaskToolIds = leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks);
       this.rejectSkillCapabilityViolation(decision, context);
       this.rejectOverlappingVideoTools(decision);
+      this.rejectExplicitMapsSelection(input, decision);
       this.normalizeSameRoundDependency(
         decision,
         sameRoundProducerTaskToolIds,
@@ -237,6 +246,42 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         const failure: Error = error instanceof Error ? error :
           new Error('Leader decision failed strict validation.');
         throw failure;
+      }
+      if (error instanceof Error && error.message === EXPLICIT_MAPS_SELECTION_ERROR) {
+        const repaired: string = await this.completeBounded(
+          prompt + '\n' + EXPLICIT_MAPS_SELECTION_REPAIR_INSTRUCTION +
+            '\nRejected decision: ' + output
+        );
+        try {
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          if (rejectedDecision === null ||
+            !this.explicitMapsSelectionOnlyRepair(rejectedDecision, repairedDecision)) {
+            throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
+          }
+          this.rejectSkillCapabilityViolation(repairedDecision, context);
+          this.rejectOverlappingVideoTools(repairedDecision);
+          this.rejectExplicitMapsSelection(input, repairedDecision);
+          this.normalizeSameRoundDependency(
+            repairedDecision,
+            leaderSameRoundDependencyProducerTaskToolIds(repairedDecision.dataTasks),
+            leaderSameRoundDependencyConsumerTaskToolIds(repairedDecision.dataTasks)
+          );
+          this.rejectSameRoundDependency(repairedDecision);
+          this.rejectCompletedToolReuse(
+            repairedDecision,
+            this.currentTurnCompletedToolIds(message, input, context, round)
+          );
+          this.rejectUnboundLaterTool(
+            repairedDecision,
+            this.currentTurnDependencyObservations(message, input, round),
+            round
+          );
+          this.validateDecisionInputs(input, repairedDecision, currentLocalDate);
+          repairedDecision.normalizationCurrentLocalDate = currentLocalDate;
+          return repairedDecision;
+        } catch (_repairError) {
+          throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
+        }
       }
       const frozenScope: LeaderRepairScope | null = this.repairScope(output);
       if (frozenScope === null) {
@@ -738,6 +783,96 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (aggregate && youtubeOnly) {
       throw new Error(OVERLAPPING_VIDEO_TOOLS_ERROR);
     }
+  }
+
+  private rejectExplicitMapsSelection(
+    input: InputUserPayload,
+    decision: LeaderDecision
+  ): void {
+    if (decision.roundAction !== 'execute') {
+      return;
+    }
+    const text: string = input.text.trim().toLowerCase();
+    const explicitMaps: boolean = text.indexOf('google maps') >= 0 ||
+      text.indexOf('google places') >= 0 ||
+      text.indexOf('gmap') >= 0 ||
+      text.indexOf('谷歌地图') >= 0;
+    if (!explicitMaps) {
+      return;
+    }
+    let hasMapsSearch: boolean = false;
+    let hasFoodSearch: boolean = decision.requestedCapabilityIds.indexOf('food.search') >= 0;
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[index];
+      hasMapsSearch = hasMapsSearch ||
+        task.toolId === 'maps.place.search' ||
+        task.allowedToolIds.indexOf('maps.place.search') >= 0;
+      hasFoodSearch = hasFoodSearch ||
+        task.toolId === 'food.search' ||
+        task.allowedToolIds.indexOf('food.search') >= 0;
+    }
+    if (!hasMapsSearch && hasFoodSearch) {
+      throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
+    }
+  }
+
+  private explicitMapsSelectionOnlyRepair(
+    original: LeaderDecision,
+    repaired: LeaderDecision
+  ): boolean {
+    if (original.roundAction !== 'execute' || repaired.roundAction !== 'execute' ||
+      !this.sameActionIntent(original.actionIntent, repaired.actionIntent)) {
+      return false;
+    }
+    const originalOtherIds: string[] = original.requestedCapabilityIds.filter(
+      (toolId: string): boolean => toolId !== 'food.search' && toolId !== 'maps.place.search'
+    );
+    const repairedOtherIds: string[] = repaired.requestedCapabilityIds.filter(
+      (toolId: string): boolean => toolId !== 'food.search' && toolId !== 'maps.place.search'
+    );
+    if (!this.sameStringSet(originalOtherIds, repairedOtherIds) ||
+      repaired.requestedCapabilityIds.indexOf('maps.place.search') < 0 ||
+      repaired.requestedCapabilityIds.indexOf('food.search') >= 0) {
+      return false;
+    }
+    const originalOtherTasks: LeaderDecisionDataTask[] = original.dataTasks.filter(
+      (task: LeaderDecisionDataTask): boolean =>
+        task.toolId !== 'food.search' && task.toolId !== 'maps.place.search'
+    );
+    const repairedOtherTasks: LeaderDecisionDataTask[] = repaired.dataTasks.filter(
+      (task: LeaderDecisionDataTask): boolean =>
+        task.toolId !== 'food.search' && task.toolId !== 'maps.place.search'
+    );
+    if (originalOtherTasks.length !== repairedOtherTasks.length) {
+      return false;
+    }
+    let mapsTaskCount: number = 0;
+    for (let index = 0; index < repaired.dataTasks.length; index++) {
+      const task: LeaderDecisionDataTask = repaired.dataTasks[index];
+      if (task.toolId === 'food.search' || task.allowedToolIds.indexOf('food.search') >= 0) {
+        return false;
+      }
+      if (task.toolId === 'maps.place.search') {
+        mapsTaskCount++;
+        if (task.allowedToolIds.length !== 1 ||
+          task.allowedToolIds[0] !== 'maps.place.search') {
+          return false;
+        }
+      }
+    }
+    for (let index = 0; index < originalOtherTasks.length; index++) {
+      const first: LeaderDecisionDataTask = originalOtherTasks[index];
+      const second: LeaderDecisionDataTask = repairedOtherTasks[index];
+      if (first.localId !== second.localId ||
+        first.goal !== second.goal ||
+        first.toolId !== second.toolId ||
+        first.required !== second.required ||
+        !this.sameStrings(first.allowedToolIds, second.allowedToolIds) ||
+        !this.sameJsonValue(first.input, second.input)) {
+        return false;
+      }
+    }
+    return mapsTaskCount === 1;
   }
 
   private rejectSameRoundDependency(decision: LeaderDecision): void {

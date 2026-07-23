@@ -109,6 +109,20 @@ const FOOD_COFFEE_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"input":{"query":"咖啡"},"required":true}],"uiIntent":{' +
   '"purpose":"展示咖啡选择","preferredDensity":"comfortable",' +
   '"requiredSections":["food"]}}';
+const EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
+  '"roundAction":"execute","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
+  '"allowedToolIds":["food.search"],"toolId":"food.search",' +
+  '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
+  '"requiredSections":["places"]}}';
+const EXPLICIT_GOOGLE_MAPS_DECISION: string =
+  '{"personaId":"travel_companion","skillId":"","requestedCapabilityIds":["maps.place.search"],' +
+  '"roundAction":"execute","dataTasks":[{"localId":"places","goal":"在 Google Maps 搜索附近中餐",' +
+  '"allowedToolIds":["maps.place.search"],"toolId":"maps.place.search",' +
+  '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
+  '"requiredSections":["places"]}}';
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
@@ -1340,6 +1354,53 @@ export default function multiAgentLeaderPlannerTest() {
       expect(luckinOrder.dataTasks.length).assertEqual(0);
       expect(luckinOrder.actionIntent!.allowedActionIds.join(',')).assertEqual('luckin.order.preview');
       expect(model.prompts[0].indexOf('C10/C11 selection contract:')).assertLarger(-1);
+    });
+
+    it('asks the Leader model once to correct an explicit Google Maps selection without host rewriting', 0,
+      async () => {
+      const model = new QueueLocalModel([
+        EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION,
+        EXPLICIT_GOOGLE_MAPS_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '请用 Google Maps 查伦敦国王十字车站附近的中餐' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+      expect(decision.dataTasks[0].allowedToolIds.join(',')).assertEqual('maps.place.search');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('LEADER_EXPLICIT_MAPS_SELECTION') >= 0).assertTrue();
+      expect(model.prompts[1].indexOf(EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION) >= 0).assertTrue();
+    });
+
+    it('fails closed when the one explicit Google Maps correction is still food search', 0, async () => {
+      const model = new QueueLocalModel([
+        EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION,
+        EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION,
+        EXPLICIT_GOOGLE_MAPS_DECISION
+      ]);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '请用谷歌地图查伦敦国王十字车站附近的中餐' },
+          planningContext(),
+          1,
+          (): boolean => true
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_EXPLICIT_MAPS_SELECTION');
+      expect(model.prompts.length).assertEqual(2);
     });
 
     it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
