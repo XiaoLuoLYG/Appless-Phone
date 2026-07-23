@@ -63,6 +63,24 @@ test('returns from each F16 external authorization page with bounded Back naviga
   assert.doesNotMatch(externalLoop, /aa', 'start', '-a', 'EntryAbility', '-b', 'com\.example\.aiphonedemo/);
 });
 
+test('stops F16 external collection after a failed return before inspecting another app', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const authSmoke = source.slice(source.indexOf('async function runComposioAuthSmoke'), source.indexOf('console.log(`cleanData:'));
+  const externalLoop = authSmoke.slice(authSmoke.indexOf('for (let index = 0; index < externalApps.length'), authSmoke.indexOf("const screenPath = captureScreen"));
+  assert.match(externalLoop, /returned: restoredForeground\.bundleName === 'com\.example\.aiphonedemo'/);
+  assert.match(externalLoop, /if \(!externalAuthJumps\.at\(-1\)\.returned\) \{\s*break;/);
+});
+
+test('gives only C20 a bounded ordinary multi-agent capture settlement window', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const captureWhile = source.slice(source.indexOf('async function captureWhile'), source.indexOf('async function verifyMailExpandedBody'));
+  const runQuery = source.slice(source.indexOf('async function runQuery'), source.indexOf('  const safeLogText'));
+  assert.match(runQuery, /postCompletionWaitMs: expectedCase\.id === 'C20' \? \d+ : 0/);
+  assert.match(captureWhile, /const completionSettleMs = lifecycleOptions !== null/);
+  assert.match(captureWhile, /const completionSettled = done && Date\.now\(\) - doneAt >= completionSettleMs/);
+  assert.match(captureWhile, /customCompletion === null && completionSettled/);
+});
+
 function listedCases(args = [], env = {}) {
   const result = spawnSync(process.execPath, [
     'scripts/aiphone-device-smoke.mjs',

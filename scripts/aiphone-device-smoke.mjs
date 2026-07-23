@@ -1344,10 +1344,12 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
         hotelActionEvidencePopulated ||
         (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
-      const customSettleMs = lifecycleOptions !== null &&
+      const completionSettleMs = lifecycleOptions !== null &&
         Number.isFinite(lifecycleOptions.postCompletionWaitMs) ?
-        Math.max(0, lifecycleOptions.postCompletionWaitMs) : 500;
-      if (customCompletion !== null && done && Date.now() - doneAt >= customSettleMs) {
+        Math.max(0, lifecycleOptions.postCompletionWaitMs) :
+        (customCompletion !== null ? 500 : 0);
+      const completionSettled = done && Date.now() - doneAt >= completionSettleMs;
+      if (customCompletion !== null && completionSettled) {
         break;
       }
       if (customCompletion !== null && !done && lifecycleOptions.idleActionTimeoutMs > 0 &&
@@ -1355,7 +1357,7 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
         !/\[AIPhone\]\[MultiAgentActionRun\][^\n]*action=(?:mail|gmail)\.thread\.read\b/.test(text)) {
         break;
       }
-      if (customCompletion === null && done && (!hotelRuntimeRequested || hotelUiReady) &&
+      if (customCompletion === null && completionSettled && (!hotelRuntimeRequested || hotelUiReady) &&
         (hasQueryHtmlDocument || Date.now() - doneAt > 3000)) {
         break;
       }
@@ -2917,7 +2919,12 @@ async function runQuery(query, index, expectedTool) {
       }
     }
     hdc(['shell', 'uitest', 'uiInput', 'click', String(submitControls.generate.x), String(submitControls.generate.y)]);
-  }, { expectedToolIds, minimumDataRounds, expectedDependencies });
+  }, {
+    expectedToolIds,
+    minimumDataRounds,
+    expectedDependencies,
+    postCompletionWaitMs: expectedCase.id === 'C20' ? 3000 : 0
+  });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
   const safeLogs = safeLogText.split('\n');
   const logPath = join(outDir, `query-${index + 1}.log`);
@@ -3386,6 +3393,9 @@ async function runComposioAuthSmoke() {
         backPressCount,
         returnAbilityPath: restoredForeground.path
       });
+      if (!externalAuthJumps.at(-1).returned) {
+        break;
+      }
     } else {
       externalAuthJumps.push({
         app: app.name,
