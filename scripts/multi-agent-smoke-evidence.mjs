@@ -551,7 +551,8 @@ function optionMismatch(item, options, expectedSurface) {
     (expectedSurface && item.fields.surface !== expectedSurface) ||
     (options.expectedSourceToolId && item.fields.source !== options.expectedSourceToolId) ||
     (options.expectedConversationId && item.fields.conversation !== options.expectedConversationId) ||
-    (options.expectedTurnId && item.fields.turn !== options.expectedTurnId)
+    (options.expectedTurnId && item.fields.turn !== options.expectedTurnId) ||
+    (options.originTurnId && item.fields.turn === options.originTurnId)
   );
 }
 
@@ -562,6 +563,9 @@ export function multiAgentActionEvidence(logText, options = {}) {
     (!options.expectedActionId || item.fields.action === options.expectedActionId));
   if (actionRuns.some((item) => optionMismatch(item, options, expectedSurface))) {
     return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['stale_action_run'] };
+  }
+  if (actionRuns.length > 1) {
+    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['duplicate_action_run'] };
   }
   for (let index = actionRuns.length - 1; index >= 0; index--) {
     const run = actionRuns[index];
@@ -642,6 +646,7 @@ export function mailThreadReadEvidence(logText, options = {}) {
     currentSurfaceId: options.currentSurfaceId,
     expectedConversationId: options.expectedConversationId,
     expectedTurnId: options.expectedTurnId,
+    originTurnId: options.originTurnId,
     expectedVirtual: false
   });
   const failed = (reason) => ({

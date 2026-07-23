@@ -789,6 +789,65 @@ test('correlates an exact mail read action through one Data and in-place Ui term
   ).complete, false);
 });
 
+test('accepts a page action on a new turn and rejects reuse of the query turn', () => {
+  const logs = `
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t6 task=k7 surface=loop_surface_1784768562643 plan=p8 run=r9 action=mail.thread.read source=mail.search provider=qq identity=d08b260c
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t10 task=k11 dataTasks=k12
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t10 task=k12 round=invalid tool=mail.thread.read predecessor=none path=none target=none binding=false provider=qq identity=d08b260c
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t6 task=k7 surface=loop_surface_1784768562643 plan=p8 run=r9 status=success
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t10 task=k11 surface=loop_surface_1784768591244 state=skeleton
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t10 task=k12 tool=mail.thread.read status=success sources=1 error=false provider=qq identity=d08b260c
+    [AIPhone][MailDetailInPlace] requestKeyChars=7 provider=qq identity=d08b260c status=success bodyChars=412
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t10 task=k11 surface=loop_surface_1784768591244 state=result
+  `;
+  const options = {
+    expectedActionId: 'mail.thread.read',
+    expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 'loop_surface_1784768562643',
+    expectedConversationId: 'c1',
+    originTurnId: 't2'
+  };
+
+  assert.equal(mailThreadReadEvidence(logs, options).ok, true);
+  assert.equal(mailThreadReadEvidence(
+    logs.replaceAll('turn=t6', 'turn=t2'),
+    options
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs.replaceAll('conversation=c1', 'conversation=stale'),
+    options
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs.replace('surface=loop_surface_1784768562643', 'surface=stale'),
+    options
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs.replace('source=mail.search', 'source=stale.search'),
+    options
+  ).complete, false);
+  assert.equal(mailThreadReadEvidence(
+    logs + '\n[AIPhone][MultiAgentUiResult] conversation=c1 turn=t10 task=k11 surface=loop_surface_1784768591244 state=result',
+    options
+  ).complete, false);
+});
+
+test('rejects duplicate direct ActionRun chains on the current surface', () => {
+  const logs = `
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t6 task=k7 surface=s1 plan=p8 run=r9 action=mail.thread.read source=mail.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t6 task=k7 surface=s1 plan=p8 run=r9 status=success
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t7 task=k8 surface=s1 plan=p9 run=r10 action=mail.thread.read source=mail.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t7 task=k8 surface=s1 plan=p9 run=r10 status=success
+  `;
+  assert.equal(multiAgentActionEvidence(logs, {
+    expectedActionId: 'mail.thread.read',
+    expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 's1',
+    expectedConversationId: 'c1',
+    originTurnId: 't2',
+    expectedVirtual: false
+  }).complete, false);
+});
+
 test('does not treat the mail loading skeleton as a visible body', () => {
   assert.equal(visibleMailBodyText('发件人\n主题\n正在加载邮件正文\n回复'), false);
   assert.equal(visibleMailBodyText('Alice\nalice@example.com 发给 我\n这是供应商返回的真实完整正文\n回复'), true);
