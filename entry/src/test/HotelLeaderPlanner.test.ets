@@ -334,6 +334,41 @@ export default function hotelLeaderPlannerTest() {
       }
     });
 
+    it('rejects every semantic field mutation when originQuery exactly matches the user text', 0,
+      async () => {
+        const mutations: string[] = [
+          C20_SEARCH_JSON.replace('"place":"深圳科技园"', '"place":"曼谷"'),
+          C20_SEARCH_JSON.replace('"placeType":"POI"', '"placeType":"CITY"'),
+          C20_SEARCH_JSON.replace('"countryCode":"CN"', '"countryCode":"TH"'),
+          C20_SEARCH_JSON.replace('"checkInDate":"2026-08-08"', '"checkInDate":"2026-08-09"'),
+          C20_SEARCH_JSON.replace('"stayNights":2', '"stayNights":3'),
+          C20_SEARCH_JSON.replace('"adultCount":2', '"adultCount":3'),
+          C20_SEARCH_JSON
+            .replace('"childCount":0', '"childCount":1')
+            .replace('"childAgeDetails":[]', '"childAgeDetails":[5]'),
+          C20_SEARCH_JSON.replace('"roomCount":1', '"roomCount":2')
+        ];
+
+        for (let index = 0; index < mutations.length; index++) {
+          expect(await rejected(C20_MODEL_QUERY, mutations[index])).assertTrue();
+        }
+      });
+
+    it('rejects exact-query city country date and stay mutations on the direct search form', 0,
+      async () => {
+        const mutations: string[] = [
+          SEARCH_JSON.replace('"place":"深圳"', '"place":"曼谷"'),
+          SEARCH_JSON.replace('"placeType":"CITY"', '"placeType":"POI"'),
+          SEARCH_JSON.replace('"countryCode":"CN"', '"countryCode":"TH"'),
+          SEARCH_JSON.replace('"checkInDate":"2026-08-15"', '"checkInDate":"2026-08-16"'),
+          SEARCH_JSON.replace('"stayNights":2', '"stayNights":3')
+        ];
+
+        for (let index = 0; index < mutations.length; index++) {
+          expect(await rejected('8月15日深圳住两晚的酒店', mutations[index])).assertTrue();
+        }
+      });
+
     it('rejects missing fields malformed multiple unknown and booking output', 0, async () => {
       const missingPlace = SEARCH_JSON.replace('"place":"深圳",', '');
       const unknown = SEARCH_JSON.substring(0, SEARCH_JSON.length - 1) + ',"toolId":"hotel.unknown"}';

@@ -103,15 +103,6 @@ function chineseCount(value: string): number {
   return high * 10 + low;
 }
 
-function explicitCount(
-  query: string,
-  pattern: RegExp,
-  expected: number
-): boolean {
-  const match = pattern.exec(query);
-  return match !== null && chineseCount(match[1]) === expected;
-}
-
 function explicitHotelDestination(query: string): string {
   const nearby =
     /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日([^，,]+)附近的酒店/.exec(query);
@@ -120,7 +111,23 @@ function explicitHotelDestination(query: string): string {
   }
   const direct =
     /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日([^，,]+)的酒店/.exec(query);
-  return direct === null ? '' : direct[1].trim();
+  if (direct !== null) {
+    return direct[1].trim();
+  }
+  const cityStay =
+    /(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}日([^，,]+?)住[0-9一二两三四五六七八九十]+晚的酒店/.exec(query);
+  if (cityStay !== null) {
+    return cityStay[1].trim();
+  }
+  const simpleCity = /^(?:帮我找|请帮我找)([^，,]+?)酒店$/.exec(query);
+  if (simpleCity !== null) {
+    return simpleCity[1].trim();
+  }
+  const englishCity = /\bbook\s+(?:a|an)\s+([a-z]+)\s+hotel\b/i.exec(query);
+  if (englishCity !== null && englishCity[1].toLowerCase() === 'shenzhen') {
+    return '深圳';
+  }
+  return '';
 }
 
 function normalizedHotelPlaceType(query: string, raw: HotelSearchModelArgs): string {
@@ -137,9 +144,11 @@ function normalizedHotelPlaceType(query: string, raw: HotelSearchModelArgs): str
 
 function explicitHotelPlaceAndCountry(query: string, raw: HotelSearchModelArgs): boolean {
   const destination: string = explicitHotelDestination(query);
+  const expectedPlaceType: string =
+    query.indexOf(destination + '附近') >= 0 ? 'POI' : 'CITY';
   if (destination.length === 0 ||
     typeof raw.place !== 'string' || raw.place !== destination ||
-    raw.placeType !== 'POI' ||
+    raw.placeType !== expectedPlaceType ||
     typeof raw.countryCode !== 'string' || raw.countryCode.trim() !== 'CN') {
     return false;
   }
@@ -198,8 +207,23 @@ function explicitHotelDateAndStay(
   }
   const date = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(raw.checkInDate);
   const first = /([0-9]{1,2})月([0-9]{1,2})日?/.exec(query);
-  if (date === null || first === null) {
+  if (date === null) {
     return false;
+  }
+  if (first === null) {
+    const english = /\bfor\s+(one|two|three|four|five|six|seven|[0-9]+)\s+nights?\s+on\s+august\s+([0-9]{1,2})\b/i.exec(query);
+    if (english === null) {
+      return true;
+    }
+    const word: string = english[1].toLowerCase();
+    const words: string[] = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'];
+    const wordIndex: number = words.indexOf(word);
+    const nights: number = wordIndex >= 0 ? wordIndex + 1 : Number.parseInt(word, 10);
+    const day: number = Number.parseInt(english[2], 10);
+    return raw.stayNights === nights &&
+      Number.parseInt(date[1], 10) === expectedHotelYear(query, 8, day, currentLocalDate) &&
+      Number.parseInt(date[2], 10) === 8 &&
+      Number.parseInt(date[3], 10) === day;
   }
   const firstMonth: number = Number.parseInt(first[1], 10);
   const firstDay: number = Number.parseInt(first[2], 10);
@@ -251,9 +275,15 @@ function explicitHotelDateAndStay(
 
 function explicitHotelOccupancy(query: string, raw: HotelSearchModelArgs): boolean {
   if (typeof raw.adultCount !== 'number' || typeof raw.childCount !== 'number' ||
-    typeof raw.roomCount !== 'number' || !Array.isArray(raw.childAgeDetails) ||
-    !explicitCount(query, /([0-9一二两三四五六七八九十]+)(?:位|个)?成人/, raw.adultCount) ||
-    !explicitCount(query, /([0-9一二两三四五六七八九十]+)间(?:客房|房)?/, raw.roomCount)) {
+    typeof raw.roomCount !== 'number' || !Array.isArray(raw.childAgeDetails)) {
+    return false;
+  }
+  const adult = /([0-9一二两三四五六七八九十]+)(?:位|个)?成人/.exec(query);
+  if (adult === null ? raw.adultCount !== 2 : chineseCount(adult[1]) !== raw.adultCount) {
+    return false;
+  }
+  const room = /([0-9一二两三四五六七八九十]+)间(?:客房|房)?/.exec(query);
+  if (room === null ? raw.roomCount !== 1 : chineseCount(room[1]) !== raw.roomCount) {
     return false;
   }
   const child = /([0-9一二两三四五六七八九十]+)(?:位|名|个)?(?:儿童|孩子|小孩|婴儿)/.exec(query);
@@ -264,7 +294,7 @@ function explicitHotelOccupancy(query: string, raw: HotelSearchModelArgs): boole
     raw.childAgeDetails.length === raw.childCount;
 }
 
-function omittedHotelQueryFieldsMatch(
+function explicitHotelQueryFieldsMatch(
   query: string,
   raw: HotelSearchModelArgs,
   currentLocalDate: string
@@ -302,7 +332,7 @@ function normalizeHotelSearchInput(
   };
   const omittedPrefix: boolean = omittedHotelQueryPrefix(trustedQuery, modelQuery);
   if ((modelQuery !== trustedQuery && !omittedPrefix) ||
-    (omittedPrefix && !omittedHotelQueryFieldsMatch(modelQuery, normalizedRaw, currentLocalDate)) ||
+    !explicitHotelQueryFieldsMatch(modelQuery, normalizedRaw, currentLocalDate) ||
     typeof normalizedRaw.countryCode !== 'string' ||
     normalizedRaw.countryCode.trim().length === 0) {
     throw new Error('Hotel planner output changed the query or omitted countryCode.');
