@@ -16,9 +16,11 @@ import {
   LocalModel,
   MAX_LEADER_DATA_TASKS_PER_ROUND,
   ObservationDigest,
-  ToolDefinition,
-  dataAgentToolDefinitions,
+  leaderActionCapabilityIds,
+  leaderDataCapabilityIds,
   leaderInputHasEntityAuthority,
+  leaderIsActionCapability,
+  leaderIsDataCapability,
   leaderSameRoundDependencyProducerToolIds,
   leaderTasksHaveSameRoundDependency
 } from '@loop/agent-core';
@@ -61,6 +63,8 @@ const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
+const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
+const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -85,6 +89,13 @@ const TASK_INPUT_REPAIR_INSTRUCTION: string =
   'registered input shape. Keep personaId, skillId, requestedCapabilityIds, roundAction, each Data task localId, ' +
   'goal, allowedToolIds, toolId and required value, uiIntent, actionIntent, answer, and Data task order exactly ' +
   'unchanged. The only permitted difference is inside dataTasks[].input. ' + FULL_DECISION_CONTRACT;
+const ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_ACTION_OWNED_DATA_TASK. An Action-owned capability was placed in dataTasks. ' +
+  'Keep the same requested capability and current-user intent. Remove Action-owned IDs from dataTasks and put ' +
+  'them in actionIntent.allowedActionIds. If the Action requires a real ID, add only the necessary independent ' +
+  'Data-owned read task and use its real result in a later planning round; never invent an ID or replace the ' +
+  'requested capability. The Host validates ownership but does not rewrite planning semantics. ' +
+  FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
 const MAX_LEADER_PROMPT_CHARS: number = 100000;
@@ -117,9 +128,15 @@ interface JsonContainerFrame {
   keys: Set<string>;
 }
 
+interface LeaderRepairScope {
+  requestedCapabilityIds: string[];
+  dataCapabilityIds: string[];
+  actionCapabilityIds: string[];
+  roundAction: LeaderRoundAction;
+}
+
 export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private readonly model: LocalModel;
-  private readonly dataToolIds: Set<string>;
   private readonly currentLocalDate: HotelLocalDateProvider;
   private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
 
@@ -135,10 +152,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const day: string = now.getDate().toString().padStart(2, '0');
       return now.getFullYear().toString() + '-' + month + '-' + day;
     } : currentLocalDate;
-    this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
-      (definition: ToolDefinition): string => definition.toolId
-    ));
-    this.dataToolIds.add('dynamic.search');
     this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
       null : dataTaskInputNormalizer;
   }
@@ -148,12 +161,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     input: InputUserPayload,
     context: LeaderPlanningContext,
     round: number = 1,
-    signal?: LeaderPlanningSignal
+    signal?: LeaderPlanningSignal,
+    trustedCurrentLocalDate?: string
   ): Promise<LeaderDecision> {
     if (!Number.isInteger(round) || round < 1 || round > 3) {
       throw new Error('LEADER_ROUND_LIMIT');
     }
-    const prompt: string = this.prompt(message, input, context, round);
+    const currentLocalDate: string = trustedCurrentLocalDate === undefined ?
+      this.currentLocalDate() : trustedCurrentLocalDate;
+    const prompt: string = this.prompt(message, input, context, round, currentLocalDate);
     const output: string = await this.completeBounded(prompt);
     let sameRoundProducerToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
@@ -165,19 +181,26 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
         decision,
-        this.currentTurnCompletedToolIds(message, input, round)
+        this.currentTurnCompletedToolIds(message, input, context, round)
       );
       this.rejectUnboundLaterTool(
         decision,
         this.currentTurnDependencyObservations(message, input, round),
         round
       );
-      this.validateDecisionInputs(input, decision);
+      this.validateDecisionInputs(input, decision, currentLocalDate);
+      decision.normalizationCurrentLocalDate = currentLocalDate;
       return decision;
     } catch (error) {
       if (signal === undefined || !signal()) {
         const failure: Error = error instanceof Error ? error :
           new Error('Leader decision failed strict validation.');
+        throw failure;
+      }
+      const frozenScope: LeaderRepairScope | null = this.repairScope(output);
+      if (frozenScope === null) {
+        const failure: Error = error instanceof Error ? error :
+          new Error(REPAIR_SCOPE_INVALID_ERROR);
         throw failure;
       }
       let correction: string = REPAIR_INSTRUCTION;
@@ -191,9 +214,30 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
         correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
+      } else if (error instanceof Error && error.message === ACTION_OWNED_DATA_TASK_ERROR) {
+        correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION;
       }
+      const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
+        (error.message === COMPLETED_TOOL_REUSE_ERROR ||
+          error.message === UNBOUND_LATER_TOOL_ERROR);
+      correction += '\nFrozen requestedCapabilityIds: ' +
+        JSON.stringify(frozenScope.requestedCapabilityIds) +
+        '\nFrozen Data-position capability IDs: ' +
+        JSON.stringify(frozenScope.dataCapabilityIds) +
+        '\nFrozen actionIntent-position capability IDs: ' +
+        JSON.stringify(frozenScope.actionCapabilityIds);
+      correction += allowsTerminalExecutionDrop ?
+        '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
+          'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
+        '\nThe corrected decision must preserve all three frozen sets exactly and must not move a ' +
+          'capability between Data and actionIntent positions.';
       const repaired: string = await this.completeBounded(prompt + '\n' + correction);
       try {
+        const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
+        if (repairedScope === null ||
+          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop)) {
+          throw new Error(REPAIR_SCOPE_INVALID_ERROR);
+        }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
         if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR &&
           (rejectedDecision === null || !this.inputOnlyRepair(rejectedDecision, repairedDecision))) {
@@ -207,13 +251,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.rejectSameRoundDependency(repairedDecision);
         this.rejectCompletedToolReuse(
           repairedDecision,
-          this.currentTurnCompletedToolIds(message, input, round)
+          this.currentTurnCompletedToolIds(message, input, context, round)
         );
         this.rejectUnboundLaterTool(
           repairedDecision,
           this.currentTurnDependencyObservations(message, input, round),
           round
         );
+        this.validateDecisionInputs(input, repairedDecision, currentLocalDate);
+        repairedDecision.normalizationCurrentLocalDate = currentLocalDate;
         return repairedDecision;
       } catch (repairError) {
         if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
@@ -226,14 +272,18 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private validateDecisionInputs(input: InputUserPayload, decision: LeaderDecision): void {
+  private validateDecisionInputs(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    currentLocalDate: string
+  ): void {
     const normalizer: LeaderDataTaskInputNormalizer | null = this.dataTaskInputNormalizer;
     if (normalizer === null) {
       return;
     }
     try {
       for (let index = 0; index < decision.dataTasks.length; index++) {
-        normalizer(input, decision.dataTasks[index]);
+        normalizer(input, decision.dataTasks[index], currentLocalDate);
       }
     } catch (_error) {
       throw new Error(TASK_INPUT_INVALID_ERROR);
@@ -288,6 +338,149 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
     }
     return true;
+  }
+
+  private sameRepairScope(
+    original: LeaderRepairScope,
+    repaired: LeaderRepairScope,
+    allowsTerminalExecutionDrop: boolean
+  ): boolean {
+    if (!this.sameStringSet(
+      original.requestedCapabilityIds,
+      repaired.requestedCapabilityIds
+    )) {
+      return false;
+    }
+    if (this.sameStringSet(
+      original.dataCapabilityIds,
+      repaired.dataCapabilityIds
+    ) && this.sameStringSet(
+      original.actionCapabilityIds,
+      repaired.actionCapabilityIds
+    )) {
+      return true;
+    }
+    return allowsTerminalExecutionDrop &&
+      (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
+      repaired.dataCapabilityIds.length === 0 &&
+      repaired.actionCapabilityIds.length === 0;
+  }
+
+  private sameStringSet(original: string[], repaired: string[]): boolean {
+    if (original.length !== repaired.length) {
+      return false;
+    }
+    for (let index = 0; index < original.length; index++) {
+      if (repaired.indexOf(original[index]) < 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private repairScope(output: string): LeaderRepairScope | null {
+    const raw: Record<string, Object | string | number | boolean | null | undefined> | null =
+      this.rawDecisionObject(output);
+    if (raw === null) {
+      return null;
+    }
+    const requested: string[] | null = this.scopeStrings(raw['requestedCapabilityIds']);
+    const rawTasks = raw['dataTasks'];
+    const rawRoundAction = raw['roundAction'];
+    if (requested === null || !Array.isArray(rawTasks) ||
+      typeof rawRoundAction !== 'string' ||
+      !this.validRoundAction(rawRoundAction)) {
+      return null;
+    }
+    const dataIds: string[] = [];
+    const actionIds: string[] = [];
+    const tasks: Object[] = rawTasks as Object[];
+    for (let taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+      const rawTask: Object = tasks[taskIndex];
+      if (rawTask === null || typeof rawTask !== 'object' || Array.isArray(rawTask)) {
+        return null;
+      }
+      const task = rawTask as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const toolId = task['toolId'];
+      const allowed: string[] | null = this.scopeStrings(task['allowedToolIds']);
+      if (typeof toolId !== 'string' || toolId.trim().length === 0 || allowed === null) {
+        return null;
+      }
+      this.rememberScopeId(toolId, dataIds);
+      for (let allowedIndex = 0; allowedIndex < allowed.length; allowedIndex++) {
+        this.rememberScopeId(allowed[allowedIndex], dataIds);
+      }
+    }
+    const rawAction = raw['actionIntent'];
+    if (rawAction !== undefined) {
+      if (rawAction === null || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
+        return null;
+      }
+      const action = rawAction as
+        Record<string, Object | string | number | boolean | null | undefined>;
+      const allowedActions: string[] | null = this.scopeStrings(action['allowedActionIds']);
+      if (allowedActions === null) {
+        return null;
+      }
+      for (let index = 0; index < allowedActions.length; index++) {
+        if (actionIds.indexOf(allowedActions[index]) < 0) {
+          actionIds.push(allowedActions[index]);
+        }
+      }
+    }
+    return {
+      requestedCapabilityIds: requested,
+      dataCapabilityIds: dataIds,
+      actionCapabilityIds: actionIds,
+      roundAction: rawRoundAction as LeaderRoundAction
+    };
+  }
+
+  private rawDecisionObject(
+    output: string
+  ): Record<string, Object | string | number | boolean | null | undefined> | null {
+    const trimmed: string = output.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}') ||
+      this.hasDuplicateObjectKeys(trimmed)) {
+      return null;
+    }
+    try {
+      const parsed: Object = JSON.parse(trimmed) as Object;
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed as Record<string, Object | string | number | boolean | null | undefined>;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  private scopeStrings(
+    value: Object | string | number | boolean | null | undefined
+  ): string[] | null {
+    if (!Array.isArray(value)) {
+      return null;
+    }
+    const result: string[] = [];
+    const values: Object[] = value as Object[];
+    for (let index = 0; index < values.length; index++) {
+      const item: Object = values[index];
+      if (typeof item !== 'string' || item.trim().length === 0 || result.indexOf(item) >= 0) {
+        return null;
+      }
+      result.push(item);
+    }
+    return result;
+  }
+
+  private rememberScopeId(
+    capabilityId: string,
+    ids: string[]
+  ): void {
+    if (ids.indexOf(capabilityId) < 0) {
+      ids.push(capabilityId);
+    }
   }
 
   private completeBounded(prompt: string): Promise<string> {
@@ -457,9 +650,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     message: AgentMessage,
     input: InputUserPayload,
     context: LeaderPlanningContext,
-    round: number
+    round: number,
+    currentLocalDate: string
   ): string {
-    const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input, round);
+    const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input, context, round);
+    const dataOwnerIds: string[] = leaderDataCapabilityIds(context);
+    const actionOwnerIds: string[] = leaderActionCapabilityIds(context);
     const toolCatalog: string = JSON.stringify(context.tools);
     if (toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS) {
       throw new Error('LEADER_TOOL_CATALOG_LIMIT');
@@ -485,6 +681,14 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'their requested registered capability. For execute, requestedCapabilityIds must be exactly ' +
         'the unique union of every selected Data tool, allowed tool, and Action ID.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
+      'Ownership contract: Data-owned capability IDs belong in dataTasks toolId and allowedToolIds. ' +
+        'Action-owned capability IDs belong in actionIntent.allowedActionIds. A Data-owned ID may also appear in ' +
+        'actionIntent only when a source tool explicitly declares that exact ID in actions. Never place an ' +
+        'Action-only capability in dataTasks.',
+      'When an Action requires a real provider ID, plan the necessary Data-owned read task first and the ' +
+        'Action-owned capability in actionIntent. Use only a real observed ID in a later round; never invent one.',
+      'Available Data owner IDs: ' + JSON.stringify(dataOwnerIds),
+      'Available Action owner IDs: ' + JSON.stringify(actionOwnerIds),
       'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
       TRAVEL_SELECTION_CONTRACT,
       VIDEO_SELECTION_CONTRACT,
@@ -492,7 +696,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
-      hotelSearchPlanningContract(this.currentLocalDate()),
+      hotelSearchPlanningContract(currentLocalDate),
       'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +
         'conversation and is unavailable or not runtime-owned.',
       'Maximum planning rounds: 3.',
@@ -513,6 +717,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private currentTurnCompletedToolIds(
     message: AgentMessage,
     input: InputUserPayload,
+    context: LeaderPlanningContext,
     currentRound: number
   ): string[] {
     if (currentRound <= 1) {
@@ -528,7 +733,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const observationRound: number = this.observationRound(message.taskId, observation.taskId);
       const toolId: string = observation.toolId;
       if (terminal && observationRound > 0 && observationRound < currentRound &&
-        this.dataToolIds.has(toolId) && result.indexOf(toolId) < 0) {
+        leaderIsDataCapability(context, toolId) && result.indexOf(toolId) < 0) {
         result.push(toolId);
       }
     }
@@ -623,7 +828,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
-      this.actionIntent(actionValue, context);
+      this.actionIntent(actionValue, context, selectedAction === 'legacy_handoff');
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
@@ -689,7 +894,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private registeredCapability(context: LeaderPlanningContext, id: string): boolean {
     for (let index = 0; index < context.tools.length; index++) {
       const tool = context.tools[index];
-      if (tool.toolId === id || tool.actions.indexOf(id) >= 0) {
+      if (tool.toolId === id) {
         return true;
       }
     }
@@ -752,6 +957,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         throw new Error('Leader Data task fields must be non-empty and unique.');
       }
       const allowed: string[] = this.allowedReadTools(allowedToolIds as Object[], context);
+      if (!leaderIsDataCapability(context, toolId) &&
+        leaderIsActionCapability(context, toolId)) {
+        throw new Error(ACTION_OWNED_DATA_TASK_ERROR);
+      }
       if (allowed.indexOf(toolId) < 0 || this.readTool(context, toolId) === null) {
         throw new Error('Leader Data task selected a tool outside its read-only allowlist.');
       }
@@ -772,6 +981,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const ids: string[] = [];
     for (let index = 0; index < rawIds.length; index++) {
       const value = rawIds[index];
+      if (typeof value === 'string' &&
+        !leaderIsDataCapability(context, value) &&
+        leaderIsActionCapability(context, value)) {
+        throw new Error(ACTION_OWNED_DATA_TASK_ERROR);
+      }
       if (typeof value !== 'string' || value.trim().length === 0 || ids.indexOf(value) >= 0 ||
         this.readTool(context, value) === null) {
         throw new Error('Leader Data task allowlist must contain unique registered read tools.');
@@ -803,7 +1017,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
 
   private actionIntent(
     raw: Object | string | number | boolean | null | undefined,
-    context: LeaderPlanningContext
+    context: LeaderPlanningContext,
+    allowRegisteredHandoff: boolean = false
   ): LeaderActionIntent {
     if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw) ||
       Object.keys(raw).sort().join(',') !== ACTION_INTENT_KEYS) {
@@ -817,17 +1032,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('Leader action intent fields are malformed.');
     }
     const ids: string[] = this.uniqueStrings(allowedActionIds as Object[], 'Leader action allowlist');
-    const registered: string[] = [];
-    for (let toolIndex = 0; toolIndex < context.tools.length; toolIndex++) {
-      const actions = context.tools[toolIndex].actions;
-      for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
-        if (registered.indexOf(actions[actionIndex]) < 0) {
-          registered.push(actions[actionIndex]);
-        }
-      }
-    }
     for (let index = 0; index < ids.length; index++) {
-      if (registered.indexOf(ids[index]) < 0) {
+      if (allowRegisteredHandoff ?
+        !this.registeredCapability(context, ids[index]) :
+        !leaderIsActionCapability(context, ids[index])) {
         throw new Error('Leader action allowlist contains an unregistered action ID.');
       }
     }
@@ -867,7 +1075,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private readTool(context: LeaderPlanningContext, toolId: string): LeaderToolMetadata | null {
-    if (!this.dataToolIds.has(toolId)) {
+    if (!leaderIsDataCapability(context, toolId)) {
       return null;
     }
     for (let index = 0; index < context.tools.length; index++) {

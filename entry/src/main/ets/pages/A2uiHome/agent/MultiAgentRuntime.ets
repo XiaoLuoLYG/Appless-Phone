@@ -398,7 +398,8 @@ export class MultiAgentRuntime {
         requestedCapabilityIds: string[]
       ): void => this.recordRequestedCapabilities(
         conversationId, turnId, taskId, requestedCapabilityIds
-      )
+      ),
+      options.currentLocalDateProvider
     );
     this.planningContextProvider = options.planningContextProvider === undefined ?
       null : options.planningContextProvider;

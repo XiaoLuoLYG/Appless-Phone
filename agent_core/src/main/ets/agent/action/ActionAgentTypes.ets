@@ -31,6 +31,7 @@ export interface ActionPlanRequestPayload {
   allowedActionIds: string[];
   personaId?: string;
   inputText?: string;
+  currentLocalDate?: string;
   virtual?: boolean;
 }
 

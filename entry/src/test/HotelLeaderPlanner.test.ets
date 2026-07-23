@@ -32,6 +32,39 @@ const SEARCH_JSON: string = '{' +
   '"size":10' +
   '}';
 
+const C20_MODEL_QUERY: string = '8月8日到10日深圳科技园附近的酒店，2位成人1间房';
+const C20_SEARCH_JSON: string = '{' +
+  '"originQuery":"' + C20_MODEL_QUERY + '",' +
+  '"place":"深圳科技园",' +
+  '"placeType":"POI",' +
+  '"countryCode":"CN",' +
+  '"checkInDate":"2026-08-08",' +
+  '"stayNights":2,' +
+  '"adultCount":2,' +
+  '"childCount":0,' +
+  '"childAgeDetails":[],' +
+  '"roomCount":1,' +
+  '"currency":"CNY",' +
+  '"size":10' +
+  '}';
+
+const CROSS_YEAR_MODEL_QUERY: string =
+  '12月31日到1月2日深圳科技园附近的酒店，2位成人1间房';
+const CROSS_YEAR_SEARCH_JSON: string = '{' +
+  '"originQuery":"' + CROSS_YEAR_MODEL_QUERY + '",' +
+  '"place":"深圳科技园",' +
+  '"placeType":"POI",' +
+  '"countryCode":"CN",' +
+  '"checkInDate":"2026-12-31",' +
+  '"stayNights":2,' +
+  '"adultCount":2,' +
+  '"childCount":0,' +
+  '"childAgeDetails":[],' +
+  '"roomCount":1,' +
+  '"currency":"CNY",' +
+  '"size":10' +
+  '}';
+
 class FakeHotelModel implements LocalModel {
   response: string;
   prompts: string[] = [];
@@ -169,6 +202,102 @@ export default function hotelLeaderPlannerTest() {
       expect(args.originQuery).assertEqual('8月15日深圳住两晚的酒店');
       expect(args.currency).assertEqual('CNY');
       expect(args.size).assertEqual(10);
+    });
+
+    it('restores the exact trusted C20 query for only the allowed polite prefixes', 0, async () => {
+      const trustedQueries: string[] = [
+        '帮我找' + C20_MODEL_QUERY,
+        '请帮我找' + C20_MODEL_QUERY
+      ];
+      for (let index = 0; index < trustedQueries.length; index++) {
+        const trustedQuery = trustedQueries[index];
+        const plan = await planFor(trustedQuery, C20_SEARCH_JSON);
+        const args = plan.dataTasks[0].args as
+          Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(args.originQuery).assertEqual(trustedQuery);
+        expect(args.countryCode).assertEqual('CN');
+        expect(args.place).assertEqual('深圳科技园');
+        expect(args.checkInDate).assertEqual('2026-08-08');
+        expect(args.stayNights).assertEqual(2);
+        expect(args.adultCount).assertEqual(2);
+        expect(args.childCount).assertEqual(0);
+        expect(args.roomCount).assertEqual(1);
+      }
+    });
+
+    it('accepts a polite-prefix range that crosses month and year by exactly two UTC days', 0,
+      async () => {
+        const trustedQuery: string = '帮我找' + CROSS_YEAR_MODEL_QUERY;
+        const plan = await planFor(trustedQuery, CROSS_YEAR_SEARCH_JSON);
+        const args = plan.dataTasks[0].args as
+          Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(args.originQuery).assertEqual(trustedQuery);
+        expect(args.checkInDate).assertEqual('2026-12-31');
+        expect(args.checkOutDate).assertEqual('2027-01-02');
+        expect(args.stayNights).assertEqual(2);
+      });
+
+    it('rejects empty generalized arbitrary and Unicode-mutated omitted prefixes', 0, async () => {
+      const emptyQuery = C20_SEARCH_JSON.replace(C20_MODEL_QUERY, '');
+      const generalized = C20_SEARCH_JSON.replace(C20_MODEL_QUERY, '酒店');
+      const arbitraryPrefixes: string[] = [
+        '我要找' + C20_MODEL_QUERY,
+        '12345678' + C20_MODEL_QUERY,
+        '123456789' + C20_MODEL_QUERY,
+        '🙏帮我找' + C20_MODEL_QUERY,
+        '请\u0301帮我找' + C20_MODEL_QUERY,
+        '帮我\u200B找' + C20_MODEL_QUERY
+      ];
+
+      expect(await rejected('深圳酒店', emptyQuery)).assertTrue();
+      expect(await rejected('帮我找' + C20_MODEL_QUERY, generalized)).assertTrue();
+      for (let index = 0; index < arbitraryPrefixes.length; index++) {
+        expect(await rejected(arbitraryPrefixes[index], C20_SEARCH_JSON)).assertTrue();
+      }
+    });
+
+    it('rejects every raw origin query boundary mutation in exact and polite-prefix paths', 0, async () => {
+      const boundaryCharacters: string[] = [' ', '\u00A0', '\uFEFF', '\u200B'];
+      for (let index = 0; index < boundaryCharacters.length; index++) {
+        const boundary: string = boundaryCharacters[index];
+        const leading: string = C20_SEARCH_JSON.replace(
+          C20_MODEL_QUERY,
+          boundary + C20_MODEL_QUERY
+        );
+        const trailing: string = C20_SEARCH_JSON.replace(
+          C20_MODEL_QUERY,
+          C20_MODEL_QUERY + boundary
+        );
+
+        expect(await rejected(C20_MODEL_QUERY, leading)).assertTrue();
+        expect(await rejected(C20_MODEL_QUERY, trailing)).assertTrue();
+        expect(await rejected('帮我找' + C20_MODEL_QUERY, leading)).assertTrue();
+        expect(await rejected('帮我找' + C20_MODEL_QUERY, trailing)).assertTrue();
+      }
+    });
+
+    it('rejects every semantic field mutation on the polite-prefix recovery path', 0, async () => {
+      const trustedQuery: string = '帮我找' + C20_MODEL_QUERY;
+      const mutations: string[] = [
+        C20_SEARCH_JSON.replace('"place":"深圳科技园"', '"place":"曼谷"'),
+        C20_SEARCH_JSON.replace('"place":"深圳科技园"', '"place":"深圳"'),
+        C20_SEARCH_JSON.replace('"placeType":"POI"', '"placeType":"CITY"'),
+        C20_SEARCH_JSON.replace('"countryCode":"CN"', '"countryCode":"TH"'),
+        C20_SEARCH_JSON.replace('"checkInDate":"2026-08-08"', '"checkInDate":"2026-08-09"'),
+        C20_SEARCH_JSON.replace('"checkInDate":"2026-08-08"', '"checkInDate":"2027-08-08"'),
+        C20_SEARCH_JSON.replace('"stayNights":2', '"stayNights":3'),
+        C20_SEARCH_JSON.replace('"adultCount":2', '"adultCount":3'),
+        C20_SEARCH_JSON
+          .replace('"childCount":0', '"childCount":1')
+          .replace('"childAgeDetails":[]', '"childAgeDetails":[5]'),
+        C20_SEARCH_JSON.replace('"roomCount":1', '"roomCount":2')
+      ];
+
+      for (let index = 0; index < mutations.length; index++) {
+        expect(await rejected(trustedQuery, mutations[index])).assertTrue();
+      }
     });
 
     it('rejects missing fields malformed multiple unknown and booking output', 0, async () => {

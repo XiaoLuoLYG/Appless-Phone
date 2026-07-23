@@ -690,6 +690,26 @@ function planningContext(): LeaderPlanningContext {
         actions: ['legacy.action', 'hotel.detail']
       },
       {
+        toolId: 'hotel.detail',
+        domain: 'hotel',
+        intent: 'hotel.detail',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'hotelDetailRequest',
+        outputSchema: 'hotelRatePlans',
+        actions: []
+      },
+      {
+        toolId: 'legacy.action',
+        domain: 'legacy',
+        intent: 'legacy.action',
+        riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'legacyActionRequest',
+        outputSchema: 'legacyActionResult',
+        actions: []
+      },
+      {
         toolId: 'maps.place.search',
         domain: 'maps',
         intent: 'maps.place.search',

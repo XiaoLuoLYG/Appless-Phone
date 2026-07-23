@@ -77,19 +77,18 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
 const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
-  '"requestedCapabilityIds":["hotel.search","hotel.detail"],"roundAction":"execute",' +
+  '"requestedCapabilityIds":["hotel.search","hotel.navigate"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"hotel-search",' +
   '"goal":"search real hotels","allowedToolIds":["hotel.search"],' +
   '"toolId":"hotel.search","input":' + SEARCH_INPUT + ',"required":true}],' +
   '"uiIntent":{"purpose":"hotel.search","preferredDensity":"comfortable",' +
   '"requiredSections":["hotels"]},"actionIntent":{' +
-  '"goal":"open the selected hotel details",' +
-  '"allowedActionIds":["hotel.detail"]},"reasonCode":"hotel_search_with_detail"}';
+  '"goal":"navigate to the selected hotel",' +
+  '"allowedActionIds":["hotel.navigate"]},"reasonCode":"hotel_search_with_navigation"}';
 const HOTEL_ACTION_DRAFT: string = '{"planId":"plan-model-1","runId":"run-model-1",' +
-  '"label":"查看实时房型","steps":[{"stepId":"step-1","actionId":"hotel.detail",' +
-  '"args":{"hotelId":47675,"checkInDate":"2026-08-15",' +
-  '"checkOutDate":"2026-08-17","countryCode":"CN","currency":"CNY",' +
-  '"adultCount":2,"childCount":0,"childAgeDetails":[],"roomCount":1}}]}';
+  '"label":"导航到酒店","steps":[{"stepId":"step-1","actionId":"hotel.navigate",' +
+  '"args":{"hotelId":47675,"name":"深圳测试酒店","address":"深圳市南山区科技南路 88 号",' +
+  '"latitude":22.5431,"longitude":114.0579}}]}';
 const TWO_TOOL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search","train.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"travel","goal":"search travel options",' +
@@ -873,8 +872,8 @@ export default function multiAgentCanaryRuntimeTest() {
         value.indexOf('Appless Action Agent planner') >= 0
       );
       expect(actionPromptIndex >= 0).assertTrue();
-      expect(model.prompts[actionPromptIndex].indexOf('hotel.detail') >= 0).assertTrue();
-      expect(model.prompts[actionPromptIndex].indexOf('open the selected hotel details') >= 0)
+      expect(model.prompts[actionPromptIndex].indexOf('hotel.navigate') >= 0).assertTrue();
+      expect(model.prompts[actionPromptIndex].indexOf('navigate to the selected hotel') >= 0)
         .assertTrue();
       runtime.dispose();
     });
@@ -1757,6 +1756,35 @@ export default function multiAgentCanaryRuntimeTest() {
       current = null;
       expect(await runtime.runPageAction(exact as A2uiAction)).assertFalse();
       expect(calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('uses one Leader-owned date snapshot for a relative Calendar action', 0, async () => {
+      const surfaces: A2uiSurfaceState[] = [];
+      let dateCalls: number = 0;
+      const options = canaryOptions(
+        new QueueModel([CALENDAR_CREATE_DECISION]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.currentLocalDate = (): string => {
+        dateCalls++;
+        return dateCalls === 1 ? '2026-07-21' : '2030-01-01';
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '帮我在明天下午3点创建一个title为AIPhoneDemo的30分钟日程',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+      const exact = renderedAction(surfaces[surfaces.length - 1], 'calendar.event.create');
+
+      expect(outcome.status).assertEqual('success');
+      expect(exact === null).assertFalse();
+      expect(JSON.stringify((exact as A2uiAction).args).indexOf('2026-07-22')).assertLarger(-1);
+      expect(dateCalls).assertEqual(1);
       runtime.dispose();
     });
 

@@ -749,6 +749,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     if (parsed.inputText !== undefined) {
       request.inputText = parsed.inputText;
     }
+    if (parsed.currentLocalDate !== undefined) {
+      request.currentLocalDate = parsed.currentLocalDate;
+    }
     if (parsed.virtual !== undefined) {
       request.virtual = parsed.virtual;
     }
@@ -2027,7 +2030,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     const keys: string = Object.keys(payload).sort().join(',');
     if (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' &&
       keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId' &&
-      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual') {
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual') {
       return null;
     }
     const virtual: boolean = current.virtual === true;
@@ -2039,6 +2044,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       !this.validUniqueIds(current.dataTaskIds, current.uiTaskId) ||
       !this.validUniqueIds(current.allowedActionIds, '') ||
       (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' && !hasContext) ||
+      (current.currentLocalDate !== undefined && !nonempty(current.currentLocalDate)) ||
       (virtual && current.dataTaskIds.length !== 0) ||
       (!virtual && current.dataTaskIds.length === 0)) {
       return null;

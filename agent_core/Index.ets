@@ -12,6 +12,13 @@ export {
   leaderSameRoundDependencyProducerToolIds,
   leaderTasksHaveSameRoundDependency
 } from './src/main/ets/agent/leader/LeaderDependencyAuthority';
+export {
+  leaderActionCapabilityIds,
+  leaderDataCapabilityIds,
+  leaderIsActionCapability,
+  leaderIsDataCapability,
+  leaderIsExplicitActionOwner
+} from './src/main/ets/agent/leader/LeaderCapabilityOwnership';
 export { DataAgent } from './src/main/ets/agent/data/DataAgent';
 export * from './src/main/ets/agent/data/DataAgentTypes';
 export { UiAgent } from './src/main/ets/agent/ui/UiAgent';

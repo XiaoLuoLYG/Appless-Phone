@@ -7,6 +7,7 @@ import {
   DataTaskAuthorizer,
   DataTaskExecutor,
   DataTaskPlanner,
+  LeaderCurrentLocalDateProvider,
   LeaderPlanner,
   LeaderDataTaskInputNormalizer,
   LeaderPlanningContext,
@@ -66,6 +67,7 @@ export interface MultiAgentRuntimeOptions {
   planner: LeaderPlanner;
   planningContext: LeaderPlanningContext;
   planningContextProvider?: () => LeaderPlanningContext;
+  currentLocalDateProvider?: LeaderCurrentLocalDateProvider;
   dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer;
   dataAuthorizer: DataTaskAuthorizer;
   dataExecutor: DataTaskExecutor;

@@ -644,6 +644,7 @@ function verifySourceContracts() {
   const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
   const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
+  const liveCanaryLeaderPlanner = stripComments(canaryLeaderPlanner);
   const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const index = stripComments(read('agent_core/Index.ets'));
   const indexExports = parseIndexExports(index);
@@ -667,6 +668,9 @@ function verifySourceContracts() {
   const agentMessage = stripComments(read('agent_core/src/main/ets/agent/message/AgentMessage.ets'));
   const messageBus = stripComments(read('agent_core/src/main/ets/agent/message/LinkedMessageBus.ets'));
   const leaderAgent = stripComments(read('agent_core/src/main/ets/agent/leader/LeaderAgent.ets'));
+  const leaderOwnership = stripComments(
+    read('agent_core/src/main/ets/agent/leader/LeaderCapabilityOwnership.ets')
+  );
   const dataAgent = stripComments(read('agent_core/src/main/ets/agent/data/DataAgent.ets'));
   const uiAgent = stripComments(read('agent_core/src/main/ets/agent/ui/UiAgent.ets'));
   const actionCatalog = stripComments(read('agent_core/src/main/ets/agent/action/ActionCatalog.ets'));
@@ -888,6 +892,50 @@ function verifySourceContracts() {
   assertContains(canaryRuntime, 'domain: definition.domain', 'multi-agent planner projects registry domains');
   assertContains(canaryRuntime, 'registeredBackends: definition.backendPriority.slice()', 'multi-agent planner projects cloned registered backend candidates');
   assertContains(leaderAgent, 'registeredBackends: tool.registeredBackends.slice()', 'Leader context clone preserves registered backend candidates');
+  assertContains(
+    leaderOwnership,
+    'sourceDeclaresAction(context, capabilityId)',
+    'shared Leader ownership accepts source-declared dual-role actions'
+  );
+  assertContains(
+    liveCanaryLeaderPlanner,
+    'leaderIsActionCapability(context, ids[index])',
+    'model planner uses shared Action ownership'
+  );
+  assertContains(
+    leaderAgent,
+    'leaderIsActionCapability(this.planningContext, actionId)',
+    'runtime Leader uses shared Action ownership'
+  );
+  assertContains(
+    leaderAgent,
+    'trustedCurrentLocalDate = this.currentLocalDate()',
+    'Leader captures one host date snapshot for each planning round'
+  );
+  assertContains(
+    leaderAgent,
+    'decision.normalizationCurrentLocalDate === trustedCurrentLocalDate',
+    'Leader rejects a planner date that differs from host authority'
+  );
+  assertContains(
+    leaderAgent,
+    'normalizer(input, decision.dataTasks[index], trustedCurrentLocalDate)',
+    'Leader normalizes Data inputs with the trusted date snapshot'
+  );
+  assertContains(
+    canaryRuntime,
+    'currentLocalDateProvider: options.currentLocalDate',
+    'multi-agent runtime delegates date authority to Leader'
+  );
+  assertContains(
+    canaryRuntime,
+    'calendarNow(request.currentLocalDate)',
+    'virtual Calendar actions consume the Leader date snapshot'
+  );
+  assert(
+    !canaryRuntime.includes('new MemoryIntentResolver(options.currentLocalDate)'),
+    'virtual Action resolver does not read the date provider again'
+  );
   assert(hasBoundedLeaderModelCalls(canaryLeaderPlanner), 'every Leader model call uses the structural prompt and catalog bounds');
   assert(
     !hasBoundedLeaderModelCalls(
@@ -939,6 +987,13 @@ function verifySourceContracts() {
     ['./src/main/ets/agent/MessageDrivenAgent', ['MessageDrivenAgent'], 'message-driven base exports'],
     ['./src/main/ets/agent/leader/LeaderAgent', ['LeaderAgent'], 'Leader Agent exports'],
     ['./src/main/ets/agent/leader/LeaderTypes', ['*'], 'Leader Agent types export'],
+    ['./src/main/ets/agent/leader/LeaderCapabilityOwnership', [
+      'leaderActionCapabilityIds',
+      'leaderDataCapabilityIds',
+      'leaderIsActionCapability',
+      'leaderIsDataCapability',
+      'leaderIsExplicitActionOwner'
+    ], 'Leader capability ownership exports'],
     ['./src/main/ets/agent/data/DataAgent', ['DataAgent'], 'Data Agent exports'],
     ['./src/main/ets/agent/data/DataAgentTypes', ['*'], 'Data Agent types export'],
     ['./src/main/ets/agent/ui/UiAgent', ['UiAgent'], 'UI Agent exports'],
@@ -977,6 +1032,17 @@ function verifySourceContracts() {
   assert(/export\s+class\s+ActionCatalog\b/.test(actionCatalog), 'action catalog is public');
   assert(/export\s+abstract\s+class\s+MessageDrivenAgent\b/.test(messageDrivenAgent), 'single subscriber base is public');
   assert(!index.includes('ReactLinkedMessageBus'), 'public API has no second ReAct message bus');
+  assert(
+    leaderOwnership.includes('toolMetadata(context, capabilityId) === null') &&
+      leaderOwnership.includes('!DATA_OWNER_IDS.has(capabilityId)') &&
+      leaderOwnership.includes('!leaderIsExplicitActionOwner(context, capabilityId)'),
+    'source-declared actions still require metadata and a Data or explicit Action owner'
+  );
+  assertContains(
+    leaderOwnership,
+    'leaderIsActionCapability(context, actionId)',
+    'Leader prompt filters renderer-local actions through executable ownership'
+  );
   assert(!index.includes('ReactLeaderAgent'), 'public API has no second ReAct leader');
   assert(!index.includes('UIMakerAgent'), 'public API has no UIMaker compatibility agent');
   assertContains(index, 'ReActRunOptions', 'public API exposes role-specific ReAct options');

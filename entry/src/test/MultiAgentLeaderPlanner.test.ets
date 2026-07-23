@@ -9,7 +9,9 @@ import {
   LeaderDecisionDataTask,
   LeaderPlanningContext,
   LocalModel,
-  ObservationDigest
+  ObservationDigest,
+  ToolDefinition,
+  actionAgentToolDefinitions
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 
@@ -102,7 +104,7 @@ const MODEL_OWNED_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","sk
   '"uiIntent":{"purpose":"模型选择的真实出行总结","preferredDensity":"compact",' +
   '"requiredSections":["travel","next-step"]},"answer":"根据上一轮真实出行结果回答。"}';
 const MODEL_OWNED_UNBOUND_REPAIR: string = MODEL_OWNED_TERMINAL_REPAIR
-  .replace('"travel.search"', '"maps.place.search"')
+  .replace('"travel.search"', '"food.search"')
   .replace('模型选择的真实出行总结', '模型选择的真实地点总结')
   .replace('"travel","next-step"', '"place","next-step"');
 const SPARSE_TERMINAL_REPAIR: string = '{"personaId":"travel_companion","skillId":"",' +
@@ -564,8 +566,126 @@ function planningContext(): LeaderPlanningContext {
         instructions: 'Use real travel inventory.',
         status: 'active'
       }]
-    }]
+    }],
+    runtimeOwnedToolIds: ['memory.update']
   };
+}
+
+function actionOwnerContext(): LeaderPlanningContext {
+  const context = planningContext();
+  const definitions: ToolDefinition[] = actionAgentToolDefinitions();
+  for (let index = 0; index < definitions.length; index++) {
+    const definition = definitions[index];
+    if (context.tools.some((tool): boolean => tool.toolId === definition.toolId)) {
+      continue;
+    }
+    context.tools.push({
+      toolId: definition.toolId,
+      domain: definition.domain,
+      intent: definition.intent,
+      riskLevel: definition.riskLevel,
+      registeredBackends: definition.backendPriority.slice(),
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema,
+      actions: []
+    });
+  }
+  for (let index = 0; index < context.tools.length; index++) {
+    if (context.tools[index].toolId === 'memory.update') {
+      context.tools[index].actions = [];
+    }
+  }
+  return context;
+}
+
+function actionDecision(actionId: string): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute","dataTasks":[],' +
+    '"uiIntent":{"purpose":"perform requested action","preferredDensity":"comfortable",' +
+    '"requiredSections":[]},"actionIntent":{"goal":"perform requested action",' +
+    '"allowedActionIds":["' + actionId + '"]}}';
+}
+
+function actionAsDataDecision(actionId: string): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["' + actionId + '"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"action-as-data","goal":"perform requested action",' +
+    '"allowedToolIds":["' + actionId + '"],"toolId":"' + actionId + '",' +
+    '"input":{},"required":true}],"uiIntent":{"purpose":"perform requested action",' +
+    '"preferredDensity":"comfortable","requiredSections":[]}}';
+}
+
+function hotelDetailDualRoleDecision(): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"hotel-detail","goal":"read exact hotel detail",' +
+    '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail",' +
+    '"input":{"hotelId":47675},"required":true}],"uiIntent":{' +
+    '"purpose":"show hotel detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["hotel"]},"actionIntent":{"goal":"offer the declared hotel detail follow-up",' +
+    '"allowedActionIds":["hotel.detail"]}}';
+}
+
+function hotelDetailDataOnlyDecision(): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"hotel-detail","goal":"read exact hotel detail",' +
+    '"allowedToolIds":["hotel.detail"],"toolId":"hotel.detail",' +
+    '"input":{"hotelId":47675},"required":true}],"uiIntent":{' +
+    '"purpose":"show hotel detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["hotel"]}}';
+}
+
+function hotelDetailActionOnlyDecision(): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["hotel.detail"],"roundAction":"execute","dataTasks":[],' +
+    '"uiIntent":{"purpose":"offer hotel detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["hotel"]},"actionIntent":{"goal":"offer the declared hotel detail follow-up",' +
+    '"allowedActionIds":["hotel.detail"]}}';
+}
+
+function withoutPersona(decision: string): string {
+  return decision.replace('"personaId":"travel_companion",', '');
+}
+
+async function repairFails(
+  first: string,
+  repaired: string,
+  context: LeaderPlanningContext
+): Promise<boolean> {
+  const model = new QueueLocalModel([first, repaired]);
+  try {
+    await new MultiAgentLeaderPlanner(model).plan(
+      inputMessage(),
+      { text: '执行原始请求' },
+      context,
+      1,
+      (): boolean => true
+    );
+    return false;
+  } catch (_error) {
+    return true;
+  }
+}
+
+async function repairErrorCode(
+  first: string,
+  repaired: string,
+  context: LeaderPlanningContext
+): Promise<string> {
+  const model = new QueueLocalModel([first, repaired]);
+  try {
+    await new MultiAgentLeaderPlanner(model).plan(
+      inputMessage(),
+      { text: '执行原始请求' },
+      context,
+      1,
+      (): boolean => true
+    );
+    return '';
+  } catch (error) {
+    return error instanceof Error ? error.message : 'unknown';
+  }
 }
 
 async function fails(output: string): Promise<boolean> {
@@ -653,7 +773,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('repairs same-round producer consumer pairs to the producer regardless of input or order', 0, async () => {
+    it('fails closed when same-round dependency repair would remove requested capability scope', 0, async () => {
       const invalid: string[] = [
         sameRoundDependencyDecision('maps.place.search', 'maps.place.details', '{}'),
         sameRoundDependencyDecision(
@@ -680,16 +800,19 @@ export default function multiAgentLeaderPlannerTest() {
         'maps.place.search', 'maps.place.search', 'maps.place.search',
         'mail.search', 'gmail.mail.search', 'maps.place.search'
       ];
-
       for (let index = 0; index < invalid.length; index++) {
         const model = new QueueLocalModel([invalid[index], sourceOnlyDecision(producers[index])]);
-        const decision = await new MultiAgentLeaderPlanner(model).plan(
-          inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
-          (): boolean => true
-        );
+        let errorCode: string = '';
+        try {
+          await new MultiAgentLeaderPlanner(model).plan(
+            inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
+            (): boolean => true
+          );
+        } catch (error) {
+          errorCode = error instanceof Error ? error.message : 'unknown';
+        }
 
-        expect(decision.dataTasks.length).assertEqual(1);
-        expect(decision.dataTasks[0].toolId).assertEqual(producers[index]);
+        expect(errorCode).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
         expect(model.prompts.length).assertEqual(2);
         expect(model.prompts[1].indexOf('LEADER_SAME_ROUND_DEPENDENCY')).assertLarger(-1);
         expect(model.prompts[1].indexOf('successful or partial')).assertLarger(-1);
@@ -725,7 +848,7 @@ export default function multiAgentLeaderPlannerTest() {
       } catch (error) {
         consumerOnlyError = error instanceof Error ? error.message : 'unknown';
       }
-      expect(consumerOnlyError).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      expect(consumerOnlyError).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
       expect(consumerOnlyModel.prompts.length).assertEqual(2);
     });
 
@@ -909,21 +1032,25 @@ export default function multiAgentLeaderPlannerTest() {
       expect(workPersonaModel.prompts.length).assertEqual(1);
     });
 
-    it('repairs the real C07 overlapping video decision to one aggregate task', 0, async () => {
+    it('fails closed when C07 overlap repair would remove requested capability scope', 0, async () => {
       const model = new QueueLocalModel([
         OVERLAPPING_VIDEO_DECISION,
         AGGREGATE_VIDEO_DECISION
       ]);
-      const decision = await new MultiAgentLeaderPlanner(model).plan(
-        inputMessage(),
-        { text: '帮我在 B 站和 YouTube 里搜索 Qwen 的官方视频' },
-        planningContext(),
-        1,
-        (): boolean => true
-      );
+      let errorCode: string = '';
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '帮我在 B 站和 YouTube 里搜索 Qwen 的官方视频' },
+          planningContext(),
+          1,
+          (): boolean => true
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
 
-      expect(decision.dataTasks.length).assertEqual(1);
-      expect(decision.dataTasks[0].toolId).assertEqual('media.video.search');
+      expect(errorCode).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
       expect(model.prompts.length).assertEqual(2);
       expect(model.prompts[0].indexOf(
         'YouTube and Bilibili means exactly one media.video.search Data task'
@@ -1100,7 +1227,10 @@ export default function multiAgentLeaderPlannerTest() {
           );
         const model = new QueueLocalModel([
           index === 0 ? repeatedAuthority : TRAVEL_DECISION,
-          ANSWER_FROM_TRAVEL_OBSERVATION
+          index === 0 ? ANSWER_FROM_TRAVEL_OBSERVATION.replace(
+            '"requestedCapabilityIds":["travel.search"]',
+            '"requestedCapabilityIds":["maps.place.details","travel.search"]'
+          ) : ANSWER_FROM_TRAVEL_OBSERVATION
         ]);
 
         const decision = await new MultiAgentLeaderPlanner(model).plan(
@@ -1204,7 +1334,10 @@ export default function multiAgentLeaderPlannerTest() {
     it('repairs one unbound later-round tool into a terminal answer without exposing observations', 0, async () => {
       const model = new QueueLocalModel([
         UNBOUND_FOOD_DECISION,
-        ANSWER_FROM_TRAVEL_OBSERVATION
+        ANSWER_FROM_TRAVEL_OBSERVATION.replace(
+          '"requestedCapabilityIds":["travel.search"]',
+          '"requestedCapabilityIds":["food.search"]'
+        )
       ]);
       const planner = new MultiAgentLeaderPlanner(model);
       const input: InputUserPayload = {
@@ -1254,7 +1387,7 @@ export default function multiAgentLeaderPlannerTest() {
         expect(model.prompts.length).assertEqual(2);
         expect(decision.roundAction).assertEqual('answer');
         expect(decision.dataTasks.length).assertEqual(0);
-        expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual('food.search');
         expect(decision.uiIntent.purpose).assertEqual('模型选择的真实地点总结');
         expect(decision.uiIntent.preferredDensity).assertEqual('compact');
         expect(decision.uiIntent.requiredSections.join(',')).assertEqual('place,next-step');
@@ -1735,12 +1868,12 @@ export default function multiAgentLeaderPlannerTest() {
       expect(boundedModel.prompts[0].indexOf(
         'Current-turn completed Data tool IDs: ["travel.search","train.search",' +
           '"flight.search","hotel.search","food.search","social.feed.search",' +
-          '"x.post.search","mail.search"]'
+          '"mail.search","mail.thread.read"]'
       ) >= 0).assertTrue();
       expect(boundedModel.prompts[0].indexOf(
         'Current-turn completed Data tool IDs: ["travel.search","train.search",' +
           '"flight.search","hotel.search","food.search","social.feed.search",' +
-          '"x.post.search","mail.search","mail.thread.read"'
+          '"mail.search","mail.thread.read","gmail.mail.search"'
       )).assertEqual(-1);
     });
 
@@ -1789,6 +1922,40 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
       expect(decision.uiIntent.purpose).assertEqual('展示 SocialHub 消息');
       expect(Object.keys(repairedInput).join(',')).assertEqual('platforms');
+    });
+
+    it('captures one local date snapshot for prompt and every repair normalization', 0, async () => {
+      let dateCalls: number = 0;
+      const normalizedDates: string[] = [];
+      const currentLocalDate = (): string => {
+        dateCalls++;
+        return dateCalls === 1 ? '2026-07-20' : '2031-01-01';
+      };
+      const recordingNormalizer: LeaderDataTaskInputNormalizer = (
+        input: InputUserPayload,
+        task: LeaderDecisionDataTask,
+        localDate: string
+      ): Object => {
+        normalizedDates.push(localDate);
+        return socialInputNormalizer(input, task, localDate);
+      };
+      const model = new QueueLocalModel([SOCIAL_WITH_DATE_DECISION, SOCIAL_ONLY_DECISION]);
+      const planner = new MultiAgentLeaderPlanner(model, currentLocalDate, recordingNormalizer);
+
+      const decision = await planner.plan(
+        inputMessage(),
+        { text: '帮我查看我今天 X 和 Slack 上的消息' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(decision.normalizationCurrentLocalDate).assertEqual('2026-07-20');
+      expect(dateCalls).assertEqual(1);
+      expect(normalizedDates.join(',')).assertEqual('2026-07-20,2026-07-20');
+      expect(model.prompts[0].indexOf('Current local date: 2026-07-20')).assertLarger(-1);
+      expect(model.prompts[1].indexOf('Current local date: 2031-01-01')).assertEqual(-1);
     });
 
     it('fails closed when Data input repair changes tools or non-input plan fields', 0, async () => {
@@ -1968,6 +2135,8 @@ export default function multiAgentLeaderPlannerTest() {
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {
       const extraTop = PARALLEL_DECISION.substring(0, PARALLEL_DECISION.length - 1) +
         ',"providerFacts":{}}';
+      const forgedHostDate = PARALLEL_DECISION.substring(0, PARALLEL_DECISION.length - 1) +
+        ',"normalizationCurrentLocalDate":"2026-07-20"}';
       const duplicateTop = PARALLEL_DECISION.replace(
         '"personaId":"travel_companion"',
         '"personaId":"travel_companion","personaId":"travel_companion"'
@@ -1993,6 +2162,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails('model says ' + PARALLEL_DECISION)).assertTrue();
       expect(await fails(PARALLEL_DECISION + PARALLEL_DECISION)).assertTrue();
       expect(await fails(extraTop)).assertTrue();
+      expect(await fails(forgedHostDate)).assertTrue();
       expect(await fails(duplicateTop)).assertTrue();
       expect(await fails(unknownTool)).assertTrue();
       expect(await fails(outsideAllowed)).assertTrue();
@@ -2020,6 +2190,230 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks.length).assertEqual(0);
       expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('memory.update');
     });
+
+    it('accepts every Action owner self ID without relying on source actions', 0, async () => {
+      const actionIds: string[] = [
+        'memory.update',
+        'worldcup.open',
+        'maps.route.open',
+        'calendar.event.create',
+        'luckin.order.preview',
+        'payment.send'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        const actionId = actionIds[index];
+        const planner = new MultiAgentLeaderPlanner(
+          new QueueLocalModel([actionDecision(actionId)])
+        );
+        const decision = await planner.plan(
+          inputMessage(),
+          { text: '执行 ' + actionId },
+          actionOwnerContext(),
+          1
+        );
+
+        expect(decision.dataTasks.length).assertEqual(0);
+        expect(decision.actionIntent!.allowedActionIds[0]).assertEqual(actionId);
+      }
+    });
+
+    it('fails closed when repair moves an Action-owned capability out of its original Data position', 0,
+      async () => {
+      const actionIds: string[] = [
+        'memory.update',
+        'worldcup.open',
+        'maps.route.open',
+        'calendar.event.create',
+        'luckin.order.preview',
+        'payment.send'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        const actionId = actionIds[index];
+        const errorCode: string = await repairErrorCode(
+          actionAsDataDecision(actionId),
+          actionDecision(actionId),
+          actionOwnerContext(),
+        );
+
+        expect(errorCode).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+      }
+    });
+
+    it('freezes Data and Action positions independently for a declared dual-role capability', 0,
+      async () => {
+        const context = planningContext();
+        for (let index = 0; index < context.tools.length; index++) {
+          if (context.tools[index].toolId === 'hotel.search') {
+            context.tools[index].actions = ['hotel.detail'];
+          }
+        }
+        context.tools.push({
+          toolId: 'hotel.detail',
+          domain: 'hotel',
+          intent: 'hotel.detail',
+          riskLevel: 'read',
+          registeredBackends: ['local_adapter'],
+          inputSchema: 'hotelDetailRequest',
+          outputSchema: 'hotelRatePlans',
+          actions: []
+        });
+
+        const dataToAction: string = await repairErrorCode(
+          withoutPersona(hotelDetailDataOnlyDecision()),
+          hotelDetailActionOnlyDecision(),
+          context
+        );
+        const actionToData: string = await repairErrorCode(
+          withoutPersona(hotelDetailActionOnlyDecision()),
+          hotelDetailDataOnlyDecision(),
+          context
+        );
+        const bothToData: string = await repairErrorCode(
+          withoutPersona(hotelDetailDualRoleDecision()),
+          hotelDetailDataOnlyDecision(),
+          context
+        );
+
+        expect(dataToAction).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+        expect(actionToData).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+        expect(bothToData).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
+      });
+
+    it('fails closed when repair replaces payment scope with Calendar, memory, or an owned capability', 0,
+      async () => {
+        const context = actionOwnerContext();
+        expect(await repairFails(
+          actionAsDataDecision('payment.send'),
+          actionDecision('calendar.event.create'),
+          context
+        )).assertTrue();
+        expect(await repairFails(
+          actionAsDataDecision('payment.send'),
+          actionDecision('memory.update'),
+          context
+        )).assertTrue();
+        const unmigrated = actionAsDataDecision('unmigrated.action');
+        expect(await repairFails(
+          unmigrated,
+          actionDecision('payment.send'),
+          context
+        )).assertTrue();
+        const frozenRequestedIds: string =
+          '"requestedCapabilityIds":["payment.send","calendar.event.create"]';
+        expect(await repairFails(
+          actionAsDataDecision('payment.send').replace(
+            '"requestedCapabilityIds":["payment.send"]',
+            frozenRequestedIds
+          ),
+          actionDecision('calendar.event.create').replace(
+            '"requestedCapabilityIds":["calendar.event.create"]',
+            frozenRequestedIds
+          ),
+          context
+        )).assertTrue();
+      });
+
+    it('fails closed without a repair call when the first raw capability scope cannot be extracted', 0,
+      async () => {
+        const unextractable: string = MISSING_PERSONA_DECISION.replace(
+          '"requestedCapabilityIds":[],',
+          ''
+        );
+        const model = new QueueLocalModel([unextractable, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+        let failed: boolean = false;
+        try {
+          await new MultiAgentLeaderPlanner(model).plan(
+            inputMessage(),
+            { text: '你好' },
+            planningContext(),
+            1,
+            (): boolean => true
+          );
+        } catch (_error) {
+          failed = true;
+        }
+
+        expect(failed).assertTrue();
+        expect(model.prompts.length).assertEqual(1);
+      });
+
+    it('keeps Data owners out of actionIntent unless a source declares the same ID as a follow-up', 0, async () => {
+      expect(await fails(actionDecision('flight.search'))).assertTrue();
+
+      const context = planningContext();
+      for (let index = 0; index < context.tools.length; index++) {
+        if (context.tools[index].toolId === 'hotel.search') {
+          context.tools[index].actions = ['hotel.detail'];
+        }
+      }
+      context.tools.push({
+        toolId: 'hotel.detail',
+        domain: 'hotel',
+        intent: 'hotel.detail',
+        riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'hotelDetailRequest',
+        outputSchema: 'hotelRatePlans',
+        actions: []
+      });
+      const decision = await new MultiAgentLeaderPlanner(
+        new QueueLocalModel([hotelDetailDualRoleDecision()])
+      ).plan(inputMessage(), { text: '查看酒店详情' }, context, 1);
+
+      expect(decision.dataTasks[0].toolId).assertEqual('hotel.detail');
+      expect(decision.actionIntent!.allowedActionIds[0]).assertEqual('hotel.detail');
+    });
+
+    it('keeps source-declared page-only actions out of model Data and actionIntent ownership', 0,
+      async () => {
+        const context = planningContext();
+        for (let index = 0; index < context.tools.length; index++) {
+          if (context.tools[index].toolId === 'hotel.search') {
+            context.tools[index].actions = [
+              'hotel.search.restore',
+              'unregistered.dynamic.action'
+            ];
+          }
+        }
+        context.tools.push({
+          toolId: 'unregistered.dynamic.action',
+          domain: 'client',
+          intent: 'unregistered.dynamic.action',
+          riskLevel: 'draft',
+          registeredBackends: ['local_adapter'],
+          inputSchema: 'clientActionRequest',
+          outputSchema: 'clientActionResult',
+          actions: []
+        });
+        let actionRejected: boolean = false;
+        let dataRejected: boolean = false;
+        let contextOnlyActionRejected: boolean = false;
+        try {
+          await new MultiAgentLeaderPlanner(
+            new QueueLocalModel([actionDecision('hotel.search.restore')])
+          ).plan(inputMessage(), { text: '返回酒店搜索页' }, context, 1);
+        } catch (_error) {
+          actionRejected = true;
+        }
+        try {
+          await new MultiAgentLeaderPlanner(
+            new QueueLocalModel([actionAsDataDecision('hotel.search.restore')])
+          ).plan(inputMessage(), { text: '返回酒店搜索页' }, context, 1);
+        } catch (_error) {
+          dataRejected = true;
+        }
+        try {
+          await new MultiAgentLeaderPlanner(
+            new QueueLocalModel([actionDecision('unregistered.dynamic.action')])
+          ).plan(inputMessage(), { text: '执行未注册 client action' }, context, 1);
+        } catch (_error) {
+          contextOnlyActionRejected = true;
+        }
+
+        expect(actionRejected).assertTrue();
+        expect(dataRejected).assertTrue();
+        expect(contextOnlyActionRejected).assertTrue();
+      });
 
     it('requires unique registered requested capabilities covering every executed capability', 0, async () => {
       const missing: string = PARALLEL_DECISION.replace(

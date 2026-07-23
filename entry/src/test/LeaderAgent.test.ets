@@ -224,6 +224,63 @@ class RoundScriptedPlanner implements LeaderPlanner {
   }
 }
 
+class ThrowingPostObservationPlanner implements LeaderPlanner {
+  calls: number = 0;
+  private readonly firstDecision: LeaderDecision;
+
+  constructor(firstDecision: LeaderDecision) {
+    this.firstDecision = firstDecision;
+  }
+
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    this.calls++;
+    if (this.calls === 1) {
+      return this.firstDecision;
+    }
+    throw new Error('LEADER_UNBOUND_LATER_TOOL');
+  }
+}
+
+class ControlledPostObservationPlanner implements LeaderPlanner {
+  calls: number = 0;
+  readonly secondStarted: TestGate = new TestGate();
+  private readonly firstDecision: LeaderDecision;
+  private resolveSecond: ((decision: LeaderDecision) => void) | null = null;
+
+  constructor(firstDecision: LeaderDecision) {
+    this.firstDecision = firstDecision;
+  }
+
+  async plan(
+    _message: AgentMessage,
+    _input: InputUserPayload,
+    _context: LeaderPlanningContext,
+    _round: number = 1
+  ): Promise<LeaderDecision> {
+    this.calls++;
+    if (this.calls === 1) {
+      return this.firstDecision;
+    }
+    return new Promise<LeaderDecision>((resolve: (decision: LeaderDecision) => void) => {
+      this.resolveSecond = resolve;
+      this.secondStarted.open();
+    });
+  }
+
+  finishSecond(decision: LeaderDecision): void {
+    const resolve: ((decision: LeaderDecision) => void) | null = this.resolveSecond;
+    this.resolveSecond = null;
+    if (resolve !== null) {
+      resolve(decision);
+    }
+  }
+}
+
 class MixedRoundPlanner implements LeaderPlanner {
   calls: number = 0;
   private readonly results: LeaderPlannerResult[];
@@ -317,6 +374,18 @@ function semanticDecision(tasks: LeaderDecisionDataTask[], action: string = 'exe
   return decision;
 }
 
+function withNormalizationDate(
+  decision: LeaderDecision,
+  currentLocalDate: string = '2026-07-20'
+): LeaderDecision {
+  decision.normalizationCurrentLocalDate = currentLocalDate;
+  return decision;
+}
+
+function fixedCurrentLocalDate(): string {
+  return '2026-07-20';
+}
+
 function repeatedSemanticTasks(count: number): LeaderDecisionDataTask[] {
   const tasks: LeaderDecisionDataTask[] = [];
   for (let index = 0; index < count; index++) {
@@ -336,6 +405,24 @@ function planningContext(): LeaderPlanningContext {
       inputSchema: 'hotelSearchRequest',
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
+    }, {
+      toolId: 'hotel.detail',
+      domain: 'hotel',
+      intent: 'hotel.detail',
+      riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
+      inputSchema: 'hotelDetailRequest',
+      outputSchema: 'hotelRatePlans',
+      actions: []
+    }, {
+      toolId: 'hotel.navigate',
+      domain: 'hotel',
+      intent: 'hotel.navigate',
+      riskLevel: 'read',
+      registeredBackends: ['system_intent'],
+      inputSchema: 'hotelNavigateRequest',
+      outputSchema: 'systemIntentResult',
+      actions: []
     }],
     personas: []
   };
@@ -393,6 +480,21 @@ function nineDataPlanningContext(): LeaderPlanningContext {
   };
 }
 
+function normalizationPlanningContext(): LeaderPlanningContext {
+  const context = nineDataPlanningContext();
+  context.tools.push({
+    toolId: 'calendar.events.search',
+    domain: 'calendar',
+    intent: 'calendar.events.search',
+    riskLevel: 'read',
+    registeredBackends: ['local_adapter'],
+    inputSchema: 'calendar.events.search.input',
+    outputSchema: 'calendar.events.search.output',
+    actions: []
+  });
+  return context;
+}
+
 function dependentDataPlanningContext(): LeaderPlanningContext {
   const context = nineDataPlanningContext();
   context.tools.push({
@@ -413,6 +515,38 @@ function dependentDataPlanningContext(): LeaderPlanningContext {
     registeredBackends: ['oauth_api'],
     inputSchema: 'mapsPlaceDetailsQuery',
     outputSchema: 'place',
+    actions: []
+  });
+  return context;
+}
+
+function addHotelNavigateActionMetadata(context: LeaderPlanningContext): void {
+  const hotelTool = context.tools.filter(
+    (tool: LeaderToolMetadata): boolean => tool.toolId === 'hotel.search'
+  )[0];
+  hotelTool.actions.push('hotel.navigate');
+  context.tools.push({
+    toolId: 'hotel.navigate',
+    domain: 'hotel',
+    intent: 'hotel.navigate',
+    riskLevel: 'read',
+    registeredBackends: ['system_intent'],
+    inputSchema: 'hotelNavigateRequest',
+    outputSchema: 'systemIntentResult',
+    actions: []
+  });
+}
+
+function aggregatePlanningContext(): LeaderPlanningContext {
+  const context = semanticPlanningContext();
+  context.tools.push({
+    toolId: 'media.aggregate.search',
+    domain: 'media',
+    intent: 'media.aggregate.search',
+    riskLevel: 'read',
+    registeredBackends: ['local_adapter'],
+    inputSchema: 'media.aggregate.search.input',
+    outputSchema: 'media.aggregate.search.output',
     actions: []
   });
   return context;
@@ -570,15 +704,23 @@ async function rejectionAfterNormalizedInput(normalized: Object): Promise<string
   const secondTask = semanticDataTask('place-details', 'maps.place.details');
   secondTask.input = new Object();
   const planner = new RoundScriptedPlanner([
-    semanticDecision([firstTask]),
-    semanticDecision([secondTask])
+    withNormalizationDate(semanticDecision([firstTask])),
+    withNormalizationDate(semanticDecision([secondTask]))
   ]);
   const normalizer: LeaderDataTaskInputNormalizer = (
     _input: InputUserPayload,
     task: LeaderDecisionDataTask
   ): Object => task.toolId === 'maps.place.details' ? normalized : task.input;
   const bus = new LinkedMessageBus();
-  const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext(), 30000, normalizer);
+  const leader = new LeaderAgent(
+    bus,
+    planner,
+    dependentDataPlanningContext(),
+    30000,
+    normalizer,
+    undefined,
+    fixedCurrentLocalDate
+  );
   const observer = bus.openReader();
   leader.start();
   try {
@@ -948,7 +1090,9 @@ export default function leaderAgentTest() {
       search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const details = semanticDataTask('place-details', 'maps.place.details');
       details.input = JSON.parse('{"placeId":"place-forged"}') as Object;
-      const planner = new RoundScriptedPlanner([semanticDecision([details, search])]);
+      const planner = new RoundScriptedPlanner([
+        withNormalizationDate(semanticDecision([details, search]))
+      ]);
       let normalized: number = 0;
       let observed: number = 0;
       const normalizer: LeaderDataTaskInputNormalizer = (
@@ -967,7 +1111,8 @@ export default function leaderAgentTest() {
         normalizer,
         (): void => {
           observed++;
-        }
+        },
+        fixedCurrentLocalDate
       );
       const observer = bus.openReader();
       leader.start();
@@ -1274,6 +1419,7 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       });
+      context.runtimeOwnedToolIds = ['memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
       const observer = bus.openReader();
       leader.start();
@@ -1309,6 +1455,101 @@ export default function leaderAgentTest() {
       expect(request.personaId).assertEqual('travel_companion');
       expect(request.inputText).assertEqual('我在北京');
       expect(request.virtual).assertTrue();
+      leader.stop();
+      observer.close();
+    });
+
+    it('accepts a registered Action owner self ID when no source declares it as a follow-up', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Open the World Cup page',
+        allowedActionIds: ['worldcup.open']
+      };
+      decision.requestedCapabilityIds = ['worldcup.open'];
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'worldcup.open',
+        domain: 'media',
+        intent: 'worldcup.open',
+        riskLevel: 'read',
+        registeredBackends: ['system_intent'],
+        inputSchema: 'worldCupExperienceRequest',
+        outputSchema: 'worldCupExperience',
+        actions: []
+      });
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const request = await receive(observer);
+
+      expect(request.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect((request.payload as ActionPlanRequestPayload).allowedActionIds[0])
+        .assertEqual('worldcup.open');
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects a source-declared page-only action from semantic actionIntent', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Open a renderer-local page operation',
+        allowedActionIds: ['hotel.book.external']
+      };
+      decision.requestedCapabilityIds = ['hotel.book.external'];
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const rejected = await receive(observer);
+
+      expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+      leader.stop();
+      observer.close();
+    });
+
+    it('accepts a dynamic memory Action owner end to end without a self action declaration', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const decision = semanticDecision([]);
+      decision.actionIntent = {
+        goal: 'Remember the explicit user statement',
+        allowedActionIds: ['memory.update']
+      };
+      decision.requestedCapabilityIds = ['memory.update'];
+      const context = semanticPlanningContext();
+      context.tools.push({
+        toolId: 'memory.update',
+        domain: 'persona',
+        intent: 'memory.update',
+        riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
+        inputSchema: 'memoryUpdateRequest',
+        outputSchema: 'memoryUpdateResult',
+        actions: []
+      });
+      context.runtimeOwnedToolIds = ['hotel.search', 'memory.update'];
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const request = await receive(observer);
+
+      expect(request.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect((request.payload as ActionPlanRequestPayload).allowedActionIds[0])
+        .assertEqual('memory.update');
       leader.stop();
       observer.close();
     });
@@ -1393,6 +1634,133 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('renders an error DataResult when post-observation planning throws', 0, async () => {
+      const firstDecision = semanticDecision([semanticDataTask('maps', 'maps.place.search')]);
+      firstDecision.actionIntent = {
+        goal: 'Navigate after results',
+        allowedActionIds: ['hotel.navigate']
+      };
+      firstDecision.requestedCapabilityIds.push('hotel.navigate');
+      const planner = new ThrowingPostObservationPlanner(firstDecision);
+      const bus = new LinkedMessageBus();
+      const context = dependentDataPlanningContext();
+      addHotelNavigateActionMetadata(context);
+      const leader = new LeaderAgent(bus, planner, context, 300);
+      const observer = bus.openReader();
+      leader.start();
+
+      try {
+        bus.publish(inputMessage());
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+        const dataTask = await receive(observer);
+        expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        bus.publish(dataResultMessageWithStatus(dataTask, 'error'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+        const uiTask = await receive(observer);
+        const uiPayload = uiTask.payload as CreateUiTaskPayload;
+
+        expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+        expect(uiPayload.dataTaskIds.length).assertEqual(1);
+        expect(uiPayload.dataTaskIds[0]).assertEqual(dataTask.taskId);
+        const actionRequest = await receive(observer);
+        const actionPayload = actionRequest.payload as ActionPlanRequestPayload;
+        expect(actionRequest.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+        expect(actionPayload.uiTaskId).assertEqual(uiTask.taskId);
+        expect(actionPayload.dataTaskIds.join(',')).assertEqual(uiPayload.dataTaskIds.join(','));
+        expect(actionPayload.allowedActionIds[0]).assertEqual('hotel.navigate');
+        bus.publish({
+          type: AgentMessageType.TASK_RESULT_UI,
+          conversationId: uiTask.conversationId,
+          turnId: uiTask.turnId,
+          taskId: uiTask.taskId,
+          payload: { surfaceId: 'surface-fallback-error', state: 'result' } as UiRenderResultPayload
+        });
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+        const terminal = await receive(observer);
+        const payload = terminal.payload as TurnResultPayload;
+        expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+        expect(payload.status).assertEqual('error');
+        expect(payload.surfaceId).assertEqual('surface-fallback-error');
+        expect(planner.calls).assertEqual(2);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
+    it('renders a partial DataResult before a slow post-observation planner consumes the turn deadline', 2000, async () => {
+      const firstDecision = semanticDecision([
+        semanticDataTask('aggregate', 'media.aggregate.search')
+      ]);
+      firstDecision.actionIntent = {
+        goal: 'Navigate after results',
+        allowedActionIds: ['hotel.navigate']
+      };
+      firstDecision.requestedCapabilityIds.push('hotel.navigate');
+      const planner = new ControlledPostObservationPlanner(firstDecision);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, aggregatePlanningContext(), 300);
+      const observer = bus.openReader();
+      leader.start();
+
+      try {
+        bus.publish(inputMessage());
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+        const dataTask = await receive(observer);
+        expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        bus.publish(dataResultMessageWithStatus(dataTask, 'partial'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+        await planner.secondStarted.promise;
+        const uiTask = await receive(observer);
+        const uiPayload = uiTask.payload as CreateUiTaskPayload;
+
+        expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+        expect(uiPayload.dataTaskIds.length).assertEqual(1);
+        expect(uiPayload.dataTaskIds[0]).assertEqual(dataTask.taskId);
+        const actionRequest = await receive(observer);
+        const actionPayload = actionRequest.payload as ActionPlanRequestPayload;
+        expect(actionRequest.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+        expect(actionPayload.uiTaskId).assertEqual(uiTask.taskId);
+        expect(actionPayload.dataTaskIds.join(',')).assertEqual(uiPayload.dataTaskIds.join(','));
+        expect(actionPayload.allowedActionIds[0]).assertEqual('hotel.navigate');
+        bus.publish({
+          type: AgentMessageType.TASK_RESULT_UI,
+          conversationId: uiTask.conversationId,
+          turnId: uiTask.turnId,
+          taskId: uiTask.taskId,
+          payload: { surfaceId: 'surface-fallback-partial', state: 'result' } as UiRenderResultPayload
+        });
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+        const terminal = await receive(observer);
+        const payload = terminal.payload as TurnResultPayload;
+        expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+        expect(payload.status).assertEqual('partial');
+        expect(payload.surfaceId).assertEqual('surface-fallback-partial');
+
+        planner.finishSecond(semanticDecision([
+          semanticDataTask('late-repeat', 'media.aggregate.search')
+        ]));
+        await settle();
+        bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'fallback-marker'));
+        let replayed: number = 0;
+        let observed = await receive(observer);
+        while (observed.taskId !== 'fallback-marker') {
+          if (observed.type === AgentMessageType.TASK_CREATE_DATA ||
+            observed.type === AgentMessageType.TASK_CREATE_UI ||
+            observed.type === AgentMessageType.ACTION_PLAN_REQUEST ||
+            observed.type === AgentMessageType.TURN_RESULT) {
+            replayed++;
+          }
+          observed = await receive(observer);
+        }
+        expect(replayed).assertEqual(0);
+        expect(planner.calls).assertEqual(2);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
     it('delays one UI task until two dependent Data rounds are terminal', 0, async () => {
       const firstTask = semanticDataTask('place-search', 'maps.place.search');
       firstTask.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
@@ -1473,8 +1841,8 @@ export default function leaderAgentTest() {
       const secondTask = semanticDataTask('place-details', 'maps.place.details');
       secondTask.input = new Object();
       const planner = new RoundScriptedPlanner([
-        semanticDecision([firstTask]),
-        semanticDecision([secondTask])
+        withNormalizationDate(semanticDecision([firstTask])),
+        withNormalizationDate(semanticDecision([secondTask]))
       ]);
       const normalizer: LeaderDataTaskInputNormalizer = (
         _input: InputUserPayload,
@@ -1487,7 +1855,9 @@ export default function leaderAgentTest() {
         planner,
         dependentDataPlanningContext(),
         30000,
-        normalizer
+        normalizer,
+        undefined,
+        fixedCurrentLocalDate
       );
       const observer = bus.openReader();
       leader.start();
@@ -1505,6 +1875,151 @@ export default function leaderAgentTest() {
       expect(args['placeId'] as string).assertEqual('entity-1');
       bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-normalized'));
       await receive(observer);
+      leader.stop();
+      observer.close();
+    });
+
+    it('rejects alternate planners without valid normalization date authority before normalization', 0, async () => {
+      const tools: string[] = [
+        'hotel.search',
+        'travel.search',
+        'social.feed.search',
+        'calendar.events.search'
+      ];
+      for (let dateIndex = 0; dateIndex < 2; dateIndex++) {
+        const tasks: LeaderDecisionDataTask[] = [];
+        for (let toolIndex = 0; toolIndex < tools.length; toolIndex++) {
+          const task = semanticDataTask('authority-' + toolIndex.toString(), tools[toolIndex]);
+          task.input = JSON.parse('{"forged":"model-value"}') as Object;
+          tasks.push(task);
+        }
+        const decision = semanticDecision(tasks);
+        if (dateIndex === 1) {
+          decision.normalizationCurrentLocalDate = '2026-02-30';
+        }
+        let normalizeCalls: number = 0;
+        const normalizer: LeaderDataTaskInputNormalizer = (
+          _input: InputUserPayload,
+          task: LeaderDecisionDataTask,
+          _currentLocalDate: string
+        ): Object => {
+          normalizeCalls++;
+          return task.input;
+        };
+        const bus = new LinkedMessageBus();
+        const leader = new LeaderAgent(
+          bus,
+          new RoundScriptedPlanner([decision]),
+          normalizationPlanningContext(),
+          30000,
+          normalizer,
+          undefined,
+          fixedCurrentLocalDate
+        );
+        const observer = bus.openReader();
+        leader.start();
+
+        bus.publish(inputMessage());
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+        const rejected = await receive(observer);
+
+        expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+        expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+        expect(normalizeCalls).assertEqual(0);
+        leader.stop();
+        observer.close();
+      }
+    });
+
+    it('rejects a valid but forged planner date instead of treating it as host authority', 0, async () => {
+      const task = semanticDataTask('hotel', 'hotel.search');
+      task.input = JSON.parse('{"forged":"model-value"}') as Object;
+      const decision = withNormalizationDate(semanticDecision([task]), '2027-01-01');
+      let normalizeCalls: number = 0;
+      const normalizer: LeaderDataTaskInputNormalizer = (
+        _input: InputUserPayload,
+        plannedTask: LeaderDecisionDataTask,
+        _currentLocalDate: string
+      ): Object => {
+        normalizeCalls++;
+        return plannedTask.input;
+      };
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        normalizationPlanningContext(),
+        30000,
+        normalizer,
+        undefined,
+        (): string => '2026-07-23'
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const rejected = await receive(observer);
+
+      expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+      expect(normalizeCalls).assertEqual(0);
+      leader.stop();
+      observer.close();
+    });
+
+    it('passes trusted date authority to every alternate-planner Data input normalizer', 0, async () => {
+      const tools: string[] = [
+        'hotel.search',
+        'travel.search',
+        'social.feed.search',
+        'calendar.events.search'
+      ];
+      const tasks: LeaderDecisionDataTask[] = [];
+      for (let index = 0; index < tools.length; index++) {
+        const task = semanticDataTask('bound-' + index.toString(), tools[index]);
+        task.input = JSON.parse('{"forged":"model-value"}') as Object;
+        tasks.push(task);
+      }
+      const decision = withNormalizationDate(semanticDecision(tasks));
+      const normalized: string[] = [];
+      const normalizer: LeaderDataTaskInputNormalizer = (
+        _input: InputUserPayload,
+        task: LeaderDecisionDataTask,
+        currentLocalDate: string
+      ): Object => {
+        normalized.push(task.toolId + '@' + currentLocalDate);
+        return JSON.parse(
+          '{"bound":"' + task.toolId + '@' + currentLocalDate + '"}'
+        ) as Object;
+      };
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        normalizationPlanningContext(),
+        30000,
+        normalizer,
+        undefined,
+        fixedCurrentLocalDate
+      );
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      for (let index = 0; index < tools.length; index++) {
+        const dataMessage = await receive(observer);
+        const payload = dataMessage.payload as CreateDataTaskPayload;
+        const args = payload.args as Record<string, string>;
+        expect(dataMessage.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect(payload.toolId).assertEqual(tools[index]);
+        expect(args['bound']).assertEqual(tools[index] + '@2026-07-20');
+      }
+      expect(normalized.join(',')).assertEqual(
+        'hotel.search@2026-07-20,travel.search@2026-07-20,' +
+        'social.feed.search@2026-07-20,calendar.events.search@2026-07-20'
+      );
       leader.stop();
       observer.close();
     });
@@ -1715,7 +2230,7 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('rejects planning a fourth semantic round without publishing another task', 0, async () => {
+    it('renders accumulated Data and its pending action after the third round without planning a fourth', 0, async () => {
       const bus = new LinkedMessageBus();
       const roundOneMaps = semanticDataTask('round-1-maps', 'maps.place.search');
       const roundOneMail = semanticDataTask('round-1-mail', 'mail.search');
@@ -1724,12 +2239,20 @@ export default function leaderAgentTest() {
       roundTwo.input = JSON.parse('{"placeId":"entity-1"}') as Object;
       roundThree.input = JSON.parse('{"provider":"gmail","requestKey":"gmail:entity-1",' +
         '"threadId":"entity-1","messageId":"entity-1"}') as Object;
+      const firstDecision = semanticDecision([roundOneMaps, roundOneMail]);
+      firstDecision.actionIntent = {
+        goal: 'Navigate after results',
+        allowedActionIds: ['hotel.navigate']
+      };
+      firstDecision.requestedCapabilityIds.push('hotel.navigate');
       const planner = new RoundScriptedPlanner([
-        semanticDecision([roundOneMaps, roundOneMail]),
+        firstDecision,
         semanticDecision([roundTwo]),
         semanticDecision([roundThree])
       ]);
-      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
+      const context = dependentDataPlanningContext();
+      addHotelNavigateActionMetadata(context);
+      const leader = new LeaderAgent(bus, planner, context);
       const observer = bus.openReader();
       leader.start();
 
@@ -1753,13 +2276,74 @@ export default function leaderAgentTest() {
         bus.publish(dataResultMessage(task, 'round-' + round.toString()));
         expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       }
-      const limit = await receive(observer);
+      const uiTask = await receive(observer);
+      const uiPayload = uiTask.payload as CreateUiTaskPayload;
+      const actionRequest = await receive(observer);
+      const actionPayload = actionRequest.payload as ActionPlanRequestPayload;
 
-      expect(limit.type).assertEqual(AgentMessageType.TASK_ERROR);
-      expect((limit.payload as TaskErrorPayload).code).assertEqual('LEADER_ROUND_LIMIT');
+      expect(uiTask.type).assertEqual(AgentMessageType.TASK_CREATE_UI);
+      expect(uiPayload.dataTaskIds.length).assertEqual(4);
+      expect(actionRequest.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
+      expect(actionPayload.uiTaskId).assertEqual(uiTask.taskId);
+      expect(actionPayload.dataTaskIds.join(',')).assertEqual(uiPayload.dataTaskIds.join(','));
+      expect(actionPayload.allowedActionIds[0]).assertEqual('hotel.navigate');
+      bus.publish({
+        type: AgentMessageType.TASK_RESULT_UI,
+        conversationId: uiTask.conversationId,
+        turnId: uiTask.turnId,
+        taskId: uiTask.taskId,
+        payload: { surfaceId: 'surface-round-three', state: 'result' } as UiRenderResultPayload
+      });
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_UI);
+      const terminal = await receive(observer);
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).status).assertEqual('success');
+      expect((terminal.payload as TurnResultPayload).surfaceId).assertEqual('surface-round-three');
       expect(planner.calls).assertEqual(3);
       leader.stop();
       observer.close();
+    });
+
+    it('cancels during post-observation planning without fallback or late replay', 1000, async () => {
+      const planner = new ControlledPostObservationPlanner(
+        semanticDecision([semanticDataTask('cancel-after-data')])
+      );
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, semanticPlanningContext(), 300);
+      const observer = bus.openReader();
+      leader.start();
+
+      try {
+        bus.publish(inputMessage());
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+        const dataTask = await receive(observer);
+        expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        bus.publish(dataResultMessageWithStatus(dataTask, 'partial'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+        await planner.secondStarted.promise;
+        bus.publish(terminalMessage(AgentMessageType.TURN_CANCEL, 'cancel-post-observation'));
+        expect((await receive(observer)).type).assertEqual(AgentMessageType.TURN_CANCEL);
+
+        planner.finishSecond(semanticDecision([], 'answer'));
+        await settle();
+        bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'cancel-fallback-marker'));
+        let replayed: number = 0;
+        let observed = await receive(observer);
+        while (observed.taskId !== 'cancel-fallback-marker') {
+          if (observed.type === AgentMessageType.TASK_CREATE_DATA ||
+            observed.type === AgentMessageType.TASK_CREATE_UI ||
+            observed.type === AgentMessageType.ACTION_PLAN_REQUEST ||
+            observed.type === AgentMessageType.TURN_RESULT) {
+            replayed++;
+          }
+          observed = await receive(observer);
+        }
+        expect(replayed).assertEqual(0);
+        expect(planner.calls).assertEqual(2);
+      } finally {
+        leader.stop();
+        observer.close();
+      }
     });
 
     it('cancels a semantic turn before observations can trigger another round', 0, async () => {

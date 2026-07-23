@@ -48,6 +48,7 @@ export interface LeaderDecision {
   roundAction: LeaderRoundAction;
   dataTasks: LeaderDecisionDataTask[];
   uiIntent: LeaderUiIntent;
+  normalizationCurrentLocalDate?: string;
   actionIntent?: LeaderActionIntent;
   answer?: string;
   reasonCode: string;
@@ -100,8 +101,11 @@ export interface LeaderPlanningContext {
 
 export type LeaderDataTaskInputNormalizer = (
   input: InputUserPayload,
-  task: LeaderDecisionDataTask
+  task: LeaderDecisionDataTask,
+  currentLocalDate: string
 ) => Object;
+
+export type LeaderCurrentLocalDateProvider = () => string;
 
 export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
 export type LeaderPlanningSignal = () => boolean;
@@ -112,6 +116,7 @@ export interface LeaderPlanner {
     input: InputUserPayload,
     context: LeaderPlanningContext,
     round?: number,
-    signal?: LeaderPlanningSignal
+    signal?: LeaderPlanningSignal,
+    currentLocalDate?: string
   ): Promise<LeaderPlannerResult>;
 }

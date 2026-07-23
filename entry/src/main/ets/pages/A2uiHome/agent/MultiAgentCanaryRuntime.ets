@@ -532,13 +532,28 @@ class RejectClientAction implements ClientActionAuthorizer {
   }
 }
 
-function calendarNow(currentLocalDate?: HotelLocalDateProvider): Date {
-  if (currentLocalDate === undefined) {
-    return new Date();
+function calendarNow(currentLocalDate: string | undefined): Date | null {
+  if (currentLocalDate === undefined || currentLocalDate.length !== 10 ||
+    currentLocalDate.charCodeAt(4) !== 45 || currentLocalDate.charCodeAt(7) !== 45) {
+    return null;
   }
-  const value = currentLocalDate().trim();
-  const timestamp = Date.parse(value + 'T00:00:00+08:00');
-  return Number.isNaN(timestamp) ? new Date() : new Date(timestamp);
+  const digitIndexes: number[] = [0, 1, 2, 3, 5, 6, 8, 9];
+  for (let index = 0; index < digitIndexes.length; index++) {
+    const code: number = currentLocalDate.charCodeAt(digitIndexes[index]);
+    if (code < 48 || code > 57) {
+      return null;
+    }
+  }
+  const year: number = Number(currentLocalDate.substring(0, 4));
+  const month: number = Number(currentLocalDate.substring(5, 7));
+  const day: number = Number(currentLocalDate.substring(8, 10));
+  const utc: Date = new Date(Date.UTC(year, month - 1, day));
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 ||
+    utc.getUTCFullYear() !== year || utc.getUTCMonth() + 1 !== month || utc.getUTCDate() !== day) {
+    return null;
+  }
+  const timestamp: number = Date.parse(currentLocalDate + 'T00:00:00+08:00');
+  return Number.isNaN(timestamp) ? null : new Date(timestamp);
 }
 
 function calendarUpdateSearchArgs(input: string, now: Date): CalendarUpdateSearchArgs | null {
@@ -618,10 +633,13 @@ function validSocialFeedTaskInput(input: Object): boolean {
 function normalizeCanaryTaskInput(
   input: InputUserPayload,
   task: LeaderDecisionDataTask,
-  now: Date
+  currentLocalDate: string
 ): Object {
+  // MultiAgentLeaderPlanner owns the date snapshot and replaces task.input with
+  // the normalized value. LeaderAgent receives the same host-only authority
+  // for its defense-in-depth pass and never calls an independent clock.
   if (task.toolId === 'hotel.search') {
-    return normalizeHotelSearchTaskInput(input, task);
+    return normalizeHotelSearchTaskInput(input, task, currentLocalDate);
   }
   if (task.toolId === 'travel.search' || task.toolId === 'train.search' ||
     task.toolId === 'flight.search') {
@@ -639,6 +657,11 @@ function normalizeCanaryTaskInput(
   if (task.toolId !== 'calendar.events.search') {
     return task.input;
   }
+  const timestamp: number = Date.parse(currentLocalDate + 'T00:00:00+08:00');
+  if (Number.isNaN(timestamp)) {
+    throw new Error('CURRENT_LOCAL_DATE_INVALID');
+  }
+  const now = new Date(timestamp);
   const update = calendarUpdateSearchArgs(input.text, now);
   if (update !== null) {
     return update as Object;
@@ -832,12 +855,6 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
 }
 
 class MemoryIntentResolver implements VirtualActionIntentResolver {
-  private readonly currentLocalDate?: HotelLocalDateProvider;
-
-  constructor(currentLocalDate?: HotelLocalDateProvider) {
-    this.currentLocalDate = currentLocalDate;
-  }
-
   async resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null> {
     if (request.virtual !== true || request.dataTaskIds.length !== 0 ||
       request.allowedActionIds.length !== 1 ||
@@ -846,8 +863,12 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
     }
     const actionId = request.allowedActionIds[0];
     if (actionId !== MEMORY_ACTION_ID) {
+      const now: Date | null = calendarNow(request.currentLocalDate);
+      if (now === null) {
+        return null;
+      }
       const action = resolveVirtualRegisteredPageAction(
-        actionId, request.inputText, calendarNow(this.currentLocalDate)
+        actionId, request.inputText, now
       );
       if (action === null || action.args === undefined) {
         return null;
@@ -985,11 +1006,6 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
       const actions = definition.actions.filter(
         (actionId: string): boolean => toolDefinitionForToolId(actionId) !== null
       );
-      if ((definition.toolId === 'worldcup.open' || definition.toolId === 'maps.route.open' ||
-        definition.toolId === 'calendar.event.create') &&
-        actions.indexOf(definition.toolId) < 0) {
-        actions.push(definition.toolId);
-      }
       return {
         toolId: definition.toolId,
         domain: definition.domain,
@@ -1126,19 +1142,21 @@ export class MultiAgentCanaryRuntime {
     const initialContext = canaryPlanningContext(options.selectedPersonaId());
     const dataTaskInputNormalizer: LeaderDataTaskInputNormalizer = (
       input: InputUserPayload,
-      task: LeaderDecisionDataTask
-    ): Object => normalizeCanaryTaskInput(input, task, calendarNow(options.currentLocalDate));
+      task: LeaderDecisionDataTask,
+      currentLocalDate: string
+    ): Object => normalizeCanaryTaskInput(input, task, currentLocalDate);
     this.runtime = new MultiAgentRuntime({
       conversationId,
       bus: options.bus,
       planner: new MultiAgentLeaderPlanner(
         options.model,
-        options.currentLocalDate,
+        undefined,
         dataTaskInputNormalizer
       ),
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
         canaryPlanningContext(options.selectedPersonaId()),
+      currentLocalDateProvider: options.currentLocalDate,
       dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
@@ -1165,7 +1183,7 @@ export class MultiAgentCanaryRuntime {
           options.onSurface(surface, hostGeneration);
         }
       ),
-      virtualActionResolver: new MemoryIntentResolver(options.currentLocalDate),
+      virtualActionResolver: new MemoryIntentResolver(),
       submitTimeoutMs: options.submitTimeoutMs,
       actionTimeoutMs: options.actionTimeoutMs,
       settingsFingerprint: options.settingsFingerprint,

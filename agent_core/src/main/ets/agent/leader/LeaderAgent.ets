@@ -15,6 +15,7 @@ import {
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
+  LeaderCurrentLocalDateProvider,
   LeaderDataTask,
   LeaderDataTaskInputNormalizer,
   LeaderDecision,
@@ -37,9 +38,11 @@ import {
 } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { dataAgentToolDefinitions } from '../../aiphone/runtime/ToolDefinitionRegistry';
-import { ToolDefinition } from '../../aiphone/runtime/ToolDefinitionTypes';
 import { ActionPlanRequestPayload } from '../action/ActionAgentTypes';
+import {
+  leaderIsActionCapability,
+  leaderIsDataCapability
+} from './LeaderCapabilityOwnership';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -66,6 +69,8 @@ interface LeaderTurnState {
   dataDone: boolean;
   terminal: boolean;
   timerId: number;
+  planningTimerId: number;
+  deadlineAtMs: number;
   releasePlanning: (() => void) | null;
 }
 
@@ -74,13 +79,17 @@ interface LeaderPendingDataTask {
   outputSchema: string;
 }
 
+const MAX_POST_OBSERVATION_PLANNING_MS: number = 8000;
+const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
+const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
+
 export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly planner: LeaderPlanner;
   private planningContext: LeaderPlanningContext;
   private readonly timeoutMs: number;
-  private readonly dataToolIds: Set<string>;
   private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
+  private readonly currentLocalDate: LeaderCurrentLocalDateProvider;
   private readonly decisionObserver: ((
     conversationId: string,
     turnId: string,
@@ -103,20 +112,23 @@ export class LeaderAgent extends MessageDrivenAgent {
       turnId: string,
       taskId: string,
       requestedCapabilityIds: string[]
-    ) => void
+    ) => void,
+    currentLocalDate?: LeaderCurrentLocalDateProvider
   ) {
     super(bus);
     this.bus = bus;
     this.planner = planner;
     this.planningContext = this.copyPlanningContext(planningContext);
-    this.dataToolIds = new Set<string>(dataAgentToolDefinitions().map(
-      (definition: ToolDefinition): string => definition.toolId
-    ));
-    this.dataToolIds.add('dynamic.search');
     this.timeoutMs = timeoutMs > 0 ? timeoutMs : 30000;
     this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
       null : dataTaskInputNormalizer;
     this.decisionObserver = decisionObserver === undefined ? null : decisionObserver;
+    this.currentLocalDate = currentLocalDate === undefined ? (): string => {
+      const now = new Date();
+      const month: string = (now.getMonth() + 1).toString().padStart(2, '0');
+      const day: string = now.getDate().toString().padStart(2, '0');
+      return now.getFullYear().toString() + '-' + month + '-' + day;
+    } : currentLocalDate;
   }
 
   stop(): void {
@@ -251,6 +263,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       dataDone: false,
       terminal: false,
       timerId: -1,
+      planningTimerId: -1,
+      deadlineAtMs: Date.now() + this.timeoutMs,
       releasePlanning: null
     };
     this.turns.set(key, state);
@@ -269,12 +283,27 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     state.planning = true;
+    let trustedCurrentLocalDate: string = '';
+    try {
+      trustedCurrentLocalDate = this.currentLocalDate();
+      if (!this.validNormalizationCurrentLocalDate(trustedCurrentLocalDate)) {
+        throw new Error('Leader current local date authority is invalid');
+      }
+    } catch (error) {
+      this.failPlanning(message, state, error as Object);
+      return;
+    }
     const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
       state.releasePlanning = resolve;
     });
     const key: string = this.turnKey(message);
     const planningSignal: LeaderPlanningSignal = (): boolean =>
       this.turns.get(key) === state && !state.terminal && state.planning;
+    if (this.canRenderObservedFallback(state)) {
+      state.planningTimerId = setTimeout(() => {
+        this.timeoutPostObservationPlanning(key, state);
+      }, this.postObservationPlanningBudgetMs(state));
+    }
     try {
       Promise.race([
         this.planner.plan(
@@ -282,12 +311,13 @@ export class LeaderAgent extends MessageDrivenAgent {
           input,
           this.copyPlanningContext(this.planningContext),
           state.round,
-          planningSignal
+          planningSignal,
+          trustedCurrentLocalDate
         ),
         timeoutSignal
       ])
         .then((outcome: LeaderPlannerResult | void) => {
-          this.completePlanning(message, state, outcome);
+          this.completePlanning(message, state, outcome, trustedCurrentLocalDate);
         })
         .catch((error: Object) => {
           this.failPlanning(message, state, error);
@@ -300,12 +330,15 @@ export class LeaderAgent extends MessageDrivenAgent {
   private completePlanning(
     message: AgentMessage,
     state: LeaderTurnState,
-    outcome: LeaderPlannerResult | void
+    outcome: LeaderPlannerResult | void,
+    trustedCurrentLocalDate: string
   ): void {
-    state.planning = false;
-    if (state.terminal) {
+    if (state.terminal || !state.planning) {
       return;
     }
+    state.planning = false;
+    this.clearPlanningTimer(state);
+    state.releasePlanning = null;
     if (outcome === undefined) {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_FAILED', 'Leader planner returned no decision');
@@ -321,7 +354,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.completeLegacyPlanning(message, state, result as LeaderPlan);
       return;
     }
-    this.completeDecisionPlanning(message, state, result as LeaderDecision);
+    this.completeDecisionPlanning(message, state, result as LeaderDecision, trustedCurrentLocalDate);
   }
 
   private completeLegacyPlanning(message: AgentMessage, state: LeaderTurnState, plan: LeaderPlan): void {
@@ -341,7 +374,8 @@ export class LeaderAgent extends MessageDrivenAgent {
   private completeDecisionPlanning(
     message: AgentMessage,
     state: LeaderTurnState,
-    decision: LeaderDecision
+    decision: LeaderDecision,
+    trustedCurrentLocalDate: string
   ): void {
     if (Array.isArray(decision.dataTasks) &&
       decision.dataTasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
@@ -353,7 +387,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       );
       return;
     }
-    if (!this.validDecision(decision)) {
+    if (!this.validDecision(decision, trustedCurrentLocalDate)) {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
@@ -401,7 +435,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     try {
-      this.normalizeDecisionInputs(state.input, decision);
+      this.normalizeDecisionInputs(state.input, decision, trustedCurrentLocalDate);
     } catch (error) {
       this.finishTurn(state);
       const detail: string = error instanceof Error ? error.message : `${error}`;
@@ -461,16 +495,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       if (state.dataTaskIds.length > 0) {
         state.pendingAnswer = decision.answer as string;
         state.uiIntent = decision.uiIntent.purpose;
-        this.publishAccumulatedUiTask(message, state);
-        if (state.pendingActionDecision !== null) {
-          this.publishActionPlanRequest(
-            message,
-            state.pendingActionDecision,
-            state.uiTaskId,
-            state.dataTaskIds,
-            false
-          );
-        }
+        this.publishAccumulatedUiWithPendingAction(message, state);
         return;
       }
       this.publishTurnResult(message, state, decision.answer as string);
@@ -533,7 +558,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       const observation: ObservationDigest = state.turnObservations[index];
       const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
         observation.status === 'empty' || observation.status === 'error';
-      if (terminal && this.dataToolIds.has(observation.toolId)) {
+      if (terminal && leaderIsDataCapability(this.planningContext, observation.toolId)) {
         completedToolIds.add(observation.toolId);
       }
     }
@@ -552,8 +577,14 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {
+    if (state.terminal || !state.planning) {
+      return;
+    }
     state.planning = false;
-    if (state.terminal) {
+    this.clearPlanningTimer(state);
+    state.releasePlanning = null;
+    if (this.canRenderObservedFallback(state)) {
+      this.publishObservedFallback(message, state);
       return;
     }
     this.finishTurn(state);
@@ -561,6 +592,44 @@ export class LeaderAgent extends MessageDrivenAgent {
     const code: string = error instanceof Error && detail === 'LEADER_TASK_INPUT_INVALID' ?
       'LEADER_TASK_INPUT_INVALID' : 'LEADER_PLAN_FAILED';
     this.publishError(message, code, detail);
+  }
+
+  private canRenderObservedFallback(state: LeaderTurnState): boolean {
+    return state.semantic &&
+      state.dataTaskIds.length > 0 &&
+      state.turnObservations.length > 0 &&
+      state.pendingDataTools.size === 0 &&
+      state.pendingAnswer === null &&
+      !state.uiDone;
+  }
+
+  private publishObservedFallback(message: AgentMessage, state: LeaderTurnState): void {
+    state.pendingAnswer = OBSERVATION_FALLBACK_ANSWER;
+    this.publishAccumulatedUiWithPendingAction(message, state);
+  }
+
+  private postObservationPlanningBudgetMs(state: LeaderTurnState): number {
+    const remainingMs: number = Math.max(1, state.deadlineAtMs - Date.now());
+    const proportionalReserveMs: number = Math.max(1, Math.floor(this.timeoutMs / 3));
+    const reserveMs: number = Math.min(
+      MAX_POST_OBSERVATION_UI_RESERVE_MS,
+      proportionalReserveMs
+    );
+    return Math.max(
+      1,
+      Math.min(MAX_POST_OBSERVATION_PLANNING_MS, remainingMs - reserveMs)
+    );
+  }
+
+  private timeoutPostObservationPlanning(key: string, state: LeaderTurnState): void {
+    if (this.turns.get(key) !== state || state.terminal || !state.planning ||
+      !this.canRenderObservedFallback(state)) {
+      return;
+    }
+    state.planning = false;
+    this.clearPlanningTimer(state);
+    this.releasePlanning(state);
+    this.publishObservedFallback(this.inputMessage(state), state);
   }
 
   private handleSemanticObservation(state: LeaderTurnState, message: AgentMessage): void {
@@ -579,8 +648,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     if (state.round >= 3) {
       const inputMessage: AgentMessage = this.inputMessage(state);
-      this.finishTurn(state);
-      this.publishError(inputMessage, 'LEADER_ROUND_LIMIT', 'Leader cannot plan more than three rounds');
+      if (this.canRenderObservedFallback(state)) {
+        this.publishObservedFallback(inputMessage, state);
+      } else {
+        this.finishTurn(state);
+        this.publishError(inputMessage, 'LEADER_ROUND_LIMIT', 'Leader cannot plan more than three rounds');
+      }
       return;
     }
     state.round++;
@@ -796,11 +869,27 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.validPlan(result as LeaderPlan);
   }
 
-  private validDecision(decision: LeaderDecision): boolean {
+  private validDecision(decision: LeaderDecision, trustedCurrentLocalDate: string): boolean {
     if (decision === undefined || decision === null) {
       return false;
     }
-    const keys: string = Object.keys(decision).sort().join(',');
+    const rawKeys: string[] = Object.keys(decision);
+    const hasNormalizationDate: boolean =
+      rawKeys.indexOf('normalizationCurrentLocalDate') >= 0;
+    const normalizationDateMatchesAuthority: boolean =
+      this.validNormalizationCurrentLocalDate(decision.normalizationCurrentLocalDate) &&
+      decision.normalizationCurrentLocalDate === trustedCurrentLocalDate;
+    if ((hasNormalizationDate && !normalizationDateMatchesAuthority) ||
+      (decision.roundAction === 'execute' && this.dataTaskInputNormalizer !== null &&
+        Array.isArray(decision.dataTasks) &&
+        decision.dataTasks.length > 0 &&
+        !normalizationDateMatchesAuthority)) {
+      return false;
+    }
+    const keys: string = rawKeys
+      .filter((key: string): boolean => key !== 'normalizationCurrentLocalDate')
+      .sort()
+      .join(',');
     if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
       keys !== 'answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
       keys !== 'actionIntent,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
@@ -833,7 +922,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       return false;
     }
     const actionIntent = decision.actionIntent;
-    return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
+    const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
+    return (actionIntent === undefined ||
+      this.validActionIntent(actionIntent, ownership.owner === 'legacy')) &&
       this.requestedCapabilitiesMatchExecution(decision);
   }
 
@@ -864,7 +955,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   private registeredCapability(id: string): boolean {
     for (let index = 0; index < this.planningContext.tools.length; index++) {
       const tool = this.planningContext.tools[index];
-      if (tool.toolId === id || tool.actions.indexOf(id) >= 0) {
+      if (tool.toolId === id) {
         return true;
       }
     }
@@ -900,14 +991,41 @@ export class LeaderAgent extends MessageDrivenAgent {
     return true;
   }
 
-  private normalizeDecisionInputs(input: InputUserPayload, decision: LeaderDecision): void {
+  private normalizeDecisionInputs(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    trustedCurrentLocalDate: string
+  ): void {
     const normalizer: LeaderDataTaskInputNormalizer | null = this.dataTaskInputNormalizer;
     if (normalizer === null) {
       return;
     }
     for (let index = 0; index < decision.dataTasks.length; index++) {
-      decision.dataTasks[index].input = normalizer(input, decision.dataTasks[index]);
+      decision.dataTasks[index].input =
+        normalizer(input, decision.dataTasks[index], trustedCurrentLocalDate);
     }
+  }
+
+  private validNormalizationCurrentLocalDate(value: string | undefined): boolean {
+    if (typeof value !== 'string' || value.length !== 10 ||
+      value.charCodeAt(4) !== 45 || value.charCodeAt(7) !== 45) {
+      return false;
+    }
+    const digitIndexes: number[] = [0, 1, 2, 3, 5, 6, 8, 9];
+    for (let index = 0; index < digitIndexes.length; index++) {
+      const code: number = value.charCodeAt(digitIndexes[index]);
+      if (code < 48 || code > 57) {
+        return false;
+      }
+    }
+    const year: number = Number(value.substring(0, 4));
+    const month: number = Number(value.substring(5, 7));
+    const day: number = Number(value.substring(8, 10));
+    const timestamp: number = Date.UTC(year, month - 1, day);
+    const date = new Date(timestamp);
+    return date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
   }
 
   private validDecisionTasks(tasks: LeaderDecisionDataTask[]): boolean {
@@ -931,8 +1049,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
         const allowedId = task.allowedToolIds[allowedIndex];
         if (typeof allowedId !== 'string' || allowedId.trim().length === 0 ||
-          allowed.has(allowedId) || !this.dataToolIds.has(allowedId) ||
-          this.toolMetadata(allowedId)?.riskLevel !== 'read') {
+          allowed.has(allowedId) ||
+          !leaderIsDataCapability(this.planningContext, allowedId)) {
           return false;
         }
         allowed.add(allowedId);
@@ -958,7 +1076,10 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.validUniqueStrings(values['requiredSections'] as Object[], true);
   }
 
-  private validActionIntent(intent: Object | string | number | boolean | null): boolean {
+  private validActionIntent(
+    intent: Object | string | number | boolean | null,
+    allowRegisteredHandoff: boolean = false
+  ): boolean {
     if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
       Object.keys(intent).sort().join(',') !== 'allowedActionIds,goal') {
       return false;
@@ -969,15 +1090,11 @@ export class LeaderAgent extends MessageDrivenAgent {
       !Array.isArray(allowedIds) || !this.validUniqueStrings(allowedIds as Object[], false)) {
       return false;
     }
-    const registered: Set<string> = new Set<string>();
-    for (let toolIndex = 0; toolIndex < this.planningContext.tools.length; toolIndex++) {
-      const actions = this.planningContext.tools[toolIndex].actions;
-      for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
-        registered.add(actions[actionIndex]);
-      }
-    }
     for (let index = 0; index < allowedIds.length; index++) {
-      if (!registered.has(allowedIds[index] as string)) {
+      const actionId: string = allowedIds[index] as string;
+      if (allowRegisteredHandoff ?
+        this.toolMetadata(actionId) === null :
+        !leaderIsActionCapability(this.planningContext, actionId)) {
         return false;
       }
     }
@@ -1210,6 +1327,22 @@ export class LeaderAgent extends MessageDrivenAgent {
     });
   }
 
+  private publishAccumulatedUiWithPendingAction(
+    input: AgentMessage,
+    state: LeaderTurnState
+  ): void {
+    this.publishAccumulatedUiTask(input, state);
+    if (state.pendingActionDecision !== null) {
+      this.publishActionPlanRequest(
+        input,
+        state.pendingActionDecision,
+        state.uiTaskId,
+        state.dataTaskIds,
+        false
+      );
+    }
+  }
+
   private publishActionPlanRequest(
     input: AgentMessage,
     decision: LeaderDecision,
@@ -1226,6 +1359,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       personaId: decision.personaId,
       inputText: (input.payload as InputUserPayload).text
     };
+    if (decision.normalizationCurrentLocalDate !== undefined) {
+      payload.currentLocalDate = decision.normalizationCurrentLocalDate;
+    }
     if (virtual) {
       payload.virtual = true;
     }
@@ -1388,6 +1524,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     state.terminal = true;
     this.clearTurnTimer(state);
+    this.clearPlanningTimer(state);
     this.releasePlanning(state);
     const key: string = this.turnKeyFor(state.conversationId, state.turnId);
     if (this.turns.get(key) === state) {
@@ -1400,6 +1537,13 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state.timerId >= 0) {
       clearTimeout(state.timerId);
       state.timerId = -1;
+    }
+  }
+
+  private clearPlanningTimer(state: LeaderTurnState): void {
+    if (state.planningTimerId >= 0) {
+      clearTimeout(state.planningTimerId);
+      state.planningTimerId = -1;
     }
   }
 
