@@ -197,10 +197,12 @@ export interface A2uiMultiTaskSectionMeta {
   title: string;
   status: string;
   summary: string;
+  completionReply?: string;
 }
 
 export interface A2uiMultiTaskBoardData {
   batchId: string;
+  mode?: string;
   activeSectionId: string;
   sections: A2uiMultiTaskSectionMeta[];
 }

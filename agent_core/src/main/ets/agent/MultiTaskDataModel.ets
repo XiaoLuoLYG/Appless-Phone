@@ -52,6 +52,7 @@ export function mergeSectionIntoDataModel(
       board.sections[index].title = content.title;
       board.sections[index].status = content.status;
       board.sections[index].summary = content.summary;
+      board.sections[index].completionReply = content.completionReply;
       break;
     }
     if (activateSlot) {

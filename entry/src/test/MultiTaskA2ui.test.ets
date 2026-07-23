@@ -724,7 +724,7 @@ export default function multiTaskA2uiTest() {
       isBusy: false,
       isAwaitingFirstSurface: false
     });
-    expect(document.title).assertEqual('串行任务');
+    expect(document.executionMode).assertEqual('serial');
     expect(document.blocks.length).assertEqual(2);
     const html = renderMultiTaskHomeDocument(document, false);
     expect(html.indexOf('multi-serial-replies')).assertEqual(-1);

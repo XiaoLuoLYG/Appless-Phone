@@ -24,16 +24,7 @@ export interface A2uiObservationDigest {
   finalText: string;
 }
 
-const FAILURE_STATUSES: string[] = [
-  'error',
-  'blocked',
-  'confirm_required',
-  'needs_input',
-  'needs_user',
-  'auth_required',
-  'needs_auth',
-  'unsafe_action_blocked'
-];
+const FAILURE_STATUSES: string[] = ['error', 'blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
 const MAX_DETAILED_RESULTS: number = 5;
 const MAX_TEXT_LENGTH: number = 180;
 const USEFUL_ROW_LABELS: string[] = [

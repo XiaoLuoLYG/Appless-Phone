@@ -9,6 +9,7 @@ export interface MultiToolSectionMeta {
   title: string;
   status: MultiToolSlotStatus;
   summary: string;
+  completionReply?: string;
 }
 
 export interface MultiTaskBoardData {
@@ -24,6 +25,7 @@ export interface MultiToolSectionContent {
   title: string;
   status: MultiToolSlotStatus;
   summary: string;
+  completionReply: string;
   observationDigest: string;
   failureKey: string;
   embeddedSurface: A2uiSurfaceState | null;
