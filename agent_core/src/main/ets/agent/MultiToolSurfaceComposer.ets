@@ -8,9 +8,10 @@ import {
   A2uiSummaryData,
   A2uiSurfaceState
 } from '../aiphone/runtime/A2uiTypes';
-import { ingestToolObservation } from './MultiToolSectionAdapters';
+import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
 import {
   MultiTaskBoardData,
+  MultiToolExecutionMode,
   MultiToolSectionContent,
   MultiToolSectionMeta,
   MultiToolSectionValue,
@@ -74,6 +75,7 @@ export class MultiToolSurfaceComposer {
   private onEmit: MultiToolSurfaceEmitHandler;
   private generation: number;
   private emitGeneration: number;
+  private executionMode: MultiToolExecutionMode;
 
   constructor(compositeSurfaceId: string, onEmit: MultiToolSurfaceEmitHandler) {
     this.batchId = 'batch_' + Date.now().toString();
@@ -86,6 +88,11 @@ export class MultiToolSurfaceComposer {
     this.onEmit = onEmit;
     this.generation = 0;
     this.emitGeneration = 0;
+    this.executionMode = 'parallel';
+  }
+
+  setExecutionMode(mode: MultiToolExecutionMode): void {
+    this.executionMode = mode;
   }
 
   childSurfaceId(slotId: string): string {
@@ -150,10 +157,12 @@ export class MultiToolSurfaceComposer {
       title: this.titleForSlot(slotId),
       status: 'error',
       summary: message,
+      completionReply: '',
       observationDigest: 'ObservationDigest\nerror: ' + message,
       failureKey: 'slot:error',
       embeddedSurface: null
     };
+    content.completionReply = serialStepCompletionReply(content.toolId, content);
     this.applySlotContent(slotId, content, 'error');
   }
 
@@ -174,7 +183,7 @@ export class MultiToolSurfaceComposer {
     const lines: string[] = [
       'ObservationDigest',
       'batchId: ' + this.batchId,
-      'mode: parallel',
+      'mode: ' + this.executionMode,
       'surface: multi-task composite'
     ];
     for (let index = 0; index < this.slots.length; index++) {
@@ -196,6 +205,16 @@ export class MultiToolSurfaceComposer {
       } else if (this.slots[index].status === 'error') {
         errorCount++;
       }
+    }
+    if (this.executionMode === 'serial') {
+      if (readyCount === 0 && errorCount > 0) {
+        return '串行任务未完成，详情已更新到主页。';
+      }
+      if (errorCount > 0) {
+        return '已完成 ' + readyCount.toString() + '/' + this.slots.length.toString() +
+          ' 步串行任务，可在页内切换查看；' + errorCount.toString() + ' 步失败。';
+      }
+      return '串行任务已完成，可在页内切换查看各步骤结果。';
     }
     if (readyCount === 0 && errorCount > 0) {
       return '并行任务均失败，详情已更新到主页。';
@@ -272,7 +291,14 @@ export class MultiToolSurfaceComposer {
 
   private noteSlotResult(slotId: string): void {
     const slot = this.slotByIdLookup(slotId);
-    if (slot === null || !this.slotHasDisplayableResult(slot)) {
+    if (slot === null) {
+      return;
+    }
+    if (this.executionMode === 'serial') {
+      if (slot.status !== 'ready' && slot.status !== 'error') {
+        return;
+      }
+    } else if (!this.slotHasDisplayableResult(slot)) {
       return;
     }
     if (this.completionOrder.indexOf(slotId) >= 0) {
@@ -284,6 +310,14 @@ export class MultiToolSurfaceComposer {
   }
 
   private syncActiveSectionFromCompletion(): void {
+    if (this.executionMode === 'serial') {
+      if (this.completionOrder.length === 0) {
+        this.activeSectionId = '';
+        return;
+      }
+      this.activeSectionId = this.completionOrder[this.completionOrder.length - 1];
+      return;
+    }
     if (this.completionOrder.length === 0) {
       this.activeSectionId = '';
       return;
@@ -321,11 +355,13 @@ export class MultiToolSurfaceComposer {
         toolId: slot.toolId,
         title: slot.content !== null ? slot.content.title : slot.toolId,
         status: slot.status,
-        summary: slot.content !== null ? slot.content.summary : ''
+        summary: slot.content !== null ? slot.content.summary : '',
+        completionReply: slot.content !== null ? slot.content.completionReply : ''
       });
     }
     return {
       batchId: this.batchId,
+      mode: this.executionMode,
       activeSectionId: this.activeSectionId,
       sections: sections
     };
@@ -350,6 +386,14 @@ export class MultiToolSurfaceComposer {
     return values;
   }
 
+  private batchTitle(): string {
+    return this.executionMode === 'serial' ? '串行任务' : '并行任务';
+  }
+
+  private batchBody(): string {
+    return this.executionMode === 'serial' ? '按顺序查看各步骤结果' : '页内切换查看各工具结果';
+  }
+
   private summaryData(): A2uiSummaryData {
     let readyCount = 0;
     for (let index = 0; index < this.slots.length; index++) {
@@ -357,8 +401,9 @@ export class MultiToolSurfaceComposer {
         readyCount++;
       }
     }
+    const label = this.executionMode === 'serial' ? '串行任务进度 ' : '并行任务进度 ';
     return {
-      text: '并行任务进度 ' + readyCount.toString() + '/' + this.slots.length.toString(),
+      text: label + readyCount.toString() + '/' + this.slots.length.toString(),
       toolName: 'multi.task.batch',
       dataLabel: 'multiTask',
       count: readyCount
@@ -366,20 +411,21 @@ export class MultiToolSurfaceComposer {
   }
 
   private compositeComponents(): A2uiComponent[] {
+    const title = this.batchTitle();
     return [
       {
         id: 'root',
         component: A2UI_COMPONENT_SURFACE_ROOT,
         child: 'board',
-        title: '并行任务',
+        title: title,
         body: '多个工具结果',
         status: 'ready'
       },
       {
         id: 'board',
         component: A2UI_COMPONENT_MULTI_TASK_BOARD,
-        title: '并行任务',
-        body: '页内切换查看各工具结果',
+        title: title,
+        body: this.batchBody(),
         status: 'ready',
         dataPath: '/multiTask'
       }
@@ -396,7 +442,7 @@ export class MultiToolSurfaceComposer {
         createSurface: {
           surfaceId: this.compositeSurfaceId,
           root: 'root',
-          title: '并行任务',
+          title: this.batchTitle(),
           intent: 'multi-task',
           status: this.isBatchTerminal() ? 'ready' : 'calling_tool',
           sendDataModel: true
@@ -408,6 +454,17 @@ export class MultiToolSurfaceComposer {
         updateComponents: {
           surfaceId: this.compositeSurfaceId,
           components: this.compositeComponents()
+        }
+      });
+    } else if (this.isBatchTerminal()) {
+      envelopes.push({
+        createSurface: {
+          surfaceId: this.compositeSurfaceId,
+          root: 'root',
+          title: this.batchTitle(),
+          intent: 'multi-task',
+          status: 'ready',
+          sendDataModel: false
         }
       });
     }

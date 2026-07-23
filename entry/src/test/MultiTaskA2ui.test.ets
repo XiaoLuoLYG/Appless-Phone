@@ -8,6 +8,7 @@ import {
 } from '@loop/agent-core';
 import {
   childSurfaceIdForMultiTaskSlot,
+  genericToolResultsA2ui,
   mergeSlotObservationIntoMultiTaskSurface,
   MultiToolSurfaceComposer,
   resolveMultiTaskSlotId
@@ -657,5 +658,74 @@ export default function multiTaskA2uiTest() {
     expect(payload.indexOf('"isBusy":true')).assertLarger(-1);
     expect(payload.indexOf('slot_1')).assertLarger(-1);
   });
+
+  it('serial_keeps_active_tab_on_last_completed_until_next_finishes', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_serial', (surface) => {
+      latestSurface = surface;
+    });
+    composer.setExecutionMode('serial');
+    composer.registerSlots([
+      { name: 'time', input: '' },
+      { name: 'calendar.event.create', input: '{}' }
+    ]);
+    composer.emitShell();
+    composer.markRunning('slot_0');
+    composer.ingestSlotObservation('slot_0', '7/23/2026, 3:32:45 PM');
+    expect(latestSurface !== null).assertTrue();
+    const afterFirst = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const boardAfterFirst = afterFirst.multiTask as Record<string, string>;
+    expect(boardAfterFirst.activeSectionId).assertEqual('slot_0');
+    composer.markRunning('slot_1');
+    const whileSecondRunning = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const boardWhileSecond = whileSecondRunning.multiTask as Record<string, string>;
+    expect(boardWhileSecond.activeSectionId).assertEqual('slot_0');
+    composer.ingestSlotObservation('slot_1', genericToolResultsA2ui('surface_calendar', 'calendar.event.create', [{
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.create',
+      title: '会议',
+      status: 'success',
+      summary: '已直接写入真实 Google Calendar。',
+      rows: [{ label: 'Event ID', value: 'evt_123' }]
+    }]));
+    const afterSecond = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const boardAfterSecond = afterSecond.multiTask as Record<string, string>;
+    expect(boardAfterSecond.activeSectionId).assertEqual('slot_1');
   });
-}
+
+  it('builds_serial_multi_task_without_completion_reply_banner', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_serial', (surface) => {
+      latestSurface = surface;
+    });
+    composer.setExecutionMode('serial');
+    composer.registerSlots([
+      { name: 'time', input: '' },
+      { name: 'calendar.event.create', input: '{"title":"会议"}' }
+    ]);
+    composer.emitShell();
+    composer.markRunning('slot_0');
+    composer.ingestSlotObservation('slot_0', '7/23/2026, 3:32:45 PM');
+    composer.markRunning('slot_1');
+    composer.ingestSlotObservation('slot_1', genericToolResultsA2ui('surface_calendar', 'calendar.event.create', [{
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.create',
+      title: '会议',
+      status: 'success',
+      summary: '已直接写入真实 Google Calendar。',
+      rows: [{ label: 'Event ID', value: 'evt_123' }]
+    }]));
+    expect(latestSurface !== null).assertTrue();
+    const document = createHtmlHomeDocument({
+      surface: latestSurface!,
+      messages: [],
+      isBusy: false,
+      isAwaitingFirstSurface: false
+    });
+    expect(document.executionMode).assertEqual('serial');
+    expect(document.blocks.length).assertEqual(2);
+    const html = renderMultiTaskHomeDocument(document, false);
+    expect(html.indexOf('multi-serial-replies')).assertEqual(-1);
+    expect(html.indexOf('multi-tabs-track')).assertLarger(-1);
+  });
+});

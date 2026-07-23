@@ -78,6 +78,7 @@ export struct HtmlHomeSurfaceView {
       return;
     }
     try {
+      this.webReady = false;
       this.controller.loadData(this.html, 'text/html', 'UTF-8', 'https://aiphone.local/');
       this.loadedKey = this.html;
       this.lastMailDetailEventJson = '';
@@ -103,9 +104,14 @@ export struct HtmlHomeSurfaceView {
   }
 
   private pushMultiTaskPayloadIfNeeded(): void {
-    if (!this.webReady || this.multiTaskPayloadJson.length === 0 ||
+    if (this.multiTaskPayloadJson.length === 0 ||
       (this.multiTaskPayloadJson === this.lastMultiTaskPayloadJson &&
         this.multiTaskPayloadTick === this.lastMultiTaskPayloadTick)) {
+      return;
+    }
+    if (!this.webReady) {
+      aiLogInfo('[AIPhone][HtmlHomeMultiTaskPushDeferred] tick=' + this.multiTaskPayloadTick.toString() +
+        ' payloadChars=' + this.multiTaskPayloadJson.length.toString());
       return;
     }
     try {
@@ -114,6 +120,8 @@ export struct HtmlHomeSurfaceView {
       );
       this.lastMultiTaskPayloadJson = this.multiTaskPayloadJson;
       this.lastMultiTaskPayloadTick = this.multiTaskPayloadTick;
+      aiLogInfo('[AIPhone][HtmlHomeMultiTaskPush] tick=' + this.multiTaskPayloadTick.toString() +
+        ' payloadChars=' + this.multiTaskPayloadJson.length.toString());
     } catch (error) {
       aiLogError('[AIPhone][HtmlHomeMultiTaskPushError] ' + JSON.stringify(error));
     }

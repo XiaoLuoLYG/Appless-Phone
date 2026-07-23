@@ -635,6 +635,44 @@ export default function reActAgentRunnerTest() {
       expect(actions[1].indexOf('tool.b')).assertLarger(-1);
     });
 
+    it('runs all serial A2UI tools before emitting final', 0, async () => {
+      const calendar = new FixedTool('calendar.event.create', componentOnlyStatusJsonl('ready', 'surface_calendar'));
+      const gmail = new FixedTool('gmail.draft.create', componentOnlyStatusJsonl('ready', 'surface_gmail'));
+      const registry = new ToolRegistry();
+      registry.register(calendar);
+      registry.register(gmail);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: create event then draft email\nExecution: serial\n' +
+          'Action: calendar.event.create({"title":"会议"})\n' +
+          'Action: gmail.draft.create({"to":"test@example.com","subject":"会议","body":"明天见"})'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+      let finalCount = 0;
+      let observationCount = 0;
+
+      await runner.run('serial a2ui chain', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+        if (event.kind === AgentEventKind.FINAL) {
+          finalCount++;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observationCount++;
+        }
+      });
+
+      expect(calendar.calls.length).assertEqual(1);
+      expect(gmail.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+      expect(observationCount).assertEqual(2);
+      expect(finalCount).assertEqual(1);
+    });
+
     it('waits for all parallel A2UI tools before emitting final', 0, async () => {
       const first = new FixedTool('tool.a', componentOnlyStatusJsonl('ready', 'surface_a'));
       const second = new FixedTool('service.b', componentOnlyStatusJsonl('ready', 'surface_b'));

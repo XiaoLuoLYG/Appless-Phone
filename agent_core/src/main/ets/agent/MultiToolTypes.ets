@@ -1,6 +1,7 @@
 import { A2uiSurfaceState } from '../aiphone/runtime/A2uiTypes';
 
 export type MultiToolSlotStatus = 'queued' | 'running' | 'ready' | 'error';
+export type MultiToolExecutionMode = 'parallel' | 'serial';
 
 export interface MultiToolSectionMeta {
   slotId: string;
@@ -8,10 +9,12 @@ export interface MultiToolSectionMeta {
   title: string;
   status: MultiToolSlotStatus;
   summary: string;
+  completionReply?: string;
 }
 
 export interface MultiTaskBoardData {
   batchId: string;
+  mode: MultiToolExecutionMode;
   activeSectionId: string;
   sections: MultiToolSectionMeta[];
 }
@@ -22,6 +25,7 @@ export interface MultiToolSectionContent {
   title: string;
   status: MultiToolSlotStatus;
   summary: string;
+  completionReply: string;
   observationDigest: string;
   failureKey: string;
   embeddedSurface: A2uiSurfaceState | null;

@@ -160,6 +160,14 @@ export class ReActAgentRunner {
           for (let index = 0; index < batchObservations.length; index++) {
             observationsForModel.push(batchObservations[index]);
           }
+        } else if (plan.mode === 'serial' && plan.calls.length > 1 && this.batchHost !== null) {
+          const serialObservations = await this.executeSerialToolCalls(plan.calls, listener);
+          if (serialObservations === null) {
+            return;
+          }
+          for (let index = 0; index < serialObservations.length; index++) {
+            observationsForModel.push(serialObservations[index]);
+          }
         } else {
           for (let index = 0; index < plan.calls.length; index++) {
             const call = plan.calls[index];
@@ -170,7 +178,12 @@ export class ReActAgentRunner {
             listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
             const processed = this.processObservation(observation, listener);
             observationsForModel.push(processed.text);
-            if (processed.shouldStop) {
+            const isLastCall = index === plan.calls.length - 1;
+            if (processed.failureKey.length > 0) {
+              this.emitDigestFinal(processed, listener);
+              return;
+            }
+            if (processed.shouldStop && isLastCall) {
               this.emitDigestFinal(processed, listener);
               return;
             }
@@ -198,6 +211,7 @@ export class ReActAgentRunner {
     const composer = this.createBatchComposer(calls, listener);
     const useComposer = composer !== null;
     if (useComposer && composer !== null) {
+      composer.setExecutionMode('parallel');
       const slotCalls: MultiToolSlotCall[] = [];
       for (let index = 0; index < calls.length; index++) {
         slotCalls.push({ name: calls[index].name, input: calls[index].input });
@@ -274,6 +288,55 @@ export class ReActAgentRunner {
 
     this.clearBatchExecution(composer);
     return observationsForModel;
+  }
+
+  private async executeSerialToolCalls(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    const composer = this.createBatchComposer(calls, listener);
+    if (composer === null) {
+      return null;
+    }
+    composer.setExecutionMode('serial');
+    const slotCalls: MultiToolSlotCall[] = [];
+    for (let index = 0; index < calls.length; index++) {
+      slotCalls.push({ name: calls[index].name, input: calls[index].input });
+    }
+    composer.registerSlots(slotCalls);
+    composer.emitShell();
+
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const slotId = 'slot_' + index.toString();
+      composer.markRunning(slotId);
+      const observation = await this.executeToolCall(
+        call,
+        listener,
+        this.batchToolRunOptions(composer, slotId)
+      );
+      if (observation === null) {
+        this.clearBatchExecution(composer);
+        return null;
+      }
+      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      composer.ingestSlotObservation(slotId, observation);
+      const processed = this.processObservation(observation, listener, true);
+      if (processed.failureKey.length > 0) {
+        this.emitDigestFinal(processed, listener);
+        this.clearBatchExecution(composer);
+        return null;
+      }
+    }
+
+    this.emitDigestFinal(new ProcessedObservation(
+      composer.buildBatchObservationText(),
+      true,
+      composer.batchFailureKey(),
+      composer.buildFinalText()
+    ), listener);
+    this.clearBatchExecution(composer);
+    return null;
   }
 
   private async executeBatchSlot(

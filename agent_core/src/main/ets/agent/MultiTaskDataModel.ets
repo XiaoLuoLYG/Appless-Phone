@@ -52,6 +52,7 @@ export function mergeSectionIntoDataModel(
       board.sections[index].title = content.title;
       board.sections[index].status = content.status;
       board.sections[index].summary = content.summary;
+      board.sections[index].completionReply = content.completionReply;
       break;
     }
     if (activateSlot) {
@@ -69,7 +70,8 @@ export function mergeSectionIntoDataModel(
     const board = boardAfter as MultiTaskBoardData;
     const summary = summaryValue as Record<string, Object | string | number | boolean | null | undefined>;
     const readyCount = readySectionCount(board);
-    summary.text = '并行任务进度 ' + readyCount.toString() + '/' + board.sections.length.toString();
+    const progressLabel = board.mode === 'serial' ? '串行任务进度 ' : '并行任务进度 ';
+    summary.text = progressLabel + readyCount.toString() + '/' + board.sections.length.toString();
     summary.count = readyCount;
     parsed.summary = summary as Object;
   }

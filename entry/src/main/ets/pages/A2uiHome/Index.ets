@@ -918,6 +918,26 @@ struct Index {
     this.multiTaskPayloadTick = this.multiTaskPayloadTick + 1;
   }
 
+  private scheduleMultiTaskPayloadRefresh(): void {
+    if (!isMultiTaskSurface(this.currentSurface)) {
+      return;
+    }
+    setTimeout((): void => {
+      if (!isMultiTaskSurface(this.currentSurface)) {
+        return;
+      }
+      const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
+      if (document.kind !== 'multi-task') {
+        return;
+      }
+      this.syncMultiTaskPayloadUpdate(document);
+      aiLogInfo('[AIPhone][MultiTaskPayloadRefresh] tick=' + this.multiTaskPayloadTick.toString() +
+        ' blocks=' + document.blocks.length.toString() +
+        ' active=' + (document.activeSectionId ?? '') +
+        ' busy=' + (this.isBusy ? 'true' : 'false'));
+    }, 0);
+  }
+
   private syncHtmlHomeStableHtml(): void {
     const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
     if (document.kind === 'multi-task') {
@@ -1716,12 +1736,17 @@ struct Index {
     this.surfaceRenderTick = this.surfaceRenderTick + 1;
     this.clearLuckinInlinePatchState();
     this.syncHtmlHomeStableHtml();
+    if (surface.intent === 'multi-task') {
+      this.scheduleMultiTaskPayloadRefresh();
+    }
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
+      ' intent=' + surface.intent +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
-      ' renderTick=' + this.surfaceRenderTick.toString());
+      ' renderTick=' + this.surfaceRenderTick.toString() +
+      ' multiTaskTick=' + this.multiTaskPayloadTick.toString());
   }
 
   private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {
@@ -2316,6 +2341,10 @@ struct Index {
     } finally {
       this.isAwaitingFirstSurface = false;
       this.isBusy = false;
+      if (isMultiTaskSurface(this.currentSurface)) {
+        this.syncMultiTaskPayloadUpdate(this.withMultiTaskActiveSection(this.currentHtmlHomeDocument()));
+        this.scheduleMultiTaskPayloadRefresh();
+      }
     }
   }
 
