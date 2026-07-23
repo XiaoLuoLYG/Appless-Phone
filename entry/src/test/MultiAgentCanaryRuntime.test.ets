@@ -1454,8 +1454,11 @@ export default function multiAgentCanaryRuntimeTest() {
         '\nRuntime-owned tool IDs:', priceCatalogStart
       );
       const priceCatalog = priceModel.prompts[0].substring(priceCatalogStart, priceCatalogEnd);
+      const pricePersonasStart = priceModel.prompts[0].indexOf('\nPersonas: ');
+      const pricePersonas = priceModel.prompts[0].substring(pricePersonasStart);
       expect(priceCatalog.indexOf('"toolId":"food.search"')).assertLarger(-1);
       expect(priceCatalog.indexOf('"toolId":"luckin.order.preview"')).assertEqual(-1);
+      expect(pricePersonas.indexOf('luckin.order.preview')).assertEqual(-1);
       priceRuntime.dispose();
 
       const orderModel = new QueueModel([ANSWER_DECISION]);

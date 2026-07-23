@@ -21,7 +21,9 @@ import {
   JsonValue,
   LeaderDataTaskInputNormalizer,
   LeaderDecisionDataTask,
+  LeaderPersonaMetadata,
   LeaderPlanningContext,
+  LeaderSkillMetadata,
   LeaderToolMetadata,
   LinkedMessageBus,
   LocalModel,
@@ -1208,9 +1210,29 @@ function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): 
   runtimeOwnedToolIds.push(MEMORY_ACTION_ID);
   return {
     tools,
-    personas: leaderPersonaContext(previousPersonaId),
+    personas: scopedLeaderPersonas(previousPersonaId, tools),
     runtimeOwnedToolIds
   };
+}
+
+function scopedLeaderPersonas(
+  previousPersonaId: string,
+  tools: LeaderToolMetadata[]
+): LeaderPersonaMetadata[] {
+  const visibleToolIds: Set<string> = new Set<string>();
+  for (let index = 0; index < tools.length; index++) {
+    visibleToolIds.add(tools[index].toolId);
+  }
+  return leaderPersonaContext(previousPersonaId).map((persona: LeaderPersonaMetadata): LeaderPersonaMetadata => ({
+    personaId: persona.personaId,
+    name: persona.name,
+    soul: persona.soul,
+    memory: persona.memory,
+    previous: persona.previous,
+    activeSkills: persona.activeSkills.filter((skill: LeaderSkillMetadata): boolean =>
+      skill.toolIds.every((toolId: string): boolean => visibleToolIds.has(toolId))
+    )
+  }));
 }
 
 export function rememberedPersonaAfterOutcome(

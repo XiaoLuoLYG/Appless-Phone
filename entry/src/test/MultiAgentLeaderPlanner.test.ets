@@ -828,7 +828,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('repairs every registered same-round dependency to the exact producer current-round scope', 0, async () => {
+    it('normalizes every registered same-round dependency to the exact producer without another model call', 0, async () => {
       const sources: string[] = [
         'maps.place.search',
         'mail.search',
@@ -840,17 +840,27 @@ export default function multiAgentLeaderPlannerTest() {
         'gmail.thread.read'
       ];
       for (let index = 0; index < sources.length; index++) {
-        const invalid = sameRoundDependencyDecision(
+        let invalid = sameRoundDependencyDecision(
           sources[index], consumers[index], '{}', index === 0
         );
-        const repaired = producerOnlyRepairDecision(sources[index]);
-        const model = new QueueLocalModel([invalid, repaired]);
+        if (index === 0) {
+          invalid = invalid.replace(
+            '"requestedCapabilityIds":["maps.place.search","maps.place.details"]',
+            '"requestedCapabilityIds":["maps.place.search","maps.place.details","memory.update"]'
+          ).replace(
+            '],"uiIntent":',
+            '],"actionIntent":{"goal":"remember source","allowedActionIds":["memory.update"]},"uiIntent":'
+          );
+        }
+        const model = new QueueLocalModel([invalid]);
         const decision = await new MultiAgentLeaderPlanner(model).plan(
           inputMessage(), { text: 'read source then dependent detail' }, planningContext(), 1,
           (): boolean => true
         );
 
-        expect(decision.requestedCapabilityIds.join(',')).assertEqual(sources[index]);
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual(
+          index === 0 ? sources[index] + ',memory.update' : sources[index]
+        );
         expect(decision.dataTasks.length).assertEqual(1);
         expect(decision.dataTasks[0].localId).assertEqual('source');
         expect(decision.dataTasks[0].goal).assertEqual('read source');
@@ -863,17 +873,20 @@ export default function multiAgentLeaderPlannerTest() {
         expect(decision.uiIntent.purpose).assertEqual('read source and dependent detail');
         expect(decision.uiIntent.preferredDensity).assertEqual('comfortable');
         expect(decision.uiIntent.requiredSections.join(',')).assertEqual('source,detail');
-        expect(decision.actionIntent === undefined).assertTrue();
-        expect(model.prompts.length).assertEqual(2);
+        if (index === 0) {
+          expect(decision.actionIntent!.goal).assertEqual('remember source');
+          expect(decision.actionIntent!.allowedActionIds.join(',')).assertEqual('memory.update');
+        } else {
+          expect(decision.actionIntent === undefined).assertTrue();
+        }
+        expect(model.prompts.length).assertEqual(1);
         expect(model.prompts[0].indexOf(
           'requestedCapabilityIds is the exact current-round execution union'
         )).assertLarger(-1);
-        expect(model.prompts[1].indexOf('LEADER_SAME_ROUND_DEPENDENCY')).assertLarger(-1);
-        expect(model.prompts[1].indexOf('successful or partial')).assertLarger(-1);
       }
     });
 
-    it('rejects producer-only repair that changes any retained field or capability scope', 0, async () => {
+    it('does not consume a queued consumer-only or mutated dependency repair', 0, async () => {
       const invalid = sameRoundDependencyDecision(
         'maps.place.search', 'maps.place.details', '{}'
       );
@@ -901,19 +914,32 @@ export default function multiAgentLeaderPlannerTest() {
         )
       ];
       for (let index = 0; index < changed.length; index++) {
-        expect(await repairFails(invalid, changed[index], planningContext())).assertTrue();
+        const model = new QueueLocalModel([invalid, changed[index]]);
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'search then details' }, planningContext(), 1,
+          (): boolean => true
+        );
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+        expect(decision.dataTasks.length).assertEqual(1);
+        expect(decision.dataTasks[0].localId).assertEqual('source');
+        expect(decision.dataTasks[0].goal).assertEqual('read source');
+        expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+        expect(JSON.stringify(decision.dataTasks[0].input)).assertEqual('{}');
+        expect(decision.personaId).assertEqual('travel_companion');
+        expect(decision.skillId).assertEqual('');
+        expect(decision.uiIntent.purpose).assertEqual('read source and dependent detail');
+        expect(model.prompts.length).assertEqual(1);
       }
     });
 
-    it('fails closed when the one repair still contains a same-round dependency pair', 0, async () => {
+    it('fails closed without a repair call when producer metadata also advertises the consumer', 0, async () => {
       const invalid = sameRoundDependencyDecision(
         'maps.place.search', 'maps.place.details', '{"placeId":"place-forged"}'
+      ).replace(
+        '"allowedToolIds":["maps.place.search"]',
+        '"allowedToolIds":["maps.place.search","maps.place.details"]'
       );
-      const model = new QueueLocalModel([
-        invalid,
-        invalid,
-        producerOnlyRepairDecision('maps.place.search')
-      ]);
+      const model = new QueueLocalModel([invalid]);
       let errorCode: string = '';
 
       try {
@@ -926,20 +952,7 @@ export default function multiAgentLeaderPlannerTest() {
       }
 
       expect(errorCode).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
-      expect(model.prompts.length).assertEqual(2);
-
-      const consumerOnlyModel = new QueueLocalModel([invalid, MAP_DETAILS_DECISION]);
-      let consumerOnlyError: string = '';
-      try {
-        await new MultiAgentLeaderPlanner(consumerOnlyModel).plan(
-          inputMessage(), { text: 'search then details' }, planningContext(), 1,
-          (): boolean => true
-        );
-      } catch (error) {
-        consumerOnlyError = error instanceof Error ? error.message : 'unknown';
-      }
-      expect(consumerOnlyError).assertEqual('LEADER_REPAIR_SCOPE_INVALID');
-      expect(consumerOnlyModel.prompts.length).assertEqual(2);
+      expect(model.prompts.length).assertEqual(1);
     });
 
     it('keeps direct details with an explicit ID and independent flight train tasks valid', 0, async () => {

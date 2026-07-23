@@ -76,11 +76,6 @@ const UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION: string =
   'from a successful or partial earlier round. Return answer or clarify from existing observations, or execute ' +
   'only tasks whose own input contains an exact earlier entity reference. Base any terminal summary only on real ' +
   'recentObservations; do not reschedule a completed tool or invent provider facts. ' + FULL_DECISION_CONTRACT;
-const SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION: string =
-  'Correction: LEADER_SAME_ROUND_DEPENDENCY. The decision put a producer and its entity-dependent consumer ' +
-  'in the same round. Return execute with only the producer task. Wait until a later round after a successful ' +
-  'or partial producer observation supplies the exact entity reference before scheduling the consumer. ' +
-  FULL_DECISION_CONTRACT;
 const OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_OVERLAPPING_VIDEO_TOOLS. media.video.search already covers both YouTube and Bilibili. ' +
   'For a request naming both sources, return exactly one media.video.search Data task with sources ' +
@@ -201,6 +196,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
       this.rejectSkillCapabilityViolation(decision, context);
       this.rejectOverlappingVideoTools(decision);
+      this.normalizeSameRoundDependency(decision, sameRoundProducerToolIds);
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
         decision,
@@ -215,6 +211,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.normalizationCurrentLocalDate = currentLocalDate;
       return decision;
     } catch (error) {
+      if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
+        throw error;
+      }
       if (signal === undefined || !signal()) {
         const failure: Error = error instanceof Error ? error :
           new Error('Leader decision failed strict validation.');
@@ -231,8 +230,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = COMPLETED_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === UNBOUND_LATER_TOOL_ERROR) {
         correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
-      } else if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR) {
-        correction = SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
@@ -244,8 +241,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
       const actionOwnedRepair: boolean = error instanceof Error &&
         error.message === ACTION_OWNED_DATA_TASK_ERROR;
-      const sameRoundDependencyRepair: boolean = error instanceof Error &&
-        error.message === SAME_ROUND_DEPENDENCY_ERROR;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
           error.message === UNBOUND_LATER_TOOL_ERROR);
@@ -260,11 +255,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           'uiIntent, each non-Action Data task, all existing Action IDs, and the original request intent exactly. ' +
           'Move exactly one Action-only capability ID from Data positions to actionIntent.allowedActionIds. ' +
           'Do not add, remove, reorder, or change any other field or capability.' :
-        sameRoundDependencyRepair ?
-        '\nSame-round dependency repair freeze: preserve personaId, skillId, roundAction, answer, uiIntent, ' +
-          'actionIntent, and every retained producer task exactly. Remove every dependent consumer task from this ' +
-          'round. Set requestedCapabilityIds to the exact current-round union of the retained producer and unchanged ' +
-          'Action IDs. Do not add, substitute, reorder, or change a retained field or capability.' :
         allowsTerminalExecutionDrop ?
         '\nA corrected answer or clarify decision may clear both execution-position sets to empty. ' +
           'It must preserve requestedCapabilityIds exactly and must not introduce any new Data or Action capability.' :
@@ -275,11 +265,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         const repairedScope: LeaderRepairScope | null = this.repairScope(repaired);
         if (repairedScope === null || (actionOwnedRepair ?
           !this.sameActionOwnedRepair(output, repaired, context, frozenScope, repairedScope) :
-          sameRoundDependencyRepair ?
-            !this.sameProducerOnlyRepairScope(
-              frozenScope, repairedScope, sameRoundProducerToolIds
-            ) :
-            !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
+          !this.sameRepairScope(frozenScope, repairedScope, allowsTerminalExecutionDrop))) {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
@@ -292,14 +278,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           (rejectedDecision === null || !this.inputOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(TASK_INPUT_INVALID_ERROR);
         }
-        if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
-          (rejectedDecision === null ||
-            !this.producerOnlyRepair(
-              rejectedDecision, repairedDecision, sameRoundProducerToolIds
-            ))) {
-          throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
-        }
         this.rejectOverlappingVideoTools(repairedDecision);
+        this.normalizeSameRoundDependency(
+          repairedDecision,
+          leaderSameRoundDependencyProducerToolIds(repairedDecision.dataTasks)
+        );
         this.rejectSameRoundDependency(repairedDecision);
         this.rejectCompletedToolReuse(
           repairedDecision,
@@ -483,25 +466,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (repaired.roundAction === 'answer' || repaired.roundAction === 'clarify') &&
       repaired.dataCapabilityIds.length === 0 &&
       repaired.actionCapabilityIds.length === 0;
-  }
-
-  private sameProducerOnlyRepairScope(
-    original: LeaderRepairScope,
-    repaired: LeaderRepairScope,
-    producerToolIds: string[]
-  ): boolean {
-    if (repaired.roundAction !== 'execute' || producerToolIds.length === 0 ||
-      !this.sameStringSet(original.actionCapabilityIds, repaired.actionCapabilityIds)) {
-      return false;
-    }
-    if (this.sameRepairScope(original, repaired, false)) {
-      return true;
-    }
-    if (!this.sameStringSet(producerToolIds, repaired.dataCapabilityIds)) {
-      return false;
-    }
-    const expectedRequested: string[] = producerToolIds.concat(original.actionCapabilityIds);
-    return this.sameStringSet(expectedRequested, repaired.requestedCapabilityIds);
   }
 
   private sameActionOwnedRepair(
@@ -763,44 +727,23 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
-  private producerOnlyRepair(
-    original: LeaderDecision,
-    repaired: LeaderDecision,
+  private normalizeSameRoundDependency(
+    decision: LeaderDecision,
     producerToolIds: string[]
-  ): boolean {
-    if (original.roundAction !== 'execute' || repaired.roundAction !== 'execute' ||
-      original.personaId !== repaired.personaId ||
-      original.skillId !== repaired.skillId ||
-      original.answer !== repaired.answer ||
-      original.uiIntent.purpose !== repaired.uiIntent.purpose ||
-      original.uiIntent.preferredDensity !== repaired.uiIntent.preferredDensity ||
-      !this.sameStrings(original.uiIntent.requiredSections, repaired.uiIntent.requiredSections) ||
-      !this.sameActionIntent(original.actionIntent, repaired.actionIntent) ||
-      producerToolIds.length === 0) {
-      return false;
+  ): void {
+    if (producerToolIds.length === 0) {
+      return;
     }
     const expected: Set<string> = new Set<string>(producerToolIds);
     const retained: LeaderDecisionDataTask[] = [];
-    for (let taskIndex = 0; taskIndex < original.dataTasks.length; taskIndex++) {
-      const task: LeaderDecisionDataTask = original.dataTasks[taskIndex];
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
       if (expected.has(task.toolId)) {
         retained.push(task);
       }
     }
-    if (retained.length === 0 || retained.length !== repaired.dataTasks.length) {
-      return false;
-    }
-    for (let index = 0; index < retained.length; index++) {
-      const first: LeaderDecisionDataTask = retained[index];
-      const second: LeaderDecisionDataTask = repaired.dataTasks[index];
-      if (first.localId !== second.localId ||
-        first.goal !== second.goal ||
-        first.toolId !== second.toolId ||
-        first.required !== second.required ||
-        !this.sameStrings(first.allowedToolIds, second.allowedToolIds) ||
-        !this.sameJsonValue(first.input, second.input)) {
-        return false;
-      }
+    if (retained.length === 0) {
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
     }
     const retainedCapabilities: Set<string> = new Set<string>();
     for (let index = 0; index < retained.length; index++) {
@@ -812,24 +755,29 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
     }
     if (retainedCapabilities.size !== expected.size) {
-      return false;
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
     }
     const retainedIds: string[] = Array.from(retainedCapabilities);
     for (let index = 0; index < retainedIds.length; index++) {
       if (!expected.has(retainedIds[index])) {
-        return false;
+        throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
       }
     }
-    const actionIds: string[] = original.actionIntent === undefined ?
-      [] : original.actionIntent.allowedActionIds;
-    const expectedRequested: string[] = original.requestedCapabilityIds.filter(
-      (capabilityId: string): boolean =>
-        expected.has(capabilityId) || actionIds.indexOf(capabilityId) >= 0
-    );
-    if (!this.sameStrings(expectedRequested, repaired.requestedCapabilityIds)) {
-      return false;
+    const currentRoundIds: string[] = retainedIds.slice();
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        this.rememberScopeId(decision.actionIntent.allowedActionIds[index], currentRoundIds);
+      }
     }
-    return true;
+    const normalizedRequested: string[] = decision.requestedCapabilityIds.filter(
+      (capabilityId: string): boolean =>
+        currentRoundIds.indexOf(capabilityId) >= 0
+    );
+    if (!this.sameStringSet(currentRoundIds, normalizedRequested)) {
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+    }
+    decision.dataTasks = retained;
+    decision.requestedCapabilityIds = normalizedRequested;
   }
 
   private rejectUnboundLaterTool(
