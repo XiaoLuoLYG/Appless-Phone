@@ -89,8 +89,6 @@ const HOTEL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"
   '"answer":"酒店结果已就绪","reasonCode":"hotel_ready"}';
 const HOTEL_DATA_CALL_DECISION: string = '{"kind":"call","toolId":"hotel.search",' +
   '"args":' + SEARCH_INPUT + ',"summary":"query the registered hotel provider"}';
-const HOTEL_DATA_FINISH_DECISION: string = '{"kind":"finish","toolId":"hotel.search",' +
-  '"args":{},"summary":"return the observed hotel result"}';
 const HOTEL_ACTION_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["hotel.search","hotel.navigate"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"hotel-search",' +
@@ -1457,7 +1455,6 @@ export default function multiAgentCanaryRuntimeTest() {
       const model = new QueueModel([
         HOTEL_DECISION,
         HOTEL_DATA_CALL_DECISION,
-        HOTEL_DATA_FINISH_DECISION,
         HOTEL_DONE_DECISION
       ]);
       const executor = new CanaryHotelExecutor();
@@ -1476,7 +1473,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(executor.calls.length).assertEqual(1);
       expect(executor.calls[0]).assertEqual('hotel.search');
-      expect(model.prompts.length).assertEqual(4);
+      expect(model.prompts.length).assertEqual(3);
       expect(model.prompts[1].indexOf('You are the Appless Data Agent.')).assertEqual(0);
       expect(model.prompts[1].indexOf('Maximum 3 steps.')).assertLarger(-1);
       expect(model.prompts[1].indexOf('"allowedToolIds":["hotel.search"]')).assertLarger(-1);

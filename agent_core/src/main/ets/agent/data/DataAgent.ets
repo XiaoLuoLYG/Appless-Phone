@@ -281,6 +281,11 @@ export class DataAgent extends MessageDrivenAgent {
       }
       results.push(result);
       observations.push(this.observation(task.taskId, result));
+      if (result.toolId === task.toolId && result.status !== 'error') {
+        this.publishResult(message, result);
+        this.completeTask(taskKey, generation);
+        return;
+      }
     }
     this.completeTask(taskKey, generation);
   }

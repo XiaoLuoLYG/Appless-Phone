@@ -246,6 +246,12 @@ function dynamicDataResult(index: number = 1): DataResult {
   };
 }
 
+function dynamicErrorDataResult(index: number): DataResult {
+  const result: DataResult = dynamicDataResult(index);
+  result.status = 'error';
+  return result;
+}
+
 function genericDataResult(toolId: string, outputSchema: string): DataResult {
   return {
     toolId,
@@ -478,32 +484,34 @@ export default function dataAgentTest() {
       observer.close();
     });
 
-    it('runs call observe finish and publishes only the actual read result', 0, async () => {
+    it('observes a supporting read before returning the successful primary read', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
-      const executor: SequenceDataExecutor = new SequenceDataExecutor([dynamicDataResult()]);
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        dynamicDataResult(),
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
       const args: DynamicQueryArgs = { query: '深圳天气' };
       const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
         decision('call', 'dynamic.search', args),
-        decision('finish', 'dynamic.search')
+        decision('call', 'travel.search')
       ]);
       const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
       const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage('data-react', 'travel.search', 'travelOptions');
+      (task.payload as CreateDataTaskPayload).allowedToolIds = ['dynamic.search', 'travel.search'];
       agent.start();
 
-      bus.publish(dynamicDataTaskMessage('data-react'));
+      bus.publish(task);
       const resultMessage: AgentMessage = await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
       const result: DataResult = resultMessage.payload as DataResult;
-      const data: DynamicResultData = result.data as DynamicResultData;
 
-      expect(executor.calls).assertEqual(1);
+      expect(executor.calls).assertEqual(2);
       expect(planner.steps.join(',')).assertEqual('1,2');
       expect(planner.observationJson[0]).assertEqual('[]');
       expect(planner.observationJson[1].indexOf('provider-secret-must-not-reach-model')).assertEqual(-1);
       expect((JSON.parse(planner.observationJson[1]) as ObservationDigest[])[0].entityRefs.length)
         .assertEqual(16);
-      expect(result.toolId).assertEqual('dynamic.search');
-      expect(result.sources[0].provider).assertEqual('composio');
-      expect(data.recordId).assertEqual('weather-record-real-1');
+      expect(result.toolId).assertEqual('travel.search');
       expect(resultMessage.taskId).assertEqual('data-react');
 
       bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
@@ -548,10 +556,34 @@ export default function dataAgentTest() {
       observer.close();
     });
 
+    it('returns a successful primary read without letting the planner repeat it', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'travel.search'),
+        decision('call', 'travel.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-primary-terminal', 'travel.search', 'travelOptions'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((terminal.payload as DataResult).toolId).assertEqual('travel.search');
+      expect(executor.calls).assertEqual(1);
+      expect(planner.steps.join(',')).assertEqual('1');
+      agent.stop();
+      observer.close();
+    });
+
     it('rejects an attempted fourth read before invoking the executor', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SequenceDataExecutor = new SequenceDataExecutor([
-        dynamicDataResult(1), dynamicDataResult(2), dynamicDataResult(3)
+        dynamicErrorDataResult(1), dynamicErrorDataResult(2), dynamicErrorDataResult(3)
       ]);
       const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
         decision('call', 'dynamic.search'), decision('call', 'dynamic.search'),
@@ -640,8 +672,7 @@ export default function dataAgentTest() {
         dynamicDataResult(1), dynamicDataResult(2)
       ]);
       const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
-        decision('call', 'dynamic.search'), decision('finish', 'dynamic.search'),
-        decision('call', 'dynamic.search'), decision('finish', 'dynamic.search')
+        decision('call', 'dynamic.search'), decision('call', 'dynamic.search')
       ]);
       const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
       const observer: AgentMessageReader = bus.openReader();
