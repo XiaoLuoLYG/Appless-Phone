@@ -40,6 +40,19 @@ function hasObjectArgs(args: Object): boolean {
   return args !== null && typeof args === 'object' && !Array.isArray(args);
 }
 
+function hasExactPaymentPreviewIntentArgs(args: Object): boolean {
+  if (!hasObjectArgs(args)) {
+    return false;
+  }
+  const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(values);
+  const originalQuery = values['originalQuery'];
+  return keys.length === 1 &&
+    keys[0] === 'originalQuery' &&
+    typeof originalQuery === 'string' &&
+    originalQuery.trim().length > 0;
+}
+
 function malformedArgs(): ActionCatalogResult {
   return denied('ACTION_ARGS_MALFORMED', 'Action args must be a non-array object.');
 }
@@ -138,6 +151,12 @@ export class ActionCatalog {
       return denied(
         'ACTION_INTENT_DENIED',
         'Only registered no-Data actions with deterministic args may execute from actionIntent.'
+      );
+    }
+    if (actionId === 'payment.send' && !hasExactPaymentPreviewIntentArgs(args)) {
+      return denied(
+        'ACTION_INTENT_ARGS_DENIED',
+        'Virtual payment intent requires the exact resolver-owned preview request.'
       );
     }
     return this.validateRegisteredStep(actionId, args);

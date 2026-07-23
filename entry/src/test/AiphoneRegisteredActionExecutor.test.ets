@@ -656,6 +656,66 @@ export default function aiphoneRegisteredActionExecutorTest() {
       expect(JSON.stringify(result)).assertEqual(JSON.stringify(recorder.result));
     });
 
+    it('rejects virtual payment confirm and capture before the page callback', 0, async () => {
+      const preview = object('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}');
+      const forged: Object[] = [
+        object('{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"confirm"}'),
+        object('{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"capture",' +
+          '"providerSessionId":"provider-order-forged"}')
+      ];
+      const previewRecorder = new RecordingPageAction();
+      const previewExecutor = pageExecutor(
+        'payment.send', preview, previewRecorder, new FakeUriOpener(), 'virtual.action-intent'
+      );
+      const previewContext = context('virtual.action-intent');
+      previewContext.virtualAction = true;
+
+      const previewResult = await previewExecutor.execute('payment.send', preview, previewContext);
+
+      expect(previewResult.status).assertEqual('success');
+      expect(previewRecorder.calls.length).assertEqual(1);
+      for (let index = 0; index < forged.length; index++) {
+        const recorder = new RecordingPageAction();
+        const executor = pageExecutor(
+          'payment.send', forged[index], recorder, new FakeUriOpener(), 'virtual.action-intent'
+        );
+        const virtualContext = context('virtual.action-intent');
+        virtualContext.virtualAction = true;
+        virtualContext.runId = 'forged-run-' + index.toString();
+
+        const result = await executor.execute('payment.send', forged[index], virtualContext);
+
+        expect(result.status).assertEqual('error');
+        expect(JSON.stringify(result).indexOf('ACTION_INTENT_ARGS_DENIED')).assertLarger(-1);
+        expect(recorder.calls.length).assertEqual(0);
+      }
+    });
+
+    it('preserves current-surface payment confirm and capture callbacks', 0, async () => {
+      const actions: string[] = ['confirm', 'capture'];
+      for (let index = 0; index < actions.length; index++) {
+        const phase = actions[index];
+        const args = object(
+          '{"provider":"paypal","recipient":"real-user","amountText":"5.00",' +
+            '"currency":"USD","phase":"' + phase + '","providerSessionId":"order-real-1"}'
+        );
+        const recorder = new RecordingPageAction();
+        const executor = pageExecutor(
+          'payment.send', args, recorder, new FakeUriOpener(), 'payment.send'
+        );
+
+        const result = await executor.execute(
+          'payment.send', args, pageContext('payment.' + phase, 'payment.send')
+        );
+
+        expect(result.status).assertEqual('success');
+        expect(recorder.calls.length).assertEqual(1);
+        expect(JSON.stringify(recorder.calls[0].args)).assertEqual(JSON.stringify(args));
+        expect((recorder.calls[0].context as RegisteredPageActionContext).pageActionId)
+          .assertEqual('payment.' + phase);
+      }
+    });
+
     it('routes maps route open once with exact endpoints and provider output', 0, async () => {
       const args = object(
         '{"origin":"Shenzhen North Station","destination":"Hong Kong West Kowloon",' +

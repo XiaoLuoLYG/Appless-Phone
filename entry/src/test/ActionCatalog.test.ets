@@ -343,8 +343,10 @@ export default function actionCatalogTest() {
       ];
 
       for (let index = 0; index < allowed.length; index++) {
+        const intentArgs = allowed[index] === 'payment.send' ?
+          args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}') : new Object();
         expect(actionCatalog.validateActionIntentExecution(
-          allowed[index], new Object()
+          allowed[index], intentArgs
         ).ok).assertTrue();
       }
       for (let index = 0; index < denied.length; index++) {
@@ -352,6 +354,39 @@ export default function actionCatalogTest() {
           denied[index], new Object()
         ).code).assertEqual('ACTION_INTENT_DENIED');
       }
+    });
+
+    it('allows only the resolver-owned payment preview shape from actionIntent', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const preview = args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}');
+      const confirm = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"confirm"}'
+      );
+      const capture = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"capture",' +
+          '"providerSessionId":"provider-order-forged"}'
+      );
+      const structured = args(
+        '{"provider":"paypal","recipient":"罗一格","amountText":"1","currency":"USD"}'
+      );
+
+      expect(actionCatalog.validateActionIntentExecution('payment.send', preview).ok).assertTrue();
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', confirm
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', capture
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', structured
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateRegisteredStep('payment.send', confirm).ok).assertTrue();
+      expect(actionCatalog.validateRegisteredStep('payment.send', capture).ok).assertTrue();
     });
 
     it('recognizes only workflow run as the fixed workflow entry', 0, () => {
