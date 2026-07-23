@@ -513,6 +513,41 @@ export default function dataAgentTest() {
       observer.close();
     });
 
+    it('keeps trusted original args when the planner calls the selected Data tool', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
+      const incompleteArgs: Object = JSON.parse(
+        '{"origin":"北京","destination":"上海","date":"2026-07-25"}'
+      ) as Object;
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'travel.search', incompleteArgs),
+        decision('finish', 'travel.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage(
+        'data-travel-preserve',
+        'travel.search',
+        'travelOptions'
+      );
+      const trustedArgs: Object = JSON.parse(
+        '{"origin":"北京","destination":"上海","date":"2026-07-25",' +
+        '"query":"我明天要从北京去上海，帮我搜索出行方案"}'
+      ) as Object;
+      (task.payload as CreateDataTaskPayload).args = trustedArgs;
+      agent.start();
+
+      bus.publish(task);
+      await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
+
+      expect(executor.tasks.length).assertEqual(1);
+      expect(JSON.stringify(executor.tasks[0].args)).assertEqual(JSON.stringify(trustedArgs));
+      agent.stop();
+      observer.close();
+    });
+
     it('rejects an attempted fourth read before invoking the executor', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: SequenceDataExecutor = new SequenceDataExecutor([

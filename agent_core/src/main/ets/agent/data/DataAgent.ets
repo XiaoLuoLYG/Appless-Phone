@@ -319,7 +319,7 @@ export class DataAgent extends MessageDrivenAgent {
       allowedToolIds: task.allowedToolIds.slice(),
       toolId: decision.toolId,
       outputSchema,
-      args: decision.args,
+      args: decision.toolId === task.toolId ? task.args : decision.args,
       required: task.required
     };
   }
