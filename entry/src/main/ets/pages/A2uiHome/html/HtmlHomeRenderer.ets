@@ -2452,7 +2452,12 @@ body[data-scene="gmail"] .details {
   color: #ffffff;
   justify-content: center;
 }
+body.mail-reply-open {
+  overflow: hidden;
+}
 .mail-reply-overlay {
+  --kind-accent: var(--accent);
+  --kind-soft: var(--accent-soft);
   position: fixed;
   inset: 0;
   z-index: 120;
@@ -2461,7 +2466,20 @@ body[data-scene="gmail"] .details {
   justify-content: center;
   padding: 16px;
   background: transparent;
-  pointer-events: none;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+}
+.mail-reply-overlay[data-source-key="mail-gmail"] {
+  --kind-accent: var(--gmail);
+  --kind-soft: var(--gmail-soft);
+}
+.mail-reply-overlay[data-source-key="mail-qq"] {
+  --kind-accent: var(--qqmail);
+  --kind-soft: var(--qqmail-soft);
+}
+.mail-reply-overlay[data-source-key="composio-outlook"] {
+  --kind-accent: var(--outlook);
+  --kind-soft: var(--outlook-soft);
 }
 .mail-reply-dialog {
   width: min(432px, 100%);
@@ -2676,11 +2694,11 @@ body[data-scene="gmail"] .mail-reply-footer .action.secondary {
   box-shadow: 0 2px 8px rgba(31, 41, 55, 0.04);
 }
 body[data-scene="gmail"] .mail-reply-footer .action.primary {
-  border: 0;
-  background: #262626;
-  color: #ffffff;
+  border: 1px solid var(--kind-accent);
+  background: var(--kind-soft);
+  color: var(--kind-accent);
   font-weight: 680;
-  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.08);
+  box-shadow: none;
 }
 body[data-scene] .credential {
   border: 1px solid rgba(46, 111, 143, 0.22);
@@ -3449,6 +3467,7 @@ const HTML_HOME_JS: string = `
       activeMailReply.overlay.parentNode.removeChild(activeMailReply.overlay);
     }
     activeMailReply = null;
+    if (document.body) { document.body.classList.remove('mail-reply-open'); }
   }
   function submitMailReply(operation) {
     if (!activeMailReply || activeMailReply.busy) { return; }
@@ -3504,9 +3523,10 @@ const HTML_HOME_JS: string = `
     if (activeMailReply) { closeMailReply(); }
     var requestKey = text(detail.requestKey) || text(entry.detailAction.prompt);
     var overlay = add(document.body, 'div', 'mail-reply-overlay');
+    overlay.setAttribute('data-source-key', entry.card.getAttribute('data-source-key') || '');
     var dialog = add(overlay, 'section', 'mail-reply-dialog');
     dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'false');
+    dialog.setAttribute('aria-modal', 'true');
     var header = add(dialog, 'header', 'mail-reply-header');
     add(header, 'h2', 'mail-reply-title', '编辑回复');
     var aiButton = add(header, 'button', 'action secondary mail-reply-ai', 'AI回复');
@@ -3535,6 +3555,10 @@ const HTML_HOME_JS: string = `
       args: copiedMailReplyArgs(entry.replyAction, detail, requestKey),
       busy: false
     };
+    if (document.body) { document.body.classList.add('mail-reply-open'); }
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) { closeMailReply(); }
+    });
     editor.addEventListener('input', function () { mailReplyDrafts[requestKey] = editor.value; });
     closeButton.addEventListener('click', closeMailReply);
     aiButton.addEventListener('click', function () { requestMailReplyAiDraft(); });
