@@ -21,7 +21,8 @@ import {
   leaderInputHasEntityAuthority,
   leaderIsActionCapability,
   leaderIsDataCapability,
-  leaderSameRoundDependencyProducerToolIds,
+  leaderSameRoundDependencyConsumerTaskToolIds,
+  leaderSameRoundDependencyProducerTaskToolIds,
   leaderTasksHaveSameRoundDependency
 } from '@loop/agent-core';
 import { HotelLocalDateProvider, hotelSearchPlanningContract } from './HotelLeaderPlanner';
@@ -188,15 +189,21 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       this.currentLocalDate() : trustedCurrentLocalDate;
     const prompt: string = this.prompt(message, input, context, round, currentLocalDate);
     const output: string = await this.completeBounded(prompt);
-    let sameRoundProducerToolIds: string[] = [];
+    let sameRoundProducerTaskToolIds: string[] = [];
+    let sameRoundConsumerTaskToolIds: string[] = [];
     let rejectedDecision: LeaderDecision | null = null;
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
       rejectedDecision = decision;
-      sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
+      sameRoundProducerTaskToolIds = leaderSameRoundDependencyProducerTaskToolIds(decision.dataTasks);
+      sameRoundConsumerTaskToolIds = leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks);
       this.rejectSkillCapabilityViolation(decision, context);
       this.rejectOverlappingVideoTools(decision);
-      this.normalizeSameRoundDependency(decision, sameRoundProducerToolIds);
+      this.normalizeSameRoundDependency(
+        decision,
+        sameRoundProducerTaskToolIds,
+        sameRoundConsumerTaskToolIds
+      );
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
         decision,
@@ -281,7 +288,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.rejectOverlappingVideoTools(repairedDecision);
         this.normalizeSameRoundDependency(
           repairedDecision,
-          leaderSameRoundDependencyProducerToolIds(repairedDecision.dataTasks)
+          leaderSameRoundDependencyProducerTaskToolIds(repairedDecision.dataTasks),
+          leaderSameRoundDependencyConsumerTaskToolIds(repairedDecision.dataTasks)
         );
         this.rejectSameRoundDependency(repairedDecision);
         this.rejectCompletedToolReuse(
@@ -729,41 +737,46 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
 
   private normalizeSameRoundDependency(
     decision: LeaderDecision,
-    producerToolIds: string[]
+    producerTaskToolIds: string[],
+    consumerTaskToolIds: string[]
   ): void {
-    if (producerToolIds.length === 0) {
+    if (producerTaskToolIds.length === 0 && consumerTaskToolIds.length === 0) {
       return;
     }
-    const expected: Set<string> = new Set<string>(producerToolIds);
+    if (producerTaskToolIds.length === 0 || consumerTaskToolIds.length === 0) {
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+    }
+    const producerToolIds: Set<string> = new Set<string>(producerTaskToolIds);
+    const consumerToolIds: Set<string> = new Set<string>(consumerTaskToolIds);
     const retained: LeaderDecisionDataTask[] = [];
     for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
       const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
-      if (expected.has(task.toolId)) {
+      if (!consumerToolIds.has(task.toolId)) {
         retained.push(task);
       }
     }
     if (retained.length === 0) {
       throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
     }
-    const retainedCapabilities: Set<string> = new Set<string>();
+    let hasProducer: boolean = false;
+    const currentRoundIds: string[] = [];
     for (let index = 0; index < retained.length; index++) {
-      retainedCapabilities.add(retained[index].toolId);
+      const task: LeaderDecisionDataTask = retained[index];
+      hasProducer = hasProducer || producerToolIds.has(task.toolId);
+      this.rememberScopeId(task.toolId, currentRoundIds);
       for (let allowedIndex = 0;
-        allowedIndex < retained[index].allowedToolIds.length;
+        allowedIndex < task.allowedToolIds.length;
         allowedIndex++) {
-        retainedCapabilities.add(retained[index].allowedToolIds[allowedIndex]);
+        const allowedToolId: string = task.allowedToolIds[allowedIndex];
+        if (consumerToolIds.has(allowedToolId)) {
+          throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+        }
+        this.rememberScopeId(allowedToolId, currentRoundIds);
       }
     }
-    if (retainedCapabilities.size !== expected.size) {
+    if (!hasProducer) {
       throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
     }
-    const retainedIds: string[] = Array.from(retainedCapabilities);
-    for (let index = 0; index < retainedIds.length; index++) {
-      if (!expected.has(retainedIds[index])) {
-        throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
-      }
-    }
-    const currentRoundIds: string[] = retainedIds.slice();
     if (decision.actionIntent !== undefined) {
       for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
         this.rememberScopeId(decision.actionIntent.allowedActionIds[index], currentRoundIds);

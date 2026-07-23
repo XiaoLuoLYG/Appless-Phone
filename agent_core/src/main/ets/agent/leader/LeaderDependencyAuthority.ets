@@ -37,6 +37,10 @@ export function leaderSameRoundDependencyProducerToolIds(tasks: LeaderDecisionDa
       roundToolIds.add(task.allowedToolIds[allowedIndex].trim());
     }
   }
+  return dependencyProducerToolIds(roundToolIds);
+}
+
+function dependencyProducerToolIds(roundToolIds: Set<string>): string[] {
   const toolIds: string[] = Array.from(roundToolIds);
   const producerToolIds: Set<string> = new Set<string>();
   for (let index = 0; index < toolIds.length; index++) {
@@ -51,6 +55,44 @@ export function leaderSameRoundDependencyProducerToolIds(tasks: LeaderDecisionDa
     }
   }
   return Array.from(producerToolIds);
+}
+
+function taskToolIds(tasks: LeaderDecisionDataTask[]): Set<string> {
+  const toolIds: Set<string> = new Set<string>();
+  for (let index = 0; index < tasks.length; index++) {
+    toolIds.add(tasks[index].toolId.trim());
+  }
+  return toolIds;
+}
+
+// Normalization is narrower than validation: it can only rewrite a pair that
+// is actually scheduled in dataTasks, never a capability merely advertised by
+// an allowedToolIds fallback list.
+export function leaderSameRoundDependencyProducerTaskToolIds(
+  tasks: LeaderDecisionDataTask[]
+): string[] {
+  return dependencyProducerToolIds(taskToolIds(tasks));
+}
+
+export function leaderSameRoundDependencyConsumerTaskToolIds(
+  tasks: LeaderDecisionDataTask[]
+): string[] {
+  const roundToolIds: Set<string> = taskToolIds(tasks);
+  const consumerToolIds: string[] = [];
+  const toolIds: string[] = Array.from(roundToolIds);
+  for (let index = 0; index < toolIds.length; index++) {
+    const contract: LeaderDependencyContract | null = dependencyContract(toolIds[index]);
+    if (contract === null) {
+      continue;
+    }
+    for (let sourceIndex = 0; sourceIndex < contract.sourceToolIds.length; sourceIndex++) {
+      if (roundToolIds.has(contract.sourceToolIds[sourceIndex])) {
+        consumerToolIds.push(toolIds[index]);
+        break;
+      }
+    }
+  }
+  return consumerToolIds;
 }
 
 export function leaderTasksHaveSameRoundDependency(tasks: LeaderDecisionDataTask[]): boolean {

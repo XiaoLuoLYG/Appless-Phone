@@ -220,6 +220,43 @@ function producerOnlyRepairDecision(toolId: string): string {
     '"purpose":"read source and dependent detail","preferredDensity":"comfortable",' +
     '"requiredSections":["source","detail"]}}';
 }
+
+function sameRoundMapsWithFood(
+  includeConsumer: boolean,
+  foodAllowedToolIds: string
+): string {
+  const source: string = '{"localId":"source","goal":"read source",' +
+    '"allowedToolIds":["maps.place.search"],"toolId":"maps.place.search",' +
+    '"input":{},"required":true}';
+  const food: string = '{"localId":"food","goal":"search food",' +
+    '"allowedToolIds":' + foodAllowedToolIds + ',"toolId":"food.search",' +
+    '"input":{"query":"coffee"},"required":false}';
+  const consumer: string = '{"localId":"consumer","goal":"read dependent detail",' +
+    '"allowedToolIds":["maps.place.details"],"toolId":"maps.place.details",' +
+    '"input":{"placeId":"place-forged"},"required":true}';
+  const tasks: string = includeConsumer ? source + ',' + food + ',' + consumer : source + ',' + food;
+  const capabilityIds: string = includeConsumer || foodAllowedToolIds.indexOf('maps.place.details') >= 0 ?
+    '["maps.place.search","food.search","maps.place.details"]' :
+    '["maps.place.search","food.search"]';
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":' + capabilityIds + ',"roundAction":"execute","dataTasks":[' +
+    tasks + '],"uiIntent":{"purpose":"read source and food","preferredDensity":"comfortable",' +
+    '"requiredSections":["source","food"]}}';
+}
+
+async function sameRoundDependencyError(output: string): Promise<string> {
+  const model = new QueueLocalModel([output]);
+  try {
+    await new MultiAgentLeaderPlanner(model).plan(
+      inputMessage(), { text: 'search then details' }, planningContext(), 1,
+      (): boolean => true
+    );
+  } catch (error) {
+    return error instanceof Error ? error.message : 'unknown';
+  }
+  return '';
+}
+
 const MISSING_PERSONA_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.replace(
   '"personaId":"travel_companion",',
   ''
@@ -884,6 +921,39 @@ export default function multiAgentLeaderPlannerTest() {
           'requestedCapabilityIds is the exact current-round execution union'
         )).assertLarger(-1);
       }
+    });
+
+    it('retains independent Data tasks while dropping only the real same-round consumer', 0, async () => {
+      const model = new QueueLocalModel([
+        sameRoundMapsWithFood(true, '["food.search"]')
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: 'search then details and food' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search,food.search');
+      expect(decision.dataTasks.length).assertEqual(2);
+      expect(decision.dataTasks[0].localId).assertEqual('source');
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+      expect(decision.dataTasks[1].localId).assertEqual('food');
+      expect(decision.dataTasks[1].goal).assertEqual('search food');
+      expect(decision.dataTasks[1].allowedToolIds.join(',')).assertEqual('food.search');
+      expect(JSON.stringify(decision.dataTasks[1].input)).assertEqual('{"query":"coffee"}');
+      expect(decision.dataTasks[1].required).assertFalse();
+      expect(model.prompts.length).assertEqual(1);
+    });
+
+    it('does not normalize an allowlist-only dependent consumer', 0, async () => {
+      expect(await sameRoundDependencyError(
+        sameRoundMapsWithFood(false, '["food.search","maps.place.details"]')
+      )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+    });
+
+    it('fails closed when an unrelated retained task advertises the dependent consumer', 0, async () => {
+      expect(await sameRoundDependencyError(
+        sameRoundMapsWithFood(true, '["food.search","maps.place.details"]')
+      )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
     });
 
     it('does not consume a queued consumer-only or mutated dependency repair', 0, async () => {
