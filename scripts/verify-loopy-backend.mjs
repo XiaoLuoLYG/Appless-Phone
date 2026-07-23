@@ -330,6 +330,26 @@ function hasOptionalCalendarUpdateSchema(source) {
     calendarUpdateOptionalSchema;
 }
 
+function fencedListAfterHeading(source, heading) {
+  const headingStart = source.indexOf(heading);
+  if (headingStart < 0) {
+    return [];
+  }
+  const fenceStart = source.indexOf('```text', headingStart);
+  if (fenceStart < 0) {
+    return [];
+  }
+  const bodyStart = source.indexOf('\n', fenceStart);
+  const fenceEnd = source.indexOf('```', bodyStart + 1);
+  if (bodyStart < 0 || fenceEnd < 0) {
+    return [];
+  }
+  return source.substring(bodyStart + 1, fenceEnd)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 function hasSystemIntentDefinition(source, toolId) {
   const body = toolDefinitionBody(source, toolId);
   return body.length > 0 && /backendPriority:\s*\[\s*'system_intent'\s*\]/.test(body);
@@ -710,6 +730,15 @@ function verifySourceContracts() {
   const migrationDesign = read(
     'docs/superpowers/specs/2026-07-21-full-scenario-multi-agent-migration-design.md'
   );
+  const foundationPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-runtime-foundation.md'
+  );
+  const domainPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-domain-migration.md'
+  );
+  const cutoverPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-cutover-regression.md'
+  );
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
@@ -864,6 +893,63 @@ function verifySourceContracts() {
     '| Action | 执行下列 21 个固定 Action 工具',
     'migration design reports all 21 fixed Action tools'
   );
+  assertContains(
+    migrationDesign,
+    '| Data | 执行下列 25 个固定只读工具',
+    'migration design reports all 25 fixed Data tools'
+  );
+  const documentedDataTools = fencedListAfterHeading(
+    migrationDesign, '### 9.2 Data Agent 固定工具（25）'
+  );
+  const documentedActionTools = fencedListAfterHeading(
+    migrationDesign, '### 9.3 Action Agent 固定工具（21）'
+  );
+  assert(
+    documentedDataTools.length === 25 &&
+      new Set(documentedDataTools).size === 25 &&
+      documentedDataTools.includes('social.community.search'),
+    'migration design Data list has 25 unique tools including social.community.search',
+    `found ${documentedDataTools.length}`
+  );
+  assert(
+    documentedActionTools.length === 21 &&
+      new Set(documentedActionTools).size === 21 &&
+      documentedActionTools.includes('social.post.preview'),
+    'migration design Action list has 21 unique tools including social.post.preview',
+    `found ${documentedActionTools.length}`
+  );
+  assert(
+    foundationPlan.includes('expect(all.length).assertEqual(46);') &&
+      foundationPlan.includes('expect(data.length).assertEqual(25);') &&
+      foundationPlan.includes('expect(action.length).assertEqual(21);') &&
+      foundationPlan.includes('46 unique fixed tools, split 25/21'),
+    'foundation plan ownership example and gate use 46 fixed tools split 25/21'
+  );
+  assertContains(
+    foundationPlan,
+    "indexOf('social.community.search')",
+    'foundation plan ownership example includes social.community.search'
+  );
+  assertContains(
+    foundationPlan,
+    "indexOf('social.post.preview')",
+    'foundation plan ownership example includes social.post.preview'
+  );
+  assertContains(
+    domainPlan,
+    'all 21 fixed Action tools',
+    'domain migration registered executor covers all 21 fixed Action tools'
+  );
+  assertContains(
+    cutoverPlan,
+    'Registry: fixed=46, Data=25, Action=21, virtual=2, blocked=0',
+    'cutover report gate uses the restored fixed-tool counts'
+  );
+  const approvedDocs = [migrationDesign, foundationPlan, domainPlan, cutoverPlan].join('\n');
+  assert(
+    !/44 unique fixed tools|split 24\/20|all 20 fixed Action tools|fixed=44, Data=24, Action=20|固定工具（24）|固定工具（20）|执行下列 24 个固定只读工具/.test(approvedDocs),
+    'approved specs and plans contain no stale 44 or 24/20 registry gates'
+  );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
   assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
@@ -986,6 +1072,21 @@ function verifySourceContracts() {
   assertContains(composioDynamic, "if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';", 'Gmail reply send pins the exact Composio write tool');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
+  assertContains(
+    a2uiHome,
+    "this.composioSocialHubConnection('reddit', 'Reddit')",
+    'production default SocialHub connections include Reddit'
+  );
+  assertContains(
+    backend,
+    "toolId !== 'social.reply.draft'",
+    'legacy model registry excludes social.reply.draft'
+  );
+  assertContains(
+    canaryRuntime,
+    "definition.toolId !== 'social.reply.draft'",
+    'multi-agent top-level model catalog excludes social.reply.draft'
+  );
 
   assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
   assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');

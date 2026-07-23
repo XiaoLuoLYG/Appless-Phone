@@ -170,6 +170,7 @@ export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
 
 function isLoopToolExposedToModel(toolId: string): boolean {
   return !isSurfaceDerivedHotelActionId(toolId) && toolId !== 'gmail.message.send' &&
+    toolId !== 'social.reply.draft' &&
     toolId !== 'calendar.event.create' && toolId !== 'calendar.event.update' &&
     toolId !== 'calendar.event.delete';
 }

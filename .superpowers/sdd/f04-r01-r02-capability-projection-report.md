@@ -148,3 +148,56 @@ SHA-256: ee2f2db09974d17873dddd67c8f5749fb936e1fccdd308f82d198840c6f76fcc
 The verifier count is lower than the earlier 310 because checks against the
 deleted duplicate public registry were removed; the runtime authority and
 compatibility derivation are now checked directly.
+
+## Selected-Item Projection Re-review
+
+The second re-review was implemented test-first. The authoritative RED was:
+
+```text
+Tests run: 1252, Failure: 4, Error: 0, Pass: 1248, Ignore: 0
+```
+
+Those four failures proved that a legacy model could still invent an item ID
+for `social.reply.draft`, that both the legacy and multi-agent top-level model
+catalogs still exposed that selected-item action, and that the gateway accepted
+the model-owned legacy route. The strengthened structural verifier separately
+reported 12 expected failures covering the same two catalog leaks, the missing
+historical Reddit default connection, and stale count/list/gate claims in the
+four approved migration documents. Its HAR build already passed in RED.
+
+The re-review changes:
+
+- remove `social.reply.draft` from both top-level model catalog projections
+  while retaining it in the single runtime registry and selected-item
+  ActionOffer path;
+- make the SocialHub gateway reject reply drafts unless the invocation is the
+  exact `social.reply.draft` page action, clearing any model-supplied item ID
+  from the error surface before a provider draft can run;
+- add no selection cache or inferred selection fallback;
+- restore `reddit` / `Reddit` to `defaultSocialHubConnections`;
+- correct the approved design, foundation, domain-migration, and cutover
+  documents to 46 fixed tools split into 25 Data and 21 Action tools, including
+  `social.community.search` and `social.post.preview`; and
+- strengthen the verifier to check the design table, fenced tool lists,
+  foundation examples and gate, domain executor count, cutover gate, restored
+  IDs, Reddit production default, both catalog exclusions, and absence of the
+  stale 44 or 24/20 gates.
+
+Final second re-review evidence:
+
+```text
+entry/.test/default/intermediates/test/coverage_data/test_result.txt
+Tests run: 1252, Failure: 0, Error: 0, Pass: 1252, Ignore: 0
+Timestamp: 2026-07-24T01:23:38+0800
+SHA-256: 3c638e634e4e42013ef9ecda496b194054dea0a3ae3d958caa45d8d12fa539e7
+```
+
+- `node scripts/verify-loopy-backend.mjs`
+  - `AIPhone Loopy backend smoke passed (299 checks).`
+  - `agent_core` HAR build: PASS
+- `git diff --check`: PASS
+- the existing coverage reporter warning `00507008` remains non-fatal;
+- no social write, selection cache, smoke script, mail-body code, or cleanup
+  path was added or changed; and
+- both pre-existing untracked smoke-evidence directories remain untouched and
+  unstaged.

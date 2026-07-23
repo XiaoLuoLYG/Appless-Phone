@@ -387,7 +387,7 @@ git commit -m "feat: render structured multi-agent results"
 - Modify: `entry/src/test/List.test.ets`
 
 **Interfaces:**
-- Produces: one `RegisteredActionExecutor` for all 20 fixed Action tools plus current registered client-facing offers.
+- Produces: one `RegisteredActionExecutor` for all 21 fixed Action tools plus current registered client-facing offers.
 - Consumes: existing page callbacks, `callToolGateway`, hotel URI opener, payment/ride/luckin handlers, and current system/Web overlay code.
 
 - [ ] **Step 1: Write failing exact-action tests**

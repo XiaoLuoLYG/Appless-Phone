@@ -21,6 +21,19 @@ class CalendarWriteAttemptModel implements LocalModel {
   }
 }
 
+class InventedSocialReplyModel implements LocalModel {
+  calls: number = 0;
+
+  async complete(_prompt: string, _conversation?: ConversationContext): Promise<string> {
+    this.calls++;
+    if (this.calls === 1) {
+      return 'Thought: invent a selection\nAction: social.reply.draft[' +
+        '{"itemId":"invented-item","platform":"x","instruction":"draft a reply"}]';
+    }
+    return 'Thought: stop\nFinal: The reply draft was not available.';
+  }
+}
+
 function request(): LoopBackendRequest {
   return {
     prompt: '创建日程',
@@ -57,6 +70,24 @@ export default function loopBackendTest() {
       } finally {
         configureComposioConfigFromRawJson('{}');
       }
+    });
+
+    it('does not dispatch an invented SocialHub item ID from the legacy model', 0, async () => {
+      const model = new InventedSocialReplyModel();
+      const backend = new LoopBackend(model);
+      let toolSurfaceCalls = 0;
+
+      const result = await backend.run(request(), {
+        onA2uiSurface: (): void => { toolSurfaceCalls++; }
+      });
+
+      expect(model.calls).assertEqual(2);
+      expect(toolSurfaceCalls).assertEqual(0);
+      expect(result.toolCalls.length).assertEqual(1);
+      expect(result.toolCalls[0].observation.indexOf('Unknown tool: social.reply.draft'))
+        .assertLarger(-1);
+      expect(result.raw.indexOf('invented-item')).assertLarger(-1);
+      expect(result.raw.indexOf('"status":"draft"')).assertEqual(-1);
     });
   });
 }

@@ -1491,6 +1491,7 @@ export default function multiAgentCanaryRuntimeTest() {
       const prompt = model.prompts[0];
       expect(prompt.indexOf('"toolId":"social.community.search"')).assertLarger(-1);
       expect(prompt.indexOf('"toolId":"social.post.preview"')).assertLarger(-1);
+      expect(prompt.indexOf('"toolId":"social.reply.draft"')).assertEqual(-1);
       expect(prompt.indexOf(
         'Reddit/LinkedIn/Instagram/public community reading -> social.community.search'
       )).assertLarger(-1);

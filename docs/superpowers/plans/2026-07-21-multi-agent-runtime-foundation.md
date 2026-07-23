@@ -202,12 +202,14 @@ const all = allToolDefinitions();
 const data = dataAgentToolDefinitions();
 const action = actionAgentToolDefinitions();
 const ids = data.concat(action).map((item: ToolDefinition): string => item.toolId);
-expect(all.length).assertEqual(44);
-expect(data.length).assertEqual(24);
-expect(action.length).assertEqual(20);
-expect(new Set<string>(ids).size).assertEqual(44);
+expect(all.length).assertEqual(46);
+expect(data.length).assertEqual(25);
+expect(action.length).assertEqual(21);
+expect(new Set<string>(ids).size).assertEqual(46);
 expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();
 expect(data.map((item: ToolDefinition): string => item.toolId).indexOf('hotel.navigate')).assertEqual(-1);
+expect(data.map((item: ToolDefinition): string => item.toolId).indexOf('social.community.search') >= 0).assertTrue();
+expect(action.map((item: ToolDefinition): string => item.toolId).indexOf('social.post.preview') >= 0).assertTrue();
 ```
 
 Assert that mutating a returned definition does not mutate a later view.
@@ -242,7 +244,7 @@ Keep `dynamic.search` and `memory.update` out of this fixed list; their owners a
 
 - [ ] **Step 4: Run Hypium and verify ownership counts**
 
-Run the Task 1 command and read `test_result.txt`. Expected: 44 unique fixed tools, split 24/20, zero failures.
+Run the Task 1 command and read `test_result.txt`. Expected: 46 unique fixed tools, split 25/21, zero failures.
 
 - [ ] **Step 5: Commit the registry views**
 

@@ -1158,6 +1158,7 @@ function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): 
   const tools: LeaderToolMetadata[] = allToolDefinitions()
     .filter((definition: ToolDefinition): boolean =>
       definition.toolId !== 'gmail.message.send' &&
+        definition.toolId !== 'social.reply.draft' &&
         (definition.toolId !== 'luckin.order.preview' || isExplicitLuckinOrderPrompt(prompt))
     )
     .map(

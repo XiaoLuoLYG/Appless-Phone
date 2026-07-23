@@ -518,7 +518,7 @@ export default function toolGatewayClientTest() {
         'social.reply.draft',
         '帮我回复这条消息，谢谢反馈',
         'surface_social_reply_missing_selection',
-        '',
+        'social.reply.draft',
         noop,
         null,
         null
@@ -529,6 +529,29 @@ export default function toolGatewayClientTest() {
       expect(draft.itemId).assertEqual('');
       expect(draft.error).assertEqual(
         'Social reply draft requires a selected real item ID, platform, and instruction.'
+      );
+    });
+
+    it('rejects an invented social reply selection from a model-owned legacy route', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'social.reply.draft',
+        'draft a reply',
+        'surface_social_reply_invented',
+        'model_tool_request',
+        noop,
+        null,
+        looseObject(
+          '{"itemId":"invented-item","platform":"x","instruction":"draft a reply"}'
+        )
+      );
+      const draft = socialHubDraft(result.surface);
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.itemId).assertEqual('');
+      expect(draft.error).assertEqual(
+        'Social reply draft requires a selected-item page action.'
       );
     });
 

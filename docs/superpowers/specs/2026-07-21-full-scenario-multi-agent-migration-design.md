@@ -484,13 +484,13 @@ Prompt 所见工具列表必须从 registry 派生，禁止维护第二份手写
 | Agent | 可见/可执行能力 |
 |---|---|
 | Leader | 只读查看全部 capability metadata，用于规划；注册 0 个 executor |
-| Data | 执行下列 24 个固定只读工具，加 turn-scoped `dynamic.search` |
+| Data | 执行下列 25 个固定只读工具，加 turn-scoped `dynamic.search` |
 | UI | 注册 0 个业务工具；只使用 component catalog、data paths 和 ActionOffer |
 | Action | 执行下列 21 个固定 Action 工具，加 `memory.update` |
 
 所谓“给 Agent 注册工具”在这里是从统一 registry 建立受限只读视图或 executor view，不是在四个 Prompt 旁复制四套注册表。
 
-### 9.2 Data Agent 固定工具（24）
+### 9.2 Data Agent 固定工具（25）
 
 ```text
 travel.search
@@ -501,6 +501,7 @@ hotel.detail
 food.search
 luckin.order.status
 social.feed.search
+social.community.search
 x.post.search
 mail.search
 mail.thread.read
@@ -521,7 +522,7 @@ ride.driver.location
 
 `ride.app.link` 虽为读/链接解析能力，后续真正打开外部 app 仍由 Action/client boundary 处理。
 
-### 9.3 Action Agent 固定工具（20）
+### 9.3 Action Agent 固定工具（21）
 
 ```text
 hotel.navigate
@@ -529,6 +530,7 @@ hotel.booking.open
 luckin.order.preview
 luckin.order.create
 social.reply.draft
+social.post.preview
 mail.draft.create
 gmail.draft.create
 gmail.draft.apply

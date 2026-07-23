@@ -12251,8 +12251,26 @@ export async function sendLocalSocialHubReply(item: SocialHubItemData, text: str
   return socialHubClient.sendReply(item, text);
 }
 
-async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalSocialHubTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'social.reply.draft') {
+    if (actionId !== 'social.reply.draft') {
+      const unauthorized: SocialHubDraftData = {
+        itemId: '',
+        platform: 'unknown',
+        text: '',
+        status: 'error',
+        error: 'Social reply draft requires a selected-item page action.',
+        localOnly: true,
+        sent: false
+      };
+      return socialHubDraftA2ui(surfaceId, unauthorized);
+    }
     const request: SocialHubDraftRequestArgs = args === null ? emptySocialHubDraftRequestArgs() : args as SocialHubDraftRequestArgs;
     const itemId = textOf(request.itemId).trim();
     const platform = socialHubPlatformFromText(textOf(request.platform));
@@ -14337,7 +14355,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalYouTubeTool(toolId, prompt, surfaceId, args);
   }
   if (isSocialHubToolId(toolId)) {
-    return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+    return callLocalSocialHubTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (toolId === 'x.post.search') {
     return callLocalXTool(toolId, prompt, surfaceId, args);

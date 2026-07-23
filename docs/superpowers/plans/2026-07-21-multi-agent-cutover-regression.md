@@ -507,7 +507,7 @@ Report:
 
 ```text
 Architecture: Leader/Data/UI/Action ownership and prompt boundaries
-Registry: fixed=44, Data=24, Action=20, virtual=2, blocked=0
+Registry: fixed=46, Data=25, Action=21, virtual=2, blocked=0
 Tests: authoritative Hypium totals and verifier totals
 Scenes: C01-C20, F01-F16, R01-R04 one row each
 Manual safety: Gmail send and all other side-effect states

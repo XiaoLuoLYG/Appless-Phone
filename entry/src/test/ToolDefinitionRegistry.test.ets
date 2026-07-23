@@ -177,6 +177,7 @@ export default function toolDefinitionRegistryTest() {
       expect(gmailDraft.indexOf('create a draft first')).assertLarger(-1);
       expect(gmailDraft.indexOf('exact current mail reply Send button')).assertLarger(-1);
       expect(aiphoneToolDescriptionForModel('gmail.message.send')).assertEqual('');
+      expect(aiphoneToolDescriptionForModel('social.reply.draft')).assertEqual('');
     });
 
     it('registers only truthful hotel actions with aligned public and runtime registries', 0, () => {

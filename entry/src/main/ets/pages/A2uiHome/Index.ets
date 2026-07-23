@@ -1711,7 +1711,8 @@ struct Index {
       this.composioSocialHubConnection('discord', 'Discord'),
       this.composioSocialHubConnection('linkedin', 'LinkedIn'),
       this.composioSocialHubConnection('whatsapp', 'WhatsApp'),
-      this.composioSocialHubConnection('instagram', 'Instagram')
+      this.composioSocialHubConnection('instagram', 'Instagram'),
+      this.composioSocialHubConnection('reddit', 'Reddit')
     ];
   }
 
