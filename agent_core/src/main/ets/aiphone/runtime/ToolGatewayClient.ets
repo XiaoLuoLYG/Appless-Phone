@@ -135,13 +135,28 @@ import {
 } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
 import {
+  socialHubCommunityA2ui,
   socialHubDraftA2ui,
   socialHubFeedA2ui,
+  socialHubPublicationA2ui,
   socialHubStructuredDataA2ui,
   SocialHubStructuredData
 } from './SocialHubA2ui';
-import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from './SocialHubClient';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
+import {
+  createSocialHubPublicationPreview,
+  parseComposioCommunityFeed,
+  parseComposioSocialFeed,
+  SocialHubClient,
+  SocialHubFeedResult,
+  SocialHubPublicationPreviewInput
+} from './SocialHubClient';
+import {
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData,
+  SocialHubPlatform,
+  SocialHubPublicationData
+} from './SocialHubTypes';
 import {
   callComposioDynamic,
   callComposioFixedDynamic,
@@ -5827,7 +5842,10 @@ function socialConnectionUnsupported(connection: SocialHubConnectionData): boole
   return connection.status === 'limited' || connection.status === 'disabled';
 }
 
-export function socialHubStructuredDataResult(feed: SocialHubFeedResult): DataResult {
+export function socialHubStructuredDataResult(
+  feed: SocialHubFeedResult,
+  toolId: string = 'social.feed.search'
+): DataResult {
   const data: SocialHubStructuredData = { items: feed.items, connections: feed.connections };
   const sources: DataSource[] = feed.connections
     .filter((connection: SocialHubConnectionData): boolean => socialConnectionAttempted(connection))
@@ -5844,23 +5862,23 @@ export function socialHubStructuredDataResult(feed: SocialHubFeedResult): DataRe
       (connection.displayName.length > 0 ? connection.displayName : connection.platform) + '：' + connection.message);
   if (feed.items.length > 0) {
     return warnings.length > 0 ?
-      partialDataResult('social.feed.search', 'socialHubFeed', data, sources, warnings) :
-      successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
+      partialDataResult(toolId, 'socialHubFeed', data, sources, warnings) :
+      successfulDataResult(toolId, 'socialHubFeed', data, sources);
   }
   const attemptedFailure = feed.connections.some((connection: SocialHubConnectionData): boolean =>
     connection.status === 'error');
   if (attemptedFailure) {
     return structuredErrorWithData(
-      'social.feed.search', 'socialHubFeed', data, 'SOCIAL_PROVIDERS_FAILED', warnings.join('；'), false, sources, warnings
+      toolId, 'socialHubFeed', data, 'SOCIAL_PROVIDERS_FAILED', warnings.join('；'), false, sources, warnings
     );
   }
   if (sources.length === 0 && feed.connections.length > 0 &&
     feed.connections.every((connection: SocialHubConnectionData): boolean => socialConnectionUnsupported(connection))) {
     return structuredErrorWithData(
-      'social.feed.search', 'socialHubFeed', data, 'SOCIAL_SOURCES_UNSUPPORTED', warnings.join('；'), false, [], warnings
+      toolId, 'socialHubFeed', data, 'SOCIAL_SOURCES_UNSUPPORTED', warnings.join('；'), false, [], warnings
     );
   }
-  const empty = successfulDataResult('social.feed.search', 'socialHubFeed', data, sources);
+  const empty = successfulDataResult(toolId, 'socialHubFeed', data, sources);
   empty.status = 'empty';
   empty.warnings = warnings;
   return empty;
@@ -11677,6 +11695,45 @@ interface SocialHubFeedRequestArgs {
   platforms?: Object[];
 }
 
+interface SocialCommunityRequestArgs {
+  platform?: Object | string | number | boolean | null;
+  query?: Object | string | number | boolean | null;
+  resourceId?: Object | string | number | boolean | null;
+  limit?: number;
+}
+
+interface SocialPublicationPreviewRequestArgs {
+  platform?: Object | string | number | boolean | null;
+  operation?: Object | string | number | boolean | null;
+  text?: Object | string | number | boolean | null;
+}
+
+interface SocialXCommunityArgs {
+  query: string;
+  maxResults: number;
+}
+
+interface EmptySocialProviderArgs {
+}
+
+interface SocialLinkedInPostArgs {
+  postId: string;
+}
+
+interface SocialInstagramMediaArgs {
+  igUserId: string;
+  limit: number;
+}
+
+interface SocialRedditProfileArgs {
+  username: string;
+}
+
+interface SocialRedditCommunityArgs {
+  searchQuery: string;
+  limit: number;
+}
+
 interface SocialXListArgs {
   maxResults: number;
   expansions: string[];
@@ -11748,14 +11805,16 @@ function socialHubPlatformFromText(value: string): SocialHubPlatform {
   if (text === 'wecom' || text === 'wework' || text === '企业微信') {
     return 'wecom';
   }
-  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' ||
+    text === 'instagram' || text === 'reddit') {
     return text as SocialHubPlatform;
   }
   return 'unknown';
 }
 
 function isSocialHubToolId(toolId: string): boolean {
-  return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
+  return toolId === 'social.feed.search' || toolId === 'social.reply.draft' ||
+    toolId === 'social.community.search' || toolId === 'social.post.preview';
 }
 
 function socialHubDefaultPlatforms(): SocialHubPlatform[] {
@@ -11881,6 +11940,166 @@ function socialProfileId(raw: string): string {
     return textOf((profile.data as SocialProfilePayload).id).trim();
   } catch (_error) {
     return '';
+  }
+}
+
+interface SocialProfileIdentity {
+  id: string;
+  name: string;
+}
+
+function socialProfileIdentityRecord(value: Object | null | undefined): SocialProfileIdentity {
+  if (value === undefined || value === null) {
+    return { id: '', name: '' };
+  }
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  const nested = record.data;
+  if (nested !== undefined && nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    const identity = socialProfileIdentityRecord(nested as Object);
+    if (identity.id.length > 0 || identity.name.length > 0) {
+      return identity;
+    }
+  }
+  const id = textOf(record.id).trim();
+  const username = textOf(record.username).trim();
+  const name = textOf(record.name).trim();
+  return {
+    id: id.length > 0 ? id : (username.length > 0 ? username : name),
+    name: username.length > 0 ? username : name
+  };
+}
+
+function socialProfileIdentityFromObservation(raw: string): SocialProfileIdentity {
+  try {
+    return socialProfileIdentityRecord(JSON.parse(raw) as Object);
+  } catch (_error) {
+    return { id: '', name: '' };
+  }
+}
+
+async function socialProfileForPreview(platform: SocialHubPlatform): Promise<SocialProfileIdentity> {
+  if (platform === 'x') {
+    const args: SocialXProfileArgs = { userFields: ['id', 'name', 'username'] };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw('Authenticated Twitter X profile', 'social.x.profile', args)).observation
+    );
+  }
+  if (platform === 'linkedin') {
+    const args: EmptySocialProviderArgs = {};
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated LinkedIn profile', 'social.linkedin.profile', args
+      )).observation
+    );
+  }
+  if (platform === 'instagram') {
+    const args: SocialInstagramProfileArgs = { igUserId: 'me' };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated Instagram profile', 'social.instagram.profile', args
+      )).observation
+    );
+  }
+  if (platform === 'reddit') {
+    const args: SocialRedditProfileArgs = { username: 'me' };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated Reddit profile', 'social.reddit.profile', args
+      )).observation
+    );
+  }
+  return { id: '', name: '' };
+}
+
+async function composioSocialCommunity(args: Object | null): Promise<SocialHubFeedResult> {
+  const request = args === null ? {} as SocialCommunityRequestArgs :
+    args as SocialCommunityRequestArgs;
+  const platform = socialHubPlatformFromText(textOf(request.platform));
+  const query = textOf(request.query).trim();
+  const resourceId = textOf(request.resourceId).trim();
+  const limit = typeof request.limit === 'number' ?
+    Math.max(1, Math.min(25, request.limit)) : 10;
+  try {
+    if (platform === 'x') {
+      const fixedArgs: SocialXCommunityArgs = {
+        query,
+        maxResults: Math.max(10, limit)
+      };
+      const execution = await callComposioFixedRaw(
+        'Search recent public X posts', 'social.x.community.search', fixedArgs
+      );
+      return parseComposioCommunityFeed('x', execution.observation);
+    }
+    if (platform === 'reddit') {
+      const fixedArgs: SocialRedditCommunityArgs = { searchQuery: query, limit };
+      const execution = await callComposioFixedRaw(
+        'Search public Reddit posts', 'social.reddit.search', fixedArgs
+      );
+      return parseComposioCommunityFeed('reddit', execution.observation);
+    }
+    if (platform === 'instagram') {
+      const profile = await socialProfileForPreview('instagram');
+      if (profile.id.length === 0) {
+        return socialHubConnectionResult(
+          'instagram', 'Instagram', 'error', 'Provider profile 没有返回真实账号 ID。'
+        );
+      }
+      const fixedArgs: SocialInstagramMediaArgs = { igUserId: profile.id, limit };
+      const execution = await callComposioFixedRaw(
+        'List authenticated Instagram media', 'social.instagram.media.list', fixedArgs
+      );
+      return parseComposioCommunityFeed('instagram', execution.observation);
+    }
+    if (platform === 'linkedin') {
+      if (resourceId.length === 0) {
+        const profile = await socialProfileForPreview('linkedin');
+        const result = socialHubConnectionResult(
+          'linkedin',
+          'LinkedIn',
+          'limited',
+          '当前账号没有公开社区列表读取权限；请提供可读 resource ID 或补充读 scope。'
+        );
+        result.connections[0].accountId = profile.id;
+        return result;
+      }
+      const fixedArgs: SocialLinkedInPostArgs = { postId: resourceId };
+      const execution = await callComposioFixedRaw(
+        'Read one LinkedIn post', 'social.linkedin.post.read', fixedArgs
+      );
+      return parseComposioCommunityFeed('linkedin', execution.observation);
+    }
+    return socialHubConnectionResult(
+      platform, 'SocialHub', 'error', '请选择 X、LinkedIn、Instagram 或 Reddit。'
+    );
+  } catch (error) {
+    return socialHubConnectionResult(platform, 'SocialHub', 'error', describeThrown(error));
+  }
+}
+
+async function socialPublicationPreview(args: Object | null): Promise<SocialHubPublicationData> {
+  const request = args === null ? {} as SocialPublicationPreviewRequestArgs :
+    args as SocialPublicationPreviewRequestArgs;
+  const platform = socialHubPlatformFromText(textOf(request.platform));
+  const text = textOf(request.text).trim();
+  const base: SocialHubPublicationPreviewInput = {
+    platform,
+    operation: 'publish',
+    text
+  };
+  if (text.length === 0 || text.length > 3000 ||
+    (platform !== 'x' && platform !== 'linkedin' &&
+      platform !== 'instagram' && platform !== 'reddit')) {
+    return createSocialHubPublicationPreview(base);
+  }
+  try {
+    const identity = await socialProfileForPreview(platform);
+    base.accountId = identity.id;
+    base.accountName = identity.name;
+    return createSocialHubPublicationPreview(base);
+  } catch (error) {
+    const failed = createSocialHubPublicationPreview(base);
+    failed.error = '读取真实 provider 账号失败：' + describeThrown(error);
+    return failed;
   }
 }
 
@@ -12048,11 +12267,25 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
     const result = await callStructuredSocialHubTool(args);
     return socialHubStructuredDataA2ui(surfaceId, result.data as SocialHubStructuredData);
   }
+  if (toolId === 'social.community.search') {
+    const result = await composioSocialCommunity(args);
+    return socialHubCommunityA2ui(surfaceId, result.items, result.connections);
+  }
+  if (toolId === 'social.post.preview') {
+    return socialHubPublicationA2ui(surfaceId, await socialPublicationPreview(args));
+  }
   return socialHubFeedA2ui(surfaceId, [], []);
 }
 
 async function callStructuredSocialHubTool(args: Object | null): Promise<DataResult> {
   return socialHubStructuredDataResult(await composioSocialAggregate(args));
+}
+
+async function callStructuredSocialCommunityTool(args: Object | null): Promise<DataResult> {
+  return socialHubStructuredDataResult(
+    await composioSocialCommunity(args),
+    'social.community.search'
+  );
 }
 
 interface XPostPreviewEnvelope {
@@ -13972,6 +14205,9 @@ export async function callStructuredTool(
   }
   if (toolId === 'social.feed.search') {
     return callStructuredSocialHubTool(args);
+  }
+  if (toolId === 'social.community.search') {
+    return callStructuredSocialCommunityTool(args);
   }
   if (toolId === 'mail.search') {
     return callStructuredMailSearch(prompt, args);

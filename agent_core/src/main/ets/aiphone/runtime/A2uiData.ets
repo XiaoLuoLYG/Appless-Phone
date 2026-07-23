@@ -25,7 +25,8 @@ import {
   normalizeSocialHub,
   SocialHubConnectionData,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 import { AggregateSearchResult, emptyAggregateSearchResult } from './AggregateSearchTypes';
 
@@ -515,6 +516,9 @@ export function resolveData(surface: A2uiSurfaceState, path: string | undefined)
   if (path === '/socialHub/draft') {
     return model.socialHub.draft;
   }
+  if (path === '/socialHub/publication') {
+    return model.socialHub.publication;
+  }
   if (path === '/socialHub/connections') {
     return model.socialHub.connections;
   }
@@ -638,6 +642,10 @@ export function socialHubDraft(surface: A2uiSurfaceState): SocialHubDraftData {
 
 export function socialHubConnections(surface: A2uiSurfaceState): SocialHubConnectionData[] {
   return parseModel(surface).socialHub.connections;
+}
+
+export function socialHubPublication(surface: A2uiSurfaceState): SocialHubPublicationData {
+  return parseModel(surface).socialHub.publication;
 }
 
 export function componentById(surface: A2uiSurfaceState, id: string): A2uiComponent | null {

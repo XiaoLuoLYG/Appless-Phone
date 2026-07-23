@@ -254,6 +254,33 @@ const C09_SOCIAL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["social.feed.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"social.feed.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回真实 SocialHub 消息。","reasonCode":"social_feed_ready"}';
+const F04_PRICE_DECISION: string = '{"personaId":"food_companion","skillId":"",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"food-price","goal":"查询瑞幸生椰拿铁价格",' +
+  '"allowedToolIds":["food.search"],"toolId":"food.search",' +
+  '"input":{"query":"瑞幸生椰拿铁多少钱"},"required":true}],' +
+  '"uiIntent":{"purpose":"food.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["food"]}}';
+const F04_PRICE_DONE: string = '{"personaId":"food_companion","skillId":"",' +
+  '"requestedCapabilityIds":["food.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"food.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"价格查询结果已就绪"}';
+const R01_COMMUNITY_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.community.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"community","goal":"读取 Reddit 社区讨论",' +
+  '"allowedToolIds":["social.community.search"],"toolId":"social.community.search",' +
+  '"input":{"platform":"reddit","query":"Appless","limit":10},"required":true}],' +
+  '"uiIntent":{"purpose":"social.community.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["social"]}}';
+const R01_COMMUNITY_DONE: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.community.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"social.community.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"社区结果已就绪"}';
+const R02_POST_PREVIEW_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.post.preview"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"social.post.preview","preferredDensity":"comfortable",' +
+  '"requiredSections":["preview"]},"actionIntent":{"goal":"生成独立公开帖子预览",' +
+  '"allowedActionIds":["social.post.preview"]}}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
   '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
@@ -477,6 +504,15 @@ class RecordingDynamicExecutor implements DataTaskExecutor {
       data: JSON.parse(JSON.stringify({ results: [result] })) as Object,
       warnings: []
     };
+  }
+}
+
+class RecordingGenericExecutor implements DataTaskExecutor {
+  readonly tasks: CreateDataTaskPayload[] = [];
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.tasks.push(task);
+    return canaryStructuredResult(task.toolId, task.outputSchema);
   }
 }
 
@@ -1400,6 +1436,149 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(catalogEnd - catalogStart).assertLess(64001);
       expect(prompt.length).assertLess(100001);
       expect(model.prompts.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('projects Luckin preview only for an explicit current order prompt', 0, async () => {
+      const priceModel = new QueueModel([ANSWER_DECISION]);
+      const priceRuntime = new MultiAgentCanaryRuntime(canaryOptions(
+        priceModel,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+      await priceRuntime.submit('瑞幸生椰拿铁多少钱', { text: '' });
+      const priceCatalogStart = priceModel.prompts[0].indexOf('Registry capabilities: ');
+      const priceCatalogEnd = priceModel.prompts[0].indexOf(
+        '\nRuntime-owned tool IDs:', priceCatalogStart
+      );
+      const priceCatalog = priceModel.prompts[0].substring(priceCatalogStart, priceCatalogEnd);
+      expect(priceCatalog.indexOf('"toolId":"food.search"')).assertLarger(-1);
+      expect(priceCatalog.indexOf('"toolId":"luckin.order.preview"')).assertEqual(-1);
+      priceRuntime.dispose();
+
+      const orderModel = new QueueModel([ANSWER_DECISION]);
+      const orderRuntime = new MultiAgentCanaryRuntime(canaryOptions(
+        orderModel,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+      await orderRuntime.submit('帮我点一杯瑞幸生椰拿铁，半糖少冰', { text: '' });
+      const orderCatalogStart = orderModel.prompts[0].indexOf('Registry capabilities: ');
+      const orderCatalogEnd = orderModel.prompts[0].indexOf(
+        '\nRuntime-owned tool IDs:', orderCatalogStart
+      );
+      const orderCatalog = orderModel.prompts[0].substring(orderCatalogStart, orderCatalogEnd);
+      expect(orderCatalog.indexOf('"toolId":"luckin.order.preview"')).assertLarger(-1);
+      orderRuntime.dispose();
+    });
+
+    it('projects the fixed community read and standalone post preview contracts', 0, async () => {
+      const model = new QueueModel([ANSWER_DECISION]);
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      await runtime.submit('帮我看看 Reddit 上对 Appless 的讨论', { text: '' });
+
+      const prompt = model.prompts[0];
+      expect(prompt.indexOf('"toolId":"social.community.search"')).assertLarger(-1);
+      expect(prompt.indexOf('"toolId":"social.post.preview"')).assertLarger(-1);
+      expect(prompt.indexOf(
+        'Reddit/LinkedIn/Instagram/public community reading -> social.community.search'
+      )).assertLarger(-1);
+      expect(prompt.indexOf(
+        'Standalone public post draft -> social.post.preview'
+      )).assertLarger(-1);
+      expect(prompt.indexOf(
+        'social.reply.draft only after a selected real inbox/feed item'
+      )).assertLarger(-1);
+      runtime.dispose();
+    });
+
+    it('executes F04 price as food.search without creating an Action plan', 0, async () => {
+      const bus = new TrackingBus();
+      const executor = new RecordingGenericExecutor();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([F04_PRICE_DECISION, F04_PRICE_DONE]),
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit('瑞幸生椰拿铁多少钱', { text: '' });
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('food.search');
+      expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(0);
+      expect(bus.count(AgentMessageType.ACTION_PLAN_DRAFT)).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('executes R01 through social.community.search and never x.post.search', 0, async () => {
+      const executor = new RecordingGenericExecutor();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([R01_COMMUNITY_DECISION, R01_COMMUNITY_DONE]),
+        executor,
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      const outcome = await runtime.submit('帮我看看 Reddit 上对 Appless 的讨论', { text: '' });
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('social.community.search');
+      expect(executor.tasks.filter((task: CreateDataTaskPayload): boolean =>
+        task.toolId === 'x.post.search'
+      ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('executes R02 as a zero-Data preview Action without provider write authority', 0, async () => {
+      const executor = new RecordingGenericExecutor();
+      const actionIds: string[] = [];
+      const options = canaryOptions(
+        new QueueModel([R02_POST_PREVIEW_DECISION]),
+        executor,
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.pageAction = async (
+        actionId: string,
+        _args: Object,
+        _context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        actionIds.push(actionId);
+        return {
+          status: 'success',
+          output: JSON.parse('{"surfaceId":"social-preview"}') as Object
+        };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '帮我在 X 发帖：Appless migration ready（只生成预览，不发布）',
+        { text: '' }
+      );
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(executor.tasks.length).assertEqual(0);
+      expect(actionIds.join(',')).assertEqual('social.post.preview');
+      expect(actionIds.indexOf('social.reply.draft')).assertEqual(-1);
+      expect(actionIds.indexOf('social.post.publish')).assertEqual(-1);
       runtime.dispose();
     });
 

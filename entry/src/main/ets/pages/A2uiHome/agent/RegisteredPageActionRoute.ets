@@ -17,6 +17,7 @@ import { HtmlHomeDocument } from '../html/HtmlHomeTypes';
 const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'luckin.order.preview',
   'luckin.order.create',
+  'social.post.preview',
   'social.reply.draft',
   'mail.draft.create',
   'gmail.draft.create',
@@ -73,6 +74,12 @@ interface OriginalQueryVirtualArgs {
   originalQuery: string;
 }
 
+interface SocialPostPreviewVirtualArgs {
+  platform: string;
+  operation: string;
+  text: string;
+}
+
 interface WhatsAppVirtualArgs {
   toNumber: string;
   text: string;
@@ -93,6 +100,41 @@ function virtualAction(actionId: string, inputText: string, args: Object): A2uiA
     kind: 'prompt',
     args
   };
+}
+
+function socialPostPreviewVirtualArgs(inputText: string): SocialPostPreviewVirtualArgs | null {
+  const value = inputText.trim();
+  const lower = value.toLowerCase();
+  let platform = '';
+  if (/(^|[^a-z])x([^a-z]|$)|twitter|x\.com/i.test(value)) {
+    platform = 'x';
+  } else if (lower.indexOf('linkedin') >= 0) {
+    platform = 'linkedin';
+  } else if (lower.indexOf('instagram') >= 0) {
+    platform = 'instagram';
+  } else if (lower.indexOf('reddit') >= 0) {
+    platform = 'reddit';
+  }
+  const chineseMarker = value.indexOf('发帖：');
+  const asciiMarker = value.indexOf('发帖:');
+  const postMarker = lower.indexOf('post:');
+  let marker = chineseMarker >= 0 ? chineseMarker : asciiMarker;
+  let markerLength = chineseMarker >= 0 ? '发帖：'.length : '发帖:'.length;
+  if (marker < 0 && postMarker >= 0) {
+    marker = postMarker;
+    markerLength = 'post:'.length;
+  }
+  if (platform.length === 0 || marker < 0) {
+    return null;
+  }
+  const text = value.substring(marker + markerLength)
+    .replace(/（只生成预览，不发布）$/, '')
+    .replace(/\(preview only,? do not publish\)$/i, '')
+    .trim();
+  if (text.length === 0 || text.length > 3000) {
+    return null;
+  }
+  return { platform, operation: 'publish', text };
 }
 
 function whatsAppVirtualArgs(inputText: string): WhatsAppVirtualArgs | null {
@@ -392,6 +434,11 @@ export function resolveVirtualRegisteredPageAction(
       return null;
     }
     return virtualAction(actionId, inputText.trim(), args as Object);
+  }
+  if (actionId === 'social.post.preview') {
+    const args = socialPostPreviewVirtualArgs(inputText);
+    return args === null ? null :
+      virtualAction(actionId, inputText.trim(), args as Object);
   }
   if (actionId === 'luckin.order.preview' || actionId === 'payment.send' ||
     actionId === 'payment.account.setup') {

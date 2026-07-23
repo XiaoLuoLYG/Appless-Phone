@@ -362,7 +362,7 @@ export class MultiAgentRuntime {
   private readonly surfaceTurnActivator: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly leader: LeaderAgent;
-  private readonly planningContextProvider: (() => LeaderPlanningContext) | null;
+  private readonly planningContextProvider: ((prompt: string) => LeaderPlanningContext) | null;
   private runtimeOwnedToolIds: string[];
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
@@ -469,10 +469,11 @@ export class MultiAgentRuntime {
       return Promise.resolve(settled('canceled', 'Multi-agent runtime is unavailable.'));
     }
     this.cancelActiveTurn('superseded');
-    const contextProvider: (() => LeaderPlanningContext) | null = this.planningContextProvider;
+    const contextProvider: ((prompt: string) => LeaderPlanningContext) | null =
+      this.planningContextProvider;
     if (contextProvider !== null) {
       try {
-        const planningContext = contextProvider();
+        const planningContext = contextProvider(prompt);
         this.leader.updatePlanningContext(planningContext);
         this.runtimeOwnedToolIds = runtimeOwnedIds(planningContext);
       } catch (_error) {

@@ -2,7 +2,8 @@ import {
   SocialHubConnectionData,
   SocialHubData,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 import { AggregateSearchResult } from './AggregateSearchTypes';
 
@@ -267,6 +268,7 @@ export type A2uiDataValue =
   SocialHubItemData[] |
   SocialHubItemData |
   SocialHubDraftData |
+  SocialHubPublicationData |
   SocialHubConnectionData[] |
   A2uiToolRequestData[] |
   string |

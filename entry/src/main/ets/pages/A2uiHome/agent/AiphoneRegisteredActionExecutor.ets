@@ -184,6 +184,17 @@ export function validateRegisteredPageActionArgs(
       'SOCIAL_DRAFT_ARGS_INVALID', 'Social draft requires the exact item, platform, and instruction.'
     );
   }
+  if (actionId === 'social.post.preview') {
+    const platform = argText(values, ['platform']).toLowerCase();
+    const operation = argText(values, ['operation']).toLowerCase();
+    const text = argText(values, ['text']);
+    return validation(
+      ['x', 'linkedin', 'instagram', 'reddit'].indexOf(platform) >= 0 &&
+        operation === 'publish' && text.length > 0 && text.length <= 3000,
+      'SOCIAL_PREVIEW_ARGS_INVALID',
+      'Social post preview requires one supported platform and non-empty preview text.'
+    );
+  }
   if (actionId === 'mail.draft.create') {
     const provider = argText(values, ['provider']).toLowerCase();
     return validation(

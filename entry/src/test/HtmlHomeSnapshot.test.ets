@@ -553,8 +553,8 @@ export default function htmlHomeSnapshotTest() {
       expect(serialized.indexOf('local draft only; not sent')).assertLarger(-1);
       expect(serialized.indexOf('Slack token required')).assertLarger(-1);
       expect(serialized.indexOf('WeCom callback unavailable')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_select_item')).assertLarger(-1);
-      expect(serialized.indexOf('social_hub_draft_reply')).assertLarger(-1);
+      expect(serialized.indexOf('social_hub_select_item')).assertEqual(-1);
+      expect(serialized.indexOf('social_hub_draft_reply')).assertEqual(-1);
       expect(serialized.indexOf('social_hub_open_source')).assertLarger(-1);
       expect(serialized.indexOf('social_select_message')).assertEqual(-1);
       expect(serialized.indexOf('SocialInbox')).assertEqual(-1);

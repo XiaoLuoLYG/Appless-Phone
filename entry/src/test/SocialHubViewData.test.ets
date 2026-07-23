@@ -20,6 +20,7 @@ export default function socialHubViewDataTest() {
       expect(socialHubPlatformLabel('linkedin')).assertEqual('LinkedIn');
       expect(socialHubPlatformLabel('whatsapp')).assertEqual('WhatsApp');
       expect(socialHubPlatformLabel('instagram')).assertEqual('Instagram');
+      expect(socialHubPlatformLabel('reddit')).assertEqual('Reddit');
     });
 
     it('labels post kind as public post', 0, () => {

@@ -191,6 +191,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['social.reply.draft']
   },
   {
+    toolId: 'social.community.search',
+    domain: 'social',
+    intent: 'social.community.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['oauth', 'provider_key'],
+    inputSchema: 'socialCommunitySearchQuery',
+    outputSchema: 'socialHubFeed',
+    a2uiComponent: 'SocialHub',
+    actions: []
+  },
+  {
+    toolId: 'social.post.preview',
+    domain: 'social',
+    intent: 'social.post.preview',
+    riskLevel: 'draft',
+    backendPriority: ['local_adapter'],
+    authModes: ['oauth', 'provider_key'],
+    inputSchema: 'socialPostPreviewRequest',
+    outputSchema: 'socialHubPublication',
+    a2uiComponent: 'SocialHub',
+    actions: []
+  },
+  {
     toolId: 'social.reply.draft',
     domain: 'social',
     intent: 'social.reply.draft',

@@ -4,7 +4,7 @@
 
 来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：44 个固定 `ToolDefinition`（24 个 Data Agent + 20 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 43 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
+当前 agent 工具箱：46 个固定 `ToolDefinition`（25 个 Data Agent + 21 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 45 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
 

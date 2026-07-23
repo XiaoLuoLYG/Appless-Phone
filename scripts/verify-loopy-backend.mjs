@@ -855,13 +855,16 @@ function verifySourceContracts() {
     runtimeUniqueIds.has(id) && !toolDefinitionContractsMatch(definitions, runtimeDefinitions, id));
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(ids.length >= 22, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
+  assert(ids.length === 46, 'AIPhone public tool registry has expected fixed count', `found ${ids.length}`);
+  assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
     'train.search',
     'flight.search',
     'food.search',
     'social.feed.search',
+    'social.community.search',
+    'social.post.preview',
     'social.reply.draft',
     'x.post.search',
     'mail.search',
@@ -883,6 +886,31 @@ function verifySourceContracts() {
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
   assertContains(runtimeGateway, "if (toolId === 'dynamic.search')", 'runtime registry explicitly handles dynamic.search');
+  assertContains(
+    runtimeGateway,
+    "if (toolId === 'social.community.search')",
+    'runtime gateway handles the read-only social community route'
+  );
+  assertContains(
+    runtimeGateway,
+    "if (toolId === 'social.post.preview')",
+    'runtime gateway handles the social post preview route'
+  );
+  assertContains(
+    canaryRuntime,
+    "definition.toolId !== 'luckin.order.preview' || isExplicitLuckinOrderPrompt(prompt)",
+    'planning projection hides Luckin preview outside explicit ordering prompts'
+  );
+  assertContains(
+    canaryRuntime,
+    'planningContextProvider: (prompt: string): LeaderPlanningContext =>',
+    'planning projection receives the current user prompt'
+  );
+  assertContains(
+    liveCanaryLeaderPlanner,
+    'Social selection contract:',
+    'leader planning prompt defines the social capability selection contract'
+  );
   assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
   assert(
     ids.length === runtimeIds.length &&

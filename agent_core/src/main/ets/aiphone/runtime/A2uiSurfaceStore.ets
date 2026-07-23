@@ -32,6 +32,7 @@ import {
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
   normalizeSocialHubItem,
+  normalizeSocialHubPublication,
   SocialHubConnectionData,
   SocialHubItemData
 } from './SocialHubTypes';
@@ -640,6 +641,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.socialHub.selected = normalizeSocialHubItem(value as Object);
   } else if (path === '/socialHub/draft') {
     next.socialHub.draft = normalizeSocialHubDraft(value as Object);
+  } else if (path === '/socialHub/publication') {
+    next.socialHub.publication = normalizeSocialHubPublication(value as Object);
   } else if (path === '/socialHub/connections') {
     const connections: SocialHubConnectionData[] = [];
     if (Array.isArray(value)) {

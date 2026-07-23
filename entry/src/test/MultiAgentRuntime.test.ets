@@ -1122,7 +1122,7 @@ export default function multiAgentRuntimeTest() {
       expect(afterTerminal).assertEqual(first);
     });
 
-    it('owns all 44 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
+    it('owns all 46 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
       const registryIds = allToolDefinitions().map(
         (definition: ToolDefinition): string => definition.toolId
       );
@@ -1132,9 +1132,9 @@ export default function multiAgentRuntimeTest() {
         MIGRATED_TOOL_IDS
       );
 
-      expect(MIGRATED_TOOL_IDS.size).assertEqual(45);
+      expect(MIGRATED_TOOL_IDS.size).assertEqual(47);
       expect(MIGRATED_TOOL_IDS.has('dynamic.search')).assertTrue();
-      expect(new Set<string>(registryIds).size).assertEqual(44);
+      expect(new Set<string>(registryIds).size).assertEqual(46);
       expect(known.owner).assertEqual('multi_agent');
       expect(known.unmigratedToolIds.length).assertEqual(0);
       const handoff = unknown as LegacyHandoff;

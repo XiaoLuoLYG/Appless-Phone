@@ -368,6 +368,9 @@ function fixedActionArgs(actionId: string): Object {
   if (actionId === 'social.reply.draft') {
     return object('{"itemId":"post-1","platform":"x","instruction":"draft a reply"}');
   }
+  if (actionId === 'social.post.preview') {
+    return object('{"platform":"x","operation":"publish","text":"Preview only"}');
+  }
   if (actionId === 'mail.draft.create') {
     return object('{"provider":"qq","to":["qa@example.com"],"subject":"QA","body":"Draft"}');
   }
@@ -806,6 +809,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
     it('routes every current Wave 3 draft preview system and Web action explicitly', 0, async () => {
       const actionIds: string[] = [
         'luckin.order.preview',
+        'social.post.preview',
         'social.reply.draft',
         'mail.draft.create',
         'gmail.draft.apply',
@@ -827,17 +831,18 @@ export default function aiphoneRegisteredActionExecutorTest() {
       }
     });
 
-    it('validates invalid and minimal args for all 20 fixed Action definitions', 0, () => {
+    it('validates invalid and minimal args for all 21 fixed Action definitions', 0, () => {
       const expected: string[] = [
         'hotel.navigate', 'hotel.booking.open', 'luckin.order.preview', 'luckin.order.create',
-        'social.reply.draft', 'mail.draft.create', 'gmail.draft.create', 'gmail.draft.apply',
+        'social.post.preview', 'social.reply.draft', 'mail.draft.create',
+        'gmail.draft.create', 'gmail.draft.apply',
         'gmail.open.web', 'gmail.message.send', 'worldcup.open', 'calendar.event.create',
         'calendar.event.update', 'calendar.event.delete', 'payment.send', 'payment.account.setup',
         'maps.route.open', 'whatsapp.message.send', 'ride.order.create', 'ride.order.cancel'
       ];
       const definitions = actionAgentToolDefinitions();
 
-      expect(definitions.length).assertEqual(20);
+      expect(definitions.length).assertEqual(21);
       expect(definitions.map((current: ToolDefinition): string => current.toolId).sort().join(','))
         .assertEqual(expected.slice().sort().join(','));
       for (let index = 0; index < expected.length; index++) {

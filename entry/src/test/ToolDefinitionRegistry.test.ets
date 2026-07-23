@@ -119,6 +119,8 @@ export default function toolDefinitionRegistryTest() {
     it('registers SocialHub read and draft tools without send', 0, () => {
       const feed = toolDefinitionForToolId('social.feed.search') as ToolDefinition;
       const draft = toolDefinitionForToolId('social.reply.draft') as ToolDefinition;
+      const community = toolDefinitionForToolId('social.community.search');
+      const postPreview = toolDefinitionForToolId('social.post.preview');
       const xPost = toolDefinitionForToolId('x.post.search') as ToolDefinition;
 
       expect(feed.domain).assertEqual('social');
@@ -129,12 +131,30 @@ export default function toolDefinitionRegistryTest() {
       expect(draft.riskLevel).assertEqual('draft');
       expect(draft.outputSchema).assertEqual('socialHubDraft');
       expect(draft.actions.length).assertEqual(0);
+      expect(community !== null).assertTrue();
+      expect(postPreview !== null).assertTrue();
+      if (community !== null && postPreview !== null) {
+        expect(community.riskLevel).assertEqual('read');
+        expect(community.outputSchema).assertEqual('socialHubFeed');
+        expect(community.a2uiComponent).assertEqual('SocialHub');
+        expect(postPreview.riskLevel).assertEqual('draft');
+        expect(postPreview.outputSchema).assertEqual('socialHubPublication');
+        expect(postPreview.a2uiComponent).assertEqual('SocialHub');
+      }
       expect(xPost.domain).assertEqual('x');
       expect(xPost.riskLevel).assertEqual('read');
       expect(xPost.outputSchema).assertEqual('genericToolResults');
       expect(xPost.a2uiComponent).assertEqual('GenericToolResults');
       expect(xPost.actions.length).assertEqual(0);
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
+      expect(toolDefinitionForToolId('social.post.publish')).assertEqual(null);
+
+      const socialIds = allToolDefinitions().map(
+        (definition: ToolDefinition): string => definition.toolId
+      ).filter((toolId: string): boolean =>
+        toolId === 'social.community.search' || toolId === 'social.post.preview'
+      );
+      expect(socialIds.join(',')).assertEqual('social.community.search,social.post.preview');
     });
 
     it('keeps mutually exclusive model-selection semantics in the registry projection', 0, () => {
@@ -493,10 +513,10 @@ export default function toolDefinitionRegistryTest() {
       const action: ToolDefinition[] = actionAgentToolDefinitions();
       const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
 
-      expect(all.length).assertEqual(44);
-      expect(data.length).assertEqual(24);
-      expect(action.length).assertEqual(20);
-      expect(new Set<string>(ids).size).assertEqual(44);
+      expect(all.length).assertEqual(46);
+      expect(data.length).assertEqual(25);
+      expect(action.length).assertEqual(21);
+      expect(new Set<string>(ids).size).assertEqual(46);
       expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
         .assertEqual(0);
       expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();

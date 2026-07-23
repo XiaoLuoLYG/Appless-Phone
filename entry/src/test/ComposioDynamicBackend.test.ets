@@ -109,6 +109,19 @@ function successfulExecutionObservation(): string {
 
 export default function composioDynamicBackendTest() {
   describe('composioDynamicBackend', () => {
+    it('pins restored social community reads to exact provider slugs', 0, () => {
+      expect(composioExactToolSlugForFixedTool('social.x.community.search'))
+        .assertEqual('TWITTER_RECENT_SEARCH');
+      expect(composioExactToolSlugForFixedTool('social.linkedin.profile'))
+        .assertEqual('LINKEDIN_GET_MY_INFO');
+      expect(composioExactToolSlugForFixedTool('social.instagram.media.list'))
+        .assertEqual('INSTAGRAM_GET_IG_USER_MEDIA');
+      expect(composioExactToolSlugForFixedTool('social.reddit.profile'))
+        .assertEqual('REDDIT_GET_REDDIT_USER_ABOUT');
+      expect(composioExactToolSlugForFixedTool('social.reddit.search'))
+        .assertEqual('REDDIT_SEARCH_ACROSS_SUBREDDITS');
+    });
+
     it('recognizes unsupported high-frequency app queries', 0, () => {
       expect(isComposioDynamicPrompt('帮我在 Notion 里找一下 7 月旅行计划相关页面')).assertTrue();
       expect(isComposioDynamicPrompt('帮我在 Google Docs 里找 AIPhoneDemo 设计文档')).assertTrue();

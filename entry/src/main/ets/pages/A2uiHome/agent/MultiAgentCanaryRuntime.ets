@@ -43,6 +43,7 @@ import {
   allToolDefinitions,
   callStructuredTool,
   genericToolResultsA2ui,
+  isExplicitLuckinOrderPrompt,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   setJsonPointer,
@@ -1153,9 +1154,12 @@ interface MemorySurfaceOutput {
   surfaceId: string;
 }
 
-function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext {
+function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): LeaderPlanningContext {
   const tools: LeaderToolMetadata[] = allToolDefinitions()
-    .filter((definition: ToolDefinition): boolean => definition.toolId !== 'gmail.message.send')
+    .filter((definition: ToolDefinition): boolean =>
+      definition.toolId !== 'gmail.message.send' &&
+        (definition.toolId !== 'luckin.order.preview' || isExplicitLuckinOrderPrompt(prompt))
+    )
     .map(
     (definition: ToolDefinition): LeaderToolMetadata => {
       const actions = definition.actions.filter(
@@ -1331,8 +1335,8 @@ export class MultiAgentCanaryRuntime {
         dataTaskInputNormalizer
       ),
       planningContext: initialContext,
-      planningContextProvider: (): LeaderPlanningContext =>
-        canaryPlanningContext(this.lastLeaderPersonaId),
+      planningContextProvider: (prompt: string): LeaderPlanningContext =>
+        canaryPlanningContext(this.lastLeaderPersonaId, prompt),
       currentLocalDateProvider: options.currentLocalDate,
       dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,

@@ -130,6 +130,11 @@ const C10_C11_SELECTION_CONTRACT: string =
   '我只喝瑞幸咖啡, 以后只喝..., or an explicit remember-preference request uses only memory.update. Use ' +
   'luckin.order.preview only for an explicit Luckin/Ruixing order request with a concrete product or specification, ' +
   'for example 帮我点一杯瑞幸生椰拿铁，半糖少冰; do not infer it from generic coffee or saved preference text.';
+const SOCIAL_SELECTION_CONTRACT: string =
+  'Social selection contract: Reddit/LinkedIn/Instagram/public community reading -> ' +
+  'social.community.search. Standalone public post draft -> social.post.preview. ' +
+  'social.reply.draft only after a selected real inbox/feed item. social.post.preview is preview-only; ' +
+  'never infer or invoke a provider publish write from the preview request.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -983,6 +988,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       TRAVEL_SELECTION_CONTRACT,
       VIDEO_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
+      SOCIAL_SELECTION_CONTRACT,
       CALENDAR_DELETE_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,

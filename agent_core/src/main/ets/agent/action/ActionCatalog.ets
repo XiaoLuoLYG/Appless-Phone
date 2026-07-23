@@ -15,6 +15,7 @@ const ACTION_INTENT_IDS: string[] = [
   'gmail.draft.create',
   'gmail.draft.apply',
   'luckin.order.preview',
+  'social.post.preview',
   'payment.send',
   'payment.account.setup',
   'whatsapp.message.send'

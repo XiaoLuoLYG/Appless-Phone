@@ -1842,6 +1842,7 @@ export default function registeredPageActionMigrationTest() {
 
     it('resolves and invokes only bounded safe initial Action requests without write authority', 0, async () => {
       const luckinPrompt = '帮我点一杯瑞幸生椰拿铁，半糖少冰';
+      const socialPreviewPrompt = '帮我在 X 发帖：Appless migration ready（只生成预览，不发布）';
       const paypalPrompt = '用 PayPal 给罗一格转 1 美元';
       const googlePayPrompt = '用 Google Pay 给罗一格转 1 美元';
       const stripePrompt = '帮我设置 Stripe 收款账户';
@@ -1851,6 +1852,14 @@ export default function registeredPageActionMigrationTest() {
       expect(JSON.stringify(resolveVirtualRegisteredPageAction(
         'luckin.order.preview', luckinPrompt
       )?.args)).assertEqual('{"originalQuery":"' + luckinPrompt + '"}');
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'social.post.preview', socialPreviewPrompt
+      )?.args)).assertEqual(
+        '{"platform":"x","operation":"publish","text":"Appless migration ready"}'
+      );
+      expect(resolveVirtualRegisteredPageAction(
+        'social.post.preview', '帮我发一条社交动态'
+      )).assertNull();
       expect(JSON.stringify(resolveVirtualRegisteredPageAction(
         'payment.send', paypalPrompt
       )?.args)).assertEqual('{"originalQuery":"' + paypalPrompt + '"}');
@@ -1879,6 +1888,14 @@ export default function registeredPageActionMigrationTest() {
       expect(validateRegisteredPageActionArgs(
         'luckin.order.preview', JSON.parse('{"originalQuery":"' + luckinPrompt + '"}') as Object
       ).ok).assertTrue();
+      expect(validateRegisteredPageActionArgs(
+        'social.post.preview',
+        JSON.parse('{"platform":"x","operation":"publish","text":"Appless migration ready"}') as Object
+      ).ok).assertTrue();
+      expect(validateRegisteredPageActionArgs(
+        'social.post.preview',
+        JSON.parse('{"platform":"x","operation":"publish","text":""}') as Object
+      ).ok).assertFalse();
       expect(validateRegisteredPageActionArgs(
         'payment.send', JSON.parse('{"originalQuery":"' + paypalPrompt + '"}') as Object
       ).ok).assertTrue();

@@ -29,6 +29,9 @@ export function socialHubPlatformLabel(platform: SocialHubPlatform | string): st
   if (platform === 'instagram') {
     return 'Instagram';
   }
+  if (platform === 'reddit') {
+    return 'Reddit';
+  }
   return '未知';
 }
 

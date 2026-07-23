@@ -9,9 +9,11 @@ import {
 import {
   emptySocialHubDraft,
   emptySocialHubItem,
+  emptySocialHubPublication,
   SocialHubConnectionData,
   SocialHubDraftData,
-  SocialHubItemData
+  SocialHubItemData,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 import { socialHubPrivateItems } from './SocialHubClient';
 
@@ -81,6 +83,7 @@ export function socialHubFeedA2ui(surfaceId: string, items: SocialHubItemData[],
     dataLine(surfaceId, '/socialHub/items', privateItems),
     dataLine(surfaceId, '/socialHub/selected', selected),
     dataLine(surfaceId, '/socialHub/draft', emptySocialHubDraft()),
+    dataLine(surfaceId, '/socialHub/publication', emptySocialHubPublication()),
     dataLine(surfaceId, '/socialHub/connections', connections)
   ]).join('\n') + '\n';
 }
@@ -96,6 +99,37 @@ export function socialHubDraftA2ui(surfaceId: string, draft: SocialHubDraftData)
     dataLine(surfaceId, '/socialHub/items', items),
     dataLine(surfaceId, '/socialHub/selected', emptySocialHubItem()),
     dataLine(surfaceId, '/socialHub/draft', draft),
+    dataLine(surfaceId, '/socialHub/publication', emptySocialHubPublication()),
+    dataLine(surfaceId, '/socialHub/connections', connections)
+  ]).join('\n') + '\n';
+}
+
+export function socialHubCommunityA2ui(
+  surfaceId: string,
+  items: SocialHubItemData[],
+  connections: SocialHubConnectionData[]
+): string {
+  const selected = items.length > 0 ? items[0] : emptySocialHubItem();
+  return surfaceLines(surfaceId).concat([
+    dataLine(surfaceId, '/socialHub/items', items),
+    dataLine(surfaceId, '/socialHub/selected', selected),
+    dataLine(surfaceId, '/socialHub/draft', emptySocialHubDraft()),
+    dataLine(surfaceId, '/socialHub/publication', emptySocialHubPublication()),
+    dataLine(surfaceId, '/socialHub/connections', connections)
+  ]).join('\n') + '\n';
+}
+
+export function socialHubPublicationA2ui(
+  surfaceId: string,
+  publication: SocialHubPublicationData
+): string {
+  const items: SocialHubItemData[] = [];
+  const connections: SocialHubConnectionData[] = [];
+  return surfaceLines(surfaceId).concat([
+    dataLine(surfaceId, '/socialHub/items', items),
+    dataLine(surfaceId, '/socialHub/selected', emptySocialHubItem()),
+    dataLine(surfaceId, '/socialHub/draft', emptySocialHubDraft()),
+    dataLine(surfaceId, '/socialHub/publication', publication),
     dataLine(surfaceId, '/socialHub/connections', connections)
   ]).join('\n') + '\n';
 }

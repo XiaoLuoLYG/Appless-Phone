@@ -2,11 +2,18 @@ import { describe, it, expect } from '@ohos/hypium';
 import { resolveData } from '@loop/agent-core';
 import { parseA2uiJsonl } from '@loop/agent-core';
 import { A2uiSurfaceStore } from '@loop/agent-core';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
+import {
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData,
+  SocialHubPublicationData
+} from '@loop/agent-core';
 import {
   SocialHubStructuredData,
+  socialHubCommunityA2ui,
   socialHubDraftA2ui,
   socialHubFeedA2ui,
+  socialHubPublicationA2ui,
   socialHubStructuredDataA2ui,
   socialHubStructuredDataResult
 } from '@loop/agent-core';
@@ -79,6 +86,52 @@ export default function socialHubA2uiTest() {
       const parsedItems = resolveData(store.getSurface(), '/socialHub/items') as SocialHubItemData[];
 
       expect(parsedItems.length).assertEqual(0);
+    });
+
+    it('renders real public community posts without changing private feed filtering', 0, () => {
+      const items: SocialHubItemData[] = [{
+        id: 't3_appless',
+        platform: 'reddit',
+        kind: 'post',
+        author: 'real-user',
+        handle: 'u/real-user',
+        text: 'real result',
+        timestamp: '2026-07-18T01:00:00.000Z',
+        url: 'https://www.reddit.com/r/test/comments/appless',
+        mediaUrl: '',
+        channel: 'r/test',
+        channelId: 'test',
+        threadId: 't3_appless',
+        unread: false
+      }];
+      const store = applyJsonl(socialHubCommunityA2ui('surface_social_hub', items, []));
+      const parsedItems = resolveData(store.getSurface(), '/socialHub/items') as SocialHubItemData[];
+
+      expect(parsedItems.length).assertEqual(1);
+      expect(parsedItems[0].platform).assertEqual('reddit');
+      expect(parsedItems[0].id).assertEqual('t3_appless');
+    });
+
+    it('renders a preview-only publication without publish actions', 0, () => {
+      const publication: SocialHubPublicationData = {
+        platform: 'x',
+        operation: 'publish',
+        accountId: 'x-real',
+        accountName: '@real',
+        text: 'Appless preview',
+        status: 'preview',
+        updatedAt: '2026-07-18T01:00:00.000Z',
+        error: ''
+      };
+      const jsonl = socialHubPublicationA2ui('surface_social_hub', publication);
+      const store = applyJsonl(jsonl);
+      const parsed = resolveData(
+        store.getSurface(), '/socialHub/publication'
+      ) as SocialHubPublicationData;
+
+      expect(parsed.status).assertEqual('preview');
+      expect(parsed.accountName).assertEqual('@real');
+      expect(jsonl.indexOf('social.post.publish')).assertEqual(-1);
     });
 
     it('renders drafts as local unsent SocialHub state', 0, () => {

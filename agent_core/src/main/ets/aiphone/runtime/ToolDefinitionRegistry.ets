@@ -152,6 +152,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['social.reply.draft']
   },
   {
+    toolId: 'social.community.search',
+    domain: 'social',
+    intent: 'social.community.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['oauth', 'provider_key'],
+    inputSchema: 'socialCommunitySearchQuery',
+    outputSchema: 'socialHubFeed',
+    a2uiComponent: 'SocialHub',
+    actions: []
+  },
+  {
+    toolId: 'social.post.preview',
+    domain: 'social',
+    intent: 'social.post.preview',
+    riskLevel: 'draft',
+    backendPriority: ['local_adapter'],
+    authModes: ['oauth', 'provider_key'],
+    inputSchema: 'socialPostPreviewRequest',
+    outputSchema: 'socialHubPublication',
+    a2uiComponent: 'SocialHub',
+    actions: []
+  },
+  {
     toolId: 'social.reply.draft',
     domain: 'social',
     intent: 'social.reply.draft',
@@ -588,8 +612,12 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
     description += '. Use when the user asks to check, refresh, or view a Luckin order status, pickup code, or existing orderId.';
   } else if (definition.toolId === 'social.feed.search') {
     description += '. Use for every SocialHub inbox, received-message, recent-message, private-message, or connection-state request involving X/Twitter, Slack, WeCom, Discord, LinkedIn, WhatsApp, or Instagram, including when the user mentions Composio or authorization. The tool argument object must contain exactly one key named platforms: LeaderDecision uses dataTasks[].input.platforms; legacy ToolCall uses args.platforms. Do not add date, query, or limit. Use one named platform such as ["whatsapp"] for a single-source request, named platforms such as ["x","slack"] for a combined request, or ["all"] for the complete SocialHub. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. This tool reports unsupported read capabilities as limitations and never fabricates social messages.';
+  } else if (definition.toolId === 'social.community.search') {
+    description += '. Use for read-only public community content on Reddit, LinkedIn, Instagram, or X when the user asks for the SocialHub community view. Preserve platform, query, resourceId, and limit. Do not use x.post.search for SocialHub community requests. Never fabricate posts or hide provider auth/network failures.';
+  } else if (definition.toolId === 'social.post.preview') {
+    description += '. Use only for a standalone public X, LinkedIn, Instagram, or Reddit post draft. It creates a reviewable preview and does not publish. Include platform, operation="publish", and non-empty text. Never replace this with social.reply.draft, which requires a selected real inbox/feed item.';
   } else if (definition.toolId === 'social.reply.draft') {
-    description += '. Use only to draft a reply after a real SocialHub item is selected. Include itemId, platform, and instruction when available. Do not send.';
+    description += '. Use only to draft a reply after a real SocialHub inbox/feed item is selected. Include itemId, platform, and instruction when available. Never use for a standalone public post. Do not send.';
   } else if (definition.toolId === 'x.post.search') {
     description += '. Use only for explicit X/Twitter/x.com public post searches, not arbitrary letter X or Xcode requests. Never use it for SocialHub inbox or private social messages. Never fabricate posts.';
   } else if (definition.toolId === 'maps.place.search') {

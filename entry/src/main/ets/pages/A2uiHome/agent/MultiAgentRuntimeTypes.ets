@@ -68,7 +68,7 @@ export type MultiAgentTurnOutcome = MultiAgentSettledOutcome | MultiAgentHandoff
 export interface MultiAgentRuntimeOptions {
   planner: LeaderPlanner;
   planningContext: LeaderPlanningContext;
-  planningContextProvider?: () => LeaderPlanningContext;
+  planningContextProvider?: (prompt: string) => LeaderPlanningContext;
   currentLocalDateProvider?: LeaderCurrentLocalDateProvider;
   dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer;
   dataAuthorizer: DataTaskAuthorizer;

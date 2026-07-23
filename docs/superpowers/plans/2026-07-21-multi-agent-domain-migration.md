@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Execute this plan only after `2026-07-21-multi-agent-runtime-foundation.md` passes its completion gate.
-- Keep `ToolDefinitionRegistry` as the only fixed capability authority: 44 fixed tools = 24 Data + 20 Action.
+- Keep `ToolDefinitionRegistry` as the only fixed capability authority: 46 fixed tools = 25 Data + 21 Action.
 - No provider rewrite, new dependency, fake data, old-A2UI-inside-DataResult bridge, or cross-domain workflow product.
 - An idempotent read may use its existing backend fallback; a write must never auto-retry or fall back to legacy.
 - Exact UI button clicks keep original arguments and skip LLM planning.
@@ -574,7 +574,7 @@ git commit -m "feat: complete multi-agent action ownership"
 
 ## Domain Migration Completion Gate
 
-- Every one of the 24 Data tools returns a real structured `DataResult`; no adapter returns A2UI as data.
+- Every one of the 25 Data tools returns a real structured `DataResult`; no adapter returns A2UI as data.
 - Every one of the 20 fixed Action tools has one registered executor route and exact confirmation behavior.
 - `dynamic.search` executes only turn-scoped safe reads; `memory.update` is Action-owned.
 - Existing renderer snapshots and interaction sequences pass for all C/F/R families.

@@ -362,6 +362,24 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
   if (fixedToolId === 'social.instagram.messages.list') {
     return 'List messages in an Instagram conversation';
   }
+  if (fixedToolId === 'social.x.community.search') {
+    return 'Search recent public X Twitter posts';
+  }
+  if (fixedToolId === 'social.linkedin.profile') {
+    return 'Get authenticated LinkedIn member profile';
+  }
+  if (fixedToolId === 'social.linkedin.post.read') {
+    return 'Get one LinkedIn post by resource ID';
+  }
+  if (fixedToolId === 'social.instagram.media.list') {
+    return 'List authenticated Instagram creator media';
+  }
+  if (fixedToolId === 'social.reddit.profile') {
+    return 'Get authenticated Reddit user profile';
+  }
+  if (fixedToolId === 'social.reddit.search') {
+    return 'Search public Reddit posts across subreddits';
+  }
   if (fixedToolId === 'whatsapp.phone_numbers.list') {
     return 'List WhatsApp Business phone numbers for the authenticated account';
   }
@@ -492,6 +510,33 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
     return [
       { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
       { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults', 'max_results'] }
+    ];
+  }
+  if (toolId === 'social.x.community.search') {
+    return [
+      { source: 'query', targets: ['query'] },
+      { source: 'maxResults', targets: ['max_results', 'maxResults'] }
+    ];
+  }
+  if (toolId === 'social.linkedin.profile') {
+    return [];
+  }
+  if (toolId === 'social.linkedin.post.read') {
+    return [{ source: 'postId', targets: ['post_id'] }];
+  }
+  if (toolId === 'social.instagram.media.list') {
+    return [
+      { source: 'igUserId', targets: ['ig_user_id'] },
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
+  if (toolId === 'social.reddit.profile') {
+    return [{ source: 'username', targets: ['username'] }];
+  }
+  if (toolId === 'social.reddit.search') {
+    return [
+      { source: 'searchQuery', targets: ['search_query'] },
+      { source: 'limit', targets: ['limit'] }
     ];
   }
   if (toolId === 'gmail.thread.read') {
@@ -731,6 +776,12 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'social.instagram.profile') return 'INSTAGRAM_GET_USER_INFO';
   if (fixedToolId === 'social.instagram.conversations.list') return 'INSTAGRAM_LIST_ALL_CONVERSATIONS';
   if (fixedToolId === 'social.instagram.messages.list') return 'INSTAGRAM_LIST_ALL_MESSAGES';
+  if (fixedToolId === 'social.x.community.search') return 'TWITTER_RECENT_SEARCH';
+  if (fixedToolId === 'social.linkedin.profile') return 'LINKEDIN_GET_MY_INFO';
+  if (fixedToolId === 'social.linkedin.post.read') return 'LINKEDIN_GET_POST_CONTENT';
+  if (fixedToolId === 'social.instagram.media.list') return 'INSTAGRAM_GET_IG_USER_MEDIA';
+  if (fixedToolId === 'social.reddit.profile') return 'REDDIT_GET_REDDIT_USER_ABOUT';
+  if (fixedToolId === 'social.reddit.search') return 'REDDIT_SEARCH_ACROSS_SUBREDDITS';
   if (fixedToolId === 'whatsapp.phone_numbers.list') return 'WHATSAPP_GET_PHONE_NUMBERS';
   if (fixedToolId === 'whatsapp.message.send') return 'WHATSAPP_SEND_MESSAGE';
   if (fixedToolId === 'calendar.events.search') return 'GOOGLECALENDAR_EVENTS_LIST';
