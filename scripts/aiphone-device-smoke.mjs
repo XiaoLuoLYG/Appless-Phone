@@ -75,19 +75,22 @@ const composioCases = [
     query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'github_find_pull_requests'
   },
   {
     query: '帮我在 Google Drive 里找专利交底书',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'googledrive_find_file'
   },
   {
     query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档',
     expectsTool: true,
     expectedToolId: 'dynamic.search',
-    expectedDiscoveredToolId: 'dynamic.search'
+    expectedDiscoveredToolId: 'dynamic.search',
+    expectedDynamicQualifiedName: 'googledocs_search_documents'
   },
   {
     query: '帮我用 Composio Slack 查最近提到 AIPhoneDemo 的消息',
@@ -242,9 +245,9 @@ const retainedFullCases = [
       target: '/placeId'
     }]
   },
-  { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
-  { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
-  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search' },
+  { id: 'F13', query: '帮我在 GitHub 里找 Appless-Phone 最近的 pr', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'github_find_pull_requests' },
+  { id: 'F14', query: '帮我在 Google Drive 里找专利交底书', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'googledrive_find_file' },
+  { id: 'F15', query: '帮我在 Google Docs 里找 AIPhoneDemo 设计文档', expectsTool: true, expectedToolId: 'dynamic.search', expectedDiscoveredToolId: 'dynamic.search', expectedDynamicQualifiedName: 'googledocs_search_documents' },
   {
     id: 'F16',
     query: '打开当前应用的 Composio 管理授权设置',
@@ -286,7 +289,8 @@ const fullScenarioManifest = retainedFullCases.map((testCase) => ({
   expectedToolIds: testCase.expectedToolIds ||
     (testCase.expectedToolId.length > 0 ? [testCase.expectedToolId] : []),
   minimumDataRounds: testCase.minimumDataRounds || 0,
-  expectedDependencies: testCase.expectedDependencies || []
+  expectedDependencies: testCase.expectedDependencies || [],
+  expectedDynamicQualifiedName: testCase.expectedDynamicQualifiedName || ''
 }));
 
 const forbiddenSocialHubLegacyMarkers = [
@@ -1516,6 +1520,7 @@ function analyze(
   expectedTool,
   expectedToolId = '',
   expectedDiscoveredToolId = '',
+  expectedDynamicQualifiedName = '',
   expectedToolIds = [],
   minimumDataRounds = 0,
   expectedDependencies = []
@@ -1539,7 +1544,8 @@ function analyze(
   const dynamicDiscovery = expectedDiscoveredToolId.length === 0 ? null :
     dynamicToolDiscoveryEvidence(text, {
       expectedSelectedToolId: expectedDiscoveredToolId,
-      expectedProvider: expectedDiscoveredToolId === 'dynamic.search' ? 'composio' : ''
+      expectedProvider: expectedDiscoveredToolId === 'dynamic.search' ? 'composio' : '',
+      expectedQualifiedName: expectedDynamicQualifiedName
     });
   const hasExpectedDiscoveredToolId = dynamicDiscovery === null ? true : dynamicDiscovery.ok;
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
@@ -1558,6 +1564,7 @@ function analyze(
     expectedToolId,
     expectedToolIds,
     expectedDiscoveredToolId,
+    expectedDynamicQualifiedName,
     dynamicDiscovery,
     multiAgentLifecycle,
     hasExpectedToolId,
@@ -2986,6 +2993,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
   const logPath = join(outDir, `query-${index + 1}.log`);
   writeFileSync(logPath, safeLogText + '\n');
   const expectedDiscoveredToolId = expectedCase.expectedDiscoveredToolId || '';
+  const expectedDynamicQualifiedName = expectedCase.expectedDynamicQualifiedName || '';
   const expectedPersonaMemory = expectedCase.expectedPersonaMemory || '';
   const summary = analyze(
     query,
@@ -2993,6 +3001,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
     expectedTool,
     expectedToolId,
     expectedDiscoveredToolId,
+    expectedDynamicQualifiedName,
     expectedToolIds,
     minimumDataRounds,
     expectedDependencies

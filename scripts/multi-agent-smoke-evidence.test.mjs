@@ -95,7 +95,7 @@ test('requires correlated provider-backed dynamic discovery and keeps local mani
   const remote = [
     '[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input1',
     '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false',
-    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true receipt=false',
+    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true auth=false receipt=absent',
     '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=d1 tool=dynamic.search status=empty sources=1 error=false',
     '[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=u1 dataTasks=d1',
     '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=u1 surface=loop_surface_1 state=result',
@@ -103,7 +103,8 @@ test('requires correlated provider-backed dynamic discovery and keeps local mani
   ].join('\n');
   const remoteEvidence = smokeLifecycle.dynamicToolDiscoveryEvidence(remote, {
     expectedSelectedToolId: 'dynamic.search',
-    expectedProvider: 'composio'
+    expectedProvider: 'composio',
+    expectedQualifiedName: 'googledocs_search_documents'
   });
   assert.equal(remoteEvidence.ok, true);
   assert.equal(remoteEvidence.qualifiedName, 'googledocs_search_documents');
@@ -112,31 +113,38 @@ test('requires correlated provider-backed dynamic discovery and keeps local mani
   const local = remote
     .replace('selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents',
       'selectedToolId=weather.query provider=amap qualifiedName=weather.query')
-    .replace('status=empty source=true receipt=false', 'status=success source=true receipt=true')
+    .replace('status=empty source=true auth=false receipt=absent',
+      'status=success source=true auth=false receipt=matched')
     .replaceAll('status=empty', 'status=success');
   assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(local, {
-    expectedSelectedToolId: 'weather.query'
+    expectedSelectedToolId: 'weather.query',
+    expectedQualifiedName: 'weather.query'
   }).ok, true);
 });
 
-test('rejects prompt UI only stale mismatched and source-less dynamic discovery evidence', () => {
+test('requires case-specific qualified names and rejects prompt UI stale source-less and receipt mismatch evidence', () => {
   assert.equal(typeof smokeLifecycle.dynamicToolDiscoveryEvidence, 'function');
   const exact = [
     '[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input1',
     '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false',
-    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true receipt=false',
+    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true auth=false receipt=absent',
     '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=d1 tool=dynamic.search status=empty sources=1 error=false',
     '[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=u1 dataTasks=d1',
     '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=u1 surface=loop_surface_1 state=result',
     '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input1 status=empty surface=loop_surface_1 roundCount=1 messageChars=4'
   ].join('\n');
-  const options = { expectedSelectedToolId: 'dynamic.search', expectedProvider: 'composio' };
+  const options = {
+    expectedSelectedToolId: 'dynamic.search',
+    expectedProvider: 'composio',
+    expectedQualifiedName: 'googledocs_search_documents'
+  };
   [
     exact.replace('[AIPhone][DynamicToolDiscovery]', '[AIPhone][PromptCopy]'),
     exact.replace('conversation=c1 turn=t1 task=d1 selectedToolId=', 'conversation=c1 turn=old task=d1 selectedToolId='),
     exact.replace('provider=composio', 'provider=github'),
     exact.replace('qualifiedName=googledocs_search_documents', 'qualifiedName=invalid'),
     exact.replace('source=true', 'source=false'),
+    exact.replace('receipt=absent', 'receipt=mismatch'),
     exact.replace('status=empty source=true', 'status=success source=true')
   ].forEach((logs) => {
     assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(logs, options).ok, false);
@@ -145,6 +153,64 @@ test('rejects prompt UI only stale mismatched and source-less dynamic discovery 
     '[AIPhone][HtmlHomeDocument] text=dynamic.search provider=composio qualifiedName=googledocs_search_documents',
     options
   ).ok, false);
+});
+
+test('accepts only the exact F13 F14 F15 provider tool or a correlated auth state', () => {
+  const lifecycle = (qualifiedName, status = 'empty', auth = false) => [
+    '[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input1',
+    '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false',
+    `[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=${qualifiedName} status=${status} source=true auth=${auth} receipt=absent`,
+    `[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=d1 tool=dynamic.search status=${status} sources=1 error=${status === 'error'}`,
+    '[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=u1 dataTasks=d1',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=u1 surface=loop_surface_1 state=result',
+    `[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input1 status=${status} surface=loop_surface_1 roundCount=1 messageChars=4`
+  ].join('\n');
+  const cases = [
+    ['github_find_pull_requests', 'github_find_pull_requests'],
+    ['googledrive_find_file', 'googledrive_find_file'],
+    ['googledocs_search_documents', 'googledocs_search_documents']
+  ];
+  for (const [qualifiedName, expectedQualifiedName] of cases) {
+    const evidence = smokeLifecycle.dynamicToolDiscoveryEvidence(lifecycle(qualifiedName), {
+      expectedSelectedToolId: 'dynamic.search',
+      expectedProvider: 'composio',
+      expectedQualifiedName
+    });
+    assert.equal(evidence.ok, true);
+    assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(lifecycle('dynamic.search'), {
+      expectedSelectedToolId: 'dynamic.search',
+      expectedProvider: 'composio',
+      expectedQualifiedName
+    }).ok, false);
+  }
+  const authEvidence = smokeLifecycle.dynamicToolDiscoveryEvidence(
+    lifecycle('dynamic.search', 'error', true),
+    {
+      expectedSelectedToolId: 'dynamic.search',
+      expectedProvider: 'composio',
+      expectedQualifiedName: 'googledocs_search_documents'
+    }
+  );
+  assert.equal(authEvidence.ok, true);
+  assert.equal(authEvidence.auth, true);
+  assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(
+    lifecycle('dynamic.search', 'empty', false),
+    {
+      expectedSelectedToolId: 'dynamic.search',
+      expectedProvider: 'composio',
+      expectedQualifiedName: 'googledocs_search_documents'
+    }
+  ).ok, false);
+});
+
+test('deduplicates a real dual-channel DynamicToolDiscovery marker pair', () => {
+  const paired = [
+    '07-24 09:41:13.001 4821 4821 I A00000/AIPhone: [AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=success source=true auth=false receipt=matched',
+    '07-24 09:41:13.001 4821 4821 I A03D00/JSAPP: [AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=success source=true auth=false receipt=matched'
+  ].join('\n');
+  const records = smokeLifecycle.multiAgentEvidenceRecords(paired)
+    .filter((record) => record.marker === 'DynamicToolDiscovery');
+  assert.equal(records.length, 1);
 });
 
 test('accepts C19 writes only from a correlated provider result and rejects invalid surfaces or forged IDs', () => {
@@ -1479,6 +1545,12 @@ test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
     path: '/places/0/placeId',
     target: '/placeId'
   }]);
+  assert.equal(full.find((item) => item.id === 'F13')?.expectedDynamicQualifiedName,
+    'github_find_pull_requests');
+  assert.equal(full.find((item) => item.id === 'F14')?.expectedDynamicQualifiedName,
+    'googledrive_find_file');
+  assert.equal(full.find((item) => item.id === 'F15')?.expectedDynamicQualifiedName,
+    'googledocs_search_documents');
   assert.doesNotMatch(serialized, /不确认直接发送|gmail\.message\.send/);
 });
 

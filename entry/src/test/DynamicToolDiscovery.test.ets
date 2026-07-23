@@ -140,5 +140,36 @@ export default function dynamicToolDiscoveryTest() {
         configureDynamicReadExecutorForTests(null);
       }
     });
+
+    it('preserves a thrown provider error as a truthful renderable dynamic result', 0, async () => {
+      configureDynamicReadExecutorForTests(
+        async (_prompt: string, _args: Object | null): Promise<DynamicReadExecution> => {
+          throw new Error('provider socket closed');
+        }
+      );
+      try {
+        const result = await callStructuredTool(
+          'dynamic.search',
+          'find docs',
+          looseObject('{"operation":"search","qualifiedName":"GOOGLEDOCS_SEARCH_DOCUMENTS"}')
+        );
+        const data = result.data as DynamicStructuredData;
+
+        expect(result.status).assertEqual('error');
+        expect(result.outputSchema).assertEqual('dynamicToolConnect');
+        expect(result.error?.code).assertEqual('DYNAMIC_PROVIDER_ERROR');
+        expect(result.error?.message).assertEqual('provider socket closed');
+        expect(data.results.length).assertEqual(1);
+        expect(data.results[0].status).assertEqual('error');
+        expect(data.results[0].summary).assertEqual('provider socket closed');
+        expect(data.registration.provider).assertEqual('unavailable');
+        expect(data.registration.qualifiedName).assertEqual('GOOGLEDOCS_SEARCH_DOCUMENTS');
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('unavailable');
+        expect(result.sources[0].operation).assertEqual('GOOGLEDOCS_SEARCH_DOCUMENTS');
+      } finally {
+        configureDynamicReadExecutorForTests(null);
+      }
+    });
   });
 }

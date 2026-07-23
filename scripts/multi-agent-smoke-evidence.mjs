@@ -6,7 +6,7 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentInput', 'MultiAgentDataTask', 'MultiAgentDataResult',
   'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
-  'MultiAgentTurnResult'
+  'MultiAgentTurnResult', 'DynamicToolDiscovery'
 ]);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
 
@@ -419,6 +419,7 @@ export function multiAgentTurnEvidence(logText, options = {}) {
 export function dynamicToolDiscoveryEvidence(logText, options = {}) {
   const expectedSelectedToolId = String(options.expectedSelectedToolId || '');
   const expectedProvider = String(options.expectedProvider || '');
+  const expectedQualifiedName = String(options.expectedQualifiedName || '');
   const lifecycle = multiAgentTurnEvidence(logText, { expectedToolIds: ['dynamic.search'] });
   const failed = {
     ok: false,
@@ -427,7 +428,8 @@ export function dynamicToolDiscoveryEvidence(logText, options = {}) {
     qualifiedName: '',
     status: '',
     source: false,
-    receipt: false
+    auth: false,
+    receipt: ''
   };
   if (!lifecycle.complete || expectedSelectedToolId.length === 0) return failed;
   const dynamicTasks = lifecycle.dataTasks.filter((task) => task.toolId === 'dynamic.search');
@@ -456,7 +458,14 @@ export function dynamicToolDiscoveryEvidence(logText, options = {}) {
   const provider = marker.fields.provider || '';
   const status = marker.fields.status || '';
   const source = marker.fields.source === 'true';
-  const receiptFact = marker.fields.receipt === 'true' || marker.fields.receipt === 'false';
+  const auth = marker.fields.auth === 'true';
+  const authFact = auth || marker.fields.auth === 'false';
+  const receipt = marker.fields.receipt || '';
+  const receiptFact = receipt === 'absent' || receipt === 'matched';
+  const exactQualifiedName = expectedQualifiedName.length === 0 ||
+    qualifiedName === expectedQualifiedName;
+  const correlatedAuth = auth && status === 'error' && qualifiedName === 'dynamic.search';
+  const authStatusConsistent = !auth || status === 'error';
   const ok = marker.fields.selectedToolId === expectedSelectedToolId &&
     (expectedProvider.length === 0 || provider === expectedProvider) &&
     provider !== 'invalid' &&
@@ -465,6 +474,9 @@ export function dynamicToolDiscoveryEvidence(logText, options = {}) {
     /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(qualifiedName) &&
     status === terminal.fields.status &&
     source &&
+    authFact &&
+    authStatusConsistent &&
+    (exactQualifiedName || correlatedAuth) &&
     receiptFact;
   return {
     ok,
@@ -473,7 +485,8 @@ export function dynamicToolDiscoveryEvidence(logText, options = {}) {
     qualifiedName,
     status,
     source,
-    receipt: marker.fields.receipt === 'true'
+    auth,
+    receipt
   };
 }
 

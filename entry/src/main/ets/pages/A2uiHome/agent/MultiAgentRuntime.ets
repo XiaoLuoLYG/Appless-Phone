@@ -277,9 +277,24 @@ export class MultiAgentEvidenceFormatter {
     const qualifiedName = mailIdentityText(registration['qualifiedName']);
     const selected = mailIdentityText(registration['selectedToolId']);
     const receipt = mailIdentityText(registration['receipt']);
+    const resultsValue = data['results'];
+    let authRequired: boolean = false;
+    if (Array.isArray(resultsValue)) {
+      authRequired = resultsValue.some((value: Object): boolean => {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        const result = value as Record<string, MailIdentityValue>;
+        return mailIdentityText(result['status']) === 'needs_auth';
+      });
+    }
     const source = payload.sources.find((candidate): boolean =>
       candidate.provider === provider && candidate.operation === qualifiedName
     );
+    let receiptState: string = 'absent';
+    if (receipt.length > 0) {
+      receiptState = source?.receipt === receipt ? 'matched' : 'mismatch';
+    } else if (source?.receipt !== undefined && source.receipt.length > 0) {
+      receiptState = 'mismatch';
+    }
     const identity = ' conversation=' + this.token('c', message.conversationId) +
       ' turn=' + this.token('t', message.turnId) +
       ' task=' + this.token('k', message.taskId);
@@ -291,7 +306,8 @@ export class MultiAgentEvidenceFormatter {
       ' qualifiedName=' + evidenceAllowed(qualifiedName.toLowerCase()) +
       ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
       ' source=' + (source === undefined ? 'false' : 'true') +
-      ' receipt=' + (receipt.length > 0 && source?.receipt === receipt ? 'true' : 'false');
+      ' auth=' + (authRequired ? 'true' : 'false') +
+      ' receipt=' + receiptState;
   }
   private dataTaskLine(message: AgentMessage, identity: string): string {
     const payload = message.payload as CreateDataTaskPayload;

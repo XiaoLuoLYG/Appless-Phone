@@ -10041,7 +10041,8 @@ function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResul
   base.data = data;
   const source: DataSource = {
     provider: execution.registration.provider,
-    backend: execution.registration.provider === 'Composio' ? 'oauth_api' : 'mcp_remote',
+    backend: execution.registration.provider === 'Composio' ? 'oauth_api' :
+      (execution.registration.provider === 'unavailable' ? 'local_adapter' : 'mcp_remote'),
     operation: execution.registration.qualifiedName,
     fetchedAt: new Date().toISOString()
   };
@@ -10062,9 +10063,22 @@ async function callStructuredDynamicTool(prompt: string, args: Object | null): P
   try {
     return dynamicStructuredDataResult(await dynamicReadExecutor(prompt, args));
   } catch (error) {
-    return errorDataResult(
-      'dynamic.search', 'dynamicToolConnect', 'DYNAMIC_PROVIDER_ERROR', describeThrown(error), true
+    const message = describeThrown(error);
+    const qualifiedName = dynamicQualifiedName(dynamicReadRequestArgs(args));
+    const failed = dynamicStructuredDataResult(
+      dynamicReadFailure(
+        'unavailable',
+        qualifiedName.length > 0 ? qualifiedName : 'dynamic.search',
+        new Object(),
+        message
+      )
     );
+    if (failed.error !== undefined) {
+      failed.error.code = 'DYNAMIC_PROVIDER_ERROR';
+      failed.error.message = message;
+      failed.error.retryable = true;
+    }
+    return failed;
   }
 }
 

@@ -1125,11 +1125,23 @@ export default function multiAgentRuntimeTest() {
       expect(line.indexOf('selectedToolId=dynamic.search')).assertLarger(-1);
       expect(line.indexOf('provider=composio')).assertLarger(-1);
       expect(line.indexOf('qualifiedName=googledocs_search_documents')).assertLarger(-1);
-      expect(line.indexOf('status=empty source=true receipt=false')).assertLarger(-1);
+      expect(line.indexOf('status=empty source=true auth=false receipt=absent')).assertLarger(-1);
       expect(line.indexOf('GOOGLEDOCS_SEARCH_DOCUMENTS')).assertEqual(-1);
 
       result.sources[0].operation = 'WRONG_TOOL';
       expect(formatter.dynamicDiscoveryLine(message).indexOf('source=false')).assertLarger(-1);
+      result.sources[0].operation = 'GOOGLEDOCS_SEARCH_DOCUMENTS';
+      result.sources[0].receipt = 'different-receipt';
+      const registration = (result.data as Record<string, Object>)['registration'] as
+        Record<string, Object | string>;
+      registration['receipt'] = 'provider-receipt';
+      expect(formatter.dynamicDiscoveryLine(message).indexOf('receipt=mismatch')).assertLarger(-1);
+      result.sources[0].receipt = 'provider-receipt';
+      expect(formatter.dynamicDiscoveryLine(message).indexOf('receipt=matched')).assertLarger(-1);
+
+      const results = (result.data as Record<string, Object>)['results'] as Object[];
+      results.push(JSON.parse('{"status":"needs_auth"}') as Object);
+      expect(formatter.dynamicDiscoveryLine(message).indexOf('auth=true')).assertLarger(-1);
     });
 
     it('rejects unsafe registry ids and bounds then disposes opaque correlations', 0, () => {

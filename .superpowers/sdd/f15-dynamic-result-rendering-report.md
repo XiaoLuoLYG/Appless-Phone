@@ -30,6 +30,17 @@ behavior was added or changed.
 - The smoke parser requires the exact current conversation, turn, task,
   provider registration, source, and terminal status. Prompt text, UI copy,
   stale turns, mismatched providers, and source-less markers are rejected.
+- F13, F14, and F15 additionally require their reviewed provider operations:
+  `GITHUB_FIND_PULL_REQUESTS`, `GOOGLEDRIVE_FIND_FILE`, and
+  `GOOGLEDOCS_SEARCH_DOCUMENTS`. A generic empty result cannot satisfy them.
+- A truthful authorization state may omit the selected provider operation only
+  when the same correlated Composio result explicitly reports `needs_auth`.
+- Receipt evidence is `absent`, `matched`, or `mismatch`; mismatch fails.
+  `DynamicToolDiscovery` participates in the existing dual-channel HiLog
+  de-duplication.
+- A thrown provider call remains a renderable error `dynamicToolConnect` result
+  with an `unavailable` source and the exact sanitized error message. It does
+  not claim provider success.
 
 ## TDD evidence
 
@@ -46,17 +57,27 @@ Executable RED was captured before production edits:
 Final GREEN evidence:
 
 - `node --test scripts/multi-agent-smoke-evidence.test.mjs`
-  - 64 passed, 0 failed.
+  - 66 passed, 0 failed.
 - DevEco `hvigorw --mode module -p module=entry@default -p product=default test --no-daemon`
   - authoritative
     `entry/.test/default/intermediates/test/coverage_data/test_result.txt`:
-    `Tests run: 1268, Failure: 0, Error: 0, Pass: 1268, Ignore: 0`.
+    `Tests run: 1269, Failure: 0, Error: 0, Pass: 1269, Ignore: 0`.
   - Hvigor still prints the existing coverage JSON reporter error
     `00507008`; the authoritative test result is green.
-- `node scripts/verify_multi_agent_backend.mjs`
+- `node scripts/verify-loopy-backend.mjs`
   - 305 checks passed and `agent_core` HAR built.
 - `git diff --check`
   - passed.
+
+Review repair RED was also captured before its production changes:
+
+- Node: 66 tests, 62 passed, 4 failed. These covered case-specific qualified
+  names/manifests, auth-only relaxation, receipt tri-state, and discovery-marker
+  dual-channel de-duplication.
+- Hypium:
+  `Tests run: 1269, Failure: 1, Error: 1, Pass: 1267, Ignore: 0`.
+  The failure covered formatter auth/receipt fields; the error proved a thrown
+  provider call still lacked a renderable dynamic result.
 
 ## Truth boundary
 
