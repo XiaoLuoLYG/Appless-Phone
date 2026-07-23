@@ -109,7 +109,12 @@ import {
   parseHotelDetailRequest,
   parseHotelSearchRequest
 } from './HotelToolTypes';
-import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
+import {
+  callGmailApiTool,
+  gmailMailDetailFromComposioObservation,
+  gmailMailDetailFromPayload,
+  readGmailMailDetail
+} from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
@@ -10987,35 +10992,53 @@ async function readConfiguredGmailDetailWithSource(
       sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
     };
   }
-  try {
-    const execution: ComposioRawExecution = await callComposioFixedRaw(
-      'Gmail read full thread ' + args.threadId,
-      'gmail.thread.read',
-      args as Object
-    );
-    aiLogInfo('[AIPhone][GmailDetailComposio] tool=' + execution.toolSlug +
-      ' responseChars=' + execution.observation.length.toString());
-    const payload = JSON.parse(execution.observation) as Object;
-    const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
-      Object.keys(payload).slice(0, 12).join(',') : '';
-    aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
-    return {
-      detail: gmailMailDetailFromPayload(payload, args),
-      sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
-    };
-  } catch (composioError) {
-    const message = describeThrown(composioError);
-    aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
-    const accessToken = await gmailAccessTokenForMcp();
-    if (accessToken.length === 0) {
-      throw new Error(message);
+  let composioFailure = '';
+  if (args.messageId.trim().length > 0) {
+    try {
+      const execution: ComposioRawExecution = await callComposioFixedRaw(
+        'Gmail read exact message by message ID',
+        'gmail.message.read',
+        args as Object
+      );
+      aiLogInfo('[AIPhone][GmailDetailComposio] mode=message tool=' + execution.toolSlug +
+        ' responseChars=' + execution.observation.length.toString());
+      return {
+        detail: gmailMailDetailFromComposioObservation(execution.observation, args),
+        sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
+      };
+    } catch (messageError) {
+      composioFailure = describeThrown(messageError);
+      aiLogError('[AIPhone][GmailDetailComposioMessageFailed] ' + composioFailure.substring(0, 240));
     }
-    aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
-    return {
-      detail: await readGmailMailDetail(accessToken, args),
-      sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
-    };
   }
+  if (args.threadId.trim().length > 0) {
+    try {
+      const execution: ComposioRawExecution = await callComposioFixedRaw(
+        'Gmail read full thread by thread ID',
+        'gmail.thread.read',
+        args as Object
+      );
+      aiLogInfo('[AIPhone][GmailDetailComposio] mode=thread_fallback tool=' + execution.toolSlug +
+        ' responseChars=' + execution.observation.length.toString());
+      return {
+        detail: gmailMailDetailFromComposioObservation(execution.observation, args),
+        sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
+      };
+    } catch (threadError) {
+      composioFailure = describeThrown(threadError);
+      aiLogError('[AIPhone][GmailDetailComposioThreadFailed] ' + composioFailure.substring(0, 240));
+    }
+  }
+  const accessToken = await gmailAccessTokenForMcp();
+  if (accessToken.length === 0) {
+    throw new Error(composioFailure.length > 0 ? composioFailure :
+      'Gmail detail requires a message ID or thread ID.');
+  }
+  aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
+  return {
+    detail: await readGmailMailDetail(accessToken, args),
+    sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
+  };
 }
 
 async function readConfiguredMailDetailWithSource(

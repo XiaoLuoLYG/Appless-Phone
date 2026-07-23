@@ -610,6 +610,18 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('Preserve originQuery exactly') >= 0).assertTrue();
     });
 
+    it('keeps Gmail search input limited to exact user keywords in the shared prompt', 0, async () => {
+      const model: QueueLocalModel = new QueueLocalModel([VALID_ANSWER_DECISION]);
+      const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);
+      const input: InputUserPayload = { text: 'Find my ECCV Gmail messages' };
+
+      await planner.plan(inputMessage(), input, planningContext(), 1);
+
+      expect(model.prompts[0].indexOf('Gmail query only from exact keywords') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('Never add synonyms, translations, inferred topics') >= 0).assertTrue();
+      expect(model.prompts[0].indexOf('ECCV OR paper OR manuscript OR review OR conference') >= 0).assertTrue();
+    });
+
     it('lets the model distinguish aggregate travel explicit modes and an explicit pair', 0, async () => {
       const model: TravelPromptAwareModel = new TravelPromptAwareModel();
       const planner: MultiAgentLeaderPlanner = new MultiAgentLeaderPlanner(model);

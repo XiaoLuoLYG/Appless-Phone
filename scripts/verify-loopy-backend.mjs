@@ -858,7 +858,12 @@ function verifySourceContracts() {
   assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
   assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
-  assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
+  assertContains(backend, 'only from exact keywords explicitly present', 'LoopBackend preserves exact Gmail keyword guidance');
+  assertContains(backend, 'Never add synonyms', 'LoopBackend rejects inferred Gmail query expansion');
+  assert(
+    !backend.includes('expand the Gmail query with likely English terms'),
+    'LoopBackend removes Gmail academic synonym expansion'
+  );
   assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
 
   assertContains(index, 'LoopBackend', 'public export includes LoopBackend');

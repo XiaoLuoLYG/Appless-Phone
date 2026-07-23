@@ -80,6 +80,10 @@ const DATA_SCOPE_CONTRACT: string =
   'Explicit provider, app, account, source, or independently named source scope belongs in round 1. ' +
   'Put multiple independent sources in the same round. After round 1, every Data task input must contain an ' +
   'exact entity reference from a successful or partial earlier current-turn observation.';
+const GMAIL_SEARCH_CONTRACT: string =
+  'Gmail query only from exact keywords explicitly present in the current user request. ' +
+  'Never add synonyms, translations, inferred topics, or likely related terms. Preserve explicit acronyms and ' +
+  'names exactly. An ECCV request uses query "ECCV", never "ECCV OR paper OR manuscript OR review OR conference".';
 
 interface JsonContainerFrame {
   object: boolean;
@@ -346,6 +350,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
       OBSERVATION_REUSE_CONTRACT,
       DATA_SCOPE_CONTRACT,
+      GMAIL_SEARCH_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(this.currentLocalDate()),
       'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +

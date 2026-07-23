@@ -363,6 +363,17 @@ export default function composioDynamicBackendTest() {
       ) as Record<string, Object | string | number | boolean | null | undefined>;
       expect(threadArgs.threadId).assertEqual('thread-999');
 
+      const messageTool = composioTool('{"toolSlug":"GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"format\\":{\\"type\\":\\"string\\"},\\"user_id\\":{\\"type\\":\\"string\\"},\\"message_id\\":{\\"type\\":\\"string\\"}}}"}');
+      const messageArgs = composioArgumentsForTool(
+        messageTool,
+        '读取一封 Gmail 邮件',
+        'gmail.message.read',
+        looseObject('{"messageId":"message-999"}')
+      ) as Record<string, Object | string | number | boolean | null | undefined>;
+      expect(messageArgs.message_id).assertEqual('message-999');
+      expect(messageArgs.user_id).assertEqual('me');
+      expect(messageArgs.format).assertEqual('full');
+
       const replyTool = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"recipient_email\\":{\\"type\\":\\"string\\"},\\"message_body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"}}}"}');
       const replyArgs = composioArgumentsForTool(
         replyTool,
@@ -379,9 +390,9 @@ export default function composioDynamicBackendTest() {
         searchTool,
         '帮我查看我Gmail里和我eccv论文相关的邮件',
         'gmail.mail.search',
-        looseObject('{"query":"ECCV OR paper OR manuscript OR submission OR review"}')
+        looseObject('{"query":"ECCV"}')
       ) as Record<string, Object | string | number | boolean | null | undefined>;
-      expect(searchArgs.query).assertEqual('ECCV OR paper OR manuscript OR submission OR review');
+      expect(searchArgs.query).assertEqual('ECCV');
       expect(searchArgs.max_results).assertEqual(5);
       expect(searchArgs.include_payload).assertFalse();
       expect(searchArgs.verbose).assertTrue();
@@ -448,8 +459,40 @@ export default function composioDynamicBackendTest() {
       expect(composioExactToolSlugForFixedTool('calendar.event.update')).assertEqual('GOOGLECALENDAR_PATCH_EVENT');
       expect(composioExactToolSlugForFixedTool('calendar.event.delete')).assertEqual('GOOGLECALENDAR_DELETE_EVENT');
       expect(composioExactToolSlugForFixedTool('gmail.reply.send')).assertEqual('GMAIL_REPLY_TO_THREAD');
+      expect(composioExactToolSlugForFixedTool('gmail.mail.search')).assertEqual('GMAIL_FETCH_EMAILS');
+      expect(composioExactToolSlugForFixedTool('gmail.message.read')).assertEqual('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID');
       expect(normalizedComposioUseCase('', 'calendar.event.delete')).assertEqual(
         'Delete a Google Calendar event by event ID');
+      expect(normalizedComposioUseCase('', 'gmail.message.read')).assertEqual(
+        'Fetch exactly one Gmail email message by its message ID, not the entire thread');
+    });
+
+    it('executes the exact fixed Gmail search tool without broadening fetch authorization', 0, async () => {
+      const exactClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GMAIL_FETCH_EMAILS'),
+        '{"data":{"messages":[]},"error":null}'
+      );
+      const exact = await callComposioFixedSearchAndExecuteForTest(
+        exactClient,
+        'Search Gmail for ECCV',
+        'gmail.mail.search',
+        looseObject('{"query":"ECCV","pageSize":5}')
+      );
+      const unknownClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GMAIL_FETCH_ARCHIVE'),
+        '{"data":{"messages":[]},"error":null}'
+      );
+      const unknown = await callComposioFixedSearchAndExecuteForTest(
+        unknownClient,
+        'Search Gmail for ECCV',
+        'gmail.mail.search',
+        looseObject('{"query":"ECCV","pageSize":5}')
+      );
+
+      expect(exact.status).assertEqual('success');
+      expect(exactClient.executedSlugs[0]).assertEqual('GMAIL_FETCH_EMAILS');
+      expect(unknown.status).assertEqual('error');
+      expect(unknownClient.executedSlugs.length).assertEqual(0);
     });
 
     it('rejects a lone read candidate when Gmail reply discovery omits the exact write tool', 0, async () => {
@@ -676,6 +719,7 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('帮我看今天的 Google Calendar 日程', calendarCreate, 'calendar.events.search'));
 
       const gmailRead = composioTool('{"toolSlug":"GMAIL_GET_THREAD","description":"Read Gmail thread"}');
+      const gmailMessageRead = composioTool('{"toolSlug":"GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID","description":"Fetch one Gmail message by message ID"}');
       const gmailThreadRead = composioTool('{"toolSlug":"GMAIL_FETCH_MESSAGE_BY_THREAD_ID","description":"Fetch Message by Thread ID"}');
       const gmailReply = composioTool('{"toolSlug":"GMAIL_REPLY_TO_THREAD","description":"Reply to Gmail thread"}');
       const gmailDraft = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft"}');
@@ -686,6 +730,8 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailDraft, 'gmail.thread.read'));
       expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailThreadRead, 'gmail.thread.read'))
         .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailEmails, 'gmail.thread.read'));
+      expect(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailMessageRead, 'gmail.message.read'))
+        .assertLarger(composioPreferredToolScore('帮我读取这封 Gmail 邮件', gmailThreadRead, 'gmail.message.read'));
       expect(composioPreferredToolScore('回复这封 Gmail 邮件', gmailReply, 'gmail.reply.send'))
         .assertLarger(composioPreferredToolScore('回复这封 Gmail 邮件', gmailDraft, 'gmail.reply.send'));
       expect(composioPreferredToolScore('帮我查看我Gmail里和我eccv论文相关的邮件', gmailEmails, 'gmail.mail.search'))
