@@ -543,7 +543,7 @@ Expected: uncovered fixed Action IDs and inconsistent manual-only failures are r
 
 - [ ] **Step 3: Complete explicit routes without generic write discovery**
 
-Add exact executor branches only for the 20 fixed definitions. Review-required work/knowledge actions remain their current preview/prepare client actions until promoted to fixed ToolDefinitions; do not execute discovered writes through `dynamic.search`.
+Add exact executor branches only for the 21 fixed definitions. Review-required work/knowledge actions remain their current preview/prepare client actions until promoted to fixed ToolDefinitions; do not execute discovered writes through `dynamic.search`.
 
 Every external write branch must return a real receipt/status or an error. Preserve Calendar eventId across update/delete and stop the plan on error/cancel. Update `docs/current-capabilities.md` with `migrated owner`, `automation state`, and `confirmation` for each capability.
 
@@ -575,7 +575,7 @@ git commit -m "feat: complete multi-agent action ownership"
 ## Domain Migration Completion Gate
 
 - Every one of the 25 Data tools returns a real structured `DataResult`; no adapter returns A2UI as data.
-- Every one of the 20 fixed Action tools has one registered executor route and exact confirmation behavior.
+- Every one of the 21 fixed Action tools has one registered executor route and exact confirmation behavior.
 - `dynamic.search` executes only turn-scoped safe reads; `memory.update` is Action-owned.
 - Existing renderer snapshots and interaction sequences pass for all C/F/R families.
 - `gmail.message.send` is confirm-required and reuses the current exact reply UI/executor.

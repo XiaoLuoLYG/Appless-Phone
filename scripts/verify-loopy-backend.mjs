@@ -52,6 +52,10 @@ function assertContains(text, needle, name) {
   assert(text.includes(needle), name, `missing ${needle}`);
 }
 
+function hasNoStaleApprovedRegistryCounts(source) {
+  return !/44 unique fixed tools|split 24\/20|fixed=44, Data=24, Action=20|固定工具（24）|固定工具（20）|执行下列 24 个固定只读工具|\b20 fixed (?:Action tools|definitions)\b|\b44-tool\b|\b44 migrated IDs\b|\.size\)\.assertEqual\(44\)/.test(source);
+}
+
 function personaSkillToolIds(source) {
   const frontmatter = source.match(/^---\s*\n([\s\S]*?)\n---/);
   if (frontmatter === null) {
@@ -667,6 +671,21 @@ Use Google Maps for explicit provider requests.`;
   const requiredCalendarContract = optionalCalendarContract.replace('start?:string', 'start:string');
   assert(hasOptionalCalendarUpdateSchema(optionalCalendarContract), 'verifier accepts optional Calendar update fields');
   assert(!hasOptionalCalendarUpdateSchema(requiredCalendarContract), 'verifier rejects required Calendar update fields');
+
+  const staleRegistryCountFixtures = [
+    ['20 fixed definitions', 'Add exact executor branches only for the 20 fixed definitions.'],
+    ['20 fixed Action tools', 'Every one of the 20 fixed Action tools has one executor.'],
+    ['complete 44-tool set', 'Produces: complete 44-tool `MIGRATED_TOOL_IDS`.'],
+    ['wave size 44', 'expect(migratedToolIdsForWave(4).size).assertEqual(44);'],
+    ['44 migrated IDs', 'Expected: 44 migrated IDs, zero blocked tools.'],
+    ['completed 44-tool ownership', 'Consumes: completed 44-tool ownership and gates.']
+  ];
+  for (const [label, fixture] of staleRegistryCountFixtures) {
+    assert(
+      !hasNoStaleApprovedRegistryCounts(fixture),
+      `verifier rejects stale approved-plan count form: ${label}`
+    );
+  }
 }
 
 function runHarBuild() {
@@ -947,8 +966,8 @@ function verifySourceContracts() {
   );
   const approvedDocs = [migrationDesign, foundationPlan, domainPlan, cutoverPlan].join('\n');
   assert(
-    !/44 unique fixed tools|split 24\/20|all 20 fixed Action tools|fixed=44, Data=24, Action=20|固定工具（24）|固定工具（20）|执行下列 24 个固定只读工具/.test(approvedDocs),
-    'approved specs and plans contain no stale 44 or 24/20 registry gates'
+    hasNoStaleApprovedRegistryCounts(approvedDocs),
+    'approved specs and plans contain no stale fixed-tool count claims'
   );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
   assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);

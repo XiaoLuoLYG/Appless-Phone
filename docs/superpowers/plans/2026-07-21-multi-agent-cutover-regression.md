@@ -104,7 +104,7 @@ git commit -m "feat: enforce whole-turn runtime ownership"
 - Modify: `entry/src/test/A2uiHomeToolRequest.test.ets`
 
 **Interfaces:**
-- Produces: complete 44-tool `MIGRATED_TOOL_IDS` after four independently testable additions.
+- Produces: complete 46-tool `MIGRATED_TOOL_IDS` after four independently testable additions.
 - Consumes: completion evidence from both preceding plans.
 
 - [ ] **Step 1: Add failing wave-ownership tests**
@@ -117,7 +117,7 @@ expect(migratedToolIdsForWave(1).has('gmail.mail.search')).assertFalse();
 expect(migratedToolIdsForWave(2).has('gmail.mail.search')).assertTrue();
 expect(migratedToolIdsForWave(3).has('payment.send')).assertTrue();
 expect(migratedToolIdsForWave(4).has('calendar.event.delete')).assertTrue();
-expect(migratedToolIdsForWave(4).size).assertEqual(44);
+expect(migratedToolIdsForWave(4).size).assertEqual(46);
 ```
 
 Assert an input planning two tools is legacy until both are in the active wave.
@@ -153,7 +153,7 @@ tail -5 entry/.test/default/intermediates/test/coverage_data/test_result.txt
 node scripts/verify-loopy-backend.mjs
 ```
 
-Expected: 44 migrated IDs, zero fixed blocked tools, Hypium zero failure/error, verifier PASS.
+Expected: 46 migrated IDs, zero fixed blocked tools, Hypium zero failure/error, verifier PASS.
 
 - [ ] **Step 5: Commit full wave enablement**
 
@@ -322,7 +322,7 @@ git diff --check
 
 **Interfaces:**
 - Produces: one production runtime with renderer fallback only.
-- Consumes: completed 44-tool ownership and scenario gates.
+- Consumes: completed 46-tool ownership and scenario gates.
 
 - [ ] **Step 1: Add failing static exit assertions**
 

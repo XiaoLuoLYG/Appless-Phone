@@ -201,3 +201,41 @@ SHA-256: 3c638e634e4e42013ef9ecda496b194054dea0a3ae3d958caa45d8d12fa539e7
   path was added or changed; and
 - both pre-existing untracked smoke-evidence directories remain untouched and
   unstaged.
+
+## Approved-Plan Count Re-review
+
+The final Minor was reproduced with a verifier-first change. Six mutation
+fixtures separately proved rejection of these stale forms:
+
+- `20 fixed definitions`;
+- `20 fixed Action tools`;
+- complete `44-tool` migration set;
+- wave `.size).assertEqual(44)`;
+- `44 migrated IDs`; and
+- completed `44-tool` ownership.
+
+Before the documents changed, all six fixture checks passed while the real
+approved-document aggregate failed exactly one gate:
+
+```text
+FAIL approved specs and plans contain no stale fixed-tool count claims
+1 verification check(s) failed.
+```
+
+The domain plan now uses 21 for both remaining Action statements. The cutover
+plan now uses 46 for the migration-set interface, wave-size assertion, expected
+migrated IDs, and completed ownership dependency.
+
+Final evidence:
+
+- `node scripts/verify-loopy-backend.mjs`
+  - `AIPhone Loopy backend smoke passed (305 checks).`
+  - all six stale-form fixtures: PASS
+  - approved-document aggregate gate: PASS
+  - `agent_core` HAR build: PASS
+- `git diff --check`: PASS
+- full Hypium was not rerun because the complete follow-up diff contains only
+  Markdown evidence/plans and the Node verifier; no ArkTS/runtime/test source
+  changed.
+- both pre-existing untracked smoke-evidence directories remain untouched and
+  unstaged.
