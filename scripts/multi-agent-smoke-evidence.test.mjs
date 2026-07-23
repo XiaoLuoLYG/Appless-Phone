@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import * as smokeLifecycle from './multi-agent-smoke-evidence.mjs';
 import {
   composioAuthEvidence,
   directTextVisibleEvidence,
@@ -56,29 +57,63 @@ test('requires strict F16 provider cards and rejects ambiguous, leaked, and inco
 test('returns from each F16 external authorization page with bounded Back navigation', () => {
   const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
   const authSmoke = source.slice(source.indexOf('async function runComposioAuthSmoke'), source.indexOf('console.log(`cleanData:'));
-  const externalLoop = authSmoke.slice(authSmoke.indexOf('for (let index = 0; index < externalApps.length'), authSmoke.indexOf("const screenPath = captureScreen"));
-  assert.match(externalLoop, /keyEvent', 'Back'/);
-  assert.match(externalLoop, /shouldRetryHotelReturnToApp\(restoredForeground\.bundleName, backPressCount\)/);
-  assert.doesNotMatch(externalLoop, /force-stop', 'com\.huawei\.hmos\.browser/);
-  assert.doesNotMatch(externalLoop, /aa', 'start', '-a', 'EntryAbility', '-b', 'com\.example\.aiphonedemo/);
+  const externalCollection = authSmoke.slice(authSmoke.indexOf('await collectExternalAuthJumps'), authSmoke.indexOf("const screenPath = captureScreen"));
+  assert.match(externalCollection, /keyEvent', 'Back'/);
+  assert.match(externalCollection, /shouldRetryHotelReturnToApp\(restoredForeground\.bundleName, backPressCount\)/);
+  assert.doesNotMatch(externalCollection, /force-stop', 'com\.huawei\.hmos\.browser/);
+  assert.doesNotMatch(externalCollection, /aa', 'start', '-a', 'EntryAbility', '-b', 'com\.example\.aiphonedemo/);
 });
 
-test('stops F16 external collection after a failed return before inspecting another app', () => {
-  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
-  const authSmoke = source.slice(source.indexOf('async function runComposioAuthSmoke'), source.indexOf('console.log(`cleanData:'));
-  const externalLoop = authSmoke.slice(authSmoke.indexOf('for (let index = 0; index < externalApps.length'), authSmoke.indexOf("const screenPath = captureScreen"));
-  assert.match(externalLoop, /returned: restoredForeground\.bundleName === 'com\.example\.aiphonedemo'/);
-  assert.match(externalLoop, /if \(!externalAuthJumps\.at\(-1\)\.returned\) \{\s*break;/);
+test('holds ordinary C20 multi-agent capture until its bounded settlement window', () => {
+  assert.equal(typeof smokeLifecycle.multiAgentPostCompletionWaitMs, 'function');
+  assert.equal(typeof smokeLifecycle.captureCompletionSettled, 'function');
+  const waitMs = smokeLifecycle.multiAgentPostCompletionWaitMs('C20');
+  assert.ok(waitMs > 0);
+  assert.equal(smokeLifecycle.multiAgentPostCompletionWaitMs('C19'), 0);
+  assert.equal(smokeLifecycle.captureCompletionSettled({
+    done: true,
+    doneAt: 100,
+    now: 100 + waitMs - 1,
+    lifecycleOptions: { postCompletionWaitMs: waitMs },
+    customCompletion: null
+  }), false);
+  assert.equal(smokeLifecycle.captureCompletionSettled({
+    done: true,
+    doneAt: 100,
+    now: 100 + waitMs,
+    lifecycleOptions: { postCompletionWaitMs: waitMs },
+    customCompletion: null
+  }), true);
 });
 
-test('gives only C20 a bounded ordinary multi-agent capture settlement window', () => {
-  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
-  const captureWhile = source.slice(source.indexOf('async function captureWhile'), source.indexOf('async function verifyMailExpandedBody'));
-  const runQuery = source.slice(source.indexOf('async function runQuery'), source.indexOf('  const safeLogText'));
-  assert.match(runQuery, /postCompletionWaitMs: expectedCase\.id === 'C20' \? \d+ : 0/);
-  assert.match(captureWhile, /const completionSettleMs = lifecycleOptions !== null/);
-  assert.match(captureWhile, /const completionSettled = done && Date\.now\(\) - doneAt >= completionSettleMs/);
-  assert.match(captureWhile, /customCompletion === null && completionSettled/);
+test('stops F16 external collection after a failed return and retains failure evidence', async () => {
+  assert.equal(typeof smokeLifecycle.collectExternalAuthJumps, 'function');
+  const calls = [];
+  const jumps = await smokeLifecycle.collectExternalAuthJumps(['QQ 邮箱', '瑞幸咖啡', '滴滴出行'], async (app) => {
+    calls.push(`${app}:lookup`);
+    if (app !== 'QQ 邮箱') {
+      calls.push(`${app}:action`);
+    }
+    return {
+      app,
+      opened: true,
+      returned: false,
+      backPressCount: 3,
+      returnAbilityPath: 'external-auth-1-return-ability-3.txt'
+    };
+  });
+  assert.deepEqual(calls, ['QQ 邮箱:lookup']);
+  assert.deepEqual(jumps, [{
+    app: 'QQ 邮箱',
+    opened: true,
+    returned: false,
+    backPressCount: 3,
+    returnAbilityPath: 'external-auth-1-return-ability-3.txt'
+  }]);
+  assert.equal(composioAuthEvidence({
+    textValues: ['应用授权', '当前用户', '刷新', '2300028', 'Operation timeout'],
+    externalAuthJumps: jumps
+  }).status, 'FAIL');
 });
 
 function listedCases(args = [], env = {}) {

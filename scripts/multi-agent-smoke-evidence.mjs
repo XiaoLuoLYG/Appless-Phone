@@ -424,6 +424,29 @@ export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] }
   };
 }
 
+export function multiAgentPostCompletionWaitMs(caseId) {
+  return caseId === 'C20' ? 3000 : 0;
+}
+
+export function captureCompletionSettled({ done, doneAt, lifecycleOptions, customCompletion, now }) {
+  const waitMs = lifecycleOptions !== null && Number.isFinite(lifecycleOptions.postCompletionWaitMs) ?
+    Math.max(0, lifecycleOptions.postCompletionWaitMs) :
+    (customCompletion !== null ? 500 : 0);
+  return done && now - doneAt >= waitMs;
+}
+
+export async function collectExternalAuthJumps(apps, collectApp) {
+  const jumps = [];
+  for (const [index, app] of apps.entries()) {
+    const jump = await collectApp(app, index);
+    jumps.push(jump);
+    if (jump?.returned === false) {
+      break;
+    }
+  }
+  return jumps;
+}
+
 function socialRawValues(value) {
   if (typeof value === 'string') return [value.trim()].filter(Boolean);
   const values = [];

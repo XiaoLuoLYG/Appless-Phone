@@ -22,11 +22,14 @@ import {
   restoredHotelSearchSurface
 } from './hotel-smoke-evidence.mjs';
 import {
+  captureCompletionSettled,
+  collectExternalAuthJumps,
   composioAuthEvidence,
   directTextVisibleEvidence,
   mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
+  multiAgentPostCompletionWaitMs,
   multiAgentTurnEvidence,
   socialDraftUiEvidence,
   socialReplyButtonCenter,
@@ -1344,11 +1347,13 @@ async function captureWhile(appPid, runAction, lifecycleOptions = null) {
         hotelActionEvidencePopulated ||
         (hotelToolLifecycleComplete && Date.now() - doneAt > 1500) ||
         (hasTerminalOutcome && hasHotelActionEvidence && Date.now() - doneAt > 1500);
-      const completionSettleMs = lifecycleOptions !== null &&
-        Number.isFinite(lifecycleOptions.postCompletionWaitMs) ?
-        Math.max(0, lifecycleOptions.postCompletionWaitMs) :
-        (customCompletion !== null ? 500 : 0);
-      const completionSettled = done && Date.now() - doneAt >= completionSettleMs;
+      const completionSettled = captureCompletionSettled({
+        done,
+        doneAt,
+        lifecycleOptions,
+        customCompletion,
+        now: Date.now()
+      });
       if (customCompletion !== null && completionSettled) {
         break;
       }
@@ -2923,7 +2928,7 @@ async function runQuery(query, index, expectedTool) {
     expectedToolIds,
     minimumDataRounds,
     expectedDependencies,
-    postCompletionWaitMs: expectedCase.id === 'C20' ? 3000 : 0
+    postCompletionWaitMs: multiAgentPostCompletionWaitMs(expectedCase.id)
   });
   const safeLogText = sanitizeExternalUrlLogs(logs.join('\n'));
   const safeLogs = safeLogText.split('\n');
@@ -3334,7 +3339,6 @@ async function runComposioAuthSmoke() {
     throw new Error('Could not capture Composio auth page layout evidence.');
   }
   const externalAuthAppHits = [];
-  const externalAuthJumps = [];
   const externalApps = [
     {
       name: 'QQ 邮箱',
@@ -3349,8 +3353,7 @@ async function runComposioAuthSmoke() {
       url: 'https://mcp.didichuxing.com'
     }
   ];
-  for (let index = 0; index < externalApps.length; index += 1) {
-    const app = externalApps[index];
+  const externalAuthJumps = await collectExternalAuthJumps(externalApps, async (app, index) => {
     const actionCenter = await findExternalAuthActionWithScroll(app.name, `external-auth-${index + 1}`, 10);
     if (actionCenter !== null) {
       externalAuthAppHits.push(app.name);
@@ -3370,14 +3373,14 @@ async function runComposioAuthSmoke() {
       writeFileSync(logPath,
         logs.split('\n').filter((line) => line.includes('[AIPhone][A2uiHomeOpenUrl]')).join('\n') +
         `\nfocusWindow=${focusWindowLine}\n`);
-      externalAuthJumps.push({
+      const jump = {
         app: app.name,
         url: app.url,
         opened,
         intentLogSeen,
         browserFocused,
         logPath
-      });
+      };
       let backPressCount = 0;
       let restoredForeground = { bundleName: '', path: '' };
       do {
@@ -3388,23 +3391,19 @@ async function runComposioAuthSmoke() {
           `external-auth-${index + 1}-return-ability-${backPressCount}.txt`
         );
       } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
-      Object.assign(externalAuthJumps[externalAuthJumps.length - 1], {
+      return Object.assign(jump, {
         returned: restoredForeground.bundleName === 'com.example.aiphonedemo',
         backPressCount,
         returnAbilityPath: restoredForeground.path
       });
-      if (!externalAuthJumps.at(-1).returned) {
-        break;
-      }
-    } else {
-      externalAuthJumps.push({
-        app: app.name,
-        url: app.url,
-        opened: false,
-        reason: 'authorization action not found'
-      });
     }
-  }
+    return {
+      app: app.name,
+      url: app.url,
+      opened: false,
+      reason: 'authorization action not found'
+    };
+  });
   const screenPath = captureScreen('composio-auth-page-screen.png');
   const assessment = composioAuthEvidence({
     textValues: collectLayoutText(evidence.layout),
