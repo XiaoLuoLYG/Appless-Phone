@@ -370,10 +370,6 @@ function appendMultiTaskBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
   }
   if (board !== null) {
     document.activeSectionId = firstText(board.activeSectionId as string, document.activeSectionId ?? '');
-    const boardMode = firstText(board.mode as string).trim();
-    if (boardMode === 'serial' || boardMode === 'parallel') {
-      document.executionMode = boardMode;
-    }
     const sectionList = board.sections;
     if (Array.isArray(sectionList)) {
       for (let index = 0; index < sectionList.length; index++) {
@@ -389,15 +385,11 @@ function appendMultiTaskBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
         block.toolId = toolId;
         block.status = firstText(meta.status as string, 'loading');
         block.subtitle = firstText(meta.summary as string);
-        block.completionReply = firstText(meta.completionReply as string);
         if (sections !== null) {
           const sectionContent = sections[slotId] as Record<string, Object | string | number | boolean | null | undefined> | undefined;
           if (sectionContent !== undefined) {
             block.rawPreview = firstText(sectionContent.observationDigest as string, sectionContent.summary as string);
             block.subtitle = firstText(sectionContent.summary as string, block.subtitle);
-            if (block.completionReply.length === 0) {
-              block.completionReply = firstText(meta.completionReply as string);
-            }
             const embedded = parseEmbeddedSurface(sectionContent.embeddedSurface as HtmlHomeTextValue);
             if (embedded !== null) {
               const embeddedKind = embeddedKindForSection(firstText(block.toolId), embedded);

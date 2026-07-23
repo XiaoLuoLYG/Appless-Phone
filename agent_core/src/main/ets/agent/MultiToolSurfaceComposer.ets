@@ -8,7 +8,7 @@ import {
   A2uiSummaryData,
   A2uiSurfaceState
 } from '../aiphone/runtime/A2uiTypes';
-import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
+import { ingestToolObservation } from './MultiToolSectionAdapters';
 import {
   MultiTaskBoardData,
   MultiToolExecutionMode,
@@ -157,12 +157,10 @@ export class MultiToolSurfaceComposer {
       title: this.titleForSlot(slotId),
       status: 'error',
       summary: message,
-      completionReply: '',
       observationDigest: 'ObservationDigest\nerror: ' + message,
       failureKey: 'slot:error',
       embeddedSurface: null
     };
-    content.completionReply = serialStepCompletionReply(content.toolId, content);
     this.applySlotContent(slotId, content, 'error');
   }
 
@@ -355,8 +353,7 @@ export class MultiToolSurfaceComposer {
         toolId: slot.toolId,
         title: slot.content !== null ? slot.content.title : slot.toolId,
         status: slot.status,
-        summary: slot.content !== null ? slot.content.summary : '',
-        completionReply: slot.content !== null ? slot.content.completionReply : ''
+        summary: slot.content !== null ? slot.content.summary : ''
       });
     }
     return {
@@ -390,10 +387,6 @@ export class MultiToolSurfaceComposer {
     return this.executionMode === 'serial' ? '串行任务' : '并行任务';
   }
 
-  private batchBody(): string {
-    return this.executionMode === 'serial' ? '按顺序查看各步骤结果' : '页内切换查看各工具结果';
-  }
-
   private summaryData(): A2uiSummaryData {
     let readyCount = 0;
     for (let index = 0; index < this.slots.length; index++) {
@@ -425,7 +418,7 @@ export class MultiToolSurfaceComposer {
         id: 'board',
         component: A2UI_COMPONENT_MULTI_TASK_BOARD,
         title: title,
-        body: this.batchBody(),
+        body: this.executionMode === 'serial' ? '按顺序查看各步骤结果' : '页内切换查看各工具结果',
         status: 'ready',
         dataPath: '/multiTask'
       }

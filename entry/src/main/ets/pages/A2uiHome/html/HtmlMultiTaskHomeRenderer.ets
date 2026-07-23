@@ -13,7 +13,6 @@ interface MultiTaskSectionBlockPayload {
   sectionId?: string;
   status?: string;
   subtitle?: string;
-  completionReply?: string;
   rawPreview?: string;
 }
 
@@ -116,9 +115,6 @@ body {
   background: #fffaf4;
   color: var(--accent);
   box-shadow: 0 2px 10px rgba(139, 90, 69, 0.14);
-}
-.multi-tab.done:not(.active) {
-  color: #8a7d72;
 }
 .multi-tab.loading::after {
   content: '';
@@ -291,7 +287,6 @@ const MULTI_TASK_SCRIPT: string = `
       bindTab(button, block, sectionId);
     }
     button.classList.toggle('loading', isLoadingStatus(block.status));
-    button.classList.toggle('done', text(block.status) === 'ready');
     return button;
   }
   function upsertPanelBody(panel, block, sectionId, embedHtml) {
@@ -315,7 +310,7 @@ const MULTI_TASK_SCRIPT: string = `
       return;
     }
     if (iframe !== null) { panel.removeChild(iframe); }
-    var message = text(block.completionReply) || text(block.subtitle) || text(block.rawPreview) || '等待结果...';
+    var message = text(block.subtitle) || text(block.rawPreview) || '等待结果...';
     if (fallback === null) {
       add(panel, 'div', 'multi-fallback', message);
     } else {
@@ -428,7 +423,6 @@ function multiTaskPayloadBlocks(blocks: HtmlHomeBlock[]): MultiTaskSectionBlockP
       sectionId: block.sectionId,
       status: block.status,
       subtitle: block.subtitle,
-      completionReply: block.completionReply,
       rawPreview: block.rawPreview
     };
     next.push(item);

@@ -931,10 +931,6 @@ struct Index {
         return;
       }
       this.syncMultiTaskPayloadUpdate(document);
-      aiLogInfo('[AIPhone][MultiTaskPayloadRefresh] tick=' + this.multiTaskPayloadTick.toString() +
-        ' blocks=' + document.blocks.length.toString() +
-        ' active=' + (document.activeSectionId ?? '') +
-        ' busy=' + (this.isBusy ? 'true' : 'false'));
     }, 0);
   }
 
@@ -1740,13 +1736,11 @@ struct Index {
       this.scheduleMultiTaskPayloadRefresh();
     }
     aiLogInfo('[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=' + surface.surfaceId +
-      ' intent=' + surface.intent +
       ' status=' + surface.status +
       ' components=' + surface.components.length.toString() +
       ' dataChars=' + surface.dataModelJson.length.toString() +
       ' sequence=' + surface.sequence.toString() +
-      ' renderTick=' + this.surfaceRenderTick.toString() +
-      ' multiTaskTick=' + this.multiTaskPayloadTick.toString());
+      ' renderTick=' + this.surfaceRenderTick.toString());
   }
 
   private forceApplySurface(surface: A2uiSurfaceState, reason: string): void {

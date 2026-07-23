@@ -14,6 +14,7 @@ import {
   isExplicitLuckinOrderPrompt,
   LocalModel,
   parseLoopToolInputArgs,
+  ReActBatchHost,
   ReActAgentRunner,
   SkillSnapshot,
   summarizeA2uiObservation,
@@ -150,6 +151,27 @@ function componentOnlyStatusJsonl(status: string, surfaceId: string = 'surface_c
   let jsonl = '';
   envelopes.forEach((envelope: A2uiEnvelope) => jsonl += JSON.stringify(envelope) + '\n');
   return jsonl;
+}
+
+function batchHost(surfaceId: string): ReActBatchHost {
+  return {
+    request: {
+      prompt: '',
+      history: [],
+      modelSettings: {
+        provider: '',
+        baseUrl: '',
+        apiKey: '',
+        model: '',
+        customParametersJson: ''
+      },
+      surfaceId: surfaceId,
+      actionId: '',
+      maxSteps: 1
+    },
+    emitSurface: (_surface: A2uiSurfaceState, _raw: string): void => {},
+    emitJsonlLine: (_line: string): void => {}
+  };
 }
 
 function longText(prefix: string): string {
@@ -331,7 +353,16 @@ export default function reActAgentRunnerTest() {
         expect(digest.shouldStop).assertTrue();
       });
 
-      const failureStatuses: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
+      const failureStatuses: string[] = [
+        'error',
+        'blocked',
+        'confirm_required',
+        'needs_input',
+        'needs_user',
+        'auth_required',
+        'needs_auth',
+        'unsafe_action_blocked'
+      ];
       failureStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
         expect(digest.failureKey.indexOf('youtube.video.search')).assertLarger(-1);
@@ -340,7 +371,7 @@ export default function reActAgentRunnerTest() {
     });
 
     it('sets failure keys from component-only terminal statuses', 0, () => {
-      const failureStatuses: string[] = ['error', 'blocked', 'auth_required'];
+      const failureStatuses: string[] = ['error', 'blocked', 'confirm_required', 'needs_input', 'auth_required'];
       failureStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(componentOnlyStatusJsonl(status));
 
@@ -648,7 +679,11 @@ export default function reActAgentRunnerTest() {
           'Action: gmail.draft.create({"to":"test@example.com","subject":"会议","body":"明天见"})'
         ),
         registry,
-        1
+        1,
+        undefined,
+        undefined,
+        false,
+        batchHost('surface_serial')
       );
       const actions: string[] = [];
       let finalCount = 0;
@@ -671,6 +706,30 @@ export default function reActAgentRunnerTest() {
       expect(actions.length).assertEqual(2);
       expect(observationCount).assertEqual(2);
       expect(finalCount).assertEqual(1);
+    });
+
+    it('stops a serial A2UI chain when a step requires confirmation', 0, async () => {
+      const first = new FixedTool('tool.a', componentOnlyStatusJsonl('confirm_required'));
+      const second = new FixedTool('tool.b', componentOnlyStatusJsonl('ready'));
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: second follows first\nExecution: serial\nAction: tool.a({})\nAction: tool.b({})'
+        ),
+        registry,
+        1,
+        undefined,
+        undefined,
+        false,
+        batchHost('surface_serial_confirm')
+      );
+
+      await runner.run('serial confirmation chain', (_event: AgentEvent): void => {});
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(0);
     });
 
     it('waits for all parallel A2UI tools before emitting final', 0, async () => {

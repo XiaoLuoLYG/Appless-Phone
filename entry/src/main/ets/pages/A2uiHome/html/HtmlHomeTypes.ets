@@ -57,7 +57,6 @@ export interface HtmlHomeBlock {
   toolId?: string;
   sectionId?: string;
   prompt?: string;
-  completionReply?: string;
   metrics: HtmlHomeMetric[];
   rows: HtmlHomeMetric[];
   actions: HtmlHomeAction[];
@@ -102,6 +101,5 @@ export interface HtmlHomeDocument {
   personaMemory: HtmlHomePersonaMemory;
   rawSurfaceRoot: A2uiComponent | null;
   activeSectionId?: string;
-  executionMode?: 'parallel' | 'serial';
   generatedAt: string;
 }

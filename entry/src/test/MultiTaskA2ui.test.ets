@@ -625,7 +625,7 @@ export default function multiTaskA2uiTest() {
     });
     composer.registerSlots([{ name: 'flight.search', input: '{}' }]);
     composer.emitShell();
-    composer.ingestSlotObservation('slot_0', 'not-a2ui-json');
+    composer.ingestSlotObservation('slot_0', '{not-a2ui-json');
 
     expect(latestSurface !== null).assertTrue();
     const parsed = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
@@ -686,7 +686,8 @@ export default function multiTaskA2uiTest() {
       title: '会议',
       status: 'success',
       summary: '已直接写入真实 Google Calendar。',
-      rows: [{ label: 'Event ID', value: 'evt_123' }]
+      rows: [{ label: 'Event ID', value: 'evt_123' }],
+      rawPreview: ''
     }]));
     const afterSecond = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
     const boardAfterSecond = afterSecond.multiTask as Record<string, string>;
@@ -713,7 +714,8 @@ export default function multiTaskA2uiTest() {
       title: '会议',
       status: 'success',
       summary: '已直接写入真实 Google Calendar。',
-      rows: [{ label: 'Event ID', value: 'evt_123' }]
+      rows: [{ label: 'Event ID', value: 'evt_123' }],
+      rawPreview: ''
     }]));
     expect(latestSurface !== null).assertTrue();
     const document = createHtmlHomeDocument({
@@ -722,10 +724,11 @@ export default function multiTaskA2uiTest() {
       isBusy: false,
       isAwaitingFirstSurface: false
     });
-    expect(document.executionMode).assertEqual('serial');
+    expect(document.title).assertEqual('串行任务');
     expect(document.blocks.length).assertEqual(2);
     const html = renderMultiTaskHomeDocument(document, false);
     expect(html.indexOf('multi-serial-replies')).assertEqual(-1);
     expect(html.indexOf('multi-tabs-track')).assertLarger(-1);
   });
 });
+}
