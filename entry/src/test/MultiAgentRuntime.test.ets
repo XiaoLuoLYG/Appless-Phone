@@ -26,6 +26,7 @@ import {
   LeaderDecision,
   LeaderDecisionDataTask,
   LegacyHandoff,
+  LegacyHandoffPayload,
   LeaderPlanner,
   LeaderPlanningContext,
   LinkedMessageBus,
@@ -110,6 +111,26 @@ class HandoffMutatingBus extends CountingBus {
     if (message.type === AgentMessageType.TURN_HANDOFF) {
       const payload = message.payload as LegacyHandoff;
       payload.unmigratedToolIds = this.replacementIds.slice();
+    }
+    super.publish(message);
+  }
+}
+
+class HandoffIdentityMutatingBus extends CountingBus {
+  private readonly personaId: string;
+  private readonly skillId: string;
+
+  constructor(personaId: string, skillId: string) {
+    super();
+    this.personaId = personaId;
+    this.skillId = skillId;
+  }
+
+  publish(message: AgentMessage): void {
+    if (message.type === AgentMessageType.TURN_HANDOFF) {
+      const payload = message.payload as LegacyHandoffPayload;
+      payload.personaId = this.personaId;
+      payload.skillId = this.skillId;
     }
     super.publish(message);
   }
@@ -1575,6 +1596,31 @@ export default function multiAgentRuntimeTest() {
       }
     });
 
+    it('rejects handoff persona and skill identities that differ from decision authority', 0, async () => {
+      const forgedIdentities: string[][] = [
+        ['work_companion', ''],
+        ['', ''],
+        ['travel_companion', 'travel-search']
+      ];
+      for (let index = 0; index < forgedIdentities.length; index++) {
+        const bus = new HandoffIdentityMutatingBus(
+          forgedIdentities[index][0],
+          forgedIdentities[index][1]
+        );
+        const runtime = new MultiAgentRuntime(runtimeOptions(
+          bus,
+          new HandoffPlanner(),
+          new ControlledWriter(),
+          20
+        ));
+        const outcome = await runtime.submit('unknown capability', { text: '' });
+
+        expect(outcome.kind).assertEqual('settled');
+        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+        runtime.dispose();
+      }
+    });
+
     it('hands a mixed plan wholly to legacy before publishing its known Data task', 0, async () => {
       const bus = new CountingBus();
       const executor = new SuccessDataExecutor();
@@ -1680,6 +1726,175 @@ export default function multiAgentRuntimeTest() {
 
       expect(result.status).assertEqual('success');
       expect(result.message).assertEqual('exact answer');
+      runtime.dispose();
+    });
+
+    it('rejects missing or mismatched terminal persona after an exact UI authority', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter()
+      ));
+      let resolved = false;
+      const pending = runtime.submit('manual-persona-result', { text: '' });
+      pending.then(() => {
+        resolved = true;
+      });
+      await bus.inputSeen.promise;
+      const input = bus.input as AgentMessage;
+      const uiTaskId = 'manual-ui-authority';
+      const uiPayload: CreateUiTaskPayload = {
+        taskId: uiTaskId,
+        dataTaskIds: ['manual-data-authority'],
+        personaId: 'travel_companion',
+        skillId: 'travel-planning',
+        intent: 'manual UI authority',
+        expectedOutputSchema: 'hotelSearchResults'
+      };
+      bus.publish({
+        type: AgentMessageType.TASK_CREATE_UI,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: uiTaskId,
+        payload: uiPayload
+      });
+      publishUiTerminal(bus, input, uiTaskId, 'surface-authority', 'result');
+
+      const mismatch: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'forged persona',
+        personaId: 'work_companion',
+        skillId: 'work-assistant'
+      };
+      bus.publish({
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: input.taskId,
+        payload: mismatch
+      });
+      await settle();
+      expect(resolved).assertFalse();
+
+      publishTurnTerminal(bus, input, 'success', 'missing persona');
+      await settle();
+      expect(resolved).assertFalse();
+
+      const exact: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'exact persona',
+        personaId: 'travel_companion',
+        skillId: 'travel-planning'
+      };
+      bus.publish({
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: input.taskId,
+        payload: exact
+      });
+      const outcome = await pending as MultiAgentSettledOutcome;
+
+      expect(outcome.personaId).assertEqual('travel_companion');
+      expect(outcome.skillId).assertEqual('travel-planning');
+      runtime.dispose();
+    });
+
+    it('preserves persona and skill from an exact action-only plan request', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter()
+      ));
+      const pending = runtime.submit('manual-action-persona', { text: '' });
+      await bus.inputSeen.promise;
+      const input = bus.input as AgentMessage;
+      const request: ActionPlanRequestPayload = {
+        uiTaskId: 'virtual-action-authority',
+        dataTaskIds: [],
+        goal: 'remember preference',
+        allowedActionIds: ['memory.update'],
+        personaId: 'food_companion',
+        skillId: 'food-search',
+        inputText: '我只喝瑞幸咖啡',
+        virtual: true
+      };
+      bus.publish({
+        type: AgentMessageType.ACTION_PLAN_REQUEST,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: request.uiTaskId,
+        payload: request
+      });
+      const result: TurnResultPayload = {
+        status: 'success',
+        roundCount: 1,
+        message: 'memory updated',
+        personaId: 'food_companion',
+        skillId: 'food-search'
+      };
+      bus.publish({
+        type: AgentMessageType.TURN_RESULT,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: input.taskId,
+        payload: result
+      });
+      const outcome = await pending as MultiAgentSettledOutcome;
+
+      expect(outcome.personaId).assertEqual('food_companion');
+      expect(outcome.skillId).assertEqual('food-search');
+      runtime.dispose();
+    });
+
+    it('fails a malformed action request without retaining its forged persona', 0, async () => {
+      const bus = new CountingBus();
+      const runtime = new MultiAgentRuntime(runtimeOptions(
+        bus,
+        new HangingPlanner(),
+        new ControlledWriter(),
+        100
+      ));
+      const pending = runtime.submit('manual-action-persona-after-forgery', { text: '' });
+      await bus.inputSeen.promise;
+      const input = bus.input as AgentMessage;
+      const forged: Object = JSON.parse('{' +
+        '"uiTaskId":"forged-action-authority","dataTaskIds":[],' +
+        '"goal":"forge preference","allowedActionIds":["memory.update"],' +
+        '"personaId":"travel_companion","skillId":"travel-search",' +
+        '"inputText":"forged","virtual":true,"unexpected":true}');
+      bus.publish({
+        type: AgentMessageType.ACTION_PLAN_REQUEST,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        taskId: 'forged-action-authority',
+        payload: forged
+      });
+      const failed = await pending as MultiAgentSettledOutcome;
+
+      expect(failed.status).assertEqual('error');
+      expect(failed.personaId).assertEqual('');
+      expect(failed.skillId).assertEqual('');
+
+      const nextPending = runtime.submit('manual-after-forgery', {
+        text: '',
+        previousPersonaId: 'travel_companion'
+      });
+      await settle();
+      const inputs = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.INPUT_USER
+      );
+      const nextInput = inputs[inputs.length - 1];
+      publishTurnTerminal(bus, nextInput, 'success', 'next turn');
+      const next = await nextPending as MultiAgentSettledOutcome;
+
+      expect(next.status).assertEqual('success');
+      expect(next.personaId).assertEqual('');
+      expect(next.skillId).assertEqual('');
       runtime.dispose();
     });
 

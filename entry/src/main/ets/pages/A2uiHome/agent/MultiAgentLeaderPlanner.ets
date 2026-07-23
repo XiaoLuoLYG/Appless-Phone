@@ -675,6 +675,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
       'Select one persona and at most one active skill.',
+      'If skillId is non-empty, every requested Data tool and Action ID must be listed in that skill toolIds. ' +
+        'Use skillId="" when no single active skill declares the complete requested capability set.',
       'requestedCapabilityIds is mandatory, unique, and contains exact registered tool/action IDs. ' +
         'Use [] only for ordinary direct conversation that needs no tool-backed fact.',
       'Mail, weather, travel, and other capability-backed answer or clarify decisions must name ' +

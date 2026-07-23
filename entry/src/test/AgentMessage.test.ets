@@ -95,6 +95,7 @@ export default function agentMessageTest() {
       const ui: CreateUiTaskPayload = {
         taskId: 'ui-1',
         dataTaskIds: ['data-1', 'data-2'],
+        personaId: 'travel_companion',
         skillId: 'hotel-search',
         intent: 'hotel.search.results',
         expectedOutputSchema: 'hotelSearchResults'
@@ -177,13 +178,16 @@ export default function agentMessageTest() {
         status: 'partial',
         surfaceId: 'surface-1',
         roundCount: 2,
-        message: 'one source unavailable'
+        message: 'one source unavailable',
+        personaId: 'travel_companion',
+        skillId: 'hotel-search'
       };
 
       expect(AgentMessageType.TURN_RESULT).assertEqual('TURN.RESULT');
       expect(AgentMessageType.ACTION_PLAN_REQUEST).assertEqual('ACTION.PLAN.REQUEST');
       expect(input.recentMessages!.length).assertEqual(1);
       expect(turn.roundCount).assertEqual(2);
+      expect(turn.personaId).assertEqual('travel_companion');
     });
 
     it('retains each structured data result status', 0, () => {

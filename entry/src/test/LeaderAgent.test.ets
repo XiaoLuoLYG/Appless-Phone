@@ -444,7 +444,13 @@ function semanticPlanningContext(): LeaderPlanningContext {
       soul: 'Use real travel results.',
       memory: 'No saved preference.',
       previous: false,
-      activeSkills: []
+      activeSkills: [{
+        skillId: 'travel-planning',
+        description: 'Search hotels only in this fixture.',
+        instructions: 'Use the declared hotel tool.',
+        status: 'active',
+        toolIds: ['hotel.search']
+      }]
     }]
   };
 }
@@ -808,7 +814,9 @@ export default function leaderAgentTest() {
       expect(data.skillId).assertEqual('');
       expect(args.city).assertEqual('Shenzhen');
       expect(args.guests).assertEqual(2);
-      expect(Object.keys(ui).sort().join(',')).assertEqual('dataTaskIds,expectedOutputSchema,intent,skillId,taskId');
+      expect(Object.keys(ui).sort().join(',')).assertEqual(
+        'dataTaskIds,expectedOutputSchema,intent,skillId,taskId'
+      );
       expect(Object.keys(data).sort().join(',')).assertEqual('allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId');
       expect(JSON.stringify(ui).indexOf('provider')).assertEqual(-1);
       expect(JSON.stringify(ui).indexOf('jsonl')).assertEqual(-1);
@@ -1632,6 +1640,86 @@ export default function leaderAgentTest() {
 
       leader.stop();
       observer.close();
+    });
+
+    it('rejects changing persona or skill after the first round of one turn', 0, async () => {
+      const first = semanticDecision([semanticDataTask('hotel')]);
+      const second = semanticDecision([], 'answer');
+      second.personaId = 'default_companion';
+      const context = semanticPlanningContext();
+      context.personas.push({
+        personaId: 'default_companion',
+        name: 'Default Companion',
+        soul: 'General conversation.',
+        memory: '',
+        previous: false,
+        activeSkills: []
+      });
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([first, second]), context);
+      const observer = bus.openReader();
+      leader.start();
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        const task = await receive(observer);
+        bus.publish(dataResultMessage(task));
+        await receive(observer);
+        const error = await receive(observer);
+
+        expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+        expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PERSONA_SKILL_SWITCH');
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
+    it('rejects a selected skill capability outside its declared tool IDs', 0, async () => {
+      const decision = semanticDecision([semanticDataTask('detail', 'hotel.detail')]);
+      decision.skillId = 'travel-planning';
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        const error = await receive(observer);
+
+        expect(error.type).assertEqual(AgentMessageType.TASK_ERROR);
+        expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_SKILL_CAPABILITY_VIOLATION');
+      } finally {
+        leader.stop();
+        observer.close();
+      }
+    });
+
+    it('keeps the full registry available when no skill is selected', 0, async () => {
+      const decision = semanticDecision([semanticDataTask('detail', 'hotel.detail')]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        semanticPlanningContext()
+      );
+      const observer = bus.openReader();
+      leader.start();
+      try {
+        bus.publish(inputMessage());
+        await receive(observer);
+        const task = await receive(observer);
+
+        expect(task.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+        expect((task.payload as CreateDataTaskPayload).toolId).assertEqual('hotel.detail');
+      } finally {
+        leader.stop();
+        observer.close();
+      }
     });
 
     it('renders an error DataResult when post-observation planning throws', 0, async () => {
@@ -2465,6 +2553,7 @@ export default function leaderAgentTest() {
       expect(input.previousPersonaId).assertEqual('food_companion');
       expect(plan.personaId).assertEqual('work_companion');
       expect(selected.activeSkills[0].skillId).assertEqual(plan.skillId);
+      expect((ui.payload as CreateUiTaskPayload).personaId).assertEqual(plan.personaId);
       expect((ui.payload as CreateUiTaskPayload).skillId).assertEqual(plan.skillId);
       expect((data.payload as CreateDataTaskPayload).skillId).assertEqual(plan.skillId);
       expect(controlPlan.personaId).assertEqual('food_companion');

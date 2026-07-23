@@ -82,6 +82,7 @@ export interface LeaderSkillMetadata {
   description: string;
   instructions: string;
   status: string;
+  toolIds: string[];
 }
 
 export interface LeaderPersonaMetadata {

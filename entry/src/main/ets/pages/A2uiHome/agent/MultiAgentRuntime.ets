@@ -60,6 +60,8 @@ interface PendingTurn {
   hostGeneration: number;
   requestedCapabilityIds: string[];
   runtimeOwnedToolIds: string[];
+  personaId: string;
+  skillId: string;
   uiTaskId: string;
   uiTerminal: boolean;
   uiState: '' | 'result' | 'error';
@@ -109,14 +111,18 @@ function boundedTimeout(value: number | undefined, fallback: number): number {
 function settled(
   status: TurnResultStatus,
   message: string,
-  surfaceId: string = ''
+  surfaceId: string = '',
+  personaId: string = '',
+  skillId: string = ''
 ): MultiAgentSettledOutcome {
   return {
     kind: 'settled',
     ok: status === 'success' || status === 'partial' || status === 'empty',
     status,
     surfaceId,
-    message
+    message,
+    personaId,
+    skillId
   };
 }
 
@@ -395,9 +401,11 @@ export class MultiAgentRuntime {
         conversationId: string,
         turnId: string,
         taskId: string,
-        requestedCapabilityIds: string[]
-      ): void => this.recordRequestedCapabilities(
-        conversationId, turnId, taskId, requestedCapabilityIds
+        requestedCapabilityIds: string[],
+        personaId: string,
+        skillId: string
+      ): void => this.recordDecisionAuthority(
+        conversationId, turnId, taskId, requestedCapabilityIds, personaId, skillId
       ),
       options.currentLocalDateProvider
     );
@@ -484,6 +492,8 @@ export class MultiAgentRuntime {
         hostGeneration,
         requestedCapabilityIds: [],
         runtimeOwnedToolIds: this.runtimeOwnedToolIds.slice(),
+        personaId: '',
+        skillId: '',
         uiTaskId: '',
         uiTerminal: false,
         uiState: '',
@@ -681,6 +691,11 @@ export class MultiAgentRuntime {
       return;
     }
     if (message.type === AgentMessageType.TASK_CREATE_UI) {
+      const task: CreateUiTaskPayload = message.payload as CreateUiTaskPayload;
+      if (!this.validObservedUiTask(message, task) ||
+        !this.acceptPersonaAuthority(pending, task.personaId, task.skillId)) {
+        return;
+      }
       this.activateSurfaceTurn(message.turnId, pending.hostGeneration);
       pending.uiTaskId = message.taskId;
       pending.uiTerminal = false;
@@ -718,6 +733,38 @@ export class MultiAgentRuntime {
     }
   }
 
+  private validObservedUiTask(message: AgentMessage, task: CreateUiTaskPayload): boolean {
+    if (task === null || typeof task !== 'object' || Array.isArray(task)) {
+      return false;
+    }
+    const keys: string = Object.keys(task).sort().join(',');
+    return (keys === 'dataTaskIds,expectedOutputSchema,intent,skillId,taskId' ||
+      keys === 'dataTaskIds,expectedOutputSchema,intent,personaId,skillId,taskId') &&
+      task.taskId === message.taskId &&
+      Array.isArray(task.dataTaskIds) &&
+      typeof task.skillId === 'string' &&
+      nonempty(task.intent) &&
+      nonempty(task.expectedOutputSchema) &&
+      (task.personaId === undefined || nonempty(task.personaId));
+  }
+
+  private acceptPersonaAuthority(
+    pending: PendingTurn,
+    personaId: string | undefined,
+    skillId: string
+  ): boolean {
+    if (!nonempty(personaId)) {
+      return pending.personaId.length === 0 && skillId.length === 0;
+    }
+    const selected: string = personaId as string;
+    if (pending.personaId.length === 0) {
+      pending.personaId = selected;
+      pending.skillId = skillId;
+      return true;
+    }
+    return pending.personaId === selected && pending.skillId === skillId;
+  }
+
   private observeUiResult(message: AgentMessage, pending: PendingTurn): void {
     if (message.taskId !== pending.uiTaskId) {
       return;
@@ -735,6 +782,16 @@ export class MultiAgentRuntime {
 
   private observeActionRequest(message: AgentMessage, pending: PendingTurn): void {
     const request: ActionPlanRequestPayload = message.payload as ActionPlanRequestPayload;
+    if (!this.validObservedActionRequest(message, request)) {
+      // ActionAgent publishes a correlated TASK.ERROR for malformed requests.
+      // Remember only the task identity so the turn fails closed without
+      // accepting persona or skill data from the malformed payload.
+      pending.virtualActionTaskId = message.taskId;
+      return;
+    }
+    if (!this.acceptPersonaAuthority(pending, request.personaId, request.skillId)) {
+      return;
+    }
     if (request.virtual === true && Array.isArray(request.dataTaskIds) &&
       request.dataTaskIds.length === 0) {
       pending.virtualActionTaskId = message.taskId;
@@ -742,6 +799,34 @@ export class MultiAgentRuntime {
       pending.virtualActionRunId = pending.virtualActionSurfaceId;
       pending.virtualActionPlanId = 'direct:' + pending.virtualActionRunId;
     }
+  }
+
+  private validObservedActionRequest(
+    message: AgentMessage,
+    request: ActionPlanRequestPayload
+  ): boolean {
+    if (request === null || typeof request !== 'object' || Array.isArray(request)) {
+      return false;
+    }
+    const keys: string = Object.keys(request).sort().join(',');
+    const exactShape: boolean =
+      keys === 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' ||
+      keys === 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' ||
+      keys === 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual';
+    if (!exactShape ||
+      request.uiTaskId !== message.taskId ||
+      !nonempty(request.goal) ||
+      typeof request.skillId !== 'string' ||
+      !Array.isArray(request.dataTaskIds) ||
+      !Array.isArray(request.allowedActionIds)) {
+      return false;
+    }
+    const contextual: boolean = request.personaId !== undefined || request.inputText !== undefined;
+    return (!contextual || (nonempty(request.personaId) && nonempty(request.inputText))) &&
+      (request.currentLocalDate === undefined || nonempty(request.currentLocalDate)) &&
+      (request.virtual === undefined || typeof request.virtual === 'boolean');
   }
 
   private observeVirtualActionResult(message: AgentMessage, pending: PendingTurn): void {
@@ -774,6 +859,14 @@ export class MultiAgentRuntime {
     if (!this.validTurnResult(result)) {
       return;
     }
+    if (pending.personaId.length > 0 &&
+      (result.personaId !== pending.personaId || result.skillId !== pending.skillId)) {
+      return;
+    }
+    if (pending.personaId.length === 0 &&
+      (result.personaId !== undefined || result.skillId !== undefined)) {
+      return;
+    }
     pending.terminal = result;
     this.trySettleTurn(pending);
   }
@@ -786,6 +879,9 @@ export class MultiAgentRuntime {
     if (payload.owner !== 'legacy' || payload.reason !== 'unmigrated_tool' ||
       payload.reasonCode !== 'unmigrated_tool' || !nonempty(payload.personaId) ||
       typeof payload.skillId !== 'string' ||
+      pending.personaId.length === 0 ||
+      payload.personaId !== pending.personaId ||
+      payload.skillId !== pending.skillId ||
       !this.validUnmigratedToolIds(payload.unmigratedToolIds) ||
       !this.exactPendingHandoff(payload.unmigratedToolIds, pending)) {
       return;
@@ -802,11 +898,13 @@ export class MultiAgentRuntime {
     this.settleTurn(pending, outcome);
   }
 
-  private recordRequestedCapabilities(
+  private recordDecisionAuthority(
     conversationId: string,
     turnId: string,
     taskId: string,
-    requestedCapabilityIds: string[]
+    requestedCapabilityIds: string[],
+    personaId: string,
+    skillId: string
   ): void {
     const pending = this.pendingTurn;
     if (pending === null || pending.generation !== this.generation ||
@@ -815,6 +913,7 @@ export class MultiAgentRuntime {
       return;
     }
     pending.requestedCapabilityIds = requestedCapabilityIds.slice();
+    this.acceptPersonaAuthority(pending, personaId, skillId);
   }
 
   private exactPendingHandoff(ids: string[], pending: PendingTurn): boolean {
@@ -869,13 +968,21 @@ export class MultiAgentRuntime {
       this.activeSurfaceId = surfaceId;
       const message: string = result.status === 'error' ?
         result.message : 'Multi-agent UI rendering failed.';
-      this.settleTurn(pending, settled('error', message, surfaceId));
+      this.settleTurn(pending, settled(
+        'error', message, surfaceId,
+        pending.personaId,
+        pending.skillId
+      ));
       return;
     }
     this.activeConversationId = pending.conversationId;
     this.activeTurnId = pending.turnId;
     this.activeSurfaceId = surfaceId;
-    this.settleTurn(pending, settled(result.status, result.message, surfaceId));
+    this.settleTurn(pending, settled(
+      result.status, result.message, surfaceId,
+      pending.personaId,
+      pending.skillId
+    ));
   }
 
   private observeActionResult(message: AgentMessage, pending: PendingAction): void {
@@ -1040,6 +1147,10 @@ export class MultiAgentRuntime {
       roundCount: 0,
       message
     };
+    if (pending.personaId.length > 0) {
+      payload.personaId = pending.personaId;
+      payload.skillId = pending.skillId;
+    }
     if (surfaceId.length > 0) {
       payload.surfaceId = surfaceId;
     }
@@ -1118,12 +1229,18 @@ export class MultiAgentRuntime {
     }
     const keys: string = Object.keys(result).sort().join(',');
     return (keys === 'message,roundCount,status' ||
-      keys === 'message,roundCount,status,surfaceId') &&
+      keys === 'message,roundCount,status,surfaceId' ||
+      keys === 'message,personaId,roundCount,skillId,status' ||
+      keys === 'message,personaId,roundCount,skillId,status,surfaceId') &&
       (result.status === 'success' || result.status === 'partial' ||
         result.status === 'empty' || result.status === 'error' ||
         result.status === 'canceled') &&
       Number.isInteger(result.roundCount) && result.roundCount >= 0 &&
       typeof result.message === 'string' &&
+      (result.personaId === undefined ||
+        (nonempty(result.personaId) && typeof result.skillId === 'string')) &&
+      (result.skillId === undefined ||
+        (typeof result.skillId === 'string' && nonempty(result.personaId))) &&
       (result.surfaceId === undefined || nonempty(result.surfaceId));
   }
 

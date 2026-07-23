@@ -502,10 +502,12 @@ function hotelDataAssessment(data: DataResult, expectedToolId: string): HotelDat
 function uiTaskPayload(message: AgentMessage): CreateUiTaskPayload | null {
   const payload = recordOf(message.payload);
   if (payload === null ||
-    !hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,skillId,taskId') ||
+    (!hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,skillId,taskId') &&
+      !hasOnlyKeys(payload, 'dataTaskIds,expectedOutputSchema,intent,personaId,skillId,taskId')) ||
     payload['taskId'] !== message.taskId ||
     !Array.isArray(payload['dataTaskIds']) || payload['dataTaskIds'].length !== 1 ||
     !nonempty(payload['dataTaskIds'][0]) || payload['dataTaskIds'][0] === message.taskId ||
+    (payload['personaId'] !== undefined && !nonempty(payload['personaId'])) ||
     typeof payload['skillId'] !== 'string' ||
     !nonempty(payload['intent']) ||
     !nonempty(payload['expectedOutputSchema'])) {

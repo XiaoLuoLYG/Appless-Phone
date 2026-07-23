@@ -30,6 +30,7 @@ export interface ActionPlanRequestPayload {
   goal: string;
   allowedActionIds: string[];
   personaId?: string;
+  skillId: string;
   inputText?: string;
   currentLocalDate?: string;
   virtual?: boolean;

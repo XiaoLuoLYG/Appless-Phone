@@ -118,7 +118,6 @@ interface SocialFeedTaskInput {
 
 export interface MultiAgentCanaryOptions {
   model: LocalModel;
-  selectedPersonaId: () => string;
   opener: SystemUriOpener;
   pageAction?: RegisteredPageAction;
   currentPageSnapshot?: () => RegisteredPageSnapshot | null;
@@ -897,11 +896,10 @@ class MemoryIntentResolver implements VirtualActionIntentResolver {
     }
     const summary: string = statement.length > MEMORY_SUMMARY_LIMIT ?
       statement.substring(0, MEMORY_SUMMARY_LIMIT) : statement;
-    const separator: string = pack.memory.trim().length === 0 ? '' : '\n';
     const args: PersonaMemoryUpdateRequest = {
       personaId: request.personaId,
       summary,
-      memoryText: pack.memory + separator + statement,
+      memoryText: statement,
       reason: '用户明确表达了可长期保存的偏好。'
     };
     const offer: ActionOffer = {
@@ -1053,6 +1051,20 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
   };
 }
 
+export function rememberedPersonaAfterOutcome(
+  currentPersonaId: string,
+  outcome: MultiAgentTurnOutcome,
+  isLatestSubmission: boolean
+): string {
+  if (!isLatestSubmission ||
+    outcome.kind !== 'settled' ||
+    (outcome.status !== 'success' && outcome.status !== 'partial' && outcome.status !== 'empty') ||
+    outcome.personaId.trim().length === 0) {
+    return currentPersonaId;
+  }
+  return outcome.personaId;
+}
+
 export class MultiAgentCanaryRuntime {
   private readonly runtime: MultiAgentRuntime;
   private readonly authority: HotelSurfaceAuthority;
@@ -1068,6 +1080,8 @@ export class MultiAgentCanaryRuntime {
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
   private surfaceGeneration: number = 0;
+  private lastLeaderPersonaId: string = '';
+  private submissionSequence: number = 0;
 
   constructor(options: MultiAgentCanaryOptions) {
     const conversationId: string = options.conversationId === undefined ?
@@ -1139,7 +1153,7 @@ export class MultiAgentCanaryRuntime {
       mailDetailBridge
     );
     this.aiphoneExecutor = aiphoneExecutor;
-    const initialContext = canaryPlanningContext(options.selectedPersonaId());
+    const initialContext = canaryPlanningContext(this.lastLeaderPersonaId);
     const dataTaskInputNormalizer: LeaderDataTaskInputNormalizer = (
       input: InputUserPayload,
       task: LeaderDecisionDataTask,
@@ -1155,7 +1169,7 @@ export class MultiAgentCanaryRuntime {
       ),
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
-        canaryPlanningContext(options.selectedPersonaId()),
+        canaryPlanningContext(this.lastLeaderPersonaId),
       currentLocalDateProvider: options.currentLocalDate,
       dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,
@@ -1202,9 +1216,26 @@ export class MultiAgentCanaryRuntime {
     context: UserInputPayload,
     hostGeneration: number = 0
   ): Promise<MultiAgentTurnOutcome> {
+    this.submissionSequence++;
+    const submissionSequence: number = this.submissionSequence;
     const capturedGeneration = Number.isSafeInteger(hostGeneration) && hostGeneration > 0 ?
       hostGeneration : 0;
-    return this.runtime.submit(text, context, capturedGeneration);
+    const input: UserInputPayload = {
+      text: context.text,
+      recentMessages: context.recentMessages,
+      previousPersonaId: this.lastLeaderPersonaId,
+      currentSurfaceSummary: context.currentSurfaceSummary,
+      recentObservations: context.recentObservations
+    };
+    return this.runtime.submit(text, input, capturedGeneration)
+      .then((outcome: MultiAgentTurnOutcome): MultiAgentTurnOutcome => {
+        this.lastLeaderPersonaId = rememberedPersonaAfterOutcome(
+          this.lastLeaderPersonaId,
+          outcome,
+          submissionSequence === this.submissionSequence
+        );
+        return outcome;
+      });
   }
 
   runAction(action: A2uiAction, context: MultiAgentCanaryActionContext): Promise<boolean> {

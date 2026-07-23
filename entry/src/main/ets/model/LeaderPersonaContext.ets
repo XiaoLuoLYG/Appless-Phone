@@ -6,7 +6,7 @@ import { allPersonaPacks } from './PersonaStore';
 export function leaderPersonaContext(previousPersonaId: string): LeaderPersonaMetadata[] {
   return allPersonaPacks().map((pack: PersonaPack): LeaderPersonaMetadata => {
     const active = pack.skillList.filter((skill: PersonaSkillMarkdown): boolean =>
-      skill.status === 'active').slice(0, 1);
+      skill.status === 'active');
     return {
       personaId: pack.manifest.id,
       name: pack.manifest.name,
@@ -17,7 +17,8 @@ export function leaderPersonaContext(previousPersonaId: string): LeaderPersonaMe
         skillId: skill.id,
         description: skill.description,
         instructions: skill.body,
-        status: skill.status
+        status: skill.status,
+        toolIds: skill.tools.slice()
       }))
     };
   });

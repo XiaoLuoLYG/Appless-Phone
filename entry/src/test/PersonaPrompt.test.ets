@@ -1,6 +1,10 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { LeaderPersonaMetadata } from '@loop/agent-core';
-import { configureDefaultPersonaStoreForTests, updatePersonaPackText } from '../main/ets/model/PersonaStore';
+import {
+  configureDefaultPersonaStoreForTests,
+  configurePersonaStoreFromRaw,
+  updatePersonaPackText
+} from '../main/ets/model/PersonaStore';
 import { preparePersonaPrompt } from '../main/ets/model/PersonaPrompt';
 import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
 
@@ -66,18 +70,43 @@ export default function personaPromptTest() {
       expect(prepared.modelPrompt.indexOf('Planned capability')).assertEqual(-1);
     });
 
-    it('builds bounded persona metadata', 0, () => {
-      configureDefaultPersonaStoreForTests();
-      const catalog = leaderPersonaContext('food_companion');
-      const food = catalog.filter((item: LeaderPersonaMetadata): boolean =>
-        item.personaId === 'food_companion')[0];
+    it('exposes every active skill candidate while keeping placeholders out', 0, () => {
+      try {
+        configurePersonaStoreFromRaw(
+          '[{"id":"food_companion","name":"饮食搭子","avatarKey":"food",' +
+            '"domains":["food"],"defaultTools":["food.search"]}]',
+          {
+            'food_companion/soul.md': '饮食搭子',
+            'food_companion/memory.md': '## Stable Preferences\n- 半糖',
+            'food_companion/skills.json': '{"activeSkillId":"food-search","skills":[' +
+              '{"id":"food-search","path":"skills/food/SKILL.md","status":"active"},' +
+              '{"id":"coffee-order","path":"skills/coffee/SKILL.md","status":"active"},' +
+              '{"id":"planned","path":"skills/planned/SKILL.md","status":"placeholder"}]}',
+            'food_companion/skills/food/SKILL.md': '---\nname: food-search\n' +
+              'description: search\ntools:\n  - food.search\nstatus: active\n---\n# Food',
+            'food_companion/skills/coffee/SKILL.md': '---\nname: coffee-order\n' +
+              'description: order\ntools:\n  - luckin.order.preview\nstatus: active\n---\n# Coffee',
+            'food_companion/skills/planned/SKILL.md': '---\nname: planned\n' +
+              'description: later\ntools: []\nstatus: placeholder\n---\n# Planned'
+          }
+        );
+        const catalog = leaderPersonaContext('food_companion');
+        const food = catalog.filter((item: LeaderPersonaMetadata): boolean =>
+          item.personaId === 'food_companion')[0];
 
-      expect(food.previous).assertTrue();
-      expect(food.activeSkills.length).assertEqual(1);
-      expect(food.activeSkills[0].status).assertEqual('active');
-      expect(food.soul.length > 0).assertTrue();
-      expect(food.memory.length > 0).assertTrue();
-      expect(JSON.stringify(catalog).indexOf('placeholder')).assertEqual(-1);
+        expect(food.previous).assertTrue();
+        expect(food.activeSkills.length).assertEqual(2);
+        expect(food.activeSkills.map((skill): string => skill.skillId).join(','))
+          .assertEqual('food-search,coffee-order');
+        expect(food.activeSkills[0].toolIds.join(',')).assertEqual('food.search');
+        expect(food.activeSkills[1].toolIds.join(',')).assertEqual('luckin.order.preview');
+        expect(food.activeSkills[0].status).assertEqual('active');
+        expect(food.soul.length > 0).assertTrue();
+        expect(food.memory.length > 0).assertTrue();
+        expect(JSON.stringify(catalog).indexOf('placeholder')).assertEqual(-1);
+      } finally {
+        configureDefaultPersonaStoreForTests();
+      }
     });
   });
 }

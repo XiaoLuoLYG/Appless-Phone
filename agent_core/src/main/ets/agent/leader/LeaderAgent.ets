@@ -61,6 +61,7 @@ interface LeaderTurnState {
   pendingActionDecision: LeaderDecision | null;
   observations: ObservationDigest[];
   turnObservations: ObservationDigest[];
+  personaId: string;
   skillId: string;
   uiDone: boolean;
   uiState: '' | 'result' | 'error';
@@ -94,7 +95,9 @@ export class LeaderAgent extends MessageDrivenAgent {
     conversationId: string,
     turnId: string,
     taskId: string,
-    requestedCapabilityIds: string[]
+    requestedCapabilityIds: string[],
+    personaId: string,
+    skillId: string
   ) => void) | null;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
   // Terminal state is reduced to exact identities so active turn payloads and
@@ -111,7 +114,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       conversationId: string,
       turnId: string,
       taskId: string,
-      requestedCapabilityIds: string[]
+      requestedCapabilityIds: string[],
+      personaId: string,
+      skillId: string
     ) => void,
     currentLocalDate?: LeaderCurrentLocalDateProvider
   ) {
@@ -255,6 +260,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       pendingActionDecision: null,
       observations: input.recentObservations as ObservationDigest[],
       turnObservations: [],
+      personaId: '',
       skillId: '',
       uiDone: false,
       uiState: '',
@@ -366,6 +372,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.uiTaskId = plan.ui.taskId;
     const dataTask: LeaderDataTask = plan.dataTasks[0];
     state.dataTaskId = dataTask.taskId;
+    state.personaId = plan.personaId;
     state.skillId = plan.skillId;
     this.publishUiTask(message, plan.ui, dataTask.taskId);
     this.publishDataTask(message, dataTask);
@@ -392,6 +399,25 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
       return;
     }
+    if (state.personaId.length > 0 &&
+      (state.personaId !== decision.personaId || state.skillId !== decision.skillId)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_PERSONA_SKILL_SWITCH',
+        'Leader cannot change persona or skill after execution starts in one turn'
+      );
+      return;
+    }
+    if (!this.decisionWithinSelectedSkill(decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_SKILL_CAPABILITY_VIOLATION',
+        'Selected skill does not declare every requested capability'
+      );
+      return;
+    }
     const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
     const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
     if (ownership.owner === 'legacy') {
@@ -400,7 +426,9 @@ export class LeaderAgent extends MessageDrivenAgent {
           message.conversationId,
           message.turnId,
           message.taskId,
-          decision.requestedCapabilityIds.slice()
+          decision.requestedCapabilityIds.slice(),
+          decision.personaId,
+          decision.skillId
         );
       }
       if (executionStarted) {
@@ -486,10 +514,13 @@ export class LeaderAgent extends MessageDrivenAgent {
         message.conversationId,
         message.turnId,
         message.taskId,
-        decision.requestedCapabilityIds.slice()
+        decision.requestedCapabilityIds.slice(),
+        decision.personaId,
+        decision.skillId
       );
     }
     state.semantic = true;
+    state.personaId = decision.personaId;
     state.skillId = decision.skillId;
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
       if (state.dataTaskIds.length > 0) {
@@ -1136,6 +1167,54 @@ export class LeaderAgent extends MessageDrivenAgent {
     return false;
   }
 
+  private decisionWithinSelectedSkill(decision: LeaderDecision): boolean {
+    if (decision.skillId.length === 0) {
+      return true;
+    }
+    let toolIds: string[] | null = null;
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== decision.personaId) {
+        continue;
+      }
+      for (let skillIndex = 0; skillIndex < persona.activeSkills.length; skillIndex++) {
+        const skill = persona.activeSkills[skillIndex];
+        if (skill.skillId === decision.skillId && skill.status === 'active') {
+          toolIds = skill.toolIds;
+          break;
+        }
+      }
+    }
+    if (toolIds === null) {
+      return false;
+    }
+    const declared = new Set<string>(toolIds);
+    for (let index = 0; index < decision.requestedCapabilityIds.length; index++) {
+      if (!declared.has(decision.requestedCapabilityIds[index])) {
+        return false;
+      }
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task = decision.dataTasks[taskIndex];
+      if (!declared.has(task.toolId)) {
+        return false;
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (!declared.has(task.allowedToolIds[allowedIndex])) {
+          return false;
+        }
+      }
+    }
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        if (!declared.has(decision.actionIntent.allowedActionIds[index])) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   private validRoundAction(value: string): boolean {
     return value === 'execute' || value === 'answer' || value === 'clarify' || value === 'legacy_handoff';
   }
@@ -1230,6 +1309,10 @@ export class LeaderAgent extends MessageDrivenAgent {
       intent: task.intent,
       expectedOutputSchema: task.expectedOutputSchema
     };
+    const personaId: string = this.currentPersonaId(input);
+    if (personaId.length > 0) {
+      payload.personaId = personaId;
+    }
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
@@ -1315,6 +1398,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       intent: state.uiIntent,
       expectedOutputSchema: state.expectedOutputSchema
     };
+    if (state.personaId.length > 0) {
+      payload.personaId = state.personaId;
+    }
     state.uiDone = false;
     state.uiState = '';
     state.uiSurfaceId = '';
@@ -1357,6 +1443,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       goal: intent['goal'] as string,
       allowedActionIds: (intent['allowedActionIds'] as string[]).slice(),
       personaId: decision.personaId,
+      skillId: decision.skillId,
       inputText: (input.payload as InputUserPayload).text
     };
     if (decision.normalizationCurrentLocalDate !== undefined) {
@@ -1384,6 +1471,10 @@ export class LeaderAgent extends MessageDrivenAgent {
       roundCount: state.round,
       message: state.uiState === 'error' ? 'Multi-agent UI rendering failed.' : answer
     };
+    if (state.personaId.length > 0) {
+      payload.personaId = state.personaId;
+      payload.skillId = state.skillId;
+    }
     if (state.uiSurfaceId.length > 0) {
       payload.surfaceId = state.uiSurfaceId;
     }
@@ -1447,6 +1538,11 @@ export class LeaderAgent extends MessageDrivenAgent {
     return state.skillId;
   }
 
+  private currentPersonaId(input: AgentMessage): string {
+    const state: LeaderTurnState | undefined = this.turns.get(this.turnKey(input));
+    return state === undefined ? '' : state.personaId;
+  }
+
   private copyPlanningContext(context: LeaderPlanningContext): LeaderPlanningContext {
     const tools: LeaderToolMetadata[] = [];
     const personas: LeaderPersonaMetadata[] = [];
@@ -1476,7 +1572,8 @@ export class LeaderAgent extends MessageDrivenAgent {
           skillId: skill.skillId,
           description: skill.description,
           instructions: skill.instructions,
-          status: skill.status
+          status: skill.status,
+          toolIds: skill.toolIds.slice()
         }))
       });
     }

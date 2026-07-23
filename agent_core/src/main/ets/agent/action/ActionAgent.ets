@@ -741,7 +741,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       uiTaskId: parsed.uiTaskId,
       dataTaskIds: parsed.dataTaskIds.slice(),
       goal: parsed.goal,
-      allowedActionIds: parsed.allowedActionIds.slice()
+      allowedActionIds: parsed.allowedActionIds.slice(),
+      skillId: parsed.skillId
     };
     if (parsed.personaId !== undefined) {
       request.personaId = parsed.personaId;
@@ -2028,22 +2029,23 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
     const current = payload as ActionPlanRequestPayload;
     const keys: string = Object.keys(payload).sort().join(',');
-    if (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' &&
-      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId' &&
-      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,uiTaskId' &&
-      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual' &&
-      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,uiTaskId,virtual') {
+    if (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual') {
       return null;
     }
     const virtual: boolean = current.virtual === true;
     const hasContext: boolean = nonempty(current.personaId) && nonempty(current.inputText);
     if (
       !nonempty(current.uiTaskId) || !nonempty(current.goal) ||
+      typeof current.skillId !== 'string' ||
       !Array.isArray(current.dataTaskIds) ||
       !Array.isArray(current.allowedActionIds) || current.allowedActionIds.length === 0 ||
       !this.validUniqueIds(current.dataTaskIds, current.uiTaskId) ||
       !this.validUniqueIds(current.allowedActionIds, '') ||
-      (keys !== 'allowedActionIds,dataTaskIds,goal,uiTaskId' && !hasContext) ||
+      (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' && !hasContext) ||
       (current.currentLocalDate !== undefined && !nonempty(current.currentLocalDate)) ||
       (virtual && current.dataTaskIds.length !== 0) ||
       (!virtual && current.dataTaskIds.length === 0)) {

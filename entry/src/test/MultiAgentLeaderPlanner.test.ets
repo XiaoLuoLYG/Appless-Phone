@@ -564,7 +564,8 @@ function planningContext(): LeaderPlanningContext {
         skillId: 'travel-planning',
         description: 'Plan travel',
         instructions: 'Use real travel inventory.',
-        status: 'active'
+        status: 'active',
+        toolIds: ['travel.search']
       }]
     }],
     runtimeOwnedToolIds: ['memory.update']

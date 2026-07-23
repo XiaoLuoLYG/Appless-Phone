@@ -397,7 +397,8 @@ function singlePlanRequest(index: number): ActionPlanRequestPayload {
     uiTaskId: `capacity-ui-${index}`,
     dataTaskIds: [`capacity-data-${index}`],
     goal: `capacity-goal-${index}`,
-    allowedActionIds: ['social.reply.draft']
+    allowedActionIds: ['social.reply.draft'],
+    skillId: ''
   };
 }
 
@@ -473,7 +474,8 @@ function planRequest(): ActionPlanRequestPayload {
     uiTaskId: 'ui-1',
     dataTaskIds: ['social-data', 'gmail-data'],
     goal: '生成回复后保存草稿',
-    allowedActionIds: ['social.reply.draft', 'gmail.draft.create']
+    allowedActionIds: ['social.reply.draft', 'gmail.draft.create'],
+    skillId: ''
   };
 }
 
@@ -679,6 +681,7 @@ export default function actionAgentTest() {
         goal: 'Remember the explicit user statement',
         allowedActionIds: ['memory.update'],
         personaId: 'travel_companion',
+        skillId: '',
         inputText: '我在北京',
         virtual: true
       };
@@ -730,6 +733,7 @@ export default function actionAgentTest() {
           goal: 'Unowned virtual request',
           allowedActionIds: ['memory.update'],
           personaId: 'travel_companion',
+          skillId: '',
           inputText: '我在北京',
           virtual: true
         } as ActionPlanRequestPayload,
@@ -1926,7 +1930,8 @@ export default function actionAgentTest() {
           uiTaskId: 'early-offer-ui',
           dataTaskIds: ['early-offer-0'],
           goal: 'use preserved first offer',
-          allowedActionIds: ['social.reply.draft']
+          allowedActionIds: ['social.reply.draft'],
+          skillId: ''
         };
         bus.publish(message(
           AgentMessageType.ACTION_PLAN_REQUEST,

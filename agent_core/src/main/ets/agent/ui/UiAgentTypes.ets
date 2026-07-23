@@ -4,6 +4,7 @@ import { ActionOffer } from '../action/ActionOfferTypes';
 export interface CreateUiTaskPayload {
   taskId: string;
   dataTaskIds: string[];
+  personaId?: string;
   skillId: string;
   intent: string;
   expectedOutputSchema: string;

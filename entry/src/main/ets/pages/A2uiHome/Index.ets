@@ -96,8 +96,14 @@ import {
   saveConfiguredMailDraft,
   sendConfiguredMailReply
 } from '@loop/agent-core';
-import { copyPersonaData } from '../../model/PersonaA2ui';
-import { PersonaMemoryUpdateRequest } from '../../model/PersonaMemoryUpdate';
+import {
+  copyPersonaData,
+  leaderPersonaSurfaceUpdate
+} from '../../model/PersonaA2ui';
+import {
+  mergePersonaStablePreference,
+  PersonaMemoryUpdateRequest
+} from '../../model/PersonaMemoryUpdate';
 import { PreferencesPersonaPackStore } from '../../model/PersonaPreferencesStore';
 import { allPersonaPacks, personaPackForId, resetPersonaPackText, updatePersonaPackText } from '../../model/PersonaStore';
 import { PersonaPack } from '../../model/PersonaTypes';
@@ -1171,7 +1177,11 @@ struct Index {
       aiLogError('[AIPhone][PersonaMemoryUpdate] ok=false reason=unknown_persona personaId=' + update.personaId);
       return;
     }
-    updatePersonaPackText(update.personaId, pack.soul, update.memoryText);
+    updatePersonaPackText(
+      update.personaId,
+      pack.soul,
+      mergePersonaStablePreference(pack.memory, update.memoryText)
+    );
     this.savePersonaOverrides();
     this.refreshPersonaEditor(update.personaId);
     this.personaSaveMessage = '已保存：' + update.summary;
@@ -1253,7 +1263,6 @@ struct Index {
     );
     const options: MultiAgentCanaryOptions = {
       model: model,
-      selectedPersonaId: (): string => this.selectedPersonaId,
       opener: opener,
       onSurface: (surface: A2uiSurfaceState, generation: number): boolean => {
         const accepted = this.applyRuntimeSurface(surface, 'multi_agent', generation);
@@ -2035,7 +2044,7 @@ struct Index {
     return {
       text,
       recentMessages,
-      previousPersonaId: this.selectedPersonaId,
+      previousPersonaId: '',
       currentSurfaceSummary: surface,
       recentObservations: []
     };
@@ -2174,6 +2183,19 @@ struct Index {
               result.message : 'Multi-agent runtime failed to complete the turn.');
           }
           this.isAwaitingFirstSurface = false;
+          if (result.surfaceId.length > 0 &&
+            result.surfaceId === this.currentSurface.surfaceId &&
+            result.personaId.length > 0) {
+            this.applyRuntimeSurface(
+              leaderPersonaSurfaceUpdate(
+                this.currentSurface,
+                result.personaId,
+                result.skillId
+              ),
+              'multi_agent',
+              turnGeneration
+            );
+          }
           const readyMessage: string = result.message.length > 0 ?
             result.message : this.currentSurface.title;
           this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {

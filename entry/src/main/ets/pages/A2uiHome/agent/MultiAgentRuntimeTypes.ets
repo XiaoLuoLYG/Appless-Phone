@@ -36,6 +36,8 @@ export interface MultiAgentSettledOutcome {
   status: TurnResultStatus;
   surfaceId: string;
   message: string;
+  personaId: string;
+  skillId: string;
 }
 
 const RUNTIME_OWNED_TOOL_IDS: string[] = allToolDefinitions().map(

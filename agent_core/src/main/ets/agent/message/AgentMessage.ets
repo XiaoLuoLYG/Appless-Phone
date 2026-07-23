@@ -101,6 +101,8 @@ export interface TurnResultPayload {
   surfaceId?: string;
   roundCount: number;
   message: string;
+  personaId?: string;
+  skillId?: string;
 }
 
 export interface LegacyHandoffPayload extends LegacyHandoff {

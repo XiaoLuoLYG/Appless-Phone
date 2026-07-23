@@ -565,7 +565,6 @@ function canary(
 ): MultiAgentCanaryRuntime {
   const options: MultiAgentCanaryOptions = {
     model,
-    selectedPersonaId: (): string => 'travel_companion',
     opener,
     pageAction: pageAction === undefined ? (
       actionId: string,

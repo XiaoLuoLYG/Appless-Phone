@@ -37,10 +37,14 @@ import {
 } from '../main/ets/model/PersonaStore';
 import {
   MultiAgentCanaryOptions,
-  MultiAgentCanaryRuntime
+  MultiAgentCanaryRuntime,
+  rememberedPersonaAfterOutcome
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
-import { MultiAgentSettledOutcome } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
+import {
+  MultiAgentHandoffOutcome,
+  MultiAgentSettledOutcome
+} from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import {
@@ -392,6 +396,38 @@ class TwoToolExecutor implements DataTaskExecutor {
   }
 }
 
+class ErrorHotelExecutor implements DataTaskExecutor {
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    return {
+      toolId: task.toolId,
+      outputSchema: task.outputSchema,
+      status: 'error',
+      sources: [],
+      data: new Object(),
+      warnings: [],
+      error: {
+        code: 'PROVIDER_UNAVAILABLE',
+        message: 'provider unavailable'
+      }
+    };
+  }
+}
+
+class GatedHotelExecutor implements DataTaskExecutor {
+  readonly started: TestGate = new TestGate();
+  readonly release: TestGate = new TestGate();
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.started.open();
+    await this.release.promise;
+    const parsed = parseHotelSearchRequest(task.args);
+    if (parsed.value === null) {
+      throw new Error('Invalid gated hotel task.');
+    }
+    return hotelSearchDataResult(searchResult(parsed.value), []);
+  }
+}
+
 class RecordingDynamicExecutor implements DataTaskExecutor {
   readonly tasks: CreateDataTaskPayload[] = [];
 
@@ -691,7 +727,6 @@ function canaryOptions(
 ): MultiAgentCanaryOptions {
   return {
     model,
-    selectedPersonaId: (): string => 'travel_companion',
     opener,
     onSurface: (surface: A2uiSurfaceState): boolean => {
       surfaces.push(surface);
@@ -741,6 +776,16 @@ function renderedAction(surface: A2uiSurfaceState, actionId: string): A2uiAction
     }
   }
   return null;
+}
+
+function promptMarksPersonaPrevious(prompt: string, personaId: string): boolean {
+  const start: number = prompt.indexOf('{"personaId":"' + personaId + '"');
+  const next: number = start < 0 ? -1 : prompt.indexOf('},{"personaId"', start);
+  const segment: string = start < 0 ? '' : prompt.substring(
+    start,
+    next < 0 ? prompt.length : next
+  );
+  return segment.indexOf('"previous":true') >= 0;
 }
 
 interface RecordedPageAction {
@@ -1163,6 +1208,71 @@ export default function multiAgentCanaryRuntimeTest() {
       ).length).assertEqual(0);
       expect(model.prompts[0].indexOf('"requestedCapabilityIds"') >= 0).assertTrue();
       runtime.dispose();
+    });
+
+    it('does not remember a persona from an error terminal outcome', 0, async () => {
+      const model = new QueueModel([HOTEL_DECISION, HOTEL_DONE_DECISION, ANSWER_DECISION]);
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        new ErrorHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      const failed = await runtime.submit(SEARCH_TEXT, { text: '' }) as MultiAgentSettledOutcome;
+      const next = await runtime.submit('你好', {
+        text: '',
+        previousPersonaId: 'travel_companion'
+      }) as MultiAgentSettledOutcome;
+
+      expect(failed.status).assertEqual('error');
+      expect(next.status).assertEqual('success');
+      expect(promptMarksPersonaPrevious(model.prompts[2], 'travel_companion')).assertFalse();
+      runtime.dispose();
+    });
+
+    it('does not remember a persona from a canceled in-flight turn', 0, async () => {
+      const model = new QueueModel([HOTEL_DECISION, ANSWER_DECISION]);
+      const executor = new GatedHotelExecutor();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      const pending = runtime.submit(SEARCH_TEXT, { text: '' }) as
+        Promise<MultiAgentSettledOutcome>;
+      await executor.started.promise;
+      runtime.cancelActiveTurn('user_cancel');
+      executor.release.open();
+      const canceled = await pending;
+      const next = await runtime.submit('你好', {
+        text: '',
+        previousPersonaId: 'travel_companion'
+      }) as MultiAgentSettledOutcome;
+
+      expect(canceled.status).assertEqual('canceled');
+      expect(next.status).assertEqual('success');
+      expect(promptMarksPersonaPrevious(model.prompts[1], 'travel_companion')).assertFalse();
+      runtime.dispose();
+    });
+
+    it('does not remember a persona from a legacy handoff', 0, async () => {
+      const handoff: MultiAgentHandoffOutcome = {
+        kind: 'handoff',
+        owner: 'legacy',
+        unmigratedToolIds: ['synthetic.unmigrated'],
+        reason: 'unmigrated_tool',
+        reasonCode: 'synthetic_handoff',
+        personaId: 'travel_companion',
+        skillId: 'travel-search'
+      };
+
+      expect(rememberedPersonaAfterOutcome('default_companion', handoff, true))
+        .assertEqual('default_companion');
     });
 
     it('rejects a legacy handoff claim for the newly owned dynamic read tool', 0, async () => {
@@ -1603,7 +1713,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(updates.length).assertEqual(1);
       expect(updates[0].personaId).assertEqual('food_companion');
-      expect(updates[0].memoryText.indexOf('我只喝瑞幸咖啡') >= 0).assertTrue();
+      expect(updates[0].memoryText).assertEqual('我只喝瑞幸咖啡');
       expect(surfaces.length).assertEqual(1);
       runtime.dispose();
     });
@@ -1890,7 +2000,6 @@ export default function multiAgentCanaryRuntimeTest() {
         [],
         updates
       );
-      options.selectedPersonaId = (): string => 'food_companion';
       options.onMemoryUpdate = (update: PersonaMemoryUpdateRequest): void => {
         updates.push(update);
         const pack = personaPackForId(update.personaId);
@@ -1900,15 +2009,17 @@ export default function multiAgentCanaryRuntimeTest() {
       try {
         const remembered = await runtime.submit('我只喝瑞幸咖啡', {
           text: '',
-          previousPersonaId: 'food_companion'
+          previousPersonaId: 'travel_companion'
         }) as MultiAgentSettledOutcome;
         const continued = await runtime.submit('继续', {
           text: '',
-          previousPersonaId: 'food_companion'
+          previousPersonaId: 'travel_companion'
         }) as MultiAgentSettledOutcome;
 
         expect(remembered.status).assertEqual('success');
+        expect(remembered.personaId).assertEqual('food_companion');
         expect(continued.status).assertEqual('success');
+        expect(continued.personaId).assertEqual('food_companion');
         expect(continued.message).assertEqual('已按更新后的瑞幸偏好继续');
         expect(updates.length).assertEqual(1);
         expect(model.prompts.length).assertEqual(2);
