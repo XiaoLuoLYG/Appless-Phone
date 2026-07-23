@@ -244,6 +244,9 @@ export function hotelMultiAgentDetailEvidence(logText, options = {}) {
   if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index) {
     return detailFailure('missing_or_invalid_provider_result');
   }
+  if (dataTask.index >= requests[0].index || uiTask.index >= requests[0].index) {
+    return detailFailure('late_correlated_task');
+  }
   const documents = all.filter((item) => item.index > dataResult.index && item.index < action.resultIndex &&
     item.marker === 'HtmlHomeDocument' && item.fields.source === 'tool' && item.fields.kind === 'hotel' &&
     /^[1-9]\d*$/.test(item.fields.chars || '') && /^[1-9]\d*$/.test(item.fields.blocks || ''));

@@ -408,7 +408,7 @@ export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] }
   const externalOk = externalAuthJumps.length === requiredApps.length && requiredApps.every((app) => externalAuthJumps.some((jump) =>
     jump?.app === app && jump.opened === true && jump.returned === true));
   const uiBase = ['应用授权', '当前用户', '刷新'].every((marker) => values.includes(marker)) &&
-    externalOk && !/^auth_config_/im.test(text);
+    externalOk && !/auth_config_/i.test(text);
   const providerError = /(?:2300028|Operation timeout)/i.test(text);
   const product = ['Gmail', 'GitHub', 'Google Calendar', 'Google Drive', 'Google Docs', 'Slack', 'Notion']
     .some((name) => values.includes(name));

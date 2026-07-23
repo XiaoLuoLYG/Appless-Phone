@@ -3371,12 +3371,21 @@ async function runComposioAuthSmoke() {
         browserFocused,
         logPath
       });
-      hdc(['shell', 'aa', 'force-stop', 'com.huawei.hmos.browser']);
-      hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
-      await sleep(1200);
-      const returned = captureForegroundAbility(`external-auth-${index + 1}-return-ability.txt`)
-        .bundleName === 'com.example.aiphonedemo';
-      externalAuthJumps[externalAuthJumps.length - 1].returned = returned;
+      let backPressCount = 0;
+      let restoredForeground = { bundleName: '', path: '' };
+      do {
+        hdc(['shell', 'uitest', 'uiInput', 'keyEvent', 'Back']);
+        backPressCount += 1;
+        await sleep(1400);
+        restoredForeground = captureForegroundAbility(
+          `external-auth-${index + 1}-return-ability-${backPressCount}.txt`
+        );
+      } while (shouldRetryHotelReturnToApp(restoredForeground.bundleName, backPressCount));
+      Object.assign(externalAuthJumps[externalAuthJumps.length - 1], {
+        returned: restoredForeground.bundleName === 'com.example.aiphonedemo',
+        backPressCount,
+        returnAbilityPath: restoredForeground.path
+      });
     } else {
       externalAuthJumps.push({
         app: app.name,

@@ -45,9 +45,20 @@ test('requires strict F16 provider cards and rejects ambiguous, leaked, and inco
   [
     { ...connected, textValues: ['应用授权', '当前用户', '刷新'] },
     { ...connected, textValues: [...connected.textValues, 'auth_config_github'] },
+    { ...connected, textValues: [...connected.textValues, 'provider rejected auth_config_github'] },
     { ...connected, externalAuthJumps: f16ExternalReturns.map((jump, index) =>
       index === 0 ? { ...jump, returned: false } : jump) }
   ].forEach((input) => assert.equal(composioAuthEvidence(input).status, 'FAIL'));
+});
+
+test('returns from each F16 external authorization page with bounded Back navigation', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const authSmoke = source.slice(source.indexOf('async function runComposioAuthSmoke'), source.indexOf('console.log(`cleanData:'));
+  const externalLoop = authSmoke.slice(authSmoke.indexOf('for (let index = 0; index < externalApps.length'), authSmoke.indexOf("const screenPath = captureScreen"));
+  assert.match(externalLoop, /keyEvent', 'Back'/);
+  assert.match(externalLoop, /shouldRetryHotelReturnToApp\(restoredForeground\.bundleName, backPressCount\)/);
+  assert.doesNotMatch(externalLoop, /force-stop', 'com\.huawei\.hmos\.browser/);
+  assert.doesNotMatch(externalLoop, /aa', 'start', '-a', 'EntryAbility', '-b', 'com\.example\.aiphonedemo/);
 });
 
 function listedCases(args = [], env = {}) {

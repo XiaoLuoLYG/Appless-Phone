@@ -59,6 +59,28 @@ test('rejects C20 detail evidence with a wrong task, surface, operation, respons
   ].forEach((logs) => assert.equal(hotelMultiAgentDetailEvidence(logs, options).ok, false));
 });
 
+test('rejects C20 detail evidence when either correlated task begins after the provider request', () => {
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  const lateUiTask = realC20DetailLog.replace(
+    '  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail\n',
+    ''
+  ).replace(
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n',
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n' +
+      '  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail\n'
+  );
+  const lateDataTask = realC20DetailLog.replace(
+    '  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false\n',
+    ''
+  ).replace(
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n',
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n' +
+      '  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false\n'
+  );
+  assert.equal(hotelMultiAgentDetailEvidence(lateUiTask, options).ok, false);
+  assert.equal(hotelMultiAgentDetailEvidence(lateDataTask, options).ok, false);
+});
+
 const validBooking = {
   id: 'hotel.booking.open',
   label: '在 App 内继续预订',
