@@ -197,13 +197,31 @@ function sameRoundDependencyDecision(
   consumerInput: string,
   reversed: boolean = false
 ): string {
+  return sameRoundDependencyDecisionWithConsumers(
+    sourceToolId,
+    consumerToolId,
+    [consumerInput],
+    reversed
+  );
+}
+
+function sameRoundDependencyDecisionWithConsumers(
+  sourceToolId: string,
+  consumerToolId: string,
+  consumerInputs: string[],
+  reversed: boolean = false
+): string {
   const source: string = '{"localId":"source","goal":"read source",' +
     '"allowedToolIds":["' + sourceToolId + '"],"toolId":"' + sourceToolId + '",' +
     '"input":{},"required":true}';
-  const consumer: string = '{"localId":"consumer","goal":"read dependent detail",' +
-    '"allowedToolIds":["' + consumerToolId + '"],"toolId":"' + consumerToolId + '",' +
-    '"input":' + consumerInput + ',"required":true}';
-  const tasks: string = reversed ? consumer + ',' + source : source + ',' + consumer;
+  const consumers: string[] = [];
+  for (let index = 0; index < consumerInputs.length; index++) {
+    consumers.push('{"localId":"consumer-' + index.toString() + '","goal":"read dependent detail",' +
+      '"allowedToolIds":["' + consumerToolId + '"],"toolId":"' + consumerToolId + '",' +
+      '"input":' + consumerInputs[index] + ',"required":true}');
+  }
+  const consumerTasks: string = consumers.join(',');
+  const tasks: string = reversed ? consumerTasks + ',' + source : source + ',' + consumerTasks;
   return '{"personaId":"travel_companion","skillId":"",' +
     '"requestedCapabilityIds":["' + sourceToolId + '","' + consumerToolId + '"],' +
     '"roundAction":"execute","dataTasks":[' + tasks + '],"uiIntent":{' +
@@ -221,6 +239,16 @@ function producerOnlyRepairDecision(toolId: string): string {
     '"requiredSections":["source","detail"]}}';
 }
 
+function directDependencyConsumerDecision(toolId: string, input: string): string {
+  return '{"personaId":"travel_companion","skillId":"",' +
+    '"requestedCapabilityIds":["' + toolId + '"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"direct-detail","goal":"read an explicit detail",' +
+    '"allowedToolIds":["' + toolId + '"],"toolId":"' + toolId + '",' +
+    '"input":' + input + ',"required":true}],"uiIntent":{' +
+    '"purpose":"read a direct detail","preferredDensity":"comfortable",' +
+    '"requiredSections":["detail"]}}';
+}
+
 function sameRoundMapsWithFood(
   includeConsumer: boolean,
   foodAllowedToolIds: string
@@ -233,7 +261,7 @@ function sameRoundMapsWithFood(
     '"input":{"query":"coffee"},"required":false}';
   const consumer: string = '{"localId":"consumer","goal":"read dependent detail",' +
     '"allowedToolIds":["maps.place.details"],"toolId":"maps.place.details",' +
-    '"input":{"placeId":"place-forged"},"required":true}';
+    '"input":{},"required":true}';
   const tasks: string = includeConsumer ? source + ',' + food + ',' + consumer : source + ',' + food;
   const capabilityIds: string = includeConsumer || foodAllowedToolIds.indexOf('maps.place.details') >= 0 ?
     '["maps.place.search","food.search","maps.place.details"]' :
@@ -941,6 +969,56 @@ export default function multiAgentLeaderPlannerTest() {
       expect(decision.dataTasks[1].allowedToolIds.join(',')).assertEqual('food.search');
       expect(JSON.stringify(decision.dataTasks[1].input)).assertEqual('{"query":"coffee"}');
       expect(decision.dataTasks[1].required).assertFalse();
+      expect(model.prompts.length).assertEqual(1);
+    });
+
+    it('fails closed for every same-round consumer with an explicit entity input', 0, async () => {
+      const sources: string[] = [
+        'maps.place.search',
+        'mail.search',
+        'gmail.mail.search'
+      ];
+      const consumers: string[] = [
+        'maps.place.details',
+        'mail.thread.read',
+        'gmail.thread.read'
+      ];
+      const inputs: string[] = [
+        '{"placeId":"place-explicit"}',
+        '{"threadId":"thread-explicit"}',
+        '{"threadId":"gmail-thread-explicit"}'
+      ];
+      for (let index = 0; index < sources.length; index++) {
+        expect(await sameRoundDependencyError(
+          sameRoundDependencyDecision(sources[index], consumers[index], inputs[index])
+        )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      }
+    });
+
+    it('fails closed when one same-round Maps consumer is unbound and another has a placeId', 0, async () => {
+      expect(await sameRoundDependencyError(
+        sameRoundDependencyDecisionWithConsumers(
+          'maps.place.search',
+          'maps.place.details',
+          ['{}', '{"placeId":"place-explicit"}']
+        )
+      )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+    });
+
+    it('keeps direct Maps details available without a same-round producer', 0, async () => {
+      const model = new QueueLocalModel([
+        directDependencyConsumerDecision('maps.place.details', '{"placeId":"place-explicit"}')
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(), { text: 'show the selected place details' }, planningContext(), 1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.details');
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].localId).assertEqual('direct-detail');
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(JSON.stringify(decision.dataTasks[0].input)).assertEqual('{"placeId":"place-explicit"}');
       expect(model.prompts.length).assertEqual(1);
     });
 

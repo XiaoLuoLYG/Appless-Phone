@@ -9,6 +9,7 @@ export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';
 export * from './src/main/ets/agent/leader/LeaderTypes';
 export {
   leaderInputHasEntityAuthority,
+  leaderSameRoundDependencyConsumerTasksLackEntityInput,
   leaderSameRoundDependencyConsumerTaskToolIds,
   leaderSameRoundDependencyProducerToolIds,
   leaderSameRoundDependencyProducerTaskToolIds,

@@ -95,6 +95,63 @@ export function leaderSameRoundDependencyConsumerTaskToolIds(
   return consumerToolIds;
 }
 
+function optionalEntityInputDefinitelyEmpty(
+  values: Record<string, JsonValue | undefined>,
+  key: string
+): boolean {
+  const value: JsonValue | undefined = values[key];
+  return value === undefined || (typeof value === 'string' && value.trim().length === 0);
+}
+
+function consumerTaskDefinitelyLacksEntityInput(task: LeaderDecisionDataTask): boolean {
+  const cloned = cloneJsonValue(task.input as JsonValue);
+  if (!cloned.ok || cloned.value === undefined || cloned.value === null ||
+    typeof cloned.value !== 'object' || Array.isArray(cloned.value)) {
+    return false;
+  }
+  const values = cloned.value as Record<string, JsonValue | undefined>;
+  if (task.toolId === 'maps.place.details') {
+    return optionalEntityInputDefinitelyEmpty(values, 'placeId') &&
+      optionalEntityInputDefinitelyEmpty(values, 'id');
+  }
+  // mail.thread.read resolves its consumed entity from provider/threadId or
+  // provider/messageId; requestKey also binds that entity. Any supplied value
+  // is ambiguous without an earlier observation, so it must not be erased.
+  return optionalEntityInputDefinitelyEmpty(values, 'threadId') &&
+    optionalEntityInputDefinitelyEmpty(values, 'messageId') &&
+    optionalEntityInputDefinitelyEmpty(values, 'requestKey');
+}
+
+// A same-round rewrite is safe only for consumers that provably omit every
+// entity input required by their dependency contract. An explicit or malformed
+// identity may represent an independent direct-details request and is rejected
+// by the caller rather than silently dropped.
+export function leaderSameRoundDependencyConsumerTasksLackEntityInput(
+  tasks: LeaderDecisionDataTask[]
+): boolean {
+  const roundToolIds: Set<string> = taskToolIds(tasks);
+  let foundConsumer: boolean = false;
+  for (let index = 0; index < tasks.length; index++) {
+    const task: LeaderDecisionDataTask = tasks[index];
+    const contract: LeaderDependencyContract | null = dependencyContract(task.toolId.trim());
+    if (contract === null) {
+      continue;
+    }
+    let hasProducer: boolean = false;
+    for (let sourceIndex = 0; sourceIndex < contract.sourceToolIds.length; sourceIndex++) {
+      hasProducer = hasProducer || roundToolIds.has(contract.sourceToolIds[sourceIndex]);
+    }
+    if (!hasProducer) {
+      continue;
+    }
+    foundConsumer = true;
+    if (!consumerTaskDefinitelyLacksEntityInput(task)) {
+      return false;
+    }
+  }
+  return foundConsumer;
+}
+
 export function leaderTasksHaveSameRoundDependency(tasks: LeaderDecisionDataTask[]): boolean {
   return leaderSameRoundDependencyProducerToolIds(tasks).length > 0;
 }

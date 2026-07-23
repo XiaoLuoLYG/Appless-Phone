@@ -21,6 +21,7 @@ import {
   leaderInputHasEntityAuthority,
   leaderIsActionCapability,
   leaderIsDataCapability,
+  leaderSameRoundDependencyConsumerTasksLackEntityInput,
   leaderSameRoundDependencyConsumerTaskToolIds,
   leaderSameRoundDependencyProducerTaskToolIds,
   leaderTasksHaveSameRoundDependency
@@ -744,6 +745,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       return;
     }
     if (producerTaskToolIds.length === 0 || consumerTaskToolIds.length === 0) {
+      throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+    }
+    if (!leaderSameRoundDependencyConsumerTasksLackEntityInput(decision.dataTasks)) {
       throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
     }
     const producerToolIds: Set<string> = new Set<string>(producerTaskToolIds);
