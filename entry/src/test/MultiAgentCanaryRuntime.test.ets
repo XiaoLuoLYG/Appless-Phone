@@ -199,6 +199,26 @@ const GMAIL_REGISTERED_CAPABILITY_ANSWER: string = '{"personaId":"work_companion
   '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"mail.actions",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"邮件操作由当前四 Agent runtime 负责。","reasonCode":"registered_mail_actions"}';
+const GMAIL_AUTHORIZE_FORGERY: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["gmail.authorize"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"gmail.authorize","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"forged","reasonCode":"forged_client_action"}';
+const CALENDAR_AUTHORIZE_FORGERY: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.authorize"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.authorize","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"forged","reasonCode":"forged_client_action"}';
+const C06_QUERY: string = '帮我查看我 Gmail 里和 ECCV 论文相关的邮件';
+const C06_GMAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"gmail-search","goal":"search real Gmail mail",' +
+  '"allowedToolIds":["gmail.mail.search"],"toolId":"gmail.mail.search",' +
+  '"input":{"query":"' + C06_QUERY + '"},"required":true}],' +
+  '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
+  '"requiredSections":["mail"]},"reasonCode":"gmail_search"}';
+const C06_GMAIL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"已返回真实 Gmail 邮件。","reasonCode":"gmail_search_ready"}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
   '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
@@ -428,6 +448,30 @@ function canaryStructuredResult(toolId: string, outputSchema: string): DataResul
     status: 'success',
     sources: [],
     data,
+    warnings: []
+  };
+}
+
+function c06GmailSearchResult(): DataResult {
+  return {
+    toolId: 'gmail.mail.search',
+    outputSchema: 'mailThreads',
+    status: 'success',
+    sources: [{
+      provider: 'Composio Gmail',
+      backend: 'oauth_api',
+      operation: 'gmail.mail.search',
+      fetchedAt: '2026-07-23T10:00:00.000Z'
+    }],
+    data: JSON.parse('{"threads":[{"provider":"gmail","accountLabel":"Gmail",' +
+      '"threadId":"thread-c06-real","messageId":"message-c06-real",' +
+      '"subject":"ECCV paper review","from":"reviewer@example.com",' +
+      '"to":["author@example.com"],"participants":["reviewer@example.com"],' +
+      '"snippet":"ECCV review update","receivedAt":"2026-07-23T09:00:00Z",' +
+      '"unread":true,"important":true,"sourceUrl":"https://mail.google.com/",' +
+      '"rawProviderRef":"thread-c06-real","requestKey":"gmail:thread-c06-real"}],' +
+      '"statuses":[{"provider":"gmail","status":"success","title":"Gmail",' +
+      '"message":"1 real result"}],"extras":[],"entityRefs":["thread-c06-real"]}') as Object,
     warnings: []
   };
 }
@@ -1111,6 +1155,81 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(model.prompts[0].indexOf('gmail.draft.create') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('gmail.open.web') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('gmail.authorize') >= 0).assertFalse();
+      runtime.dispose();
+    });
+
+    it('fails closed on forged client-only authorize capabilities without legacy handoff or work', 0, async () => {
+      const forgeries: string[] = [GMAIL_AUTHORIZE_FORGERY, CALENDAR_AUTHORIZE_FORGERY];
+      for (let index = 0; index < forgeries.length; index++) {
+        const bus = new TrackingBus();
+        const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+          new QueueModel([forgeries[index]]),
+          new CanaryHotelExecutor(),
+          new RecordingOpener(),
+          [],
+          [],
+          bus
+        ));
+
+        const outcome = await runtime.submit('malicious authorize output', { text: '' });
+
+        expect(outcome.kind).assertEqual('settled');
+        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+        expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_UI)).assertEqual(0);
+        expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(0);
+        expect(bus.count(AgentMessageType.ACTION_RUN)).assertEqual(0);
+        runtime.dispose();
+      }
+    });
+
+    it('executes the C06 Gmail search through Data Agent without legacy handoff', 0, async () => {
+      const calls: StructuredToolCallRecord[] = [];
+      const bus = new TrackingBus();
+      const options = canaryOptions(
+        new QueueModel([C06_GMAIL_DECISION, C06_GMAIL_DONE]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        args: Object
+      ): Promise<DataResult> => {
+        calls.push({ toolId, prompt, args });
+        return c06GmailSearchResult();
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(C06_QUERY, { text: '' });
+      const tasks = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA
+      );
+      const results = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_RESULT_DATA
+      );
+      const task = tasks[0].payload as CreateDataTaskPayload;
+      const taskArgs = task.args as Record<string, Object | string | number | boolean>;
+      const result = results[0].payload as DataResult;
+
+      expect(outcome.kind).assertEqual('settled');
+      expect((outcome as MultiAgentSettledOutcome).status).assertEqual('success');
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      expect(tasks.length).assertEqual(1);
+      expect(results.length).assertEqual(1);
+      expect(task.toolId).assertEqual('gmail.mail.search');
+      expect(taskArgs['query']).assertEqual(C06_QUERY);
+      expect(result.toolId).assertEqual('gmail.mail.search');
+      expect(result.status).assertEqual('success');
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].toolId).assertEqual('gmail.mail.search');
+      expect((calls[0].args as Record<string, Object | string | number | boolean>)['query'])
+        .assertEqual(C06_QUERY);
       runtime.dispose();
     });
 
