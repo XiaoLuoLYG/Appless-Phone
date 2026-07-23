@@ -264,6 +264,9 @@ function providerError(model: A2uiRuntimeDataModel): string {
   if (model.socialHub.draft.status === 'error') {
     return model.socialHub.draft.error;
   }
+  if (model.socialHub.publication.status === 'error') {
+    return model.socialHub.publication.error;
+  }
   if (model.stripeReceivingAccount !== undefined &&
     (model.stripeReceivingAccount.status === 'error' ||
       model.stripeReceivingAccount.status === 'blocked')) {

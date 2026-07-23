@@ -45,6 +45,7 @@ import {
   mediaVideoStructuredDataA2ui,
   mergeA2uiLayout,
   parseA2uiJsonl,
+  socialHubCommunityA2ui,
   socialHubStructuredDataA2ui,
   toolDefinitionForToolId,
   trainStructuredDataA2ui,
@@ -342,7 +343,13 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
       if (!hasArray(record, 'items') || !hasArray(record, 'connections')) {
         throw new Error('socialHubFeed data is malformed');
       }
-      return socialHubStructuredDataA2ui(surfaceId, data.data as SocialHubStructuredData);
+      return data.toolId === 'social.community.search' ?
+        socialHubCommunityA2ui(
+          surfaceId,
+          (data.data as SocialHubStructuredData).items,
+          (data.data as SocialHubStructuredData).connections
+        ) :
+        socialHubStructuredDataA2ui(surfaceId, data.data as SocialHubStructuredData);
     case 'mailThreads':
       if (!hasArray(record, 'threads') || !hasArray(record, 'statuses') || !hasArray(record, 'extras')) {
         throw new Error('mailThreads data is malformed');

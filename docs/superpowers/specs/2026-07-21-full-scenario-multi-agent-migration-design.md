@@ -486,7 +486,7 @@ Prompt 所见工具列表必须从 registry 派生，禁止维护第二份手写
 | Leader | 只读查看全部 capability metadata，用于规划；注册 0 个 executor |
 | Data | 执行下列 24 个固定只读工具，加 turn-scoped `dynamic.search` |
 | UI | 注册 0 个业务工具；只使用 component catalog、data paths 和 ActionOffer |
-| Action | 执行下列 20 个固定 Action 工具，加 `memory.update` |
+| Action | 执行下列 21 个固定 Action 工具，加 `memory.update` |
 
 所谓“给 Agent 注册工具”在这里是从统一 registry 建立受限只读视图或 executor view，不是在四个 Prompt 旁复制四套注册表。
 

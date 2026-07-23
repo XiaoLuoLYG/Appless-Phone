@@ -105,16 +105,6 @@ function virtualAction(actionId: string, inputText: string, args: Object): A2uiA
 function socialPostPreviewVirtualArgs(inputText: string): SocialPostPreviewVirtualArgs | null {
   const value = inputText.trim();
   const lower = value.toLowerCase();
-  let platform = '';
-  if (/(^|[^a-z])x([^a-z]|$)|twitter|x\.com/i.test(value)) {
-    platform = 'x';
-  } else if (lower.indexOf('linkedin') >= 0) {
-    platform = 'linkedin';
-  } else if (lower.indexOf('instagram') >= 0) {
-    platform = 'instagram';
-  } else if (lower.indexOf('reddit') >= 0) {
-    platform = 'reddit';
-  }
   const chineseMarker = value.indexOf('发帖：');
   const asciiMarker = value.indexOf('发帖:');
   const postMarker = lower.indexOf('post:');
@@ -124,17 +114,44 @@ function socialPostPreviewVirtualArgs(inputText: string): SocialPostPreviewVirtu
     marker = postMarker;
     markerLength = 'post:'.length;
   }
-  if (platform.length === 0 || marker < 0) {
+  const draftMarker = value.indexOf('起草');
+  const naturalDraft = marker < 0 && draftMarker >= 0;
+  if (naturalDraft) {
+    marker = draftMarker;
+    markerLength = '起草'.length;
+  }
+  if (marker < 0) {
     return null;
   }
-  const text = value.substring(marker + markerLength)
+  const target = value.substring(0, marker);
+  const targetLower = target.toLowerCase();
+  const platforms: string[] = [];
+  if (/(^|[^a-z])x([^a-z]|$)|twitter|x\.com/i.test(target)) {
+    platforms.push('x');
+  }
+  if (targetLower.indexOf('linkedin') >= 0) {
+    platforms.push('linkedin');
+  }
+  if (targetLower.indexOf('instagram') >= 0) {
+    platforms.push('instagram');
+  }
+  if (targetLower.indexOf('reddit') >= 0) {
+    platforms.push('reddit');
+  }
+  if (platforms.length !== 1) {
+    return null;
+  }
+  let text = value.substring(marker + markerLength)
     .replace(/（只生成预览，不发布）$/, '')
     .replace(/\(preview only,? do not publish\)$/i, '')
     .trim();
+  if (naturalDraft) {
+    text = text.replace(/^一[条篇]/, '').replace(/的帖子$/, '').replace(/帖子$/, '').trim();
+  }
   if (text.length === 0 || text.length > 3000) {
     return null;
   }
-  return { platform, operation: 'publish', text };
+  return { platform: platforms[0], operation: 'publish', text };
 }
 
 function whatsAppVirtualArgs(inputText: string): WhatsAppVirtualArgs | null {

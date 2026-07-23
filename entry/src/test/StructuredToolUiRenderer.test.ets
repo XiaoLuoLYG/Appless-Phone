@@ -358,6 +358,24 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.indexOf('structured_results')).assertLarger(-1);
     });
 
+    it('preserves public community posts through the production structured renderer', 0, async () => {
+      const community = dataResult('social.community.search', 'socialHubFeed', object(
+        '{"items":[{"id":"t3_real","platform":"reddit","kind":"post","author":"dev_user",' +
+        '"handle":"dev_user","text":"Real Reddit discussion","timestamp":"2026-07-22T00:00:00Z",' +
+        '"url":"https://reddit.com/r/OpenAI/comments/real","mediaUrl":"","channel":"r/OpenAI",' +
+        '"channelId":"OpenAI","threadId":"t3_real","unread":false}],' +
+        '"connections":[{"platform":"reddit","status":"connected","displayName":"Reddit",' +
+        '"accountId":"reddit-real","message":"connected"}]}'
+      ));
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [community], [], 'surface-community'
+      );
+
+      expect(rendered.jsonl.indexOf('t3_real')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('Real Reddit discussion')).assertLarger(-1);
+    });
+
     it('dispatches every structured Data family to its canonical semantic rows', 0, async () => {
       const renderer = new StructuredToolUiRenderer();
       const fixtures: DataResult[] = [

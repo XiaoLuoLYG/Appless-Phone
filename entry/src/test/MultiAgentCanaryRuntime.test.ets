@@ -1549,6 +1549,7 @@ export default function multiAgentCanaryRuntimeTest() {
     it('executes R02 as a zero-Data preview Action without provider write authority', 0, async () => {
       const executor = new RecordingGenericExecutor();
       const actionIds: string[] = [];
+      const actionArgs: Object[] = [];
       const options = canaryOptions(
         new QueueModel([R02_POST_PREVIEW_DECISION]),
         executor,
@@ -1558,10 +1559,11 @@ export default function multiAgentCanaryRuntimeTest() {
       );
       options.pageAction = async (
         actionId: string,
-        _args: Object,
+        args: Object,
         _context: ActionExecutionContext
       ): Promise<ActionExecutionResult> => {
         actionIds.push(actionId);
+        actionArgs.push(args);
         return {
           status: 'success',
           output: JSON.parse('{"surfaceId":"social-preview"}') as Object
@@ -1570,13 +1572,16 @@ export default function multiAgentCanaryRuntimeTest() {
       const runtime = new MultiAgentCanaryRuntime(options);
 
       const outcome = await runtime.submit(
-        '帮我在 X 发帖：Appless migration ready（只生成预览，不发布）',
+        '帮我为 X 起草一条介绍 Appless 新版本的帖子',
         { text: '' }
       );
 
       expect(outcome.kind).assertEqual('settled');
       expect(executor.tasks.length).assertEqual(0);
       expect(actionIds.join(',')).assertEqual('social.post.preview');
+      expect(JSON.stringify(actionArgs[0])).assertEqual(
+        '{"platform":"x","operation":"publish","text":"介绍 Appless 新版本"}'
+      );
       expect(actionIds.indexOf('social.reply.draft')).assertEqual(-1);
       expect(actionIds.indexOf('social.post.publish')).assertEqual(-1);
       runtime.dispose();

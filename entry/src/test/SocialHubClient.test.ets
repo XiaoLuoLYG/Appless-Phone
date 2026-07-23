@@ -93,6 +93,10 @@ export default function socialHubClientTest() {
         'reddit',
         '{"data":null,"error":{"message":"Reddit account is not connected"}}'
       );
+      const unsuccessful = parseComposioCommunityFeed(
+        'reddit',
+        '{"successful":false,"data":null,"error":null}'
+      );
 
       expect(reddit.items.length).assertEqual(1);
       expect(reddit.items[0].id).assertEqual('t3_real');
@@ -100,6 +104,11 @@ export default function socialHubClientTest() {
       expect(failed.items.length).assertEqual(0);
       expect(failed.connections[0].status).assertEqual('error');
       expect(failed.connections[0].message).assertEqual('Reddit account is not connected');
+      expect(unsuccessful.items.length).assertEqual(0);
+      expect(unsuccessful.connections[0].status).assertEqual('error');
+      expect(unsuccessful.connections[0].message).assertEqual(
+        'Provider returned an unsuccessful execution status.'
+      );
     });
 
     it('creates a preview only for one real provider identity', 0, () => {

@@ -12083,10 +12083,10 @@ async function socialPublicationPreview(args: Object | null): Promise<SocialHubP
   const text = textOf(request.text).trim();
   const base: SocialHubPublicationPreviewInput = {
     platform,
-    operation: 'publish',
+    operation: textOf(request.operation).trim().toLowerCase(),
     text
   };
-  if (text.length === 0 || text.length > 3000 ||
+  if (base.operation !== 'publish' || text.length === 0 || text.length > 3000 ||
     (platform !== 'x' && platform !== 'linkedin' &&
       platform !== 'instagram' && platform !== 'reddit')) {
     return createSocialHubPublicationPreview(base);
@@ -12255,12 +12255,21 @@ async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId:
   if (toolId === 'social.reply.draft') {
     const request: SocialHubDraftRequestArgs = args === null ? emptySocialHubDraftRequestArgs() : args as SocialHubDraftRequestArgs;
     const itemId = textOf(request.itemId).trim();
+    const platform = socialHubPlatformFromText(textOf(request.platform));
     const instruction = textOf(request.instruction).trim();
-    const draft = await socialHubClient.draft(
-      itemId.length > 0 ? itemId : prompt,
-      socialHubPlatformFromText(textOf(request.platform)),
-      instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿'
-    );
+    if (itemId.length === 0 || platform === 'unknown' || instruction.length === 0) {
+      const failed: SocialHubDraftData = {
+        itemId,
+        platform,
+        text: '',
+        status: 'error',
+        error: 'Social reply draft requires a selected real item ID, platform, and instruction.',
+        localOnly: true,
+        sent: false
+      };
+      return socialHubDraftA2ui(surfaceId, failed);
+    }
+    const draft = await socialHubClient.draft(itemId, platform, instruction);
     return socialHubDraftA2ui(surfaceId, draft);
   }
   if (toolId === 'social.feed.search') {

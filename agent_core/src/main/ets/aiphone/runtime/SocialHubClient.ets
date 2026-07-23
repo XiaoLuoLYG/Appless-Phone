@@ -25,7 +25,7 @@ export interface SocialHubProviderConfig {
 
 export interface SocialHubPublicationPreviewInput {
   platform: SocialHubPlatform;
-  operation: 'publish';
+  operation: string;
   accountId?: string;
   accountName?: string;
   text?: string;
@@ -95,6 +95,7 @@ interface ComposioSocialErrorPayload {
 interface ComposioSocialEnvelope {
   data?: Object | null;
   error?: Object | string | number | boolean | null;
+  successful?: boolean | string;
 }
 
 type SocialCommunityValue = Object | string | number | boolean | null | undefined;
@@ -167,7 +168,9 @@ export function createSocialHubPublicationPreview(
   const supported = platform === 'x' || platform === 'linkedin' ||
     platform === 'instagram' || platform === 'reddit';
   let error = '';
-  if (!supported) {
+  if (input.operation !== 'publish') {
+    error = 'Social post preview requires operation=publish.';
+  } else if (!supported) {
     error = '请选择 X、LinkedIn、Instagram 或 Reddit。';
   } else if (text.length === 0 || text.length > 3000) {
     error = '公开帖子预览需要 1–3000 个字符的正文。';
@@ -315,15 +318,16 @@ export function parseSocialHubFeedPayload(raw: string): SocialHubFeedResult {
 }
 
 function composioSocialError(payload: ComposioSocialEnvelope): string {
-  if (payload.error === undefined || payload.error === null) {
-    return '';
+  if (payload.error !== undefined && payload.error !== null) {
+    if (typeof payload.error === 'object') {
+      const error = payload.error as ComposioSocialErrorPayload;
+      const message = textOf(error.message).trim();
+      return message.length > 0 ? message : textOf(payload.error);
+    }
+    return textOf(payload.error);
   }
-  if (typeof payload.error === 'object') {
-    const error = payload.error as ComposioSocialErrorPayload;
-    const message = textOf(error.message).trim();
-    return message.length > 0 ? message : textOf(payload.error);
-  }
-  return textOf(payload.error);
+  return payload.successful === false || payload.successful === 'false' ?
+    'Provider returned an unsuccessful execution status.' : '';
 }
 
 function xUserForId(includes: XIncludesPayload | undefined, id: string): XUserPayload {

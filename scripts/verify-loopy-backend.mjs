@@ -707,6 +707,9 @@ function runHarBuild() {
 
 function verifySourceContracts() {
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  const migrationDesign = read(
+    'docs/superpowers/specs/2026-07-21-full-scenario-multi-agent-migration-design.md'
+  );
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
@@ -845,17 +848,23 @@ function verifySourceContracts() {
     'payment handoff logs redact the URL payload'
   );
 
-  const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
-  const uniqueIds = new Set(ids);
   const runtimeUniqueIds = new Set(runtimeIds);
-  const publicOnlyToolIds = ids.filter((id) => !runtimeUniqueIds.has(id));
-  const runtimeOnlyToolIds = runtimeIds.filter((id) => !uniqueIds.has(id));
-  const semanticDriftToolIds = ids.filter((id) =>
-    runtimeUniqueIds.has(id) && !toolDefinitionContractsMatch(definitions, runtimeDefinitions, id));
-  assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
+  assert(
+    !/^\s*toolId:\s*'/m.test(definitions),
+    'public compatibility module has no independently maintained tool definitions'
+  );
+  assertContains(
+    definitions,
+    "from './runtime/ToolDefinitionRegistry'",
+    'public compatibility module derives the runtime registry'
+  );
+  assertContains(
+    migrationDesign,
+    '| Action | 执行下列 21 个固定 Action 工具',
+    'migration design reports all 21 fixed Action tools'
+  );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(ids.length === 46, 'AIPhone public tool registry has expected fixed count', `found ${ids.length}`);
   assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
@@ -881,7 +890,6 @@ function verifySourceContracts() {
     'maps.place.search',
     'maps.place.details'
   ]) {
-    assert(uniqueIds.has(id), `registered ${id}`);
     assert(runtimeUniqueIds.has(id), `runtime registered ${id}`);
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
@@ -911,21 +919,13 @@ function verifySourceContracts() {
     'Social selection contract:',
     'leader planning prompt defines the social capability selection contract'
   );
-  assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
   assert(
-    ids.length === runtimeIds.length &&
-      publicOnlyToolIds.length === 0 &&
-      runtimeOnlyToolIds.length === 0,
-    'public and runtime tool registries align exactly',
-    `public=${ids.length}; runtime=${runtimeIds.length}; public-only=[${publicOnlyToolIds.join(', ')}]; runtime-only=[${runtimeOnlyToolIds.join(', ')}]`
+    definitions.includes('return runtimeToolDefinitions();') &&
+      definitions.includes('return runtimeToolDefinitions().length;'),
+    'public compatibility APIs derive the runtime registry'
   );
   assert(
-    semanticDriftToolIds.length === 0,
-    'public and runtime tool registries align semantically',
-    `drift=[${semanticDriftToolIds.join(', ')}]`
-  );
-  assert(
-    hasOptionalCalendarUpdateSchema(definitions) && hasOptionalCalendarUpdateSchema(runtimeDefinitions),
+    hasOptionalCalendarUpdateSchema(runtimeDefinitions),
     'Calendar update schema keeps lookup and destination fields optional'
   );
 
@@ -936,8 +936,8 @@ function verifySourceContracts() {
   assert(hasHotelBookingBackend(runtimeDefinitions), 'hotel booking uses the web session backend');
   assert(hasSystemIntentDefinition(runtimeDefinitions, 'hotel.navigate'), 'hotel navigation is a system intent');
   assert(
-    forbiddenHotelTools.every((toolId) => !uniqueIds.has(toolId) && !runtimeUniqueIds.has(toolId)),
-    'hotel transaction tools are absent from both registries'
+    forbiddenHotelTools.every((toolId) => !runtimeUniqueIds.has(toolId)),
+    'hotel transaction tools are absent from the runtime registry'
   );
   assert(hasHotelRolesOnBus(hotelRuntime), 'HotelAgentRuntime assigns all four roles to one broadcast bus');
   assert(

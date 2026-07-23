@@ -91,3 +91,60 @@ zero failures and zero errors.
 - PR #68 mail-body code and smoke-evidence scripts were not changed.
 - The two pre-existing untracked smoke-evidence directories remain untouched
   and unstaged.
+
+## Independent Review Follow-up
+
+All findings in `f04-r01-r02-review-fixes.md` were fixed with tests registered
+before the production changes.
+
+The authoritative follow-up RED was:
+
+```text
+Tests run: 1250, Failure: 8, Error: 0, Pass: 1242, Ignore: 0
+```
+
+The failures covered the production structured renderer, unsuccessful
+Composio envelopes, the production registered action handler, target-only
+platform parsing, the exact approved R02 query, both legacy SocialHub gateway
+invariants, and the Reddit authorization projection. The structural verifier
+also failed its three new single-registry/design assertions before the fix.
+
+The follow-up changes:
+
+- route exact `social.community.search` results through the community A2UI
+  renderer so public Reddit posts are not filtered as private messages;
+- treat `successful:false` community observations as provider failures while
+  retaining a concrete provider error when one exists;
+- propagate `socialHub.publication.status=error` through the production page
+  action handler;
+- parse exactly one platform from the command target, never from post body
+  text, reject ambiguous targets, and support the approved natural-language
+  R02 prompt without rewriting it;
+- require a selected real item ID, explicit platform, and instruction for
+  legacy reply drafts, and validate `operation=publish` for preview requests
+  before provider identity lookup;
+- replace the independently maintained public tool-definition table with a
+  compatibility projection derived from runtime `ToolDefinitionRegistry`;
+- restore Reddit to the Composio toolkit candidate projection; and
+- correct the remaining Action count from 20 to 21.
+
+Final follow-up evidence:
+
+```text
+entry/.test/default/intermediates/test/coverage_data/test_result.txt
+Tests run: 1250, Failure: 0, Error: 0, Pass: 1250, Ignore: 0
+Timestamp: 2026-07-24T01:13:43+0800
+SHA-256: ee2f2db09974d17873dddd67c8f5749fb936e1fccdd308f82d198840c6f76fcc
+```
+
+- `node scripts/verify-loopy-backend.mjs`
+  - `AIPhone Loopy backend smoke passed (287 checks).`
+  - `agent_core` HAR build: PASS
+- `git diff --check`: PASS
+- no social publication write route was added;
+- PR #68 mail-body code, smoke scripts, cleanup paths, and both pre-existing
+  untracked smoke-evidence directories remain untouched.
+
+The verifier count is lower than the earlier 310 because checks against the
+deleted duplicate public registry were removed; the runtime authority and
+compatibility derivation are now checked directly.

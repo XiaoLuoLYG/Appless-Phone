@@ -78,6 +78,8 @@ import {
   rideAmapGeocodeKeyForTest,
   rideAmapRequestArgsForTest,
   rideDidiCityFromAmapGeocodeForTest,
+  socialHubDraft,
+  socialHubPublication,
   rideDidiCancelOrderArgsForTest,
   rideDidiCreateOrderArgsForTest,
   rideDidiDriverLocationArgsForTest,
@@ -507,6 +509,52 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
       expect(isRegisteredToolId('social.reply.send')).assertFalse();
+    });
+
+    it('fails closed when a legacy social reply draft lacks a selected real item', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'social.reply.draft',
+        '帮我回复这条消息，谢谢反馈',
+        'surface_social_reply_missing_selection',
+        '',
+        noop,
+        null,
+        null
+      );
+      const draft = socialHubDraft(result.surface);
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.itemId).assertEqual('');
+      expect(draft.error).assertEqual(
+        'Social reply draft requires a selected real item ID, platform, and instruction.'
+      );
+    });
+
+    it('rejects non-publish legacy social preview operations before provider lookup', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'social.post.preview',
+          'reply to a post',
+          'surface_social_preview_invalid_operation',
+          '',
+          noop,
+          null,
+          looseObject('{"platform":"x","operation":"reply","text":"Thanks"}')
+        );
+        const publication = socialHubPublication(result.surface);
+
+        expect(publication.status).assertEqual('error');
+        expect(publication.error).assertEqual(
+          'Social post preview requires operation=publish.'
+        );
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
     });
 
     it('allows only explicit dynamic catalog aliases to enter the local tool host', 0, () => {

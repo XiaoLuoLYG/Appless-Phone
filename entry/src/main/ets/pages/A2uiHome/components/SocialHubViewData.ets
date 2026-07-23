@@ -163,7 +163,7 @@ export function socialHubComposioToolkitCandidates(platform: SocialHubPlatform |
     return ['x', 'twitter'];
   }
   if (platform === 'slack' || platform === 'discord' || platform === 'linkedin' ||
-    platform === 'whatsapp' || platform === 'instagram') {
+    platform === 'whatsapp' || platform === 'instagram' || platform === 'reddit') {
     return [platform];
   }
   return [];

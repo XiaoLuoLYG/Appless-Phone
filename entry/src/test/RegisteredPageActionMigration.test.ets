@@ -5,6 +5,7 @@ import {
   A2uiLabelValueData,
   A2uiRuntimeDataModel,
   A2uiSurfaceState,
+  ActionExecutionErrorResult,
   ActionExecutionResult,
   AgentMessage,
   AgentMessageType,
@@ -339,6 +340,30 @@ class FixedProviderResultInvoker implements RegisteredPageToolInvoker {
       rawPreview: this.provider.rawPreview,
       actions: this.provider.actions
     }];
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
+  }
+}
+
+class SocialPublicationErrorInvoker implements RegisteredPageToolInvoker {
+  async invoke(
+    toolId: string,
+    _prompt: string,
+    _pageActionId: string,
+    _args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    const result = successfulToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.socialHub.publication = {
+      platform: 'x',
+      operation: 'publish',
+      accountId: '',
+      accountName: '',
+      text: 'Appless',
+      status: 'error',
+      updatedAt: '2026-07-24T00:00:00.000Z',
+      error: 'Provider 没有返回真实账号 ID；不会创建或发布帖子。'
+    };
     result.surface.dataModelJson = JSON.stringify(model);
     return { ok: true, result, error: '' };
   }
@@ -1861,6 +1886,24 @@ export default function registeredPageActionMigrationTest() {
         'social.post.preview', '帮我发一条社交动态'
       )).assertNull();
       expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'social.post.preview', '帮我为 X 起草一条介绍 Appless 新版本的帖子'
+      )?.args)).assertEqual(
+        '{"platform":"x","operation":"publish","text":"介绍 Appless 新版本"}'
+      );
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'social.post.preview', '帮我在 LinkedIn 发帖：从 X 迁移到 Appless'
+      )?.args)).assertEqual(
+        '{"platform":"linkedin","operation":"publish","text":"从 X 迁移到 Appless"}'
+      );
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'social.post.preview', '帮我为 LinkedIn 起草一条从 X 迁移到 Appless 的帖子'
+      )?.args)).assertEqual(
+        '{"platform":"linkedin","operation":"publish","text":"从 X 迁移到 Appless"}'
+      );
+      expect(resolveVirtualRegisteredPageAction(
+        'social.post.preview', '帮我在 X 和 LinkedIn 发帖：Appless'
+      )).assertNull();
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
         'payment.send', paypalPrompt
       )?.args)).assertEqual('{"originalQuery":"' + paypalPrompt + '"}');
       expect(JSON.stringify(resolveVirtualRegisteredPageAction(
@@ -1958,6 +2001,33 @@ export default function registeredPageActionMigrationTest() {
       expect(serializedCalls.indexOf('payment.confirm')).assertEqual(-1);
       expect(serializedCalls.indexOf('payment.capture')).assertEqual(-1);
       expect(serializedCalls.indexOf('stripe.account.create')).assertEqual(-1);
+    });
+
+    it('returns SocialHub publication errors from the production page action handler', 0, async () => {
+      const result = await new RegisteredPageActionHandler(
+        new SocialPublicationErrorInvoker()
+      ).execute(
+        'social.post.preview',
+        JSON.parse('{"platform":"x","operation":"publish","text":"Appless"}') as Object,
+        {
+          conversationId: 'social-preview',
+          turnId: 'turn-1',
+          surfaceId: 'virtual:social-preview',
+          sourceToolId: 'virtual.action-intent',
+          planId: 'direct:social-preview',
+          runId: 'social-preview',
+          stepId: 'step-1',
+          pageActionId: 'social.post.preview',
+          virtualAction: true
+        }
+      );
+      const failure = result as ActionExecutionErrorResult;
+
+      expect(result.status).assertEqual('error');
+      expect(failure.errorCode).assertEqual('ACTION_PAGE_PROVIDER_ERROR');
+      expect(failure.message).assertEqual(
+        'Provider 没有返回真实账号 ID；不会创建或发布帖子。'
+      );
     });
 
     it('invokes WhatsApp only as its existing confirm-required surface', 0, async () => {
