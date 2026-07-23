@@ -111,6 +111,10 @@ interface CalendarUpdateSearchArgs {
   requestedAction: CalendarUpdateRequestArgs;
 }
 
+interface SocialFeedTaskInput {
+  platforms: string[];
+}
+
 export interface MultiAgentCanaryOptions {
   model: LocalModel;
   selectedPersonaId: () => string;
@@ -562,6 +566,54 @@ function calendarUpdateSearchArgs(input: string, now: Date): CalendarUpdateSearc
   };
 }
 
+function unwrapSingleArgsEnvelope(input: Object): Object {
+  const source = input as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(source);
+  if (keys.length !== 1 || keys[0] !== 'args') {
+    return input;
+  }
+  const args = source['args'];
+  return args !== null && args !== undefined && typeof args === 'object' && !Array.isArray(args) ?
+    args as Object : input;
+}
+
+function normalizedSocialFeedTaskInput(input: Object): Object {
+  const source = input as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(source);
+  const raw: Object | string | number | boolean | null | undefined = source['platforms'];
+  if (keys.length !== 1 || keys[0] !== 'platforms' || !Array.isArray(raw) || raw.length === 0) {
+    throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+  }
+  const rawPlatforms: Object[] = raw as Object[];
+  const allowed: string[] = ['x', 'slack', 'wecom', 'discord', 'linkedin', 'whatsapp', 'instagram', 'all'];
+  const platforms: string[] = [];
+  for (let index = 0; index < rawPlatforms.length; index++) {
+    const value: Object = rawPlatforms[index];
+    if (typeof value !== 'string') {
+      throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+    }
+    const platform = value.trim().toLowerCase();
+    if (allowed.indexOf(platform) < 0 || platforms.indexOf(platform) >= 0) {
+      throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+    }
+    platforms.push(platform);
+  }
+  if (platforms.indexOf('all') >= 0 && platforms.length !== 1) {
+    throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+  }
+  const result: SocialFeedTaskInput = { platforms };
+  return result;
+}
+
+function validSocialFeedTaskInput(input: Object): boolean {
+  try {
+    normalizedSocialFeedTaskInput(input);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function normalizeCanaryTaskInput(
   input: InputUserPayload,
   task: LeaderDecisionDataTask,
@@ -579,6 +631,9 @@ function normalizeCanaryTaskInput(
         normalized.errorCode : 'TRAVEL_TASK_INPUT_INVALID');
     }
     return normalized.value as Object;
+  }
+  if (task.toolId === 'social.feed.search') {
+    return normalizedSocialFeedTaskInput(unwrapSingleArgsEnvelope(task.input));
   }
   if (task.toolId !== 'calendar.events.search') {
     return task.input;
@@ -629,6 +684,9 @@ function authorizeCanaryDataTask(task: CreateDataTaskPayload): DataTaskAuthoriza
     }
   }
   valid = valid && allowed.has(task.toolId);
+  if (valid && task.toolId === 'social.feed.search') {
+    valid = validSocialFeedTaskInput(task.args);
+  }
   return {
     ok: valid,
     code: valid ? '' : 'DATA_TASK_UNAUTHORIZED',

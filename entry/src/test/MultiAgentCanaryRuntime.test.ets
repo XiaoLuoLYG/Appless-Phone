@@ -219,6 +219,10 @@ const C06_GMAIL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["gmail.mail.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"gmail.mail.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回真实 Gmail 邮件。","reasonCode":"gmail_search_ready"}';
+const C09_SOCIAL_DONE: string = '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"social.feed.search","preferredDensity":"comfortable",' +
+  '"requiredSections":[]},"answer":"已返回真实 SocialHub 消息。","reasonCode":"social_feed_ready"}';
 const FOOD_CONTEXT_ANSWER: string = '{"personaId":"food_companion","skillId":"",' +
   '"requestedCapabilityIds":[],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"conversation",' +
@@ -474,6 +478,32 @@ function c06GmailSearchResult(): DataResult {
       '"message":"1 real result"}],"extras":[],"entityRefs":["thread-c06-real"]}') as Object,
     warnings: []
   };
+}
+
+function c09SocialFeedResult(): DataResult {
+  return {
+    toolId: 'social.feed.search',
+    outputSchema: 'socialHubFeed',
+    status: 'success',
+    sources: [],
+    data: JSON.parse('{"items":[{"id":"item-c09-real","platform":"slack","kind":"message",' +
+      '"author":"Alice","handle":"alice","text":"hello","timestamp":"2026-07-23T09:00:00Z",' +
+      '"url":"","mediaUrl":"","channel":"general","channelId":"C1","threadId":"T1",' +
+      '"unread":true}],"connections":[{"platform":"x","status":"connected","displayName":"X",' +
+      '"accountId":"x-real","message":"connected"},{"platform":"slack","status":"connected",' +
+      '"displayName":"Slack","accountId":"slack-real","message":"connected"}]}') as Object,
+    warnings: []
+  };
+}
+
+function c09SocialDecision(inputJson: string): string {
+  return '{"personaId":"work_companion","skillId":"",' +
+    '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute",' +
+    '"dataTasks":[{"localId":"social-feed","goal":"read X and Slack messages",' +
+    '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search","input":' +
+    inputJson + ',"required":true}],"uiIntent":{"purpose":"social.feed.search",' +
+    '"preferredDensity":"comfortable","requiredSections":["messages"]},' +
+    '"reasonCode":"social_feed_search"}';
 }
 
 class CalendarUpdateExecutor implements DataTaskExecutor {
@@ -1057,6 +1087,39 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('does not unwrap an args envelope for a non SocialHub Data task', 0, async () => {
+      const input = '{"args":{"operation":"search","qualifiedName":"NOTION_SEARCH",' +
+        '"schema":{"type":"object"},"receipt":"turn-dynamic-1"}}';
+      const decision = DYNAMIC_READ_DECISION.replace(
+        '{"operation":"search","qualifiedName":"NOTION_SEARCH",' +
+          '"schema":{"type":"object"},"receipt":"turn-dynamic-1"}',
+        input
+      );
+      const executor = new RecordingDynamicExecutor();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([decision, DYNAMIC_READ_DONE]),
+        executor,
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      const outcome = await runtime.submit('搜索我授权的 Notion 页面', { text: '' });
+      const args = executor.tasks[0].args as Record<
+        string,
+        Object | string | number | boolean | null | undefined
+      >;
+
+      expect(outcome.kind).assertEqual('settled');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(Object.keys(args).join(',')).assertEqual('args');
+      expect(JSON.stringify(args['args'])).assertEqual(
+        '{"operation":"search","qualifiedName":"NOTION_SEARCH",' +
+          '"schema":{"type":"object"},"receipt":"turn-dynamic-1"}'
+      );
+      runtime.dispose();
+    });
+
     it('keeps known direct-answer planner errors inside multi-agent and hands off only unmigrated IDs', 0, async () => {
       const model = new QueueModel([
         ANSWER_DECISION,
@@ -1149,6 +1212,8 @@ export default function multiAgentCanaryRuntimeTest() {
       const prompt = model.prompts[0];
       expect(prompt.indexOf('SocialHub inbox')).assertLarger(-1);
       expect(prompt.indexOf('private-message')).assertLarger(-1);
+      expect(prompt.indexOf('dataTasks[].input.platforms')).assertLarger(-1);
+      expect(prompt.indexOf('legacy ToolCall uses args.platforms')).assertLarger(-1);
       expect(prompt.indexOf('public X/Twitter posts')).assertLarger(-1);
       expect(prompt.indexOf('mailbox/email/inbox')).assertLarger(-1);
       expect(prompt.indexOf('Composio-backed app/toolkit')).assertLarger(-1);
@@ -1165,6 +1230,147 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(catalogEnd - catalogStart).assertLess(64001);
       expect(prompt.length).assertLess(100001);
       expect(model.prompts.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('passes only the Leader selected top-level SocialHub platforms to the Provider', 0, async () => {
+      const calls: StructuredToolCallRecord[] = [];
+      const bus = new TrackingBus();
+      const options = canaryOptions(
+        new QueueModel([c09SocialDecision('{"platforms":["x","slack"]}'), C09_SOCIAL_DONE]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        args: Object
+      ): Promise<DataResult> => {
+        calls.push({ toolId, prompt, args });
+        return c09SocialFeedResult();
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+      const args = calls[0].args as Record<string, Object | string | number | boolean>;
+      const platforms = args['platforms'] as Object[];
+
+      expect(outcome.kind).assertEqual('settled');
+      expect((outcome as MultiAgentSettledOutcome).status).assertEqual('success');
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].toolId).assertEqual('social.feed.search');
+      expect(Object.keys(args).join(',')).assertEqual('platforms');
+      expect(platforms.length).assertEqual(2);
+      expect(platforms[0]).assertEqual('x');
+      expect(platforms[1]).assertEqual('slack');
+      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('unwraps one legacy args envelope before passing SocialHub platforms to the Provider', 0, async () => {
+      const calls: StructuredToolCallRecord[] = [];
+      const options = canaryOptions(
+        new QueueModel([
+          c09SocialDecision('{"args":{"platforms":["x","slack"]}}'),
+          C09_SOCIAL_DONE
+        ]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      );
+      options.dataExecutor = undefined;
+      options.structuredToolCall = async (
+        toolId: string,
+        prompt: string,
+        args: Object
+      ): Promise<DataResult> => {
+        calls.push({ toolId, prompt, args });
+        return c09SocialFeedResult();
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+      const args = calls[0].args as Record<string, Object | string | number | boolean>;
+      const platforms = args['platforms'] as Object[];
+
+      expect(outcome.kind).assertEqual('settled');
+      expect((outcome as MultiAgentSettledOutcome).status).assertEqual('success');
+      expect(Object.keys(args).join(',')).assertEqual('platforms');
+      expect(platforms.length).assertEqual(2);
+      expect(platforms[0]).assertEqual('x');
+      expect(platforms[1]).assertEqual('slack');
+      runtime.dispose();
+    });
+
+    it('rejects malformed SocialHub platform inputs before Data task publication', 0, async () => {
+      const malformed: string[] = [
+        '{"args":{"platforms":["x","slack"]},"extra":true}',
+        '{"args":[]}',
+        '{"platforms":[]}',
+        '{"platforms":["x","x"]}',
+        '{"platforms":["x","unknown"]}',
+        '{"platforms":["all","slack"]}'
+      ];
+      for (let index = 0; index < malformed.length; index++) {
+        const bus = new TrackingBus();
+        const executor = new RecordingDynamicExecutor();
+        const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+          new QueueModel([c09SocialDecision(malformed[index])]),
+          executor,
+          new RecordingOpener(),
+          [],
+          [],
+          bus
+        ));
+
+        const outcome = await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+
+        expect(outcome.kind).assertEqual('settled');
+        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+        expect(executor.tasks.length).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+        runtime.dispose();
+      }
+    });
+
+    it('rejects a nested SocialHub Data task at authorization', 0, async () => {
+      const bus = new TrackingBus();
+      const executor = new RecordingDynamicExecutor();
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        new QueueModel([ANSWER_DECISION]),
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      bus.publish({
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'canary-test',
+        turnId: 'forged-social-turn',
+        taskId: 'forged-social-task',
+        payload: {
+          taskId: 'forged-social-task',
+          roundId: 'forged-social-turn:round-1',
+          skillId: '',
+          goal: 'read social messages',
+          allowedToolIds: ['social.feed.search'],
+          toolId: 'social.feed.search',
+          outputSchema: 'socialHubFeed',
+          args: JSON.parse('{"args":{"platforms":["x","slack"]}}') as Object,
+          required: true
+        } as CreateDataTaskPayload
+      });
+      await flush();
+
+      expect(executor.tasks.length).assertEqual(0);
+      expect(bus.count(AgentMessageType.TASK_ERROR)).assertEqual(1);
       runtime.dispose();
     });
 

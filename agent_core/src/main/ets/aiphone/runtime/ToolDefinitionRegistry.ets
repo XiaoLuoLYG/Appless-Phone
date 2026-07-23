@@ -545,7 +545,8 @@ const DYNAMIC_SEARCH_PLANNING_DESCRIPTION: string =
   'Asana tasks, GitHub issues, HubSpot, Salesforce, Outlook, Spotify, TikTok, or Ticketmaster. Do not use ' +
   'dynamic.search for any SocialHub inbox, private-message, recent-message, or connection-state request involving ' +
   'X/Twitter, Slack, WeCom, Discord, LinkedIn, WhatsApp, or Instagram; use social.feed.search with structured ' +
-  'args.platforms instead. WhatsApp Business message sending uses whatsapp.message.send, never dynamic.search. ' +
+  'top-level platforms instead. LeaderDecision uses dataTasks[].input.platforms; legacy ToolCall uses args.platforms. ' +
+  'WhatsApp Business message sending uses whatsapp.message.send, never dynamic.search. ' +
   'Gmail, Google Calendar, YouTube account tools, and X public post search have fixed Composio-backed tools; use ' +
   'those fixed tool IDs instead of dynamic.search. Use dynamic.search for Outlook only when the user explicitly ' +
   'names Outlook or Composio Outlook; ordinary mailbox aggregation uses mail.search. World Cup page, schedule, ' +
@@ -586,7 +587,7 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
   } else if (definition.toolId === 'luckin.order.status') {
     description += '. Use when the user asks to check, refresh, or view a Luckin order status, pickup code, or existing orderId.';
   } else if (definition.toolId === 'social.feed.search') {
-    description += '. Use for every SocialHub inbox, received-message, recent-message, private-message, or connection-state request involving X/Twitter, Slack, WeCom, Discord, LinkedIn, WhatsApp, or Instagram, including when the user mentions Composio or authorization. Input must be JSON with args.platforms: use one named platform such as ["whatsapp"] for a single-source request, or ["all"] for the complete SocialHub. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. This tool reports unsupported read capabilities as limitations and never fabricates social messages.';
+    description += '. Use for every SocialHub inbox, received-message, recent-message, private-message, or connection-state request involving X/Twitter, Slack, WeCom, Discord, LinkedIn, WhatsApp, or Instagram, including when the user mentions Composio or authorization. The tool argument object must contain top-level platforms: LeaderDecision uses dataTasks[].input.platforms; legacy ToolCall uses args.platforms. Use one named platform such as ["whatsapp"] for a single-source request, named platforms such as ["x","slack"] for a combined request, or ["all"] for the complete SocialHub. Do not use for public X/Twitter posts; use x.post.search for explicit public post searches. This tool reports unsupported read capabilities as limitations and never fabricates social messages.';
   } else if (definition.toolId === 'social.reply.draft') {
     description += '. Use only to draft a reply after a real SocialHub item is selected. Include itemId, platform, and instruction when available. Do not send.';
   } else if (definition.toolId === 'x.post.search') {
