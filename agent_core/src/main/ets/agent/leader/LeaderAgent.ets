@@ -4,13 +4,9 @@ import {
   AgentMessageType,
   ConversationTurnMessage,
   CurrentSurfaceSummary,
-  LegacyHandoff,
-  LegacyHandoffPayload,
   ObservationDigest,
-  RuntimeOwnershipDecision,
   TaskErrorPayload,
-  TurnResultPayload,
-  ownershipForPlan
+  TurnResultPayload
 } from '../message/AgentMessage';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
@@ -419,40 +415,6 @@ export class LeaderAgent extends MessageDrivenAgent {
         'LEADER_SKILL_CAPABILITY_VIOLATION',
         'Selected skill does not declare every requested capability'
       );
-      return;
-    }
-    const executionStarted: boolean = state.semantic || state.turnObservations.length > 0;
-    const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
-    if (ownership.owner === 'legacy') {
-      if (this.decisionObserver !== null) {
-        this.decisionObserver(
-          message.conversationId,
-          message.turnId,
-          message.taskId,
-          decision.requestedCapabilityIds.slice(),
-          decision.personaId,
-          decision.skillId
-        );
-      }
-      if (executionStarted) {
-        this.publishError(
-          message,
-          'LEADER_RUNTIME_OWNERSHIP_VIOLATION',
-          'Leader cannot hand off after runtime execution has started'
-        );
-      } else {
-        this.publishHandoff(message, decision, ownership);
-      }
-      this.finishTurn(state);
-      return;
-    }
-    if (decision.roundAction === 'legacy_handoff') {
-      this.publishError(
-        message,
-        'LEADER_HANDOFF_INVALID',
-        'Legacy handoff requires at least one unmigrated capability'
-      );
-      this.finishTurn(state);
       return;
     }
     if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
@@ -957,18 +919,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       return false;
     }
     const actionIntent = decision.actionIntent;
-    const ownership: RuntimeOwnershipDecision = this.decisionOwnership(decision);
-    return (actionIntent === undefined ||
-      this.validActionIntent(actionIntent, ownership.owner === 'legacy')) &&
+    return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
       this.requestedCapabilitiesMatchExecution(decision);
-  }
-
-  private decisionOwnership(decision: LeaderDecision): RuntimeOwnershipDecision {
-    const ownedIds: string[] | undefined = this.planningContext.runtimeOwnedToolIds;
-    if (ownedIds === undefined) {
-      return { owner: 'multi_agent', unmigratedToolIds: [] };
-    }
-    return ownershipForPlan(decision.requestedCapabilityIds, new Set<string>(ownedIds));
   }
 
   private validRequestedCapabilityIds(ids: string[]): boolean {
@@ -1111,10 +1063,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.validUniqueStrings(values['requiredSections'] as Object[], true);
   }
 
-  private validActionIntent(
-    intent: Object | string | number | boolean | null,
-    allowRegisteredHandoff: boolean = false
-  ): boolean {
+  private validActionIntent(intent: Object | string | number | boolean | null): boolean {
     if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
       Object.keys(intent).sort().join(',') !== 'allowedActionIds,goal') {
       return false;
@@ -1127,9 +1076,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     for (let index = 0; index < allowedIds.length; index++) {
       const actionId: string = allowedIds[index] as string;
-      if (allowRegisteredHandoff ?
-        this.toolMetadata(actionId) === null :
-        !leaderIsActionCapability(this.planningContext, actionId)) {
+      if (!leaderIsActionCapability(this.planningContext, actionId)) {
         return false;
       }
     }
@@ -1220,7 +1167,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   }
 
   private validRoundAction(value: string): boolean {
-    return value === 'execute' || value === 'answer' || value === 'clarify' || value === 'legacy_handoff';
+    return value === 'execute' || value === 'answer' || value === 'clarify';
   }
 
   private validSelectedSkill(personaId: string, skillId: string): boolean {
@@ -1529,28 +1476,6 @@ export class LeaderAgent extends MessageDrivenAgent {
     return hasError ? 'error' : 'empty';
   }
 
-  private publishHandoff(
-    input: AgentMessage,
-    decision: LeaderDecision,
-    handoff: LegacyHandoff
-  ): void {
-    const payload: LegacyHandoffPayload = {
-      owner: 'legacy',
-      reason: 'unmigrated_tool',
-      unmigratedToolIds: handoff.unmigratedToolIds.slice(),
-      reasonCode: 'unmigrated_tool',
-      personaId: decision.personaId,
-      skillId: decision.skillId
-    };
-    this.bus.publish({
-      type: AgentMessageType.TURN_HANDOFF,
-      conversationId: input.conversationId,
-      turnId: input.turnId,
-      taskId: input.taskId,
-      payload
-    });
-  }
-
   private currentSkillId(input: AgentMessage): string {
     const state: LeaderTurnState | undefined = this.turns.get(this.turnKey(input));
     if (state === undefined) {
@@ -1598,9 +1523,7 @@ export class LeaderAgent extends MessageDrivenAgent {
         }))
       });
     }
-    const runtimeOwnedToolIds: string[] | undefined = context.runtimeOwnedToolIds === undefined ?
-      undefined : context.runtimeOwnedToolIds.slice();
-    return { tools, personas, runtimeOwnedToolIds };
+    return { tools, personas };
   }
 
   private publishError(message: AgentMessage, code: string, detail: string): void {

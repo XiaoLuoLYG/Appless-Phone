@@ -671,8 +671,7 @@ function planningContext(): LeaderPlanningContext {
         status: 'active',
         toolIds: ['travel.search']
       }]
-    }],
-    runtimeOwnedToolIds: ['memory.update']
+    }]
   };
 }
 
@@ -1210,11 +1209,11 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[0].indexOf('"reasonCode":"string"')).assertEqual(-1);
       expect(model.systemPrompts[0].indexOf(
         'For roundAction answer or clarify, include answer as a non-empty string. ' +
-          'For roundAction execute or legacy_handoff, omit answer.'
+          'For roundAction execute, omit answer.'
       ) >= 0).assertTrue();
       expect(model.prompts[0].indexOf(
         'For roundAction answer or clarify, include answer as a non-empty string. ' +
-          'For roundAction execute or legacy_handoff, omit answer.'
+          'For roundAction execute, omit answer.'
       ) >= 0).assertTrue();
     });
 
@@ -2431,17 +2430,13 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('owns diagnostic reason codes for omitted forged and legacy values', 0, async () => {
+    it('owns diagnostic reason codes for omitted and forged model values', 0, async () => {
       const omittedModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
       const forgedModel = new QueueLocalModel([VALID_ANSWER_DECISION]);
       const clarifyModel = new QueueLocalModel(['{"personaId":"travel_companion","skillId":"",' +
         '"requestedCapabilityIds":[],"roundAction":"clarify","dataTasks":[],' +
         '"uiIntent":{"purpose":"clarify","preferredDensity":"comfortable","requiredSections":[]},' +
         '"answer":"请提供城市"}']);
-      const legacyModel = new QueueLocalModel(['{"personaId":"travel_companion","skillId":"",' +
-        '"requestedCapabilityIds":["payment.create"],"roundAction":"legacy_handoff","dataTasks":[],' +
-        '"uiIntent":{"purpose":"handoff","preferredDensity":"comfortable","requiredSections":[]},' +
-        '"reasonCode":"forged_by_model"}']);
       const input: InputUserPayload = { text: '你好' };
 
       const omitted = await new MultiAgentLeaderPlanner(omittedModel).plan(
@@ -2453,18 +2448,12 @@ export default function multiAgentLeaderPlannerTest() {
       const clarify = await new MultiAgentLeaderPlanner(clarifyModel).plan(
         inputMessage(), input, planningContext(), 1
       );
-      const legacy = await new MultiAgentLeaderPlanner(legacyModel).plan(
-        inputMessage(), input, planningContext(), 1
-      );
-
       expect(omitted.reasonCode).assertEqual('host_answer');
       expect(forged.reasonCode).assertEqual('host_answer');
       expect(clarify.reasonCode).assertEqual('host_clarify');
-      expect(legacy.reasonCode).assertEqual('unmigrated_tool');
       expect(omittedModel.prompts.length).assertEqual(1);
       expect(forgedModel.prompts.length).assertEqual(1);
       expect(clarifyModel.prompts.length).assertEqual(1);
-      expect(legacyModel.prompts.length).assertEqual(1);
     });
 
     it('repairs a present malformed reason code while ignoring a valid model value', 0, async () => {

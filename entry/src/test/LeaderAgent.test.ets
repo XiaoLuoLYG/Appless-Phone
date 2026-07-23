@@ -16,7 +16,6 @@ import {
   LeaderDataTask,
   LeaderDecision,
   LeaderDecisionDataTask,
-  LegacyHandoffPayload,
   LeaderPlan,
   LeaderPlanner,
   LeaderPlannerResult,
@@ -33,7 +32,6 @@ import {
 } from '@loop/agent-core';
 import { MultiAgentLeaderPlanner } from '../main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner';
 import { leaderPersonaContext } from '../main/ets/model/LeaderPersonaContext';
-import { routePersonaForPrompt } from '../main/ets/model/PersonaRouter';
 
 interface HotelSearchArgs {
   city: string;
@@ -83,10 +81,15 @@ class CapturingLeaderPlanner implements LeaderPlanner {
   }
 }
 
-class RoutedPersonaPlanner implements LeaderPlanner {
+class SelectedPersonaPlanner implements LeaderPlanner {
   lastInput: InputUserPayload | null = null;
   lastContext: LeaderPlanningContext | null = null;
   lastPlan: LeaderPlan | null = null;
+  private readonly personaId: string;
+
+  constructor(personaId: string) {
+    this.personaId = personaId;
+  }
 
   async plan(
     _message: AgentMessage,
@@ -95,7 +98,7 @@ class RoutedPersonaPlanner implements LeaderPlanner {
   ): Promise<LeaderPlan> {
     this.lastInput = input;
     this.lastContext = context;
-    const personaId = routePersonaForPrompt(input.text).personaId;
+    const personaId = this.personaId;
     const persona = context.personas.filter((item): boolean => item.personaId === personaId)[0];
     const plan = hotelPlan('persona-ui', 'persona-data');
     plan.personaId = personaId;
@@ -1155,7 +1158,6 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       });
-      context.runtimeOwnedToolIds = ['hotel.search', 'memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
       const observer = bus.openReader();
       leader.start();
@@ -1428,7 +1430,6 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       });
-      context.runtimeOwnedToolIds = ['memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
       const observer = bus.openReader();
       leader.start();
@@ -1482,7 +1483,6 @@ export default function leaderAgentTest() {
         registeredBackends: ['local_adapter'], inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult', actions: ['memory.update']
       });
-      context.runtimeOwnedToolIds = ['memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context, 10);
       const observer = bus.openReader();
       leader.start();
@@ -1530,7 +1530,6 @@ export default function leaderAgentTest() {
         registeredBackends: ['local_adapter'], inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult', actions: ['memory.update']
       });
-      context.runtimeOwnedToolIds = ['memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context, 20);
       const observer = bus.openReader();
       leader.start();
@@ -1654,7 +1653,6 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: []
       });
-      context.runtimeOwnedToolIds = ['hotel.search', 'memory.update'];
       const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
       const observer = bus.openReader();
       leader.start();
@@ -1666,56 +1664,6 @@ export default function leaderAgentTest() {
       expect(request.type).assertEqual(AgentMessageType.ACTION_PLAN_REQUEST);
       expect((request.payload as ActionPlanRequestPayload).allowedActionIds[0])
         .assertEqual('memory.update');
-      leader.stop();
-      observer.close();
-    });
-
-    it('publishes a typed semantic legacy handoff before any execution message', 0, async () => {
-      const bus = new LinkedMessageBus();
-      const decision = semanticDecision([]);
-      decision.roundAction = 'legacy_handoff';
-      decision.requestedCapabilityIds = ['unknown.search'];
-      decision.reasonCode = 'unmigrated_tool';
-      const context = semanticPlanningContext();
-      context.tools.push({
-        toolId: 'unknown.search',
-        domain: 'unknown',
-        intent: 'unknown.search',
-        riskLevel: 'read',
-        registeredBackends: [],
-        inputSchema: 'dynamicToolSearchQuery',
-        outputSchema: 'dynamicToolConnect',
-        actions: []
-      });
-      context.runtimeOwnedToolIds = ['hotel.search'];
-      const leader = new LeaderAgent(
-        bus,
-        new RoundScriptedPlanner([decision]),
-        context
-      );
-      const observer = bus.openReader();
-      leader.start();
-
-      bus.publish(inputMessage());
-      await settle();
-      bus.publish(inputMessage('marker-conversation', 'marker-turn', 'marker-task', 'marker'));
-      const beforeMarker: AgentMessage[] = [];
-      let next = await receive(observer);
-      while (next.taskId !== 'marker-task') {
-        beforeMarker.push(next);
-        next = await receive(observer);
-      }
-
-      expect(beforeMarker.length).assertEqual(2);
-      expect(beforeMarker[0].type).assertEqual(AgentMessageType.INPUT_USER);
-      expect(beforeMarker[1].type).assertEqual(AgentMessageType.TURN_HANDOFF);
-      const handoff = beforeMarker[1].payload as LegacyHandoffPayload;
-      expect(handoff.owner).assertEqual('legacy');
-      expect(handoff.reason).assertEqual('unmigrated_tool');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.search');
-      expect(handoff.reasonCode).assertEqual('unmigrated_tool');
-      expect(handoff.personaId).assertEqual('travel_companion');
-      expect(handoff.skillId).assertEqual('');
       leader.stop();
       observer.close();
     });
@@ -2627,7 +2575,7 @@ export default function leaderAgentTest() {
 
     it('accepts matching work persona skill for explicit work wording', 0, async () => {
       const bus = new LinkedMessageBus();
-      const planner = new RoutedPersonaPlanner();
+      const planner = new SelectedPersonaPlanner('work_companion');
       const leader = new LeaderAgent(bus, planner, realPersonaPlanningContext());
       const observer = bus.openReader();
       leader.start();
@@ -2651,7 +2599,7 @@ export default function leaderAgentTest() {
       const input = planner.lastInput as InputUserPayload;
       const selected = context.personas.filter((item): boolean => item.personaId === plan.personaId)[0];
       const controlInput: InputUserPayload = { text: '点一杯咖啡' };
-      const controlPlan = await new RoutedPersonaPlanner().plan(
+      const controlPlan = await new SelectedPersonaPlanner('food_companion').plan(
         inputMessage('conversation-food', 'turn-food', 'input-food', controlInput.text),
         controlInput,
         context

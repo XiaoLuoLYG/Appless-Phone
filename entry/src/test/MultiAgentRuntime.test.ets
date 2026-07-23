@@ -26,8 +26,6 @@ import {
   InputUserPayload,
   LeaderDecision,
   LeaderDecisionDataTask,
-  LegacyHandoff,
-  LegacyHandoffPayload,
   LeaderPlanner,
   LeaderPlanningContext,
   LinkedMessageBus,
@@ -43,19 +41,15 @@ import {
   UiSurfaceWriter,
   UiTaskRenderer,
   VirtualActionIntent,
-  VirtualActionIntentResolver,
-  allToolDefinitions
+  VirtualActionIntentResolver
 } from '@loop/agent-core';
 import {
   MultiAgentEvidenceFormatter,
   MultiAgentRuntime
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntime';
 import {
-  MultiAgentHandoffOutcome,
-  MIGRATED_TOOL_IDS,
   MultiAgentRuntimeOptions,
-  MultiAgentSettledOutcome,
-  ownershipForPlan
+  MultiAgentSettledOutcome
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 
 class TestGate {
@@ -100,43 +94,6 @@ class CountingBus extends LinkedMessageBus {
   }
 }
 
-class HandoffMutatingBus extends CountingBus {
-  private readonly replacementIds: string[];
-
-  constructor(replacementIds: string[]) {
-    super();
-    this.replacementIds = replacementIds.slice();
-  }
-
-  publish(message: AgentMessage): void {
-    if (message.type === AgentMessageType.TURN_HANDOFF) {
-      const payload = message.payload as LegacyHandoff;
-      payload.unmigratedToolIds = this.replacementIds.slice();
-    }
-    super.publish(message);
-  }
-}
-
-class HandoffIdentityMutatingBus extends CountingBus {
-  private readonly personaId: string;
-  private readonly skillId: string;
-
-  constructor(personaId: string, skillId: string) {
-    super();
-    this.personaId = personaId;
-    this.skillId = skillId;
-  }
-
-  publish(message: AgentMessage): void {
-    if (message.type === AgentMessageType.TURN_HANDOFF) {
-      const payload = message.payload as LegacyHandoffPayload;
-      payload.personaId = this.personaId;
-      payload.skillId = this.skillId;
-    }
-    super.publish(message);
-  }
-}
-
 class AnswerPlanner implements LeaderPlanner {
   lastInput: InputUserPayload | null = null;
 
@@ -148,89 +105,6 @@ class AnswerPlanner implements LeaderPlanner {
   ): Promise<LeaderDecision> {
     this.lastInput = input;
     return answerDecision(input.text === '查询天气' ? '我会保留上轮地点上下文。' : '你好');
-  }
-}
-
-class HandoffPlanner implements LeaderPlanner {
-  async plan(
-    _message: AgentMessage,
-    _input: InputUserPayload,
-    _context: LeaderPlanningContext,
-    _round: number = 1
-  ): Promise<LeaderDecision> {
-    return {
-      personaId: 'travel_companion',
-      skillId: '',
-      requestedCapabilityIds: ['unknown.search'],
-      roundAction: 'legacy_handoff',
-      dataTasks: [],
-      uiIntent: {
-        purpose: 'handoff',
-        preferredDensity: 'comfortable',
-        requiredSections: []
-      },
-      reasonCode: 'unmigrated_tool'
-    };
-  }
-}
-
-class GenericHandoffPlanner implements LeaderPlanner {
-  async plan(
-    _message: AgentMessage,
-    _input: InputUserPayload,
-    _context: LeaderPlanningContext,
-    _round: number = 1
-  ): Promise<LeaderDecision> {
-    return {
-      personaId: 'travel_companion',
-      skillId: '',
-      requestedCapabilityIds: [],
-      roundAction: 'legacy_handoff',
-      dataTasks: [],
-      uiIntent: {
-        purpose: 'handoff',
-        preferredDensity: 'comfortable',
-        requiredSections: []
-      },
-      reasonCode: 'model_failed'
-    };
-  }
-}
-
-class MixedOwnershipPlanner implements LeaderPlanner {
-  async plan(
-    _message: AgentMessage,
-    _input: InputUserPayload,
-    _context: LeaderPlanningContext,
-    _round: number = 1
-  ): Promise<LeaderDecision> {
-    const task: LeaderDecisionDataTask = {
-      localId: 'hotel-search',
-      goal: 'Search real hotels',
-      allowedToolIds: ['hotel.search'],
-      toolId: 'hotel.search',
-      input: JSON.parse(
-        '{"city":"Shenzhen","checkIn":"2026-07-21","checkOut":"2026-07-22","guests":2}'
-      ) as Object,
-      required: true
-    };
-    return {
-      personaId: 'travel_companion',
-      skillId: '',
-      requestedCapabilityIds: ['hotel.search', 'legacy.action'],
-      roundAction: 'execute',
-      dataTasks: [task],
-      uiIntent: {
-        purpose: 'mixed ownership',
-        preferredDensity: 'comfortable',
-        requiredSections: ['hotels']
-      },
-      actionIntent: {
-        goal: 'Run an unmigrated action',
-        allowedActionIds: ['legacy.action']
-      },
-      reasonCode: 'mixed_plan'
-    };
   }
 }
 
@@ -328,54 +202,6 @@ class TwoDataRoundPlanner implements LeaderPlanner {
         purpose: 'combined results', preferredDensity: 'comfortable', requiredSections: ['place']
       },
       reasonCode: 'place_search'
-    };
-  }
-}
-
-class PostExecutionHandoffPlanner implements LeaderPlanner {
-  async plan(
-    _message: AgentMessage,
-    input: InputUserPayload,
-    _context: LeaderPlanningContext,
-    _round: number = 1
-  ): Promise<LeaderDecision> {
-    if (input.recentObservations !== undefined && input.recentObservations.length > 0) {
-      return {
-        personaId: 'travel_companion',
-        skillId: '',
-        requestedCapabilityIds: ['unknown.search'],
-        roundAction: 'legacy_handoff',
-        dataTasks: [],
-        uiIntent: {
-          purpose: 'unknown.search',
-          preferredDensity: 'comfortable',
-          requiredSections: []
-        },
-        reasonCode: 'unmigrated_tool'
-      };
-    }
-    const task: LeaderDecisionDataTask = {
-      localId: 'hotel-search',
-      goal: 'Search real hotels',
-      allowedToolIds: ['hotel.search'],
-      toolId: 'hotel.search',
-      input: JSON.parse(
-        '{"city":"Shenzhen","checkIn":"2026-07-21","checkOut":"2026-07-22","guests":2}'
-      ) as Object,
-      required: true
-    };
-    return {
-      personaId: 'travel_companion',
-      skillId: '',
-      requestedCapabilityIds: ['hotel.search'],
-      roundAction: 'execute',
-      dataTasks: [task],
-      uiIntent: {
-        purpose: 'hotel.search',
-        preferredDensity: 'comfortable',
-        requiredSections: ['hotels']
-      },
-      reasonCode: 'hotel_search'
     };
   }
 }
@@ -789,18 +615,8 @@ function planningContext(): LeaderPlanningContext {
       memory: '常用出发地：北京。',
       previous: true,
       activeSkills: []
-    }],
-    runtimeOwnedToolIds: migratedRuntimeIds()
+    }]
   };
-}
-
-function migratedRuntimeIds(): string[] {
-  const ids: string[] = [];
-  MIGRATED_TOOL_IDS.forEach((toolId: string): void => {
-    ids.push(toolId);
-  });
-  ids.push('memory.update');
-  return ids;
 }
 
 async function noOffers(
@@ -1223,27 +1039,6 @@ export default function multiAgentRuntimeTest() {
       formatter.dispose();
       const afterTerminal: string = formatter.line(input);
       expect(afterTerminal).assertEqual(first);
-    });
-
-    it('owns all 46 fixed tools plus the bounded dynamic read virtual tool', 0, () => {
-      const registryIds = allToolDefinitions().map(
-        (definition: ToolDefinition): string => definition.toolId
-      );
-      const known = ownershipForPlan(registryIds, MIGRATED_TOOL_IDS);
-      const unknown = ownershipForPlan(
-        ['travel.search', 'unknown.tool', 'unknown.tool'],
-        MIGRATED_TOOL_IDS
-      );
-
-      expect(MIGRATED_TOOL_IDS.size).assertEqual(47);
-      expect(MIGRATED_TOOL_IDS.has('dynamic.search')).assertTrue();
-      expect(new Set<string>(registryIds).size).assertEqual(46);
-      expect(known.owner).assertEqual('multi_agent');
-      expect(known.unmigratedToolIds.length).assertEqual(0);
-      const handoff = unknown as LegacyHandoff;
-      expect(handoff.owner).assertEqual('legacy');
-      expect(handoff.reason).assertEqual('unmigrated_tool');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.tool');
     });
 
     it('opens exactly four Agent readers and one observer before bounded INPUT.USER', 0, async () => {
@@ -1721,173 +1516,6 @@ export default function multiAgentRuntimeTest() {
       expect(result.surfaceId).assertEqual('surface_seed');
       executor.release.open();
       runtime.dispose();
-    });
-
-    it('returns a typed handoff before any Data, UI, or Action execution', 0, async () => {
-      const bus = new CountingBus();
-      const runtime = new MultiAgentRuntime(runtimeOptions(
-        bus,
-        new HandoffPlanner(),
-        new ControlledWriter()
-      ));
-      const raw = await runtime.submit('non-canary', { text: '' });
-      const handoff = raw as MultiAgentHandoffOutcome;
-
-      expect(handoff.kind).assertEqual('handoff');
-      expect(handoff.owner).assertEqual('legacy');
-      expect(handoff.reason).assertEqual('unmigrated_tool');
-      expect(handoff.reasonCode).assertEqual('unmigrated_tool');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('unknown.search');
-      expect(handoff.personaId).assertEqual('travel_companion');
-      expect(bus.published.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TASK_CREATE_DATA ||
-          message.type === AgentMessageType.TASK_CREATE_UI ||
-          message.type === AgentMessageType.ACTION_RUN
-      ).length).assertEqual(0);
-      runtime.dispose();
-    });
-
-    it('rejects a truly unknown handoff after owned provider execution starts', 0, async () => {
-      const bus = new CountingBus();
-      const executor = new SuccessDataExecutor();
-      const options = runtimeOptions(
-        bus,
-        new PostExecutionHandoffPlanner(),
-        new ControlledWriter()
-      );
-      options.dataExecutor = executor;
-      const runtime = new MultiAgentRuntime(options);
-
-      const outcome = await runtime.submit('search then hand off', { text: '' }) as
-        MultiAgentSettledOutcome;
-      const errors = bus.published.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TASK_ERROR
-      );
-
-      expect(outcome.kind).assertEqual('settled');
-      expect(outcome.status).assertEqual('error');
-      expect(outcome.message).assertEqual('Leader cannot hand off after runtime execution has started');
-      expect(executor.calls).assertEqual(1);
-      expect(bus.published.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TURN_HANDOFF
-      ).length).assertEqual(0);
-      expect(errors.length).assertEqual(1);
-      expect((errors[0].payload as TaskErrorPayload).code)
-        .assertEqual('LEADER_RUNTIME_OWNERSHIP_VIOLATION');
-      runtime.dispose();
-    });
-
-    it('rejects forged known missing extra and case-mutated handoff capability sets', 0, async () => {
-      const forgeries: string[][] = [
-        ['travel.search'],
-        [],
-        ['unknown.search', 'extra.search'],
-        ['UNKNOWN.SEARCH']
-      ];
-      for (let index = 0; index < forgeries.length; index++) {
-        const bus = new HandoffMutatingBus(forgeries[index]);
-        const runtime = new MultiAgentRuntime(runtimeOptions(
-          bus,
-          new HandoffPlanner(),
-          new ControlledWriter(),
-          20
-        ));
-        const outcome = await runtime.submit('unknown capability', { text: '' });
-        expect(outcome.kind).assertEqual('settled');
-        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
-        runtime.dispose();
-      }
-    });
-
-    it('rejects handoff persona and skill identities that differ from decision authority', 0, async () => {
-      const forgedIdentities: string[][] = [
-        ['work_companion', ''],
-        ['', ''],
-        ['travel_companion', 'travel-search']
-      ];
-      for (let index = 0; index < forgedIdentities.length; index++) {
-        const bus = new HandoffIdentityMutatingBus(
-          forgedIdentities[index][0],
-          forgedIdentities[index][1]
-        );
-        const runtime = new MultiAgentRuntime(runtimeOptions(
-          bus,
-          new HandoffPlanner(),
-          new ControlledWriter(),
-          20
-        ));
-        const outcome = await runtime.submit('unknown capability', { text: '' });
-
-        expect(outcome.kind).assertEqual('settled');
-        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
-        runtime.dispose();
-      }
-    });
-
-    it('hands a mixed plan wholly to legacy before publishing its known Data task', 0, async () => {
-      const bus = new CountingBus();
-      const executor = new SuccessDataExecutor();
-      const options = runtimeOptions(bus, new MixedOwnershipPlanner(), new ControlledWriter());
-      options.dataExecutor = executor;
-      const runtime = new MultiAgentRuntime(options);
-
-      const handoff = await runtime.submit('mixed plan', { text: '' }) as MultiAgentHandoffOutcome;
-
-      expect(handoff.kind).assertEqual('handoff');
-      expect(handoff.unmigratedToolIds.join(',')).assertEqual('legacy.action');
-      expect(executor.calls).assertEqual(0);
-      expect(bus.published.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TASK_CREATE_DATA ||
-          message.type === AgentMessageType.TASK_CREATE_UI ||
-          message.type === AgentMessageType.ACTION_PLAN_REQUEST ||
-          message.type === AgentMessageType.ACTION_RUN
-      ).length).assertEqual(0);
-      runtime.dispose();
-    });
-
-    it('rejects a generic planner handoff before publication instead of invoking legacy', 0, async () => {
-      const bus = new CountingBus();
-      const runtime = new MultiAgentRuntime(runtimeOptions(
-        bus,
-        new GenericHandoffPlanner(),
-        new ControlledWriter()
-      ));
-
-      const outcome = await runtime.submit('generic failure', { text: '' }) as MultiAgentSettledOutcome;
-
-      expect(outcome.kind).assertEqual('settled');
-      expect(outcome.status).assertEqual('error');
-      expect(bus.published.filter((message: AgentMessage): boolean =>
-        message.type === AgentMessageType.TURN_HANDOFF
-      ).length).assertEqual(0);
-      runtime.dispose();
-    });
-
-    it('isolates concurrent ownership decisions by runtime conversation', 0, async () => {
-      const migratedBus = new CountingBus();
-      const legacyBus = new CountingBus();
-      const migrated = new MultiAgentRuntime(runtimeOptions(
-        migratedBus,
-        new AnswerPlanner(),
-        new ControlledWriter()
-      ));
-      const legacy = new MultiAgentRuntime(runtimeOptions(
-        legacyBus,
-        new HandoffPlanner(),
-        new ControlledWriter()
-      ));
-
-      const outcomes = await Promise.all([
-        migrated.submit('你好', { text: '' }),
-        legacy.submit('dynamic tool', { text: '' })
-      ]);
-
-      expect(outcomes[0].kind).assertEqual('settled');
-      expect(outcomes[1].kind).assertEqual('handoff');
-      expect((outcomes[1] as MultiAgentHandoffOutcome).unmigratedToolIds[0])
-        .assertEqual('unknown.search');
-      migrated.dispose();
-      legacy.dispose();
     });
 
     it('ignores wrong correlation and accepts only the exact terminal result', 0, async () => {

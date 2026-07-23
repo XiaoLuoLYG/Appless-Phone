@@ -19,7 +19,7 @@ export interface LeaderDataTask {
   args: Object;
 }
 
-export type LeaderRoundAction = 'execute' | 'answer' | 'clarify' | 'legacy_handoff';
+export type LeaderRoundAction = 'execute' | 'answer' | 'clarify';
 
 export interface LeaderActionIntent {
   goal: string;
@@ -97,7 +97,6 @@ export interface LeaderPersonaMetadata {
 export interface LeaderPlanningContext {
   tools: LeaderToolMetadata[];
   personas: LeaderPersonaMetadata[];
-  runtimeOwnedToolIds?: string[];
 }
 
 export type LeaderDataTaskInputNormalizer = (

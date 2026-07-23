@@ -672,6 +672,31 @@ export function toolPlanningDescriptionForToolId(toolId: string): string {
   return description;
 }
 
+export function isExplicitLuckinOrderPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  const hasLuckin = /瑞幸|luckin|ruixing/i.test(text);
+  const hasTransaction =
+    /点一杯|点杯|点个瑞幸|点瑞幸|帮我点|我要点|下单|下一杯|买一杯|买瑞幸|帮我买|购买一杯|购买瑞幸|来一杯|要一杯|\border\b|\bbuy\b/i
+      .test(text);
+  return hasLuckin && hasTransaction;
+}
+
+export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
+  return toolId === 'hotel.navigate' || toolId === 'hotel.booking.open';
+}
+
+export function aiphoneToolDescriptionForModel(toolId: string): string {
+  if (isSurfaceDerivedHotelActionId(toolId) ||
+    toolId === 'gmail.message.send' ||
+    toolId === 'social.reply.draft' ||
+    toolId === 'calendar.event.create' ||
+    toolId === 'calendar.event.update' ||
+    toolId === 'calendar.event.delete') {
+    return '';
+  }
+  return toolPlanningDescriptionForToolId(toolId);
+}
+
 function toolIdsForDomain(domain: string): string[] {
   const toolIds: string[] = [];
   for (let index = 0; index < TOOL_DEFINITIONS.length; index++) {

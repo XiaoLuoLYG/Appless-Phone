@@ -13,7 +13,6 @@ import {
   travelOptions
 } from '@loop/agent-core';
 import { SocialHubItemData } from '@loop/agent-core';
-import { modelThinkCloseSeen } from '../main/ets/model/LocalModelClient';
 
 export default function a2uiParserTest() {
   describe('a2uiParser', () => {
@@ -199,11 +198,6 @@ export default function a2uiParserTest() {
       expect(items.length).assertEqual(1);
       expect(items[0].platform).assertEqual('slack');
       expect(items[0].text).assertEqual('standup moved');
-    });
-
-    it('detects redacted thinking close tag', 0, () => {
-      expect(modelThinkCloseSeen('分析完成</think>\n{"version":"v0.9.1"}')).assertTrue();
-      expect(modelThinkCloseSeen('还在思考中')).assertFalse();
     });
 
     it('rejects unknown components', 0, () => {

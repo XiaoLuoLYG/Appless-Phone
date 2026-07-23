@@ -121,6 +121,38 @@ function readAgentRuntimeSources() {
   return stripComments(sources.join('\n'));
 }
 
+const retiredOrchestrationPatterns = [
+  ['LoopBackend construction', /\bnew\s+LoopBackend\s*\(/],
+  ['ReActAgentRunner construction', /\bnew\s+ReActAgentRunner\s*\(/],
+  ['PersonaRouter call', /\broutePersonaForPrompt\s*\(/],
+  ['migration ownership list', /\bMIGRATED_TOOL_IDS\b/],
+  ['legacy handoff contract', /\bLegacyHandoff\b/]
+];
+
+function retiredOrchestrationViolations(source) {
+  const code = maskNonCode(source);
+  return retiredOrchestrationPatterns
+    .filter(([, pattern]) => pattern.test(code))
+    .map(([name]) => name);
+}
+
+function readProductionEtsSources() {
+  const sources = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.ets')) {
+        sources.push(readFileSync(entryPath, 'utf8'));
+      }
+    }
+  }
+  visit(resolve(repoRoot, 'agent_core/src/main/ets'));
+  visit(resolve(repoRoot, 'entry/src/main/ets'));
+  return sources.join('\n');
+}
+
 function parseIndexExports(index) {
   const exports = new Map();
   for (const match of index.matchAll(/export\s+(\*|\{[\s\S]*?\})\s+from\s+'([^']+)';/g)) {
@@ -424,6 +456,27 @@ function hasHotelRolesOnBus(source) {
 }
 
 function verifyArchitectureVerifier() {
+  for (const [name, liveSource] of [
+    ['LoopBackend construction', 'const backend = new LoopBackend(options);'],
+    ['ReActAgentRunner construction', 'const runner = new ReActAgentRunner(options);'],
+    ['PersonaRouter call', 'const route = routePersonaForPrompt(prompt);'],
+    ['migration ownership list', 'const ids = MIGRATED_TOOL_IDS;'],
+    ['legacy handoff contract', 'const handoff: LegacyHandoff = value;']
+  ]) {
+    assert(
+      retiredOrchestrationViolations(liveSource).includes(name),
+      `verifier detects live ${name}`
+    );
+    assert(
+      retiredOrchestrationViolations(`// ${liveSource}\n/* ${liveSource} */`).length === 0,
+      `verifier ignores comment-only ${name}`
+    );
+    assert(
+      retiredOrchestrationViolations(`const decoy = ${JSON.stringify(liveSource)};`).length === 0,
+      `verifier ignores string-only ${name}`
+    );
+  }
+
   const exactSkillFixture = `---
 name: test
 tools:
@@ -745,6 +798,12 @@ function runHarBuild() {
 }
 
 function verifySourceContracts() {
+  const retiredViolations = retiredOrchestrationViolations(readProductionEtsSources());
+  assert(
+    retiredViolations.length === 0,
+    'production sources contain no retired orchestration entry points',
+    retiredViolations.join(', ')
+  );
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
   const migrationDesign = read(
     'docs/superpowers/specs/2026-07-21-full-scenario-multi-agent-migration-design.md'
@@ -764,11 +823,9 @@ function verifySourceContracts() {
   const aiphoneA2ui = read('agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
   const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
-  const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
   const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
   const liveCanaryLeaderPlanner = stripComments(canaryLeaderPlanner);
-  const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const index = stripComments(read('agent_core/Index.ets'));
   const indexExports = parseIndexExports(index);
   const agentRuntimeSources = readAgentRuntimeSources();
@@ -1112,28 +1169,14 @@ function verifySourceContracts() {
     'production default SocialHub connections include Reddit'
   );
   assertContains(
-    backend,
-    "toolId !== 'social.reply.draft'",
-    'legacy model registry excludes social.reply.draft'
-  );
-  assertContains(
     canaryRuntime,
     "definition.toolId !== 'social.reply.draft'",
     'multi-agent top-level model catalog excludes social.reply.draft'
   );
 
-  assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
-  assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
-  assertContains(backend, 'splitJsonl(jsonl)', 'LoopBackend splits AIPhone JSONL');
-  assertContains(backend, 'this.callbacks.onA2uiJsonl?.(line)', 'LoopBackend emits AIPhone JSONL lines');
-  assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
-  assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
-  assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
   assertContains(runtimeDefinitions, 'Composio-backed app/toolkit requests', 'registry describes Composio dynamic routing');
   assertContains(runtimeDefinitions, 'Keep the query focused to the relevant 6-10 OR terms', 'registry preserves Gmail academic query expansion guidance');
   assertContains(runtimeDefinitions, 'toolPlanningDescriptionForToolId', 'registry owns the shared planning description projection');
-  assertContains(backend, 'toolPlanningDescriptionForToolId(toolId)', 'LoopBackend consumes the registry planning projection');
-  assert(!backend.includes('private describeAiphoneTool'), 'LoopBackend has no duplicate private planning table');
   assertContains(canaryRuntime, 'toolPlanningDescriptionForToolId(definition.toolId)', 'multi-agent canary consumes the registry planning projection');
   assertContains(canaryRuntime, "definition.toolId !== 'gmail.message.send'", 'multi-agent planner excludes direct Gmail send');
   assertContains(canaryRuntime, 'domain: definition.domain', 'multi-agent planner projects registry domains');
@@ -1211,9 +1254,6 @@ function verifySourceContracts() {
     ),
     'verifier rejects removal of the live tool catalog bound'
   );
-  assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
-
-  assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
@@ -1292,7 +1332,6 @@ function verifySourceContracts() {
   );
   assert(!index.includes('ReactLeaderAgent'), 'public API has no second ReAct leader');
   assert(!index.includes('UIMakerAgent'), 'public API has no UIMaker compatibility agent');
-  assertContains(index, 'ReActRunOptions', 'public API exposes role-specific ReAct options');
 
   const obsoleteAgentFiles = [
     'AgentMessageTypes.ets',
@@ -1383,8 +1422,6 @@ function verifySourceContracts() {
     'model layout actions can reference only immutable offer ids');
   assertContains(a2uiRunner, 'implements UiLayoutPlanner', 'existing A2UI runner is reused as the layout planner');
   assertContains(a2uiModel, 'Output exactly one compact JSON line', 'A2UI model is constrained to one layout envelope');
-  assertContains(backend, 'new ReActAgentRunner', 'legacy scene backend remains a real ReAct runner caller');
-  assert(!agentRuntimeSources.includes('ReActAgentRunner'), 'four-agent runtime does not create a second ReAct execution loop');
   assert(!hasLiveToken(agentRuntimeSources, 'BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
   assert(!hasLiveClass(agentRuntimeSources, 'Coordinator'), 'agent runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
@@ -1441,7 +1478,6 @@ function verifySourceContracts() {
       );
     }
   }
-  assertContains(runner, 'AgentEventKind.SKILL', 'ReAct emits selected skills');
   assertContains(genericMcp, 'annotations: tool.annotations', 'MCP annotations are preserved');
   assertContains(modelScope, "from '../aiphone/runtime/GenericMcpClient'", 'ModelScope reuses GenericMcpClient');
   assertContains(modelScope, 'annotations.readOnlyHint !== true', 'ModelScope requires explicit read-only annotations');
@@ -1472,7 +1508,6 @@ function verifySourceContracts() {
   assert(!/飞常准|12306|天气|weather|searchFlightsByDepArr|searchFlightItineraries|getFlightPriceByCities/i.test(modelScope), 'ModelScope has no domain-specific routing');
   assert(!existsSync(streamablePath), 'ModelScope does not duplicate MCP transport');
   assertContains(registry, 'new ModelScopeTool', 'configured registry exposes ModelScope');
-  assertContains(runner, "this.tools.has('modelscope')", 'ModelScope prompt is gated by actual registration');
   assertContains(index, "./src/main/ets/modelscope/ModelScopeTool", 'public export includes ModelScope');
   assert(!legacySocialPaths.some((path) => existsSync(path)), 'obsolete social bridge files are absent');
 }

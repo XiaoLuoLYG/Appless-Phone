@@ -1,6 +1,5 @@
 import localUnitTest from './LocalUnit.test';
 import conversationContextTest from './ConversationContext.test';
-import reActAgentRunnerTest from './ReActAgentRunner.test';
 import a2uiParserTest from './A2uiParser.test';
 import localModelClientTest from './LocalModelClient.test';
 import toolGatewayClientTest from './ToolGatewayClient.test';
@@ -70,8 +69,6 @@ import socialHubA2uiTest from './SocialHubA2ui.test';
 import socialHubClientTest from './SocialHubClient.test';
 import voiceInputBridgeTest from './VoiceInputBridge.test';
 import personaStoreTest from './PersonaStore.test';
-import personaRouterTest from './PersonaRouter.test';
-import personaPromptTest from './PersonaPrompt.test';
 import personaA2uiTest from './PersonaA2ui.test';
 import personaMemoryUpdateTest from './PersonaMemoryUpdate.test';
 import personaMarkdownTest from './PersonaMarkdown.test';
@@ -90,12 +87,10 @@ import actionPlanRunnerTest from './ActionPlanRunner.test';
 import actionAgentTest from './ActionAgent.test';
 import a2uiLayoutMergerTest from './A2uiLayoutMerger.test';
 import checkoutWebOverlayTest from './CheckoutWebOverlay.test';
-import loopBackendTest from './LoopBackend.test';
 
 export default function testsuite() {
   localUnitTest();
   conversationContextTest();
-  reActAgentRunnerTest();
   a2uiParserTest();
   localModelClientTest();
   toolGatewayClientTest();
@@ -178,12 +173,9 @@ export default function testsuite() {
   a2uiLayoutMergerTest();
   checkoutWebOverlayTest();
   personaStoreTest();
-  personaRouterTest();
-  personaPromptTest();
   personaA2uiTest();
   personaMemoryUpdateTest();
   htmlHomeSnapshotTest();
   htmlHomeRendererTest();
   htmlHomeActionPolicyTest();
-  loopBackendTest();
 }

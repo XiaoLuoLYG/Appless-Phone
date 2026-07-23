@@ -45,7 +45,6 @@ import {
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime';
 import { SystemUriOpener } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 import {
-  MultiAgentHandoffOutcome,
   MultiAgentSettledOutcome
 } from '../main/ets/pages/A2uiHome/agent/MultiAgentRuntimeTypes';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
@@ -226,10 +225,6 @@ const DYNAMIC_READ_DONE: string = '{"personaId":"work_companion","skillId":"",' 
   '"uiIntent":{"purpose":"dynamic.search","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已返回授权 Notion 的读取结果。",' +
   '"reasonCode":"dynamic_read_done"}';
-const WEATHER_HANDOFF_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
-  '"requestedCapabilityIds":["dynamic.search"],"roundAction":"legacy_handoff","dataTasks":[],' +
-  '"uiIntent":{"purpose":"weather","preferredDensity":"comfortable",' +
-  '"requiredSections":[]},"reasonCode":"capability_unavailable"}';
 const GMAIL_REGISTERED_CAPABILITY_ANSWER: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["gmail.thread.read","gmail.draft.create","gmail.open.web"],' +
   '"roundAction":"answer","dataTasks":[],"uiIntent":{"purpose":"mail.actions",' +
@@ -969,7 +964,7 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('owns one independent two-tool turn without legacy handoff', 0, async () => {
+    it('owns one independent two-tool turn', 0, async () => {
       const executor = new TwoToolExecutor();
       const bus = new TrackingBus();
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
@@ -989,7 +984,6 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(outcome.status).assertEqual('success');
       expect(executor.calls.sort().join(',')).assertEqual('train.search,travel.search');
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       runtime.dispose();
     });
 
@@ -1227,7 +1221,6 @@ export default function multiAgentCanaryRuntimeTest() {
       const args = executor.tasks[0].args as Record<string, Object | string | number | boolean | null | undefined>;
       expect(args['operation'] as string).assertEqual('search');
       expect(args['qualifiedName'] as string).assertEqual('NOTION_SEARCH');
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       runtime.dispose();
     });
 
@@ -1435,7 +1428,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(prompt.indexOf('"toolId":"dynamic.search","domain":"dynamic"')).assertLarger(-1);
       expect(prompt.indexOf('"toolId":"memory.update","domain":"persona"')).assertLarger(-1);
       const catalogStart = prompt.indexOf('Registry capabilities: ');
-      const catalogEnd = prompt.indexOf('\nRuntime-owned tool IDs:', catalogStart);
+      const catalogEnd = prompt.indexOf('\nPersonas: ', catalogStart);
       expect(catalogStart).assertLarger(-1);
       expect(catalogEnd).assertLarger(catalogStart);
       expect(catalogEnd - catalogStart).assertLess(64001);
@@ -1456,7 +1449,7 @@ export default function multiAgentCanaryRuntimeTest() {
       await priceRuntime.submit('瑞幸生椰拿铁多少钱', { text: '' });
       const priceCatalogStart = priceModel.prompts[0].indexOf('Registry capabilities: ');
       const priceCatalogEnd = priceModel.prompts[0].indexOf(
-        '\nRuntime-owned tool IDs:', priceCatalogStart
+        '\nPersonas: ', priceCatalogStart
       );
       const priceCatalog = priceModel.prompts[0].substring(priceCatalogStart, priceCatalogEnd);
       const pricePersonasStart = priceModel.prompts[0].indexOf('\nPersonas: ');
@@ -1481,7 +1474,7 @@ export default function multiAgentCanaryRuntimeTest() {
       await orderRuntime.submit('帮我点一杯瑞幸生椰拿铁，半糖少冰', { text: '' });
       const orderCatalogStart = orderModel.prompts[0].indexOf('Registry capabilities: ');
       const orderCatalogEnd = orderModel.prompts[0].indexOf(
-        '\nRuntime-owned tool IDs:', orderCatalogStart
+        '\nPersonas: ', orderCatalogStart
       );
       const orderCatalog = orderModel.prompts[0].substring(orderCatalogStart, orderCatalogEnd);
       expect(orderCatalog.indexOf('"toolId":"luckin.order.preview"')).assertLarger(-1);
@@ -1500,7 +1493,7 @@ export default function multiAgentCanaryRuntimeTest() {
       await statusRuntime.submit('查询瑞幸订单状态', { text: '' });
       const statusCatalogStart = statusModel.prompts[0].indexOf('Registry capabilities: ');
       const statusCatalogEnd = statusModel.prompts[0].indexOf(
-        '\nRuntime-owned tool IDs:', statusCatalogStart
+        '\nPersonas: ', statusCatalogStart
       );
       const statusCatalog = statusModel.prompts[0].substring(statusCatalogStart, statusCatalogEnd);
       expect(statusCatalog.indexOf('"toolId":"luckin.order.preview"')).assertEqual(-1);
@@ -1662,7 +1655,6 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(platforms[1]).assertEqual('slack');
       expect(model.prompts.length).assertEqual(3);
       expect(model.prompts[1].indexOf('LEADER_TASK_INPUT_INVALID')).assertLarger(-1);
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       runtime.dispose();
     });
 
@@ -1856,7 +1848,6 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(outcome.kind).assertEqual('settled');
       expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       expect(model.prompts[0].indexOf('gmail.thread.read') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('gmail.draft.create') >= 0).assertTrue();
       expect(model.prompts[0].indexOf('gmail.open.web') >= 0).assertTrue();
@@ -1864,7 +1855,7 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('fails closed on forged client-only authorize capabilities without legacy handoff or work', 0, async () => {
+    it('fails closed on forged client-only authorize capabilities without work', 0, async () => {
       const forgeries: string[] = [GMAIL_AUTHORIZE_FORGERY, CALENDAR_AUTHORIZE_FORGERY];
       for (let index = 0; index < forgeries.length; index++) {
         const bus = new TrackingBus();
@@ -1881,7 +1872,6 @@ export default function multiAgentCanaryRuntimeTest() {
 
         expect(outcome.kind).assertEqual('settled');
         expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
-        expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
         expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
         expect(bus.count(AgentMessageType.TASK_CREATE_UI)).assertEqual(0);
         expect(bus.count(AgentMessageType.ACTION_PLAN_REQUEST)).assertEqual(0);
@@ -1890,7 +1880,7 @@ export default function multiAgentCanaryRuntimeTest() {
       }
     });
 
-    it('executes the C06 Gmail search through Data Agent without legacy handoff', 0, async () => {
+    it('executes the C06 Gmail search through Data Agent', 0, async () => {
       const calls: StructuredToolCallRecord[] = [];
       const bus = new TrackingBus();
       const options = canaryOptions(
@@ -1925,7 +1915,6 @@ export default function multiAgentCanaryRuntimeTest() {
 
       expect(outcome.kind).assertEqual('settled');
       expect((outcome as MultiAgentSettledOutcome).status).assertEqual('success');
-      expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       expect(tasks.length).assertEqual(1);
       expect(results.length).assertEqual(1);
       expect(task.toolId).assertEqual('gmail.mail.search');

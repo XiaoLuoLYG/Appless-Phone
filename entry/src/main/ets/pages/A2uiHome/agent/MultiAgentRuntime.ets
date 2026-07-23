@@ -20,7 +20,6 @@ import {
   DataResult,
   LeaderAgent,
   LeaderPlanningContext,
-  LegacyHandoffPayload,
   LinkedMessageBus,
   ObservationDigest,
   TaskErrorPayload,
@@ -32,7 +31,6 @@ import {
   aiLogInfo
 } from '@loop/agent-core';
 import {
-  MultiAgentHandoffOutcome,
   MultiAgentRuntimeOptions,
   MultiAgentSettledOutcome,
   MultiAgentTurnOutcome
@@ -58,8 +56,6 @@ interface PendingTurn {
   inputTaskId: string;
   generation: number;
   hostGeneration: number;
-  requestedCapabilityIds: string[];
-  runtimeOwnedToolIds: string[];
   personaId: string;
   skillId: string;
   uiTaskId: string;
@@ -416,10 +412,6 @@ function emitEvidence(formatter: MultiAgentEvidenceFormatter, message: AgentMess
   } catch (_error) {}
 }
 
-function runtimeOwnedIds(context: LeaderPlanningContext): string[] {
-  return context.runtimeOwnedToolIds === undefined ? [] : context.runtimeOwnedToolIds.slice();
-}
-
 class RuntimeActionIds implements HotelActionIdFactory {
   private sequence: number = 0;
 
@@ -452,7 +444,6 @@ export class MultiAgentRuntime {
   private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly leader: LeaderAgent;
   private readonly planningContextProvider: ((prompt: string) => LeaderPlanningContext) | null;
-  private runtimeOwnedToolIds: string[];
   private readonly data: DataAgent;
   private readonly ui: UiAgent;
   private readonly action: ActionAgent;
@@ -479,7 +470,6 @@ export class MultiAgentRuntime {
       null : options.surfaceTurnActivator;
     this.turnGenerationObserver = options.turnGenerationObserver === undefined ?
       null : options.turnGenerationObserver;
-    this.runtimeOwnedToolIds = runtimeOwnedIds(options.planningContext);
     this.leader = new LeaderAgent(
       this.bus,
       options.planner,
@@ -493,7 +483,7 @@ export class MultiAgentRuntime {
         requestedCapabilityIds: string[],
         personaId: string,
         skillId: string
-      ): void => this.recordDecisionAuthority(
+      ): void => this.recordDecisionPersona(
         conversationId, turnId, taskId, requestedCapabilityIds, personaId, skillId
       ),
       options.currentLocalDateProvider
@@ -564,7 +554,6 @@ export class MultiAgentRuntime {
       try {
         const planningContext = contextProvider(prompt);
         this.leader.updatePlanningContext(planningContext);
-        this.runtimeOwnedToolIds = runtimeOwnedIds(planningContext);
       } catch (_error) {
         return Promise.resolve(settled('error', 'Multi-agent planning context refresh failed.'));
       }
@@ -580,8 +569,6 @@ export class MultiAgentRuntime {
         inputTaskId,
         generation: this.generation,
         hostGeneration,
-        requestedCapabilityIds: [],
-        runtimeOwnedToolIds: this.runtimeOwnedToolIds.slice(),
         personaId: '',
         skillId: '',
         uiTaskId: '',
@@ -811,10 +798,6 @@ export class MultiAgentRuntime {
       this.observeTurnResult(message, pending);
       return;
     }
-    if (message.type === AgentMessageType.TURN_HANDOFF) {
-      this.observeHandoff(message, pending);
-      return;
-    }
     if (message.type === AgentMessageType.TASK_ERROR) {
       const error: TaskErrorPayload = message.payload as TaskErrorPayload;
       if (message.taskId === pending.inputTaskId || message.taskId === pending.uiTaskId ||
@@ -964,38 +947,11 @@ export class MultiAgentRuntime {
     this.trySettleTurn(pending);
   }
 
-  private observeHandoff(message: AgentMessage, pending: PendingTurn): void {
-    if (message.taskId !== pending.inputTaskId) {
-      return;
-    }
-    const payload: LegacyHandoffPayload = message.payload as LegacyHandoffPayload;
-    if (payload.owner !== 'legacy' || payload.reason !== 'unmigrated_tool' ||
-      payload.reasonCode !== 'unmigrated_tool' || !nonempty(payload.personaId) ||
-      typeof payload.skillId !== 'string' ||
-      pending.personaId.length === 0 ||
-      payload.personaId !== pending.personaId ||
-      payload.skillId !== pending.skillId ||
-      !this.validUnmigratedToolIds(payload.unmigratedToolIds) ||
-      !this.exactPendingHandoff(payload.unmigratedToolIds, pending)) {
-      return;
-    }
-    const outcome: MultiAgentHandoffOutcome = {
-      kind: 'handoff',
-      owner: 'legacy',
-      reason: 'unmigrated_tool',
-      unmigratedToolIds: payload.unmigratedToolIds.slice(),
-      reasonCode: payload.reasonCode,
-      personaId: payload.personaId,
-      skillId: payload.skillId
-    };
-    this.settleTurn(pending, outcome);
-  }
-
-  private recordDecisionAuthority(
+  private recordDecisionPersona(
     conversationId: string,
     turnId: string,
     taskId: string,
-    requestedCapabilityIds: string[],
+    _requestedCapabilityIds: string[],
     personaId: string,
     skillId: string
   ): void {
@@ -1005,46 +961,7 @@ export class MultiAgentRuntime {
       pending.inputTaskId !== taskId) {
       return;
     }
-    pending.requestedCapabilityIds = requestedCapabilityIds.slice();
     this.acceptPersonaAuthority(pending, personaId, skillId);
-  }
-
-  private exactPendingHandoff(ids: string[], pending: PendingTurn): boolean {
-    if (pending.requestedCapabilityIds.length === 0) {
-      return false;
-    }
-    const owned = new Set<string>(pending.runtimeOwnedToolIds);
-    const expected: string[] = [];
-    for (let index = 0; index < pending.requestedCapabilityIds.length; index++) {
-      const toolId = pending.requestedCapabilityIds[index];
-      if (!owned.has(toolId)) {
-        expected.push(toolId);
-      }
-    }
-    if (expected.length === 0 || expected.length !== ids.length) {
-      return false;
-    }
-    for (let index = 0; index < expected.length; index++) {
-      if (expected[index] !== ids[index]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private validUnmigratedToolIds(ids: string[]): boolean {
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return false;
-    }
-    const unique: Set<string> = new Set<string>();
-    for (let index = 0; index < ids.length; index++) {
-      const toolId: string = ids[index];
-      if (!nonempty(toolId) || unique.has(toolId)) {
-        return false;
-      }
-      unique.add(toolId);
-    }
-    return true;
   }
 
   private trySettleTurn(pending: PendingTurn): void {

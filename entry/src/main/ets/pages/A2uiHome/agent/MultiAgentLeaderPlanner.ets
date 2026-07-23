@@ -38,7 +38,7 @@ const DATA_TASK_KEYS: string = 'allowedToolIds,goal,input,localId,required,toolI
 const UI_INTENT_KEYS: string = 'preferredDensity,purpose,requiredSections';
 const ACTION_INTENT_KEYS: string = 'allowedActionIds,goal';
 const ANSWER_FIELD_RULE: string = 'For roundAction answer or clarify, include answer as a non-empty string. ' +
-  'For roundAction execute or legacy_handoff, omit answer.';
+  'For roundAction execute, omit answer.';
 const REASON_CODE_FIELD_RULE: string = 'Omit reasonCode. The host creates deterministic diagnostic reason metadata.';
 const FULL_DECISION_CONTRACT: string =
   'Every decision, including a correction or repair, must include personaId, skillId, requestedCapabilityIds, ' +
@@ -930,12 +930,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       REQUEST_SCOPE_CONTRACT,
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
         '"requestedCapabilityIds":["registered tool or action ID"],' +
-        '"roundAction":"execute|answer|clarify|legacy_handoff","dataTasks":[' +
+        '"roundAction":"execute|answer|clarify","dataTasks":[' +
         '{"localId":"string","goal":"string","allowedToolIds":["string"],' +
         '"toolId":"string","input":{},"required":true}],"uiIntent":{' +
         '"purpose":"string","preferredDensity":"string","requiredSections":["string"]},' +
         '"actionIntent":{"goal":"string","allowedActionIds":["string"]} optional,' +
-        '"answer":"required non-empty string for answer|clarify; omit for execute|legacy_handoff"}.',
+        '"answer":"required non-empty string for answer|clarify; omit for execute"}.',
       ANSWER_FIELD_RULE,
       REASON_CODE_FIELD_RULE,
       'Select one persona and at most one active skill.',
@@ -968,15 +968,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       DATA_SCOPE_CONTRACT,
       'Never emit provider facts, action args, A2UI, credentials, or unregistered tool IDs.',
       hotelSearchPlanningContract(currentLocalDate),
-      'Use legacy_handoff with no tasks whenever the requested capability is not ordinary ' +
-        'conversation and is unavailable or not runtime-owned.',
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
       'Context: ' + JSON.stringify(input),
       'Registry capabilities: ' + toolCatalog,
-      'Runtime-owned tool IDs: ' + JSON.stringify(
-        context.runtimeOwnedToolIds === undefined ? [] : context.runtimeOwnedToolIds
-      ),
       'Personas: ' + JSON.stringify(context.personas)
     ].join('\n');
     if (result.length > MAX_LEADER_PROMPT_CHARS) {
@@ -1099,7 +1094,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     );
     const actionValue = values['actionIntent'];
     const actionIntent: LeaderActionIntent | null = actionValue === undefined ? null :
-      this.actionIntent(actionValue, context, selectedAction === 'legacy_handoff');
+      this.actionIntent(actionValue, context);
     if ((selectedAction === 'execute' && tasks.length === 0 && actionIntent === null) ||
       (selectedAction !== 'execute' && tasks.length !== 0)) {
       throw new Error('Leader round action does not match its Data tasks.');
@@ -1137,9 +1132,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private hostReasonCode(action: LeaderRoundAction): string {
-    if (action === 'legacy_handoff') {
-      return 'unmigrated_tool';
-    }
     if (action === 'execute') {
       return 'host_execute';
     }
@@ -1288,8 +1280,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
 
   private actionIntent(
     raw: Object | string | number | boolean | null | undefined,
-    context: LeaderPlanningContext,
-    allowRegisteredHandoff: boolean = false
+    context: LeaderPlanningContext
   ): LeaderActionIntent {
     if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw) ||
       Object.keys(raw).sort().join(',') !== ACTION_INTENT_KEYS) {
@@ -1304,9 +1295,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     const ids: string[] = this.uniqueStrings(allowedActionIds as Object[], 'Leader action allowlist');
     for (let index = 0; index < ids.length; index++) {
-      if (allowRegisteredHandoff ?
-        !this.registeredCapability(context, ids[index]) :
-        !leaderIsActionCapability(context, ids[index])) {
+      if (!leaderIsActionCapability(context, ids[index])) {
         throw new Error('Leader action allowlist contains an unregistered action ID.');
       }
     }
@@ -1389,6 +1378,6 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private validRoundAction(value: Object | string | number | boolean | null | undefined): boolean {
-    return value === 'execute' || value === 'answer' || value === 'clarify' || value === 'legacy_handoff';
+    return value === 'execute' || value === 'answer' || value === 'clarify';
   }
 }

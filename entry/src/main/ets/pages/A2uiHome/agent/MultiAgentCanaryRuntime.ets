@@ -66,7 +66,7 @@ import {
   normalizeHotelSearchTaskInput
 } from './HotelLeaderPlanner';
 import { mailDetailIdentityDigest, MultiAgentRuntime } from './MultiAgentRuntime';
-import { MIGRATED_TOOL_IDS, MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
+import { MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import {
   authorizeHotelDataTask,
@@ -1220,15 +1220,9 @@ function canaryPlanningContext(previousPersonaId: string, prompt: string = ''): 
     outputSchema: memory.outputSchema,
     actions: memory.actions.slice()
   });
-  const runtimeOwnedToolIds: string[] = [];
-  MIGRATED_TOOL_IDS.forEach((toolId: string): void => {
-    runtimeOwnedToolIds.push(toolId);
-  });
-  runtimeOwnedToolIds.push(MEMORY_ACTION_ID);
   return {
     tools,
-    personas: scopedLeaderPersonas(previousPersonaId, tools),
-    runtimeOwnedToolIds
+    personas: scopedLeaderPersonas(previousPersonaId, tools)
   };
 }
 

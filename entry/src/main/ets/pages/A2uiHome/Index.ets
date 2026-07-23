@@ -42,7 +42,10 @@ import {
   A2uiTravelOptionData
 } from '@loop/agent-core';
 import { stripeReceivingAccount } from '@loop/agent-core';
-import { A2uiStreamMeta, callLocalModel, modelThinkCloseSeen } from '../../model/LocalModelClient';
+import {
+  callDirectModel,
+  DirectModelCallResult
+} from '../../model/LocalModelClient';
 import { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from '@loop/agent-core';
 import { A2uiSurfaceStore, createSeedA2uiSurface } from '@loop/agent-core';
 import {
@@ -171,12 +174,8 @@ import {
   voiceInputTextAfterRecognition
 } from './state/A2uiHomeState';
 import {
-  A2uiHomeResolvedToolRequest,
   directPaymentToolIdForActionId,
-  directRideToolIdForActionId,
-  resolveA2uiHomeToolRequest,
-  surfaceHasSatisfiedToolResult,
-  surfaceHasVisibleToolResult
+  directRideToolIdForActionId
 } from './render/A2uiHomeToolRequest';
 
 const CONNECTION_TEST_PROMPT: string = '连接检查：请返回 A2UI v0.9.1 setup surface，说明 Local API 已可用。';
@@ -2147,9 +2146,7 @@ struct Index {
       }));
       return;
     }
-    const turnGeneration: number = this.beginRuntimeTurn(
-      actionId.length === 0 ? 'multi_agent' : 'legacy'
-    );
+    const turnGeneration: number = this.beginRuntimeTurn('multi_agent');
     this.inputPlaceholder = DEFAULT_INPUT_PLACEHOLDER;
     this.appendMessage('user', visibleText);
     aiLogInfo('[AIPhone][A2uiHomeSubmitPrompt] chars=' + modelPrompt.length.toString() +
@@ -2166,140 +2163,46 @@ struct Index {
         foodPartialThrottleMs: normalizeFoodPartialThrottleMs(this.foodPartialThrottleMs)
       });
       this.markChecking('正在生成 A2UI...');
-      if (actionId.length === 0) {
-        const canaryOutcome: MultiAgentTurnOutcome = await this.canaryRuntime().submit(
-          trimmed,
-          this.multiAgentInput(trimmed),
-          turnGeneration
-        );
-        if (!runtimeCallbackIsCurrent(
-          this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', turnGeneration
-        )) {
-          return;
-        }
-        if (canaryOutcome.kind === 'settled') {
-          const result: MultiAgentSettledOutcome = canaryOutcome as MultiAgentSettledOutcome;
-          if (!result.ok) {
-            throw new Error(result.message.length > 0 ?
-              result.message : 'Multi-agent runtime failed to complete the turn.');
-          }
-          this.isAwaitingFirstSurface = false;
-          if (result.surfaceId.length > 0 &&
-            result.surfaceId === this.currentSurface.surfaceId &&
-            result.personaId.length > 0) {
-            this.applyRuntimeSurface(
-              leaderPersonaSurfaceUpdate(
-                this.currentSurface,
-                result.personaId,
-                result.skillId
-              ),
-              'multi_agent',
-              turnGeneration
-            );
-          }
-          const readyMessage: string = result.message.length > 0 ?
-            result.message : this.currentSurface.title;
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: true,
-            status: 'ready',
-            message: readyMessage,
-            requestDebug: 'multi-agent-runtime',
-            assistantDebug: readyMessage,
-            error: ''
-          }));
-          this.appendMessage('assistant', readyMessage);
-          return;
-        }
-        aiLogInfo('[AIPhone][MultiAgentHandoff] reason=' + canaryOutcome.reasonCode +
-          ' personaId=' + canaryOutcome.personaId +
-          ' unmigratedToolIds=' + canaryOutcome.unmigratedToolIds.join(','));
-        this.activeRuntimeOwner = 'legacy';
-      }
-      const result: A2uiCallResult = await callLocalModel(
-        this.getSettings(),
+      const outcome: MultiAgentTurnOutcome = await this.canaryRuntime().submit(
         modelPrompt,
-        this.recentMessages(),
-        (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
-          if (!this.applyRuntimeSurface(surface, 'legacy', turnGeneration)) {
-            return;
-          }
-          this.isAwaitingFirstSurface = false;
-          const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: true,
-            status: 'checking',
-            message: '模型流式更新：' + surface.title + (thinkClosed ? '，思考流已闭合。' : '。'),
-            requestDebug: this.lastModelRequest,
-            assistantDebug: raw,
-            error: ''
-          }));
-        },
-        null,
-        (update: PersonaMemoryUpdateRequest) => {
-          if (runtimeCallbackIsCurrent(
-            this.activeRuntimeOwner, this.runtimeGeneration, 'legacy', turnGeneration
-          )) {
-            this.applyPersonaMemoryUpdate(update);
-          }
-        },
-        actionArgs
+        this.multiAgentInput(modelPrompt),
+        turnGeneration
       );
-      if (!this.applyRuntimeSurface(result.surface, 'legacy', turnGeneration)) {
+      if (!runtimeCallbackIsCurrent(
+        this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', turnGeneration
+      )) {
         return;
       }
-      this.isAwaitingFirstSurface = false;
-      aiLogInfo('[AIPhone][A2uiHomeModelResult] ok=' + (result.ok ? 'true' : 'false') +
-        ' errorChars=' + result.error.length.toString() +
-        ' rawChars=' + result.raw.length.toString() +
-        ' assistantChars=' + result.assistantDebug.length.toString());
-      aiLogInfo('[AIPhone][A2uiHomeModelOutput] ' + logSnippet(result.assistantDebug.length > 0 ? result.assistantDebug : result.raw));
-      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-        ok: result.ok,
-        status: result.ok ? 'ready' : 'error',
-        message: result.ok ? 'A2UI 已更新到主页。' : 'A2UI 生成异常，请到配置页查看详情。',
-        requestDebug: result.requestDebug,
-        assistantDebug: result.assistantDebug.length > 0 ? result.assistantDebug : result.raw,
-        error: result.error
-      }));
-      if (result.ok) {
-        this.appendMessage('assistant', result.assistantDebug.length > 0 ? result.assistantDebug : result.surface.title);
-        if (result.requestDebug.indexOf('@loop/agent-core/LoopBackend') >= 0) {
-          const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(
-            result.surface, modelPrompt, actionId, actionArgs, false);
-          if (fallbackRequest.hasTool && surfaceHasSatisfiedToolResult(result.surface, fallbackRequest.toolId)) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_satisfied source=loopy_adapter toolId=' + fallbackRequest.toolId);
-          } else if (fallbackRequest.hasTool && surfaceHasVisibleToolResult(result.surface)) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] already_visible source=loopy_adapter toolId=' + fallbackRequest.toolId);
-          } else if (fallbackRequest.hasTool) {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
-              ' source=loopy_adapter promptChars=' + fallbackRequest.prompt.length.toString());
-            await this.callToolById(
-              fallbackRequest.toolId,
-              fallbackRequest.prompt,
-              fallbackRequest.actionId,
-              fallbackRequest.args
-            );
-          } else {
-            aiLogInfo('[AIPhone][A2uiHomeToolRequest] none source=loopy_adapter');
-          }
-        } else {
-          await this.callModelRequestedTool(result.surface, modelPrompt, actionId, actionArgs);
-        }
-      } else {
-        const fallbackRequest: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(result.surface, modelPrompt, actionId, actionArgs);
-        if (fallbackRequest.hasTool) {
-          aiLogInfo('[AIPhone][A2uiHomeToolRequestByIntent] toolId=' + fallbackRequest.toolId +
-            ' reason=model_failed promptChars=' + fallbackRequest.prompt.length.toString());
-          await this.callToolById(
-            fallbackRequest.toolId,
-            fallbackRequest.prompt,
-            fallbackRequest.actionId,
-            fallbackRequest.args
-          );
-        } else {
-          this.appendMessage('assistant', 'A2UI 生成失败：' + result.error);
-        }
+      const result: MultiAgentSettledOutcome = outcome as MultiAgentSettledOutcome;
+      if (!result.ok) {
+        throw new Error(result.message.length > 0 ?
+          result.message : 'Multi-agent runtime failed to complete the turn.');
       }
+      this.isAwaitingFirstSurface = false;
+      if (result.surfaceId.length > 0 &&
+        result.surfaceId === this.currentSurface.surfaceId &&
+        result.personaId.length > 0) {
+        this.applyRuntimeSurface(
+          leaderPersonaSurfaceUpdate(
+            this.currentSurface,
+            result.personaId,
+            result.skillId
+          ),
+          'multi_agent',
+          turnGeneration
+        );
+      }
+      const readyMessage: string = result.message.length > 0 ?
+        result.message : this.currentSurface.title;
+      this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
+        ok: true,
+        status: 'ready',
+        message: readyMessage,
+        requestDebug: 'multi-agent-runtime',
+        assistantDebug: readyMessage,
+        error: ''
+      }));
+      this.appendMessage('assistant', readyMessage);
     } catch (error) {
       if (this.runtimeGeneration !== turnGeneration) {
         return;
@@ -2845,14 +2748,10 @@ struct Index {
       ' bodyChars=' + detail.bodyText.length.toString() +
       ' promptChars=' + prompt.length.toString());
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         prompt,
-        this.recentMessages(),
-        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
-        null,
-        null,
-        null
+        this.recentMessages()
       );
       const raw = result.assistantDebug.length > 0 ? result.assistantDebug : result.raw;
       if (!result.ok || raw.trim().length === 0) {
@@ -2979,14 +2878,10 @@ struct Index {
       ' contextChars=' + this.actionText(args.contextSummary).length.toString() +
       ' promptChars=' + prompt.length.toString());
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         prompt,
-        this.recentMessages(),
-        (_surface: A2uiSurfaceState, _raw: string, _meta?: A2uiStreamMeta) => {},
-        null,
-        null,
-        action.args
+        this.recentMessages()
       );
       aiLogInfo('[AIPhone][MailReplyAiDraft] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +
@@ -4229,24 +4124,6 @@ struct Index {
     return this.currentSurface.surfaceId;
   }
 
-  private async callModelRequestedTool(
-    surface: A2uiSurfaceState,
-    fallbackPrompt: string,
-    fallbackActionId: string,
-    fallbackArgs: Object | null = null
-  ): Promise<void> {
-    const request: A2uiHomeResolvedToolRequest = resolveA2uiHomeToolRequest(surface, fallbackPrompt, fallbackActionId, fallbackArgs);
-    if (!request.hasTool) {
-      aiLogInfo('[AIPhone][A2uiHomeToolRequest] none');
-      return;
-    }
-    aiLogInfo('[AIPhone][A2uiHomeToolRequestFromModel] toolId=' + request.toolId +
-      ' modelPromptChars=' + request.modelPromptChars.toString() +
-      ' userPromptChars=' + fallbackPrompt.length.toString() +
-      ' sentPromptChars=' + request.prompt.length.toString());
-    await this.callToolById(request.toolId, request.prompt, request.actionId, request.args);
-  }
-
   private configureDidiMcpSandboxRuntime(isSandbox: boolean): void {
     this.didiMcpSandboxEnabled = isSandbox;
     configureDidiMcpSandboxForRuntime(isSandbox);
@@ -4482,21 +4359,10 @@ struct Index {
     aiLogInfo('[AIPhone][A2uiHomeConnectionTest] model=' + this.selectedModel + ' baseUrl=' + this.baseUrl);
     this.markChecking('正在向模型发起连接检查...');
     try {
-      const result: A2uiCallResult = await callLocalModel(
+      const result: DirectModelCallResult = await callDirectModel(
         this.getSettings(),
         CONNECTION_TEST_PROMPT,
-        this.recentMessages(),
-        (surface: A2uiSurfaceState, raw: string, meta?: A2uiStreamMeta) => {
-          const thinkClosed = meta?.thinkClosed === true || modelThinkCloseSeen(raw);
-          this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
-            ok: true,
-            status: 'checking',
-            message: '已收到模型流式更新：' + surface.title + (thinkClosed ? '，思考流已闭合。' : '。'),
-            requestDebug: this.lastModelRequest,
-            assistantDebug: raw,
-            error: ''
-          }));
-        }
+        this.recentMessages()
       );
       aiLogInfo('[AIPhone][A2uiHomeConnectionResult] ok=' + (result.ok ? 'true' : 'false') +
         ' errorChars=' + result.error.length.toString() +

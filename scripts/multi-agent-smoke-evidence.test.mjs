@@ -1156,7 +1156,7 @@ test('rejects a missing DataResult and a UI-ready-only trace', () => {
   `, { expectedToolIds: ['travel.search'] }).complete, false);
 });
 
-test('rejects legacy LoopBackend-only markers and a mismatched tool ID', () => {
+test('rejects retired runtime-only markers and a mismatched tool ID', () => {
   assert.equal(multiAgentTurnEvidence(`
     [AIPhone][A2uiHomeToolRequest] toolId=travel.search
     [AIPhone][LocalToolResult] ok=true toolId=travel.search

@@ -13,6 +13,10 @@ DATA_OWNER_IDS.add('dynamic.search');
 const ACTION_OWNER_IDS: Set<string> = new Set<string>(actionAgentToolDefinitions().map(
   (definition: ToolDefinition): string => definition.toolId
 ));
+const VIRTUAL_ACTION_OWNER_IDS: Set<string> = new Set<string>([
+  'memory.update',
+  'gmail.draft.apply'
+]);
 
 function toolMetadata(context: LeaderPlanningContext, capabilityId: string): LeaderToolMetadata | null {
   for (let index = 0; index < context.tools.length; index++) {
@@ -50,17 +54,8 @@ export function leaderIsExplicitActionOwner(
   capabilityId: string
 ): boolean {
   const tool: LeaderToolMetadata | null = toolMetadata(context, capabilityId);
-  if (tool === null) {
-    return false;
-  }
-  if (ACTION_OWNER_IDS.has(capabilityId)) {
-    return true;
-  }
-  const runtimeOwnedToolIds: string[] | undefined = context.runtimeOwnedToolIds;
-  return runtimeOwnedToolIds !== undefined &&
-    runtimeOwnedToolIds.indexOf(capabilityId) >= 0 &&
-    !DATA_OWNER_IDS.has(capabilityId) &&
-    tool.riskLevel !== 'read';
+  return tool !== null &&
+    (ACTION_OWNER_IDS.has(capabilityId) || VIRTUAL_ACTION_OWNER_IDS.has(capabilityId));
 }
 
 export function leaderIsActionCapability(
