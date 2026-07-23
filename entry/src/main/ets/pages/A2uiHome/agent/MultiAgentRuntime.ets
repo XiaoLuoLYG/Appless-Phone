@@ -71,6 +71,8 @@ interface PendingTurn {
   virtualActionSurfaceId: string;
   virtualActionPlanId: string;
   virtualActionRunId: string;
+  virtualAllowedActionIds: string[];
+  hostSurfaceId: string;
   timerId: number;
   resolve: (outcome: MultiAgentTurnOutcome) => void;
 }
@@ -591,6 +593,8 @@ export class MultiAgentRuntime {
         virtualActionSurfaceId: '',
         virtualActionPlanId: '',
         virtualActionRunId: '',
+        virtualAllowedActionIds: [],
+        hostSurfaceId: payload.currentSurfaceSummary === undefined ? '' : payload.currentSurfaceSummary.surfaceId,
         timerId: -1,
         resolve
       };
@@ -886,6 +890,7 @@ export class MultiAgentRuntime {
       pending.virtualActionSurfaceId = 'virtual:' + message.taskId;
       pending.virtualActionRunId = pending.virtualActionSurfaceId;
       pending.virtualActionPlanId = 'direct:' + pending.virtualActionRunId;
+      pending.virtualAllowedActionIds = request.allowedActionIds.slice();
     }
   }
 
@@ -925,14 +930,14 @@ export class MultiAgentRuntime {
     if (result.surfaceId !== pending.virtualActionSurfaceId ||
       result.planId !== pending.virtualActionPlanId ||
       result.runId !== pending.virtualActionRunId ||
-      result.status === 'paused') {
+      (result.status !== 'success' && result.status !== 'error' && result.status !== 'canceled')) {
       return;
     }
     const status: TurnResultStatus = result.status === 'success' ? 'success' :
       result.status === 'canceled' ? 'canceled' : 'error';
     const messageText: string = result.status === 'success' ?
       'Action completed.' : nonempty(result.message) ? result.message as string : 'Action failed.';
-    const surfaceId: string = this.actionOutputSurfaceId(result);
+    const surfaceId: string = this.actionOutputSurfaceId(pending, result);
     if (status !== 'success') {
       this.publishCancel(pending.turnId, 'virtual_action_' + status);
     }
@@ -1332,7 +1337,7 @@ export class MultiAgentRuntime {
       (result.surfaceId === undefined || nonempty(result.surfaceId));
   }
 
-  private actionOutputSurfaceId(result: ActionResultPayload): string {
+  private actionOutputSurfaceId(pending: PendingTurn, result: ActionResultPayload): string {
     if (result.outputs === undefined || result.outputs.length === 0) {
       return result.surfaceId;
     }
@@ -1341,7 +1346,22 @@ export class MultiAgentRuntime {
       return result.surfaceId;
     }
     const surfaceId = (output as Record<string, Object | string | number | boolean | null | undefined>)['surfaceId'];
-    return typeof surfaceId === 'string' && surfaceId.length > 0 ? surfaceId : result.surfaceId;
+    return typeof surfaceId === 'string' && this.authorizedVirtualOutputSurface(pending, surfaceId) ?
+      surfaceId : result.surfaceId;
+  }
+
+  private authorizedVirtualOutputSurface(pending: PendingTurn, surfaceId: string): boolean {
+    if (surfaceId === pending.hostSurfaceId || surfaceId === pending.virtualActionSurfaceId) {
+      return true;
+    }
+    if (/^calendar-review:[1-9]\d*$/.test(surfaceId)) {
+      return pending.virtualAllowedActionIds.indexOf('calendar.event.create') >= 0 ||
+        pending.virtualAllowedActionIds.indexOf('calendar.event.update') >= 0;
+    }
+    if (/^memory-update:[1-9]\d*$/.test(surfaceId)) {
+      return pending.virtualAllowedActionIds.indexOf('memory.update') >= 0;
+    }
+    return false;
   }
 
   private boundedInput(text: string, context: UserInputPayload): UserInputPayload {

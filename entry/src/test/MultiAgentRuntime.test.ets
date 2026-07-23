@@ -1602,7 +1602,16 @@ export default function multiAgentRuntimeTest() {
           runId: 'virtual:forged',
           status: 'success',
           completedStepIds: []
-        }
+        },
+        {
+          surfaceId,
+          planId,
+          runId: surfaceId,
+          status: 'paused',
+          completedStepIds: []
+        },
+        JSON.parse('{"surfaceId":"' + surfaceId + '","planId":"' + planId +
+          '","runId":"' + surfaceId + '","status":"unexpected","completedStepIds":[]}') as ActionResultPayload
       ];
       for (let index = 0; index < forgeries.length; index++) {
         bus.publish({
@@ -1618,8 +1627,99 @@ export default function multiAgentRuntimeTest() {
       executor.release.open();
       const result = await pending as MultiAgentSettledOutcome;
 
-      expect(accepted.join(',')).assertEqual('false,false,false');
+      expect(accepted.join(',')).assertEqual('false,false,false,false,false');
       expect(result.status).assertEqual('success');
+      runtime.dispose();
+    });
+
+    it('rejects a shape-valid virtual output surface unrelated to its host action', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new BlockingVirtualExecutor();
+      const options = runtimeOptions(
+        bus,
+        new VirtualMemoryPlanner(),
+        new ControlledWriter(),
+        1000
+      );
+      options.virtualActionResolver = new StaticVirtualResolver();
+      options.actionExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+      const pending = runtime.submit('remember me', { text: '' });
+      await executor.started.promise;
+      const request = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      )[0];
+      const surfaceId = 'virtual:' + request.taskId;
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: request.conversationId,
+        turnId: request.turnId,
+        taskId: request.taskId,
+        payload: {
+          surfaceId,
+          planId: 'direct:' + surfaceId,
+          runId: surfaceId,
+          status: 'success',
+          completedStepIds: ['step-1'],
+          outputs: [{
+            stepId: 'step-1',
+            output: JSON.parse('{"surfaceId":"calendar-review:999"}') as Object
+          }]
+        } as ActionResultPayload
+      });
+      const result = await pending as MultiAgentSettledOutcome;
+
+      expect(result.status).assertEqual('success');
+      expect(result.surfaceId).assertEqual(surfaceId);
+      executor.release.open();
+      runtime.dispose();
+    });
+
+    it('keeps a virtual output surface that is the exact current host surface', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new BlockingVirtualExecutor();
+      const options = runtimeOptions(
+        bus,
+        new VirtualMemoryPlanner(),
+        new ControlledWriter(),
+        1000
+      );
+      options.virtualActionResolver = new StaticVirtualResolver();
+      options.actionExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+      const pending = runtime.submit('remember me', {
+        text: '',
+        currentSurfaceSummary: {
+          surfaceId: 'surface_seed', kind: 'local_tool', status: 'ready', entityRefs: [], actionOfferIds: []
+        }
+      });
+      await executor.started.promise;
+      const request = bus.published.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      )[0];
+      const surfaceId = 'virtual:' + request.taskId;
+      bus.publish({
+        type: AgentMessageType.ACTION_RESULT,
+        conversationId: request.conversationId,
+        turnId: request.turnId,
+        taskId: request.taskId,
+        payload: {
+          surfaceId,
+          planId: 'direct:' + surfaceId,
+          runId: surfaceId,
+          status: 'success',
+          completedStepIds: ['step-1'],
+          outputs: [{
+            stepId: 'step-1',
+            output: JSON.parse('{"surfaceId":"surface_seed"}') as Object
+          }]
+        } as ActionResultPayload
+      });
+      const result = await pending as MultiAgentSettledOutcome;
+
+      expect(result.status).assertEqual('success');
+      expect(result.surfaceId).assertEqual('surface_seed');
+      executor.release.open();
       runtime.dispose();
     });
 
