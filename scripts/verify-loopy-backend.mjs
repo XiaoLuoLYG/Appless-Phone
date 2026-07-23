@@ -301,6 +301,25 @@ function liveDeclarationBody(source, declaration) {
   return declarationBody(stripComments(source), declaration);
 }
 
+function hasBoundedLeaderModelCalls(source) {
+  const live = stripComments(source);
+  const plan = declarationBody(live, 'async plan(');
+  const prompt = declarationBody(live, 'private prompt(');
+  const bounded = declarationBody(live, 'private completeBounded(');
+  const modelCalls = live.match(/this\.model\.complete\s*\(/g) ?? [];
+  return /const\s+MAX_LEADER_TOOL_CATALOG_CHARS\s*:\s*number\s*=\s*64000\s*;/.test(live) &&
+    /const\s+MAX_LEADER_PROMPT_CHARS\s*:\s*number\s*=\s*100000\s*;/.test(live) &&
+    prompt.includes('toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS') &&
+    prompt.includes("throw new Error('LEADER_TOOL_CATALOG_LIMIT')") &&
+    bounded.includes('prompt.length > MAX_LEADER_PROMPT_CHARS') &&
+    bounded.includes("throw new Error('LEADER_PROMPT_LIMIT')") &&
+    bounded.includes('return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT)') &&
+    plan.includes('await this.completeBounded(prompt)') &&
+    plan.includes('await this.completeBounded(prompt +') &&
+    plan.includes('correction') &&
+    modelCalls.length === 1;
+}
+
 function hasStructuredHotelGateway(source) {
   return liveDeclarationBody(source, 'export async function callStructuredHotelTool').length > 0;
 }
@@ -623,6 +642,8 @@ function verifySourceContracts() {
   const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
+  const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
+  const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
   const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const index = stripComments(read('agent_core/Index.ets'));
   const indexExports = parseIndexExports(index);
@@ -857,8 +878,44 @@ function verifySourceContracts() {
   assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
   assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
-  assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
-  assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
+  assertContains(runtimeDefinitions, 'Composio-backed app/toolkit requests', 'registry describes Composio dynamic routing');
+  assertContains(runtimeDefinitions, 'Keep the query focused to the relevant 6-10 OR terms', 'registry preserves Gmail academic query expansion guidance');
+  assertContains(runtimeDefinitions, 'toolPlanningDescriptionForToolId', 'registry owns the shared planning description projection');
+  assertContains(backend, 'toolPlanningDescriptionForToolId(toolId)', 'LoopBackend consumes the registry planning projection');
+  assert(!backend.includes('private describeAiphoneTool'), 'LoopBackend has no duplicate private planning table');
+  assertContains(canaryRuntime, 'toolPlanningDescriptionForToolId(definition.toolId)', 'multi-agent canary consumes the registry planning projection');
+  assertContains(canaryRuntime, "definition.toolId !== 'gmail.message.send'", 'multi-agent planner excludes direct Gmail send');
+  assertContains(canaryRuntime, 'domain: definition.domain', 'multi-agent planner projects registry domains');
+  assertContains(canaryRuntime, 'registeredBackends: definition.backendPriority.slice()', 'multi-agent planner projects cloned registered backend candidates');
+  assertContains(leaderAgent, 'registeredBackends: tool.registeredBackends.slice()', 'Leader context clone preserves registered backend candidates');
+  assert(hasBoundedLeaderModelCalls(canaryLeaderPlanner), 'every Leader model call uses the structural prompt and catalog bounds');
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'await this.completeBounded(prompt + \'\\n\' + correction)',
+        'await this.model.complete(prompt + \'\\n\' + correction)'
+      )
+    ),
+    'verifier rejects a repair model call that bypasses the prompt bound'
+  );
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'await this.completeBounded(prompt)',
+        'await this.model.complete(prompt)'
+      )
+    ),
+    'verifier rejects an initial model call that bypasses the prompt bound'
+  );
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS',
+        'false'
+      )
+    ),
+    'verifier rejects removal of the live tool catalog bound'
+  );
   assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
 
   assertContains(index, 'LoopBackend', 'public export includes LoopBackend');

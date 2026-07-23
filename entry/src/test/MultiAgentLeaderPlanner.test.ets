@@ -344,113 +344,145 @@ function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
       toolId: 'travel.search',
+      domain: 'travel',
       intent: 'Search aggregate real travel options',
       riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
       inputSchema: 'travelSearchQuery',
       outputSchema: 'travelOptions',
       actions: []
     }, {
       toolId: 'flight.search',
+      domain: 'travel',
       intent: 'Search real flights',
       riskLevel: 'read',
+      registeredBackends: ['mcp_remote'],
       inputSchema: 'flightSearchRequest',
       outputSchema: 'flightSearchResults',
       actions: []
     }, {
       toolId: 'train.search',
+      domain: 'travel',
       intent: 'Search real trains',
       riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
       inputSchema: 'trainSearchRequest',
       outputSchema: 'trainSearchResults',
       actions: []
     }, {
       toolId: 'hotel.search',
+      domain: 'hotel',
       intent: 'Search real hotels',
       riskLevel: 'read',
+      registeredBackends: ['mcp_remote'],
       inputSchema: 'hotelSearchRequest',
       outputSchema: 'hotelSearchResults',
       actions: []
     }, {
       toolId: 'hotel.navigate',
+      domain: 'hotel',
       intent: 'Open hotel navigation',
       riskLevel: 'read',
+      registeredBackends: ['system_intent'],
       inputSchema: 'hotelNavigateRequest',
       outputSchema: 'hotelNavigateResult',
       actions: []
     }, {
       toolId: 'maps.place.search',
+      domain: 'maps',
       intent: 'Search real places',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api'],
       inputSchema: 'mapsPlaceSearchQuery',
       outputSchema: 'places',
       actions: []
     }, {
       toolId: 'maps.place.details',
+      domain: 'maps',
       intent: 'Read details for one real place ID',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api'],
       inputSchema: 'mapsPlaceDetailsQuery',
       outputSchema: 'place',
       actions: []
     }, {
       toolId: 'food.search',
+      domain: 'food',
       intent: 'Search food for an explicitly scoped place',
       riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
       inputSchema: 'foodSearchRequest',
       outputSchema: 'foodSearchResults',
       actions: []
     }, {
       toolId: 'mail.search',
+      domain: 'mail',
       intent: 'Search real mail',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api', 'imap', 'workspace_mcp'],
       inputSchema: 'mailSearchRequest',
       outputSchema: 'mailSearchResults',
       actions: []
     }, {
       toolId: 'mail.thread.read',
+      domain: 'mail',
       intent: 'Read one exact mail identity',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api', 'imap', 'workspace_mcp'],
       inputSchema: 'mailThreadReadRequest',
       outputSchema: 'mailThread',
       actions: []
     }, {
       toolId: 'gmail.mail.search',
+      domain: 'gmail',
       intent: 'Search real Gmail',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api', 'workspace_mcp'],
       inputSchema: 'gmailSearchRequest',
       outputSchema: 'mailSearchResults',
       actions: []
     }, {
       toolId: 'gmail.thread.read',
+      domain: 'gmail',
       intent: 'Read one exact Gmail identity',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api', 'workspace_mcp'],
       inputSchema: 'mailThreadReadRequest',
       outputSchema: 'mailThread',
       actions: []
     }, {
       toolId: 'media.video.search',
+      domain: 'media',
       intent: 'Search real Bilibili or multi-source videos',
       riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
       inputSchema: 'mediaVideoSearchQuery',
       outputSchema: 'videoSearchResults',
       actions: []
     }, {
       toolId: 'youtube.video.search',
+      domain: 'media',
       intent: 'Search real YouTube-only videos',
       riskLevel: 'read',
+      registeredBackends: ['oauth_api'],
       inputSchema: 'youtubeVideoSearchQuery',
       outputSchema: 'videoSearchResults',
       actions: []
     }, {
       toolId: 'memory.update',
+      domain: 'persona',
       intent: 'Update persona memory',
       riskLevel: 'draft',
+      registeredBackends: ['local_adapter'],
       inputSchema: 'memoryUpdateRequest',
       outputSchema: 'memoryUpdateResult',
       actions: ['memory.update']
     }, {
       toolId: 'payment.create',
+      domain: 'payment',
       intent: 'Create a payment',
       riskLevel: 'confirm_required',
+      registeredBackends: ['web_session'],
       inputSchema: 'paymentCreateRequest',
       outputSchema: 'paymentCreateResult',
       actions: []
@@ -497,6 +529,65 @@ async function failsAtRound(output: string, round: number): Promise<boolean> {
 
 export default function multiAgentLeaderPlannerTest() {
   describe('multiAgentLeaderPlanner', () => {
+    it('rejects an oversized registered tool catalog before calling the model', 0, async () => {
+      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const context = planningContext();
+      context.tools[0].planningHint = 'x'.repeat(65000);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'hello' }, context, 1
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_TOOL_CATALOG_LIMIT');
+      expect(model.prompts.length).assertEqual(0);
+    });
+
+    it('rejects oversized persona context before calling the model', 0, async () => {
+      const model = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      const context = planningContext();
+      context.personas[0].memory = 'x'.repeat(100001);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'hello' }, context, 1
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(errorCode).assertEqual('LEADER_PROMPT_LIMIT');
+      expect(model.prompts.length).assertEqual(0);
+    });
+
+    it('bounds the repair prompt after an initially valid-sized model call', 0, async () => {
+      const baselineModel = new QueueLocalModel([LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      await new MultiAgentLeaderPlanner(baselineModel).plan(
+        inputMessage(), { text: 'hello' }, planningContext(), 1
+      );
+      const context = planningContext();
+      context.personas[0].memory += 'x'.repeat(99900 - baselineModel.prompts[0].length);
+      const model = new QueueLocalModel([MISSING_PERSONA_DECISION, LIVE_ANSWER_WITHOUT_REASON_CODE]);
+      let errorCode: string = '';
+
+      try {
+        await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(), { text: 'hello' }, context, 1, (): boolean => true
+        );
+      } catch (error) {
+        errorCode = error instanceof Error ? error.message : 'unknown';
+      }
+
+      expect(model.prompts[0].length).assertLess(100001);
+      expect(errorCode).assertEqual('LEADER_PROMPT_LIMIT');
+      expect(model.prompts.length).assertEqual(1);
+    });
+
     it('repairs same-round producer consumer pairs to the producer regardless of input or order', 0, async () => {
       const invalid: string[] = [
         sameRoundDependencyDecision('maps.place.search', 'maps.place.details', '{}'),

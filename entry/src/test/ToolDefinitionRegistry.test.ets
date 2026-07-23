@@ -137,6 +137,28 @@ export default function toolDefinitionRegistryTest() {
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
     });
 
+    it('keeps mutually exclusive model-selection semantics in the registry projection', 0, () => {
+      const socialFeed = aiphoneToolDescriptionForModel('social.feed.search');
+      const publicX = aiphoneToolDescriptionForModel('x.post.search');
+      const mail = aiphoneToolDescriptionForModel('mail.search');
+      const dynamic = aiphoneToolDescriptionForModel('dynamic.search');
+      const gmailDraft = aiphoneToolDescriptionForModel('gmail.draft.create');
+
+      expect(socialFeed.indexOf('SocialHub inbox')).assertLarger(-1);
+      expect(socialFeed.indexOf('Slack')).assertLarger(-1);
+      expect(socialFeed.indexOf('private-message')).assertLarger(-1);
+      expect(socialFeed.indexOf('public X/Twitter posts')).assertLarger(-1);
+      expect(publicX.indexOf('public post searches')).assertLarger(-1);
+      expect(publicX.indexOf('private-message')).assertEqual(-1);
+      expect(mail.indexOf('mailbox/email/inbox')).assertLarger(-1);
+      expect(mail.indexOf('Never use it for SocialHub messages')).assertLarger(-1);
+      expect(dynamic.indexOf('Composio-backed app/toolkit')).assertLarger(-1);
+      expect(dynamic.indexOf('use social.feed.search')).assertLarger(-1);
+      expect(gmailDraft.indexOf('create a draft first')).assertLarger(-1);
+      expect(gmailDraft.indexOf('exact current mail reply Send button')).assertLarger(-1);
+      expect(aiphoneToolDescriptionForModel('gmail.message.send')).assertEqual('');
+    });
+
     it('registers only truthful hotel actions with aligned public and runtime registries', 0, () => {
       const search = toolDefinitionForToolId('hotel.search') as ToolDefinition;
       const detail = toolDefinitionForToolId('hotel.detail') as ToolDefinition;

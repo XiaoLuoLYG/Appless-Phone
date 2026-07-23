@@ -795,8 +795,10 @@ export function hotelLeaderPlanningContext(): LeaderPlanningContext {
   return {
     tools: [{
       toolId: definition.toolId,
+      domain: definition.domain,
       intent: definition.intent,
       riskLevel: definition.riskLevel,
+      registeredBackends: definition.backendPriority.slice(),
       inputSchema: definition.inputSchema,
       outputSchema: definition.outputSchema,
       actions: definition.actions.slice()

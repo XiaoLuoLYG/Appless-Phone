@@ -69,6 +69,8 @@ const OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION: string =
   'For a request naming both sources, return exactly one media.video.search Data task with sources ' +
   '["youtube","bilibili"]; do not also schedule youtube.video.search. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
+const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
+const MAX_LEADER_PROMPT_CHARS: number = 100000;
 const TRAVEL_SELECTION_CONTRACT: string =
   'Travel selection contract: Explicitly naming both flight/航班/飞机 and train/高铁/火车 takes precedence over broad words ' +
   'such as 比较. In that case, select flight.search and train.search as two independent tasks in the same round. ' +
@@ -128,11 +130,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       throw new Error('LEADER_ROUND_LIMIT');
     }
     const prompt: string = this.prompt(message, input, context, round);
-    const output: string = await this.model.complete(
-      prompt,
-      undefined,
-      LEADER_SYSTEM_PROMPT
-    );
+    const output: string = await this.completeBounded(prompt);
     let sameRoundProducerToolIds: string[] = [];
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
@@ -165,11 +163,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       }
-      const repaired: string = await this.model.complete(
-        prompt + '\n' + correction,
-        undefined,
-        LEADER_SYSTEM_PROMPT
-      );
+      const repaired: string = await this.completeBounded(prompt + '\n' + correction);
       const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
       if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
         !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
@@ -188,6 +182,13 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       );
       return repairedDecision;
     }
+  }
+
+  private completeBounded(prompt: string): Promise<string> {
+    if (prompt.length > MAX_LEADER_PROMPT_CHARS) {
+      throw new Error('LEADER_PROMPT_LIMIT');
+    }
+    return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT);
   }
 
   private rejectOverlappingVideoTools(decision: LeaderDecision): void {
@@ -353,7 +354,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     round: number
   ): string {
     const completedToolIds: string[] = this.currentTurnCompletedToolIds(message, input, round);
-    return [
+    const toolCatalog: string = JSON.stringify(context.tools);
+    if (toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS) {
+      throw new Error('LEADER_TOOL_CATALOG_LIMIT');
+    }
+    const result: string = [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
@@ -386,12 +391,16 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
       'Context: ' + JSON.stringify(input),
-      'Registry capabilities: ' + JSON.stringify(context.tools),
+      'Registry capabilities: ' + toolCatalog,
       'Runtime-owned tool IDs: ' + JSON.stringify(
         context.runtimeOwnedToolIds === undefined ? [] : context.runtimeOwnedToolIds
       ),
       'Personas: ' + JSON.stringify(context.personas)
     ].join('\n');
+    if (result.length > MAX_LEADER_PROMPT_CHARS) {
+      throw new Error('LEADER_PROMPT_LIMIT');
+    }
+    return result;
   }
 
   private currentTurnCompletedToolIds(

@@ -681,48 +681,60 @@ function planningContext(): LeaderPlanningContext {
     tools: [
       {
         toolId: 'hotel.search',
+        domain: 'hotel',
         intent: 'hotel.search',
         riskLevel: 'read',
+        registeredBackends: ['mcp_remote'],
         inputSchema: 'hotelSearchRequest',
         outputSchema: 'hotelSearchResults',
         actions: ['legacy.action', 'hotel.detail']
       },
       {
         toolId: 'maps.place.search',
+        domain: 'maps',
         intent: 'maps.place.search',
         riskLevel: 'read',
+        registeredBackends: ['oauth_api'],
         inputSchema: 'mapsPlaceSearchQuery',
         outputSchema: 'places',
         actions: []
       },
       {
         toolId: 'maps.place.details',
+        domain: 'maps',
         intent: 'maps.place.details',
         riskLevel: 'read',
+        registeredBackends: ['oauth_api'],
         inputSchema: 'mapsPlaceDetailsQuery',
         outputSchema: 'place',
         actions: []
       },
       {
         toolId: 'memory.update',
+        domain: 'persona',
         intent: 'memory.update',
         riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
         inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       },
       {
         toolId: 'dynamic.search',
+        domain: 'dynamic',
         intent: 'dynamic.search',
         riskLevel: 'read',
+        registeredBackends: ['mcp_remote', 'oauth_api'],
         inputSchema: 'dynamicToolSearchQuery',
         outputSchema: 'dynamicToolConnect',
         actions: []
       },
       {
         toolId: 'unknown.search',
+        domain: 'unknown',
         intent: 'unknown.search',
         riskLevel: 'read',
+        registeredBackends: [],
         inputSchema: 'unknownSearchQuery',
         outputSchema: 'unknownSearchResults',
         actions: []

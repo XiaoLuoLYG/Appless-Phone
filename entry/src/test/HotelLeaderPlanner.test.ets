@@ -70,8 +70,10 @@ function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
       toolId: 'hotel.search',
+      domain: 'hotel',
       intent: 'hotel.search',
       riskLevel: 'read',
+      registeredBackends: ['mcp_remote'],
       inputSchema: 'hotelSearchRequest',
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']

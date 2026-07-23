@@ -329,8 +329,10 @@ function planningContext(): LeaderPlanningContext {
   return {
     tools: [{
       toolId: 'hotel.search',
+      domain: 'hotel',
       intent: 'hotel.search',
       riskLevel: 'read',
+      registeredBackends: ['mcp_remote'],
       inputSchema: 'hotelSearchRequest',
       outputSchema: 'hotelSearchResults',
       actions: ['hotel.detail', 'hotel.navigate', 'hotel.book.external']
@@ -376,8 +378,10 @@ function nineDataPlanningContext(): LeaderPlanningContext {
   for (let index = 0; index < ids.length; index++) {
     tools.push({
       toolId: ids[index],
+      domain: ids[index].split('.')[0],
       intent: ids[index],
       riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
       inputSchema: ids[index] + '.input',
       outputSchema: ids[index] + '.output',
       actions: []
@@ -393,16 +397,20 @@ function dependentDataPlanningContext(): LeaderPlanningContext {
   const context = nineDataPlanningContext();
   context.tools.push({
     toolId: 'maps.place.search',
+    domain: 'maps',
     intent: 'maps.place.search',
     riskLevel: 'read',
+    registeredBackends: ['oauth_api'],
     inputSchema: 'mapsPlaceSearchQuery',
     outputSchema: 'places',
     actions: []
   });
   context.tools.push({
     toolId: 'maps.place.details',
+    domain: 'maps',
     intent: 'maps.place.details',
     riskLevel: 'read',
+    registeredBackends: ['oauth_api'],
     inputSchema: 'mapsPlaceDetailsQuery',
     outputSchema: 'place',
     actions: []
@@ -871,15 +879,19 @@ export default function leaderAgentTest() {
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'flight.search',
+        domain: 'travel',
         intent: 'flight.search',
         riskLevel: 'read',
+        registeredBackends: ['mcp_remote'],
         inputSchema: 'flightSearchRequest',
         outputSchema: 'flights',
         actions: []
       }, {
         toolId: 'train.search',
+        domain: 'travel',
         intent: 'train.search',
         riskLevel: 'read',
+        registeredBackends: ['local_adapter'],
         inputSchema: 'trainSearchRequest',
         outputSchema: 'trains',
         actions: []
@@ -981,8 +993,10 @@ export default function leaderAgentTest() {
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'memory.update',
+        domain: 'persona',
         intent: 'memory.update',
         riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
         inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
@@ -1252,8 +1266,10 @@ export default function leaderAgentTest() {
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'memory.update',
+        domain: 'persona',
         intent: 'memory.update',
         riskLevel: 'draft',
+        registeredBackends: ['local_adapter'],
         inputSchema: 'memoryUpdateRequest',
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
@@ -1306,8 +1322,10 @@ export default function leaderAgentTest() {
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'unknown.search',
+        domain: 'unknown',
         intent: 'unknown.search',
         riskLevel: 'read',
+        registeredBackends: [],
         inputSchema: 'dynamicToolSearchQuery',
         outputSchema: 'dynamicToolConnect',
         actions: []

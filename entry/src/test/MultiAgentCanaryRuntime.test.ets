@@ -1134,6 +1134,40 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('gives the Leader registry-derived SocialHub, public X, mail, and dynamic selection semantics', 0, async () => {
+      const model = new QueueModel([ANSWER_DECISION]);
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+
+      await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+
+      const prompt = model.prompts[0];
+      expect(prompt.indexOf('SocialHub inbox')).assertLarger(-1);
+      expect(prompt.indexOf('private-message')).assertLarger(-1);
+      expect(prompt.indexOf('public X/Twitter posts')).assertLarger(-1);
+      expect(prompt.indexOf('mailbox/email/inbox')).assertLarger(-1);
+      expect(prompt.indexOf('Composio-backed app/toolkit')).assertLarger(-1);
+      expect(prompt.indexOf('Video selection contract')).assertLarger(-1);
+      expect(prompt.indexOf('"toolId":"gmail.message.send"')).assertEqual(-1);
+      expect(prompt.indexOf('"toolId":"social.feed.search","domain":"social"')).assertLarger(-1);
+      expect(prompt.indexOf('"registeredBackends":["local_adapter"]')).assertLarger(-1);
+      expect(prompt.indexOf('"toolId":"dynamic.search","domain":"dynamic"')).assertLarger(-1);
+      expect(prompt.indexOf('"toolId":"memory.update","domain":"persona"')).assertLarger(-1);
+      const catalogStart = prompt.indexOf('Registry capabilities: ');
+      const catalogEnd = prompt.indexOf('\nRuntime-owned tool IDs:', catalogStart);
+      expect(catalogStart).assertLarger(-1);
+      expect(catalogEnd).assertLarger(catalogStart);
+      expect(catalogEnd - catalogStart).assertLess(64001);
+      expect(prompt.length).assertLess(100001);
+      expect(model.prompts.length).assertEqual(1);
+      runtime.dispose();
+    });
+
     it('keeps registered Gmail tool and action capabilities inside the canary runtime', 0, async () => {
       const model = new QueueModel([GMAIL_REGISTERED_CAPABILITY_ANSWER]);
       const bus = new TrackingBus();

@@ -1,5 +1,5 @@
 import { AgentMessage, UserInputPayload } from '../message/AgentMessage';
-import { ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
+import { ToolBackendType, ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
 
 export const MAX_LEADER_DATA_TASKS_PER_ROUND: number = 8;
 export const MAX_LEADER_DATA_TASKS_PER_TURN: number = 24;
@@ -66,11 +66,14 @@ export interface LeaderPlan {
 
 export interface LeaderToolMetadata {
   toolId: string;
+  domain: string;
   intent: string;
   riskLevel: ToolRiskLevel;
+  registeredBackends: ToolBackendType[];
   inputSchema: string;
   outputSchema: string;
   actions: string[];
+  planningHint?: string;
 }
 
 export interface LeaderSkillMetadata {

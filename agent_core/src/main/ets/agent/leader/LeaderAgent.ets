@@ -1316,11 +1316,14 @@ export class LeaderAgent extends MessageDrivenAgent {
       const tool = context.tools[index];
       tools.push({
         toolId: tool.toolId,
+        domain: tool.domain,
         intent: tool.intent,
         riskLevel: tool.riskLevel,
+        registeredBackends: tool.registeredBackends.slice(),
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
-        actions: tool.actions.slice()
+        actions: tool.actions.slice(),
+        planningHint: tool.planningHint
       });
     }
     for (let index = 0; index < context.personas.length; index++) {

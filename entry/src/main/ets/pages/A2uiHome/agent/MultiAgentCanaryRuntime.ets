@@ -45,7 +45,8 @@ import {
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   setJsonPointer,
-  toolDefinitionForToolId
+  toolDefinitionForToolId,
+  toolPlanningDescriptionForToolId
 } from '@loop/agent-core';
 import { leaderPersonaContext } from '../../../model/LeaderPersonaContext';
 import {
@@ -918,7 +919,9 @@ interface MemorySurfaceOutput {
 }
 
 function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext {
-  const tools: LeaderToolMetadata[] = allToolDefinitions().map(
+  const tools: LeaderToolMetadata[] = allToolDefinitions()
+    .filter((definition: ToolDefinition): boolean => definition.toolId !== 'gmail.message.send')
+    .map(
     (definition: ToolDefinition): LeaderToolMetadata => {
       const actions = definition.actions.filter(
         (actionId: string): boolean => toolDefinitionForToolId(actionId) !== null
@@ -930,27 +933,35 @@ function canaryPlanningContext(previousPersonaId: string): LeaderPlanningContext
       }
       return {
         toolId: definition.toolId,
+        domain: definition.domain,
         intent: definition.intent,
         riskLevel: definition.riskLevel,
+        registeredBackends: definition.backendPriority.slice(),
         inputSchema: definition.inputSchema,
         outputSchema: definition.outputSchema,
-        actions
+        actions,
+        planningHint: toolPlanningDescriptionForToolId(definition.toolId)
       };
     }
   );
   const memory = memoryDefinition();
   tools.push({
     toolId: 'dynamic.search',
+    domain: 'dynamic',
     intent: 'dynamic.search',
     riskLevel: 'read',
+    registeredBackends: ['mcp_remote', 'oauth_api'],
     inputSchema: 'dynamicToolSearchQuery',
     outputSchema: 'dynamicToolConnect',
-    actions: []
+    actions: [],
+    planningHint: toolPlanningDescriptionForToolId('dynamic.search')
   });
   tools.push({
     toolId: memory.toolId,
+    domain: memory.domain,
     intent: memory.intent,
     riskLevel: memory.riskLevel,
+    registeredBackends: memory.backendPriority.slice(),
     inputSchema: memory.inputSchema,
     outputSchema: memory.outputSchema,
     actions: memory.actions.slice()
