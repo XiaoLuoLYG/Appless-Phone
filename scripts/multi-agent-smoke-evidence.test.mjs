@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   directTextVisibleEvidence,
@@ -1135,6 +1136,52 @@ test('requires direct action ordering and the expected visible surface source an
     expectedConversationId: 'c1',
     expectedTurnId: 't1'
   }).complete, false);
+});
+
+test('accepts a current-surface action run created in a new action turn', () => {
+  const result = multiAgentActionEvidence(`
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t16 task=a16 surface=s1 plan=p16 run=r16 action=hotel.navigate source=hotel.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t16 task=a16 surface=s1 plan=p16 run=r16 status=success
+  `, {
+    expectedActionId: 'hotel.navigate',
+    expectedSourceToolId: 'hotel.search',
+    currentSurfaceId: 's1',
+    expectedConversationId: 'c1'
+  });
+  assert.equal(result.complete, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.turnId, 't16');
+});
+
+test('accepts the newest exact action run when stale same-action records coexist', () => {
+  const result = multiAgentActionEvidence(`
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=old task=a0 surface=old-surface plan=p0 run=r0 action=hotel.navigate source=hotel.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=old task=a0 surface=old-surface plan=p0 run=r0 status=success
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t16 task=a16 surface=s1 plan=p16 run=r16 action=hotel.navigate source=hotel.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t16 task=a16 surface=s1 plan=p16 run=r16 status=success
+  `, {
+    expectedActionId: 'hotel.navigate',
+    expectedSourceToolId: 'hotel.search',
+    currentSurfaceId: 's1',
+    expectedConversationId: 'c1'
+  });
+  assert.equal(result.complete, true);
+  assert.equal(result.runId, 'r16');
+});
+
+test('captures hotel booking action logs around the click with the app PID', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const exactOptions = source.slice(
+    source.indexOf('function exactActionOptions'),
+    source.indexOf('function visibleSourceToolId')
+  );
+  const booking = source.slice(
+    source.indexOf('async function verifyHotelBookingAction'),
+    source.indexOf('async function verifyHotelDetailAction')
+  );
+  assert.doesNotMatch(exactOptions, /expectedTurnId/);
+  assert.match(booking, /captureAppLogsFor\(appPid, async \(\) =>/);
+  assert.doesNotMatch(booking, /hdc\(\['shell', 'hilog', '-x'\]\)/);
 });
 
 test('requires a virtual action request before its exact result', () => {

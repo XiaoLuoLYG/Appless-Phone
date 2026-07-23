@@ -752,11 +752,9 @@ export function multiAgentActionEvidence(logText, options = {}) {
   const expectedSurface = options.currentSurfaceId || options.surfaceId || '';
   const actionRuns = options.expectedVirtual === true ? [] : all.filter((item) => item.marker === 'MultiAgentActionRun' &&
     (!options.expectedActionId || item.fields.action === options.expectedActionId));
-  if (actionRuns.some((item) => optionMismatch(item, options, expectedSurface))) {
-    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['stale_action_run'] };
-  }
-  for (let index = actionRuns.length - 1; index >= 0; index--) {
-    const run = actionRuns[index];
+  const candidates = actionRuns.filter((item) => !optionMismatch(item, options, expectedSurface));
+  for (let index = candidates.length - 1; index >= 0; index--) {
+    const run = candidates[index];
     const matchingResults = all.filter((item) => item.marker === 'MultiAgentActionResult' &&
       item.fields.conversation === run.fields.conversation && item.fields.turn === run.fields.turn &&
       item.fields.task === run.fields.task && item.fields.surface === run.fields.surface &&
@@ -784,6 +782,9 @@ export function multiAgentActionEvidence(logText, options = {}) {
       resultIndex: result.index,
       failures: truthful ? [] : ['external_or_synthetic_success']
     };
+  }
+  if (actionRuns.length > candidates.length) {
+    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['stale_action_run'] };
   }
 
   const plans = options.expectedVirtual === false ? [] : all.filter((item) => item.marker === 'MultiAgentActionPlan' &&

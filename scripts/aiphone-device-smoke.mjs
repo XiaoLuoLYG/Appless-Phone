@@ -2086,7 +2086,6 @@ function exactActionOptions(actionId, sourceToolId, context) {
     expectedSourceToolId: sourceToolId || 'invalid',
     currentSurfaceId: context?.surfaceId || 'invalid',
     expectedConversationId: context?.conversationId || 'invalid',
-    expectedTurnId: context?.turnId || 'invalid',
     expectedVirtual: false
   };
 }
@@ -2333,9 +2332,11 @@ async function verifyHotelBookingAction(layout, index, appPid, actionEvidence, a
   }
 
   clearHilog();
-  hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
-  await sleep(2200);
-  const bookingLogs = sanitizeExternalUrlLogs(hdc(['shell', 'hilog', '-x']));
+  const capturedBookingLogs = await captureAppLogsFor(appPid, async () => {
+    hdc(['shell', 'uitest', 'uiInput', 'click', String(located.center.x), String(located.center.y)]);
+    await sleep(2200);
+  });
+  const bookingLogs = sanitizeExternalUrlLogs(capturedBookingLogs.join('\n'));
   const multiAgentAction = multiAgentActionEvidence(
     bookingLogs,
     exactActionOptions('hotel.booking.open', 'hotel.detail', actionContext)
