@@ -1149,6 +1149,89 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.indexOf('"id":"youtube.open.web"')).assertEqual(-1);
     });
 
+    it('renders provider-backed dynamicToolConnect results through the canonical generic result card', 0, async () => {
+      const result = dataResult('dynamic.search', 'dynamicToolConnect', object(
+        '{"results":[{"sourceTag":"Composio","toolName":"GOOGLEDOCS_SEARCH_DOCUMENTS",' +
+        '"title":"Composio Google Docs 结果","status":"success",' +
+        '"summary":"Composio returned one provider document.",' +
+        '"rows":[{"label":"文档","value":"AIPhoneDemo 设计文档"}],' +
+        '"rawPreview":"{\\"request_id\\":\\"receipt-1\\"}"}],' +
+        '"registration":{"provider":"Composio","qualifiedName":"GOOGLEDOCS_SEARCH_DOCUMENTS",' +
+        '"inputSchema":{},"outputSchema":{},"receipt":"receipt-1"}}'
+      ));
+      result.sources = [{
+        provider: 'Composio',
+        backend: 'oauth_api',
+        operation: 'GOOGLEDOCS_SEARCH_DOCUMENTS',
+        fetchedAt: '2026-07-23T00:00:00Z',
+        receipt: 'receipt-1'
+      }];
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], [], 'surface-dynamic-provider'
+      );
+
+      expect(rendered.jsonl.indexOf('GenericToolResults')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('AIPhoneDemo 设计文档')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('结构化结果格式无效')).assertEqual(-1);
+    });
+
+    it('preserves truthful empty auth and error dynamicToolConnect states without unsupported-schema UI', 0, async () => {
+      const statuses: string[] = ['empty', 'needs_auth', 'error'];
+      const messages: string[] = ['没有找到文档', 'Google Docs 尚未授权', 'Google Docs provider error'];
+      for (let index = 0; index < statuses.length; index++) {
+        const result = dataResult('dynamic.search', 'dynamicToolConnect', object(
+          '{"results":[{"sourceTag":"Composio","toolName":"GOOGLEDOCS_SEARCH_DOCUMENTS",' +
+          '"title":"Composio Google Docs 结果","status":' + JSON.stringify(statuses[index]) + ',' +
+          '"summary":' + JSON.stringify(messages[index]) + ',"rows":[{"label":"结果数量","value":"0"}],' +
+          '"rawPreview":""}],"registration":{"provider":"Composio",' +
+          '"qualifiedName":"GOOGLEDOCS_SEARCH_DOCUMENTS","inputSchema":{},"outputSchema":{},"receipt":""}}'
+        ));
+        result.status = index === 0 ? 'empty' : 'error';
+        if (index > 0) {
+          result.error = {
+            code: index === 1 ? 'AUTH_REQUIRED' : 'PROVIDER_ERROR',
+            message: messages[index]
+          };
+        }
+        result.sources = [{
+          provider: 'Composio',
+          backend: 'oauth_api',
+          operation: 'GOOGLEDOCS_SEARCH_DOCUMENTS',
+          fetchedAt: '2026-07-23T00:00:00Z'
+        }];
+        const rendered = await new StructuredToolUiRenderer().result(
+          uiTask(), [result], [], 'surface-dynamic-' + index.toString()
+        );
+        expect(rendered.jsonl.indexOf(messages[index])).assertLarger(-1);
+        expect(rendered.jsonl.indexOf('结构化结果格式无效')).assertEqual(-1);
+      }
+    });
+
+    it('fails closed for malformed dynamicToolConnect payloads', 0, async () => {
+      const missingRegistration = dataResult(
+        'dynamic.search',
+        'dynamicToolConnect',
+        object('{"results":[]}')
+      );
+      const malformedRegistration = dataResult(
+        'dynamic.search',
+        'dynamicToolConnect',
+        object('{"results":[],"registration":{"provider":"Composio","qualifiedName":7}}')
+      );
+      const renderer = new StructuredToolUiRenderer();
+
+      const missing = await renderer.result(
+        uiTask(), [missingRegistration], [], 'surface-dynamic-missing-registration'
+      );
+      const malformed = await renderer.result(
+        uiTask(), [malformedRegistration], [], 'surface-dynamic-malformed-registration'
+      );
+
+      expect(missing.jsonl.indexOf('结构化结果格式无效')).assertLarger(-1);
+      expect(malformed.jsonl.indexOf('结构化结果格式无效')).assertLarger(-1);
+    });
+
     it('keeps valid hotel provider failures canonical while malformed payloads fail closed', 0, async () => {
       const failedSearch = hotelSearchResult();
       failedSearch.ok = false;

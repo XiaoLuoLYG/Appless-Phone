@@ -30,6 +30,7 @@ import {
   normalizeCalendarQaDate,
   runC19CleanupFinalizer,
   directTextVisibleEvidence,
+  dynamicToolDiscoveryEvidence,
   mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
@@ -1535,10 +1536,12 @@ function analyze(
   const escapedToolId = escapeRegExp(expectedToolId);
   const hasExpectedToolId = multiAgentLifecycle.complete &&
     expectedToolIds.every((toolId) => multiAgentLifecycle.toolIds.includes(toolId));
-  const discoveryPattern = expectedDiscoveredToolId.length > 0 ?
-    new RegExp(`\\[AIPhone\\]\\[DynamicToolDiscovery\\][^\\n]*selectedToolId=${expectedDiscoveredToolId.replace('.', '\\.')}`) :
-    null;
-  const hasExpectedDiscoveredToolId = discoveryPattern === null ? true : discoveryPattern.test(text);
+  const dynamicDiscovery = expectedDiscoveredToolId.length === 0 ? null :
+    dynamicToolDiscoveryEvidence(text, {
+      expectedSelectedToolId: expectedDiscoveredToolId,
+      expectedProvider: expectedDiscoveredToolId === 'dynamic.search' ? 'composio' : ''
+    });
+  const hasExpectedDiscoveredToolId = dynamicDiscovery === null ? true : dynamicDiscovery.ok;
   const missingConfig = /\[AIPhone\]\[LocalToolMissingConfig\]/.test(text);
   const rawModelSelectedExpectedToolId = expectedToolId.length === 0 ||
     new RegExp(`"toolId":"${escapedToolId}"`).test(text) ||
@@ -1555,6 +1558,7 @@ function analyze(
     expectedToolId,
     expectedToolIds,
     expectedDiscoveredToolId,
+    dynamicDiscovery,
     multiAgentLifecycle,
     hasExpectedToolId,
     hasExpectedDiscoveredToolId,

@@ -9887,14 +9887,16 @@ function dynamicRegistration(
   qualifiedName: string,
   inputSchema: Object,
   outputSchema: Object,
-  receipt: string
+  receipt: string,
+  selectedToolId: string = 'dynamic.search'
 ): DynamicRegistrationMetadata {
   return {
     provider: provider,
     qualifiedName: qualifiedName,
     inputSchema: inputSchema,
     outputSchema: outputSchema,
-    receipt: receipt
+    receipt: receipt,
+    selectedToolId: selectedToolId
   };
 }
 
@@ -9921,14 +9923,16 @@ function dynamicReadFailure(
 export function dynamicManifestRegistrationMetadata(
   provider: string,
   tool: DynamicMcpTool,
-  result: DynamicGenericToolResult
+  result: DynamicGenericToolResult,
+  selectedToolId: string = tool.name
 ): DynamicRegistrationMetadata {
   return dynamicRegistration(
     provider,
     tool.name,
     tool.inputSchema,
     tool.outputSchema ?? new Object(),
-    dynamicReceiptFromProviderPayload(result.rawPreview)
+    dynamicReceiptFromProviderPayload(result.rawPreview),
+    selectedToolId
   );
 }
 
@@ -9999,7 +10003,7 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
     }
     result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
   }
-  const metadata = dynamicManifestRegistrationMetadata(manifest.displayName, tool, result);
+  const metadata = dynamicManifestRegistrationMetadata(manifest.displayName, tool, result, discovery.toolId);
   return dynamicExecutionResult(result, metadata);
 }
 

@@ -99,6 +99,7 @@ export interface DynamicRegistrationMetadata {
   inputSchema: Object;
   outputSchema: Object;
   receipt: string;
+  selectedToolId?: string;
 }
 
 interface DynamicReceiptEnvelope {

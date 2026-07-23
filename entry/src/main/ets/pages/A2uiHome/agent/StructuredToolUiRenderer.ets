@@ -246,6 +246,34 @@ function genericDataWithOffers(
   return generic;
 }
 
+function dynamicDataWithOffers(
+  data: DataResult,
+  offers: ActionOffer[]
+): GenericStructuredData | null {
+  const record = recordOf(data.data);
+  const registration = recordOf(record === null ? null : record['registration']);
+  if (record === null || registration === null ||
+    !hasArray(record, 'results') ||
+    !hasText(registration, 'provider') ||
+    (registration['provider'] as string).trim().length === 0 ||
+    !hasText(registration, 'qualifiedName') ||
+    (registration['qualifiedName'] as string).trim().length === 0 ||
+    recordOf(registration['inputSchema']) === null ||
+    recordOf(registration['outputSchema']) === null ||
+    !hasText(registration, 'receipt')) {
+    return null;
+  }
+  const provider = registration['provider'] as string;
+  const qualifiedName = registration['qualifiedName'] as string;
+  const receipt = registration['receipt'] as string;
+  const matchingSource = data.sources.find((source): boolean =>
+    source.provider === provider &&
+    source.operation === qualifiedName &&
+    (receipt.length === 0 || source.receipt === receipt)
+  );
+  return matchingSource === undefined ? null : genericDataWithOffers(data, offers);
+}
+
 function mailThreadDynamic(data: DataResult): DynamicGenericToolResult | null {
   const record = recordOf(data.data);
   if (!hasText(record, 'provider') || !hasText(record, 'requestKey') ||
@@ -373,6 +401,13 @@ function canonicalJsonl(data: DataResult, offers: ActionOffer[], surfaceId: stri
       const generic = genericDataWithOffers(data, offers);
       if (generic === null) {
         throw new Error(data.outputSchema + ' data is malformed');
+      }
+      return genericToolResultsA2ui(surfaceId, data.toolId, generic.results);
+    }
+    case 'dynamicToolConnect': {
+      const generic = dynamicDataWithOffers(data, offers);
+      if (generic === null) {
+        throw new Error('dynamicToolConnect data is malformed');
       }
       return genericToolResultsA2ui(surfaceId, data.toolId, generic.results);
     }

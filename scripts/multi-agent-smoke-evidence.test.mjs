@@ -90,6 +90,63 @@ test('holds ordinary C20 multi-agent capture until its bounded settlement window
   }), true);
 });
 
+test('requires correlated provider-backed dynamic discovery and keeps local manifest evidence', () => {
+  assert.equal(typeof smokeLifecycle.dynamicToolDiscoveryEvidence, 'function');
+  const remote = [
+    '[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input1',
+    '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false',
+    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true receipt=false',
+    '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=d1 tool=dynamic.search status=empty sources=1 error=false',
+    '[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=u1 dataTasks=d1',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=u1 surface=loop_surface_1 state=result',
+    '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input1 status=empty surface=loop_surface_1 roundCount=1 messageChars=4'
+  ].join('\n');
+  const remoteEvidence = smokeLifecycle.dynamicToolDiscoveryEvidence(remote, {
+    expectedSelectedToolId: 'dynamic.search',
+    expectedProvider: 'composio'
+  });
+  assert.equal(remoteEvidence.ok, true);
+  assert.equal(remoteEvidence.qualifiedName, 'googledocs_search_documents');
+  assert.equal(remoteEvidence.status, 'empty');
+
+  const local = remote
+    .replace('selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents',
+      'selectedToolId=weather.query provider=amap qualifiedName=weather.query')
+    .replace('status=empty source=true receipt=false', 'status=success source=true receipt=true')
+    .replaceAll('status=empty', 'status=success');
+  assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(local, {
+    expectedSelectedToolId: 'weather.query'
+  }).ok, true);
+});
+
+test('rejects prompt UI only stale mismatched and source-less dynamic discovery evidence', () => {
+  assert.equal(typeof smokeLifecycle.dynamicToolDiscoveryEvidence, 'function');
+  const exact = [
+    '[AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input1',
+    '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=d1 round=1 tool=dynamic.search predecessor=none path=none target=none binding=false',
+    '[AIPhone][DynamicToolDiscovery] conversation=c1 turn=t1 task=d1 selectedToolId=dynamic.search provider=composio qualifiedName=googledocs_search_documents status=empty source=true receipt=false',
+    '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=d1 tool=dynamic.search status=empty sources=1 error=false',
+    '[AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=u1 dataTasks=d1',
+    '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=u1 surface=loop_surface_1 state=result',
+    '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input1 status=empty surface=loop_surface_1 roundCount=1 messageChars=4'
+  ].join('\n');
+  const options = { expectedSelectedToolId: 'dynamic.search', expectedProvider: 'composio' };
+  [
+    exact.replace('[AIPhone][DynamicToolDiscovery]', '[AIPhone][PromptCopy]'),
+    exact.replace('conversation=c1 turn=t1 task=d1 selectedToolId=', 'conversation=c1 turn=old task=d1 selectedToolId='),
+    exact.replace('provider=composio', 'provider=github'),
+    exact.replace('qualifiedName=googledocs_search_documents', 'qualifiedName=invalid'),
+    exact.replace('source=true', 'source=false'),
+    exact.replace('status=empty source=true', 'status=success source=true')
+  ].forEach((logs) => {
+    assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(logs, options).ok, false);
+  });
+  assert.equal(smokeLifecycle.dynamicToolDiscoveryEvidence(
+    '[AIPhone][HtmlHomeDocument] text=dynamic.search provider=composio qualifiedName=googledocs_search_documents',
+    options
+  ).ok, false);
+});
+
 test('accepts C19 writes only from a correlated provider result and rejects invalid surfaces or forged IDs', () => {
   const action = {
     ok: true, actionId: 'calendar.event.update', conversationId: 'c19', turnId: 'page-turn-7',

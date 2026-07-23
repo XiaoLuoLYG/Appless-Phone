@@ -416,6 +416,67 @@ export function multiAgentTurnEvidence(logText, options = {}) {
   };
 }
 
+export function dynamicToolDiscoveryEvidence(logText, options = {}) {
+  const expectedSelectedToolId = String(options.expectedSelectedToolId || '');
+  const expectedProvider = String(options.expectedProvider || '');
+  const lifecycle = multiAgentTurnEvidence(logText, { expectedToolIds: ['dynamic.search'] });
+  const failed = {
+    ok: false,
+    selectedToolId: '',
+    provider: '',
+    qualifiedName: '',
+    status: '',
+    source: false,
+    receipt: false
+  };
+  if (!lifecycle.complete || expectedSelectedToolId.length === 0) return failed;
+  const dynamicTasks = lifecycle.dataTasks.filter((task) => task.toolId === 'dynamic.search');
+  if (dynamicTasks.length !== 1) return failed;
+  const taskId = dynamicTasks[0].taskId;
+  const all = records(logText);
+  const task = all.find((item) => item.marker === 'MultiAgentDataTask' &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId &&
+    item.fields.tool === 'dynamic.search');
+  const terminal = all.find((item) => item.marker === 'MultiAgentDataResult' &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId &&
+    item.fields.tool === 'dynamic.search');
+  if (task === undefined || terminal === undefined || terminal.index <= task.index) return failed;
+  const matches = all.filter((item) => item.marker === 'DynamicToolDiscovery' &&
+    item.index > task.index && item.index < terminal.index &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId);
+  if (matches.length !== 1) return failed;
+  const marker = matches[0];
+  const qualifiedName = marker.fields.qualifiedName || '';
+  const provider = marker.fields.provider || '';
+  const status = marker.fields.status || '';
+  const source = marker.fields.source === 'true';
+  const receiptFact = marker.fields.receipt === 'true' || marker.fields.receipt === 'false';
+  const ok = marker.fields.selectedToolId === expectedSelectedToolId &&
+    (expectedProvider.length === 0 || provider === expectedProvider) &&
+    provider !== 'invalid' &&
+    qualifiedName !== 'invalid' &&
+    /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(provider) &&
+    /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(qualifiedName) &&
+    status === terminal.fields.status &&
+    source &&
+    receiptFact;
+  return {
+    ok,
+    selectedToolId: marker.fields.selectedToolId || '',
+    provider,
+    qualifiedName,
+    status,
+    source,
+    receipt: marker.fields.receipt === 'true'
+  };
+}
+
 export function toolExecutionEvidence(logText, options = {}) {
   const expectedToolIds = Array.isArray(options.expectedToolIds) ?
     options.expectedToolIds.filter((toolId) => typeof toolId === 'string' && toolId.length > 0) : [];

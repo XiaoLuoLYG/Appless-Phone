@@ -259,6 +259,40 @@ export class MultiAgentEvidenceFormatter {
       default: return '';
     }
   }
+  dynamicDiscoveryLine(message: AgentMessage): string {
+    if (message.type !== AgentMessageType.TASK_RESULT_DATA) return '';
+    const payload = message.payload as DataResult;
+    if (payload.toolId !== 'dynamic.search' || payload.outputSchema !== 'dynamicToolConnect' ||
+      payload.data === null || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+      return '';
+    }
+    const data = payload.data as Record<string, MailIdentityValue>;
+    const registrationValue = data['registration'];
+    if (registrationValue === null || registrationValue === undefined ||
+      typeof registrationValue !== 'object' || Array.isArray(registrationValue)) {
+      return '';
+    }
+    const registration = registrationValue as Record<string, MailIdentityValue>;
+    const provider = mailIdentityText(registration['provider']);
+    const qualifiedName = mailIdentityText(registration['qualifiedName']);
+    const selected = mailIdentityText(registration['selectedToolId']);
+    const receipt = mailIdentityText(registration['receipt']);
+    const source = payload.sources.find((candidate): boolean =>
+      candidate.provider === provider && candidate.operation === qualifiedName
+    );
+    const identity = ' conversation=' + this.token('c', message.conversationId) +
+      ' turn=' + this.token('t', message.turnId) +
+      ' task=' + this.token('k', message.taskId);
+    const selectedToolId = selected.length > 0 ? selected :
+      (provider.toLowerCase() === 'composio' ? 'dynamic.search' : qualifiedName);
+    return '[AIPhone][DynamicToolDiscovery]' + identity +
+      ' selectedToolId=' + evidenceAllowed(selectedToolId.toLowerCase()) +
+      ' provider=' + evidenceAllowed(provider.toLowerCase()) +
+      ' qualifiedName=' + evidenceAllowed(qualifiedName.toLowerCase()) +
+      ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
+      ' source=' + (source === undefined ? 'false' : 'true') +
+      ' receipt=' + (receipt.length > 0 && source?.receipt === receipt ? 'true' : 'false');
+  }
   private dataTaskLine(message: AgentMessage, identity: string): string {
     const payload = message.payload as CreateDataTaskPayload;
     const prefix: string = message.turnId + ':round-';
@@ -337,6 +371,8 @@ export class MultiAgentEvidenceFormatter {
 
 function emitEvidence(formatter: MultiAgentEvidenceFormatter, message: AgentMessage): void {
   try {
+    const dynamicLine: string = formatter.dynamicDiscoveryLine(message);
+    if (dynamicLine.length > 0) aiLogInfo(dynamicLine);
     const line: string = formatter.line(message);
     if (line.length > 0) aiLogInfo(line);
   } catch (_error) {}

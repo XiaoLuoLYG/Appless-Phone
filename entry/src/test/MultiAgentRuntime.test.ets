@@ -1093,6 +1093,45 @@ export default function multiAgentRuntimeTest() {
       expect(unbound.indexOf('predecessor=none path=none target=none binding=false')).assertLarger(-1);
     });
 
+    it('formats correlated dynamic discovery only from registration and matching provider source facts', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
+      const result: DataResult = {
+        toolId: 'dynamic.search',
+        outputSchema: 'dynamicToolConnect',
+        status: 'empty',
+        sources: [{
+          provider: 'Composio',
+          backend: 'oauth_api',
+          operation: 'GOOGLEDOCS_SEARCH_DOCUMENTS',
+          fetchedAt: '2026-07-23T00:00:00Z'
+        }],
+        data: JSON.parse(
+          '{"results":[],"registration":{"provider":"Composio",' +
+          '"qualifiedName":"GOOGLEDOCS_SEARCH_DOCUMENTS","inputSchema":{},' +
+          '"outputSchema":{},"receipt":""}}'
+        ) as Object,
+        warnings: []
+      };
+      const message: AgentMessage = {
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: 'conversation-dynamic',
+        turnId: 'turn-dynamic',
+        taskId: 'data-dynamic',
+        payload: result
+      };
+
+      const line = formatter.dynamicDiscoveryLine(message);
+      expect(line.indexOf('[AIPhone][DynamicToolDiscovery]')).assertEqual(0);
+      expect(line.indexOf('selectedToolId=dynamic.search')).assertLarger(-1);
+      expect(line.indexOf('provider=composio')).assertLarger(-1);
+      expect(line.indexOf('qualifiedName=googledocs_search_documents')).assertLarger(-1);
+      expect(line.indexOf('status=empty source=true receipt=false')).assertLarger(-1);
+      expect(line.indexOf('GOOGLEDOCS_SEARCH_DOCUMENTS')).assertEqual(-1);
+
+      result.sources[0].operation = 'WRONG_TOOL';
+      expect(formatter.dynamicDiscoveryLine(message).indexOf('source=false')).assertLarger(-1);
+    });
+
     it('rejects unsafe registry ids and bounds then disposes opaque correlations', 0, () => {
       const formatter = new MultiAgentEvidenceFormatter(8);
       const payload: InputUserPayload = { text: 'not logged' };
