@@ -226,6 +226,34 @@ function hasPositiveWriteEvidence(model: A2uiRuntimeDataModel, actionId: string)
   return false;
 }
 
+function hasVirtualWhatsAppConfirmation(
+  model: A2uiRuntimeDataModel,
+  args: Object
+): boolean {
+  const requested = args as HandlerArgRecord;
+  const toNumber = typeof requested['toNumber'] === 'string' ?
+    requested['toNumber'].trim() : '';
+  const text = typeof requested['text'] === 'string' ? requested['text'].trim() : '';
+  for (let index = 0; index < model.genericToolResults.length; index++) {
+    const result = model.genericToolResults[index];
+    const actions = result.actions === undefined ? [] : result.actions;
+    if (result.sourceTag !== 'Composio WhatsApp Business' ||
+      result.toolName !== 'whatsapp.message.send' ||
+      result.status !== 'confirm_required' || actions.length !== 1 ||
+      actions[0].id !== 'whatsapp.message.send.confirm' ||
+      actions[0].args === undefined || actions[0].args === null ||
+      Array.isArray(actions[0].args)) {
+      continue;
+    }
+    const confirmation = actions[0].args as HandlerArgRecord;
+    if (toNumber.length > 0 && text.length > 0 &&
+      confirmation['toNumber'] === toNumber && confirmation['text'] === text) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function providerError(model: A2uiRuntimeDataModel): string {
   for (let index = 0; index < model.genericToolResults.length; index++) {
     const result = model.genericToolResults[index];
@@ -345,7 +373,12 @@ export class RegisteredPageActionHandler {
         message: error
       };
     }
-    if (externalWrite(actionId) && !hasPositiveWriteEvidence(model, actionId)) {
+    const virtualWhatsAppConfirmation = actionId === 'whatsapp.message.send' &&
+      context.virtualAction === true &&
+      context.pageActionId === 'whatsapp.message.send' &&
+      hasVirtualWhatsAppConfirmation(model, args);
+    if (externalWrite(actionId) && !virtualWhatsAppConfirmation &&
+      !hasPositiveWriteEvidence(model, actionId)) {
       return {
         status: 'error',
         errorCode: 'ACTION_PAGE_COMPLETION_UNVERIFIED',

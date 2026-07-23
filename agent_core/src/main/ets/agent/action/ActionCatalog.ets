@@ -8,6 +8,15 @@ import {
 } from './ActionCatalogTypes';
 
 const WORKFLOW_ENTRY_ACTION_ID = 'workflow.run';
+const ACTION_INTENT_IDS: string[] = [
+  'worldcup.open',
+  'maps.route.open',
+  'calendar.event.create',
+  'luckin.order.preview',
+  'payment.send',
+  'payment.account.setup',
+  'whatsapp.message.send'
+];
 
 function denied(code: string, message: string): ActionCatalogResult {
   return {
@@ -125,8 +134,7 @@ export class ActionCatalog {
   }
 
   validateActionIntentExecution(actionId: string, args: Object): ActionCatalogResult {
-    if (actionId !== 'worldcup.open' && actionId !== 'maps.route.open' &&
-      actionId !== 'calendar.event.create') {
+    if (ACTION_INTENT_IDS.indexOf(actionId) < 0) {
       return denied(
         'ACTION_INTENT_DENIED',
         'Only registered no-Data actions with deterministic args may execute from actionIntent.'

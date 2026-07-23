@@ -53,7 +53,11 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
     if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
       toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
       toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
-      toolId === 'memory.update') {
+      toolId === 'luckin.order.preview' || toolId === 'payment.send' ||
+      toolId === 'payment.account.setup' || toolId === 'whatsapp.message.send' ||
+      toolId === 'luckin.order.create' || toolId === 'whatsapp.message.send.confirm' ||
+      toolId === 'payment.confirm' || toolId === 'payment.capture' ||
+      toolId === 'ride.order.create' || toolId === 'memory.update') {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
@@ -311,6 +315,43 @@ export default function actionCatalogTest() {
       expect(calendarIntent.ok).assertTrue();
       expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
       expect(memoryIntent.code).assertEqual('ACTION_INTENT_DENIED');
+    });
+
+    it('limits actionIntent execution to safe initial surfaces', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const allowed: string[] = [
+        'worldcup.open',
+        'maps.route.open',
+        'calendar.event.create',
+        'luckin.order.preview',
+        'payment.send',
+        'payment.account.setup',
+        'whatsapp.message.send'
+      ];
+      const denied: string[] = [
+        'luckin.order.create',
+        'whatsapp.message.send.confirm',
+        'payment.confirm',
+        'payment.capture',
+        'ride.order.create',
+        'memory.update'
+      ];
+
+      for (let index = 0; index < allowed.length; index++) {
+        expect(actionCatalog.validateActionIntentExecution(
+          allowed[index], new Object()
+        ).ok).assertTrue();
+      }
+      for (let index = 0; index < denied.length; index++) {
+        expect(actionCatalog.validateActionIntentExecution(
+          denied[index], new Object()
+        ).code).assertEqual('ACTION_INTENT_DENIED');
+      }
     });
 
     it('recognizes only workflow run as the fixed workflow entry', 0, () => {

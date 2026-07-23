@@ -32,7 +32,8 @@ import {
 import {
   RegisteredPageAction,
   RegisteredPageActionContext,
-  SystemUriOpener
+  SystemUriOpener,
+  validateRegisteredPageActionArgs
 } from '../main/ets/pages/A2uiHome/agent/AiphoneRegisteredActionExecutor';
 import {
   RegisteredPageActionHandler,
@@ -271,6 +272,43 @@ class RecordingPageToolInvoker implements RegisteredPageToolInvoker {
       return { ok: true, result: null, error: '' };
     }
     return { ok: true, result: successfulToolResult(toolId), error: '' };
+  }
+}
+
+class WhatsAppConfirmationInvoker implements RegisteredPageToolInvoker {
+  readonly calls: ToolInvocationRecord[] = [];
+
+  async invoke(
+    toolId: string,
+    prompt: string,
+    pageActionId: string,
+    args: Object
+  ): Promise<RegisteredPageToolInvocation> {
+    this.calls.push({ toolId, prompt, pageActionId, args });
+    const result = successfulToolResult(toolId);
+    const model = JSON.parse(result.surface.dataModelJson) as A2uiRuntimeDataModel;
+    model.genericToolResults = [{
+      sourceTag: 'Composio WhatsApp Business',
+      toolName: 'whatsapp.message.send',
+      title: '确认发送 WhatsApp 消息',
+      status: 'confirm_required',
+      summary: '将通过已授权的 WhatsApp Business 账号发送。',
+      rows: [
+        { label: '收件人', value: '+8613800138000' },
+        { label: '消息', value: 'Appless QA run-1' }
+      ],
+      rawPreview: 'confirm whatsapp send to=+8613800138000',
+      actions: [{
+        id: 'whatsapp.message.send.confirm',
+        label: '确认发送',
+        prompt: '确认通过 WhatsApp Business 发送消息',
+        variant: 'danger',
+        kind: 'prompt',
+        args
+      }]
+    }];
+    result.surface.dataModelJson = JSON.stringify(model);
+    return { ok: true, result, error: '' };
   }
 }
 
@@ -1800,6 +1838,139 @@ export default function registeredPageActionMigrationTest() {
       expect(resolveVirtualRegisteredPageAction('social.reply.draft', '帮我起草回复')).assertNull();
       expect(resolveVirtualRegisteredPageAction('maps.route.open', '打开路线')).assertNull();
       runtime.dispose();
+    });
+
+    it('resolves and invokes only bounded safe initial Action requests without write authority', 0, async () => {
+      const luckinPrompt = '帮我点一杯瑞幸生椰拿铁，半糖少冰';
+      const paypalPrompt = '用 PayPal 给罗一格转 1 美元';
+      const googlePayPrompt = '用 Google Pay 给罗一格转 1 美元';
+      const stripePrompt = '帮我设置 Stripe 收款账户';
+      const whatsappPrompt =
+        '帮我给 WhatsApp 测试联系人 +8613800138000 发送消息：Appless QA run-1';
+
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'luckin.order.preview', luckinPrompt
+      )?.args)).assertEqual('{"originalQuery":"' + luckinPrompt + '"}');
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'payment.send', paypalPrompt
+      )?.args)).assertEqual('{"originalQuery":"' + paypalPrompt + '"}');
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'payment.send', googlePayPrompt
+      )?.args)).assertEqual('{"originalQuery":"' + googlePayPrompt + '"}');
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'payment.account.setup', stripePrompt
+      )?.args)).assertEqual('{"originalQuery":"' + stripePrompt + '"}');
+      expect(JSON.stringify(resolveVirtualRegisteredPageAction(
+        'whatsapp.message.send', whatsappPrompt
+      )?.args)).assertEqual(
+        '{"toNumber":"+8613800138000","text":"Appless QA run-1"}'
+      );
+      expect(resolveVirtualRegisteredPageAction(
+        'whatsapp.message.send', '帮我给 WhatsApp 测试联系人发送消息：Appless QA run-1'
+      )).assertNull();
+      expect(resolveVirtualRegisteredPageAction(
+        'whatsapp.message.send', '帮我给 WhatsApp 测试联系人 +8613800138000 发送消息：'
+      )).assertNull();
+      expect(resolveVirtualRegisteredPageAction(
+        'whatsapp.message.send',
+        '帮我给 WhatsApp 测试联系人 +1234567890123456 发送消息：Appless QA run-1'
+      )).assertNull();
+
+      expect(validateRegisteredPageActionArgs(
+        'luckin.order.preview', JSON.parse('{"originalQuery":"' + luckinPrompt + '"}') as Object
+      ).ok).assertTrue();
+      expect(validateRegisteredPageActionArgs(
+        'payment.send', JSON.parse('{"originalQuery":"' + paypalPrompt + '"}') as Object
+      ).ok).assertTrue();
+      expect(validateRegisteredPageActionArgs(
+        'payment.account.setup', JSON.parse('{"originalQuery":"' + stripePrompt + '"}') as Object
+      ).ok).assertTrue();
+      const unsafe: string[] = [
+        'luckin.order.create',
+        'payment.confirm',
+        'payment.capture',
+        'stripe.account.create',
+        'whatsapp.message.send.confirm',
+        'ride.order.create'
+      ];
+      for (let index = 0; index < unsafe.length; index++) {
+        expect(validateRegisteredPageActionArgs(
+          unsafe[index], JSON.parse('{"originalQuery":"请直接执行"}') as Object
+        ).ok).assertFalse();
+      }
+
+      const invoker = new RecordingPageToolInvoker();
+      const handler = new RegisteredPageActionHandler(invoker);
+      const prompts: string[] = [luckinPrompt, paypalPrompt, googlePayPrompt, stripePrompt];
+      const actionIds: string[] = [
+        'luckin.order.preview',
+        'payment.send',
+        'payment.send',
+        'payment.account.setup'
+      ];
+      for (let index = 0; index < actionIds.length; index++) {
+        const resolved = resolveVirtualRegisteredPageAction(actionIds[index], prompts[index]);
+        const result = await handler.execute(
+          actionIds[index],
+          (resolved as A2uiAction).args as Object,
+          {
+            conversationId: 'safe-initial',
+            turnId: 'turn-' + index.toString(),
+            surfaceId: 'virtual:' + actionIds[index],
+            sourceToolId: 'virtual.action-intent',
+            planId: 'direct:' + index.toString(),
+            runId: 'run-' + index.toString(),
+            stepId: 'step-1',
+            pageActionId: actionIds[index],
+            virtualAction: true
+          }
+        );
+        expect(result.status).assertEqual('success');
+      }
+      expect(invoker.calls.length).assertEqual(4);
+      expect(invoker.calls[0].toolId).assertEqual('luckin.order.preview');
+      expect(invoker.calls[0].prompt).assertEqual(luckinPrompt);
+      expect(invoker.calls[1].toolId).assertEqual('payment.send');
+      expect(invoker.calls[1].prompt).assertEqual(paypalPrompt);
+      expect(invoker.calls[2].toolId).assertEqual('payment.send');
+      expect(invoker.calls[2].prompt).assertEqual(googlePayPrompt);
+      expect(invoker.calls[3].toolId).assertEqual('payment.account.setup');
+      expect(invoker.calls[3].prompt).assertEqual(stripePrompt);
+      const serializedCalls = JSON.stringify(invoker.calls);
+      expect(serializedCalls.indexOf('luckin.order.create')).assertEqual(-1);
+      expect(serializedCalls.indexOf('payment.confirm')).assertEqual(-1);
+      expect(serializedCalls.indexOf('payment.capture')).assertEqual(-1);
+      expect(serializedCalls.indexOf('stripe.account.create')).assertEqual(-1);
+    });
+
+    it('invokes WhatsApp only as its existing confirm-required surface', 0, async () => {
+      const invoker = new WhatsAppConfirmationInvoker();
+      const args = JSON.parse(
+        '{"toNumber":"+8613800138000","text":"Appless QA run-1"}'
+      ) as Object;
+      const result = await new RegisteredPageActionHandler(invoker).execute(
+        'whatsapp.message.send',
+        args,
+        {
+          conversationId: 'whatsapp-preview',
+          turnId: 'turn-1',
+          surfaceId: 'virtual:whatsapp',
+          sourceToolId: 'virtual.action-intent',
+          planId: 'direct:whatsapp',
+          runId: 'whatsapp',
+          stepId: 'step-1',
+          pageActionId: 'whatsapp.message.send',
+          virtualAction: true
+        }
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(invoker.calls.length).assertEqual(1);
+      expect(invoker.calls[0].toolId).assertEqual('whatsapp.message.send');
+      expect(invoker.calls[0].pageActionId).assertEqual('whatsapp.message.send');
+      expect(invoker.calls[0].prompt).assertEqual('whatsapp.message.send');
+      expect(JSON.stringify(invoker.calls[0].args)).assertEqual(JSON.stringify(args));
+      expect(JSON.stringify(invoker.calls).indexOf('whatsapp.message.send.confirm')).assertEqual(-1);
     });
 
     it('rejects invalid World Cup arguments before the real handler invocation', 0, async () => {

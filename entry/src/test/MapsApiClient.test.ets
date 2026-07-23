@@ -6,6 +6,7 @@ import {
   mapsPlaceDetailsProviderResultFromPayload,
   mapsPlaceProviderFailure,
   mapsPlaceSearchProviderResultFromPayload,
+  mapsRouteInputFromPrompt,
   mapsRouteResult,
   mapsStructuredDataResult,
   mapsTextSearchBody,
@@ -110,6 +111,17 @@ export default function mapsApiClientTest() {
       expect(url.indexOf('travelmode=driving')).assertLarger(-1);
       expect(url.indexOf('dir_action=navigate')).assertLarger(-1);
       expect(googleMapsDirectionsUrl(JSON.parse('{"origin":"深圳北站"}') as Object)).assertEqual('');
+    });
+
+    it('removes composed route suffixes without changing the exact endpoints', 0, () => {
+      const route = mapsRouteInputFromPrompt(
+        '帮我用 Google Maps 查询从深圳北站到深圳湾口岸的驾车路线并发起导航'
+      );
+
+      expect(route === null).assertFalse();
+      expect(JSON.stringify(route)).assertEqual(
+        '{"origin":"深圳北站","destination":"深圳湾口岸","travelMode":"driving","navigate":true}'
+      );
     });
 
     it('returns a real Maps URL action without falling back to Places', 0, () => {

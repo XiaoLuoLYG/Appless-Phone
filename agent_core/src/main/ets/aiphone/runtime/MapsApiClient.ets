@@ -138,6 +138,8 @@ export function normalizeMapsRouteInput(value: Object | null): MapsRouteArgs | n
 
 function trimRoutePrefix(value: string): string {
   const prefixes: string[] = [
+    '请帮我用 Google Maps 查询',
+    '帮我用 Google Maps 查询',
     '请帮我打开',
     '帮我打开',
     '请打开',
@@ -174,10 +176,15 @@ function trimRouteSuffix(value: string): string {
     '导航'
   ];
   let current = value.trim();
-  for (let index = 0; index < suffixes.length; index++) {
-    if (current.endsWith(suffixes[index])) {
-      current = current.substring(0, current.length - suffixes[index].length).trim();
-      break;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = 0; index < suffixes.length; index++) {
+      if (current.endsWith(suffixes[index])) {
+        current = current.substring(0, current.length - suffixes[index].length).trim();
+        changed = true;
+        break;
+      }
     }
   }
   return current;

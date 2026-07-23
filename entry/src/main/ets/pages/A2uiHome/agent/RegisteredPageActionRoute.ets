@@ -69,6 +69,50 @@ interface WorldCupVirtualArgs {
   route: string;
 }
 
+interface OriginalQueryVirtualArgs {
+  originalQuery: string;
+}
+
+interface WhatsAppVirtualArgs {
+  toNumber: string;
+  text: string;
+}
+
+function virtualAction(actionId: string, inputText: string, args: Object): A2uiAction {
+  return {
+    id: actionId,
+    label: actionId,
+    prompt: inputText,
+    variant: 'primary',
+    kind: 'prompt',
+    args
+  };
+}
+
+function whatsAppVirtualArgs(inputText: string): WhatsAppVirtualArgs | null {
+  const numbers = inputText.match(/\+[1-9][0-9]{7,14}/g);
+  const chineseMarker = inputText.indexOf('发送消息：');
+  const asciiMarker = inputText.indexOf('发送消息:');
+  const marker = chineseMarker >= 0 ? chineseMarker : asciiMarker;
+  const markerLength = chineseMarker >= 0 ? '发送消息：'.length : '发送消息:'.length;
+  const numberIndex = numbers === null || numbers.length !== 1 ?
+    -1 : inputText.indexOf(numbers[0]);
+  const previous = numberIndex > 0 ? inputText.charAt(numberIndex - 1) : '';
+  const nextIndex = numberIndex < 0 || numbers === null ?
+    -1 : numberIndex + numbers[0].length;
+  const next = nextIndex >= 0 && nextIndex < inputText.length ?
+    inputText.charAt(nextIndex) : '';
+  if (numbers === null || numbers.length !== 1 || marker < 0 ||
+    numberIndex >= marker || previous === '+' || (next >= '0' && next <= '9')) {
+    return null;
+  }
+  const text = inputText.substring(marker + markerLength).trim();
+  if (text.length === 0 || text.length > 4096) {
+    return null;
+  }
+  return { toNumber: numbers[0], text };
+}
+
 function registeredProductAction(actionId: string): boolean {
   return actionAgentToolDefinitions().some(
     (definition: ToolDefinition): boolean => definition.toolId === actionId
@@ -308,28 +352,28 @@ export function resolveVirtualRegisteredPageAction(
 ): A2uiAction | null {
   if (actionId === 'worldcup.open' && inputText.trim().length > 0) {
     const args: WorldCupVirtualArgs = { route: 'pages/A2uiHome/AnythingDemo' };
-    return {
-      id: actionId,
-      label: actionId,
-      prompt: inputText.trim(),
-      variant: 'primary',
-      kind: 'prompt',
-      args: args as Object
-    };
+    return virtualAction(actionId, inputText.trim(), args as Object);
   }
   if (actionId === 'maps.route.open') {
     const args: MapsRouteArgs | null = mapsRouteInputFromPrompt(inputText);
     if (args === null) {
       return null;
     }
-    return {
-      id: actionId,
-      label: actionId,
-      prompt: inputText.trim(),
-      variant: 'primary',
-      kind: 'prompt',
-      args: args as Object
-    };
+    return virtualAction(actionId, inputText.trim(), args as Object);
+  }
+  if (actionId === 'luckin.order.preview' || actionId === 'payment.send' ||
+    actionId === 'payment.account.setup') {
+    const originalQuery = inputText.trim();
+    if (originalQuery.length === 0) {
+      return null;
+    }
+    const args: OriginalQueryVirtualArgs = { originalQuery };
+    return virtualAction(actionId, originalQuery, args as Object);
+  }
+  if (actionId === 'whatsapp.message.send') {
+    const args = whatsAppVirtualArgs(inputText.trim());
+    return args === null ? null :
+      virtualAction(actionId, inputText.trim(), args as Object);
   }
   if (actionId === 'calendar.event.create') {
     const normalized = normalizedCalendarArgsForPrompt(actionId, inputText, {}, now, true);
@@ -343,14 +387,9 @@ export function resolveVirtualRegisteredPageAction(
       timezone: normalized.timezone,
       calendarId: normalized.calendarId
     };
-    return {
-      id: actionId,
-      label: '确认创建日程',
-      prompt: inputText.trim(),
-      variant: 'primary',
-      kind: 'prompt',
-      args: args as Object
-    };
+    const action = virtualAction(actionId, inputText.trim(), args as Object);
+    action.label = '确认创建日程';
+    return action;
   }
   return null;
 }

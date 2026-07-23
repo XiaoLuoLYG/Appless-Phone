@@ -163,9 +163,10 @@ export function validateRegisteredPageActionArgs(
     return validateGmailReplyActionArgs(args);
   }
   const values = args as MailReplyArgRecord;
+  const originalQuery = argText(values, ['originalQuery']);
   if (actionId === 'luckin.order.preview') {
     return validation(
-      argText(values, ['deptId']).length > 0,
+      argText(values, ['deptId']).length > 0 || originalQuery.length > 0,
       'LUCKIN_PREVIEW_ARGS_INVALID', 'Luckin preview requires the exact store.'
     );
   }
@@ -231,14 +232,16 @@ export function validateRegisteredPageActionArgs(
   }
   if (actionId === 'payment.send') {
     return validation(
-      argText(values, ['provider']).length > 0 && argText(values, ['recipient']).length > 0 &&
-        argText(values, ['amountText']).length > 0 && argText(values, ['currency']).length > 0,
+      originalQuery.length > 0 ||
+        (argText(values, ['provider']).length > 0 && argText(values, ['recipient']).length > 0 &&
+          argText(values, ['amountText']).length > 0 && argText(values, ['currency']).length > 0),
       'PAYMENT_SEND_ARGS_INVALID', 'Payment requires the exact provider, recipient, amount, and currency.'
     );
   }
   if (actionId === 'payment.account.setup') {
     return validation(
-      argText(values, ['country']).length > 0 && argText(values, ['businessType']).length > 0,
+      originalQuery.length > 0 ||
+        (argText(values, ['country']).length > 0 && argText(values, ['businessType']).length > 0),
       'PAYMENT_ACCOUNT_ARGS_INVALID', 'Payment account setup requires exact country and business type.'
     );
   }
