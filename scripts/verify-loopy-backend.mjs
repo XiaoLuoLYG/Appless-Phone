@@ -52,6 +52,44 @@ function assertContains(text, needle, name) {
   assert(text.includes(needle), name, `missing ${needle}`);
 }
 
+function personaSkillToolIds(source) {
+  const frontmatter = source.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (frontmatter === null) {
+    return [];
+  }
+  const tools = [];
+  let inTools = false;
+  for (const line of frontmatter[1].split(/\r?\n/)) {
+    if (/^tools:\s*$/.test(line)) {
+      inTools = true;
+      continue;
+    }
+    if (inTools && /^  -\s+/.test(line)) {
+      tools.push(line.replace(/^  -\s+/, '').trim());
+      continue;
+    }
+    if (inTools && /^\S/.test(line)) {
+      break;
+    }
+  }
+  return tools;
+}
+
+function exactPersonaSkillToolIds(source, expectedIds) {
+  const actualIds = personaSkillToolIds(source);
+  return actualIds.length === expectedIds.length &&
+    new Set(actualIds).size === actualIds.length &&
+    expectedIds.every((toolId) => actualIds.includes(toolId));
+}
+
+function personaSkillBody(source) {
+  const frontmatter = source.match(/^---\s*\n[\s\S]*?\n---\s*\n/);
+  if (frontmatter === null) {
+    return '';
+  }
+  return source.substring(frontmatter[0].length).replace(/<!--[\s\S]*?-->/g, '');
+}
+
 function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
 }
@@ -362,6 +400,40 @@ function hasHotelRolesOnBus(source) {
 }
 
 function verifyArchitectureVerifier() {
+  const exactSkillFixture = `---
+name: test
+tools:
+  - food.search
+  - maps.place.search
+status: active
+---
+Use Google Maps for explicit provider requests.`;
+  const wrongIndentSkillFixture = exactSkillFixture.replace('  - maps.place.search', '    - maps.place.search');
+  const extraToolSkillFixture = exactSkillFixture.replace(
+    '  - maps.place.search',
+    '  - maps.place.search\n  - gmail.message.send'
+  );
+  const commentOnlyInstructionFixture = exactSkillFixture.replace(
+    'Use Google Maps for explicit provider requests.',
+    '<!-- Use Google Maps for explicit provider requests. -->'
+  );
+  assert(
+    exactPersonaSkillToolIds(exactSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier accepts exact persona skill tool IDs with runtime indentation'
+  );
+  assert(
+    !exactPersonaSkillToolIds(wrongIndentSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier rejects persona skill tools with indentation ignored by runtime parser'
+  );
+  assert(
+    !exactPersonaSkillToolIds(extraToolSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier rejects an extra persona skill tool'
+  );
+  assert(
+    personaSkillBody(commentOnlyInstructionFixture).indexOf('Google Maps') < 0,
+    'verifier ignores comment-only persona skill instructions'
+  );
+
   const fixtureIndex = parseIndexExports(stripComments(`
     export { AgentMessage } from './message/AgentMessage';
     // export { DataResult } from './message/DataResult';
@@ -684,6 +756,18 @@ function verifySourceContracts() {
   const conversationStore = read('agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
+  const foodSearchSkill = read(
+    'entry/src/main/resources/rawfile/personas/food_companion/skills/food-search/SKILL.md'
+  );
+  const mediaSearchSkill = read(
+    'entry/src/main/resources/rawfile/personas/entertainment_companion/skills/media-search/SKILL.md'
+  );
+  const travelPlanningSkill = read(
+    'entry/src/main/resources/rawfile/personas/travel_companion/skills/travel-planning/SKILL.md'
+  );
+  const workAssistantSkill = read(
+    'entry/src/main/resources/rawfile/personas/work_companion/skills/work-assistant/SKILL.md'
+  );
   const genericMcp = read('agent_core/src/main/ets/aiphone/runtime/GenericMcpClient.ets');
   const modelScope = read('agent_core/src/main/ets/modelscope/ModelScopeDirectClient.ets');
   const modelScopeSearchStart = modelScope.indexOf('async search(useCase: string)');
@@ -1147,6 +1231,53 @@ function verifySourceContracts() {
   assertContains(skillParser, 'export function parseSkillMarkdown', 'skill markdown parser is present');
   assertContains(skillStore, 'if (pathExists(targetPath))', 'bundled skills do not overwrite sandbox files');
   assertContains(skillStore, 'await ensureBundledSkillsInSandbox(context)', 'sandbox skills are initialized before loading');
+  for (const [skillName, source, expectedIds] of [
+    ['food search', foodSearchSkill, [
+      'food.search', 'luckin.order.preview', 'memory.update',
+      'maps.place.search', 'maps.place.details'
+    ]],
+    ['media search', mediaSearchSkill, [
+      'media.video.search', 'media.aggregate.search', 'youtube.video.search',
+      'youtube.mine.playlists', 'youtube.mine.subscriptions', 'worldcup.open', 'memory.update'
+    ]],
+    ['travel planning', travelPlanningSkill, [
+      'travel.search', 'train.search', 'flight.search', 'memory.update'
+    ]],
+    ['work assistant', workAssistantSkill, [
+      'mail.search', 'mail.thread.read', 'gmail.mail.search', 'gmail.thread.read',
+      'mail.draft.create', 'gmail.draft.create', 'gmail.draft.apply',
+      'calendar.events.search', 'calendar.event.create', 'calendar.event.update',
+      'calendar.event.delete', 'memory.update'
+    ]]
+  ]) {
+    assert(
+      exactPersonaSkillToolIds(source, expectedIds),
+      `${skillName} skill has the exact reviewed tool set`,
+      `actual ${JSON.stringify(personaSkillToolIds(source))}`
+    );
+  }
+  assert(
+    personaSkillBody(foodSearchSkill).includes('Google Maps'),
+    'food search skill tells the model to honor an explicit Google Maps provider request'
+  );
+  for (const [skillName, source] of [
+    ['food search', foodSearchSkill],
+    ['media search', mediaSearchSkill],
+    ['travel planning', travelPlanningSkill],
+    ['work assistant', workAssistantSkill]
+  ]) {
+    const toolIds = personaSkillToolIds(source);
+    for (const restrictedActionId of [
+      'gmail.message.send',
+      'hotel.navigate',
+      'hotel.booking.open'
+    ]) {
+      assert(
+        !toolIds.includes(restrictedActionId),
+        `${skillName} keeps ${restrictedActionId} on the exact-surface action path`
+      );
+    }
+  }
   assertContains(runner, 'AgentEventKind.SKILL', 'ReAct emits selected skills');
   assertContains(genericMcp, 'annotations: tool.annotations', 'MCP annotations are preserved');
   assertContains(modelScope, "from '../aiphone/runtime/GenericMcpClient'", 'ModelScope reuses GenericMcpClient');

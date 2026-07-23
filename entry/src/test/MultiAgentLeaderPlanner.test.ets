@@ -2133,6 +2133,56 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(2);
     });
 
+    it('repairs a capability-valid plan whose selected skill does not declare that capability', 0,
+      async () => {
+        const invalidSkill: string = SOCIAL_ONLY_DECISION.replace(
+          '"skillId":""',
+          '"skillId":"travel-planning"'
+        );
+        const model = new QueueLocalModel([invalidSkill, SOCIAL_ONLY_DECISION]);
+
+        const decision = await new MultiAgentLeaderPlanner(model).plan(
+          inputMessage(),
+          { text: '帮我查看我今天 X 和 Slack 上的消息' },
+          planningContext(),
+          1,
+          (): boolean => true
+        );
+
+        expect(model.prompts.length).assertEqual(2);
+        expect(model.prompts[1].indexOf('Rejected decision: ' + invalidSkill)).assertLarger(-1);
+        expect(decision.skillId).assertEqual('');
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual('social.feed.search');
+        expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
+      });
+
+    it('rejects a skill repair that changes task input UI intent or action intent', 0, async () => {
+      const invalidSocialSkill: string = SOCIAL_ONLY_DECISION.replace(
+        '"skillId":""',
+        '"skillId":"travel-planning"'
+      );
+      const changedInput: string = SOCIAL_ONLY_DECISION.replace(
+        '"platforms":["x","slack"]',
+        '"platforms":["x"]'
+      );
+      const changedUi: string = SOCIAL_ONLY_DECISION.replace(
+        '"purpose":"展示 SocialHub 消息"',
+        '"purpose":"展示不同内容"'
+      );
+      const originalAction: string = actionDecision('payment.create').replace(
+        '"skillId":""',
+        '"skillId":"travel-planning"'
+      );
+      const changedAction: string = actionDecision('payment.create').replace(
+        '"goal":"perform requested action"',
+        '"goal":"perform a different action"'
+      );
+
+      expect(await repairFails(invalidSocialSkill, changedInput, planningContext())).assertTrue();
+      expect(await repairFails(invalidSocialSkill, changedUi, planningContext())).assertTrue();
+      expect(await repairFails(originalAction, changedAction, planningContext())).assertTrue();
+    });
+
     it('rejects non-exact JSON, fields, IDs, ownership, and persona-skill pairs', 0, async () => {
       const extraTop = PARALLEL_DECISION.substring(0, PARALLEL_DECISION.length - 1) +
         ',"providerFacts":{}}';

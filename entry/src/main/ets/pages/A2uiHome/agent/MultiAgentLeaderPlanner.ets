@@ -64,6 +64,7 @@ const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
+const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
@@ -96,6 +97,11 @@ const ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION: string =
   'Data-owned read task and use its real result in a later planning round; never invent an ID or replace the ' +
   'requested capability. The Host validates ownership but does not rewrite planning semantics. ' +
   FULL_DECISION_CONTRACT;
+const SKILL_CAPABILITY_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_SKILL_CAPABILITY_VIOLATION. Keep personaId and the complete requested capability set ' +
+  'unchanged. Choose an active skill only when that one skill declares every requested Data and Action ' +
+  'capability in its toolIds. Otherwise set skillId to the empty string. Do not change, add, remove, or move ' +
+  'any capability while correcting skillId. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
 const MAX_LEADER_PROMPT_CHARS: number = 100000;
@@ -177,6 +183,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const decision: LeaderDecision = this.parseDecision(output, context);
       rejectedDecision = decision;
       sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
+      this.rejectSkillCapabilityViolation(decision, context);
       this.rejectOverlappingVideoTools(decision);
       this.rejectSameRoundDependency(decision);
       this.rejectCompletedToolReuse(
@@ -216,6 +223,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       } else if (error instanceof Error && error.message === ACTION_OWNED_DATA_TASK_ERROR) {
         correction = ACTION_OWNED_DATA_TASK_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR) {
+        correction = SKILL_CAPABILITY_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       }
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
@@ -239,6 +248,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           throw new Error(REPAIR_SCOPE_INVALID_ERROR);
         }
         const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+        if (error instanceof Error && error.message === SKILL_CAPABILITY_ERROR &&
+          (rejectedDecision === null || !this.skillOnlyRepair(rejectedDecision, repairedDecision))) {
+          throw new Error(SKILL_CAPABILITY_ERROR);
+        }
+        this.rejectSkillCapabilityViolation(repairedDecision, context);
         if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR &&
           (rejectedDecision === null || !this.inputOnlyRepair(rejectedDecision, repairedDecision))) {
           throw new Error(TASK_INPUT_INVALID_ERROR);
@@ -311,6 +325,73 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         first.toolId !== second.toolId ||
         first.required !== second.required ||
         !this.sameStrings(first.allowedToolIds, second.allowedToolIds)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private skillOnlyRepair(original: LeaderDecision, repaired: LeaderDecision): boolean {
+    if (original.personaId !== repaired.personaId ||
+      original.roundAction !== repaired.roundAction ||
+      original.answer !== repaired.answer ||
+      original.reasonCode !== repaired.reasonCode ||
+      !this.sameStrings(original.requestedCapabilityIds, repaired.requestedCapabilityIds) ||
+      original.uiIntent.purpose !== repaired.uiIntent.purpose ||
+      original.uiIntent.preferredDensity !== repaired.uiIntent.preferredDensity ||
+      !this.sameStrings(original.uiIntent.requiredSections, repaired.uiIntent.requiredSections) ||
+      !this.sameActionIntent(original.actionIntent, repaired.actionIntent) ||
+      original.dataTasks.length !== repaired.dataTasks.length) {
+      return false;
+    }
+    for (let index = 0; index < original.dataTasks.length; index++) {
+      const first: LeaderDecisionDataTask = original.dataTasks[index];
+      const second: LeaderDecisionDataTask = repaired.dataTasks[index];
+      if (first.localId !== second.localId ||
+        first.goal !== second.goal ||
+        first.toolId !== second.toolId ||
+        first.required !== second.required ||
+        !this.sameStrings(first.allowedToolIds, second.allowedToolIds) ||
+        !this.sameJsonValue(first.input, second.input)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private sameJsonValue(
+    original: Object | string | number | boolean | null | undefined,
+    repaired: Object | string | number | boolean | null | undefined
+  ): boolean {
+    if (original === null || repaired === null ||
+      typeof original !== 'object' || typeof repaired !== 'object') {
+      return original === repaired;
+    }
+    if (Array.isArray(original) || Array.isArray(repaired)) {
+      if (!Array.isArray(original) || !Array.isArray(repaired) || original.length !== repaired.length) {
+        return false;
+      }
+      const firstItems = original as Object[];
+      const secondItems = repaired as Object[];
+      for (let index = 0; index < firstItems.length; index++) {
+        if (!this.sameJsonValue(firstItems[index], secondItems[index])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    const firstKeys: string[] = Object.keys(original).sort();
+    const secondKeys: string[] = Object.keys(repaired).sort();
+    if (!this.sameStrings(firstKeys, secondKeys)) {
+      return false;
+    }
+    const firstRecord = original as
+      Record<string, Object | string | number | boolean | null | undefined>;
+    const secondRecord = repaired as
+      Record<string, Object | string | number | boolean | null | undefined>;
+    for (let index = 0; index < firstKeys.length; index++) {
+      const key: string = firstKeys[index];
+      if (!this.sameJsonValue(firstRecord[key], secondRecord[key])) {
         return false;
       }
     }
@@ -1074,6 +1155,36 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       return false;
     }
     return false;
+  }
+
+  private rejectSkillCapabilityViolation(
+    decision: LeaderDecision,
+    context: LeaderPlanningContext
+  ): void {
+    if (decision.skillId.length === 0) {
+      return;
+    }
+    for (let personaIndex = 0; personaIndex < context.personas.length; personaIndex++) {
+      const persona: LeaderPersonaMetadata = context.personas[personaIndex];
+      if (persona.personaId !== decision.personaId) {
+        continue;
+      }
+      for (let skillIndex = 0; skillIndex < persona.activeSkills.length; skillIndex++) {
+        const skill: LeaderSkillMetadata = persona.activeSkills[skillIndex];
+        if (skill.skillId !== decision.skillId || skill.status !== 'active') {
+          continue;
+        }
+        for (let capabilityIndex = 0;
+          capabilityIndex < decision.requestedCapabilityIds.length;
+          capabilityIndex++) {
+          if (skill.toolIds.indexOf(decision.requestedCapabilityIds[capabilityIndex]) < 0) {
+            throw new Error(SKILL_CAPABILITY_ERROR);
+          }
+        }
+        return;
+      }
+    }
+    throw new Error(SKILL_CAPABILITY_ERROR);
   }
 
   private readTool(context: LeaderPlanningContext, toolId: string): LeaderToolMetadata | null {
