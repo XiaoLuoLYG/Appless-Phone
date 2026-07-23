@@ -8,7 +8,6 @@ import {
   foregroundBundleFromAbilityDump,
   hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
-  hotelDetailLifecycleFromLogs,
   hotelDetailClickLocator,
   hotelMultiAgentSearchEvidence,
   hotelToolLifecycleFromLogs,
@@ -18,11 +17,13 @@ import {
   shouldRetryHotelReturnToApp,
   validateHotelDetailBookingEvidence,
   validateHotelSearchActionEvidence,
-  validateHotelSurfaceIdentity
+  validateHotelSurfaceIdentity,
+  hotelMultiAgentDetailEvidence,
+  restoredHotelSearchSurface
 } from './hotel-smoke-evidence.mjs';
 import {
+  composioAuthEvidence,
   directTextVisibleEvidence,
-  latestMultiAgentUiSurface,
   mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
@@ -2443,14 +2444,20 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs, queryCo
   const detailLogText = sanitizeExternalUrlLogs(rawDetailLogText);
   const detailLogPath = join(outDir, `query-${index + 1}-hotel-detail.log`);
   writeFileSync(detailLogPath, detailLogText + '\n');
+  const detailEvidence = hotelMultiAgentDetailEvidence(detailLogText, {
+    expectedConversationId: queryContext?.conversationId || 'invalid',
+    currentSurfaceId: searchActionEvidence.surfaceId
+  });
   const multiAgentDetailAction = multiAgentActionEvidence(
     detailLogText,
     exactActionOptions('hotel.detail', visibleSourceToolId(queryContext), queryContext)
   );
-  const detailUiContext = latestMultiAgentUiSurface(detailLogText, {
-    expectedConversationId: multiAgentDetailAction.conversationId,
-    afterIndex: multiAgentDetailAction.resultIndex
-  });
+  const detailUiContext = detailEvidence.ok ? {
+    conversationId: detailEvidence.conversationId,
+    turnId: detailEvidence.turnId,
+    taskId: detailEvidence.taskId,
+    surfaceId: detailEvidence.surfaceId
+  } : null;
   await sleep(700);
   currentLayout = dumpLayout(`query-${index + 1}-hotel-rates-layout.json`);
 
@@ -2516,22 +2523,20 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs, queryCo
     await sleep(1200);
   });
   const restoreLogText = restoreLogs.join('\n');
-  const restoredUiContext = latestMultiAgentUiSurface(restoreLogText, {
-    expectedConversationId: queryContext?.conversationId || 'invalid'
-  });
   await sleep(700);
   const restoredLayout = dumpLayout(`query-${index + 1}-hotel-restored-layout.json`);
   const restoredText = collectLayoutText(restoredLayout).join('\n');
   const restoredTextPath = join(outDir, `query-${index + 1}-hotel-restored-layout-text.txt`);
   writeFileSync(restoredTextPath, restoredText + '\n');
   const restoredScreenPath = captureScreen(`query-${index + 1}-hotel-restored-screen.png`);
-  const detailLifecycle = hotelDetailLifecycleFromLogs(detailLogText);
-  const detailRequested = multiAgentDetailAction.complete;
+  const detailLifecycle = detailEvidence;
+  const detailRequested = detailEvidence.ok;
   const detailOk = Boolean(queryContext?.surfaceId) && Boolean(detailUiContext?.surfaceId) &&
-    multiAgentDetailAction.ok && detailLifecycle.ok;
+    detailEvidence.ok;
   const restoredOk = /酒店结果/.test(restoredText);
   const rawRestoredActionEvidence = hotelActionEvidenceFromLogs(restoreLogText);
   const restoredActionEvidence = validateHotelSearchActionEvidence(rawRestoredActionEvidence);
+  const restoredUiContext = restoredHotelSearchSurface(queryContext, rawRestoredActionEvidence);
   const surfaceIdentity = validateHotelSurfaceIdentity(
     searchActionEvidence.surfaceId,
     typeof detailActionEvidence.surfaceId === 'string' ? detailActionEvidence.surfaceId : '',
@@ -3369,6 +3374,9 @@ async function runComposioAuthSmoke() {
       hdc(['shell', 'aa', 'force-stop', 'com.huawei.hmos.browser']);
       hdc(['shell', 'aa', 'start', '-a', 'EntryAbility', '-b', 'com.example.aiphonedemo']);
       await sleep(1200);
+      const returned = captureForegroundAbility(`external-auth-${index + 1}-return-ability.txt`)
+        .bundleName === 'com.example.aiphonedemo';
+      externalAuthJumps[externalAuthJumps.length - 1].returned = returned;
     } else {
       externalAuthJumps.push({
         app: app.name,
@@ -3379,16 +3387,16 @@ async function runComposioAuthSmoke() {
     }
   }
   const screenPath = captureScreen('composio-auth-page-screen.png');
+  const assessment = composioAuthEvidence({
+    textValues: collectLayoutText(evidence.layout),
+    externalAuthJumps
+  });
   const summary = {
     mode: 'composio-auth',
-    ok: evidence.markerHits.length === 2 &&
-      evidence.authActionHits.length > 0 &&
-      evidence.authStatusHits.length > 0 &&
-      evidence.appNameHits.length > 0 &&
-      externalAuthAppHits.length === 3 &&
-      externalAuthJumps.length === 3 &&
-      externalAuthJumps.every((jump) => jump.opened === true) &&
-      evidence.authConfigNameLeaks.length === 0,
+    ok: assessment.status === 'PASS',
+    uiOk: assessment.uiOk,
+    providerOk: assessment.providerOk,
+    status: assessment.status,
     requiredMarkers: ['应用授权', '当前用户'],
     markerHits: evidence.markerHits,
     authActionHits: evidence.authActionHits,
@@ -3476,7 +3484,7 @@ for (let index = 0; index < queries.length; index += 1) {
     settingsSummary.expectedTool = false;
     settingsSummary.expectedToolId = '';
     settingsSummary.expectedToolIds = [];
-    settingsSummary.status = settingsSummary.ok ? 'PASS' : 'FAIL';
+    settingsSummary.status = settingsSummary.status || (settingsSummary.ok ? 'PASS' : 'FAIL');
     summaries.push(settingsSummary);
     console.log(JSON.stringify(settingsSummary, null, 2));
     continue;

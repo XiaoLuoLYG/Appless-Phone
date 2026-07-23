@@ -1,4 +1,8 @@
-import { multiAgentTurnEvidence } from './multi-agent-smoke-evidence.mjs';
+import {
+  multiAgentActionEvidence,
+  multiAgentEvidenceRecords,
+  multiAgentTurnEvidence
+} from './multi-agent-smoke-evidence.mjs';
 
 function objectArgs(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -189,6 +193,84 @@ export function hotelToolLifecycleFromLogs(logText) {
 
 export function hotelDetailLifecycleFromLogs(logText) {
   return hotelToolLifecycleFromLogs(logText);
+}
+
+function lifecycleRecords(logText) {
+  return multiAgentEvidenceRecords(logText);
+}
+
+function detailFailure(reason) {
+  return { ok: false, surfaceId: '', operation: '', failures: [reason] };
+}
+
+export function hotelMultiAgentDetailEvidence(logText, options = {}) {
+  const action = multiAgentActionEvidence(logText, {
+    expectedActionId: 'hotel.detail',
+    expectedSourceToolId: 'hotel.search',
+    currentSurfaceId: options.currentSurfaceId,
+    expectedConversationId: options.expectedConversationId,
+    expectedVirtual: false
+  });
+  if (!action.ok) return detailFailure('missing_action_chain');
+  const all = lifecycleRecords(logText);
+  const actionRun = all.find((item) => item.marker === 'MultiAgentActionRun' &&
+    item.fields.conversation === action.conversationId && item.fields.turn === action.turnId &&
+    item.fields.task === action.taskId && item.fields.run === action.runId);
+  if (actionRun === undefined) return detailFailure('missing_action_run');
+  const dataTasks = all.filter((item) => item.index > actionRun.index && item.index < action.resultIndex &&
+    item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
+    item.fields.tool === 'hotel.detail');
+  if (dataTasks.length !== 1) return detailFailure('missing_or_duplicate_data_task');
+  const dataTask = dataTasks[0];
+  const uiTasks = all.filter((item) => item.index > actionRun.index && item.index < action.resultIndex &&
+    item.marker === 'MultiAgentUiTask' &&
+    item.fields.conversation === action.conversationId && item.fields.turn === dataTask.fields.turn &&
+    item.fields.dataTasks === dataTask.fields.task);
+  if (uiTasks.length !== 1) return detailFailure('missing_or_duplicate_ui_task');
+  const uiTask = uiTasks[0];
+  const dataResults = all.filter((item) => item.index > dataTask.index && item.index < action.resultIndex &&
+    item.marker === 'MultiAgentDataResult' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn && item.fields.task === dataTask.fields.task &&
+    item.fields.tool === 'hotel.detail' && ['success', 'partial'].includes(item.fields.status) &&
+    item.fields.error === 'false' && /^[1-9]\d*$/.test(item.fields.sources || ''));
+  if (dataResults.length !== 1) return detailFailure('missing_or_invalid_data_result');
+  const dataResult = dataResults[0];
+  const requests = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
+    item.marker === 'RollingGoHotelRequest' && item.fields.operation === 'getHotelDetail');
+  const responses = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
+    item.marker === 'RollingGoHotelResponse' && item.fields.operation === 'getHotelDetail' &&
+    item.fields.provider === 'RollingGo' && ['success', 'partial'].includes(item.fields.status) &&
+    /^[1-9]\d*$/.test(item.fields.sources || ''));
+  if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index) {
+    return detailFailure('missing_or_invalid_provider_result');
+  }
+  const documents = all.filter((item) => item.index > dataResult.index && item.index < action.resultIndex &&
+    item.marker === 'HtmlHomeDocument' && item.fields.source === 'tool' && item.fields.kind === 'hotel' &&
+    /^[1-9]\d*$/.test(item.fields.chars || '') && /^[1-9]\d*$/.test(item.fields.blocks || ''));
+  if (documents.length !== 1) return detailFailure('missing_or_duplicate_document');
+  const document = documents[0];
+  const uiResults = all.filter((item) => item.index > document.index && item.index < action.resultIndex &&
+    item.marker === 'MultiAgentUiResult' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn && item.fields.task === uiTask.fields.task &&
+    item.fields.state === 'result' && item.fields.surface && item.fields.surface !== 'none');
+  if (uiResults.length !== 1) return detailFailure('missing_or_duplicate_ui_result');
+  const result = uiResults[0];
+  const ready = all.filter((item) => item.index > document.index && item.index < result.index &&
+    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.surfaceId === result.fields.surface &&
+    item.fields.status === 'ready');
+  const calling = all.filter((item) => item.index > requests[0].index && item.index < responses[0].index &&
+    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.surfaceId === result.fields.surface &&
+    item.fields.status === 'calling_tool');
+  if (ready.length !== 1 || calling.length !== 1) return detailFailure('missing_or_invalid_surface_lifecycle');
+  return {
+    ok: true,
+    surfaceId: result.fields.surface,
+    operation: responses[0].fields.operation,
+    conversationId: action.conversationId,
+    turnId: dataTask.fields.turn,
+    taskId: uiTask.fields.task,
+    failures: []
+  };
 }
 
 export function hotelMultiAgentSearchEvidence(logText) {
@@ -449,4 +531,12 @@ export function validateHotelSurfaceIdentity(searchSurfaceId, detailSurfaceId, r
     detailSurfaceId,
     restoredSurfaceId
   };
+}
+
+export function restoredHotelSearchSurface(queryContext, actionEvidence) {
+  const validated = validateHotelSearchActionEvidence(actionEvidence);
+  const conversationId = typeof queryContext?.conversationId === 'string' ? queryContext.conversationId : '';
+  const surfaceId = validated.surfaceId;
+  return validated.ok && conversationId.length > 0 && surfaceId === queryContext?.surfaceId ?
+    { conversationId, surfaceId } : null;
 }

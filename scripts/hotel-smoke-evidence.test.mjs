@@ -6,6 +6,7 @@ import {
   hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
+  hotelMultiAgentDetailEvidence,
   hotelDetailLifecycleFromLogs,
   hotelMultiAgentSearchEvidence,
   hotelSearchActionEvidence,
@@ -13,11 +14,50 @@ import {
   hasSafeHotelSystemIntentOpen,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
+  restoredHotelSearchSurface,
   shouldRetryHotelReturnToApp,
   validateHotelDetailBookingEvidence,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
+
+const realC20DetailLog = `
+  [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search
+  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail
+  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false
+  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=calling_tool components=2
+  [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
+  [AIPhone][MultiAgentDataResult] conversation=c20 turn=detail-1 task=data-detail tool=hotel.detail status=success sources=1 error=false
+  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=ready components=3
+  [AIPhone][MultiAgentUiResult] conversation=c20 turn=detail-1 task=ui-detail surface=detail-1 state=result
+  [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 status=success
+`;
+
+test('accepts the preserved C20 detail order with a provider request before the skeleton', () => {
+  const evidence = hotelMultiAgentDetailEvidence(realC20DetailLog, {
+    expectedConversationId: 'c20',
+    currentSurfaceId: 'search-1'
+  });
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.surfaceId, 'detail-1');
+  assert.equal(evidence.operation, 'getHotelDetail');
+});
+
+test('rejects C20 detail evidence with a wrong task, surface, operation, response, or terminal order', () => {
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  [
+    realC20DetailLog.replace('task=data-detail round=1 tool=hotel.detail', 'task=wrong-data round=1 tool=hotel.detail'),
+    realC20DetailLog.replaceAll('surface=detail-1', 'surface=wrong-surface'),
+    realC20DetailLog.replaceAll('operation=getHotelDetail', 'operation=searchHotels'),
+    realC20DetailLog.replace('[AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1\n', ''),
+    realC20DetailLog.replace(
+      '[AIPhone][MultiAgentDataResult] conversation=c20 turn=detail-1 task=data-detail tool=hotel.detail status=success sources=1 error=false\n  [AIPhone][HtmlHomeDocument]',
+      '[AIPhone][HtmlHomeDocument]'
+    )
+  ].forEach((logs) => assert.equal(hotelMultiAgentDetailEvidence(logs, options).ok, false));
+});
 
 const validBooking = {
   id: 'hotel.booking.open',
@@ -252,6 +292,17 @@ test('requires exact search detail and restored surface identity', () => {
   assert.equal(validateHotelSurfaceIdentity('', 'hotel-detail-2', '').ok, false);
   assert.equal(validateHotelSurfaceIdentity('same', 'same', 'same').ok, false);
   assert.equal(validateHotelSurfaceIdentity('hotel-search-1', 'hotel-detail-2', 'other').ok, false);
+});
+
+test('uses validated restored action evidence with the original search conversation', () => {
+  const context = { conversationId: 'c20', surfaceId: 'hotel-search-1' };
+  const restored = {
+    surfaceId: 'hotel-search-1',
+    actions: hotelSearchActionEvidence('hotel-search-1', validActions.slice(0, 2)).actions
+  };
+  assert.deepEqual(restoredHotelSearchSurface(context, restored), context);
+  assert.equal(restoredHotelSearchSurface(context, { ...restored, surfaceId: 'other' }), null);
+  assert.equal(restoredHotelSearchSurface({ ...context, conversationId: '' }, restored), null);
 });
 
 test('derives the live detail click locator only from an exact valid action', () => {

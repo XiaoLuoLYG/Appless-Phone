@@ -63,6 +63,8 @@ function records(logText) {
   return result;
 }
 
+export { records as multiAgentEvidenceRecords };
+
 export function latestMultiAgentUiSurface(logText, options = {}) {
   let latest = null;
   for (const item of records(logText)) {
@@ -396,6 +398,29 @@ export function toolExecutionEvidence(logText, options = {}) {
     legacyLocalToolRequest,
     hasMultiAgentInput,
     lifecycle
+  };
+}
+
+export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] } = {}) {
+  const values = Array.isArray(textValues) ? textValues.filter((value) => typeof value === 'string') : [];
+  const text = values.join('\n');
+  const requiredApps = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'];
+  const externalOk = externalAuthJumps.length === requiredApps.length && requiredApps.every((app) => externalAuthJumps.some((jump) =>
+    jump?.app === app && jump.opened === true && jump.returned === true));
+  const uiBase = ['应用授权', '当前用户', '刷新'].every((marker) => values.includes(marker)) &&
+    externalOk && !/^auth_config_/im.test(text);
+  const providerError = /(?:2300028|Operation timeout)/i.test(text);
+  const product = ['Gmail', 'GitHub', 'Google Calendar', 'Google Drive', 'Google Docs', 'Slack', 'Notion']
+    .some((name) => values.includes(name));
+  const connected = values.includes('已连接');
+  const toolkitOrAction = values.includes('授权') || values.includes('重新授权') ||
+    values.some((value) => value.startsWith('Composio ·'));
+  const providerOk = uiBase && !providerError && product && connected && toolkitOrAction;
+  const uiOk = uiBase && (providerOk || providerError);
+  return {
+    uiOk,
+    providerOk,
+    status: providerOk ? 'PASS' : (uiOk && providerError ? 'BLOCKED' : 'FAIL')
   };
 }
 

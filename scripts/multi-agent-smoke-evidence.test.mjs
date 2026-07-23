@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  composioAuthEvidence,
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   mailThreadReadEvidence,
@@ -14,6 +15,40 @@ import {
   socialReplyButtonCenter,
   toolExecutionEvidence
 } from './multi-agent-smoke-evidence.mjs';
+
+const f16ExternalReturns = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'].map((app) => ({
+  app,
+  opened: true,
+  returned: true
+}));
+
+test('keeps F16 provider timeout as truthful usable UI evidence but BLOCKED overall', () => {
+  const evidence = composioAuthEvidence({
+    textValues: ['应用授权', '当前用户', '刷新', '2300028', 'Operation timeout'],
+    externalAuthJumps: f16ExternalReturns
+  });
+  assert.equal(evidence.uiOk, true);
+  assert.equal(evidence.providerOk, false);
+  assert.equal(evidence.status, 'BLOCKED');
+});
+
+test('requires strict F16 provider cards and rejects ambiguous, leaked, and incomplete evidence', () => {
+  const connected = {
+    textValues: ['应用授权', '当前用户', '刷新', 'GitHub', '已连接', 'Composio · GitHub', '授权'],
+    externalAuthJumps: f16ExternalReturns
+  };
+  assert.deepEqual(composioAuthEvidence(connected), {
+    uiOk: true,
+    providerOk: true,
+    status: 'PASS'
+  });
+  [
+    { ...connected, textValues: ['应用授权', '当前用户', '刷新'] },
+    { ...connected, textValues: [...connected.textValues, 'auth_config_github'] },
+    { ...connected, externalAuthJumps: f16ExternalReturns.map((jump, index) =>
+      index === 0 ? { ...jump, returned: false } : jump) }
+  ].forEach((input) => assert.equal(composioAuthEvidence(input).status, 'FAIL'));
+});
 
 function listedCases(args = [], env = {}) {
   const result = spawnSync(process.execPath, [
