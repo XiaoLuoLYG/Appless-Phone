@@ -10,6 +10,48 @@ const LIFECYCLE_MARKERS = new Set([
 ]);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
 
+export function calendarEvidenceIdentityToken(kind, value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 16777619) >>> 0;
+  }
+  return `${kind}${hash.toString(16).padStart(8, '0')}`;
+}
+
+export function normalizeCalendarQaDate(value) {
+  const text = String(value || '').trim();
+  const match = /^(\d{4})(?:年|-)(\d{1,2})(?:月|-)(\d{1,2})(?:日)?$/.exec(text);
+  if (match === null) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const checked = new Date(Date.UTC(year, month - 1, day));
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 ||
+    checked.getUTCFullYear() !== year || checked.getUTCMonth() + 1 !== month || checked.getUTCDate() !== day) {
+    return '';
+  }
+  return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export async function runC19CleanupFinalizer({ cleanupRequired, runDelete, runAbsence }) {
+  let cleanup = { ok: true, skipped: true };
+  if (cleanupRequired) {
+    try {
+      cleanup = await runDelete();
+    } catch (error) {
+      cleanup = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  let absence;
+  try {
+    absence = await runAbsence();
+  } catch (error) {
+    absence = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  return { cleanup, absence };
+}
+
 function duplicateHilogChannelPair(left, right) {
   return (left === 'A00000/AIPHONE' && right === 'A03D00/JSAPP') ||
     (left === 'A03D00/JSAPP' && right === 'A00000/AIPHONE');
@@ -918,7 +960,8 @@ export function calendarProviderActionEvidence(logText, action, options = {}) {
     if (!['success', 'created', 'updated', 'deleted', 'ok'].includes(status)) {
       failures.push('provider_write_not_success');
     }
-    if (action.actionId === 'calendar.event.update' && (!requestedId || requestedId !== eventId)) {
+    if ((action.actionId === 'calendar.event.update' || action.actionId === 'calendar.event.delete') &&
+      (!requestedId || requestedId !== eventId)) {
       failures.push('provider_event_id_mismatch');
     }
     if (action.actionId === 'calendar.event.update' && options.expectedTime &&
@@ -939,7 +982,7 @@ export function calendarProviderActionEvidence(logText, action, options = {}) {
 
 export function calendarProviderAbsenceEvidence(logText, context, options = {}) {
   const title = String(options.title || '').trim();
-  const date = String(options.date || '').trim();
+  const date = normalizeCalendarQaDate(options.date);
   const all = records(logText);
   const tasks = all.filter((item) => item.marker === 'MultiAgentDataTask' &&
     item.fields.conversation === context?.conversationId && item.fields.turn === context?.turnId &&

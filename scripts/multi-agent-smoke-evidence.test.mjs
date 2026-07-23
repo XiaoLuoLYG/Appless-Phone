@@ -7,6 +7,8 @@ import {
   composioAuthEvidence,
   calendarProviderActionEvidence,
   calendarProviderAbsenceEvidence,
+  calendarEvidenceIdentityToken,
+  normalizeCalendarQaDate,
   directTextVisibleEvidence,
   latestMultiAgentUiSurface,
   mailThreadReadEvidence,
@@ -102,6 +104,10 @@ test('accepts C19 writes only from a correlated provider result and rejects inva
   assert.equal(calendarProviderActionEvidence(good.replace('surface=calendar-review:1 action=calendar.event.update event=provider-1 requested=provider-1 status=updated start=', 'surface=invalid action=calendar.event.update event=provider-1 requested=provider-1 status=updated start='), action, { expectedTime: '16:00' }).ok, false);
   assert.equal(calendarProviderActionEvidence(good.replace('requested=provider-1', 'requested=model-forged'), action, { expectedTime: '16:00' }).ok, false);
   assert.equal(calendarProviderActionEvidence(good.replace('status=updated', 'status=error'), action, { expectedTime: '16:00' }).ok, false);
+  assert.equal(calendarProviderActionEvidence(
+    '[AIPhone][CalendarProviderAction] conversation=c19 turn=page-turn-7 surface=calendar-review:1 action=calendar.event.delete event=provider-1 requested=model-forged status=deleted start=none',
+    { ...action, actionId: 'calendar.event.delete' }
+  ).ok, false);
 });
 
 test('requires an exact provider-correlated empty C19f search, not generic absent UI text', () => {
@@ -119,6 +125,52 @@ test('requires an exact provider-correlated empty C19f search, not generic absen
   assert.equal(calendarProviderAbsenceEvidence(good.replace('calendarScope=6b6f311e', 'calendarScope=other'), context, {
     title: 'Appless QA run-1', date: '2026-07-30'
   }).ok, false);
+});
+
+test('normalizes the production Chinese C19 QA date before exact provider absence correlation', () => {
+  assert.equal(normalizeCalendarQaDate('2026年7月30日'), '2026-07-30');
+  assert.equal(normalizeCalendarQaDate('2026-7-3'), '2026-07-03');
+  assert.equal(normalizeCalendarQaDate('2026-13-30'), '');
+});
+
+test('correlates provider receipts with the formatter privacy tokens, never raw click identities', () => {
+  const conversation = 'conversation-raw-1';
+  const turn = 'page-turn-raw-7';
+  const c = calendarEvidenceIdentityToken('c', conversation);
+  const t = calendarEvidenceIdentityToken('t', turn);
+  const actionLogs = [
+    `[AIPhone][MultiAgentActionRun] conversation=${c} turn=${t} task=k1 surface=calendar-review:1 plan=p1 run=r1 action=calendar.event.create source=calendar.events.search`,
+    `[AIPhone][MultiAgentActionResult] conversation=${c} turn=${t} task=k1 surface=calendar-review:1 plan=p1 run=r1 status=success`
+  ].join('\n');
+  const action = multiAgentActionEvidence(actionLogs, { expectedActionId: 'calendar.event.create', expectedVirtual: false });
+  const rawProvider = actionLogs + `\n[AIPhone][CalendarProviderAction] conversation=${conversation} turn=${turn} surface=calendar-review:1 action=calendar.event.create event=provider-1 requested=none status=success start=none`;
+  const tokenProvider = actionLogs + `\n[AIPhone][CalendarProviderAction] conversation=${c} turn=${t} surface=calendar-review:1 action=calendar.event.create event=provider-1 requested=none status=success start=none`;
+  assert.equal(calendarProviderActionEvidence(rawProvider, action).ok, false);
+  assert.equal(calendarProviderActionEvidence(tokenProvider, action).ok, true);
+});
+
+test('runs provider-backed C19 cleanup and final correlated absence after failed update or an exception', async () => {
+  const calls = [];
+  const run = async (kind) => {
+    calls.push(kind);
+    if (kind === 'delete') return { calendarDeleteAction: { ok: true }, ok: true };
+    return { absenceEvidence: { ok: true }, ok: true };
+  };
+  const afterFailedUpdate = await smokeLifecycle.runC19CleanupFinalizer({
+    cleanupRequired: true, runDelete: () => run('delete'), runAbsence: () => run('absence')
+  });
+  assert.deepEqual(calls, ['delete', 'absence']);
+  assert.equal(afterFailedUpdate.cleanup.ok, true);
+  assert.equal(afterFailedUpdate.absence.ok, true);
+  calls.splice(0);
+  const afterException = await smokeLifecycle.runC19CleanupFinalizer({
+    cleanupRequired: true,
+    runDelete: async () => { calls.push('delete'); throw new Error('update-post-create exception'); },
+    runAbsence: () => run('absence')
+  });
+  assert.deepEqual(calls, ['delete', 'absence']);
+  assert.equal(afterException.cleanup.ok, false);
+  assert.equal(afterException.absence.ok, true);
 });
 
 test('stops F16 external collection after a failed return and retains failure evidence', async () => {

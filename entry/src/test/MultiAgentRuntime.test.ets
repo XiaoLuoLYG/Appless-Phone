@@ -10,6 +10,7 @@ import {
   ActionPlanDraft,
   ActionPlanReadyPayload,
   ActionPlanRequestPayload,
+  ActionRunPayload,
   ActionResultPayload,
   ActionValidationResult,
   AgentMessage,
@@ -929,6 +930,35 @@ function publishTurnTerminal(
 
 export default function multiAgentRuntimeTest() {
   describe('multiAgentRuntime', () => {
+    it('uses stable privacy tokens for the actual C19 click identity and rejects invalid action surfaces', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
+      const payload: ActionRunPayload = {
+        actionId: 'calendar.event.create', sourceToolId: 'calendar.events.search',
+        args: JSON.parse('{"title":"Appless QA"}') as Object, runId: 'run-1', surfaceId: 'calendar-review:1'
+      };
+      const message: AgentMessage = {
+        type: AgentMessageType.ACTION_RUN,
+        conversationId: 'conversation-raw-1', turnId: 'page-turn-raw-7', taskId: 'action-1',
+        payload
+      };
+      const valid = formatter.line(message);
+      const invalidPayload: ActionRunPayload = {
+        actionId: 'calendar.event.create', sourceToolId: 'calendar.events.search',
+        args: JSON.parse('{"title":"Appless QA"}') as Object, runId: 'run-1', surfaceId: 'invalid'
+      };
+      const invalidMessage: AgentMessage = {
+        type: AgentMessageType.ACTION_RUN,
+        conversationId: 'conversation-raw-1', turnId: 'page-turn-raw-7', taskId: 'action-1',
+        payload: invalidPayload
+      };
+      const invalid = formatter.line(invalidMessage);
+
+      expect(valid.indexOf('conversation=c6444c223')).assertLarger(-1);
+      expect(valid.indexOf('turn=t2442801d')).assertLarger(-1);
+      expect(valid.indexOf('conversation-raw-1')).assertEqual(-1);
+      expect(invalid.indexOf('surface=invalid')).assertLarger(-1);
+    });
+
     it('formats bounded opaque lifecycle evidence without raw identities or values', 0, () => {
       const formatter = new MultiAgentEvidenceFormatter(32);
       const inputPayload: InputUserPayload = {
@@ -1024,27 +1054,27 @@ export default function multiAgentRuntimeTest() {
       const turnLine = formatter.line(turnMessage);
 
       expect(inputLine).assertEqual(
-        '[AIPhone][MultiAgentInput] conversation=c1 turn=t2 task=k3'
+        '[AIPhone][MultiAgentInput] conversation=caf571c80 turn=t18046e8c task=k1'
       );
       expect(firstDataLine).assertEqual(
-        '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=k4 ' +
+        '[AIPhone][MultiAgentDataTask] conversation=caf571c80 turn=t18046e8c task=k2 ' +
           'round=1 tool=maps.place.search predecessor=none path=none target=none binding=false'
       );
       expect(firstResultLine).assertEqual(
-        '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t2 task=k4 ' +
+        '[AIPhone][MultiAgentDataResult] conversation=caf571c80 turn=t18046e8c task=k2 ' +
           'tool=maps.place.search status=success sources=0 error=false'
       );
       expect(dataLine).assertEqual(
-        '[AIPhone][MultiAgentDataTask] conversation=c1 turn=t2 task=k5 ' +
-          'round=2 tool=maps.place.details predecessor=k4 ' +
+        '[AIPhone][MultiAgentDataTask] conversation=caf571c80 turn=t18046e8c task=k3 ' +
+          'round=2 tool=maps.place.details predecessor=k2 ' +
           'path=/places/0/placeId target=/placeId binding=true'
       );
       expect(uiLine).assertEqual(
-        '[AIPhone][MultiAgentUiResult] conversation=c1 turn=t2 task=k3 ' +
+        '[AIPhone][MultiAgentUiResult] conversation=caf571c80 turn=t18046e8c task=k1 ' +
           'surface=loop_surface_1784700000000_2 state=result'
       );
       expect(turnLine).assertEqual(
-        '[AIPhone][MultiAgentTurnResult] conversation=c1 turn=t2 task=k3 ' +
+        '[AIPhone][MultiAgentTurnResult] conversation=caf571c80 turn=t18046e8c task=k1 ' +
           'status=partial surface=loop_surface_1784700000000_2 roundCount=2 messageChars=29'
       );
       expect(inputLine.indexOf('secret')).assertEqual(-1);

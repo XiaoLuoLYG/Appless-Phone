@@ -27,6 +27,8 @@ import {
   composioAuthEvidence,
   calendarProviderActionEvidence,
   calendarProviderAbsenceEvidence,
+  normalizeCalendarQaDate,
+  runC19CleanupFinalizer,
   directTextVisibleEvidence,
   mailThreadReadEvidence,
   modelTransportEvidence,
@@ -165,6 +167,8 @@ const whatsappTestTo = (process.env.AIPHONE_WHATSAPP_TEST_TO || '').trim();
 const qaDateValue = new Date();
 qaDateValue.setDate(qaDateValue.getDate() + 7);
 const qaDate = `${qaDateValue.getFullYear()}年${String(qaDateValue.getMonth() + 1).padStart(2, '0')}月${String(qaDateValue.getDate()).padStart(2, '0')}日`;
+const qaDateIso = normalizeCalendarQaDate(qaDate);
+if (qaDateIso.length === 0) throw new Error(`Could not normalize C19 QA date: ${qaDate}`);
 const qaTitle = `Appless QA ${smokeRunId}`;
 const whatsappRecipient = whatsappTestTo.length > 0 ? whatsappTestTo : '{AIPHONE_WHATSAPP_TEST_TO}';
 
@@ -2106,7 +2110,9 @@ function visibleSourceToolId(lifecycle) {
     : '';
 }
 
-async function verifyCalendarWriteAction(layout, index, appPid, _actionContext, actionId, label, expectedTime = '') {
+async function verifyCalendarWriteAction(
+  layout, index, appPid, _actionContext, actionId, label, expectedTime = '', onProviderSuccess = undefined
+) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const center = findExactTextCenter(currentLayout, label);
@@ -2115,12 +2121,15 @@ async function verifyCalendarWriteAction(layout, index, appPid, _actionContext, 
       const actionLogs = await captureWhile(appPid, async () => {
         hdc(['shell', 'uitest', 'uiInput', 'click', String(center.x), String(center.y)]);
       });
-      const resultLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-layout.json`);
       const logs = actionLogs.join('\n');
       const actionEvidence = multiAgentActionEvidence(
         logs, { expectedActionId: actionId, expectedVirtual: false }
       );
       const providerEvidence = calendarProviderActionEvidence(logs, actionEvidence, { expectedTime });
+      if (actionId === 'calendar.event.create' && providerEvidence.ok && typeof onProviderSuccess === 'function') {
+        onProviderSuccess(providerEvidence.providerEventId);
+      }
+      const resultLayout = dumpLayout(`query-${index + 1}-${actionId.replaceAll('.', '-')}-layout.json`);
       const suffix = actionId.replaceAll('.', '-');
       const logPath = join(outDir, `query-${index + 1}-${suffix}.log`);
       const textPath = join(outDir, `query-${index + 1}-${suffix}-layout-text.txt`);
@@ -3143,7 +3152,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
   summary.calendarCreateAction = expectedCase.verifyCalendarCreate === true
     ? await verifyCalendarWriteAction(
       evidenceLayout, index, appPid, summary.multiAgentLifecycle,
-      'calendar.event.create', '确认创建'
+      'calendar.event.create', '确认创建', '', () => { c19CleanupRequired = true; }
     )
     : { ok: true, skipped: true };
   summary.calendarUpdateAction = expectedCase.verifyCalendarUpdate === true
@@ -3169,7 +3178,7 @@ async function runQuery(query, index, expectedTool, expectedCaseOverride = null)
   summary.absenceEvidence = summary.expectedAbsentText.length === 0 ? { ok: true, skipped: true } :
     calendarProviderAbsenceEvidence(safeLogText, summary.multiAgentLifecycle, {
       title: summary.expectedAbsentText,
-      date: qaDate
+      date: qaDateIso
     });
   summary.absenceVerified = summary.absenceEvidence.ok;
   if (isPersonaMemoryUpdateQuery(query)) {
@@ -3627,38 +3636,31 @@ for (let index = 0; index < queries.length; index += 1) {
   if (c19Requested) {
     const cleanupDelete = coreRegressionCases.find((testCase) => testCase.id === 'C19e');
     const cleanupAbsence = coreRegressionCases.find((testCase) => testCase.id === 'C19f');
-    if (c19CleanupRequired && cleanupDelete !== undefined) {
-      try {
+    const finalizer = await runC19CleanupFinalizer({
+      cleanupRequired: c19CleanupRequired && cleanupDelete !== undefined,
+      runDelete: async () => {
+        if (cleanupDelete === undefined) throw new Error('C19 cleanup delete case missing');
         const cleanup = await runQuery(cleanupDelete.query, queries.length, cleanupDelete.expectsTool, cleanupDelete);
         cleanup.caseId = 'C19e-cleanup';
         cleanup.status = cleanup.ok ? 'PASS' : (cleanup.providerFailed ? 'BLOCKED' : 'FAIL');
-        summaries.push(cleanup);
-        c19CleanupRequired = cleanup.calendarDeleteAction?.ok !== true;
-        console.log(JSON.stringify(cleanup, null, 2));
-      } catch (error) {
-        const cleanup = {
-          caseId: 'C19e-cleanup', status: 'FAIL', ok: false,
-          reason: error instanceof Error ? error.message : String(error)
-        };
-        summaries.push(cleanup);
-        console.log(JSON.stringify(cleanup, null, 2));
-      }
-    }
-    if (cleanupAbsence !== undefined) {
-      try {
+        return cleanup;
+      },
+      runAbsence: async () => {
+        if (cleanupAbsence === undefined) throw new Error('C19 final absence case missing');
         const absence = await runQuery(cleanupAbsence.query, queries.length + 1, cleanupAbsence.expectsTool, cleanupAbsence);
         absence.caseId = 'C19f-final-cleanup';
         absence.status = absence.ok ? 'PASS' : (absence.providerFailed ? 'BLOCKED' : 'FAIL');
-        summaries.push(absence);
-        console.log(JSON.stringify(absence, null, 2));
-      } catch (error) {
-        const absence = {
-          caseId: 'C19f-final-cleanup', status: 'FAIL', ok: false,
-          reason: error instanceof Error ? error.message : String(error)
-        };
-        summaries.push(absence);
-        console.log(JSON.stringify(absence, null, 2));
+        return absence;
       }
+    });
+    if (finalizer.cleanup.skipped !== true) {
+      summaries.push(finalizer.cleanup);
+      c19CleanupRequired = finalizer.cleanup.calendarDeleteAction?.ok !== true;
+      console.log(JSON.stringify(finalizer.cleanup, null, 2));
+    }
+    if (finalizer.absence !== undefined) {
+      summaries.push(finalizer.absence);
+      console.log(JSON.stringify(finalizer.absence, null, 2));
     }
   }
   if (personaMemoryBackup !== null) {

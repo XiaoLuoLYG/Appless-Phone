@@ -312,6 +312,9 @@ export class MultiAgentEvidenceFormatter {
       return 'invalid';
     }
     const key: string = kind + ':' + value;
+    if (kind === 'c' || kind === 't') {
+      return kind + mailIdentityHash(value);
+    }
     const existing: string | undefined = this.tokens.get(key);
     if (existing !== undefined) return existing;
     this.sequence++;

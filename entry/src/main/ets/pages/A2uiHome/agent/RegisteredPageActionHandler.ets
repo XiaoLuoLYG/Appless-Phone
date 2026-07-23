@@ -231,6 +231,14 @@ function encodedEvidenceValue(value: string): string {
   return encodeURIComponent(value.trim().length > 0 ? value.trim() : 'none');
 }
 
+function privacyIdentityToken(kind: string, value: string): string {
+  let hash: number = 2166136261;
+  for (let index: number = 0; index < value.length; index++) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return kind + hash.toString(16).padStart(8, '0');
+}
+
 function calendarProviderWriteEvidence(
   model: A2uiRuntimeDataModel,
   actionId: string,
@@ -251,8 +259,8 @@ function calendarProviderWriteEvidence(
     const eventId = evidenceRow(result.rows, ['event id']);
     const start = evidenceRow(result.rows, ['start', 'start time', 'starts at', '开始时间']);
     const requested = typeof values['eventId'] === 'string' ? values['eventId'] : '';
-    aiLogInfo('[AIPhone][CalendarProviderAction] conversation=' + encodedEvidenceValue(context.conversationId) +
-      ' turn=' + encodedEvidenceValue(context.turnId) + ' surface=' + encodedEvidenceValue(surfaceId) +
+    aiLogInfo('[AIPhone][CalendarProviderAction] conversation=' + privacyIdentityToken('c', context.conversationId) +
+      ' turn=' + privacyIdentityToken('t', context.turnId) + ' surface=' + encodedEvidenceValue(surfaceId) +
       ' action=' + encodedEvidenceValue(actionId) + ' event=' + encodedEvidenceValue(eventId) +
       ' requested=' + encodedEvidenceValue(requested) + ' status=' + encodedEvidenceValue(
         actionId === 'calendar.event.delete' ? evidenceRow(result.rows, ['status', '状态']) || result.status : result.status
