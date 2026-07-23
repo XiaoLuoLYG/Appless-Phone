@@ -325,6 +325,94 @@ test('collapses adjacent identical lifecycle copies one millisecond apart across
   assert.deepEqual(evidence.toolIds, ['travel.search', 'travel.search']);
 });
 
+test('collapses a dual-channel lifecycle pair across intervening NETSTACK noise', () => {
+  const withNetstackBetweenChannels = dualChannelTurn.replace(
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentDataResult]',
+    '07-22 09:41:13.009  4821  4899 I C015B0/com.example.aiphonedemo/NETSTACK: ' +
+      'taskid=7 RespCode:200\n' +
+      '07-22 09:41:13.010  4821  4821 I A03D00/JSAPP: [AIPhone][MultiAgentDataResult]'
+  );
+  const evidence = multiAgentTurnEvidence(withNetstackBetweenChannels, {
+    expectedToolIds: ['travel.search', 'travel.search']
+  });
+
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.status, 'partial');
+  assert.deepEqual(evidence.toolIds, ['travel.search', 'travel.search']);
+});
+
+test('preserves a second real emission after each dual-channel pair is collapsed once', () => {
+  const originalPair =
+    '07-22 09:41:13.009  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const secondRealPair =
+    '07-22 09:41:13.010  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.010  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const evidence = multiAgentTurnEvidence(
+    dualChannelTurn.replace(originalPair, originalPair + '\n' + secondRealPair),
+    { expectedToolIds: ['travel.search', 'travel.search'] }
+  );
+
+  assert.equal(evidence.complete, false);
+  assert.ok(evidence.failures.includes('missing_or_duplicate_data_terminal'));
+});
+
+test('consumes an A00000 lifecycle record only once for an A00000 A03D00 A03D00 triplet', () => {
+  const original =
+    '07-22 09:41:13.009  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const third =
+    '07-22 09:41:13.010  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const evidence = multiAgentTurnEvidence(
+    dualChannelTurn.replace(original, original + '\n' + third),
+    { expectedToolIds: ['travel.search', 'travel.search'] }
+  );
+
+  assert.equal(evidence.complete, false);
+  assert.ok(evidence.failures.includes('missing_or_duplicate_data_terminal'));
+});
+
+test('consumes an A03D00 lifecycle record only once for an A03D00 A00000 A00000 triplet', () => {
+  const original =
+    '07-22 09:41:13.009  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const reverseTriplet =
+    '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.009  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false\n' +
+    '07-22 09:41:13.010  4821  4821 I A00000/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 ' +
+      'tool=travel.search status=success sources=1 error=false';
+  const evidence = multiAgentTurnEvidence(
+    dualChannelTurn.replace(original, reverseTriplet),
+    { expectedToolIds: ['travel.search', 'travel.search'] }
+  );
+
+  assert.equal(evidence.complete, false);
+  assert.ok(evidence.failures.includes('missing_or_duplicate_data_terminal'));
+});
+
 test('preserves opposite-channel lifecycle events separated by more than one millisecond', () => {
   const laterTimestamp = dualChannelTurn.replace(
     '07-22 09:41:13.009  4821  4821 I A03D00/JSAPP:',

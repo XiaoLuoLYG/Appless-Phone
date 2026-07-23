@@ -8,8 +8,12 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
   'MultiAgentTurnResult'
 ]);
-const DUPLICATE_HILOG_CHANNELS = new Set(['A00000/AIPHONE', 'A03D00/JSAPP']);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
+
+function duplicateHilogChannelPair(left, right) {
+  return (left === 'A00000/AIPHONE' && right === 'A03D00/JSAPP') ||
+    (left === 'A03D00/JSAPP' && right === 'A00000/AIPHONE');
+}
 
 function duplicateHilogTimestamp(left, right) {
   if (left === right) return true;
@@ -36,14 +40,25 @@ function records(logText) {
     const timestamp = /^\s*(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\b/.exec(line)?.[1] || '';
     const normalized = line.slice(marker.index).trim();
     const previous = result.at(-1);
-    if (LIFECYCLE_MARKERS.has(marker[1]) && previous?.index === index - 1 &&
+    if (LIFECYCLE_MARKERS.has(marker[1]) && previous !== undefined &&
+      previous.duplicatePaired !== true &&
       timestamp.length > 0 && previous.timestamp.length > 0 &&
       duplicateHilogTimestamp(previous.timestamp, timestamp) &&
-      previous.normalized === normalized && previous.channel !== channel &&
-      DUPLICATE_HILOG_CHANNELS.has(previous.channel) && DUPLICATE_HILOG_CHANNELS.has(channel)) {
+      previous.normalized === normalized &&
+      duplicateHilogChannelPair(previous.channel, channel)) {
+      previous.duplicatePaired = true;
       continue;
     }
-    result.push({ marker: marker[1], fields, index, line, channel, timestamp, normalized });
+    result.push({
+      marker: marker[1],
+      fields,
+      index,
+      line,
+      channel,
+      timestamp,
+      normalized,
+      duplicatePaired: false
+    });
   }
   return result;
 }
