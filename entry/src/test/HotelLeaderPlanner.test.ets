@@ -48,6 +48,21 @@ const C20_SEARCH_JSON: string = '{' +
   '"size":10' +
   '}';
 
+const C20_DEVICE_SEARCH_JSON: string = '{' +
+  '"originQuery":"' + C20_MODEL_QUERY + '",' +
+  '"place":"深圳科技园",' +
+  '"placeType":"neighborhood",' +
+  '"countryCode":"CN",' +
+  '"checkInDate":"2026-08-08",' +
+  '"stayNights":2,' +
+  '"adultCount":2,' +
+  '"childCount":0,' +
+  '"childAgeDetails":[],' +
+  '"roomCount":1,' +
+  '"currency":"",' +
+  '"size":0' +
+  '}';
+
 const CROSS_YEAR_MODEL_QUERY: string =
   '12月31日到1月2日深圳科技园附近的酒店，2位成人1间房';
 const CROSS_YEAR_SEARCH_JSON: string = '{' +
@@ -224,6 +239,25 @@ export default function hotelLeaderPlannerTest() {
         expect(args.childCount).assertEqual(0);
         expect(args.roomCount).assertEqual(1);
       }
+    });
+
+    it('normalizes the device neighborhood alias only for the exact nearby POI', 0, async () => {
+      const trustedQuery: string = '帮我找' + C20_MODEL_QUERY;
+      const plan = await planFor(trustedQuery, C20_DEVICE_SEARCH_JSON);
+      const args = plan.dataTasks[0].args as
+        Record<string, Object | string | number | boolean | null | undefined>;
+
+      expect(args.originQuery).assertEqual(trustedQuery);
+      expect(args.place).assertEqual('深圳科技园');
+      expect(args.placeType).assertEqual('POI');
+      expect(args.currency).assertEqual('CNY');
+      expect(args.size).assertEqual(10);
+
+      const changedPlace = C20_DEVICE_SEARCH_JSON.replace(
+        '"place":"深圳科技园"',
+        '"place":"深圳"'
+      );
+      expect(await rejected(trustedQuery, changedPlace)).assertTrue();
     });
 
     it('accepts a polite-prefix range that crosses month and year by exactly two UTC days', 0,

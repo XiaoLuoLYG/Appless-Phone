@@ -1011,8 +1011,23 @@ function verifySourceContracts() {
   );
   assertContains(
     canaryRuntime,
-    "definition.toolId !== 'luckin.order.preview' || isExplicitLuckinOrderPrompt(prompt)",
-    'planning projection hides Luckin preview outside explicit ordering prompts'
+    'isLuckinOrderToolVisible(definition.toolId, prompt)',
+    'planning projection delegates Luckin order-tool visibility to the intent filter'
+  );
+  assertContains(
+    canaryRuntime,
+    "if (toolId === 'luckin.order.preview')",
+    'planning projection exposes Luckin preview only for explicit ordering prompts'
+  );
+  assertContains(
+    canaryRuntime,
+    "if (toolId === 'luckin.order.create' || toolId === 'luckin.order.status')",
+    'planning projection keeps Luckin create and status behind explicit order intents'
+  );
+  assertContains(
+    canaryRuntime,
+    'return orderIntent || isExplicitLuckinOrderStatusPrompt(prompt);',
+    'planning projection allows Luckin status tools for explicit status prompts'
   );
   assertContains(
     canaryRuntime,

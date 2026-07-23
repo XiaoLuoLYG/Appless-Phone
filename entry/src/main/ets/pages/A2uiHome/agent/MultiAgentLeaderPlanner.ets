@@ -131,7 +131,9 @@ const C10_C11_SELECTION_CONTRACT: string =
   'requests use social.feed.search. A generic request to 点一杯咖啡 uses food.search. Stable preference text such as ' +
   '我只喝瑞幸咖啡, 以后只喝..., or an explicit remember-preference request uses only memory.update. Use ' +
   'luckin.order.preview only for an explicit Luckin/Ruixing order request with a concrete product or specification, ' +
-  'for example 帮我点一杯瑞幸生椰拿铁，半糖少冰; do not infer it from generic coffee or saved preference text.';
+  'for example 帮我点一杯瑞幸生椰拿铁，半糖少冰. A Luckin product or price question uses food.search; ' +
+  'luckin.order.status is only for an explicit existing-order status or pickup-code request. Do not infer ordering ' +
+  'or order status from generic coffee, a product/price question, or saved preference text.';
 const SOCIAL_SELECTION_CONTRACT: string =
   'Social selection contract: Reddit/LinkedIn/Instagram/public community reading -> ' +
   'social.community.search. Standalone public post draft -> social.post.preview. ' +

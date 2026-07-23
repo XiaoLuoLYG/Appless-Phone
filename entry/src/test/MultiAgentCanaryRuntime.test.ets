@@ -1444,7 +1444,7 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('projects Luckin preview only for an explicit current order prompt', 0, async () => {
+    it('projects Luckin order tools only for explicit order or status intent', 0, async () => {
       const priceModel = new QueueModel([ANSWER_DECISION]);
       const priceRuntime = new MultiAgentCanaryRuntime(canaryOptions(
         priceModel,
@@ -1463,7 +1463,11 @@ export default function multiAgentCanaryRuntimeTest() {
       const pricePersonas = priceModel.prompts[0].substring(pricePersonasStart);
       expect(priceCatalog.indexOf('"toolId":"food.search"')).assertLarger(-1);
       expect(priceCatalog.indexOf('"toolId":"luckin.order.preview"')).assertEqual(-1);
+      expect(priceCatalog.indexOf('"toolId":"luckin.order.create"')).assertEqual(-1);
+      expect(priceCatalog.indexOf('"toolId":"luckin.order.status"')).assertEqual(-1);
       expect(pricePersonas.indexOf('luckin.order.preview')).assertEqual(-1);
+      expect(pricePersonas.indexOf('luckin.order.create')).assertEqual(-1);
+      expect(pricePersonas.indexOf('luckin.order.status')).assertEqual(-1);
       priceRuntime.dispose();
 
       const orderModel = new QueueModel([ANSWER_DECISION]);
@@ -1481,7 +1485,28 @@ export default function multiAgentCanaryRuntimeTest() {
       );
       const orderCatalog = orderModel.prompts[0].substring(orderCatalogStart, orderCatalogEnd);
       expect(orderCatalog.indexOf('"toolId":"luckin.order.preview"')).assertLarger(-1);
+      expect(orderCatalog.indexOf('"toolId":"luckin.order.create"')).assertLarger(-1);
+      expect(orderCatalog.indexOf('"toolId":"luckin.order.status"')).assertLarger(-1);
       orderRuntime.dispose();
+
+      const statusModel = new QueueModel([ANSWER_DECISION]);
+      const statusRuntime = new MultiAgentCanaryRuntime(canaryOptions(
+        statusModel,
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        []
+      ));
+      await statusRuntime.submit('查询瑞幸订单状态', { text: '' });
+      const statusCatalogStart = statusModel.prompts[0].indexOf('Registry capabilities: ');
+      const statusCatalogEnd = statusModel.prompts[0].indexOf(
+        '\nRuntime-owned tool IDs:', statusCatalogStart
+      );
+      const statusCatalog = statusModel.prompts[0].substring(statusCatalogStart, statusCatalogEnd);
+      expect(statusCatalog.indexOf('"toolId":"luckin.order.preview"')).assertEqual(-1);
+      expect(statusCatalog.indexOf('"toolId":"luckin.order.create"')).assertLarger(-1);
+      expect(statusCatalog.indexOf('"toolId":"luckin.order.status"')).assertLarger(-1);
+      statusRuntime.dispose();
     });
 
     it('projects the fixed community read and standalone post preview contracts', 0, async () => {

@@ -60,6 +60,7 @@ export function hotelSearchPlanningContract(currentLocalDate: string): string {
   return 'Current local date: ' + currentLocalDate + '. Resolve relative dates from this date.\n' +
     'For hotel.search, input must contain exactly originQuery, place, placeType, countryCode, ' +
     'checkInDate, stayNights, adultCount, childCount, childAgeDetails, roomCount, currency, and size.\n' +
+    'Use placeType "CITY" only for a city and "POI" for a named landmark, park, or "<place>附近" request.\n' +
     'Use currency "" when the user does not specify it; local code applies the bounded CNY default.\n' +
     'Use size 0 when the user does not specify a positive result limit; bounded local code applies the default.\n' +
     'Do not invent missing destination, date, year, guest, child-age, or room values.\n' +
@@ -120,6 +121,18 @@ function explicitHotelDestination(query: string): string {
   const direct =
     /(?:到|至)(?:[0-9]{4}年)?(?:[0-9]{1,2}月)?[0-9]{1,2}日([^，,]+)的酒店/.exec(query);
   return direct === null ? '' : direct[1].trim();
+}
+
+function normalizedHotelPlaceType(query: string, raw: HotelSearchModelArgs): string {
+  const placeType: string = typeof raw.placeType === 'string' ? raw.placeType.trim() : '';
+  const destination: string = explicitHotelDestination(query);
+  if (placeType.toLowerCase() === 'neighborhood' &&
+    destination.length > 0 &&
+    typeof raw.place === 'string' &&
+    raw.place === destination) {
+    return 'POI';
+  }
+  return placeType;
 }
 
 function explicitHotelPlaceAndCountry(query: string, raw: HotelSearchModelArgs): boolean {
@@ -273,16 +286,10 @@ function normalizeHotelSearchInput(
   const raw = value as HotelSearchModelArgs;
   const trustedQuery: string = query.trim();
   const modelQuery: string = typeof raw.originQuery === 'string' ? raw.originQuery : '';
-  const omittedPrefix: boolean = omittedHotelQueryPrefix(trustedQuery, modelQuery);
-  if ((modelQuery !== trustedQuery && !omittedPrefix) ||
-    (omittedPrefix && !omittedHotelQueryFieldsMatch(modelQuery, raw, currentLocalDate)) ||
-    typeof raw.countryCode !== 'string' || raw.countryCode.trim().length === 0) {
-    throw new Error('Hotel planner output changed the query or omitted countryCode.');
-  }
-  const trusted: HotelSearchModelArgs = {
-    originQuery: trustedQuery,
+  const normalizedRaw: HotelSearchModelArgs = {
+    originQuery: raw.originQuery,
     place: raw.place,
-    placeType: raw.placeType,
+    placeType: normalizedHotelPlaceType(modelQuery, raw),
     countryCode: raw.countryCode,
     checkInDate: raw.checkInDate,
     stayNights: raw.stayNights,
@@ -292,6 +299,27 @@ function normalizeHotelSearchInput(
     roomCount: raw.roomCount,
     currency: raw.currency,
     size: raw.size
+  };
+  const omittedPrefix: boolean = omittedHotelQueryPrefix(trustedQuery, modelQuery);
+  if ((modelQuery !== trustedQuery && !omittedPrefix) ||
+    (omittedPrefix && !omittedHotelQueryFieldsMatch(modelQuery, normalizedRaw, currentLocalDate)) ||
+    typeof normalizedRaw.countryCode !== 'string' ||
+    normalizedRaw.countryCode.trim().length === 0) {
+    throw new Error('Hotel planner output changed the query or omitted countryCode.');
+  }
+  const trusted: HotelSearchModelArgs = {
+    originQuery: trustedQuery,
+    place: normalizedRaw.place,
+    placeType: normalizedRaw.placeType,
+    countryCode: normalizedRaw.countryCode,
+    checkInDate: normalizedRaw.checkInDate,
+    stayNights: normalizedRaw.stayNights,
+    adultCount: normalizedRaw.adultCount,
+    childCount: normalizedRaw.childCount,
+    childAgeDetails: normalizedRaw.childAgeDetails,
+    roomCount: normalizedRaw.roomCount,
+    currency: normalizedRaw.currency,
+    size: normalizedRaw.size
   };
   const parsed: HotelSearchParseResult = parseHotelSearchRequest(trusted as Object);
   if (!parsed.ok || parsed.value === null) {
