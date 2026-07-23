@@ -27,6 +27,8 @@ import {
 
 const SURFACE_HISTORY_LIMIT: number = 20;
 
+export type HotelTurnStatus = 'success' | 'partial' | 'empty' | 'error' | 'canceled' | 'timeout';
+
 export type HotelSurfaceApplyCallback = (
   surface: A2uiSurfaceState,
   generation: number,

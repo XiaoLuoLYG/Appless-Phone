@@ -136,6 +136,10 @@ function retiredOrchestrationViolations(source) {
     .map(([name]) => name);
 }
 
+function importsRetiredHotelRuntime(source) {
+  return /\bfrom\s+['"][^'"]*HotelAgentRuntime['"]/.test(stripComments(source));
+}
+
 function readProductionEtsSources() {
   const sources = [];
   function visit(directory) {
@@ -476,6 +480,14 @@ function verifyArchitectureVerifier() {
       `verifier ignores string-only ${name}`
     );
   }
+  assert(
+    importsRetiredHotelRuntime("import { HotelVisibility } from './HotelAgentRuntime';"),
+    'verifier detects a live HotelAgentRuntime import'
+  );
+  assert(
+    !importsRetiredHotelRuntime("// import { HotelVisibility } from './HotelAgentRuntime';"),
+    'verifier ignores a comment-only HotelAgentRuntime import'
+  );
 
   const exactSkillFixture = `---
 name: test
@@ -805,6 +817,13 @@ function verifySourceContracts() {
     retiredViolations.join(', ')
   );
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  const multiAgentCanary = read(
+    'entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets'
+  );
+  assert(
+    !importsRetiredHotelRuntime(a2uiHome + '\n' + multiAgentCanary),
+    'production host does not import the retired HotelAgentRuntime'
+  );
   const migrationDesign = read(
     'docs/superpowers/specs/2026-07-21-full-scenario-multi-agent-migration-design.md'
   );

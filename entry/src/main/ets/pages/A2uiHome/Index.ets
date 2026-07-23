@@ -120,7 +120,7 @@ import {
 import { ConfigPage } from './components/ConfigPage';
 import {
   HotelTurnStatus
-} from './agent/HotelAgentRuntime';
+} from './agent/MultiAgentHotelSupport';
 import {
   MailDetailInPlaceEvent,
   MailDetailWriteLease,

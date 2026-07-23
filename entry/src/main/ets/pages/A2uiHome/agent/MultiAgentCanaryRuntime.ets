@@ -78,7 +78,7 @@ import {
   IgnoreHotelSurfaceWriter,
   MonotonicHotelIds,
   PreparedHotelFollowUpIds
-} from './HotelAgentRuntime';
+} from './MultiAgentHotelSupport';
 import { StructuredToolUiRenderer } from './StructuredToolUiRenderer';
 import {
   AiphoneRegisteredActionExecutor,
