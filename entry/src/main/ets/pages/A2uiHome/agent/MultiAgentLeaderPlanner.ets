@@ -40,9 +40,19 @@ const FULL_DECISION_CONTRACT: string =
   'roundAction, dataTasks, and uiIntent. For answer or clarify, set dataTasks to [] and include a non-empty answer. ' +
   'uiIntent must contain exactly purpose, preferredDensity, and requiredSections. Choose purpose, preferredDensity, ' +
   'and requiredSections from the current user request and real recentObservations when present; never omit them.';
+const REQUEST_SCOPE_CONTRACT: string =
+  'Request scope contract: The current user request defines a closed capability and source set. ' +
+  'Persona, active Skill, saved Memory, defaults, and available tools may shape behavior but must not add an ' +
+  'unrequested capability, provider, account, source, or channel. Every Data task and Action must directly serve ' +
+  'an explicit current-user request or a real dependency from prior current-turn observations. When the user names ' +
+  'platforms or sources, select only those sources; do not add channels. X or Slack inbox/message requests use ' +
+  'social.feed.search, and mail.search may run in parallel only when the current request also explicitly asks for ' +
+  'mail or email. Explicit multi-domain requests remain valid and should keep independent tasks in the same round. ' +
+  'Before returning JSON, silently scope-check every requestedCapabilityId, Data task, allowed tool, and Action ' +
+  'against that closed set; do not output the check.';
 const LEADER_SYSTEM_PROMPT: string = 'Return exactly one JSON object and nothing else. ' +
   'Do not include Thought, markdown, or code fences. ' + ANSWER_FIELD_RULE + ' ' + REASON_CODE_FIELD_RULE + ' ' +
-  FULL_DECISION_CONTRACT;
+  REQUEST_SCOPE_CONTRACT + ' ' + FULL_DECISION_CONTRACT;
 const REPAIR_INSTRUCTION: string = 'Correction: previous decision rejected by strict schema. ' +
   'Return one corrected decision matching the schema exactly. ' + FULL_DECISION_CONTRACT;
 const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
@@ -361,6 +371,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const result: string = [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
+      REQUEST_SCOPE_CONTRACT,
       'LeaderDecision schema: {"personaId":"string","skillId":"string",' +
         '"requestedCapabilityIds":["registered tool or action ID"],' +
         '"roundAction":"execute|answer|clarify|legacy_handoff","dataTasks":[' +

@@ -71,6 +71,22 @@ const BILIBILI_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId
   '"input":{"query":"Qwen","sources":["bilibili"]},"required":true}],' +
   '"uiIntent":{"purpose":"展示 B 站视频","preferredDensity":"comfortable",' +
   '"requiredSections":["video"]}}';
+const SOCIAL_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.feed.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
+  '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search",' +
+  '"input":{"platforms":["x","slack"]},"required":true}],' +
+  '"uiIntent":{"purpose":"展示 SocialHub 消息","preferredDensity":"comfortable",' +
+  '"requiredSections":["social"]}}';
+const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["social.feed.search","mail.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
+  '"allowedToolIds":["social.feed.search"],"toolId":"social.feed.search",' +
+  '"input":{"platforms":["x","slack"]},"required":true},' +
+  '{"localId":"mail","goal":"查看邮件","allowedToolIds":["mail.search"],' +
+  '"toolId":"mail.search","input":{"providers":["gmail","qq","outlook"],"query":"","pageSize":10},' +
+  '"required":true}],"uiIntent":{"purpose":"展示消息和邮件","preferredDensity":"comfortable",' +
+  '"requiredSections":["social","mail"]}}';
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
@@ -262,6 +278,27 @@ class TravelPromptAwareModel implements LocalModel {
   }
 }
 
+class RequestScopePromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+  systemPrompts: string[] = [];
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    systemPrompt?: string
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    this.systemPrompts.push(systemPrompt ?? '');
+    const explicitMultiDomain: boolean = prompt.indexOf('同时查看 X、Slack 和邮件') >= 0;
+    const scoped: boolean = prompt.indexOf(
+      'The current user request defines a closed capability and source set.'
+    ) >= 0 && (systemPrompt ?? '').indexOf(
+      'The current user request defines a closed capability and source set.'
+    ) >= 0 && prompt.indexOf('silently scope-check') >= 0;
+    return explicitMultiDomain || !scoped ? SOCIAL_MAIL_DECISION : SOCIAL_ONLY_DECISION;
+  }
+}
+
 class ObservationPromptAwareModel implements LocalModel {
   prompts: string[] = [];
 
@@ -413,6 +450,15 @@ function planningContext(): LeaderPlanningContext {
       registeredBackends: ['local_adapter'],
       inputSchema: 'foodSearchRequest',
       outputSchema: 'foodSearchResults',
+      actions: []
+    }, {
+      toolId: 'social.feed.search',
+      domain: 'social',
+      intent: 'Search real SocialHub messages',
+      riskLevel: 'read',
+      registeredBackends: ['local_adapter'],
+      inputSchema: 'socialFeedSearchQuery',
+      outputSchema: 'socialHubFeed',
       actions: []
     }, {
       toolId: 'mail.search',
@@ -799,6 +845,49 @@ export default function multiAgentLeaderPlannerTest() {
       expect(comparisonPair.dataTasks.length).assertEqual(2);
       expect(comparisonPair.dataTasks[0].toolId).assertEqual('flight.search');
       expect(comparisonPair.dataTasks[1].toolId).assertEqual('train.search');
+    });
+
+    it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
+      const socialModel = new RequestScopePromptAwareModel();
+      const explicitMultiModel = new RequestScopePromptAwareModel();
+      const workPersonaModel = new RequestScopePromptAwareModel();
+      const workContext = planningContext();
+      workContext.personas[0].name = 'Work Assistant';
+      workContext.personas[0].soul = 'Help with work messages and mail.';
+      workContext.personas[0].memory = 'The user often reads work email.';
+      workContext.personas[0].activeSkills[0].skillId = 'work-assistant';
+      workContext.personas[0].activeSkills[0].description = 'Manage work communication';
+      workContext.personas[0].activeSkills[0].instructions = 'Use mail tools for email.';
+
+      const social = await new MultiAgentLeaderPlanner(socialModel).plan(
+        inputMessage(),
+        { text: '帮我查看我今天 X 和 Slack 上的消息' },
+        planningContext(),
+        1
+      );
+      const explicitMulti = await new MultiAgentLeaderPlanner(explicitMultiModel).plan(
+        inputMessage(),
+        { text: '同时查看 X、Slack 和邮件' },
+        planningContext(),
+        1
+      );
+      const workPersona = await new MultiAgentLeaderPlanner(workPersonaModel).plan(
+        inputMessage(),
+        { text: '帮我查看我今天 X 和 Slack 上的消息' },
+        workContext,
+        1
+      );
+
+      expect(social.dataTasks.length).assertEqual(1);
+      expect(social.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(workPersona.dataTasks.length).assertEqual(1);
+      expect(workPersona.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(explicitMulti.dataTasks.length).assertEqual(2);
+      expect(explicitMulti.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(explicitMulti.dataTasks[1].toolId).assertEqual('mail.search');
+      expect(socialModel.prompts.length).assertEqual(1);
+      expect(explicitMultiModel.prompts.length).assertEqual(1);
+      expect(workPersonaModel.prompts.length).assertEqual(1);
     });
 
     it('repairs the real C07 overlapping video decision to one aggregate task', 0, async () => {
