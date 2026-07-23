@@ -15,6 +15,7 @@ import {
   TrainStructuredData,
   TravelStructuredData
 } from '@loop/agent-core';
+import { ComposioRawExecution } from '@loop/agent-core';
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
@@ -34,6 +35,7 @@ import {
   configureComposioConfigFromRawJson,
   configureDidiMcpSandboxForRuntime,
   configureGmailComposioResultForTests,
+  configureGmailComposioRawReaderForTests,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
   configureMailDetailReaderForTests,
@@ -913,6 +915,58 @@ export default function toolGatewayClientTest() {
         configureGmailMcpClientForTests(null);
         configureGmailCredentialStoreForTests(null);
         configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('falls back from exact message to thread and then OAuth without accepting stale identities', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const oauth = new ScriptedGmailMcpClient(
+        gmailFullDetailResult('thread-exact-fallback', 'message-exact-fallback')
+      );
+      const attempts: string[] = [];
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(oauth);
+      configureGmailComposioRawReaderForTests(async (
+        _prompt: string,
+        fixedToolId: string,
+        _args: Object
+      ): Promise<ComposioRawExecution> => {
+        attempts.push(fixedToolId);
+        if (fixedToolId === 'gmail.message.read') {
+          return {
+            toolSlug: 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+            observation: '{"data":{"threadId":"thread-exact-fallback",' +
+              '"messageText":"provider omitted message ID","payload":{"headers":[]}}}'
+          };
+        }
+        return {
+          toolSlug: 'GMAIL_FETCH_MESSAGE_BY_THREAD_ID',
+          observation: '{"data":{"id":"thread-wrong-fallback","messages":[{' +
+            '"id":"message-exact-fallback","threadId":"thread-wrong-fallback",' +
+            '"messageText":"provider returned wrong thread","payload":{"headers":[]}}]}}'
+        };
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-exact-fallback",' +
+            '"threadId":"thread-exact-fallback","messageId":"message-exact-fallback"}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(attempts.length).assertEqual(2);
+        expect(attempts[0]).assertEqual('gmail.message.read');
+        expect(attempts[1]).assertEqual('gmail.thread.read');
+        expect(oauth.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(serialized.indexOf('thread-exact-fallback')).assertLarger(-1);
+        expect(serialized.indexOf('message-exact-fallback')).assertLarger(-1);
+        expect(serialized.indexOf('Hello Gmail')).assertLarger(-1);
+      } finally {
+        configureGmailComposioRawReaderForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
       }
     });
 

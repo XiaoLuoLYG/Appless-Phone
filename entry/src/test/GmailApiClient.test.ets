@@ -59,6 +59,52 @@ export default function gmailApiClientTest() {
       expect(detail.bodyText).assertEqual('Single message body');
     });
 
+    it('keeps a complete provider observation larger than the dynamic preview limit', 0, () => {
+      const body: string = '真实完整 Gmail 正文。'.repeat(1800);
+      const observation: string = '{"data":{"messageId":"message-large","threadId":"thread-large",' +
+        '"labelIds":["INBOX"],"messageText":' + JSON.stringify(body) + ',' +
+        '"payload":{"headers":[{"name":"Subject","value":"Large exact message"}]}}}';
+      const detail = gmailMailDetailFromComposioObservation(observation, {
+        requestKey: 'gmail:thread-large', provider: 'gmail', threadId: 'thread-large',
+        messageId: 'message-large', subject: ''
+      });
+
+      expect(observation.length > 16000).assertTrue();
+      expect(detail.threadId).assertEqual('thread-large');
+      expect(detail.messageId).assertEqual('message-large');
+      expect(detail.bodyText).assertEqual(body);
+    });
+
+    it('fails closed when the provider omits or changes the requested Gmail identities', 0, () => {
+      const observations: string[] = [
+        '{"data":{"threadId":"thread-exact","messageText":"missing message ID",' +
+          '"payload":{"headers":[]}}}',
+        '{"data":{"messageId":"message-exact","messageText":"missing thread ID",' +
+          '"payload":{"headers":[]}}}',
+        '{"data":{"messageId":"message-wrong","threadId":"thread-exact",' +
+          '"messageText":"wrong message ID","payload":{"headers":[]}}}',
+        '{"data":{"messageId":"message-exact","threadId":"thread-wrong",' +
+          '"messageText":"wrong thread ID","payload":{"headers":[]}}}',
+        '{"data":{"id":"thread-exact","messages":[{"id":"message-wrong",' +
+          '"threadId":"thread-exact","messageText":"wrong thread member",' +
+          '"payload":{"headers":[]}}]}}'
+      ];
+      let rejected: number = 0;
+
+      observations.forEach((observation: string) => {
+        try {
+          gmailMailDetailFromComposioObservation(observation, {
+            requestKey: 'gmail:thread-exact', provider: 'gmail', threadId: 'thread-exact',
+            messageId: 'message-exact', subject: ''
+          });
+        } catch (_error) {
+          rejected++;
+        }
+      });
+
+      expect(rejected).assertEqual(observations.length);
+    });
+
     it('ignores Gmail drafts when reading a thread fallback', 0, () => {
       const observation = '{"successful":true,"data":{"id":"thread-large","messages":[' +
         '{"id":"message-large","threadId":"thread-large","labelIds":["INBOX"],"messageText":' +

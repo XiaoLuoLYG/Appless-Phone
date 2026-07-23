@@ -578,20 +578,45 @@ function gmailJsonRecord(value: GmailJsonValue): Record<string, GmailJsonValue> 
   return null;
 }
 
+function gmailProviderMessageId(record: Record<string, GmailJsonValue>): string {
+  const id = textOf(record.id).trim();
+  return id.length > 0 ? id : textOf(record.messageId).trim();
+}
+
+function exactThreadMessage(
+  messages: GmailMessage[],
+  args: MailDetailRequest
+): GmailMessage | null {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    const record = message as Object as Record<string, GmailJsonValue>;
+    const messageId = gmailProviderMessageId(record);
+    const threadId = textOf(message.threadId).trim();
+    if (messageId === args.messageId && threadId === args.threadId) {
+      message.id = messageId;
+      return message;
+    }
+  }
+  return null;
+}
+
 function gmailThreadCandidate(record: Record<string, GmailJsonValue>, args: MailDetailRequest): GmailThread | null {
   if (Array.isArray(record.messages)) {
-    const threadId = textOf(record.id).length > 0 ? textOf(record.id) : textOf(record.threadId);
-    if (args.threadId.length === 0 || threadId.length === 0 || threadId === args.threadId) {
-      return record as GmailThread;
+    const threadId = textOf(record.id).trim().length > 0 ?
+      textOf(record.id).trim() : textOf(record.threadId).trim();
+    const message = exactThreadMessage(record.messages as GmailMessage[], args);
+    if (threadId === args.threadId && message !== null) {
+      return { id: threadId, messages: [message] };
     }
   }
   const payload = gmailJsonRecord(record.payload);
   if (payload !== null) {
-    const messageId = textOf(record.id).length > 0 ? textOf(record.id) : textOf(record.messageId);
-    const threadId = textOf(record.threadId).length > 0 ? textOf(record.threadId) : args.threadId;
-    if ((args.messageId.length === 0 || messageId.length === 0 || messageId === args.messageId) &&
-      (args.threadId.length === 0 || threadId.length === 0 || threadId === args.threadId)) {
+    const messageId = gmailProviderMessageId(record);
+    const threadId = textOf(record.threadId).trim();
+    if (messageId === args.messageId && threadId === args.threadId) {
       const message = record as GmailMessage;
+      message.id = messageId;
+      message.threadId = threadId;
       const thread: GmailThread = {
         id: threadId,
         messages: [message]
@@ -658,8 +683,8 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
   const detail: MailDetail = {
     requestKey: args.requestKey,
     provider: 'gmail',
-    threadId: textOf(thread.id).length > 0 ? textOf(thread.id) : args.threadId,
-    messageId: textOf(newest.id).length > 0 ? textOf(newest.id) : args.messageId,
+    threadId: textOf(thread.id).trim(),
+    messageId: textOf(newest.id).trim(),
     internetMessageId: gmailHeader(newest, 'Message-ID'),
     subject: subject,
     from: gmailHeader(newest, 'From'),
@@ -681,6 +706,9 @@ export function gmailMailDetailFromPayload(payload: Object, args: MailDetailRequ
     throw new Error('Composio Gmail response contained only draft messages.');
   }
   const detail = gmailDetailFromThread(thread, args);
+  if (detail.threadId !== args.threadId || detail.messageId !== args.messageId) {
+    throw new Error('Composio Gmail response identity did not match the requested message and thread.');
+  }
   if (detail.bodyText.length === 0 && detail.bodyHtml.length === 0) {
     throw new Error('Composio Gmail response did not include the message body.');
   }
@@ -726,7 +754,14 @@ export async function readGmailMailDetail(
     throw new Error('Gmail detail requires a thread ID.');
   }
   const thread = await getThreadFull(accessToken, args.threadId.trim());
-  return gmailDetailFromThread(thread, args);
+  const detail = gmailDetailFromThread(thread, args);
+  if (detail.threadId !== args.threadId || detail.messageId !== args.messageId) {
+    throw new Error('Gmail API response identity did not match the requested message and thread.');
+  }
+  if (detail.bodyText.length === 0 && detail.bodyHtml.length === 0) {
+    throw new Error('Gmail API response did not include the message body.');
+  }
+  return detail;
 }
 
 async function getThreadOrNull(accessToken: string, threadId: string): Promise<GmailThread | null> {
