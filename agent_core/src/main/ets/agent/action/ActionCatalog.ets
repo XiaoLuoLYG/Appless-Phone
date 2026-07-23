@@ -12,6 +12,8 @@ const ACTION_INTENT_IDS: string[] = [
   'worldcup.open',
   'maps.route.open',
   'calendar.event.create',
+  'gmail.draft.create',
+  'gmail.draft.apply',
   'luckin.order.preview',
   'payment.send',
   'payment.account.setup',

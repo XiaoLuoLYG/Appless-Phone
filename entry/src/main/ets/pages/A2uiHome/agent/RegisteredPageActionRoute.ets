@@ -78,6 +78,12 @@ interface WhatsAppVirtualArgs {
   text: string;
 }
 
+interface GmailDraftVirtualArgs {
+  to: string[];
+  subject: string;
+  body: string;
+}
+
 function virtualAction(actionId: string, inputText: string, args: Object): A2uiAction {
   return {
     id: actionId,
@@ -111,6 +117,27 @@ function whatsAppVirtualArgs(inputText: string): WhatsAppVirtualArgs | null {
     return null;
   }
   return { toNumber: numbers[0], text };
+}
+
+function gmailDraftVirtualArgs(inputText: string): GmailDraftVirtualArgs | null {
+  const value = inputText.trim();
+  const emails = value.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g);
+  if (emails === null || emails.length !== 1 ||
+    value.indexOf('Gmail') < 0 || value.indexOf('写一封邮件给') < 0) {
+    return null;
+  }
+  const email = emails[0];
+  const emailIndex = value.indexOf(email);
+  const marker = value.indexOf('说', emailIndex + email.length);
+  if (emailIndex < 0 || marker < 0 ||
+    value.substring(emailIndex + email.length, marker).replace(/[，,\s]/g, '').length > 0) {
+    return null;
+  }
+  const body = value.substring(marker + 1).trim();
+  if (body.length === 0 || body.length > 4096) {
+    return null;
+  }
+  return { to: [email], subject: '', body };
 }
 
 function registeredProductAction(actionId: string): boolean {
@@ -350,6 +377,11 @@ export function resolveVirtualRegisteredPageAction(
   inputText: string,
   now: Date = new Date()
 ): A2uiAction | null {
+  if (actionId === 'gmail.draft.create') {
+    const args = gmailDraftVirtualArgs(inputText);
+    return args === null ? null :
+      virtualAction(actionId, inputText.trim(), args as Object);
+  }
   if (actionId === 'worldcup.open' && inputText.trim().length > 0) {
     const args: WorldCupVirtualArgs = { route: 'pages/A2uiHome/AnythingDemo' };
     return virtualAction(actionId, inputText.trim(), args as Object);
