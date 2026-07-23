@@ -1429,6 +1429,8 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(prompt.indexOf('mailbox/email/inbox')).assertLarger(-1);
       expect(prompt.indexOf('Composio-backed app/toolkit')).assertLarger(-1);
       expect(prompt.indexOf('Video selection contract')).assertLarger(-1);
+      expect(prompt.indexOf('Explicit Google Maps/Google Places/GMap/谷歌地图 requests use exactly maps.place.search'))
+        .assertLarger(-1);
       expect(prompt.indexOf('"toolId":"gmail.message.send"')).assertEqual(-1);
       expect(prompt.indexOf('"toolId":"social.feed.search","domain":"social"')).assertLarger(-1);
       expect(prompt.indexOf('"registeredBackends":["local_adapter"]')).assertLarger(-1);

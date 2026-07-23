@@ -126,6 +126,10 @@ const VIDEO_SELECTION_CONTRACT: string =
   'the same decision as media.video.search. Use youtube.video.search only for explicit YouTube-only requests. ' +
   'Use media.video.search for Bilibili-only or multi-source video requests. Other independent tools may still run ' +
   'in parallel when the user actually requested them.';
+const MAPS_SELECTION_CONTRACT: string =
+  'Maps selection contract: Explicit Google Maps/Google Places/GMap/谷歌地图 requests use exactly maps.place.search ' +
+  'for the requested place search and never substitute food.search. Use maps.place.details only in a later round ' +
+  'with a real placeId returned by maps.place.search.';
 const C10_C11_SELECTION_CONTRACT: string =
   'C10/C11 selection contract: Explicit X/Twitter public post searches use x.post.search. X or Slack inbox/message ' +
   'requests use social.feed.search. A generic request to 点一杯咖啡 uses food.search. Stable preference text such as ' +
@@ -959,6 +963,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       'Maximum Data tasks in one round: ' + MAX_LEADER_DATA_TASKS_PER_ROUND.toString() + '.',
       TRAVEL_SELECTION_CONTRACT,
       VIDEO_SELECTION_CONTRACT,
+      MAPS_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
       SOCIAL_SELECTION_CONTRACT,
       CALENDAR_UPDATE_SELECTION_CONTRACT,
