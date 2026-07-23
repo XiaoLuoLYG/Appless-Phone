@@ -558,7 +558,9 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     this.finishTurn(state);
     const detail: string = error instanceof Error ? error.message : `${error}`;
-    this.publishError(message, 'LEADER_PLAN_FAILED', detail);
+    const code: string = error instanceof Error && detail === 'LEADER_TASK_INPUT_INVALID' ?
+      'LEADER_TASK_INPUT_INVALID' : 'LEADER_PLAN_FAILED';
+    this.publishError(message, code, detail);
   }
 
   private handleSemanticObservation(state: LeaderTurnState, message: AgentMessage): void {

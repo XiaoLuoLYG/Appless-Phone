@@ -21,6 +21,7 @@ import {
   JsonValue,
   LocalModel,
   LinkedMessageBus,
+  TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
   createSeedA2uiSurface,
@@ -1213,6 +1214,8 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(prompt.indexOf('SocialHub inbox')).assertLarger(-1);
       expect(prompt.indexOf('private-message')).assertLarger(-1);
       expect(prompt.indexOf('dataTasks[].input.platforms')).assertLarger(-1);
+      expect(prompt.indexOf('exactly one key named platforms')).assertLarger(-1);
+      expect(prompt.indexOf('Do not add date, query, or limit')).assertLarger(-1);
       expect(prompt.indexOf('legacy ToolCall uses args.platforms')).assertLarger(-1);
       expect(prompt.indexOf('public X/Twitter posts')).assertLarger(-1);
       expect(prompt.indexOf('mailbox/email/inbox')).assertLarger(-1);
@@ -1236,8 +1239,13 @@ export default function multiAgentCanaryRuntimeTest() {
     it('passes only the Leader selected top-level SocialHub platforms to the Provider', 0, async () => {
       const calls: StructuredToolCallRecord[] = [];
       const bus = new TrackingBus();
+      const model = new QueueModel([
+        c09SocialDecision('{"platforms":["x","slack"],"date":"2026-07-23"}'),
+        c09SocialDecision('{"platforms":["x","slack"]}'),
+        C09_SOCIAL_DONE
+      ]);
       const options = canaryOptions(
-        new QueueModel([c09SocialDecision('{"platforms":["x","slack"]}'), C09_SOCIAL_DONE]),
+        model,
         new CanaryHotelExecutor(),
         new RecordingOpener(),
         [],
@@ -1267,8 +1275,81 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(platforms.length).assertEqual(2);
       expect(platforms[0]).assertEqual('x');
       expect(platforms[1]).assertEqual('slack');
+      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts[1].indexOf('LEADER_TASK_INPUT_INVALID')).assertLarger(-1);
       expect(bus.count(AgentMessageType.TURN_HANDOFF)).assertEqual(0);
       runtime.dispose();
+    });
+
+    it('publishes no Data task when the one SocialHub input repair remains invalid', 0, async () => {
+      const bus = new TrackingBus();
+      const executor = new RecordingDynamicExecutor();
+      const model = new QueueModel([
+        c09SocialDecision('{"platforms":["x","slack"],"date":"2026-07-23"}'),
+        c09SocialDecision('{"platforms":["x","slack"],"date":"2026-07-23"}')
+      ]);
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      ));
+
+      const outcome = await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+      const errors = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_ERROR
+      );
+
+      expect(outcome.kind).assertEqual('settled');
+      expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+      expect(model.prompts.length).assertEqual(2);
+      expect(executor.tasks.length).assertEqual(0);
+      expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+      expect(errors.length).assertEqual(1);
+      expect((errors[0].payload as TaskErrorPayload).code).assertEqual('LEADER_TASK_INPUT_INVALID');
+      runtime.dispose();
+    });
+
+    it('keeps the exact input error when repair changes tools UI or JSON shape', 0, async () => {
+      const repairs: string[] = [
+        MAIL_DECISION,
+        c09SocialDecision('{"platforms":["x","slack"]}')
+          .replace('"purpose":"social.feed.search"', '"purpose":"forged.ui"'),
+        '{'
+      ];
+      for (let index = 0; index < repairs.length; index++) {
+        const bus = new TrackingBus();
+        const executor = new RecordingDynamicExecutor();
+        const model = new QueueModel([
+          c09SocialDecision('{"platforms":["x","slack"],"date":"2026-07-23"}'),
+          repairs[index]
+        ]);
+        const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+          model,
+          executor,
+          new RecordingOpener(),
+          [],
+          [],
+          bus
+        ));
+
+        const outcome = await runtime.submit('帮我查看我今天 X 和 Slack 上的消息', { text: '' });
+        const errors = bus.messages.filter((message: AgentMessage): boolean =>
+          message.type === AgentMessageType.TASK_ERROR
+        );
+
+        expect(outcome.kind).assertEqual('settled');
+        expect((outcome as MultiAgentSettledOutcome).status).assertEqual('error');
+        expect(model.prompts.length).assertEqual(2);
+        expect(executor.tasks.length).assertEqual(0);
+        expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(0);
+        expect(errors.length).assertEqual(1);
+        expect((errors[0].payload as TaskErrorPayload).code)
+          .assertEqual('LEADER_TASK_INPUT_INVALID');
+        runtime.dispose();
+      }
     });
 
     it('unwraps one legacy args envelope before passing SocialHub platforms to the Provider', 0, async () => {

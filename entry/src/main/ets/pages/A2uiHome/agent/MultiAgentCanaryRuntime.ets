@@ -19,6 +19,7 @@ import {
   DynamicGenericToolResult,
   InputUserPayload,
   JsonValue,
+  LeaderDataTaskInputNormalizer,
   LeaderDecisionDataTask,
   LeaderPlanningContext,
   LeaderToolMetadata,
@@ -1123,15 +1124,22 @@ export class MultiAgentCanaryRuntime {
     );
     this.aiphoneExecutor = aiphoneExecutor;
     const initialContext = canaryPlanningContext(options.selectedPersonaId());
+    const dataTaskInputNormalizer: LeaderDataTaskInputNormalizer = (
+      input: InputUserPayload,
+      task: LeaderDecisionDataTask
+    ): Object => normalizeCanaryTaskInput(input, task, calendarNow(options.currentLocalDate));
     this.runtime = new MultiAgentRuntime({
       conversationId,
       bus: options.bus,
-      planner: new MultiAgentLeaderPlanner(options.model, options.currentLocalDate),
+      planner: new MultiAgentLeaderPlanner(
+        options.model,
+        options.currentLocalDate,
+        dataTaskInputNormalizer
+      ),
       planningContext: initialContext,
       planningContextProvider: (): LeaderPlanningContext =>
         canaryPlanningContext(options.selectedPersonaId()),
-      dataTaskInputNormalizer: (input: InputUserPayload, task: LeaderDecisionDataTask): Object =>
-        normalizeCanaryTaskInput(input, task, calendarNow(options.currentLocalDate)),
+      dataTaskInputNormalizer,
       dataAuthorizer: authorizeCanaryDataTask,
       dataExecutor: options.dataExecutor === undefined ?
         new CanaryStructuredDataExecutor(options.structuredToolCall) : options.dataExecutor,

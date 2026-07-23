@@ -4,7 +4,9 @@ import {
   AgentMessageType,
   ConversationContext,
   InputUserPayload,
+  LeaderDataTaskInputNormalizer,
   LeaderDecision,
+  LeaderDecisionDataTask,
   LeaderPlanningContext,
   LocalModel,
   ObservationDigest
@@ -78,6 +80,10 @@ const SOCIAL_ONLY_DECISION: string = '{"personaId":"travel_companion","skillId":
   '"input":{"platforms":["x","slack"]},"required":true}],' +
   '"uiIntent":{"purpose":"展示 SocialHub 消息","preferredDensity":"comfortable",' +
   '"requiredSections":["social"]}}';
+const SOCIAL_WITH_DATE_DECISION: string = SOCIAL_ONLY_DECISION.replace(
+  '"input":{"platforms":["x","slack"]}',
+  '"input":{"platforms":["x","slack"],"date":"2026-07-23"}'
+);
 const SOCIAL_MAIL_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["social.feed.search","mail.search"],"roundAction":"execute",' +
   '"dataTasks":[{"localId":"social","goal":"查看 X 和 Slack 消息",' +
@@ -249,6 +255,19 @@ class QueueLocalModel implements LocalModel {
     return this.outputs.shift() as string;
   }
 }
+
+const socialInputNormalizer: LeaderDataTaskInputNormalizer = (
+  _input: InputUserPayload,
+  task: LeaderDecisionDataTask
+): Object => {
+  const values = task.input as Record<string, Object | string | number | boolean | null | undefined>;
+  if (task.toolId !== 'social.feed.search' ||
+    Object.keys(values).join(',') !== 'platforms' ||
+    !Array.isArray(values['platforms'])) {
+    throw new Error('SOCIAL_FEED_PLATFORMS_INVALID');
+  }
+  return task.input;
+};
 
 class TravelPromptAwareModel implements LocalModel {
   prompts: string[] = [];
@@ -1745,6 +1764,79 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts[1].indexOf('LIVE_PRIVATE_MARKER')).assertEqual(-1);
       expect(model.systemPrompts[1]).assertEqual(model.systemPrompts[0]);
       expect(model.prompts[1].indexOf('Round: 1') >= 0).assertTrue();
+    });
+
+    it('repairs only invalid Data task input once and preserves the accepted plan', 0, async () => {
+      const model = new QueueLocalModel([SOCIAL_WITH_DATE_DECISION, SOCIAL_ONLY_DECISION]);
+      const planner = new MultiAgentLeaderPlanner(model, undefined, socialInputNormalizer);
+      const input: InputUserPayload = { text: '帮我查看我今天 X 和 Slack 上的消息' };
+
+      const decision = await planner.plan(
+        inputMessage(),
+        input,
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+      const repairedInput = decision.dataTasks[0].input as
+        Record<string, Object | string | number | boolean>;
+
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('LEADER_TASK_INPUT_INVALID')).assertLarger(-1);
+      expect(model.prompts[1].indexOf('Change only dataTasks[].input')).assertLarger(-1);
+      expect(decision.personaId).assertEqual('travel_companion');
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('social.feed.search');
+      expect(decision.dataTasks[0].toolId).assertEqual('social.feed.search');
+      expect(decision.uiIntent.purpose).assertEqual('展示 SocialHub 消息');
+      expect(Object.keys(repairedInput).join(',')).assertEqual('platforms');
+    });
+
+    it('fails closed when Data input repair changes tools or non-input plan fields', 0, async () => {
+      const changedTool = new QueueLocalModel([SOCIAL_WITH_DATE_DECISION, SOCIAL_MAIL_DECISION]);
+      const changedUi = new QueueLocalModel([
+        SOCIAL_WITH_DATE_DECISION,
+        SOCIAL_ONLY_DECISION.replace('展示 SocialHub 消息', '展示篡改后的界面')
+      ]);
+      const input: InputUserPayload = { text: '帮我查看我今天 X 和 Slack 上的消息' };
+      let changedToolFailed: boolean = false;
+      let changedUiFailed: boolean = false;
+
+      try {
+        await new MultiAgentLeaderPlanner(changedTool, undefined, socialInputNormalizer).plan(
+          inputMessage(), input, planningContext(), 1, (): boolean => true
+        );
+      } catch (_error) {
+        changedToolFailed = true;
+      }
+      try {
+        await new MultiAgentLeaderPlanner(changedUi, undefined, socialInputNormalizer).plan(
+          inputMessage(), input, planningContext(), 1, (): boolean => true
+        );
+      } catch (_error) {
+        changedUiFailed = true;
+      }
+
+      expect(changedToolFailed).assertTrue();
+      expect(changedUiFailed).assertTrue();
+      expect(changedTool.prompts.length).assertEqual(2);
+      expect(changedUi.prompts.length).assertEqual(2);
+    });
+
+    it('does not start Data input repair after lifecycle cancellation', 0, async () => {
+      const model = new QueueLocalModel([SOCIAL_WITH_DATE_DECISION, SOCIAL_ONLY_DECISION]);
+      const input: InputUserPayload = { text: '帮我查看我今天 X 和 Slack 上的消息' };
+      let failed: boolean = false;
+
+      try {
+        await new MultiAgentLeaderPlanner(model, undefined, socialInputNormalizer).plan(
+          inputMessage(), input, planningContext(), 1, (): boolean => false
+        );
+      } catch (_error) {
+        failed = true;
+      }
+
+      expect(failed).assertTrue();
+      expect(model.prompts.length).assertEqual(1);
     });
 
     it('stops after one invalid or throwing strict-schema repair', 0, async () => {

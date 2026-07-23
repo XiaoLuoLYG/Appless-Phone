@@ -2,6 +2,7 @@ import {
   AgentMessage,
   InputUserPayload,
   LeaderActionIntent,
+  LeaderDataTaskInputNormalizer,
   LeaderDecision,
   LeaderDecisionDataTask,
   LeaderPersonaMetadata,
@@ -59,6 +60,7 @@ const COMPLETED_TOOL_REUSE_ERROR: string = 'LEADER_COMPLETED_TOOL_REUSE';
 const UNBOUND_LATER_TOOL_ERROR: string = 'LEADER_UNBOUND_LATER_TOOL';
 const SAME_ROUND_DEPENDENCY_ERROR: string = 'LEADER_SAME_ROUND_DEPENDENCY';
 const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
+const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
   'Every completed Data tool is terminal for this turn. Return answer or clarify with a truthful summary, ' +
@@ -78,6 +80,11 @@ const OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_OVERLAPPING_VIDEO_TOOLS. media.video.search already covers both YouTube and Bilibili. ' +
   'For a request naming both sources, return exactly one media.video.search Data task with sources ' +
   '["youtube","bilibili"]; do not also schedule youtube.video.search. ' + FULL_DECISION_CONTRACT;
+const TASK_INPUT_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_TASK_INPUT_INVALID. Change only dataTasks[].input so every selected tool receives its exact ' +
+  'registered input shape. Keep personaId, skillId, requestedCapabilityIds, roundAction, each Data task localId, ' +
+  'goal, allowedToolIds, toolId and required value, uiIntent, actionIntent, answer, and Data task order exactly ' +
+  'unchanged. The only permitted difference is inside dataTasks[].input. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
 const MAX_LEADER_PROMPT_CHARS: number = 100000;
@@ -114,8 +121,13 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   private readonly model: LocalModel;
   private readonly dataToolIds: Set<string>;
   private readonly currentLocalDate: HotelLocalDateProvider;
+  private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
 
-  constructor(model: LocalModel, currentLocalDate?: HotelLocalDateProvider) {
+  constructor(
+    model: LocalModel,
+    currentLocalDate?: HotelLocalDateProvider,
+    dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer
+  ) {
     this.model = model;
     this.currentLocalDate = currentLocalDate === undefined ? (): string => {
       const now = new Date();
@@ -127,6 +139,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (definition: ToolDefinition): string => definition.toolId
     ));
     this.dataToolIds.add('dynamic.search');
+    this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
+      null : dataTaskInputNormalizer;
   }
 
   async plan(
@@ -142,8 +156,10 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     const prompt: string = this.prompt(message, input, context, round);
     const output: string = await this.completeBounded(prompt);
     let sameRoundProducerToolIds: string[] = [];
+    let rejectedDecision: LeaderDecision | null = null;
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
+      rejectedDecision = decision;
       sameRoundProducerToolIds = leaderSameRoundDependencyProducerToolIds(decision.dataTasks);
       this.rejectOverlappingVideoTools(decision);
       this.rejectSameRoundDependency(decision);
@@ -156,6 +172,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         this.currentTurnDependencyObservations(message, input, round),
         round
       );
+      this.validateDecisionInputs(input, decision);
       return decision;
     } catch (error) {
       if (signal === undefined || !signal()) {
@@ -172,26 +189,105 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = SAME_ROUND_DEPENDENCY_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
+        correction = TASK_INPUT_REPAIR_INSTRUCTION + '\nRejected decision: ' + output;
       }
       const repaired: string = await this.completeBounded(prompt + '\n' + correction);
-      const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
-      if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
-        !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
-        throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+      try {
+        const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+        if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR &&
+          (rejectedDecision === null || !this.inputOnlyRepair(rejectedDecision, repairedDecision))) {
+          throw new Error(TASK_INPUT_INVALID_ERROR);
+        }
+        if (error instanceof Error && error.message === SAME_ROUND_DEPENDENCY_ERROR &&
+          !this.producerOnlyRepair(repairedDecision, sameRoundProducerToolIds)) {
+          throw new Error(SAME_ROUND_DEPENDENCY_ERROR);
+        }
+        this.rejectOverlappingVideoTools(repairedDecision);
+        this.rejectSameRoundDependency(repairedDecision);
+        this.rejectCompletedToolReuse(
+          repairedDecision,
+          this.currentTurnCompletedToolIds(message, input, round)
+        );
+        this.rejectUnboundLaterTool(
+          repairedDecision,
+          this.currentTurnDependencyObservations(message, input, round),
+          round
+        );
+        return repairedDecision;
+      } catch (repairError) {
+        if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
+          throw new Error(TASK_INPUT_INVALID_ERROR);
+        }
+        const failure: Error = repairError instanceof Error ? repairError :
+          new Error('Leader decision repair failed strict validation.');
+        throw failure;
       }
-      this.rejectOverlappingVideoTools(repairedDecision);
-      this.rejectSameRoundDependency(repairedDecision);
-      this.rejectCompletedToolReuse(
-        repairedDecision,
-        this.currentTurnCompletedToolIds(message, input, round)
-      );
-      this.rejectUnboundLaterTool(
-        repairedDecision,
-        this.currentTurnDependencyObservations(message, input, round),
-        round
-      );
-      return repairedDecision;
     }
+  }
+
+  private validateDecisionInputs(input: InputUserPayload, decision: LeaderDecision): void {
+    const normalizer: LeaderDataTaskInputNormalizer | null = this.dataTaskInputNormalizer;
+    if (normalizer === null) {
+      return;
+    }
+    try {
+      for (let index = 0; index < decision.dataTasks.length; index++) {
+        normalizer(input, decision.dataTasks[index]);
+      }
+    } catch (_error) {
+      throw new Error(TASK_INPUT_INVALID_ERROR);
+    }
+  }
+
+  private inputOnlyRepair(original: LeaderDecision, repaired: LeaderDecision): boolean {
+    if (original.personaId !== repaired.personaId ||
+      original.skillId !== repaired.skillId ||
+      original.roundAction !== repaired.roundAction ||
+      original.answer !== repaired.answer ||
+      !this.sameStrings(original.requestedCapabilityIds, repaired.requestedCapabilityIds) ||
+      original.uiIntent.purpose !== repaired.uiIntent.purpose ||
+      original.uiIntent.preferredDensity !== repaired.uiIntent.preferredDensity ||
+      !this.sameStrings(original.uiIntent.requiredSections, repaired.uiIntent.requiredSections) ||
+      !this.sameActionIntent(original.actionIntent, repaired.actionIntent) ||
+      original.dataTasks.length !== repaired.dataTasks.length) {
+      return false;
+    }
+    for (let index = 0; index < original.dataTasks.length; index++) {
+      const first: LeaderDecisionDataTask = original.dataTasks[index];
+      const second: LeaderDecisionDataTask = repaired.dataTasks[index];
+      if (first.localId !== second.localId ||
+        first.goal !== second.goal ||
+        first.toolId !== second.toolId ||
+        first.required !== second.required ||
+        !this.sameStrings(first.allowedToolIds, second.allowedToolIds)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private sameActionIntent(
+    original: LeaderActionIntent | undefined,
+    repaired: LeaderActionIntent | undefined
+  ): boolean {
+    if (original === undefined || repaired === undefined) {
+      return original === undefined && repaired === undefined;
+    }
+    return original.goal === repaired.goal &&
+      this.sameStrings(original.allowedActionIds, repaired.allowedActionIds);
+  }
+
+  private sameStrings(original: string[], repaired: string[]): boolean {
+    if (original.length !== repaired.length) {
+      return false;
+    }
+    for (let index = 0; index < original.length; index++) {
+      if (original[index] !== repaired[index]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private completeBounded(prompt: string): Promise<string> {
