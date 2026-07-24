@@ -569,7 +569,9 @@ export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] }
   const requiredApps = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'];
   const externalOk = externalAuthJumps.length === requiredApps.length && requiredApps.every((app) => externalAuthJumps.some((jump) =>
     jump?.app === app && jump.opened === true && jump.returned === true));
-  const uiBase = ['应用授权', '当前用户', '刷新'].every((marker) => values.includes(marker)) &&
+  const currentUser = values.some((value) =>
+    value.startsWith('当前用户 ') && value.slice('当前用户 '.length).trim().length > 0);
+  const uiBase = ['应用授权', '刷新'].every((marker) => values.includes(marker)) && currentUser &&
     externalOk && !/auth_config/i.test(text);
   const providerError = /(?:2300028|Operation timeout)/i.test(text);
   const product = ['Gmail', 'GitHub', 'Google Calendar', 'Google Drive', 'Google Docs', 'Slack', 'Notion']
@@ -728,6 +730,23 @@ function socialBoundsCenter(bounds) {
     x: Math.floor((Number(match[1]) + Number(match[3])) / 2),
     y: Math.floor((Number(match[2]) + Number(match[4])) / 2)
   };
+}
+
+export function calendarConfirmationButtonCenter(layout, prefix) {
+  let match = null;
+  const visit = (node) => {
+    if (match !== null || node === null || typeof node !== 'object') return;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    const clickable = attributes.clickable === true || attributes.clickable === 'true';
+    if (clickable && socialLines(node).some((line) => line.startsWith(prefix))) {
+      match = socialBoundsCenter(attributes.bounds);
+      if (match !== null) return;
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  return match;
 }
 
 export function socialReplyButtonCenter(layout) {

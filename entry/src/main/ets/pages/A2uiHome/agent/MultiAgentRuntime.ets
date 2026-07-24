@@ -178,7 +178,11 @@ function calendarEvidenceSuffix(toolId: string, value: Object): string {
   }
   const record = value as Record<string, MailIdentityValue>;
   const title = mailIdentityText(record['query']);
-  const date = mailIdentityText(record['date']);
+  const explicitDate = mailIdentityText(record['date']);
+  const timeMin = mailIdentityText(record['timeMin']);
+  const derivedDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timeMin) ?
+    timeMin.substring(0, 10) : '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(explicitDate) ? explicitDate : derivedDate;
   const scope = title.length === 0 ? '' : mailIdentityHash(title);
   return ' calendarScope=' + (scope.length > 0 ? scope : 'invalid') +
     ' calendarDate=' + evidenceAllowed(date, [], /^\d{4}-\d{2}-\d{2}$/);

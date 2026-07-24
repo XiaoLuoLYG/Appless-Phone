@@ -25,6 +25,7 @@ import {
   captureCompletionSettled,
   collectExternalAuthJumps,
   composioAuthEvidence,
+  calendarConfirmationButtonCenter,
   calendarProviderActionEvidence,
   calendarProviderAbsenceEvidence,
   normalizeCalendarQaDate,
@@ -2127,7 +2128,7 @@ async function verifyCalendarWriteAction(
 ) {
   let currentLayout = layout;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const center = findExactTextCenter(currentLayout, label);
+    const center = calendarConfirmationButtonCenter(currentLayout, label);
     if (center !== null) {
       clearHilog();
       const actionLogs = await captureWhile(appPid, async () => {

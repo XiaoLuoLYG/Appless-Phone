@@ -775,6 +775,45 @@ export default function multiAgentRuntimeTest() {
       expect(invalid.indexOf('surface=invalid')).assertLarger(-1);
     });
 
+    it('derives C19 search evidence date only from a valid RFC3339 timeMin', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
+      const validPayload: CreateDataTaskPayload = {
+        taskId: 'calendar-search',
+        roundId: 'turn-1:round-1',
+        skillId: '',
+        goal: 'Find the exact QA event',
+        allowedToolIds: ['calendar.events.search'],
+        toolId: 'calendar.events.search',
+        outputSchema: 'calendarEvents',
+        args: JSON.parse('{"query":"Appless QA run-1","timeMin":"2026-07-31T00:00:00+08:00",' +
+          '"timeMax":"2026-08-01T00:00:00+08:00","timezone":"Asia/Shanghai"}') as Object,
+        required: true
+      };
+      const invalidPayload: CreateDataTaskPayload = {
+        taskId: validPayload.taskId,
+        roundId: validPayload.roundId,
+        skillId: validPayload.skillId,
+        goal: validPayload.goal,
+        allowedToolIds: validPayload.allowedToolIds,
+        toolId: validPayload.toolId,
+        outputSchema: validPayload.outputSchema,
+        args: JSON.parse('{"query":"Appless QA run-1","timeMin":"2026-07-31",' +
+          '"timeMax":"2026-08-01","timezone":"Asia/Shanghai"}') as Object,
+        required: true
+      };
+      const message: AgentMessage = {
+        type: AgentMessageType.TASK_CREATE_DATA,
+        conversationId: 'calendar-c19',
+        turnId: 'turn-1',
+        taskId: 'calendar-search',
+        payload: validPayload
+      };
+
+      expect(formatter.line(message).indexOf(' calendarDate=2026-07-31')).assertLarger(-1);
+      message.payload = invalidPayload;
+      expect(formatter.line(message).indexOf(' calendarDate=invalid')).assertLarger(-1);
+    });
+
     it('formats a virtual client Action terminal with its returned current surface', 0, () => {
       const formatter = new MultiAgentEvidenceFormatter(32);
       const payload: ActionResultPayload = {

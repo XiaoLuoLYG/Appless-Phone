@@ -5,6 +5,7 @@ import test from 'node:test';
 import * as smokeLifecycle from './multi-agent-smoke-evidence.mjs';
 import {
   composioAuthEvidence,
+  calendarConfirmationButtonCenter,
   calendarProviderActionEvidence,
   calendarProviderAbsenceEvidence,
   calendarEvidenceIdentityToken,
@@ -29,7 +30,7 @@ const f16ExternalReturns = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'].map((ap
 
 test('keeps F16 provider timeout as truthful usable UI evidence but BLOCKED overall', () => {
   const evidence = composioAuthEvidence({
-    textValues: ['应用授权', '当前用户', '刷新', '2300028', 'Operation timeout'],
+    textValues: ['应用授权', '当前用户 aiphone-luoyige', '刷新', '2300028', 'Operation timeout'],
     externalAuthJumps: f16ExternalReturns
   });
   assert.equal(evidence.uiOk, true);
@@ -39,7 +40,7 @@ test('keeps F16 provider timeout as truthful usable UI evidence but BLOCKED over
 
 test('requires strict F16 provider cards and rejects ambiguous, leaked, and incomplete evidence', () => {
   const connected = {
-    textValues: ['应用授权', '当前用户', '刷新', 'GitHub', '已连接', 'Composio · GitHub', '授权'],
+    textValues: ['应用授权', '当前用户 aiphone-luoyige', '刷新', 'GitHub', '已连接', 'Composio · GitHub', '授权'],
     externalAuthJumps: f16ExternalReturns
   };
   assert.deepEqual(composioAuthEvidence(connected), {
@@ -337,6 +338,28 @@ test('accepts C19 writes only from a correlated provider result and rejects inva
   ).ok, false);
 });
 
+test('locates only a clickable contextual C19 confirmation label', () => {
+  const layout = {
+    attributes: { type: 'root' },
+    children: [{
+      attributes: {
+        type: 'Column',
+        clickable: 'false',
+        text: '确认创建日程'
+      }
+    }, {
+      attributes: {
+        type: 'Button',
+        clickable: 'true',
+        description: '确认创建日程 15:00 - 15:30 · 30分钟',
+        bounds: '[100,200][500,280]'
+      }
+    }]
+  };
+  assert.deepEqual(calendarConfirmationButtonCenter(layout, '确认创建'), { x: 300, y: 240 });
+  assert.equal(calendarConfirmationButtonCenter(layout, '确认更新'), null);
+});
+
 test('requires an exact provider-correlated empty C19f search, not generic absent UI text', () => {
   const context = { conversationId: 'c19', turnId: 't-final' };
   const good = [
@@ -350,6 +373,9 @@ test('requires an exact provider-correlated empty C19f search, not generic absen
     title: 'Appless QA run-1', date: '2026-07-30'
   }).ok, false);
   assert.equal(calendarProviderAbsenceEvidence(good.replace('calendarScope=6b6f311e', 'calendarScope=other'), context, {
+    title: 'Appless QA run-1', date: '2026-07-30'
+  }).ok, false);
+  assert.equal(calendarProviderAbsenceEvidence(good.replace('calendarDate=2026-07-30', 'calendarDate=invalid'), context, {
     title: 'Appless QA run-1', date: '2026-07-30'
   }).ok, false);
 });
