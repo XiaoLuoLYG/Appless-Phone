@@ -137,7 +137,8 @@ const VIDEO_SELECTION_CONTRACT: string =
 const MAPS_SELECTION_CONTRACT: string =
   'Maps selection contract: Explicit Google Maps/Google Places/GMap/谷歌地图 requests use exactly maps.place.search ' +
   'for the requested place search and never substitute food.search. Use maps.place.details only in a later round ' +
-  'with a real placeId returned by maps.place.search.';
+  'with a real placeId returned by maps.place.search. In round 1 requestedCapabilityIds is exactly ' +
+  '["maps.place.search"]; do not list maps.place.details until that later round.';
 const C10_C11_SELECTION_CONTRACT: string =
   'C10/C11 selection contract: Explicit X/Twitter public post searches use x.post.search. X or Slack inbox/message ' +
   'requests use social.feed.search. A generic request to 点一杯咖啡 uses food.search. Stable preference text such as ' +
@@ -151,6 +152,9 @@ const SOCIAL_SELECTION_CONTRACT: string =
   'social.community.search. Standalone public post draft -> social.post.preview. ' +
   'social.reply.draft only after a selected real inbox/feed item. social.post.preview is preview-only; ' +
   'never infer or invoke a provider publish write from the preview request.';
+const AGGREGATE_MEDIA_SELECTION_CONTRACT: string =
+  'Aggregate media selection contract: A request for both 新闻 and 讨论 about the same topic uses exactly ' +
+  'media.aggregate.search, not social.community.search.';
 const OBSERVATION_REUSE_CONTRACT: string =
   'Never schedule a listed tool again in a later round, regardless of success, partial, empty, or error status. ' +
   'Data Agent owns same-tool adapter fallback and retry. A different later-round tool is allowed only when it ' +
@@ -1101,6 +1105,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       MAPS_SELECTION_CONTRACT,
       C10_C11_SELECTION_CONTRACT,
       SOCIAL_SELECTION_CONTRACT,
+      AGGREGATE_MEDIA_SELECTION_CONTRACT,
       CALENDAR_UPDATE_SELECTION_CONTRACT,
       CALENDAR_DELETE_SELECTION_CONTRACT,
       'Current-turn completed Data tool IDs: ' + JSON.stringify(completedToolIds),
