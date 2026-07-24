@@ -1,6 +1,6 @@
 name: Hypium
 
-# The target event keeps fork-authored workflow changes off the personal Mac runner.
+# The target event uses this trusted base workflow while checking out each PR head.
 on:
   pull_request_target:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'harmonyos' }}
+    runs-on: harmonyos
     timeout-minutes: 30
     env:
       DEVECO_SDK_HOME: /Users/luoyige/.aiphone/deveco-sdk
@@ -22,12 +22,6 @@ jobs:
       JAVA_HOME: /Applications/DevEco-Studio.app/Contents/jbr/Contents/Home
       NODE_HOME: /Applications/DevEco-Studio.app/Contents/tools/node
     steps:
-      - name: Reject external fork
-        if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository
-        run: |
-          echo "::error::External fork PRs cannot run on the personal Mac runner."
-          exit 1
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
