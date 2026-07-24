@@ -6,6 +6,7 @@ import {
   GmailCreateDraftArgs,
   GmailGetThreadArgs,
   GmailSearchThreadsArgs,
+  GmailUpdateDraftArgs,
   gmailMcpArgsForPrompt
 } from './GmailOAuthClient';
 import { aiLogError, aiLogInfo } from './AiphoneLogger';
@@ -422,13 +423,22 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
   const first = firstMessage(thread);
   const subject = firstHeader(first, 'Subject').length > 0 ? decodeGmailText(firstHeader(first, 'Subject')) : '(no subject)';
   const from = decodeGmailText(firstHeader(newest, 'From'));
+  const to = decodeGmailText(firstHeader(newest, 'To'));
   const date = decodeGmailText(firstHeader(newest, 'Date'));
+  const threadId = textOf(thread.id);
+  const messageId = textOf(newest.id);
+  const unread = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('UNREAD') >= 0;
+  const important = Array.isArray(newest.labelIds) && newest.labelIds.indexOf('IMPORTANT') >= 0;
   const snippet = decodeGmailText(textOf(newest.snippet).length > 0 ? textOf(newest.snippet) : textOf(first.snippet));
   const rows: A2uiLabelValueData[] = [
     { label: 'From', value: from.length > 0 ? from : 'Unknown sender' },
+    { label: 'To', value: to },
     { label: 'Date', value: date.length > 0 ? date : textOf(newest.internalDate) },
     { label: 'Messages', value: messageCount(thread).toString() },
-    { label: 'Thread ID', value: textOf(thread.id) }
+    { label: 'Thread ID', value: threadId },
+    { label: 'Message ID', value: messageId },
+    { label: 'Unread', value: unread ? 'true' : 'false' },
+    { label: 'Important', value: important ? 'true' : 'false' }
   ];
   const labels = labelsText(newest);
   if (labels.length > 0) {
@@ -441,7 +451,21 @@ function threadResult(thread: GmailThread): DynamicGenericToolResult {
     status: 'success',
     summary: snippet.length > 0 ? snippet.substring(0, 240) : 'Gmail thread retrieved.',
     rows: rows,
-    rawPreview: 'threadId=' + textOf(thread.id) + ' subject=' + subject.substring(0, 160)
+    rawPreview: JSON.stringify({
+      provider: 'gmail',
+      accountLabel: '',
+      threadId: threadId,
+      messageId: messageId,
+      from: from,
+      to: to,
+      subject: subject.substring(0, 120),
+      snippet: snippet.length > 0 ? snippet.substring(0, 240) : '',
+      receivedAt: date.length > 0 ? date : textOf(newest.internalDate),
+      unread: unread,
+      important: important,
+      sourceUrl: '',
+      rawProviderRef: JSON.stringify({ threadId: threadId, messageId: messageId, historyId: textOf(thread.historyId) })
+    })
   };
 }
 
@@ -496,6 +520,8 @@ async function getThread(accessToken: string, threadId: string): Promise<GmailTh
     ['format', 'metadata'],
     ['metadataHeaders', 'Subject'],
     ['metadataHeaders', 'From'],
+    ['metadataHeaders', 'To'],
+    ['metadataHeaders', 'Message-ID'],
     ['metadataHeaders', 'Date']
   ]);
   return await requestJson(http.RequestMethod.GET, url, accessToken, null) as GmailThread;
@@ -770,6 +796,60 @@ async function createDraft(accessToken: string, prompt: string, args: Object | n
   }];
 }
 
+async function updateDraft(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
+  const gmailArgs = gmailMcpArgsForPrompt('gmail.draft.apply', prompt, args) as GmailUpdateDraftArgs;
+  if (gmailArgs.draftId.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing Gmail draft ID.')];
+  }
+  if (gmailArgs.to.length === 0) {
+    return [errorResult('users.drafts.update', 'Missing recipient email address.')];
+  }
+  if (gmailArgs.body.trim().length === 0) {
+    return [errorResult('users.drafts.update', 'Missing email body.')];
+  }
+  const threadId = gmailArgs.threadId.trim();
+  const draftBody: GmailDraftCreateRequest = {
+    message: {
+      raw: bytesToBase64Url(utf8Bytes(rfc2822Message(gmailArgs)))
+    }
+  };
+  if (threadId.length > 0) {
+    draftBody.message.threadId = threadId;
+  }
+  const updated = await requestJson(
+    http.RequestMethod.PUT,
+    GMAIL_API_BASE_URL + '/drafts/' + encodeURIComponent(gmailArgs.draftId),
+    accessToken,
+    draftBody
+  ) as GmailDraftResponse;
+  const returnedDraftId = textOf(updated.id);
+  if (returnedDraftId.length === 0 || returnedDraftId !== gmailArgs.draftId) {
+    return [errorResult('users.drafts.update', 'Gmail returned a mismatched draft ID.')];
+  }
+  const messageId = updated.message === undefined ? '' : textOf(updated.message.id);
+  const resultThreadId = threadId.length > 0 ?
+    threadId : (updated.message === undefined ? '' : textOf(updated.message.threadId));
+  const rows: A2uiLabelValueData[] = [
+    { label: 'To', value: gmailArgs.to.join(', ') },
+    { label: 'Subject', value: gmailArgs.subject },
+    { label: 'Draft ID', value: returnedDraftId },
+    { label: 'Message ID', value: messageId }
+  ];
+  if (resultThreadId.length > 0) {
+    rows.push({ label: 'Thread ID', value: resultThreadId });
+  }
+  return [{
+    sourceTag: 'Gmail API',
+    toolName: 'users.drafts.update',
+    title: 'Gmail 草稿已更新',
+    status: 'success',
+    summary: '已在真实 Gmail 账号中更新原草稿；尚未发送。',
+    rows: rows,
+    rawPreview: 'draftId=' + returnedDraftId + ' messageId=' + messageId +
+      (resultThreadId.length > 0 ? ' threadId=' + resultThreadId : '')
+  }];
+}
+
 export async function searchGmailThreadsForMail(accessToken: string, prompt: string, args: Object | null = null): Promise<DynamicGenericToolResult[]> {
   return await searchThreads(accessToken, prompt, args);
 }
@@ -786,8 +866,11 @@ export async function callGmailApiTool(toolId: string, prompt: string, accessTok
     if (toolId === 'gmail.thread.read') {
       return await readThread(accessToken, prompt, args);
     }
-    if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+    if (toolId === 'gmail.draft.create') {
       return await createDraft(accessToken, prompt, args);
+    }
+    if (toolId === 'gmail.draft.apply') {
+      return await updateDraft(accessToken, prompt, args);
     }
     return [errorResult(toolId, 'Unsupported Gmail API tool.')];
   } catch (error) {

@@ -1,6 +1,8 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   callComposioDynamic,
+  callComposioFixedSearchAndExecuteForTest,
+  callComposioSearchAndExecute,
   composioDynamicMissingConfigResult,
   composioArgumentsForTool,
   composioDynamicResultFromObservation,
@@ -14,12 +16,21 @@ import {
   currentComposioConfig,
   currentComposioUserId,
   ComposioSearchTool,
+  ComposioSearchExecuteClient,
+  dynamicManifestRegistrationMetadata,
+  dynamicReceiptFromProviderPayload,
   isComposioDynamicPrompt,
   isUnsafeComposioExecute,
   normalizedComposioUseCase,
-  slackSearchQueryForPrompt
+  slackSearchQueryForPrompt,
+  xPostStructuredDataResult
 } from '@loop/agent-core';
-import { DynamicGenericToolResult } from '@loop/agent-core';
+import {
+  DataResult,
+  DynamicGenericToolResult,
+  DynamicMcpTool,
+  DynamicRegistrationMetadata
+} from '@loop/agent-core';
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
@@ -56,8 +67,61 @@ interface TestComposioObservation {
   error: null;
 }
 
+interface SelectedSlugCase {
+  prompt: string;
+  slug: string;
+}
+
+class RecordingComposioSearchExecuteClient implements ComposioSearchExecuteClient {
+  searchObservation: string;
+  executionObservation: string;
+  executedSlugs: string[] = [];
+
+  constructor(searchObservation: string, executionObservation: string) {
+    this.searchObservation = searchObservation;
+    this.executionObservation = executionObservation;
+  }
+
+  async search(_useCase: string): Promise<string> {
+    return this.searchObservation;
+  }
+
+  async execute(toolSlug: string, _args: Object): Promise<string> {
+    this.executedSlugs.push(toolSlug);
+    return this.executionObservation;
+  }
+}
+
+function searchObservationForTool(
+  slug: string,
+  inputSchema: string = '{}',
+  outputSchema: string = '{}'
+): string {
+  return '{"source":"Composio","authorizedToolkits":["test"],"tools":[{' +
+    '"toolSlug":' + JSON.stringify(slug) + ',"description":"selected provider tool",' +
+    '"inputSchema":' + JSON.stringify(inputSchema) + ',"outputSchema":' + JSON.stringify(outputSchema) +
+    '}],"instruction":"execute selected tool"}';
+}
+
+function successfulExecutionObservation(): string {
+  return '{"data":{"items":[{"id":"real-1","text":"real provider row","url":"https://example.com/real-1"}]}}';
+}
+
 export default function composioDynamicBackendTest() {
   describe('composioDynamicBackend', () => {
+    it('pins restored social community reads to exact provider slugs', 0, () => {
+      expect(composioExactToolSlugForFixedTool('social.x.community.search'))
+        .assertEqual('TWITTER_RECENT_SEARCH');
+      expect(composioExactToolSlugForFixedTool('social.linkedin.profile'))
+        .assertEqual('LINKEDIN_GET_MY_INFO');
+      expect(composioExactToolSlugForFixedTool('social.instagram.media.list'))
+        .assertEqual('INSTAGRAM_GET_IG_USER_MEDIA');
+      expect(composioExactToolSlugForFixedTool('social.reddit.profile'))
+        .assertEqual('REDDIT_GET_REDDIT_USER_ABOUT');
+      expect(composioExactToolSlugForFixedTool('social.reddit.search'))
+        .assertEqual('REDDIT_SEARCH_ACROSS_SUBREDDITS');
+    });
+
     it('recognizes unsupported high-frequency app queries', 0, () => {
       expect(isComposioDynamicPrompt('帮我在 Notion 里找一下 7 月旅行计划相关页面')).assertTrue();
       expect(isComposioDynamicPrompt('帮我在 Google Docs 里找 AIPhoneDemo 设计文档')).assertTrue();
@@ -95,8 +159,198 @@ export default function composioDynamicBackendTest() {
 
     it('blocks dynamic Composio side effects while allowing reads', 0, () => {
       expect(isUnsafeComposioExecute('GMAIL_SEND_EMAIL', '{}')).assertTrue();
+      expect(isUnsafeComposioExecute('GMAIL_REPLY_TO_THREAD', '{}')).assertTrue();
       expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertTrue();
       expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
+    });
+
+    it('reauthorizes every actual selected Composio slug before execute', 0, async () => {
+      const blocked: SelectedSlugCase[] = [
+        { prompt: 'use GitHub', slug: 'GITHUB_EXECUTE_WORKFLOW' },
+        { prompt: 'use Google Drive', slug: 'google-drive.write-file' },
+        { prompt: 'use Notion', slug: 'notionAppendBlock' },
+        { prompt: 'use Slack', slug: 'slackuploadfile' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_PUBLISH_RELEASE' },
+        { prompt: 'use GitHub', slug: 'GITHUB_SEARCH_AND_DELETE_REPOSITORY' },
+        { prompt: 'use GitHub', slug: 'GITHUB_SYNC_REPOSITORY' },
+        { prompt: 'use GitHub', slug: 'GITHUB_BUDGET_REPORT' },
+        { prompt: 'use Google Drive', slug: 'GOOGLEDRIVE_SPREADSHEET_EXPORT' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GET_AND_MERGE_PULL_REQUEST' },
+        { prompt: 'use GitHub', slug: 'github.get-and-archive-repository' },
+        { prompt: 'use GitHub', slug: 'githubGetAndTriggerWorkflow' },
+        { prompt: 'use GitHub', slug: 'githubGetThenRunWorkflow' },
+        { prompt: 'use GitHub', slug: 'github.get-or-copy-repository' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GETANDTRIGGERWORKFLOW' },
+        { prompt: 'use GitHub', slug: 'GITHUB_GETAWAY' },
+        { prompt: 'use GitHub', slug: 'githubGetaway' },
+        { prompt: 'use GitHub', slug: 'githubgetaway' }
+      ];
+      for (let index = 0; index < blocked.length; index++) {
+        const current = blocked[index];
+        const client = new RecordingComposioSearchExecuteClient(
+          searchObservationForTool(current.slug), successfulExecutionObservation()
+        );
+        const result = await callComposioSearchAndExecute(
+          client, current.prompt, looseObject('{"operation":"search"}')
+        );
+        expect(result.status).assertEqual('unsafe_action_blocked');
+        expect(client.executedSlugs.length).assertEqual(0);
+      }
+      const callerClaimedFixed = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GMAIL_CREATE_DRAFT'), successfulExecutionObservation()
+      );
+      const callerClaimedFixedResult = await callComposioSearchAndExecute(
+        callerClaimedFixed, 'use Gmail',
+        looseObject('{"operation":"search","fixedToolId":"gmail.draft.create",' +
+          '"fixedArgs":{"to":["alice@example.com"],"body":"hello"}}')
+      );
+      expect(callerClaimedFixedResult.status).assertEqual('unsafe_action_blocked');
+      expect(callerClaimedFixed.executedSlugs.length).assertEqual(0);
+
+      const allowed: SelectedSlugCase[] = [
+        { prompt: 'use GitHub', slug: 'GITHUB_SEARCH_REPOSITORIES' },
+        { prompt: 'use GitHub', slug: 'github.list-repositories' },
+        { prompt: 'use GitHub', slug: 'githubGetRepository' },
+        { prompt: 'use GitHub', slug: 'githubsearchrepositories' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_REPOSITORY' },
+        { prompt: 'search Twitter posts', slug: 'TWITTER_SEARCH_POSTS' },
+        { prompt: 'use Slack', slug: 'slack.list-channels' },
+        { prompt: 'use Gmail', slug: 'gmailGetMessage' },
+        { prompt: 'use Google Drive', slug: 'googledrivereadfile' },
+        { prompt: 'use GitHub', slug: 'COMPOSIO_GITHUB_READ_FILE' },
+        { prompt: 'use Google Docs', slug: 'GOOGLEDOCS_SEARCH_DOCUMENTS' },
+        { prompt: 'use TikTok', slug: 'TIKTOK_SEARCH_VIDEOS' },
+        { prompt: 'use Gmail', slug: 'GMAIL_SEARCH_PEOPLE' },
+        { prompt: 'use Gmail', slug: 'GMAIL_SEARCH_CONTACTS' },
+        { prompt: 'use GitHub', slug: 'GITHUB_LIST_PULL_REQUESTS' }
+      ];
+      for (let index = 0; index < allowed.length; index++) {
+        const current = allowed[index];
+        const client = new RecordingComposioSearchExecuteClient(
+          searchObservationForTool(current.slug), successfulExecutionObservation()
+        );
+        const result = await callComposioSearchAndExecute(
+          client, current.prompt, looseObject('{"operation":"search"}')
+        );
+        expect(result.status).assertEqual('success');
+        expect(result.providerPhase).assertEqual('execution');
+        expect(client.executedSlugs.length).assertEqual(1);
+        expect(client.executedSlugs[0]).assertEqual(current.slug);
+      }
+      const mixedReadAndWrite = new RecordingComposioSearchExecuteClient(
+        '{"source":"Composio","authorizedToolkits":["twitter"],"tools":[' +
+          '{"toolSlug":"TWITTER_SEARCH_POSTS","description":"Search public posts",' +
+            '"inputSchema":"{}","outputSchema":"{}"},' +
+          '{"toolSlug":"TWITTER_CREATE_POST","description":"Create a public post",' +
+            '"inputSchema":"{}","outputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}',
+        successfulExecutionObservation()
+      );
+      const mixedResult = await callComposioSearchAndExecute(
+        mixedReadAndWrite, 'search Twitter posts', looseObject('{"operation":"search"}')
+      );
+      expect(mixedResult.status).assertEqual('success');
+      expect(mixedResult.providerPhase).assertEqual('execution');
+      expect(mixedReadAndWrite.executedSlugs.length).assertEqual(1);
+      expect(mixedReadAndWrite.executedSlugs[0]).assertEqual('TWITTER_SEARCH_POSTS');
+    });
+
+    it('preserves actual Composio schemas and only genuine bounded receipts', 0, async () => {
+      const inputSchema = '{"type":"object","properties":{"query":{"type":"string"}}}';
+      const outputSchema = '{"type":"object","properties":{"items":{"type":"array"}}}';
+      const observation = '{"request_id":"req.Trace-123","data":{"items":[{' +
+        '"id":"tweet-1","text":"payload-secret","token":"sk-live-secret",' +
+        '"url":"https://x.com/openai/status/1"}]}}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_SEARCH_TWEETS', inputSchema, outputSchema), observation
+      );
+      const result = await callComposioSearchAndExecute(
+        client, 'search Twitter posts', looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const registration = result.registration as DynamicRegistrationMetadata;
+
+      expect(JSON.stringify(registration.inputSchema)).assertEqual(inputSchema);
+      expect(JSON.stringify(registration.outputSchema)).assertEqual(outputSchema);
+      expect(registration.receipt).assertEqual('req.Trace-123');
+      expect(registration.receipt.length).assertLess(129);
+      expect(registration.receipt.indexOf('payload-secret')).assertEqual(-1);
+      expect(registration.receipt.indexOf('sk-live-secret')).assertEqual(-1);
+
+      const noReceiptClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GITHUB_SEARCH_REPOSITORIES'),
+        '{"data":{"items":[{"id":"payload-id-is-not-a-receipt","text":"secret-body"}]}}'
+      );
+      const noReceipt = await callComposioSearchAndExecute(
+        noReceiptClient, 'use GitHub', looseObject('{"operation":"search"}')
+      );
+      expect(noReceipt.registration?.receipt).assertEqual('');
+      expect(dynamicReceiptFromProviderPayload(noReceipt.rawPreview)).assertEqual('');
+    });
+
+    it('keeps ModelScope schemas distinct and payload data out of receipts', 0, () => {
+      const tool: DynamicMcpTool = {
+        name: 'weather.search',
+        description: 'Read weather',
+        inputSchema: looseObject('{"type":"object","properties":{"city":{"type":"string"}}}')
+      };
+      const providerResult: DynamicGenericToolResult = {
+        sourceTag: 'ModelScope Weather',
+        toolName: 'weather.search',
+        title: 'Weather result',
+        status: 'success',
+        summary: 'real weather',
+        rows: [{ label: 'temperature', value: '31 C' }],
+        rawPreview: '{"data":{"token":"secret-token","items":[{"id":"payload-id"}]}}'
+      };
+      const metadata = dynamicManifestRegistrationMetadata('ModelScope Weather', tool, providerResult);
+
+      expect(JSON.stringify(metadata.inputSchema).indexOf('city')).assertLarger(-1);
+      expect(JSON.stringify(metadata.outputSchema)).assertEqual('{}');
+      expect(metadata.receipt).assertEqual('');
+      expect(metadata.receipt.indexOf('secret-token')).assertEqual(-1);
+      expect(metadata.receipt.indexOf('payload-id')).assertEqual(-1);
+    });
+
+    it('does not relabel X discovery or fallback responses as post data', 0, async () => {
+      const noMatchClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_USER_LOOKUP_ME'), successfulExecutionObservation()
+      );
+      const noMatch = await callComposioSearchAndExecute(
+        noMatchClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const noMatchData: DataResult = xPostStructuredDataResult(noMatch);
+      expect(noMatch.status).assertEqual('error');
+      expect(noMatch.providerPhase).assertEqual('discovery');
+      expect(noMatchClient.executedSlugs.length).assertEqual(0);
+      expect(noMatchData.status).assertEqual('error');
+
+      const fallbackClient = new RecordingComposioSearchExecuteClient(
+        'Composio gateway returned no executable tool', successfulExecutionObservation()
+      );
+      const fallback = await callComposioSearchAndExecute(
+        fallbackClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      expect(fallback.status).assertEqual('error');
+      expect(fallback.providerPhase).assertEqual('discovery');
+      expect(fallbackClient.executedSlugs.length).assertEqual(0);
+      expect(xPostStructuredDataResult(fallback).status).assertEqual('error');
+
+      const postsClient = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('TWITTER_SEARCH_TWEETS'),
+        '{"data":{"posts":[{"id":"tweet-real-1","text":"real post",' +
+          '"url":"https://x.com/openai/status/tweet-real-1"}]}}'
+      );
+      const posts = await callComposioSearchAndExecute(
+        postsClient, 'search Twitter public posts',
+        looseObject('{"operation":"search","fixedToolId":"x.post.search"}')
+      );
+      const postData = xPostStructuredDataResult(posts);
+      expect(posts.providerPhase).assertEqual('execution');
+      expect(postsClient.executedSlugs.length).assertEqual(1);
+      expect(postData.status).assertEqual('success');
+      expect(JSON.stringify(postData.data).indexOf('tweet-real-1')).assertLarger(-1);
     });
 
     it('maps Gmail fixed-tool args into the matched Composio schema', 0, () => {
@@ -192,7 +446,7 @@ export default function composioDynamicBackendTest() {
       expect(listArgs.query === undefined).assertTrue();
     });
 
-    it('pins WhatsApp and Calendar fixed tools to their real Composio slugs', 0, () => {
+    it('pins fixed tools to their real Composio slugs', 0, () => {
       expect(composioExactToolSlugForFixedTool('social.x.profile')).assertEqual('TWITTER_USER_LOOKUP_ME');
       expect(composioExactToolSlugForFixedTool('social.x.dm.list')).assertEqual('TWITTER_GET_RECENT_DM_EVENTS');
       expect(composioExactToolSlugForFixedTool('social.slack.message.search')).assertEqual('SLACK_SEARCH_MESSAGES');
@@ -206,8 +460,75 @@ export default function composioDynamicBackendTest() {
       expect(composioExactToolSlugForFixedTool('calendar.event.create')).assertEqual('GOOGLECALENDAR_CREATE_EVENT');
       expect(composioExactToolSlugForFixedTool('calendar.event.update')).assertEqual('GOOGLECALENDAR_PATCH_EVENT');
       expect(composioExactToolSlugForFixedTool('calendar.event.delete')).assertEqual('GOOGLECALENDAR_DELETE_EVENT');
+      expect(composioExactToolSlugForFixedTool('gmail.reply.send')).assertEqual('GMAIL_REPLY_TO_THREAD');
+      expect(composioExactToolSlugForFixedTool('gmail.draft.apply')).assertEqual('GMAIL_UPDATE_DRAFT');
       expect(normalizedComposioUseCase('', 'calendar.event.delete')).assertEqual(
         'Delete a Google Calendar event by event ID');
+    });
+
+    it('rejects a lone read candidate when Gmail reply discovery omits the exact write tool', 0, async () => {
+      const searchObservation = '{"source":"Composio","authorizedToolkits":["gmail"],"tools":[' +
+        '{"toolSlug":"GMAIL_GET_THREAD","description":"Read a Gmail thread","inputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservation,
+        '{"successful":true,"data":{"id":"should-not-execute"}}'
+      );
+
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '回复 Gmail 线程',
+        'gmail.reply.send',
+        looseObject('{"recipientEmail":"alice@example.com","body":"Confirmed.","threadId":"thread-999"}')
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.summary.indexOf('GMAIL_REPLY_TO_THREAD')).assertLarger(-1);
+      expect(client.executedSlugs.length).assertEqual(0);
+    });
+
+    it('executes only the exact Gmail reply write tool returned by discovery', 0, async () => {
+      const searchObservation = '{"source":"Composio","authorizedToolkits":["gmail"],"tools":[' +
+        '{"toolSlug":"GMAIL_FETCH_EMAILS","description":"Read Gmail messages","inputSchema":"{}"},' +
+        '{"toolSlug":"GMAIL_REPLY_TO_THREAD","description":"Reply to a Gmail thread",' +
+        '"inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"recipient_email\\":{\\"type\\":\\"string\\"},' +
+        '\\"message_body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"}}}"}' +
+        '],"instruction":"execute selected tool"}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservation,
+        '{"successful":true,"data":{"id":"message-1","thread_id":"thread-999"}}'
+      );
+
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '回复 Gmail 线程',
+        'gmail.reply.send',
+        looseObject('{"recipientEmail":"alice@example.com","body":"Confirmed.","threadId":"thread-999"}')
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(client.executedSlugs.length).assertEqual(1);
+      expect(client.executedSlugs[0]).assertEqual('GMAIL_REPLY_TO_THREAD');
+    });
+
+    it('rejects non-update Gmail draft tools for the apply contract', 0, async () => {
+      const searchObservation = '{"source":"Composio","authorizedToolkits":["gmail"],"tools":[' +
+        '{"toolSlug":"GMAIL_CREATE_DRAFT","description":"Create Gmail draft","inputSchema":"{}"},' +
+        '{"toolSlug":"GMAIL_EDIT_DRAFT","description":"Edit Gmail draft","inputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}';
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservation,
+        '{"successful":true,"data":{"draft_id":"draft-1"}}'
+      );
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '确认应用刚才的 Gmail 草稿',
+        'gmail.draft.apply',
+        looseObject('{"draftId":"draft-1","to":["alice@example.com"],"subject":"","body":"我收到了"}')
+      );
+      expect(result.status).assertEqual('error');
+      expect(result.summary.indexOf('GMAIL_UPDATE_DRAFT')).assertLarger(-1);
+      expect(client.executedSlugs.length).assertEqual(0);
     });
 
     it('maps WhatsApp and Calendar args to exact provider schemas', 0, () => {
@@ -351,7 +672,8 @@ export default function composioDynamicBackendTest() {
 
         const blankRecipientResult = await callComposioDynamic(
           '确认应用刚才的 Gmail 草稿',
-          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["   "],"subject":"Re: Demo","replyMode":"reply","body":"Got it."}}')
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"draftId":"draft-123",' +
+            '"to":["   "],"subject":"Re: Demo","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(blankRecipientResult.toolName).assertEqual('gmail.draft.apply');
         expect(blankRecipientResult.status).assertEqual('error');
@@ -361,11 +683,12 @@ export default function composioDynamicBackendTest() {
 
         const draftResult = await callComposioDynamic(
           '帮我给 Alice 写 Gmail 草稿说我收到了',
-          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"threadId":"thread-123","to":["alice@example.com"],"subject":"Re: Demo","body":"Got it."}}')
+          looseObject('{"fixedToolId":"gmail.draft.apply","fixedArgs":{"to":["alice@example.com"],' +
+            '"subject":"Re: Demo","body":"Got it."}}')
         ) as DynamicGenericToolResult;
         expect(draftResult.toolName).assertEqual('gmail.draft.apply');
         expect(draftResult.status).assertEqual('error');
-        expect(draftResult.summary.indexOf('replyMode')).assertLarger(-1);
+        expect(draftResult.summary.indexOf('draftId')).assertLarger(-1);
         expect(draftResult.summary.indexOf('Composio 未配置')).assertEqual(-1);
         expect(JSON.stringify(draftResult.rows).indexOf('Missing')).assertLarger(-1);
 
@@ -430,14 +753,14 @@ export default function composioDynamicBackendTest() {
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', editDraft, 'gmail.draft.create'));
       expect(composioPreferredToolScore('创建 Gmail 回复草稿', createDraft, 'gmail.draft.create'))
         .assertLarger(composioPreferredToolScore('创建 Gmail 回复草稿', applyDraft, 'gmail.draft.create'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
       expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
         .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', sendDraft, 'gmail.draft.apply'));
-      expect(composioPreferredToolScore('应用 Gmail 回复草稿', editDraft, 'gmail.draft.apply'))
-        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', deleteDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', createDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', editDraft, 'gmail.draft.apply'));
+      expect(composioPreferredToolScore('应用 Gmail 回复草稿', updateDraft, 'gmail.draft.apply'))
+        .assertLarger(composioPreferredToolScore('应用 Gmail 回复草稿', applyDraft, 'gmail.draft.apply'));
     });
 
     it('keeps configured app user id for Composio dynamic calls', 0, () => {
@@ -509,6 +832,43 @@ export default function composioDynamicBackendTest() {
       expect(result.status).assertEqual('success');
       expect(result.summary.indexOf('GMAIL_CREATE_EMAIL_DRAFT')).assertLarger(-1);
       expect(result.rawPreview.indexOf('mail.google.com')).assertLarger(-1);
+    });
+
+    it('accepts the real Calendar write response_data id without a generic success flag', 0, () => {
+      const observation = '{"data":{"composio_execution_message":null,' +
+        '"response_data":{"id":"event-created-real","summary":"Appless QA",' +
+        '"start":{"dateTime":"2026-07-31T15:00:00+08:00"},' +
+        '"end":{"dateTime":"2026-07-31T15:30:00+08:00"}}},"error":null}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GOOGLECALENDAR_CREATE_EVENT',
+        '创建 Google Calendar 日程'
+      );
+      const rejected: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{"success":false,"id":"event-must-not-pass"}},"error":null}',
+        'GOOGLECALENDAR_CREATE_EVENT',
+        '创建 Google Calendar 日程'
+      );
+      const removed: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{"successful":true}},"error":null}',
+        'GOOGLECALENDAR_DELETE_EVENT',
+        '删除 Google Calendar 日程'
+      );
+      const unconfirmedRemove: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{}},"error":null}',
+        'GOOGLECALENDAR_DELETE_EVENT',
+        '删除 Google Calendar 日程'
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.rawPreview.indexOf('event-created-real')).assertLarger(-1);
+      expect(rejected.status).assertEqual('error');
+      expect(removed.status).assertEqual('success');
+      expect(unconfirmedRemove.status).assertEqual('error');
     });
 
     it('maps Google Docs file payload to display rows', 0, () => {
@@ -627,6 +987,82 @@ export default function composioDynamicBackendTest() {
       expect(result.status).assertEqual('error');
       expect(result.summary.indexOf('Invalid request data provided')).assertLarger(-1);
       expect(JSON.stringify(result.rows).indexOf('Invalid request data provided')).assertLarger(-1);
+    });
+
+    it('fails closed when a Composio write explicitly reports false without an error string', 0, () => {
+      const successfulFalse = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":false,"data":null,"error":null}',
+        'GMAIL_REPLY_TO_THREAD',
+        '回复 Gmail 线程'
+      );
+      const successFalse = composioDynamicResultFromObservation(
+        'execute',
+        '{"success":false,"data":{}}',
+        'GMAIL_REPLY_TO_THREAD',
+        '回复 Gmail 线程'
+      );
+
+      expect(successfulFalse.status).assertEqual('error');
+      expect(successFalse.status).assertEqual('error');
+      expect(JSON.stringify(successfulFalse).indexOf('已发送')).assertEqual(-1);
+      expect(JSON.stringify(successFalse).indexOf('已发送')).assertEqual(-1);
+    });
+
+    it('fails closed for malformed and absent Composio write results', 0, () => {
+      const malformed = composioDynamicResultFromObservation(
+        'execute',
+        'provider returned an unparseable response',
+        'GMAIL_REPLY_TO_THREAD',
+        '回复 Gmail 线程'
+      );
+      const missingResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":null,"error":null}',
+        'GMAIL_REPLY_TO_THREAD',
+        '回复 Gmail 线程'
+      );
+
+      expect(malformed.status).assertEqual('error');
+      expect(missingResult.status).assertEqual('error');
+      expect(JSON.stringify(malformed).indexOf('已发送')).assertEqual(-1);
+      expect(JSON.stringify(missingResult).indexOf('已发送')).assertEqual(-1);
+    });
+
+    it('requires positive provider evidence for writes while preserving read payloads', 0, () => {
+      const writeResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":true,"data":{"id":"message-1","thread_id":"thread-999"}}',
+        'GMAIL_REPLY_TO_THREAD',
+        '回复 Gmail 线程'
+      );
+      const readResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"items":[]}}',
+        'GMAIL_FETCH_EMAILS',
+        '查看 Gmail 邮件'
+      );
+
+      expect(writeResult.status).assertEqual('success');
+      expect(readResult.status).assertEqual('success');
+    });
+
+    it('propagates an inner Gmail reply failure through the fixed backend result', 0, async () => {
+      const client = new RecordingComposioSearchExecuteClient(
+        searchObservationForTool('GMAIL_REPLY_TO_THREAD'),
+        '{"successful":false,"data":null,"error":null}'
+      );
+
+      const result = await callComposioFixedSearchAndExecuteForTest(
+        client,
+        '回复 Gmail 线程',
+        'gmail.reply.send',
+        looseObject('{"recipientEmail":"alice@example.com","body":"Confirmed.","threadId":"thread-999"}')
+      );
+
+      expect(client.executedSlugs.length).assertEqual(1);
+      expect(result.status).assertEqual('error');
+      expect(JSON.stringify(result).indexOf('已发送')).assertEqual(-1);
     });
   });
 }

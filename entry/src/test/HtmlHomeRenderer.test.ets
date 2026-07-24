@@ -24,6 +24,10 @@ interface GooglePayCheckoutArgsFixture {
   paypalMerchantId: string;
 }
 
+interface BookingUrlArgsFixture {
+  bookingUrl: string;
+}
+
 function documentFixture(): HtmlHomeDocument {
   return {
     version: 1,
@@ -294,6 +298,9 @@ function aggregateSearchDocumentFixture(): HtmlHomeDocument {
 
 function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
   const doc = documentFixture();
+  const bookingArgs: BookingUrlArgsFixture = {
+    bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc&fs=test&ts=test&date=2026-07-22&flag=N,N,Y'
+  };
   doc.kind = 'travel';
   doc.title = '深圳北到上海虹桥';
   doc.subtitle = 'Travel and food results';
@@ -306,6 +313,7 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
     source: '12306',
     metrics: [
       { label: 'duration', value: '6h30m' },
+      { label: 'price', value: '553' },
       { label: 'source', value: 'train' }
     ],
     rows: [
@@ -313,7 +321,20 @@ function travelFoodCardsDocumentFixture(): HtmlHomeDocument {
       { label: 'arrive', value: '15:30' },
       { label: 'seats', value: '二等座有票' }
     ],
-    actions: [{ id: 'html_pin_travel', label: '收藏行程', prompt: 'pin train', variant: 'secondary', kind: 'client' }]
+    actions: [{
+      id: 'train.booking.open',
+      label: '去购票',
+      prompt: '',
+      variant: 'primary',
+      kind: 'client',
+      args: bookingArgs
+    }, {
+      id: 'html_pin_travel',
+      label: '收藏行程',
+      prompt: 'pin train',
+      variant: 'secondary',
+      kind: 'client'
+    }]
   }, {
     id: 'food-amap-1',
     kind: 'food-result',
@@ -758,7 +779,7 @@ function calendarDeleteConfirmationDocumentFixture(): HtmlHomeDocument {
     prompt: '确认删除 Google Calendar 日程',
     variant: 'danger',
     kind: 'prompt',
-    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary","confirmed":true}') as Object
+    args: JSON.parse('{"eventId":"event-delete-1","calendarId":"primary"}') as Object
   };
   doc.blocks[0].actions = [confirmAction];
   return doc;
@@ -1468,6 +1489,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('renderPersonaBanner(hero)')).assertLarger(-1);
       expect(html.indexOf('G123')).assertLarger(-1);
       expect(html.indexOf('麦当劳 科技园店')).assertLarger(-1);
+      expect(html.indexOf("var price = metric(block, ['price']);")).assertLarger(-1);
+      expect(html.indexOf("'¥' + price + '起'")).assertLarger(-1);
+      expect(html.indexOf("add(mainline, 'div', 'journey-price')")).assertLarger(-1);
+      expect(html.indexOf("summaryMetrics.push(['', '¥' + price + '起'])")).assertEqual(-1);
+      expect(html.indexOf('grid-column: 4')).assertLarger(-1);
+      expect(html.indexOf('去购票')).assertLarger(-1);
+      expect(html.indexOf('二等座起')).assertEqual(-1);
+      expect(html.indexOf('train.booking.open')).assertLess(html.indexOf('html_pin_travel'));
       expect(html.indexOf('html_pin_travel')).assertLarger(-1);
       expect(html.indexOf('html_open_food_map')).assertLarger(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
@@ -1785,9 +1814,18 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
       expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('<button type="button" class="calendar-delete-button" style="display:none"'))
+        .assertLarger(-1);
+      expect(html.indexOf(
+        "deleteButton.style.display = selectedDeleteActionId === 'calendar.event.delete.confirm' ? " +
+        "'inline-flex' : 'none';"
+      )).assertLarger(-1);
       expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
       expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(html.indexOf('confirmed: true')).assertLarger(-1);
+      expect(html.indexOf("var selectedDeleteAction = '';")).assertLarger(-1);
+      expect(html.indexOf('var action = JSON.parse(selectedDeleteAction);')).assertLarger(-1);
+      expect(html.indexOf("label: '确认删除日程'")).assertEqual(-1);
+      expect(html.indexOf('confirmed: true')).assertEqual(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
       expect(html.indexOf('产品同步')).assertLarger(-1);
@@ -1855,7 +1893,8 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
 
       expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
-      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
       expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
     });
 
@@ -1923,6 +1962,73 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('16:30')).assertLarger(-1);
       expect(html.indexOf('17:00')).assertLarger(-1);
       expect(html.indexOf('已写入')).assertLarger(-1);
+    });
+
+    it('labels a successful Google Calendar update as updated rather than written', 0, () => {
+      const update = calendarCreateDocumentFixture();
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('已更新 Google Calendar')).assertLarger(-1);
+      expect(html.indexOf('Google Calendar API · 已更新')).assertLarger(-1);
+      expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+    });
+
+    it('keeps Calendar create and update reviews visibly pending until provider success', 0, () => {
+      const create = calendarCreateDocumentFixture();
+      create.subtitle = '请核对当前日程参数；只有点击此卡片上的精确操作才会调用 Provider。';
+      create.blocks[0].status = 'confirm_required';
+      create.blocks[0].subtitle = create.subtitle;
+      const update = calendarCreateDocumentFixture();
+      update.subtitle = create.subtitle;
+      update.blocks[0].status = 'confirm_required';
+      update.blocks[0].subtitle = update.subtitle;
+      update.blocks[0].metrics[1].value = 'calendar.event.update';
+      create.blocks[0].actions = [{
+        id: 'calendar.event.create',
+        label: '确认创建',
+        prompt: 'calendar.event.create',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"title":"一对一会议","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-create-1","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+
+      [create, update].forEach((doc: HtmlHomeDocument): void => {
+        const html = renderHtmlHomeDocument(doc);
+        expect(html.indexOf('等待确认')).assertLarger(-1);
+        expect(html.indexOf('data-calendar-action=')).assertLarger(-1);
+        expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+        expect(html.indexOf(doc.blocks[0].actions[0].id)).assertLarger(-1);
+        expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
+        expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
+      });
+    });
+
+    it('renders the provider-bound Calendar update offer as the existing confirmation control', 0, () => {
+      const update = calendarSearchDocumentFixture();
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新日程',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-1","title":"产品同步",' +
+          '"start":"2026-07-02T16:00:00+08:00","end":"2026-07-02T16:30:00+08:00"}') as Object
+      }];
+
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('calendar-write-confirm')).assertLarger(-1);
+      expect(html.indexOf('确认更新日程')).assertLarger(-1);
+      expect(html.indexOf('postCalendarWrite')).assertLarger(-1);
     });
 
     it('does not show a write confirmation for a failed Calendar create', 0, () => {

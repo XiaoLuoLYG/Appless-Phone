@@ -4,8 +4,10 @@ import {
   aiphoneToolDefinitionCount,
   allAiphoneToolDefinitions,
   aiphoneToolDescriptionForModel,
+  actionAgentToolDefinitions,
   allToolDefinitions,
   backendLabel,
+  dataAgentToolDefinitions,
   isCalendarToolId,
   isGmailToolId,
   isHotelToolId,
@@ -117,6 +119,8 @@ export default function toolDefinitionRegistryTest() {
     it('registers SocialHub read and draft tools without send', 0, () => {
       const feed = toolDefinitionForToolId('social.feed.search') as ToolDefinition;
       const draft = toolDefinitionForToolId('social.reply.draft') as ToolDefinition;
+      const community = toolDefinitionForToolId('social.community.search');
+      const postPreview = toolDefinitionForToolId('social.post.preview');
       const xPost = toolDefinitionForToolId('x.post.search') as ToolDefinition;
 
       expect(feed.domain).assertEqual('social');
@@ -127,12 +131,53 @@ export default function toolDefinitionRegistryTest() {
       expect(draft.riskLevel).assertEqual('draft');
       expect(draft.outputSchema).assertEqual('socialHubDraft');
       expect(draft.actions.length).assertEqual(0);
+      expect(community !== null).assertTrue();
+      expect(postPreview !== null).assertTrue();
+      if (community !== null && postPreview !== null) {
+        expect(community.riskLevel).assertEqual('read');
+        expect(community.outputSchema).assertEqual('socialHubFeed');
+        expect(community.a2uiComponent).assertEqual('SocialHub');
+        expect(postPreview.riskLevel).assertEqual('draft');
+        expect(postPreview.outputSchema).assertEqual('socialHubPublication');
+        expect(postPreview.a2uiComponent).assertEqual('SocialHub');
+      }
       expect(xPost.domain).assertEqual('x');
       expect(xPost.riskLevel).assertEqual('read');
       expect(xPost.outputSchema).assertEqual('genericToolResults');
       expect(xPost.a2uiComponent).assertEqual('GenericToolResults');
       expect(xPost.actions.length).assertEqual(0);
       expect(toolDefinitionForToolId('social.reply.send')).assertEqual(null);
+      expect(toolDefinitionForToolId('social.post.publish')).assertEqual(null);
+
+      const socialIds = allToolDefinitions().map(
+        (definition: ToolDefinition): string => definition.toolId
+      ).filter((toolId: string): boolean =>
+        toolId === 'social.community.search' || toolId === 'social.post.preview'
+      );
+      expect(socialIds.join(',')).assertEqual('social.community.search,social.post.preview');
+    });
+
+    it('keeps mutually exclusive model-selection semantics in the registry projection', 0, () => {
+      const socialFeed = aiphoneToolDescriptionForModel('social.feed.search');
+      const publicX = aiphoneToolDescriptionForModel('x.post.search');
+      const mail = aiphoneToolDescriptionForModel('mail.search');
+      const dynamic = aiphoneToolDescriptionForModel('dynamic.search');
+      const gmailDraft = aiphoneToolDescriptionForModel('gmail.draft.create');
+
+      expect(socialFeed.indexOf('SocialHub inbox')).assertLarger(-1);
+      expect(socialFeed.indexOf('Slack')).assertLarger(-1);
+      expect(socialFeed.indexOf('private-message')).assertLarger(-1);
+      expect(socialFeed.indexOf('public X/Twitter posts')).assertLarger(-1);
+      expect(publicX.indexOf('public post searches')).assertLarger(-1);
+      expect(publicX.indexOf('private-message')).assertEqual(-1);
+      expect(mail.indexOf('mailbox/email/inbox')).assertLarger(-1);
+      expect(mail.indexOf('Never use it for SocialHub messages')).assertLarger(-1);
+      expect(dynamic.indexOf('Composio-backed app/toolkit')).assertLarger(-1);
+      expect(dynamic.indexOf('use social.feed.search')).assertLarger(-1);
+      expect(gmailDraft.indexOf('create a draft first')).assertLarger(-1);
+      expect(gmailDraft.indexOf('exact current mail reply Send button')).assertLarger(-1);
+      expect(aiphoneToolDescriptionForModel('gmail.message.send')).assertEqual('');
+      expect(aiphoneToolDescriptionForModel('social.reply.draft')).assertEqual('');
     });
 
     it('registers only truthful hotel actions with aligned public and runtime registries', 0, () => {
@@ -226,6 +271,7 @@ export default function toolDefinitionRegistryTest() {
       expect(calendarDelete.actions[0]).assertEqual('calendar.event.delete.confirm');
       expect(calendarDelete.inputSchema.indexOf('timeMin')).assertLarger(-1);
       expect(calendarDelete.inputSchema.indexOf('timeMax')).assertLarger(-1);
+      expect(calendarDelete.inputSchema.indexOf('confirmed')).assertEqual(-1);
       expect(mapsSearch.domain).assertEqual('maps');
       expect(mapsSearch.authModes.join(',')).assertEqual('provider_key');
       expect(mapsSearch.outputSchema).assertEqual('places');
@@ -236,9 +282,10 @@ export default function toolDefinitionRegistryTest() {
       expect(whatsappSend.domain).assertEqual('whatsapp');
       expect(whatsappSend.riskLevel).assertEqual('confirm_required');
       expect(whatsappSend.actions[0]).assertEqual('whatsapp.message.send.confirm');
+      expect(whatsappSend.inputSchema.indexOf('confirmed')).assertEqual(-1);
     });
 
-    it('gives the model a structured Calendar write contract', 0, () => {
+    it('exposes only the Calendar read contract to the legacy model loop', 0, () => {
       const searchDescription = aiphoneToolDescriptionForModel('calendar.events.search');
       const createDescription = aiphoneToolDescriptionForModel('calendar.event.create');
       const updateDescription = aiphoneToolDescriptionForModel('calendar.event.update');
@@ -246,27 +293,15 @@ export default function toolDefinitionRegistryTest() {
 
       expect(searchDescription.indexOf('timeMin')).assertLarger(-1);
       expect(searchDescription.indexOf('timeMax')).assertLarger(-1);
-      expect(searchDescription.indexOf('first step before update or delete')).assertEqual(-1);
-      expect(searchDescription.indexOf('NEVER use calendar.events.search for a write request')).assertLarger(-1);
+      expect(searchDescription.indexOf('first step for a natural-language update')).assertLarger(-1);
+      expect(searchDescription.indexOf('lacks a current trusted Event ID')).assertLarger(-1);
       expect(searchDescription.indexOf('query contains only event title text')).assertLarger(-1);
-      expect(createDescription.indexOf('RFC3339')).assertLarger(-1);
-      expect(createDescription.indexOf('ask the user')).assertLarger(-1);
-      expect(createDescription.indexOf('Never invent')).assertLarger(-1);
-      expect(updateDescription.indexOf('call calendar.event.update directly')).assertLarger(-1);
-      expect(updateDescription.indexOf('even when the requested new time is incomplete')).assertLarger(-1);
-      expect(updateDescription.indexOf('omit missing start or end')).assertLarger(-1);
-      expect(updateDescription.indexOf('query contains only event title text')).assertLarger(-1);
-      expect(updateDescription.indexOf('timeMin')).assertLarger(-1);
-      expect(updateDescription.indexOf('timeMax')).assertLarger(-1);
-      expect(updateDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
-      expect(deleteDescription.indexOf('call calendar.event.delete directly')).assertLarger(-1);
-      expect(deleteDescription.indexOf('query contains only event title text')).assertLarger(-1);
-      expect(deleteDescription.indexOf('timeMin')).assertLarger(-1);
-      expect(deleteDescription.indexOf('timeMax')).assertLarger(-1);
-      expect(deleteDescription.indexOf('Never ask the user to type or know an Event ID')).assertLarger(-1);
+      expect(createDescription).assertEqual('');
+      expect(updateDescription).assertEqual('');
+      expect(deleteDescription).assertEqual('');
     });
 
-    it('keeps Gmail definitions declarative and direct send blocked', 0, () => {
+    it('registers Gmail reply send as an exact OAuth confirmation action only', 0, () => {
       const mailSearch = toolDefinitionForToolId('gmail.mail.search') as ToolDefinition;
       const draftApply = toolDefinitionForToolId('gmail.draft.apply') as ToolDefinition;
       const messageSend = toolDefinitionForToolId('gmail.message.send') as ToolDefinition;
@@ -279,9 +314,31 @@ export default function toolDefinitionRegistryTest() {
       expect(mailSearch.a2uiComponent).assertEqual('GenericToolResults');
       expect(mailSearch.actions[0]).assertEqual('gmail.authorize');
       expect(draftApply.riskLevel).assertEqual('confirm_required');
-      expect(messageSend.riskLevel).assertEqual('blocked');
-      expect(messageSend.outputSchema).assertEqual('blockedAction');
+      expect(messageSend.riskLevel).assertEqual('confirm_required');
+      expect(messageSend.backendPriority.join(',')).assertEqual('oauth_api');
+      expect(messageSend.authModes.join(',')).assertEqual('oauth');
+      expect(messageSend.inputSchema).assertEqual('mailReplyCommand');
+      expect(messageSend.outputSchema).assertEqual('mailReplyOperationResult');
+      expect(messageSend.actions.length).assertEqual(0);
       expect(GMAIL_TOOL_IDS.indexOf('gmail.message.send') >= 0).assertTrue();
+      expect(aiphoneToolDescriptionForModel('gmail.message.send')).assertEqual('');
+      expect(aiphoneToolDescriptionForModel('gmail.draft.create').indexOf('create a draft first'))
+        .assertLarger(-1);
+    });
+
+    it('keeps every public and runtime tool contract semantically aligned', 0, () => {
+      const publicDefinitions: ToolDefinition[] = allAiphoneToolDefinitions();
+      const runtimeDefinitions: ToolDefinition[] = allToolDefinitions();
+      const publicUpdate = publicDefinitions.filter((definition: ToolDefinition): boolean =>
+        definition.toolId === 'calendar.event.update')[0];
+      const runtimeUpdate = runtimeDefinitions.filter((definition: ToolDefinition): boolean =>
+        definition.toolId === 'calendar.event.update')[0];
+      const optionalUpdateSchema = 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,' +
+        'title?:string,start?:string,end?:string,timezone?:string,calendarId?:string';
+
+      expect(JSON.stringify(publicDefinitions)).assertEqual(JSON.stringify(runtimeDefinitions));
+      expect(publicUpdate.inputSchema).assertEqual(optionalUpdateSchema);
+      expect(runtimeUpdate.inputSchema).assertEqual(optionalUpdateSchema);
     });
 
     it('registers aggregate mail tools without enabling send', 0, () => {
@@ -449,6 +506,30 @@ export default function toolDefinitionRegistryTest() {
       expect(backendLabel('web_session')).assertEqual('Web session');
       expect(backendLabel('system_intent')).assertEqual('System intent');
       expect(backendLabel('mcp_remote')).assertEqual('Remote MCP');
+    });
+
+    it('derives disjoint cloned Data and Action capability views from the registry', 0, () => {
+      const all: ToolDefinition[] = allToolDefinitions();
+      const data: ToolDefinition[] = dataAgentToolDefinitions();
+      const action: ToolDefinition[] = actionAgentToolDefinitions();
+      const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
+
+      expect(all.length).assertEqual(46);
+      expect(data.length).assertEqual(25);
+      expect(action.length).assertEqual(21);
+      expect(new Set<string>(ids).size).assertEqual(46);
+      expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
+        .assertEqual(0);
+      expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();
+      expect(data.map((item: ToolDefinition): string => item.toolId).indexOf('hotel.navigate')).assertEqual(-1);
+      expect(ids.indexOf('dynamic.search')).assertEqual(-1);
+      expect(ids.indexOf('memory.update')).assertEqual(-1);
+
+      data[0].toolId = 'mutated.tool';
+      data[0].backendPriority.push('web_session');
+      const laterData: ToolDefinition[] = dataAgentToolDefinitions();
+      expect(laterData[0].toolId).assertEqual('travel.search');
+      expect(laterData[0].backendPriority.join(',')).assertEqual('local_adapter');
     });
   });
 }

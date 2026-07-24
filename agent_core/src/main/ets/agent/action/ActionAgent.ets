@@ -10,12 +10,16 @@ import {
   ActionExecutionResult,
   ActionFollowUp,
   ActionPlanDraftPayload,
+  ActionPlanRequestPayload,
   ActionPlanReadyPayload,
   ActionProgressPayload,
   ActionResultPayload,
   ActionRunPayload,
   PausedActionRun,
   RegisteredActionExecutor,
+  VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
+  VirtualActionIntent,
+  VirtualActionIntentResolver,
   WorkflowRunArgs
 } from './ActionAgentTypes';
 import {
@@ -28,6 +32,7 @@ import { ActionPlanRunner } from './ActionPlanRunner';
 import {
   ActionExecutionContext,
   ActionPlan,
+  ActionPlanCompiler,
   ActionPlanDraft,
   ActionPlanOutcome,
   ActionPlanPausedOutcome,
@@ -80,6 +85,9 @@ interface ObservedDataTask {
   taskId: string;
   toolId: string;
   outputSchema: string;
+  generation: number;
+  token: number;
+  resolving: boolean;
 }
 
 interface StoredActionDraft {
@@ -92,12 +100,44 @@ interface StoredActionDraft {
   draft: ActionPlanDraft;
 }
 
+interface StoredAvailableOffers {
+  sourceToolId: string;
+  offers: ActionOffer[];
+}
+
+interface StoredPlanRequest {
+  message: AgentMessage;
+  request: ActionPlanRequestPayload;
+  compiling: boolean;
+  generation: number;
+}
+
+interface MatchedActionOffer {
+  dataTaskId: string;
+  sourceToolId: string;
+  offer: ActionOffer;
+}
+
+interface DirectSurfaceAuthorization {
+  conversationId: string;
+  turnId: string;
+  taskId: string;
+  surfaceId: string;
+  sourceToolId: string;
+  runId: string;
+  actionId: string;
+  args: Object;
+  pageActionId: string;
+  confirmed: boolean;
+  generation: number;
+}
+
 function nonempty(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
 function copyContext(context: ActionPlanRunContext): ActionPlanRunContext {
-  return {
+  const copy: ActionPlanRunContext = {
     conversationId: context.conversationId,
     turnId: context.turnId,
     surfaceId: context.surfaceId,
@@ -105,6 +145,13 @@ function copyContext(context: ActionPlanRunContext): ActionPlanRunContext {
     planId: context.planId,
     runId: context.runId
   };
+  if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+    copy.pageActionId = context.pageActionId;
+  }
+  if (context.virtualAction === true) {
+    copy.virtualAction = true;
+  }
+  return copy;
 }
 
 function clonePlan(plan: ActionPlan): ActionPlan | null {
@@ -135,6 +182,39 @@ function cloneOutputs(outputs: ActionPlanStepOutput[]): ActionPlanStepOutput[] |
   return cloned.value as ActionPlanStepOutput[];
 }
 
+function sameJson(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  if (left === null || right === null ||
+    typeof left !== 'object' || typeof right !== 'object') {
+    return left === right;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    const leftItems = left as JsonValue[];
+    const rightItems = right as JsonValue[];
+    for (let index = 0; index < leftItems.length; index++) {
+      if (!sameJson(leftItems[index], rightItems[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.join(',') !== rightKeys.join(',')) {
+    return false;
+  }
+  const leftRecord = left as Record<string, JsonValue | undefined>;
+  const rightRecord = right as Record<string, JsonValue | undefined>;
+  for (let index = 0; index < leftKeys.length; index++) {
+    if (!sameJson(leftRecord[leftKeys[index]], rightRecord[leftKeys[index]])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function directPlan(
   message: AgentMessage,
   payload: ActionRunPayload
@@ -157,6 +237,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly catalog: ActionCatalog;
   private readonly offerResolver: ActionOfferResolver;
   private readonly registeredExecutor: RegisteredActionExecutor;
+  private readonly compiler: ActionPlanCompiler | null;
+  private readonly virtualResolver: VirtualActionIntentResolver | null;
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -172,20 +254,34 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     new Map<string, ObservedDataTask>();
   private readonly pendingDrafts: Map<string, StoredActionDraft> =
     new Map<string, StoredActionDraft>();
+  private readonly availableOffers: Map<string, StoredAvailableOffers> =
+    new Map<string, StoredAvailableOffers>();
+  private readonly pendingPlanRequests: Map<string, StoredPlanRequest> =
+    new Map<string, StoredPlanRequest>();
+  private readonly terminalPlanRequests: Set<string> = new Set<string>();
+  private readonly terminalPlanRequestOrder: string[] = [];
+  private readonly uiSurfaces: Map<string, string> = new Map<string, string>();
+  private readonly directSurfaceAuthorizations: Map<string, DirectSurfaceAuthorization> =
+    new Map<string, DirectSurfaceAuthorization>();
   private generation: number = 0;
+  private observationSequence: number = 0;
   private active: boolean = false;
 
   constructor(
     bus: LinkedMessageBus,
     catalog: ActionCatalog,
     offerResolver: ActionOfferResolver,
-    executor: RegisteredActionExecutor
+    executor: RegisteredActionExecutor,
+    compiler?: ActionPlanCompiler,
+    virtualResolver?: VirtualActionIntentResolver
   ) {
     super(bus);
     this.bus = bus;
     this.catalog = catalog;
     this.offerResolver = offerResolver;
     this.registeredExecutor = executor;
+    this.compiler = compiler === undefined ? null : compiler;
+    this.virtualResolver = virtualResolver === undefined ? null : virtualResolver;
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -209,6 +305,76 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.canceledTurns.clear();
     this.observedDataTasks.clear();
     this.pendingDrafts.clear();
+    this.availableOffers.clear();
+    this.pendingPlanRequests.clear();
+    this.terminalPlanRequests.clear();
+    this.terminalPlanRequestOrder.splice(0, this.terminalPlanRequestOrder.length);
+    this.uiSurfaces.clear();
+    this.directSurfaceAuthorizations.clear();
+  }
+
+  authorizeDirectSurfaceRun(message: AgentMessage, pageActionId: string = ''): boolean {
+    if (!this.active || message.type !== AgentMessageType.ACTION_RUN) {
+      return false;
+    }
+    const payload = this.actionRunPayload(message.payload);
+    if (payload === null || payload.actionId === WORKFLOW_RUN_ACTION_ID ||
+      payload.confirmedStepId !== undefined || !nonempty(payload.sourceToolId)) {
+      return false;
+    }
+    const exactPageActionId = pageActionId.trim();
+    const current = exactPageActionId.length > 0 ?
+      this.catalog.validatePageExecution(
+        message.conversationId,
+        message.turnId,
+        payload.surfaceId,
+        payload.actionId,
+        payload.args
+      ) :
+      this.catalog.validateSurfaceExecution(
+        message.conversationId,
+        message.turnId,
+        payload.surfaceId,
+        payload.sourceToolId as string,
+        payload.actionId,
+        payload.args
+      );
+    if (!current.ok || current.definition === null) {
+      return false;
+    }
+    const confirmed = current.definition.riskLevel === 'confirm_required';
+    if (!confirmed && exactPageActionId.length === 0) {
+      return true;
+    }
+    const key = this.runKey(
+      message.conversationId,
+      message.turnId,
+      payload.surfaceId,
+      payload.runId
+    );
+    if (this.runExists(key) || this.directSurfaceAuthorizations.has(key) ||
+      this.directSurfaceAuthorizations.size >= LIVE_RUN_LIMIT) {
+      return false;
+    }
+    const cloned = cloneJsonValue(payload.args as Object);
+    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+      Array.isArray(cloned.value)) {
+      return false;
+    }
+    this.directSurfaceAuthorizations.set(key, {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: message.taskId,
+      surfaceId: payload.surfaceId,
+      sourceToolId: payload.sourceToolId as string,
+      runId: payload.runId,
+      actionId: payload.actionId,
+      args: cloned.value as Object,
+      pageActionId: exactPageActionId,
+      confirmed,
+      generation: this.generation
+    });
+    return true;
   }
 
   inspectPausedRun(
@@ -234,7 +400,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   }
 
   protected accepts(message: AgentMessage): boolean {
-    return message.type === AgentMessageType.ACTION_PLAN_DRAFT ||
+    return message.type === AgentMessageType.ACTION_PLAN_REQUEST ||
+      message.type === AgentMessageType.ACTION_PLAN_DRAFT ||
       message.type === AgentMessageType.TASK_CREATE_DATA ||
       message.type === AgentMessageType.TASK_RESULT_UI ||
       message.type === AgentMessageType.TASK_RESULT_DATA ||
@@ -256,9 +423,13 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
         this.observeDataTask(message);
         return;
       }
+      if (message.type === AgentMessageType.ACTION_PLAN_REQUEST) {
+        this.storePlanRequest(message);
+        return;
+      }
       if (message.type === AgentMessageType.TASK_RESULT_DATA ||
         message.type === AgentMessageType.TASK_ERROR) {
-        await this.resolveOffers(message);
+        this.startOfferResolution(message);
         return;
       }
       if (message.type === AgentMessageType.ACTION_PLAN_DRAFT) {
@@ -405,30 +576,34 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
     const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
     if (!this.observedDataTasks.has(key)) {
+      this.observationSequence++;
       this.observedDataTasks.set(key, {
         conversationId: message.conversationId,
         turnId: message.turnId,
         taskId: message.taskId,
         toolId: task.toolId,
-        outputSchema: task.outputSchema
+        outputSchema: task.outputSchema,
+        generation: this.generation,
+        token: this.observationSequence,
+        resolving: false
       });
     }
   }
 
-  private async resolveOffers(message: AgentMessage): Promise<void> {
+  private startOfferResolution(message: AgentMessage): void {
     const key = this.dataTaskKey(message.conversationId, message.turnId, message.taskId);
     const observed = this.observedDataTasks.get(key);
-    if (observed === undefined) {
+    if (observed === undefined || observed.resolving) {
       return;
     }
-    this.observedDataTasks.delete(key);
+    observed.resolving = true;
     if (message.type === AgentMessageType.TASK_ERROR) {
-      this.publishOffers(message, observed, []);
+      this.finishOfferResolution(key, message, observed, []);
       return;
     }
     const data = this.dataResult(message.payload, observed);
     if (data === null) {
-      this.publishOffers(message, observed, []);
+      this.finishOfferResolution(key, message, observed, []);
       return;
     }
     const context: ActionOfferContext = {
@@ -436,13 +611,36 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       turnId: message.turnId,
       dataTaskId: message.taskId
     };
-    let resolved: ActionOffer[];
     try {
-      resolved = await this.offerResolver(data, context);
+      this.offerResolver(data, context).then((resolved: ActionOffer[]) => {
+        this.finishOfferResolution(
+          key,
+          message,
+          observed,
+          this.sanitizeOffers(data.toolId, resolved)
+        );
+      }).catch((_error: Object) => {
+        this.finishOfferResolution(key, message, observed, []);
+      });
     } catch (_error) {
-      resolved = [];
+      this.finishOfferResolution(key, message, observed, []);
     }
-    this.publishOffers(message, observed, this.sanitizeOffers(data.toolId, resolved));
+  }
+
+  private finishOfferResolution(
+    key: string,
+    message: AgentMessage,
+    observed: ObservedDataTask,
+    offers: ActionOffer[]
+  ): void {
+    const current = this.observedDataTasks.get(key);
+    if (!this.active || observed.generation !== this.generation ||
+      current !== observed || current.token !== observed.token ||
+      this.canceledTurns.has(this.turnKey(observed.conversationId, observed.turnId))) {
+      return;
+    }
+    this.observedDataTasks.delete(key);
+    this.publishOffers(message, observed, offers);
   }
 
   private publishOffers(
@@ -450,6 +648,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     observed: ObservedDataTask,
     offers: ActionOffer[]
   ): void {
+    if (!this.rememberAvailableOffers(message, observed, offers)) {
+      this.publishInputError(
+        message, '', '', '', 'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
+    }
     const payload: ActionOffersReadyPayload = {
       dataTaskId: observed.taskId,
       sourceToolId: observed.toolId,
@@ -462,6 +666,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       taskId: observed.taskId,
       payload
     });
+    this.compileReadyRequests(message.conversationId, message.turnId);
   }
 
   private sanitizeOffers(sourceToolId: string, candidates: ActionOffer[]): ActionOffer[] {
@@ -498,6 +703,384 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       });
     }
     return safe;
+  }
+
+  private rememberAvailableOffers(
+    message: AgentMessage,
+    observed: ObservedDataTask,
+    offers: ActionOffer[]
+  ): boolean {
+    const cloned = cloneJsonValue(offers as Object);
+    if (!cloned.ok || !Array.isArray(cloned.value)) {
+      return true;
+    }
+    const key = this.dataTaskKey(message.conversationId, message.turnId, observed.taskId);
+    if (!this.hasLiveStateCapacity(
+      this.availableOffers.size,
+      this.availableOffers.has(key)
+    )) {
+      return false;
+    }
+    this.availableOffers.set(key, {
+      sourceToolId: observed.toolId,
+      offers: cloned.value as ActionOffer[]
+    });
+    return true;
+  }
+
+  private storePlanRequest(message: AgentMessage): void {
+    const parsed = this.planRequestPayload(message.payload);
+    if (parsed === null) {
+      this.publishInputError(
+        message, '', '', '', 'ACTION_PLAN_REQUEST_INVALID',
+        'Action plan request payload is malformed.'
+      );
+      return;
+    }
+    const request: ActionPlanRequestPayload = {
+      uiTaskId: parsed.uiTaskId,
+      dataTaskIds: parsed.dataTaskIds.slice(),
+      goal: parsed.goal,
+      allowedActionIds: parsed.allowedActionIds.slice(),
+      skillId: parsed.skillId
+    };
+    if (parsed.personaId !== undefined) {
+      request.personaId = parsed.personaId;
+    }
+    if (parsed.inputText !== undefined) {
+      request.inputText = parsed.inputText;
+    }
+    if (parsed.currentLocalDate !== undefined) {
+      request.currentLocalDate = parsed.currentLocalDate;
+    }
+    if (parsed.virtual !== undefined) {
+      request.virtual = parsed.virtual;
+    }
+    const key = this.planRequestKey(
+      message.conversationId,
+      message.turnId,
+      request.uiTaskId
+    );
+    if (this.pendingPlanRequests.has(key) || this.terminalPlanRequests.has(key)) {
+      this.publishInputError(
+        message, '', '', '', 'ACTION_PLAN_REQUEST_DUPLICATE',
+        'Action plan request identity already exists.'
+      );
+      return;
+    }
+    for (let index = 0; index < request.allowedActionIds.length; index++) {
+      const current = this.catalog.validateRegisteredAction(request.allowedActionIds[index]);
+      if (!current.ok) {
+        this.rememberTerminalPlanRequest(key);
+        this.publishInputError(message, '', '', '', current.code, current.message);
+        return;
+      }
+    }
+    if (this.pendingPlanRequests.size >= LIVE_RUN_LIMIT) {
+      this.publishInputError(
+        message, '', '', '', 'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
+      return;
+    }
+    const storedMessage: AgentMessage = {
+      type: message.type,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: message.taskId,
+      payload: request
+    };
+    const stored: StoredPlanRequest = {
+      message: storedMessage,
+      request,
+      compiling: false,
+      generation: this.generation
+    };
+    this.pendingPlanRequests.set(key, stored);
+    if (request.dataTaskIds.length === 0) {
+      if (this.virtualResolver === null) {
+        this.pendingPlanRequests.delete(key);
+        this.rememberTerminalPlanRequest(key);
+        this.publishVirtualInputError(
+          message, 'ACTION_VIRTUAL_INTENT_UNAVAILABLE',
+          'No virtual Action resolver owns this request.'
+        );
+        return;
+      }
+      this.startVirtualResolution(key, stored);
+      return;
+    }
+    if (this.compiler === null) {
+      this.pendingPlanRequests.delete(key);
+      this.rememberTerminalPlanRequest(key);
+      this.publishInputError(
+        message, '', '', '', 'ACTION_PLAN_COMPILER_UNAVAILABLE',
+        'Action plan compiler is unavailable.'
+      );
+      return;
+    }
+    this.startCompilation(key, stored);
+  }
+
+  private startVirtualResolution(key: string, stored: StoredPlanRequest): void {
+    const resolver: VirtualActionIntentResolver | null = this.virtualResolver;
+    if (resolver === null || stored.compiling || !this.compilationIsActive(key, stored)) {
+      return;
+    }
+    stored.compiling = true;
+    try {
+      resolver.resolve(stored.request).then((intent: VirtualActionIntent | null) => {
+        this.finishVirtualResolution(key, stored, intent);
+      }).catch((_error: Object) => {
+        this.finishVirtualResolution(key, stored, null);
+      });
+    } catch (_error) {
+      this.finishVirtualResolution(key, stored, null);
+    }
+  }
+
+  private finishVirtualResolution(
+    key: string,
+    stored: StoredPlanRequest,
+    intent: VirtualActionIntent | null
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'autoRun,offer,sourceToolId' ||
+      intent.autoRun !== true || !nonempty(intent.sourceToolId) ||
+      intent.offer === null || typeof intent.offer !== 'object' || Array.isArray(intent.offer) ||
+      stored.request.allowedActionIds.indexOf(intent.offer.actionId) < 0) {
+      this.publishVirtualInputError(
+        stored.message, 'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an invalid intent.'
+      );
+      return;
+    }
+    const actionIntent = intent.sourceToolId === VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID;
+    let offer: ActionOffer | null = null;
+    if (actionIntent) {
+      offer = this.sanitizeActionIntentOffer(intent.offer);
+    } else {
+      const placed = this.sanitizeOffers(intent.sourceToolId, [intent.offer]);
+      offer = placed.length === 1 ? placed[0] : null;
+    }
+    if (offer === null) {
+      this.publishVirtualInputError(
+        stored.message, 'ACTION_VIRTUAL_INTENT_INVALID',
+        'Virtual Action resolver returned an unauthorized offer.'
+      );
+      return;
+    }
+    const payload: ActionRunPayload = {
+      surfaceId: 'virtual:' + stored.message.taskId,
+      runId: 'virtual:' + stored.message.taskId,
+      sourceToolId: intent.sourceToolId,
+      actionId: offer.actionId,
+      args: offer.args
+    };
+    this.startDirectRun(stored.message, payload, actionIntent);
+  }
+
+  private sanitizeActionIntentOffer(candidate: ActionOffer): ActionOffer | null {
+    if (candidate === null || typeof candidate !== 'object' ||
+      !nonempty(candidate.offerId) || !nonempty(candidate.actionId) ||
+      !nonempty(candidate.label) || !nonempty(candidate.variant) ||
+      candidate.args === null || typeof candidate.args !== 'object' ||
+      Array.isArray(candidate.args)) {
+      return null;
+    }
+    const cloned = cloneJsonValue(candidate.args);
+    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+      Array.isArray(cloned.value)) {
+      return null;
+    }
+    const args = cloned.value as Object;
+    if (!this.catalog.validateActionIntentExecution(candidate.actionId, args).ok) {
+      return null;
+    }
+    return {
+      offerId: candidate.offerId,
+      actionId: candidate.actionId,
+      label: candidate.label,
+      variant: candidate.variant,
+      args
+    };
+  }
+
+  private compileReadyRequests(conversationId: string, turnId: string): void {
+    const matches: string[] = [];
+    this.pendingPlanRequests.forEach((stored: StoredPlanRequest, key: string) => {
+      if (stored.message.conversationId === conversationId &&
+        stored.message.turnId === turnId) {
+        matches.push(key);
+      }
+    });
+    for (let index = 0; index < matches.length; index++) {
+      const stored = this.pendingPlanRequests.get(matches[index]);
+      if (stored !== undefined) {
+        this.startCompilation(matches[index], stored);
+      }
+    }
+  }
+
+  private startCompilation(key: string, stored: StoredPlanRequest): void {
+    if (stored.compiling || this.pendingPlanRequests.get(key) !== stored ||
+      stored.generation !== this.generation || !this.active) {
+      return;
+    }
+    const matches: MatchedActionOffer[] = [];
+    for (let taskIndex = 0; taskIndex < stored.request.dataTaskIds.length; taskIndex++) {
+      const dataTaskId = stored.request.dataTaskIds[taskIndex];
+      const available = this.availableOffers.get(this.dataTaskKey(
+        stored.message.conversationId,
+        stored.message.turnId,
+        dataTaskId
+      ));
+      if (available === undefined) {
+        return;
+      }
+      for (let offerIndex = 0; offerIndex < available.offers.length; offerIndex++) {
+        const offer = available.offers[offerIndex];
+        if (stored.request.allowedActionIds.indexOf(offer.actionId) >= 0) {
+          matches.push({
+            dataTaskId,
+            sourceToolId: available.sourceToolId,
+            offer
+          });
+        }
+      }
+    }
+    const compiler = this.compiler;
+    if (compiler === null) {
+      return;
+    }
+    const offers: ActionOffer[] = [];
+    for (let index = 0; index < matches.length; index++) {
+      const cloned = cloneJsonValue(matches[index].offer as Object);
+      if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
+        Array.isArray(cloned.value)) {
+        this.finishCompilationError(key, stored, 'ACTION_PLAN_OFFERS_INVALID');
+        return;
+      }
+      offers.push(cloned.value as ActionOffer);
+    }
+    stored.compiling = true;
+    try {
+      compiler.compile(
+        stored.request.goal,
+        offers,
+        stored.request.allowedActionIds.slice()
+      ).then((draft: ActionPlanDraft) => {
+        this.finishCompilation(key, stored, matches, draft);
+      }).catch((_error: Object) => {
+        this.finishCompilationError(key, stored, 'ACTION_PLAN_COMPILE_FAILED');
+      });
+    } catch (_error) {
+      this.finishCompilationError(key, stored, 'ACTION_PLAN_COMPILE_FAILED');
+    }
+  }
+
+  private finishCompilation(
+    key: string,
+    stored: StoredPlanRequest,
+    offers: MatchedActionOffer[],
+    candidate: ActionPlanDraft
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    const draft = cloneDraft(candidate);
+    if (draft === null || !this.validDraft(draft)) {
+      this.publishInputError(
+        stored.message, '', '', '', 'ACTION_PLAN_MALFORMED',
+        'Compiled action plan is malformed.'
+      );
+      return;
+    }
+    let entry: MatchedActionOffer | null = null;
+    for (let stepIndex = 0; stepIndex < draft.steps.length; stepIndex++) {
+      const step = draft.steps[stepIndex];
+      const args = step.args === undefined ? new Object() : step.args;
+      let matched: MatchedActionOffer | null = null;
+      for (let offerIndex = 0; offerIndex < offers.length; offerIndex++) {
+        if (offers[offerIndex].offer.actionId === step.actionId &&
+          sameJson(offers[offerIndex].offer.args as JsonValue, args as JsonValue)) {
+          matched = offers[offerIndex];
+          break;
+        }
+      }
+      if (matched === null) {
+        this.publishInputError(
+          stored.message, draft.planId, draft.runId, '',
+          'ACTION_PLAN_OFFER_MISMATCH',
+          'Compiled action steps must match current immutable offers.',
+          step.stepId
+        );
+        return;
+      }
+      if (stepIndex === 0) {
+        entry = matched;
+      }
+    }
+    const first = entry as MatchedActionOffer;
+    const validation = this.runner.validateDraft(draft, first.sourceToolId);
+    if (!validation.ok) {
+      this.publishInputError(
+        stored.message,
+        draft.planId,
+        draft.runId,
+        '',
+        validation.errorCode,
+        validation.message,
+        validation.failedStepId
+      );
+      return;
+    }
+    const payload: ActionPlanDraftPayload = {
+      uiTaskId: stored.request.uiTaskId,
+      dataTaskId: first.dataTaskId,
+      sourceToolId: first.sourceToolId,
+      draft
+    };
+    this.bus.publish({
+      type: AgentMessageType.ACTION_PLAN_DRAFT,
+      conversationId: stored.message.conversationId,
+      turnId: stored.message.turnId,
+      taskId: stored.message.taskId,
+      payload
+    });
+  }
+
+  private finishCompilationError(
+    key: string,
+    stored: StoredPlanRequest,
+    errorCode: string
+  ): void {
+    if (!this.compilationIsActive(key, stored)) {
+      return;
+    }
+    this.pendingPlanRequests.delete(key);
+    this.rememberTerminalPlanRequest(key);
+    this.publishInputError(
+      stored.message, '', '', '', errorCode,
+      errorCode === 'ACTION_PLAN_COMPILE_FAILED' ?
+        'Action plan compiler failed.' : 'Action plan offers are invalid.'
+    );
+  }
+
+  private compilationIsActive(key: string, stored: StoredPlanRequest): boolean {
+    return this.active && stored.generation === this.generation &&
+      this.pendingPlanRequests.get(key) === stored &&
+      !this.canceledTurns.has(this.turnKey(
+        stored.message.conversationId,
+        stored.message.turnId
+      ));
   }
 
   private storeDraft(message: AgentMessage): void {
@@ -548,7 +1131,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
-    this.pendingDrafts.set(key, {
+    const stored: StoredActionDraft = {
       conversationId: message.conversationId,
       turnId: message.turnId,
       taskId: message.taskId,
@@ -556,13 +1139,28 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       dataTaskId: payload.dataTaskId,
       sourceToolId: payload.sourceToolId,
       draft
-    });
+    };
+    this.pendingDrafts.set(key, stored);
+    const surfaceId = this.uiSurfaces.get(this.uiSurfaceKey(
+      message.conversationId,
+      message.turnId,
+      payload.uiTaskId
+    ));
+    if (surfaceId !== undefined) {
+      this.bindDraft(stored, surfaceId);
+    }
   }
 
   private bindDrafts(message: AgentMessage): void {
     const ui = this.uiResult(message.payload);
     if (ui === null || ui.state !== 'result') {
       return;
+    }
+    if (!this.rememberUiSurface(message, ui.surfaceId)) {
+      this.publishInputError(
+        message, '', '', ui.surfaceId, 'ACTION_STATE_CAPACITY',
+        'Action agent live state capacity is exhausted.'
+      );
     }
     const matches: StoredActionDraft[] = [];
     this.pendingDrafts.forEach((stored: StoredActionDraft) => {
@@ -574,6 +1172,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     for (let index = 0; index < matches.length; index++) {
       this.bindDraft(matches[index], ui.surfaceId);
     }
+  }
+
+  private rememberUiSurface(message: AgentMessage, surfaceId: string): boolean {
+    const key = this.uiSurfaceKey(message.conversationId, message.turnId, message.taskId);
+    const current = this.uiSurfaces.get(key);
+    if (current !== undefined) {
+      return true;
+    }
+    if (!this.hasLiveStateCapacity(this.uiSurfaces.size, false)) {
+      return false;
+    }
+    this.uiSurfaces.set(key, surfaceId);
+    return true;
   }
 
   private bindDraft(storedDraft: StoredActionDraft, surfaceId: string): void {
@@ -685,7 +1296,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.startDirectRun(message, payload);
   }
 
-  private startDirectRun(message: AgentMessage, payload: ActionRunPayload): void {
+  private startDirectRun(
+    message: AgentMessage,
+    payload: ActionRunPayload,
+    virtualAction: boolean = false
+  ): void {
     const key = this.runKey(
       message.conversationId,
       message.turnId,
@@ -726,6 +1341,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
+    const authorization = this.directSurfaceAuthorization(message, payload, key, false);
     const plan = directPlan(message, payload);
     const context: ActionPlanRunContext = {
       conversationId: message.conversationId,
@@ -735,6 +1351,12 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       planId: plan.planId,
       runId: payload.runId
     };
+    if (authorization !== null && authorization.pageActionId.length > 0) {
+      context.pageActionId = authorization.pageActionId;
+    }
+    if (virtualAction) {
+      context.virtualAction = true;
+    }
     const validation = this.runner.validate(plan, context);
     if (!validation.ok) {
       this.publishInputError(
@@ -748,6 +1370,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       );
       return;
     }
+    const consumed = this.directSurfaceAuthorization(message, payload, key, true);
     this.executeStored({
       planId: plan.planId,
       runId: payload.runId,
@@ -755,7 +1378,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       context,
       taskId: message.taskId,
       followUpPublished: false
-    }, null);
+    }, null, virtualAction || (consumed !== null && consumed.confirmed) ? 'step-1' : '');
   }
 
   private startStoredRun(message: AgentMessage, payload: ActionRunPayload): void {
@@ -839,7 +1462,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.executeStored(current, null);
   }
 
-  private executeStored(stored: StoredActionRun, paused: PausedActionRun | null): void {
+  private executeStored(
+    stored: StoredActionRun,
+    paused: PausedActionRun | null,
+    directConfirmedStepId: string = ''
+  ): void {
     const priorOutputs = paused === null ? [] : cloneOutputs(paused.outputs);
     if (priorOutputs === null) {
       this.rememberTerminal(this.storedRunKey(stored));
@@ -866,15 +1493,23 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     };
     this.activeRuns.set(this.storedRunKey(stored), active);
     let execution: Promise<ActionPlanOutcome>;
-    if (paused === null) {
+    if (paused === null && directConfirmedStepId.length === 0) {
       execution = this.runner.run(stored.plan, stored.context);
-    } else {
+    } else if (paused !== null) {
       execution = this.runner.resume(
         stored.plan,
         stored.context,
         paused.nextStepIndex,
         paused.outputs,
         paused.stepId
+      );
+    } else {
+      execution = this.runner.resume(
+        stored.plan,
+        stored.context,
+        0,
+        [],
+        directConfirmedStepId
       );
     }
     execution
@@ -946,6 +1581,31 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.pendingDrafts.forEach((draft: StoredActionDraft, key: string) => {
       if (draft.conversationId === message.conversationId && draft.turnId === message.turnId) {
         this.pendingDrafts.delete(key);
+      }
+    });
+    this.pendingPlanRequests.forEach((request: StoredPlanRequest, key: string) => {
+      if (request.message.conversationId === message.conversationId &&
+        request.message.turnId === message.turnId) {
+        this.pendingPlanRequests.delete(key);
+      }
+    });
+    const prefix = this.turnPrefix(message.conversationId, message.turnId);
+    this.directSurfaceAuthorizations.forEach(
+      (authorization: DirectSurfaceAuthorization, key: string) => {
+        if (authorization.conversationId === message.conversationId &&
+          authorization.turnId === message.turnId) {
+          this.directSurfaceAuthorizations.delete(key);
+        }
+      }
+    );
+    this.availableOffers.forEach((_offers: StoredAvailableOffers, key: string) => {
+      if (key.startsWith(prefix)) {
+        this.availableOffers.delete(key);
+      }
+    });
+    this.uiSurfaces.forEach((_surfaceId: string, key: string) => {
+      if (key.startsWith(prefix)) {
+        this.uiSurfaces.delete(key);
       }
     });
     const canceled: Set<string> = new Set<string>();
@@ -1073,6 +1733,22 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     });
   }
 
+  private publishVirtualInputError(
+    message: AgentMessage,
+    errorCode: string,
+    detail: string
+  ): void {
+    const virtualRunId = 'virtual:' + message.taskId;
+    this.publishInputError(
+      message,
+      'direct:' + virtualRunId,
+      virtualRunId,
+      virtualRunId,
+      errorCode,
+      detail
+    );
+  }
+
   private publishProgress(
     active: ActiveActionRun,
     context: ActionExecutionContext,
@@ -1156,23 +1832,27 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       typeof followUp.dataTask !== 'object' ||
       Array.isArray(followUp.dataTask) ||
       Object.keys(followUp.uiTask).sort().join(',') !==
-        'dataTaskId,expectedOutputSchema,intent,skillId,taskId' ||
+        'dataTaskIds,expectedOutputSchema,intent,skillId,taskId' ||
       Object.keys(followUp.dataTask).sort().join(',') !==
-        'args,outputSchema,skillId,taskId,toolId') {
+        'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId') {
       return null;
     }
     const ui: CreateUiTaskPayload = followUp.uiTask;
     const data: CreateDataTaskPayload = followUp.dataTask;
     if (!nonempty(ui.taskId) ||
-      !nonempty(ui.dataTaskId) ||
+      !Array.isArray(ui.dataTaskIds) || ui.dataTaskIds.length !== 1 ||
+      !nonempty(ui.dataTaskIds[0]) ||
       !nonempty(ui.intent) ||
       !nonempty(ui.expectedOutputSchema) ||
       typeof ui.skillId !== 'string' || ui.skillId !== data.skillId ||
       !nonempty(data.taskId) ||
+      !nonempty(data.roundId) ||
+      !nonempty(data.goal) ||
+      !Array.isArray(data.allowedToolIds) || data.allowedToolIds.length === 0 ||
       !nonempty(data.toolId) ||
       !nonempty(data.outputSchema) ||
       ui.taskId === data.taskId ||
-      ui.dataTaskId !== data.taskId ||
+      ui.dataTaskIds[0] !== data.taskId ||
       ui.expectedOutputSchema !== data.outputSchema ||
       data.args === null ||
       typeof data.args !== 'object' ||
@@ -1189,17 +1869,21 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     return {
       uiTask: {
         taskId: ui.taskId,
-        dataTaskId: ui.dataTaskId,
+        dataTaskIds: [ui.dataTaskIds[0]],
         skillId: ui.skillId,
         intent: ui.intent,
         expectedOutputSchema: ui.expectedOutputSchema
       },
       dataTask: {
         taskId: data.taskId,
+        roundId: data.roundId,
         skillId: data.skillId,
+        goal: data.goal,
+        allowedToolIds: data.allowedToolIds.slice(),
         toolId: data.toolId,
         outputSchema: data.outputSchema,
-        args: argsClone.value as Object
+        args: argsClone.value as Object,
+        required: data.required
       }
     };
   }
@@ -1220,6 +1904,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
     }
     if (stepIndex === 0) {
+      if (active.stored.context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(actionId, args);
+      }
+      if (active.stored.context.pageActionId !== undefined &&
+        active.stored.context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          actionId,
+          args
+        );
+      }
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
         context.turnId,
@@ -1256,7 +1953,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.context.conversationId !== context.conversationId ||
       stored.context.turnId !== context.turnId ||
       stored.context.surfaceId !== context.surfaceId ||
-      stored.context.sourceToolId !== context.sourceToolId) {
+      stored.context.sourceToolId !== context.sourceToolId ||
+      stored.context.pageActionId !== context.pageActionId ||
+      (stored.context.virtualAction === true) !== (context.virtualAction === true)) {
       return false;
     }
     for (let index = 0; index < stored.plan.steps.length; index++) {
@@ -1279,6 +1978,30 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.context.conversationId === message.conversationId &&
       stored.context.turnId === message.turnId &&
       stored.context.surfaceId === payload.surfaceId;
+  }
+
+  private directSurfaceAuthorization(
+    message: AgentMessage,
+    payload: ActionRunPayload,
+    key: string,
+    consume: boolean
+  ): DirectSurfaceAuthorization | null {
+    const authorization = this.directSurfaceAuthorizations.get(key);
+    if (authorization === undefined || authorization.generation !== this.generation ||
+      authorization.conversationId !== message.conversationId ||
+      authorization.turnId !== message.turnId ||
+      authorization.taskId !== message.taskId ||
+      authorization.surfaceId !== payload.surfaceId ||
+      authorization.sourceToolId !== payload.sourceToolId ||
+      authorization.runId !== payload.runId ||
+      authorization.actionId !== payload.actionId ||
+      !sameJson(authorization.args as JsonValue, payload.args as JsonValue)) {
+      return null;
+    }
+    if (consume) {
+      this.directSurfaceAuthorizations.delete(key);
+    }
+    return authorization;
   }
 
   private matchesPaused(
@@ -1314,6 +2037,48 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return null;
     }
     return current;
+  }
+
+  private planRequestPayload(payload: Object): ActionPlanRequestPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const current = payload as ActionPlanRequestPayload;
+    const keys: string = Object.keys(payload).sort().join(',');
+    if (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId' &&
+      keys !== 'allowedActionIds,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual' &&
+      keys !== 'allowedActionIds,currentLocalDate,dataTaskIds,goal,inputText,personaId,skillId,uiTaskId,virtual') {
+      return null;
+    }
+    const virtual: boolean = current.virtual === true;
+    const hasContext: boolean = nonempty(current.personaId) && nonempty(current.inputText);
+    if (
+      !nonempty(current.uiTaskId) || !nonempty(current.goal) ||
+      typeof current.skillId !== 'string' ||
+      !Array.isArray(current.dataTaskIds) ||
+      !Array.isArray(current.allowedActionIds) || current.allowedActionIds.length === 0 ||
+      !this.validUniqueIds(current.dataTaskIds, current.uiTaskId) ||
+      !this.validUniqueIds(current.allowedActionIds, '') ||
+      (keys !== 'allowedActionIds,dataTaskIds,goal,skillId,uiTaskId' && !hasContext) ||
+      (current.currentLocalDate !== undefined && !nonempty(current.currentLocalDate)) ||
+      (virtual && current.dataTaskIds.length !== 0) ||
+      (!virtual && current.dataTaskIds.length === 0)) {
+      return null;
+    }
+    return current;
+  }
+
+  private validUniqueIds(ids: string[], forbiddenId: string): boolean {
+    const seen: Set<string> = new Set<string>();
+    for (let index = 0; index < ids.length; index++) {
+      if (!nonempty(ids[index]) || ids[index] === forbiddenId || seen.has(ids[index])) {
+        return false;
+      }
+      seen.add(ids[index]);
+    }
+    return true;
   }
 
   private validDraft(draft: ActionPlanDraft): boolean {
@@ -1354,10 +2119,13 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return null;
     }
     const task = payload as CreateDataTaskPayload;
-    if (Object.keys(payload).sort().join(',') !== 'args,outputSchema,skillId,taskId,toolId' ||
+    if (Object.keys(payload).sort().join(',') !== 'allowedToolIds,args,goal,outputSchema,required,roundId,skillId,taskId,toolId' ||
       task.taskId !== taskId || typeof task.skillId !== 'string' ||
+      !nonempty(task.roundId) || !nonempty(task.goal) ||
+      !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
       !nonempty(task.toolId) || !nonempty(task.outputSchema) ||
-      task.args === null || typeof task.args !== 'object' || Array.isArray(task.args)) {
+      task.args === null || typeof task.args !== 'object' || Array.isArray(task.args) ||
+      typeof task.required !== 'boolean') {
       return null;
     }
     return task;
@@ -1482,6 +2250,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       LIVE_RUN_LIMIT;
   }
 
+  private hasLiveStateCapacity(size: number, alreadyPresent: boolean): boolean {
+    return alreadyPresent || size < LIVE_RUN_LIMIT;
+  }
+
   private runExists(key: string): boolean {
     return this.readyRuns.has(key) ||
       this.pausedRuns.has(key) ||
@@ -1494,6 +2266,20 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       return;
     }
     this.terminalRuns.add(key);
+  }
+
+  private rememberTerminalPlanRequest(key: string): void {
+    if (this.terminalPlanRequests.has(key)) {
+      return;
+    }
+    while (this.terminalPlanRequestOrder.length >= LIVE_RUN_LIMIT) {
+      const oldest = this.terminalPlanRequestOrder.shift();
+      if (oldest !== undefined) {
+        this.terminalPlanRequests.delete(oldest);
+      }
+    }
+    this.terminalPlanRequests.add(key);
+    this.terminalPlanRequestOrder.push(key);
   }
 
   private rememberCanceledTurn(conversationId: string, turnId: string): void {
@@ -1509,8 +2295,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   }
 
   private dataTaskKey(conversationId: string, turnId: string, taskId: string): string {
-    return `${conversationId.length}:${conversationId}` +
-      `${turnId.length}:${turnId}${taskId.length}:${taskId}`;
+    return this.turnPrefix(conversationId, turnId) + `${taskId.length}:${taskId}`;
+  }
+
+  private planRequestKey(conversationId: string, turnId: string, uiTaskId: string): string {
+    return this.turnPrefix(conversationId, turnId) + `${uiTaskId.length}:${uiTaskId}`;
+  }
+
+  private uiSurfaceKey(conversationId: string, turnId: string, uiTaskId: string): string {
+    return this.planRequestKey(conversationId, turnId, uiTaskId);
+  }
+
+  private turnPrefix(conversationId: string, turnId: string): string {
+    return `${conversationId.length}:${conversationId}${turnId.length}:${turnId}`;
   }
 
   private draftKey(

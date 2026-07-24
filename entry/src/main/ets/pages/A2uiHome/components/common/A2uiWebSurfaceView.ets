@@ -13,6 +13,7 @@ export struct A2uiWebSurfaceView {
   @Prop baseUrl: string = 'https://aiphone.local/';
   @Prop bridgeName: string = 'A2uiWeb';
   @Prop allowPopup: boolean = false;
+  @Prop mobileReadable: boolean = false;
   @Prop javaScriptEnabled: boolean = true;
   @Prop domStorageEnabled: boolean = true;
   @Prop showLoading: boolean = true;
@@ -79,6 +80,17 @@ export struct A2uiWebSurfaceView {
     return info.length > 0 ? '页面加载失败：' + info : '页面加载失败，请检查网络后重试。';
   }
 
+  private closePopup(): void {
+    let mainUrl = '';
+    try {
+      mainUrl = this.controller.getUrl();
+    } catch (_error) {
+      mainUrl = '';
+    }
+    this.popupVisible = false;
+    this.onLoadEnd(mainUrl);
+  }
+
   @Builder
   private LoadingView() {
     if (this.showLoading && this.loading && this.errorText.length === 0) {
@@ -125,6 +137,8 @@ export struct A2uiWebSurfaceView {
       Web({ src: this.startSrc(), controller: this.controller })
         .javaScriptAccess(this.javaScriptEnabled)
         .domStorageAccess(this.domStorageEnabled)
+        .overviewModeAccess(!this.mobileReadable)
+        .textZoomRatio(this.mobileReadable ? 130 : 100)
         .multiWindowAccess(this.allowPopup)
         .allowWindowOpenMethod(this.allowPopup)
         .javaScriptProxy({
@@ -185,7 +199,7 @@ export struct A2uiWebSurfaceView {
               .backgroundColor(COLOR_CARD)
               .borderRadius(16)
               .onClick(() => {
-                this.popupVisible = false;
+                this.closePopup();
               })
           }
           .height(50)
@@ -197,9 +211,15 @@ export struct A2uiWebSurfaceView {
           Web({ src: 'about:blank', controller: this.popupController })
             .javaScriptAccess(this.javaScriptEnabled)
             .domStorageAccess(this.domStorageEnabled)
+            .overviewModeAccess(!this.mobileReadable)
+            .textZoomRatio(this.mobileReadable ? 130 : 100)
             .width('100%')
             .layoutWeight(1)
             .backgroundColor(COLOR_PAGE)
+            .onPageEnd((event) => {
+              const pageUrl = event === undefined || event === null ? '' : event.url;
+              this.onLoadEnd(pageUrl);
+            })
             .onLoadIntercept((event) => {
               const request = event === undefined || event === null ? null : event.data;
               const pageUrl = request === null ? '' : request.getRequestUrl();
@@ -207,7 +227,7 @@ export struct A2uiWebSurfaceView {
               return pageUrl.length > 0 ? this.onUrlIntercept(pageUrl, isMainFrame) : false;
             })
             .onWindowExit(() => {
-              this.popupVisible = false;
+              this.closePopup();
             })
         }
         .width('100%')

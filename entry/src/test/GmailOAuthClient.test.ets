@@ -130,14 +130,25 @@ export default function gmailOAuthClientTest() {
       expect(gmailMcpToolNameForToolId('gmail.mail.search')).assertEqual('search_threads');
       expect(gmailMcpToolNameForToolId('gmail.thread.read')).assertEqual('get_thread');
       expect(gmailMcpToolNameForToolId('gmail.draft.create')).assertEqual('create_draft');
+      expect(gmailMcpToolNameForToolId('gmail.draft.apply')).assertEqual('update_draft');
 
       const searchArgs = gmailMcpArgsForPrompt('gmail.mail.search', '帮我看 Gmail 里最新的重要邮件');
       const draftArgs = gmailMcpArgsForPrompt('gmail.draft.create', '帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了');
+      const updateArgs = gmailMcpArgsForPrompt(
+        'gmail.draft.apply',
+        '确认应用刚才的 Gmail 草稿',
+        JSON.parse('{"draftId":"draft-real-1","to":["alice@example.com"],' +
+          '"subject":"","body":"我收到了","threadId":""}') as Object
+      );
       expect(JSON.stringify(searchArgs).indexOf('"query":"newer_than:30d -in:draft"')).assertLarger(-1);
       expect(JSON.stringify(searchArgs).indexOf('"pageSize":10')).assertLarger(-1);
       expect(JSON.stringify(searchArgs).indexOf('is:important')).assertEqual(-1);
       expect(JSON.stringify(draftArgs).indexOf('alice@example.com')).assertEqual(-1);
       expect(JSON.stringify(draftArgs).indexOf('我收到了')).assertEqual(-1);
+      expect(JSON.stringify(updateArgs)).assertEqual(
+        '{"to":["alice@example.com"],"subject":"","body":"我收到了","threadId":"",' +
+          '"replyMode":"","inReplyTo":"","references":"","draftId":"draft-real-1"}'
+      );
     });
 
     it('uses structured Gmail search and draft args without semantic prompt parsing', 0, () => {

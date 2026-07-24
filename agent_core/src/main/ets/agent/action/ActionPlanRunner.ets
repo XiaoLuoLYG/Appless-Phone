@@ -4,6 +4,7 @@ import {
   ActionExecutionContext,
   ActionInputBinding,
   ActionPlan,
+  ActionPlanDraft,
   ActionPlanErrorOutcome,
   ActionPlanOutcome,
   ActionPlanPausedOutcome,
@@ -179,16 +180,24 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
       message: 'Action plan execution identity is malformed.'
     };
   }
+  const value: ActionPlanRunContext = {
+    conversationId: record['conversationId'] as string,
+    turnId: record['turnId'] as string,
+    surfaceId: record['surfaceId'] as string,
+    sourceToolId: record['sourceToolId'] as string,
+    planId: record['planId'] as string,
+    runId: record['runId'] as string
+  };
+  if (typeof record['pageActionId'] === 'string' &&
+    (record['pageActionId'] as string).length > 0) {
+    value.pageActionId = record['pageActionId'] as string;
+  }
+  if (record['virtualAction'] === true) {
+    value.virtualAction = true;
+  }
   return {
     ok: true,
-    value: {
-      conversationId: record['conversationId'] as string,
-      turnId: record['turnId'] as string,
-      surfaceId: record['surfaceId'] as string,
-      sourceToolId: record['sourceToolId'] as string,
-      planId: record['planId'] as string,
-      runId: record['runId'] as string
-    },
+    value,
     errorCode: '',
     message: ''
   };
@@ -263,7 +272,7 @@ function executionContext(
   stepId: string,
   stepIndex: number
 ): ActionExecutionContext {
-  return {
+  const execution: ActionExecutionContext = {
     conversationId: context.conversationId,
     turnId: context.turnId,
     surfaceId: context.surfaceId,
@@ -273,6 +282,13 @@ function executionContext(
     stepId: stepId,
     isSurfaceEntry: stepIndex === 0
   };
+  if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+    execution.pageActionId = context.pageActionId;
+  }
+  if (context.virtualAction === true) {
+    execution.virtualAction = true;
+  }
+  return execution;
 }
 
 export class ActionPlanRunner {
@@ -289,12 +305,32 @@ export class ActionPlanRunner {
     if (!contextResult.ok || contextResult.value === null) {
       return validationFailure('', contextResult.errorCode, contextResult.message);
     }
-    return this.validateSnapshot(plan, contextResult.value);
+    return this.validateSnapshot(plan, contextResult.value, true);
+  }
+
+  validateDraft(draft: ActionPlanDraft, sourceToolId: string): ActionPlanValidationResult {
+    const plan: ActionPlan = {
+      planId: draft.planId,
+      turnId: 'draft',
+      surfaceId: 'draft',
+      label: draft.label,
+      steps: draft.steps
+    };
+    const context: ActionPlanRunContext = {
+      conversationId: 'draft',
+      turnId: plan.turnId,
+      surfaceId: plan.surfaceId,
+      sourceToolId,
+      planId: plan.planId,
+      runId: draft.runId
+    };
+    return this.validateSnapshot(plan, context, false);
   }
 
   private validateSnapshot(
     plan: ActionPlan,
-    context: ActionPlanRunContext
+    context: ActionPlanRunContext,
+    requireSurface: boolean
   ): ActionPlanValidationResult {
     try {
       const inspection = inspectJsonValue(plan as Object);
@@ -397,7 +433,13 @@ export class ActionPlanRunner {
             );
           }
         }
-        const catalogResult = this.validatePreflightAction(plan, context, index, args);
+        const catalogResult = this.validatePreflightAction(
+          plan,
+          context,
+          index,
+          args,
+          requireSurface
+        );
         if (!catalogResult.ok) {
           return validationFailure(step.stepId, catalogResult.code, catalogResult.message);
         }
@@ -458,7 +500,7 @@ export class ActionPlanRunner {
         );
       }
       const snapshot = snapshotResult.value as ActionPlan;
-      const preflight = this.validateSnapshot(snapshot, contextSnapshot);
+      const preflight = this.validateSnapshot(snapshot, contextSnapshot, true);
       if (!preflight.ok) {
         return errorOutcome(
           preflight.failedStepId,
@@ -682,10 +724,30 @@ export class ActionPlanRunner {
     plan: ActionPlan,
     context: ActionPlanRunContext,
     index: number,
-    args: Object
+    args: Object,
+    requireSurface: boolean
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (index === 0) {
+      if (context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(step.actionId, args);
+      }
+      if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          step.actionId,
+          args
+        );
+      }
+      if (!requireSurface) {
+        return this.catalog.validatePlacement(
+          context.sourceToolId,
+          step.actionId,
+          args
+        );
+      }
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
         context.turnId,
@@ -706,6 +768,18 @@ export class ActionPlanRunner {
   ): ActionCatalogResult {
     const step = plan.steps[index];
     if (index === 0) {
+      if (context.virtualAction === true) {
+        return this.catalog.validateActionIntentExecution(step.actionId, args);
+      }
+      if (context.pageActionId !== undefined && context.pageActionId.length > 0) {
+        return this.catalog.validatePageExecution(
+          context.conversationId,
+          context.turnId,
+          context.surfaceId,
+          step.actionId,
+          args
+        );
+      }
       return this.catalog.validateSurfaceExecution(
         context.conversationId,
         context.turnId,

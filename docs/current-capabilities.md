@@ -1,17 +1,78 @@
 # 当前工具能力总表
 
-更新时间：2026-07-21
+更新时间：2026-07-22
 
-来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`agent_core/src/main/ets/aiphone/LoopBackend.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
+来源：`agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets`、`agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets`、`entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets`、`agent_core/src/main/ets/aiphone/runtime/AggregateSearchClient.ets`、`agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets`、`scripts/aiphone-device-smoke.mjs`、支付/Composio 相关单测。
 
-当前 agent 工具箱：42 个静态注册工具 + `memory.update` + `dynamic.search`，运行时最多 44 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/excluded 标记为准。
+当前 agent 工具箱：46 个固定 `ToolDefinition`（25 个 Data Agent + 21 个 Action Agent）+ `memory.update` + `dynamic.search` 两个虚拟 owner。`hotel.navigate`、`hotel.booking.open` 与 `gmail.message.send` 只从当前 surface 派生，不直接暴露给模型；结合按 query 收窄的瑞幸预览，运行时最多 45 个模型可选工具。Composio 不新增固定 toolId，主要挂在 `dynamic.search`；自动回归以 core/full/manual-only/excluded/review-required 标记为准。
 
 授权页统一显示 app 名称。Slack、X 的读取和授权统一走当前用户的 Composio connected account；用户确认发送 Slack 回复时固定执行 `SLACK_CHAT_POST_MESSAGE`，X 回复仍不支持。QQ 邮箱、瑞幸、滴滴继续使用当前默认凭证和原有 provider 逻辑，授权页只新增各自官方授权/开发者页面入口，不会把网页登录结果自动写回 App。
+
+## multi-Agent smoke 证据边界
+
+自动 smoke 以同一 `conversation`、`turn`、`task` 下的 `MultiAgentInput`、Data/UI task 与 terminal、`MultiAgentTurnResult` 为主证据；并行任务必须全部 terminal，依赖任务必须出现递增的 `round-*`。`success`、`partial`、`empty`、`error`、`canceled` 保留原状态，不把旧 `LoopBackend`/页面 ready/HTTP 200 单独当成成功。当前 surface 动作还要求 `MultiAgentActionRun` 与同一 surface/run 的 `MultiAgentActionResult`；virtual action 使用精确 `MultiAgentActionPlan` request 与 terminal result 关联。
+
+`node scripts/aiphone-device-smoke.mjs --list-cases` 只列 C01-C20，`--full-regression --list-cases` 再列 F01-F16，均不运行设备或 provider。`gmail.message.send` 不进入自动列表；只有同时配置 `AIPHONE_GMAIL_SAFE_THREAD_ID` 与 `AIPHONE_GMAIL_SAFE_RECIPIENT` 时，`--gmail-send-manual --list-cases` 才显示 manual-only M01，且脚本不会自动发送。X02“不确认直接发送”继续 excluded。
+
+## 固定/虚拟能力 owner 账本
+
+`confirmation` 描述产品执行边界，不代表自动回归会点击真实写入。Action Agent 的外部写入必须通过当前 surface/确认计划，并取得 provider receipt/status；`dynamic.search` 只执行只读发现。工作项和知识库写入仍停留在既有 preview/prepare client action，状态为 `review-required`，未注册为固定可执行 ToolDefinition。
+
+| capability | migrated owner | automation state | confirmation |
+| --- | --- | --- | --- |
+| `travel.search` | Data Agent | core | 无 |
+| `train.search` | Data Agent | full | 无；购票为既有 Web client action |
+| `flight.search` | Data Agent | full | 无 |
+| `hotel.search` | Data Agent | core | 无 |
+| `hotel.detail` | Data Agent | core | 当前酒店卡“查看房型” |
+| `hotel.navigate` | Action Agent | core | 当前酒店卡精确坐标动作 |
+| `hotel.booking.open` | Action Agent | core | 当前房型页精确 RollingGo URL 动作 |
+| `food.search` | Data Agent | core | 无 |
+| `luckin.order.preview` | Action Agent | core | 只生成当前订单预览 |
+| `luckin.order.create` | Action Agent | manual-only | 当前预览的精确“确认下单”；不接受自然语言或变更参数 |
+| `luckin.order.status` | Data Agent | manual-only | 需要真实 orderId |
+| `social.feed.search` | Data Agent | core | 无 |
+| `social.community.search` | Data Agent | review-required | 无；只展示真实 provider 返回的公共社区内容或真实授权/网络/无结果状态 |
+| `social.post.preview` | Action Agent | review-required | 读取真实 provider 账号后只生成发布预览；不提供发布动作、不调用 provider 写入 |
+| `social.reply.draft` | Action Agent | core | 当前真实 item 的草稿动作；不发送 |
+| `x.post.search` | Data Agent | core | 无 |
+| `mail.search` | Data Agent | core | 无 |
+| `mail.thread.read` | Data Agent | core | 当前真实邮件行 |
+| `mail.draft.create` | Action Agent | manual-only | 当前真实线程草稿动作；不发送 |
+| `gmail.mail.search` | Data Agent | core | 无 |
+| `gmail.thread.read` | Data Agent | core | 当前真实 Gmail thread |
+| `gmail.draft.create` | Action Agent | core | 当前收件人/正文草稿动作 |
+| `gmail.draft.apply` | Action Agent | full | 当前草稿应用确认 |
+| `gmail.open.web` | Action Agent | excluded | 明确 Web 打开动作 |
+| `gmail.message.send` | Action Agent | manual-only | 当前 Gmail 回复卡一次确认；exact provider/thread/message/body；仅安全 thread/recipient 手工门禁 |
+| `youtube.video.search` | Data Agent | full | 无 |
+| `media.video.search` | Data Agent | core | 无 |
+| `media.aggregate.search` | Data Agent | core | 无 |
+| `worldcup.open` | Action Agent | core | 精确 App 内页面 intent |
+| `youtube.mine.playlists` | Data Agent | full | 无 |
+| `youtube.mine.subscriptions` | Data Agent | full | 无 |
+| `calendar.events.search` | Data Agent | core | 无 |
+| `calendar.event.create` | Action Agent | core | 已确认 Action plan；必须返回真实 eventId |
+| `calendar.event.update` | Action Agent | core | 复用 create/search 返回的真实 eventId；歧义时不执行 |
+| `calendar.event.delete` | Action Agent | core | 当前真实事件的可见删除确认；删除后终止或核验 |
+| `payment.send` | Action Agent | core | 当前收款人/金额/provider 确认；自动回归不最终支付 |
+| `payment.account.setup` | Action Agent | full | 当前 Stripe 设置/开户动作；真实创建 manual-only |
+| `maps.place.search` | Data Agent | core | 无 |
+| `maps.place.details` | Data Agent | full | 上一步真实 placeId |
+| `maps.route.open` | Action Agent | core | 精确起终点与系统/Web 导航动作 |
+| `whatsapp.message.send` | Action Agent | core | 仅 `AIPHONE_WHATSAPP_TEST_TO` 与当前可见确认；自动回归不发送 |
+| `ride.estimate` | Data Agent | core | 无 |
+| `ride.app.link` | Data Agent | excluded | 只打开 provider App，不等同叫车 |
+| `ride.order.create` | Action Agent | manual-only | 当前估价卡的精确车型/trace/路线确认 |
+| `ride.order.cancel` | Action Agent | manual-only | 当前订单可见取消动作与真实 orderId |
+| `ride.driver.location` | Data Agent | manual-only | 需要真实 orderId |
+| `memory.update` | Action Agent（virtual） | core | 用户明确稳定偏好；回归结束恢复 |
+| `dynamic.search` | Data Agent（virtual） | core | 只读 operation；create/update/delete/send/write 一律拒绝 |
 
 | 领域 | toolId | 核心 query | 预期结果 | 风险 | 授权/配置 | VPN/网络 | 走 Composio | 覆盖 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 出行 | `travel.search` | `我明天要从北京去上海，帮我搜索出行方案` | 综合高铁/航班候选；不造假，缺 provider 显示真实失败 | `read` | 无；航班源可能要 `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于 12306/飞常准网络 | 否 | 默认 smoke |
-| 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306/铁路结果或真实 provider 错误 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
+| 出行 | `train.search` | `帮我查询深圳北出发到香港西九龙明天晚上六点之后的高铁` | 12306 真实余票与最低可售价格；展开后可在 App 内打开 12306 官网继续购票，指定车次需在官网重选，订单与支付结果以 12306 为准 | `read` | 无 | 通常不需要 VPN | 否 | full regression |
 | 出行 | `flight.search` | `帮我查明天北京到上海航班` | 飞常准/航班结果或缺 key 错误 | `read` | `FLIGHT_MCP_KEY` / `VARIFLIGHT_API_KEY` | 通常不需要 VPN，取决于供应商 | 否 | full regression |
 | 餐饮 | `food.search` | `帮我搜索深圳坂田华为基地附近的咖啡店` | 周边餐饮/咖啡结果；不下单不支付 | `read` | `AMAP_KEY` 等本地生活 provider key | 通常不需要 VPN | 否 | 默认 smoke |
 | 酒店 | `hotel.search` | `帮我找8月8日到10日深圳科技园附近的酒店，2位成人1间房` | RollingGo 真实酒店结果、地址、语义标签和带口径的参考价；不伪造库存 | `read` | `ROLLINGGO_HOTEL_MCP_KEY` / `ROLLINGGO_HOTEL_MCP_URL` | 取决于 RollingGo 网络 | 否 | core C20 |
@@ -22,6 +83,8 @@
 | 瑞幸 | `luckin.order.create` | 从 C15 确认页执行确认动作 | 仅显式确认后创建真实订单；自动回归不点击 | `write` | `LUCKIN_MCP_TOKEN` + 完整门店/商品/规格 ID | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 瑞幸 | `luckin.order.status` | 使用真实订单号查询 | 仅查询真实已创建订单；无订单时不执行 | `read` | `LUCKIN_MCP_TOKEN` + 真实订单号 | 取决于瑞幸 MCP 网络 | 否 | manual-only |
 | 社交 | `social.feed.search` | `帮我查看我今天 X 和 Slack 上的消息` / `帮我查看今天的社交聚合消息` | SocialHub 只展示各 app 私信/提及和连接状态；公开 post 不进入 SocialHub | `read` | Composio connected account；企业微信仍为本地回调/缓存 | X/Slack/Discord/LinkedIn/WhatsApp/Instagram 通常需要外网/VPN | 是 | 默认 smoke；`--composio-tools` 社交聚合 |
+| 社交 | `social.community.search` | `帮我搜索 Reddit 上最近关于 Qwen 的社区讨论` | 只展示 X、LinkedIn、Instagram 或 Reddit 的真实公共内容；保留 provider 的授权、网络、权限和无结果状态，不伪造帖子 | `read` | Composio 配置 + 对应平台 connected account；LinkedIn 单帖读取还需真实 resource ID | 通常需要外网/VPN | 是 | review-required R01 |
+| 社交 | `social.post.preview` | `帮我为 X 起草一条介绍 Appless 新版本的帖子` | 读取真实 provider 账号身份后只生成发布预览；账号读取失败显示真实错误，不提供发布按钮、不调用发布接口、不生成发布回执 | `draft` | Composio 配置 + X/LinkedIn/Instagram/Reddit connected account | 通常需要外网/VPN | 是 | review-required R02 |
 | 社交 | `social.reply.draft` | `帮我给这条 Slack 消息起草回复` | 对已选真实 SocialHub item 生成本地草稿，不发送 | `draft` | 需要已有真实 item 上下文 | 起草本身不需要；来源读取按平台 | 否 | 单元/动作链路 |
 | 社交 | SocialHub Slack 回复动作 | 在真实 Slack 消息草稿上点击发送 | 使用原消息的 channel/thread ID，经当前用户 Composio 执行 `SLACK_CHAT_POST_MESSAGE`；provider 未确认时不显示成功 | `write` | Composio Slack connected account + 可写 scope | 通常需要外网/VPN | 是 | 参数映射单测；真实发送 manual-only |
 | X | `x.post.search` | `帮我查看 X 上 openai 最近的公开 post` | X 公开 post 结果或真实 Composio/provider 错误；不进入 SocialHub | `read` | Composio X/Twitter connected account | 通常需要外网/VPN | 是 | 默认 smoke |
@@ -31,9 +94,9 @@
 | Gmail | `gmail.mail.search` | `帮我查看我Gmail里和我eccv论文相关的邮件` | Gmail 搜索结果、可展开详情、可生成回复草稿；无 Composio 授权则显示真实授权/失败 | `read` | Composio Gmail connected account | 通常需要外网/VPN | 是 | 默认 smoke + Gmail cases |
 | Gmail | `gmail.thread.read` | `打开第一封 Gmail 详情` | 读取指定 Gmail thread；无 Composio 授权则显示真实授权/失败 | `read` | Composio Gmail connected account + threadId | 通常需要外网/VPN | 是 | 单元/动作链路 |
 | Gmail | `gmail.draft.create` | `帮我用 Gmail 写一封邮件给 alice@example.com 说我收到了` | 创建 Gmail 草稿，不直接发送；缺少结构化 `to`/`body` 时直接报错，不会从 prompt 补正文 | `draft` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | Gmail cases |
-| Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 用户确认后应用已有草稿；缺少结构化 `threadId`/`to`/`subject`/`replyMode`/`body` 时直接报错 | `confirm_required` | Composio Gmail connected account + 结构化 draft args | 通常需要外网/VPN | 是 | 单元/动作链路 |
+| Gmail | `gmail.draft.apply` | `确认应用刚才的 Gmail 草稿` | 仅从当前 F07 草稿 surface 取得真实 provider `draftId`，并用原始 `to`/`subject`/`body` 原位更新同一草稿；缺少或篡改 provider/draft identity 时直接报错，不会再次创建或发送 | `confirm_required` | Gmail OAuth 或 Composio Gmail connected account + 当前草稿 action | 通常需要外网/VPN | 是 | 单元/动作链路 |
 | Gmail | `gmail.open.web` | `帮我打开 Gmail 网页版` | 打开 Gmail Web 让用户手动处理 | `confirm_required` | 系统 intent / Web session | 通常需要 VPN | 否 | 规则/动作链路 |
-| Gmail | `gmail.message.send` | `用 Gmail 不确认直接发送这封邮件` | 安全阻断；提示不会自动发送 Gmail | `blocked` | 系统 intent 兜底 | 通常需要 VPN，但不会发送 | 否 | 安全规则 |
+| Gmail | `gmail.message.send` | 当前 Gmail 回复卡片点击“发送回复” | 仅复用当前可见回复卡片的一次确认，固定执行 `GMAIL_REPLY_TO_THREAD`；provider 未返回明确成功证据时显示真实错误，不声称已发送 | `confirm_required` | Composio Gmail connected account + 当前 thread/message/requestKey/recipient/body；M01 还要求安全 thread/recipient 环境变量 | 通常需要外网/VPN | 是 | 参数/身份/重放/失败单测；`--gmail-send-manual --list-cases` 仅列手工门禁，不自动发送 |
 | 视频 | `media.video.search` | `帮我在b站和youtube里搜索qwen的官方视频` | B 站 + YouTube 多源视频结果或真实 provider 错误 | `read` | `YOUTUBE_API_KEY`；B 站公开接口/页面 | YouTube 通常需要；B 站通常不需要 | 否 | 默认 smoke |
 | 聚合搜索 | `media.aggregate.search` | `我想看看有关 openai codex 的相关新闻和讨论` | YouTube/B 站视频 + X/HN 讨论聚合；微博/知乎显示真实未接入原因 | `read` | `YOUTUBE_API_KEY`、`COMPOSIO_API_KEY` / `COMPOSIO_USER_ID` + X/HN connected account；B 站公开访问 | YouTube/X/HN 通常需要；B 站通常不需要 | X/HN 走 Composio；微博/知乎首版只显示真实状态 | 默认 smoke |
 | 世界杯 | `worldcup.open` | `我想看世界杯下一场比赛和赛程` | 打开 App 内世界杯专页；不把静态页冒充实时比赛结果 | `read` | 无 | 页面本身不需要 | 否 | core C12 |
@@ -78,4 +141,4 @@
 
 ## 更新规则
 
-改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 agent-only 工具看 `LoopBackend.ets`; 新增聚合搜索来源看 `AggregateSearchClient.ets`；新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。
+改工具时只同步这张表：新增/删除静态工具看 `ToolDefinitionRegistry.ets`；新增 virtual owner 或 runtime action 看 `MultiAgentCanaryRuntime.ets` 与 `MultiAgentRuntime.ets`；新增聚合搜索来源看 `AggregateSearchClient.ets`；新增 Composio app/query 看 `ComposioDynamicBackend.ets` 和 `scripts/aiphone-device-smoke.mjs`；新增支付专项场景看 `entry/src/test/*Payment*.test.ets`。

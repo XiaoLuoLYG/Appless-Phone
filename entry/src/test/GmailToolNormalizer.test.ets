@@ -4,6 +4,7 @@ import { GmailDraftPreview, GmailThreadPreview } from '@loop/agent-core';
 import {
   compactPreviewText,
   draftReplyResultFromPreview,
+  gmailSearchStructuredDataFromResults,
   mailThreadRowsFromPreviews,
   redactEmailAddress
 } from '@loop/agent-core';
@@ -93,6 +94,45 @@ export default function gmailToolNormalizerTest() {
       expect(Object.keys(rawPreview).indexOf('body')).assertEqual(-1);
       expect(Object.keys(rawPreview).indexOf('sent')).assertEqual(-1);
       expect(rawPreview['status'] as string).assertEqual('ready_to_apply');
+    });
+
+    it('keeps real Gmail identities in search summaries without accepting provider bodies', 0, () => {
+      const provider: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail result',
+        status: 'success',
+        summary: '1 real thread',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"messages":[{"provider":"gmail","accountLabel":"work@example.com",' +
+          '"threadId":"thread-real-1","messageId":"message-real-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Project launch notes","snippet":"Short provider summary",' +
+          '"receivedAt":"2026-07-22T01:02:03Z","unread":true,"important":true,' +
+          '"sourceUrl":"https://mail.google.com/mail/u/1/#inbox/thread-real-1",' +
+          '"rawProviderRef":"provider-message-ref-1",' +
+          '"body":"FULL PROVIDER BODY MUST NOT SATISFY SEARCH"}]}'
+      };
+      const data = gmailSearchStructuredDataFromResults([provider]);
+      const serialized = JSON.stringify(data);
+
+      expect(data.threads.length).assertEqual(1);
+      expect(data.threads[0].provider).assertEqual('gmail');
+      expect(data.threads[0].accountLabel).assertEqual('work@example.com');
+      expect(data.threads[0].requestKey).assertEqual('gmail:thread-real-1');
+      expect(data.threads[0].threadId).assertEqual('thread-real-1');
+      expect(data.threads[0].messageId).assertEqual('message-real-1');
+      expect(data.threads[0].to[0]).assertEqual('Me <me@example.com>');
+      expect(data.threads[0].subject).assertEqual('Project launch notes');
+      expect(data.threads[0].snippet).assertEqual('Short provider summary');
+      expect(data.threads[0].receivedAt).assertEqual('2026-07-22T01:02:03Z');
+      expect(data.threads[0].unread).assertTrue();
+      expect(data.threads[0].important).assertTrue();
+      expect(data.threads[0].sourceUrl).assertEqual('https://mail.google.com/mail/u/1/#inbox/thread-real-1');
+      expect(data.threads[0].rawProviderRef).assertEqual('provider-message-ref-1');
+      expect(serialized.indexOf('FULL PROVIDER BODY MUST NOT SATISFY SEARCH')).assertEqual(-1);
+      expect(serialized.indexOf('bodyText')).assertEqual(-1);
+      expect(serialized.indexOf('bodyHtml')).assertEqual(-1);
     });
   });
 }

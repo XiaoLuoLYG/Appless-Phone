@@ -1,6 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiAction, A2uiGenericToolResultData } from '@loop/agent-core';
 import {
+  remainingReadStructuredDataResult,
+  rideDriverLocationResultForTest,
+  rideResultsFromMcpPayloadsForTest
+} from '@loop/agent-core';
+import {
   RideToolPanelState,
   buildRideToolPanelState,
   isRideToolResult
@@ -250,6 +255,58 @@ export default function rideToolResultsStateTest() {
       expect(panel.primaryActions[0].label).assertEqual('重新查询');
       expect(panel.secondaryActions.length).assertEqual(1);
       expect(panel.secondaryActions[0].label).assertEqual('换车型');
+    });
+
+    it('keeps exact ride trace deep links driver and order identifiers in structured reads', 0, () => {
+      const estimateAndLinks = rideResultsFromMcpPayloadsForTest(
+        '华为坂田基地', '秋港花园',
+        JSON.parse('{"structuredContent":{"traceId":"trace-provider-real-123456789",' +
+          '"items":[{"productName":"快车","productCategory":"express","priceText":"15"}]}}') as Object,
+        JSON.parse('{"url":"diditaxi://ride?traceId=trace-provider-real-123456789"}') as Object,
+        JSON.parse('{"url":"amapuri://drive/takeTaxi?sourceApplication=aiphone"}') as Object
+      );
+      const estimate = remainingReadStructuredDataResult('ride.estimate', 'genericToolResults', estimateAndLinks);
+      const driverResult = rideDriverLocationResultForTest(
+        JSON.parse('{"driverId":"driver-real-77","location":"114.063920,22.637910",' +
+          '"driverName":"陈师傅","status":"en_route"}') as Object,
+        'order-real-88'
+      );
+      const driver = remainingReadStructuredDataResult(
+        'ride.driver.location', 'genericToolResults', [driverResult]
+      );
+      const estimateJson = JSON.stringify(estimate.data);
+      const driverJson = JSON.stringify(driver.data);
+
+      expect(estimate.status).assertEqual('success');
+      expect(estimateJson.indexOf('trace-provider-real-123456789')).assertLarger(-1);
+      expect(estimateJson.indexOf('diditaxi://ride')).assertLarger(-1);
+      expect(estimateJson.indexOf('amapuri://drive/takeTaxi')).assertLarger(-1);
+      expect(driverJson.indexOf('driver-real-77')).assertLarger(-1);
+      expect(driverJson.indexOf('order-real-88')).assertLarger(-1);
+      expect(driverJson.indexOf('ride.driver.location.refresh')).assertLarger(-1);
+    });
+
+    it('keeps ride provider auth input and transport failures distinct', 0, () => {
+      const auth = remainingReadStructuredDataResult('ride.estimate', 'genericToolResults', [{
+        sourceTag: '滴滴', toolName: 'ride.estimate', title: '缺少滴滴 MCP Key', status: 'needs_input',
+        summary: '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP。', rows: [], rawPreview: ''
+      }]);
+      const input = remainingReadStructuredDataResult('ride.driver.location', 'genericToolResults', [{
+        sourceTag: '滴滴', toolName: 'ride.driver.location', title: '缺少订单号', status: 'error',
+        summary: '刷新司机位置需要 order_id。', rows: [], rawPreview: ''
+      }]);
+      const transport = remainingReadStructuredDataResult('ride.app.link', 'genericToolResults', [{
+        sourceTag: '滴滴', toolName: 'ride.app.link', title: '滴滴唤端链接生成失败', status: 'error',
+        summary: '滴滴 MCP HTTP 503 transport failure', rows: [], rawPreview: '', providerPhase: 'execution'
+      }]);
+
+      expect(auth.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(auth.sources.length).assertEqual(0);
+      expect(input.error?.code).assertEqual('INPUT_REQUIRED');
+      expect(input.sources.length).assertEqual(0);
+      expect(transport.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(transport.error?.retryable).assertTrue();
+      expect(transport.sources.length).assertEqual(1);
     });
   });
 }

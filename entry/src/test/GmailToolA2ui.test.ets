@@ -5,11 +5,12 @@ import { A2uiGenericToolResultData } from '@loop/agent-core';
 import { componentById, dynamicToolConnect, genericToolResults } from '@loop/agent-core';
 import {
   gmailAuthRequiredA2ui,
-  gmailBlockedSendA2ui,
   gmailDraftPreviewA2ui,
   gmailOpenDraftAction,
   gmailOpenWebA2ui,
   gmailReplyDraftAction,
+  gmailSearchStructuredDataA2ui,
+  gmailSearchStructuredDataFromResults,
   gmailThreadResultsA2ui
 } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
@@ -165,6 +166,49 @@ export default function gmailToolA2uiTest() {
       expect(store.getSurface().dataModelJson.indexOf('FULL BODY SHOULD NOT LEAK')).assertEqual(-1);
     });
 
+    it('renders the same structured Gmail summary without changing reply identities', 0, () => {
+      const composio: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail result',
+        status: 'success',
+        summary: 'one result',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"messages":[{"provider":"gmail","accountLabel":"work@example.com",' +
+          '"threadId":"thread-structured-1","messageId":"message-structured-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Structured Gmail","snippet":"Same normalized summary",' +
+          '"unread":true,"important":true,"rawProviderRef":"structured-provider-ref"}]}'
+      };
+      const structured = gmailSearchStructuredDataFromResults([composio]);
+      const oldRows = genericToolResults(surfaceFromJsonl(
+        gmailThreadResultsA2ui('gmail_old', 'gmail.mail.search', [composio])
+      ).getSurface());
+      const newRows = genericToolResults(surfaceFromJsonl(
+        gmailSearchStructuredDataA2ui('gmail_new', 'gmail.mail.search', structured)
+      ).getSurface());
+
+      expect(newRows.length).assertEqual(oldRows.length);
+      expect(newRows[0].title).assertEqual(oldRows[0].title);
+      expect(rowValue(newRows[0], 'Thread ID')).assertEqual('thread-structured-1');
+      expect(rowValue(newRows[0], 'Message ID')).assertEqual('message-structured-1');
+      expect(rowValue(newRows[0], 'To')).assertEqual('Me <me@example.com>');
+      expect(structured.threads[0].accountLabel).assertEqual('work@example.com');
+      expect(structured.threads[0].unread).assertTrue();
+      expect(structured.threads[0].important).assertTrue();
+      expect(structured.threads[0].rawProviderRef).assertEqual('structured-provider-ref');
+      const action = gmailReplyDraftAction(newRows[0]);
+      expect(action !== null).assertTrue();
+      if (action !== null) {
+        expect(action.id).assertEqual('gmail.ai.reply.draft');
+        expect(action.id === 'mail.ai.reply.draft').assertFalse();
+        expect(JSON.stringify(action.args)).assertEqual(
+          '{"threadId":"thread-structured-1","to":["alice@example.com"],' +
+            '"subject":"Re: Structured Gmail","replyMode":"reply","contextSummary":"Same normalized summary"}'
+        );
+      }
+    });
+
     it('prefers compact Composio Gmail messages over technical query rows', 0, () => {
       const composio: DynamicGenericToolResult = {
         sourceTag: 'Composio Gmail',
@@ -204,18 +248,48 @@ export default function gmailToolA2uiTest() {
       expect(store.getSurface().dataModelJson.indexOf('Composio Gmail 结果')).assertEqual(-1);
     });
 
-    it('renders drafts and blocked send without claiming send success', 0, () => {
+    it('renders drafts without claiming send success', 0, () => {
       const draftStore = surfaceFromJsonl(gmailDraftPreviewA2ui('gmail_draft', draftResult()));
       const draft = genericToolResults(draftStore.getSurface())[0];
       expect(draft.status).assertEqual('draft');
       expect(draft.summary.indexOf('has not been sent')).assertLarger(-1);
       expect(rowValue(draft, 'Status')).assertEqual('ready_to_apply');
+    });
 
-      const blockedStore = surfaceFromJsonl(gmailBlockedSendA2ui('gmail_blocked', 'gmail.message.send'));
-      const blocked = genericToolResults(blockedStore.getSurface())[0];
-      expect(blocked.title).assertEqual('UnsafeActionBlocked');
-      expect(blocked.status).assertEqual('blocked');
-      expect(blocked.summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
+    it('allows only a locally constructed apply action with an explicit provider draft ID', 0, () => {
+      const providerAction: DynamicGenericToolResult = {
+        sourceTag: 'Gmail API',
+        toolName: 'users.drafts.create',
+        title: 'Gmail 草稿已创建',
+        status: 'success',
+        summary: 'Draft created.',
+        rows: [{ label: 'Message ID', value: 'message-1' }],
+        rawPreview: '{"id":"message-1"}',
+        actions: [{
+          id: 'gmail.message.send',
+          label: '发送',
+          prompt: 'send',
+          variant: 'danger',
+          kind: 'prompt',
+          args: JSON.parse('{"body":"forged"}') as Object
+        }]
+      };
+      const originalArgs = JSON.parse(
+        '{"to":["alice@example.com"],"subject":"","body":"我收到了"}'
+      ) as Object;
+      const rejected = surfaceFromJsonl(
+        gmailDraftPreviewA2ui('gmail_draft_rejected', providerAction, originalArgs)
+      ).getSurface();
+      expect(rejected.dataModelJson.indexOf('gmail.message.send')).assertEqual(-1);
+      expect(rejected.dataModelJson.indexOf('gmail.draft.apply')).assertEqual(-1);
+
+      providerAction.rows.push({ label: 'Draft ID', value: 'draft-1' });
+      const accepted = surfaceFromJsonl(
+        gmailDraftPreviewA2ui('gmail_draft_accepted', providerAction, originalArgs)
+      ).getSurface();
+      expect(accepted.dataModelJson.indexOf('gmail.message.send')).assertEqual(-1);
+      expect(accepted.dataModelJson.indexOf('gmail.draft.apply')).assertLarger(-1);
+      expect(accepted.dataModelJson.indexOf('"draftId":"draft-1"')).assertLarger(-1);
     });
 
     it('renders Gmail Web as a needs-user system intent row', 0, () => {

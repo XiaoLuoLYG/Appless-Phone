@@ -2,24 +2,43 @@ import { MessageDrivenAgent } from '../MessageDrivenAgent';
 import {
   AgentMessage,
   AgentMessageType,
-  TaskErrorPayload
+  ConversationTurnMessage,
+  CurrentSurfaceSummary,
+  ObservationDigest,
+  TaskErrorPayload,
+  TurnResultPayload
 } from '../message/AgentMessage';
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
+  LeaderCurrentLocalDateProvider,
   LeaderDataTask,
+  LeaderDataTaskInputNormalizer,
+  LeaderDecision,
+  LeaderDecisionDataTask,
   LeaderPlan,
   LeaderPlanner,
+  LeaderPlannerResult,
+  LeaderPlanningSignal,
+  LeaderPersonaMetadata,
   LeaderPlanningContext,
   LeaderSkillMetadata,
   LeaderToolMetadata,
-  LeaderUiTask
+  LeaderUiTask,
+  MAX_LEADER_DATA_TASKS_PER_ROUND,
+  MAX_LEADER_DATA_TASKS_PER_TURN
 } from './LeaderTypes';
-import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
+import {
+  leaderInputHasEntityAuthority,
+  leaderTasksHaveSameRoundDependency
+} from './LeaderDependencyAuthority';
+import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { ActionPlanDraftPayload } from '../action/ActionAgentTypes';
-import { ActionPlanDraft, ActionPlanStep } from '../action/ActionPlanTypes';
-import { cloneJsonValue } from '../action/JsonPointer';
+import { ActionPlanRequestPayload, ActionResultPayload } from '../action/ActionAgentTypes';
+import {
+  leaderIsActionCapability,
+  leaderIsDataCapability
+} from './LeaderCapabilityOwnership';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -27,19 +46,56 @@ interface LeaderTurnState {
   inputTaskId: string;
   uiTaskId: string;
   dataTaskId: string;
+  input: InputUserPayload;
+  round: number;
+  semantic: boolean;
+  planning: boolean;
+  pendingDataTools: Map<string, LeaderPendingDataTask>;
+  dataTaskIds: string[];
+  expectedOutputSchema: string;
+  uiIntent: string;
+  pendingActionDecision: LeaderDecision | null;
+  observations: ObservationDigest[];
+  turnObservations: ObservationDigest[];
+  personaId: string;
   skillId: string;
   uiDone: boolean;
+  uiState: '' | 'result' | 'error';
+  uiSurfaceId: string;
+  virtualActionTaskId: string;
+  pendingAnswer: string | null;
   dataDone: boolean;
   terminal: boolean;
   timerId: number;
+  planningTimerId: number;
+  deadlineAtMs: number;
   releasePlanning: (() => void) | null;
 }
+
+interface LeaderPendingDataTask {
+  toolId: string;
+  outputSchema: string;
+}
+
+const MAX_POST_OBSERVATION_PLANNING_MS: number = 8000;
+const MAX_POST_OBSERVATION_UI_RESERVE_MS: number = 8000;
+const OBSERVATION_FALLBACK_ANSWER: string = 'Showing the available tool results.';
 
 export class LeaderAgent extends MessageDrivenAgent {
   private readonly bus: LinkedMessageBus;
   private readonly planner: LeaderPlanner;
-  private readonly planningContext: LeaderPlanningContext;
+  private planningContext: LeaderPlanningContext;
   private readonly timeoutMs: number;
+  private readonly dataTaskInputNormalizer: LeaderDataTaskInputNormalizer | null;
+  private readonly currentLocalDate: LeaderCurrentLocalDateProvider;
+  private readonly decisionObserver: ((
+    conversationId: string,
+    turnId: string,
+    taskId: string,
+    requestedCapabilityIds: string[],
+    personaId: string,
+    skillId: string
+  ) => void) | null;
   private readonly turns: Map<string, LeaderTurnState> = new Map<string, LeaderTurnState>();
   // Terminal state is reduced to exact identities so active turn payloads and
   // timers are released without permitting an old input to be dispatched twice.
@@ -49,13 +105,32 @@ export class LeaderAgent extends MessageDrivenAgent {
     bus: LinkedMessageBus,
     planner: LeaderPlanner,
     planningContext: LeaderPlanningContext,
-    timeoutMs: number = 30000
+    timeoutMs: number = 30000,
+    dataTaskInputNormalizer?: LeaderDataTaskInputNormalizer,
+    decisionObserver?: (
+      conversationId: string,
+      turnId: string,
+      taskId: string,
+      requestedCapabilityIds: string[],
+      personaId: string,
+      skillId: string
+    ) => void,
+    currentLocalDate?: LeaderCurrentLocalDateProvider
   ) {
     super(bus);
     this.bus = bus;
     this.planner = planner;
     this.planningContext = this.copyPlanningContext(planningContext);
     this.timeoutMs = timeoutMs > 0 ? timeoutMs : 30000;
+    this.dataTaskInputNormalizer = dataTaskInputNormalizer === undefined ?
+      null : dataTaskInputNormalizer;
+    this.decisionObserver = decisionObserver === undefined ? null : decisionObserver;
+    this.currentLocalDate = currentLocalDate === undefined ? (): string => {
+      const now = new Date();
+      const month: string = (now.getMonth() + 1).toString().padStart(2, '0');
+      const day: string = now.getDate().toString().padStart(2, '0');
+      return now.getFullYear().toString() + '-' + month + '-' + day;
+    } : currentLocalDate;
   }
 
   stop(): void {
@@ -65,6 +140,10 @@ export class LeaderAgent extends MessageDrivenAgent {
     this.turns.clear();
     this.terminalTurns.clear();
     super.stop();
+  }
+
+  updatePlanningContext(context: LeaderPlanningContext): void {
+    this.planningContext = this.copyPlanningContext(context);
   }
 
   protected accepts(message: AgentMessage): boolean {
@@ -93,6 +172,20 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (message.type === AgentMessageType.ACTION_RESULT) {
+      this.handleVirtualActionResult(state, message);
+      return;
+    }
+    if (message.type === AgentMessageType.TASK_ERROR && message.taskId === state.inputTaskId) {
+      this.finishTurn(state);
+      return;
+    }
+    if (state.semantic) {
+      if (message.type === AgentMessageType.TASK_RESULT_UI && message.taskId === state.uiTaskId) {
+        this.handleSemanticUiResult(state, message);
+      } else if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+        message.type === AgentMessageType.TASK_ERROR) {
+        this.handleSemanticObservation(state, message);
+      }
       return;
     }
     if (message.type === AgentMessageType.TASK_RESULT_UI && message.taskId === state.uiTaskId) {
@@ -128,7 +221,22 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.publishError(message, 'LEADER_INPUT_INVALID', 'User input text must not be empty');
       return;
     }
-    const input: InputUserPayload = { text: inputText };
+    const recentMessages = inputRecord['recentMessages'];
+    const previousPersonaId = inputRecord['previousPersonaId'];
+    const currentSurfaceSummary = inputRecord['currentSurfaceSummary'];
+    const recentObservations = inputRecord['recentObservations'];
+    const input: InputUserPayload = {
+      text: inputText,
+      recentMessages: Array.isArray(recentMessages) ? recentMessages as ConversationTurnMessage[] : [],
+      previousPersonaId: typeof previousPersonaId === 'string' ? previousPersonaId : '',
+      currentSurfaceSummary: currentSurfaceSummary !== null &&
+        typeof currentSurfaceSummary === 'object' && !Array.isArray(currentSurfaceSummary) ?
+        currentSurfaceSummary as CurrentSurfaceSummary : {
+          surfaceId: '', kind: '', status: '', entityRefs: [], actionOfferIds: []
+        },
+      recentObservations: Array.isArray(recentObservations) ?
+        this.boundedObservations(recentObservations as Object[]) : []
+    };
     const key: string = this.turnKey(message);
     if (this.turns.has(key) || this.terminalTurns.has(key)) {
       return;
@@ -137,38 +245,84 @@ export class LeaderAgent extends MessageDrivenAgent {
       conversationId: message.conversationId,
       turnId: message.turnId,
       inputTaskId: message.taskId,
-      uiTaskId: '',
+      uiTaskId: message.taskId + ':ui',
       dataTaskId: '',
+      input,
+      round: 1,
+      semantic: false,
+      planning: false,
+      pendingDataTools: new Map<string, LeaderPendingDataTask>(),
+      dataTaskIds: [],
+      expectedOutputSchema: '',
+      uiIntent: '',
+      pendingActionDecision: null,
+      observations: input.recentObservations as ObservationDigest[],
+      turnObservations: [],
+      personaId: '',
       skillId: '',
       uiDone: false,
+      uiState: '',
+      uiSurfaceId: '',
+      virtualActionTaskId: '',
+      pendingAnswer: null,
       dataDone: false,
       terminal: false,
       timerId: -1,
+      planningTimerId: -1,
+      deadlineAtMs: Date.now() + this.timeoutMs,
       releasePlanning: null
     };
-    const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
-      state.releasePlanning = resolve;
-    });
     this.turns.set(key, state);
     state.timerId = setTimeout(() => {
       this.timeoutTurn(key);
     }, this.timeoutMs);
-    this.startPlanning(message, input, state, timeoutSignal);
+    this.startPlanning(message, input, state);
   }
 
   private startPlanning(
     message: AgentMessage,
     input: InputUserPayload,
-    state: LeaderTurnState,
-    timeoutSignal: Promise<void>
+    state: LeaderTurnState
   ): void {
+    if (state.terminal || state.planning) {
+      return;
+    }
+    state.planning = true;
+    let trustedCurrentLocalDate: string = '';
+    try {
+      trustedCurrentLocalDate = this.currentLocalDate();
+      if (!this.validNormalizationCurrentLocalDate(trustedCurrentLocalDate)) {
+        throw new Error('Leader current local date authority is invalid');
+      }
+    } catch (error) {
+      this.failPlanning(message, state, error as Object);
+      return;
+    }
+    const timeoutSignal: Promise<void> = new Promise<void>((resolve: () => void) => {
+      state.releasePlanning = resolve;
+    });
+    const key: string = this.turnKey(message);
+    const planningSignal: LeaderPlanningSignal = (): boolean =>
+      this.turns.get(key) === state && !state.terminal && state.planning;
+    if (this.canRenderObservedFallback(state)) {
+      state.planningTimerId = setTimeout(() => {
+        this.timeoutPostObservationPlanning(key, state);
+      }, this.postObservationPlanningBudgetMs(state));
+    }
     try {
       Promise.race([
-        this.planner.plan(message, input, this.copyPlanningContext(this.planningContext)),
+        this.planner.plan(
+          message,
+          input,
+          this.copyPlanningContext(this.planningContext),
+          state.round,
+          planningSignal,
+          trustedCurrentLocalDate
+        ),
         timeoutSignal
       ])
-        .then((outcome: LeaderPlan | void) => {
-          this.completePlanning(message, state, outcome);
+        .then((outcome: LeaderPlannerResult | void) => {
+          this.completePlanning(message, state, outcome, trustedCurrentLocalDate);
         })
         .catch((error: Object) => {
           this.failPlanning(message, state, error);
@@ -178,35 +332,458 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
   }
 
-  private completePlanning(message: AgentMessage, state: LeaderTurnState, outcome: LeaderPlan | void): void {
-    state.releasePlanning = null;
-    if (state.terminal) {
+  private completePlanning(
+    message: AgentMessage,
+    state: LeaderTurnState,
+    outcome: LeaderPlannerResult | void,
+    trustedCurrentLocalDate: string
+  ): void {
+    if (state.terminal || !state.planning) {
       return;
     }
-    const plan: LeaderPlan = outcome as LeaderPlan;
+    state.planning = false;
+    this.clearPlanningTimer(state);
+    state.releasePlanning = null;
+    if (outcome === undefined) {
+      this.finishTurn(state);
+      this.publishError(message, 'LEADER_PLAN_FAILED', 'Leader planner returned no decision');
+      return;
+    }
+    const result: LeaderPlannerResult = outcome as LeaderPlannerResult;
+    if (this.isExactLegacyPlan(result)) {
+      if (state.round !== 1 || state.semantic) {
+        this.finishTurn(state);
+        this.publishError(message, 'LEADER_PLAN_INVALID', 'Legacy plan is allowed only as the first planner outcome');
+        return;
+      }
+      this.completeLegacyPlanning(message, state, result as LeaderPlan);
+      return;
+    }
+    this.completeDecisionPlanning(message, state, result as LeaderDecision, trustedCurrentLocalDate);
+  }
+
+  private completeLegacyPlanning(message: AgentMessage, state: LeaderTurnState, plan: LeaderPlan): void {
     if (!this.validPlan(plan)) {
       this.finishTurn(state);
       this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader plan task fields must be non-empty and unique');
       return;
     }
     state.uiTaskId = plan.ui.taskId;
-    state.dataTaskId = plan.data.taskId;
+    const dataTask: LeaderDataTask = plan.dataTasks[0];
+    state.dataTaskId = dataTask.taskId;
+    state.personaId = plan.personaId;
     state.skillId = plan.skillId;
-    this.publishUiTask(message, plan.ui, plan.data.taskId);
-    this.publishDataTask(message, plan.data);
-    if (plan.actionPlan !== undefined) {
-      this.publishActionPlanDraft(message, plan);
+    this.publishUiTask(message, plan.ui, dataTask.taskId);
+    this.publishDataTask(message, dataTask);
+  }
+
+  private completeDecisionPlanning(
+    message: AgentMessage,
+    state: LeaderTurnState,
+    decision: LeaderDecision,
+    trustedCurrentLocalDate: string
+  ): void {
+    if (Array.isArray(decision.dataTasks) &&
+      decision.dataTasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_DATA_TASK_LIMIT',
+        'Leader cannot publish more than eight Data tasks in one round'
+      );
+      return;
+    }
+    if (!this.validDecision(decision, trustedCurrentLocalDate)) {
+      this.finishTurn(state);
+      this.publishError(message, 'LEADER_PLAN_INVALID', 'Leader decision violates its exact capability contract');
+      return;
+    }
+    if (state.personaId.length > 0 &&
+      (state.personaId !== decision.personaId || state.skillId !== decision.skillId)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_PERSONA_SKILL_SWITCH',
+        'Leader cannot change persona or skill after execution starts in one turn'
+      );
+      return;
+    }
+    if (!this.decisionWithinSelectedSkill(decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_SKILL_CAPABILITY_VIOLATION',
+        'Selected skill does not declare every requested capability'
+      );
+      return;
+    }
+    if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
+      state.turnObservations.length === 0 && decision.requestedCapabilityIds.length > 0) {
+      this.publishError(
+        message,
+        'LEADER_UNOBSERVED_TERMINAL',
+        'Capability-backed terminal decisions require a runtime observation'
+      );
+      this.finishTurn(state);
+      return;
+    }
+    try {
+      this.normalizeDecisionInputs(state.input, decision, trustedCurrentLocalDate);
+    } catch (error) {
+      this.finishTurn(state);
+      const detail: string = error instanceof Error ? error.message : `${error}`;
+      this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
+      return;
+    }
+    if (decision.roundAction === 'execute' &&
+      leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_SAME_ROUND_DEPENDENCY',
+        'Leader cannot execute an entity producer and its dependent consumer in the same round'
+      );
+      return;
+    }
+    if (this.reusesCompletedDataTool(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_COMPLETED_TOOL_REUSE',
+        'Leader cannot execute a completed Data tool again in the same turn'
+      );
+      return;
+    }
+    if (this.hasUnboundLaterDataTask(state, decision)) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_UNBOUND_LATER_TOOL',
+        'Every later-round Data task must bind one real successful prior entity reference'
+      );
+      return;
+    }
+    // Three bounded rounds stay below UiAgent's retained pending-data window.
+    if (state.dataTaskIds.length + decision.dataTasks.length >
+      MAX_LEADER_DATA_TASKS_PER_TURN) {
+      this.finishTurn(state);
+      this.publishError(
+        message,
+        'LEADER_DATA_TASK_LIMIT',
+        'Leader cannot publish more than twenty-four Data tasks in one turn'
+      );
+      return;
+    }
+    if (this.decisionObserver !== null) {
+      this.decisionObserver(
+        message.conversationId,
+        message.turnId,
+        message.taskId,
+        decision.requestedCapabilityIds.slice(),
+        decision.personaId,
+        decision.skillId
+      );
+    }
+    state.semantic = true;
+    state.personaId = decision.personaId;
+    state.skillId = decision.skillId;
+    if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
+      if (state.dataTaskIds.length > 0) {
+        state.pendingAnswer = decision.answer as string;
+        state.uiIntent = decision.uiIntent.purpose;
+        this.publishAccumulatedUiWithPendingAction(message, state);
+        return;
+      }
+      this.publishTurnResult(message, state, decision.answer as string);
+      this.finishTurn(state);
+      return;
+    }
+    const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
+    let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
+    if (dataTaskIds.length > 0) {
+      uiTaskId = state.uiTaskId;
+      for (let index = 0; index < dataTaskIds.length; index++) {
+        state.dataTaskIds.push(dataTaskIds[index]);
+      }
+      if (state.expectedOutputSchema.length === 0) {
+        const first: LeaderDecisionDataTask = decision.dataTasks[0];
+        state.expectedOutputSchema = (this.toolMetadata(first.toolId) as LeaderToolMetadata).outputSchema;
+      }
+      state.uiIntent = decision.uiIntent.purpose;
+      if (decision.actionIntent !== undefined) {
+        state.pendingActionDecision = decision;
+      }
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      this.publishDecisionDataTask(message, state, decision.dataTasks[index]);
+    }
+    if (decision.actionIntent !== undefined && dataTaskIds.length === 0) {
+      state.virtualActionTaskId = uiTaskId;
+      this.publishActionPlanRequest(
+        message,
+        decision,
+        uiTaskId,
+        dataTaskIds,
+        dataTaskIds.length === 0
+      );
     }
   }
 
+  private hasUnboundLaterDataTask(state: LeaderTurnState, decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0 ||
+      decision.dataTasks.length === 0) {
+      return false;
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      if (!leaderInputHasEntityAuthority(
+        decision.dataTasks[index].toolId,
+        decision.dataTasks[index].input,
+        state.turnObservations
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private reusesCompletedDataTool(state: LeaderTurnState, decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute' || state.turnObservations.length === 0) {
+      return false;
+    }
+    const completedToolIds: Set<string> = new Set<string>();
+    for (let index = 0; index < state.turnObservations.length; index++) {
+      const observation: ObservationDigest = state.turnObservations[index];
+      const terminal: boolean = observation.status === 'success' || observation.status === 'partial' ||
+        observation.status === 'empty' || observation.status === 'error';
+      if (terminal && leaderIsDataCapability(this.planningContext, observation.toolId)) {
+        completedToolIds.add(observation.toolId);
+      }
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[taskIndex];
+      if (completedToolIds.has(task.toolId)) {
+        return true;
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (completedToolIds.has(task.allowedToolIds[allowedIndex])) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   private failPlanning(message: AgentMessage, state: LeaderTurnState, error: Object): void {
+    if (state.terminal || !state.planning) {
+      return;
+    }
+    state.planning = false;
+    this.clearPlanningTimer(state);
     state.releasePlanning = null;
-    if (state.terminal) {
+    if (this.canRenderObservedFallback(state)) {
+      this.publishObservedFallback(message, state);
       return;
     }
     this.finishTurn(state);
     const detail: string = error instanceof Error ? error.message : `${error}`;
-    this.publishError(message, 'LEADER_PLAN_FAILED', detail);
+    const code: string = error instanceof Error && detail === 'LEADER_TASK_INPUT_INVALID' ?
+      'LEADER_TASK_INPUT_INVALID' : 'LEADER_PLAN_FAILED';
+    this.publishError(message, code, detail);
+  }
+
+  private canRenderObservedFallback(state: LeaderTurnState): boolean {
+    return state.semantic &&
+      state.dataTaskIds.length > 0 &&
+      state.turnObservations.length > 0 &&
+      state.pendingDataTools.size === 0 &&
+      state.pendingAnswer === null &&
+      !state.uiDone;
+  }
+
+  private publishObservedFallback(message: AgentMessage, state: LeaderTurnState): void {
+    state.pendingAnswer = OBSERVATION_FALLBACK_ANSWER;
+    this.publishAccumulatedUiWithPendingAction(message, state);
+  }
+
+  private postObservationPlanningBudgetMs(state: LeaderTurnState): number {
+    const remainingMs: number = Math.max(1, state.deadlineAtMs - Date.now());
+    const proportionalReserveMs: number = Math.max(1, Math.floor(this.timeoutMs / 3));
+    const reserveMs: number = Math.min(
+      MAX_POST_OBSERVATION_UI_RESERVE_MS,
+      proportionalReserveMs
+    );
+    return Math.max(
+      1,
+      Math.min(MAX_POST_OBSERVATION_PLANNING_MS, remainingMs - reserveMs)
+    );
+  }
+
+  private timeoutPostObservationPlanning(key: string, state: LeaderTurnState): void {
+    if (this.turns.get(key) !== state || state.terminal || !state.planning ||
+      !this.canRenderObservedFallback(state)) {
+      return;
+    }
+    state.planning = false;
+    this.clearPlanningTimer(state);
+    this.releasePlanning(state);
+    this.publishObservedFallback(this.inputMessage(state), state);
+  }
+
+  private handleSemanticObservation(state: LeaderTurnState, message: AgentMessage): void {
+    const pending: LeaderPendingDataTask | undefined = state.pendingDataTools.get(message.taskId);
+    if (pending === undefined) {
+      return;
+    }
+    const digest: ObservationDigest = message.type === AgentMessageType.TASK_RESULT_DATA ?
+      this.resultDigest(message, pending) : this.errorDigest(message, pending.toolId);
+    state.pendingDataTools.delete(message.taskId);
+    state.observations.push(digest);
+    state.turnObservations.push(digest);
+    state.observations = this.boundedObservations(state.observations as Object[]);
+    if (state.pendingDataTools.size > 0) {
+      return;
+    }
+    if (state.round >= 3) {
+      const inputMessage: AgentMessage = this.inputMessage(state);
+      if (this.canRenderObservedFallback(state)) {
+        this.publishObservedFallback(inputMessage, state);
+      } else {
+        this.finishTurn(state);
+        this.publishError(inputMessage, 'LEADER_ROUND_LIMIT', 'Leader cannot plan more than three rounds');
+      }
+      return;
+    }
+    state.round++;
+    state.input = this.inputWithObservations(state.input, state.observations);
+    this.startPlanning(this.inputMessage(state), state.input, state);
+  }
+
+  private handleSemanticUiResult(state: LeaderTurnState, message: AgentMessage): void {
+    const payload = message.payload as UiRenderResultPayload | null;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload) ||
+      typeof payload.surfaceId !== 'string' || payload.surfaceId.trim().length === 0 ||
+      (payload.state !== 'result' && payload.state !== 'error')) {
+      return;
+    }
+    state.uiDone = true;
+    state.uiState = payload.state;
+    state.uiSurfaceId = payload.surfaceId.trim();
+    if (state.pendingAnswer === null) {
+      return;
+    }
+    const answer: string = state.pendingAnswer;
+    state.pendingAnswer = null;
+    const input: AgentMessage = this.inputMessage(state);
+    this.publishTurnResult(input, state, answer);
+    this.finishTurn(state);
+  }
+
+  private resultDigest(message: AgentMessage, pending: LeaderPendingDataTask): ObservationDigest {
+    const payload = message.payload as Object | null;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      return this.invalidResultDigest(message, pending.toolId);
+    }
+    const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
+    const toolId = values['toolId'];
+    const outputSchema = values['outputSchema'];
+    const resultStatus = values['status'];
+    const sources = values['sources'];
+    const data = values['data'];
+    const warnings = values['warnings'];
+    const error = values['error'];
+    const validStatus: boolean = resultStatus === 'success' || resultStatus === 'partial' ||
+      resultStatus === 'empty' || resultStatus === 'error';
+    const validError: boolean = error === undefined || this.validResultError(error);
+    const validResult: boolean = toolId === pending.toolId && outputSchema === pending.outputSchema &&
+      validStatus && Array.isArray(sources) && data !== null && typeof data === 'object' &&
+      !Array.isArray(data) && Array.isArray(warnings) && validError;
+    const status: string = validResult ? resultStatus as string : 'error';
+    let summary: string = validResult ? pending.toolId + ' returned ' + status : 'Data task output was invalid';
+    let entityRefs: string[] = [];
+    if (validResult) {
+      const dataValues = data as Record<string, Object | string | number | boolean | null | undefined>;
+      const dataSummary = dataValues['summary'];
+      const dataEntityRefs = dataValues['entityRefs'];
+      if (typeof dataSummary === 'string' && dataSummary.trim().length > 0) {
+        summary = dataSummary;
+      }
+      if (Array.isArray(dataEntityRefs)) {
+        entityRefs = this.boundedStrings(dataEntityRefs as Object[], 16, 128);
+      }
+      if (summary === pending.toolId + ' returned ' + status &&
+        error !== undefined) {
+        const errorValues = error as Record<string, Object | string | number | boolean | null | undefined>;
+        summary = 'Data task failed: ' + (errorValues['code'] as string);
+      }
+    }
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId: pending.toolId,
+      status,
+      summary: this.boundedText(summary, 240),
+      entityRefs
+    };
+  }
+
+  private invalidResultDigest(message: AgentMessage, toolId: string): ObservationDigest {
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId,
+      status: 'error',
+      summary: 'Data task output was invalid',
+      entityRefs: []
+    };
+  }
+
+  private validResultError(error: Object | string | number | boolean | null): boolean {
+    if (error === null || typeof error !== 'object' || Array.isArray(error)) {
+      return false;
+    }
+    const keys: string = Object.keys(error).sort().join(',');
+    if (keys !== 'code,message' && keys !== 'code,message,retryable') {
+      return false;
+    }
+    const values = error as Record<string, Object | string | number | boolean | null | undefined>;
+    return typeof values['code'] === 'string' && (values['code'] as string).trim().length > 0 &&
+      typeof values['message'] === 'string' &&
+      (values['retryable'] === undefined || typeof values['retryable'] === 'boolean');
+  }
+
+  private errorDigest(message: AgentMessage, toolId: string): ObservationDigest {
+    const payload: TaskErrorPayload = message.payload as TaskErrorPayload;
+    const summary: string = payload !== null && typeof payload === 'object' &&
+      typeof payload.code === 'string' && payload.code.trim().length > 0 ?
+      'Data task failed: ' + payload.code : 'Data task failed';
+    return {
+      taskId: this.boundedText(message.taskId, 128),
+      toolId,
+      status: 'error',
+      summary: this.boundedText(summary, 240),
+      entityRefs: []
+    };
+  }
+
+  private inputWithObservations(
+    input: InputUserPayload,
+    observations: ObservationDigest[]
+  ): InputUserPayload {
+    return {
+      text: input.text,
+      recentMessages: input.recentMessages,
+      previousPersonaId: input.previousPersonaId,
+      currentSurfaceSummary: input.currentSurfaceSummary,
+      recentObservations: this.boundedObservations(observations as Object[])
+    };
+  }
+
+  private inputMessage(state: LeaderTurnState): AgentMessage {
+    return {
+      type: AgentMessageType.INPUT_USER,
+      conversationId: state.conversationId,
+      turnId: state.turnId,
+      taskId: state.inputTaskId,
+      payload: state.input
+    };
   }
 
   private hasCorrelation(message: AgentMessage): boolean {
@@ -221,38 +798,397 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private validPlan(plan: LeaderPlan): boolean {
     if (plan === undefined || plan === null ||
+      Array.isArray(plan) ||
+      !this.validLegacyPlanKeys(plan) ||
+      typeof plan.personaId !== 'string' ||
       typeof plan.skillId !== 'string' ||
-      !this.validSelectedSkill(plan.skillId) ||
-      plan.ui === undefined || plan.data === undefined) {
+      !this.validSelectedSkill(plan.personaId, plan.skillId) ||
+      plan.roundAction !== 'execute' ||
+      typeof plan.reasonCode !== 'string' || plan.reasonCode.trim().length === 0 ||
+      !this.validLegacyUi(plan.ui) ||
+      !Array.isArray(plan.dataTasks) || plan.dataTasks.length !== 1) {
       return false;
     }
-    const tool: LeaderToolMetadata | null = this.toolMetadata(plan.data.toolId);
+    const dataTask: LeaderDataTask = plan.dataTasks[0];
+    if (!this.validLegacyDataTask(dataTask)) {
+      return false;
+    }
+    const tool: LeaderToolMetadata | null = this.toolMetadata(dataTask.toolId);
     if (tool === null || tool.riskLevel !== 'read' ||
-      tool.outputSchema !== plan.data.outputSchema ||
+      tool.outputSchema !== dataTask.outputSchema ||
       tool.outputSchema !== plan.ui.expectedOutputSchema) {
       return false;
     }
-    if (plan.actionPlan !== undefined && !this.validDraft(plan.actionPlan, plan)) {
-      return false;
-    }
     return plan.ui.taskId.trim().length > 0 &&
-      plan.data.taskId.trim().length > 0 &&
-      plan.ui.taskId !== plan.data.taskId &&
+      dataTask.taskId.trim().length > 0 &&
+      plan.ui.taskId !== dataTask.taskId &&
       plan.ui.intent.trim().length > 0 &&
       plan.ui.expectedOutputSchema.trim().length > 0 &&
-      plan.ui.expectedOutputSchema === plan.data.outputSchema &&
-      plan.data.toolId.trim().length > 0 &&
-      plan.data.outputSchema.trim().length > 0;
+      plan.ui.expectedOutputSchema === dataTask.outputSchema &&
+      dataTask.toolId.trim().length > 0 &&
+      dataTask.outputSchema.trim().length > 0;
   }
 
-  private validSelectedSkill(skillId: string): boolean {
+  private validLegacyPlanKeys(plan: LeaderPlan): boolean {
+    const keys: string = Object.keys(plan).sort().join(',');
+    if (keys !== 'dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'actionIntent,dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'answer,dataTasks,personaId,reasonCode,roundAction,skillId,ui' &&
+      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,roundAction,skillId,ui') {
+      return false;
+    }
+    if (plan.actionIntent !== undefined && !this.validActionIntent(plan.actionIntent)) {
+      return false;
+    }
+    return plan.answer === undefined ||
+      (typeof plan.answer === 'string' && plan.answer.trim().length > 0);
+  }
+
+  private validLegacyUi(ui: LeaderUiTask): boolean {
+    return ui !== undefined && ui !== null && !Array.isArray(ui) &&
+      Object.keys(ui).sort().join(',') === 'expectedOutputSchema,intent,taskId' &&
+      typeof ui.taskId === 'string' &&
+      typeof ui.intent === 'string' &&
+      typeof ui.expectedOutputSchema === 'string';
+  }
+
+  private validLegacyDataTask(task: LeaderDataTask): boolean {
+    return task !== undefined && task !== null && !Array.isArray(task) &&
+      Object.keys(task).sort().join(',') === 'args,outputSchema,taskId,toolId' &&
+      typeof task.taskId === 'string' &&
+      typeof task.toolId === 'string' &&
+      typeof task.outputSchema === 'string' &&
+      task.args !== null && typeof task.args === 'object' && !Array.isArray(task.args);
+  }
+
+  private isExactLegacyPlan(result: LeaderPlannerResult): boolean {
+    return result !== undefined && result !== null && !Array.isArray(result) &&
+      this.validPlan(result as LeaderPlan);
+  }
+
+  private validDecision(decision: LeaderDecision, trustedCurrentLocalDate: string): boolean {
+    if (decision === undefined || decision === null) {
+      return false;
+    }
+    const rawKeys: string[] = Object.keys(decision);
+    const hasNormalizationDate: boolean =
+      rawKeys.indexOf('normalizationCurrentLocalDate') >= 0;
+    const normalizationDateMatchesAuthority: boolean =
+      this.validNormalizationCurrentLocalDate(decision.normalizationCurrentLocalDate) &&
+      decision.normalizationCurrentLocalDate === trustedCurrentLocalDate;
+    if ((hasNormalizationDate && !normalizationDateMatchesAuthority) ||
+      (decision.roundAction === 'execute' && this.dataTaskInputNormalizer !== null &&
+        Array.isArray(decision.dataTasks) &&
+        decision.dataTasks.length > 0 &&
+        !normalizationDateMatchesAuthority)) {
+      return false;
+    }
+    const keys: string = rawKeys
+      .filter((key: string): boolean => key !== 'normalizationCurrentLocalDate')
+      .sort()
+      .join(',');
+    if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
+      keys !== 'actionIntent,answer,dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent') {
+      return false;
+    }
+    if (typeof decision.personaId !== 'string' || decision.personaId.trim().length === 0 ||
+      typeof decision.skillId !== 'string' ||
+      !this.validDecisionPersonaSkill(decision.personaId, decision.skillId) ||
+      !this.validRoundAction(decision.roundAction) ||
+      typeof decision.reasonCode !== 'string' || decision.reasonCode.trim().length === 0 ||
+      !Array.isArray(decision.dataTasks) || !this.validUiIntent(decision.uiIntent) ||
+      !this.validRequestedCapabilityIds(decision.requestedCapabilityIds)) {
+      return false;
+    }
+    if ((decision.roundAction === 'execute' && decision.dataTasks.length === 0 &&
+      decision.actionIntent === undefined) ||
+      (decision.roundAction !== 'execute' && decision.dataTasks.length !== 0)) {
+      return false;
+    }
+    const answer = decision.answer;
+    if (answer !== undefined && (typeof answer !== 'string' || answer.trim().length === 0)) {
+      return false;
+    }
+    if ((decision.roundAction === 'answer' || decision.roundAction === 'clarify') &&
+      typeof answer !== 'string') {
+      return false;
+    }
+    if (!this.validDecisionTasks(decision.dataTasks)) {
+      return false;
+    }
+    const actionIntent = decision.actionIntent;
+    return (actionIntent === undefined || this.validActionIntent(actionIntent)) &&
+      this.requestedCapabilitiesMatchExecution(decision);
+  }
+
+  private validRequestedCapabilityIds(ids: string[]): boolean {
+    if (!Array.isArray(ids)) {
+      return false;
+    }
+    const unique: Set<string> = new Set<string>();
+    for (let index = 0; index < ids.length; index++) {
+      const id: string = ids[index];
+      if (typeof id !== 'string' || id.trim().length === 0 || unique.has(id) ||
+        !this.registeredCapability(id)) {
+        return false;
+      }
+      unique.add(id);
+    }
+    return true;
+  }
+
+  private registeredCapability(id: string): boolean {
+    for (let index = 0; index < this.planningContext.tools.length; index++) {
+      const tool = this.planningContext.tools[index];
+      if (tool.toolId === id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private requestedCapabilitiesMatchExecution(decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute') {
+      return true;
+    }
+    const required: Set<string> = new Set<string>();
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task = decision.dataTasks[taskIndex];
+      required.add(task.toolId);
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        required.add(task.allowedToolIds[allowedIndex]);
+      }
+    }
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        required.add(decision.actionIntent.allowedActionIds[index]);
+      }
+    }
+    const requested: string[] = decision.requestedCapabilityIds;
+    if (requested.length !== required.size) {
+      return false;
+    }
+    for (let index = 0; index < requested.length; index++) {
+      if (!required.has(requested[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private normalizeDecisionInputs(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    trustedCurrentLocalDate: string
+  ): void {
+    const normalizer: LeaderDataTaskInputNormalizer | null = this.dataTaskInputNormalizer;
+    if (normalizer === null) {
+      return;
+    }
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      decision.dataTasks[index].input =
+        normalizer(input, decision.dataTasks[index], trustedCurrentLocalDate);
+    }
+  }
+
+  private validNormalizationCurrentLocalDate(value: string | undefined): boolean {
+    if (typeof value !== 'string' || value.length !== 10 ||
+      value.charCodeAt(4) !== 45 || value.charCodeAt(7) !== 45) {
+      return false;
+    }
+    const digitIndexes: number[] = [0, 1, 2, 3, 5, 6, 8, 9];
+    for (let index = 0; index < digitIndexes.length; index++) {
+      const code: number = value.charCodeAt(digitIndexes[index]);
+      if (code < 48 || code > 57) {
+        return false;
+      }
+    }
+    const year: number = Number(value.substring(0, 4));
+    const month: number = Number(value.substring(5, 7));
+    const day: number = Number(value.substring(8, 10));
+    const timestamp: number = Date.UTC(year, month - 1, day);
+    const date = new Date(timestamp);
+    return date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
+  }
+
+  private validDecisionTasks(tasks: LeaderDecisionDataTask[]): boolean {
+    if (tasks.length > MAX_LEADER_DATA_TASKS_PER_ROUND) {
+      return false;
+    }
+    const localIds: Set<string> = new Set<string>();
+    for (let index = 0; index < tasks.length; index++) {
+      const task = tasks[index];
+      if (task === undefined || task === null ||
+        Object.keys(task).sort().join(',') !== 'allowedToolIds,goal,input,localId,required,toolId' ||
+        typeof task.localId !== 'string' || task.localId.trim().length === 0 || localIds.has(task.localId) ||
+        typeof task.goal !== 'string' || task.goal.trim().length === 0 ||
+        !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
+        typeof task.toolId !== 'string' || task.toolId.trim().length === 0 ||
+        task.input === null || typeof task.input !== 'object' || Array.isArray(task.input) ||
+        typeof task.required !== 'boolean') {
+        return false;
+      }
+      const allowed: Set<string> = new Set<string>();
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        const allowedId = task.allowedToolIds[allowedIndex];
+        if (typeof allowedId !== 'string' || allowedId.trim().length === 0 ||
+          allowed.has(allowedId) ||
+          !leaderIsDataCapability(this.planningContext, allowedId)) {
+          return false;
+        }
+        allowed.add(allowedId);
+      }
+      if (!allowed.has(task.toolId)) {
+        return false;
+      }
+      localIds.add(task.localId);
+    }
+    return true;
+  }
+
+  private validUiIntent(intent: Object): boolean {
+    if (intent === undefined || intent === null || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'preferredDensity,purpose,requiredSections') {
+      return false;
+    }
+    const values = intent as Record<string, Object | string | number | boolean | null | undefined>;
+    return typeof values['purpose'] === 'string' && (values['purpose'] as string).trim().length > 0 &&
+      typeof values['preferredDensity'] === 'string' &&
+      (values['preferredDensity'] as string).trim().length > 0 &&
+      Array.isArray(values['requiredSections']) &&
+      this.validUniqueStrings(values['requiredSections'] as Object[], true);
+  }
+
+  private validActionIntent(intent: Object | string | number | boolean | null): boolean {
+    if (intent === null || typeof intent !== 'object' || Array.isArray(intent) ||
+      Object.keys(intent).sort().join(',') !== 'allowedActionIds,goal') {
+      return false;
+    }
+    const values = intent as Record<string, Object | string | number | boolean | null | undefined>;
+    const allowedIds = values['allowedActionIds'];
+    if (typeof values['goal'] !== 'string' || (values['goal'] as string).trim().length === 0 ||
+      !Array.isArray(allowedIds) || !this.validUniqueStrings(allowedIds as Object[], false)) {
+      return false;
+    }
+    for (let index = 0; index < allowedIds.length; index++) {
+      const actionId: string = allowedIds[index] as string;
+      if (!leaderIsActionCapability(this.planningContext, actionId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private validUniqueStrings(values: Object[], allowEmpty: boolean): boolean {
+    if (!allowEmpty && values.length === 0) {
+      return false;
+    }
+    const seen: Set<string> = new Set<string>();
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index];
+      if (typeof value !== 'string' || value.trim().length === 0 || seen.has(value)) {
+        return false;
+      }
+      seen.add(value);
+    }
+    return true;
+  }
+
+  private validDecisionPersonaSkill(personaId: string, skillId: string): boolean {
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== personaId) {
+        continue;
+      }
+      if (skillId.length === 0) {
+        return true;
+      }
+      for (let skillIndex = 0; skillIndex < persona.activeSkills.length; skillIndex++) {
+        const skill = persona.activeSkills[skillIndex];
+        if (skill.skillId === skillId && skill.status === 'active') {
+          return true;
+        }
+      }
+      return false;
+    }
+    return false;
+  }
+
+  private decisionWithinSelectedSkill(decision: LeaderDecision): boolean {
+    if (decision.skillId.length === 0) {
+      return true;
+    }
+    let toolIds: string[] | null = null;
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== decision.personaId) {
+        continue;
+      }
+      for (let skillIndex = 0; skillIndex < persona.activeSkills.length; skillIndex++) {
+        const skill = persona.activeSkills[skillIndex];
+        if (skill.skillId === decision.skillId && skill.status === 'active') {
+          toolIds = skill.toolIds;
+          break;
+        }
+      }
+    }
+    if (toolIds === null) {
+      return false;
+    }
+    const declared = new Set<string>(toolIds);
+    for (let index = 0; index < decision.requestedCapabilityIds.length; index++) {
+      if (!declared.has(decision.requestedCapabilityIds[index])) {
+        return false;
+      }
+    }
+    for (let taskIndex = 0; taskIndex < decision.dataTasks.length; taskIndex++) {
+      const task = decision.dataTasks[taskIndex];
+      if (!declared.has(task.toolId)) {
+        return false;
+      }
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        if (!declared.has(task.allowedToolIds[allowedIndex])) {
+          return false;
+        }
+      }
+    }
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        if (!declared.has(decision.actionIntent.allowedActionIds[index])) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private validRoundAction(value: string): boolean {
+    return value === 'execute' || value === 'answer' || value === 'clarify';
+  }
+
+  private validSelectedSkill(personaId: string, skillId: string): boolean {
     if (skillId.trim().length === 0) {
       return true;
     }
-    for (let index = 0; index < this.planningContext.skills.length; index++) {
-      if (this.planningContext.skills[index].skillId === skillId) {
-        return true;
+    if (personaId.trim().length === 0) {
+      return false;
+    }
+    for (let personaIndex = 0; personaIndex < this.planningContext.personas.length; personaIndex++) {
+      const persona = this.planningContext.personas[personaIndex];
+      if (persona.personaId !== personaId) {
+        continue;
       }
+      const skills = persona.activeSkills;
+      for (let skillIndex = 0; skillIndex < skills.length; skillIndex++) {
+        if (skills[skillIndex].skillId === skillId) {
+          return true;
+        }
+      }
+      return false;
     }
     return false;
   }
@@ -267,39 +1203,67 @@ export class LeaderAgent extends MessageDrivenAgent {
     return null;
   }
 
-  private validDraft(draft: ActionPlanDraft, plan: LeaderPlan): boolean {
-    if (draft.planId.trim().length === 0 || draft.runId.trim().length === 0 ||
-      draft.label.trim().length === 0 || !Array.isArray(draft.steps) ||
-      draft.steps.length === 0 || draft.steps.length > 5 ||
-      draft.planId === draft.runId || draft.planId === plan.ui.taskId ||
-      draft.planId === plan.data.taskId || draft.runId === plan.ui.taskId ||
-      draft.runId === plan.data.taskId) {
-      return false;
-    }
-    const stepIds: Set<string> = new Set<string>();
-    for (let index = 0; index < draft.steps.length; index++) {
-      const step: ActionPlanStep = draft.steps[index];
-      if (step === undefined || step.stepId.trim().length === 0 ||
-        step.actionId.trim().length === 0 || stepIds.has(step.stepId)) {
-        return false;
-      }
-      stepIds.add(step.stepId);
-    }
-    return true;
-  }
-
   private turnKey(message: AgentMessage): string {
     return this.turnKeyFor(message.conversationId, message.turnId);
+  }
+
+  private boundedObservations(values: Object[]): ObservationDigest[] {
+    const result: ObservationDigest[] = [];
+    const start: number = values.length > 8 ? values.length - 8 : 0;
+    for (let index = start; index < values.length; index++) {
+      const value = values[index];
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const fields = value as Record<string, Object | string | number | boolean | null | undefined>;
+      const taskId = fields['taskId'];
+      const toolId = fields['toolId'];
+      const status = fields['status'];
+      const summary = fields['summary'];
+      const entityRefs = fields['entityRefs'];
+      if (typeof taskId !== 'string' || typeof toolId !== 'string' ||
+        typeof status !== 'string' || typeof summary !== 'string' || !Array.isArray(entityRefs)) {
+        continue;
+      }
+      result.push({
+        taskId: this.boundedText(taskId, 128),
+        toolId: this.boundedText(toolId, 128),
+        status: this.boundedText(status, 32),
+        summary: this.boundedText(summary, 240),
+        entityRefs: this.boundedStrings(entityRefs as Object[], 16, 128)
+      });
+    }
+    return result;
+  }
+
+  private boundedStrings(values: Object[], maximum: number, length: number): string[] {
+    const result: string[] = [];
+    for (let index = 0; index < values.length && result.length < maximum; index++) {
+      const value = values[index];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        result.push(this.boundedText(value, length));
+      }
+    }
+    return result;
+  }
+
+  private boundedText(value: string, maximum: number): string {
+    const trimmed: string = value.trim();
+    return trimmed.length > maximum ? trimmed.substring(0, maximum) : trimmed;
   }
 
   private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
     const payload: CreateUiTaskPayload = {
       taskId: task.taskId,
-      dataTaskId,
+      dataTaskIds: [dataTaskId],
       skillId: this.currentSkillId(input),
       intent: task.intent,
       expectedOutputSchema: task.expectedOutputSchema
     };
+    const personaId: string = this.currentPersonaId(input);
+    if (personaId.length > 0) {
+      payload.personaId = personaId;
+    }
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
@@ -312,10 +1276,14 @@ export class LeaderAgent extends MessageDrivenAgent {
   private publishDataTask(input: AgentMessage, task: LeaderDataTask): void {
     const payload: CreateDataTaskPayload = {
       taskId: task.taskId,
+      roundId: input.turnId,
       skillId: this.currentSkillId(input),
+      goal: task.toolId,
+      allowedToolIds: [task.toolId],
       toolId: task.toolId,
       outputSchema: task.outputSchema,
-      args: task.args
+      args: task.args,
+      required: true
     };
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_DATA,
@@ -326,24 +1294,186 @@ export class LeaderAgent extends MessageDrivenAgent {
     });
   }
 
-  private publishActionPlanDraft(input: AgentMessage, plan: LeaderPlan): void {
-    const draft: ActionPlanDraft | null = this.cloneDraft(plan.actionPlan as ActionPlanDraft);
-    if (draft === null) {
-      return;
-    }
-    const payload: ActionPlanDraftPayload = {
-      uiTaskId: plan.ui.taskId,
-      dataTaskId: plan.data.taskId,
-      sourceToolId: plan.data.toolId,
-      draft
+  private publishDecisionDataTask(
+    input: AgentMessage,
+    state: LeaderTurnState,
+    task: LeaderDecisionDataTask
+  ): void {
+    const definition: LeaderToolMetadata = this.toolMetadata(task.toolId) as LeaderToolMetadata;
+    const taskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':' + task.localId;
+    const payload: CreateDataTaskPayload = {
+      taskId,
+      roundId: state.turnId + ':round-' + state.round.toString(),
+      skillId: state.skillId,
+      goal: task.goal,
+      allowedToolIds: task.allowedToolIds.slice(),
+      toolId: task.toolId,
+      outputSchema: definition.outputSchema,
+      args: task.input,
+      required: task.required
     };
+    state.pendingDataTools.set(taskId, {
+      toolId: task.toolId,
+      outputSchema: definition.outputSchema
+    });
     this.bus.publish({
-      type: AgentMessageType.ACTION_PLAN_DRAFT,
+      type: AgentMessageType.TASK_CREATE_DATA,
       conversationId: input.conversationId,
       turnId: input.turnId,
-      taskId: `action-draft:${draft.runId}`,
+      taskId,
       payload
     });
+  }
+
+  private decisionDataTaskIds(
+    state: LeaderTurnState,
+    tasks: LeaderDecisionDataTask[]
+  ): string[] {
+    const ids: string[] = [];
+    for (let index = 0; index < tasks.length; index++) {
+      ids.push(
+        state.inputTaskId + ':round-' + state.round.toString() + ':' + tasks[index].localId
+      );
+    }
+    return ids;
+  }
+
+  private publishAccumulatedUiTask(
+    input: AgentMessage,
+    state: LeaderTurnState,
+  ): void {
+    const payload: CreateUiTaskPayload = {
+      taskId: state.uiTaskId,
+      dataTaskIds: state.dataTaskIds.slice(),
+      skillId: state.skillId,
+      intent: state.uiIntent,
+      expectedOutputSchema: state.expectedOutputSchema
+    };
+    if (state.personaId.length > 0) {
+      payload.personaId = state.personaId;
+    }
+    state.uiDone = false;
+    state.uiState = '';
+    state.uiSurfaceId = '';
+    this.bus.publish({
+      type: AgentMessageType.TASK_CREATE_UI,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: state.uiTaskId,
+      payload
+    });
+  }
+
+  private publishAccumulatedUiWithPendingAction(
+    input: AgentMessage,
+    state: LeaderTurnState
+  ): void {
+    this.publishAccumulatedUiTask(input, state);
+    if (state.pendingActionDecision !== null) {
+      this.publishActionPlanRequest(
+        input,
+        state.pendingActionDecision,
+        state.uiTaskId,
+        state.dataTaskIds,
+        false
+      );
+    }
+  }
+
+  private publishActionPlanRequest(
+    input: AgentMessage,
+    decision: LeaderDecision,
+    uiTaskId: string,
+    dataTaskIds: string[],
+    virtual: boolean
+  ): void {
+    const intent = decision.actionIntent as Object as Record<string, Object | string[]>;
+    const payload: ActionPlanRequestPayload = {
+      uiTaskId,
+      dataTaskIds: dataTaskIds.slice(),
+      goal: intent['goal'] as string,
+      allowedActionIds: (intent['allowedActionIds'] as string[]).slice(),
+      personaId: decision.personaId,
+      skillId: decision.skillId,
+      inputText: (input.payload as InputUserPayload).text
+    };
+    if (decision.normalizationCurrentLocalDate !== undefined) {
+      payload.currentLocalDate = decision.normalizationCurrentLocalDate;
+    }
+    if (virtual) {
+      payload.virtual = true;
+    }
+    this.bus.publish({
+      type: AgentMessageType.ACTION_PLAN_REQUEST,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: uiTaskId,
+      payload
+    });
+  }
+
+  private handleVirtualActionResult(state: LeaderTurnState, message: AgentMessage): void {
+    if (state.virtualActionTaskId.length === 0 || message.taskId !== state.virtualActionTaskId) {
+      return;
+    }
+    const result: ActionResultPayload = message.payload as ActionResultPayload;
+    if (result === null || typeof result !== 'object' || Array.isArray(result) ||
+      (result.status !== 'success' && result.status !== 'error' && result.status !== 'canceled')) {
+      return;
+    }
+    const virtualRunId = 'virtual:' + state.virtualActionTaskId;
+    if (result.surfaceId !== virtualRunId || result.planId !== 'direct:' + virtualRunId ||
+      result.runId !== virtualRunId) {
+      return;
+    }
+    this.finishTurn(state);
+  }
+
+  private publishTurnResult(
+    input: AgentMessage,
+    state: LeaderTurnState,
+    answer: string
+  ): void {
+    const payload: TurnResultPayload = {
+      status: state.uiState === 'error' ? 'error' : this.turnResultStatus(state),
+      roundCount: state.round,
+      message: state.uiState === 'error' ? 'Multi-agent UI rendering failed.' : answer
+    };
+    if (state.personaId.length > 0) {
+      payload.personaId = state.personaId;
+      payload.skillId = state.skillId;
+    }
+    if (state.uiSurfaceId.length > 0) {
+      payload.surfaceId = state.uiSurfaceId;
+    }
+    this.bus.publish({
+      type: AgentMessageType.TURN_RESULT,
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      taskId: state.inputTaskId,
+      payload
+    });
+  }
+
+  private turnResultStatus(state: LeaderTurnState): 'success' | 'partial' | 'empty' | 'error' {
+    if (state.turnObservations.length === 0) {
+      return 'success';
+    }
+    let hasSuccess: boolean = false;
+    let hasError: boolean = false;
+    for (let index = 0; index < state.turnObservations.length; index++) {
+      const status: string = state.turnObservations[index].status;
+      if (status === 'partial') {
+        return 'partial';
+      }
+      hasSuccess = hasSuccess || status === 'success';
+      hasError = hasError || status === 'error';
+    }
+    if (hasSuccess) {
+      return state.turnObservations.every((item: ObservationDigest): boolean =>
+        item.status === 'success') ? 'success' : 'partial';
+    }
+    return hasError ? 'error' : 'empty';
   }
 
   private currentSkillId(input: AgentMessage): string {
@@ -354,38 +1484,46 @@ export class LeaderAgent extends MessageDrivenAgent {
     return state.skillId;
   }
 
-  private cloneDraft(draft: ActionPlanDraft): ActionPlanDraft | null {
-    const cloned = cloneJsonValue(draft as Object);
-    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
-      Array.isArray(cloned.value)) {
-      return null;
-    }
-    return cloned.value as ActionPlanDraft;
+  private currentPersonaId(input: AgentMessage): string {
+    const state: LeaderTurnState | undefined = this.turns.get(this.turnKey(input));
+    return state === undefined ? '' : state.personaId;
   }
 
   private copyPlanningContext(context: LeaderPlanningContext): LeaderPlanningContext {
     const tools: LeaderToolMetadata[] = [];
-    const skills: LeaderSkillMetadata[] = [];
+    const personas: LeaderPersonaMetadata[] = [];
     for (let index = 0; index < context.tools.length; index++) {
       const tool = context.tools[index];
       tools.push({
         toolId: tool.toolId,
+        domain: tool.domain,
         intent: tool.intent,
         riskLevel: tool.riskLevel,
+        registeredBackends: tool.registeredBackends.slice(),
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
-        actions: tool.actions.slice()
+        actions: tool.actions.slice(),
+        planningHint: tool.planningHint
       });
     }
-    for (let index = 0; index < context.skills.length; index++) {
-      const skill = context.skills[index];
-      skills.push({
-        skillId: skill.skillId,
-        description: skill.description,
-        instructions: skill.instructions
+    for (let index = 0; index < context.personas.length; index++) {
+      const persona = context.personas[index];
+      personas.push({
+        personaId: persona.personaId,
+        name: persona.name,
+        soul: persona.soul,
+        memory: persona.memory,
+        previous: persona.previous,
+        activeSkills: persona.activeSkills.map((skill: LeaderSkillMetadata): LeaderSkillMetadata => ({
+          skillId: skill.skillId,
+          description: skill.description,
+          instructions: skill.instructions,
+          status: skill.status,
+          toolIds: skill.toolIds.slice()
+        }))
       });
     }
-    return { tools, skills };
+    return { tools, personas };
   }
 
   private publishError(message: AgentMessage, code: string, detail: string): void {
@@ -427,6 +1565,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     state.terminal = true;
     this.clearTurnTimer(state);
+    this.clearPlanningTimer(state);
     this.releasePlanning(state);
     const key: string = this.turnKeyFor(state.conversationId, state.turnId);
     if (this.turns.get(key) === state) {
@@ -439,6 +1578,13 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (state.timerId >= 0) {
       clearTimeout(state.timerId);
       state.timerId = -1;
+    }
+  }
+
+  private clearPlanningTimer(state: LeaderTurnState): void {
+    if (state.planningTimerId >= 0) {
+      clearTimeout(state.planningTimerId);
+      state.planningTimerId = -1;
     }
   }
 

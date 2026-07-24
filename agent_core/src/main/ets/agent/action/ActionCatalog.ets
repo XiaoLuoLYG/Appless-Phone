@@ -8,6 +8,18 @@ import {
 } from './ActionCatalogTypes';
 
 const WORKFLOW_ENTRY_ACTION_ID = 'workflow.run';
+const ACTION_INTENT_IDS: string[] = [
+  'worldcup.open',
+  'maps.route.open',
+  'calendar.event.create',
+  'gmail.draft.create',
+  'gmail.draft.apply',
+  'luckin.order.preview',
+  'social.post.preview',
+  'payment.send',
+  'payment.account.setup',
+  'whatsapp.message.send'
+];
 
 function denied(code: string, message: string): ActionCatalogResult {
   return {
@@ -29,6 +41,19 @@ function allowed(definition: ToolDefinition | null): ActionCatalogResult {
 
 function hasObjectArgs(args: Object): boolean {
   return args !== null && typeof args === 'object' && !Array.isArray(args);
+}
+
+function hasExactPaymentPreviewIntentArgs(args: Object): boolean {
+  if (!hasObjectArgs(args)) {
+    return false;
+  }
+  const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const keys = Object.keys(values);
+  const originalQuery = values['originalQuery'];
+  return keys.length === 1 &&
+    keys[0] === 'originalQuery' &&
+    typeof originalQuery === 'string' &&
+    originalQuery.trim().length > 0;
 }
 
 function malformedArgs(): ActionCatalogResult {
@@ -98,6 +123,46 @@ export class ActionCatalog {
     } catch (_error) {
       return authorityFailed();
     }
+  }
+
+  validatePageExecution(
+    conversationId: string,
+    turnId: string,
+    surfaceId: string,
+    actionId: string,
+    args: Object
+  ): ActionCatalogResult {
+    if (!hasObjectArgs(args)) {
+      return malformedArgs();
+    }
+    try {
+      const registered = this.validateRegisteredStep(actionId, args);
+      if (!registered.ok) {
+        return registered;
+      }
+      if (!this.surfaceAuthorizer.allows(conversationId, turnId, surfaceId, actionId, args)) {
+        return denied('ACTION_SURFACE_DENIED', 'Action does not match the current surface.');
+      }
+      return registered;
+    } catch (_error) {
+      return authorityFailed();
+    }
+  }
+
+  validateActionIntentExecution(actionId: string, args: Object): ActionCatalogResult {
+    if (ACTION_INTENT_IDS.indexOf(actionId) < 0) {
+      return denied(
+        'ACTION_INTENT_DENIED',
+        'Only registered no-Data actions with deterministic args may execute from actionIntent.'
+      );
+    }
+    if (actionId === 'payment.send' && !hasExactPaymentPreviewIntentArgs(args)) {
+      return denied(
+        'ACTION_INTENT_ARGS_DENIED',
+        'Virtual payment intent requires the exact resolver-owned preview request.'
+      );
+    }
+    return this.validateRegisteredStep(actionId, args);
   }
 
   validateRegisteredStep(actionId: string, args: Object): ActionCatalogResult {

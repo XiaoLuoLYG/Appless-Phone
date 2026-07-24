@@ -1,6 +1,8 @@
 import { AgentMessage, UserInputPayload } from '../message/AgentMessage';
-import { ActionPlanDraft } from '../action/ActionPlanTypes';
-import { ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
+import { ToolBackendType, ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
+
+export const MAX_LEADER_DATA_TASKS_PER_ROUND: number = 8;
+export const MAX_LEADER_DATA_TASKS_PER_TURN: number = 24;
 
 export type InputUserPayload = UserInputPayload;
 
@@ -17,37 +19,104 @@ export interface LeaderDataTask {
   args: Object;
 }
 
-export interface LeaderPlan {
+export type LeaderRoundAction = 'execute' | 'answer' | 'clarify';
+
+export interface LeaderActionIntent {
+  goal: string;
+  allowedActionIds: string[];
+}
+
+export interface LeaderDecisionDataTask {
+  localId: string;
+  goal: string;
+  allowedToolIds: string[];
+  toolId: string;
+  input: Object;
+  required: boolean;
+}
+
+export interface LeaderUiIntent {
+  purpose: string;
+  preferredDensity: string;
+  requiredSections: string[];
+}
+
+export interface LeaderDecision {
+  personaId: string;
   skillId: string;
+  requestedCapabilityIds: string[];
+  roundAction: LeaderRoundAction;
+  dataTasks: LeaderDecisionDataTask[];
+  uiIntent: LeaderUiIntent;
+  normalizationCurrentLocalDate?: string;
+  actionIntent?: LeaderActionIntent;
+  answer?: string;
+  reasonCode: string;
+}
+
+export interface LeaderPlan {
+  personaId: string;
+  skillId: string;
+  roundAction: LeaderRoundAction;
   ui: LeaderUiTask;
-  data: LeaderDataTask;
-  actionPlan?: ActionPlanDraft;
+  dataTasks: LeaderDataTask[];
+  actionIntent?: LeaderActionIntent;
+  answer?: string;
+  reasonCode: string;
 }
 
 export interface LeaderToolMetadata {
   toolId: string;
+  domain: string;
   intent: string;
   riskLevel: ToolRiskLevel;
+  registeredBackends: ToolBackendType[];
   inputSchema: string;
   outputSchema: string;
   actions: string[];
+  planningHint?: string;
 }
 
 export interface LeaderSkillMetadata {
   skillId: string;
   description: string;
   instructions: string;
+  status: string;
+  toolIds: string[];
+}
+
+export interface LeaderPersonaMetadata {
+  personaId: string;
+  name: string;
+  soul: string;
+  memory: string;
+  previous: boolean;
+  activeSkills: LeaderSkillMetadata[];
 }
 
 export interface LeaderPlanningContext {
   tools: LeaderToolMetadata[];
-  skills: LeaderSkillMetadata[];
+  personas: LeaderPersonaMetadata[];
 }
+
+export type LeaderDataTaskInputNormalizer = (
+  input: InputUserPayload,
+  task: LeaderDecisionDataTask,
+  currentLocalDate: string
+) => Object;
+
+export type LeaderCurrentLocalDateProvider = () => string;
+
+export type LeaderPlannerResult = LeaderPlan | LeaderDecision;
+export type LeaderPlanningSignal = () => boolean;
 
 export interface LeaderPlanner {
   plan(
     message: AgentMessage,
     input: InputUserPayload,
-    context: LeaderPlanningContext
-  ): Promise<LeaderPlan>;
+    context: LeaderPlanningContext,
+    round?: number,
+    signal?: LeaderPlanningSignal,
+    currentLocalDate?: string
+  ): Promise<LeaderPlannerResult>;
 }

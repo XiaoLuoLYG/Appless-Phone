@@ -8,6 +8,9 @@ import {
   ActionPlanStepOutput,
   JsonValue
 } from './ActionPlanTypes';
+import { ActionOffer } from './ActionOfferTypes';
+
+export const VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID: string = 'virtual.action-intent';
 
 export interface WorkflowRunArgs {
   planId: string;
@@ -19,6 +22,28 @@ export interface ActionPlanDraftPayload {
   dataTaskId: string;
   sourceToolId: string;
   draft: ActionPlanDraft;
+}
+
+export interface ActionPlanRequestPayload {
+  uiTaskId: string;
+  dataTaskIds: string[];
+  goal: string;
+  allowedActionIds: string[];
+  personaId?: string;
+  skillId: string;
+  inputText?: string;
+  currentLocalDate?: string;
+  virtual?: boolean;
+}
+
+export interface VirtualActionIntent {
+  sourceToolId: string;
+  offer: ActionOffer;
+  autoRun: boolean;
+}
+
+export interface VirtualActionIntentResolver {
+  resolve(request: ActionPlanRequestPayload): Promise<VirtualActionIntent | null>;
 }
 
 export interface ActionPlanReadyPayload {

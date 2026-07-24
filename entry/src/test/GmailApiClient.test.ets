@@ -19,5 +19,24 @@ export default function gmailApiClientTest() {
       expect(detail.cc[0]).assertEqual('Bob <bob@example.com>');
       expect(detail.bodyText).assertEqual('Hello Gmail');
     });
+
+    it('keeps a real full Gmail MIME body beyond the Dynamic preview limit', 0, () => {
+      const encodedBody = 'QUFB'.repeat(500);
+      const payload = JSON.parse('{"successful":true,"data":{"id":"thread-long","messages":[' +
+        '{"id":"message-long","threadId":"thread-long","payload":{"mimeType":"text/plain",' +
+        '"headers":[{"name":"Subject","value":"Long status"},{"name":"From",' +
+        '"value":"Alice <alice@example.com>"},{"name":"To","value":"Me <me@example.com>"}],' +
+        '"body":{"data":"' + encodedBody + '"}}}]}}') as Object;
+      const detail = gmailMailDetailFromPayload(payload, {
+        requestKey: 'gmail:thread-long',
+        provider: 'gmail',
+        threadId: 'thread-long',
+        messageId: 'message-long',
+        subject: 'Fallback subject'
+      });
+
+      expect(detail.bodyText.length).assertEqual(1500);
+      expect(detail.bodyText).assertEqual('A'.repeat(1500));
+    });
   });
 }

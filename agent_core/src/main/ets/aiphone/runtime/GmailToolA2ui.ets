@@ -1,5 +1,10 @@
 import { DynamicGenericToolResult } from './DynamicToolTypes';
 import {
+  gmailSearchStructuredDataFromResults,
+  GmailSearchStructuredData,
+  GmailThreadSummary
+} from './GmailToolNormalizer';
+import {
   A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TOOL_CONNECT_CARD,
@@ -36,7 +41,17 @@ interface GmailReplyDraftActionArgs {
   contextSummary: string;
 }
 
-type GmailJsonValue = Object | string | number | boolean | null | undefined;
+export interface GmailDraftApplyActionArgs {
+  provider: string;
+  draftId: string;
+  to: string[];
+  subject: string;
+  body: string;
+  threadId: string;
+}
+
+type GmailDraftValue = Object | string | number | boolean | null | undefined;
+type GmailDraftRecord = Record<string, GmailDraftValue>;
 
 function action(id: string, label: string, prompt: string, variant: string, kind: string, args: Object | null = null): A2uiAction {
   const next: A2uiAction = {
@@ -144,6 +159,115 @@ function resultFromDynamic(result: DynamicGenericToolResult): A2uiGenericToolRes
   };
 }
 
+function gmailDraftRecord(value: GmailDraftValue): GmailDraftRecord | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ?
+    value as GmailDraftRecord : null;
+}
+
+function gmailDraftText(value: GmailDraftValue): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function gmailDraftIdFromJson(rawPreview: string): string {
+  if (rawPreview.trim().length === 0 || rawPreview.trim().charAt(0) !== '{') {
+    return '';
+  }
+  try {
+    const root = gmailDraftRecord(JSON.parse(rawPreview) as Object);
+    if (root === null) {
+      return '';
+    }
+    const containers: GmailDraftRecord[] = [root];
+    ['data', 'result', 'draft'].forEach((key: string) => {
+      const nested = gmailDraftRecord(root[key]);
+      if (nested !== null) {
+        containers.push(nested);
+      }
+    });
+    for (let index = 0; index < containers.length; index++) {
+      const record = containers[index];
+      const candidate = gmailDraftText(record['draftId']).length > 0 ?
+        gmailDraftText(record['draftId']) :
+        gmailDraftText(record['draft_id']);
+      if (candidate.length > 0) {
+        return candidate;
+      }
+    }
+  } catch (_error) {
+    return '';
+  }
+  return '';
+}
+
+function gmailDraftIdFromResult(result: DynamicGenericToolResult): string {
+  for (let index = 0; index < result.rows.length; index++) {
+    const row = result.rows[index];
+    const label = row.label.trim().toLowerCase().replace(/[_\s-]/g, '');
+    if (label === 'draftid' && row.value.trim().length > 0) {
+      return row.value.trim();
+    }
+  }
+  return gmailDraftIdFromJson(result.rawPreview);
+}
+
+function gmailDraftProvider(result: DynamicGenericToolResult): string {
+  const source = result.sourceTag.trim().toLowerCase();
+  if (source.indexOf('composio') >= 0) {
+    return 'composio';
+  }
+  if (source.indexOf('gmail api') >= 0 || source.indexOf('gmail oauth') >= 0) {
+    return 'gmail_oauth';
+  }
+  return '';
+}
+
+function gmailDraftRecipients(value: GmailDraftValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const recipients: string[] = [];
+  value.forEach((item: GmailDraftValue) => {
+    if (typeof item === 'string' && item.trim().length > 0) {
+      recipients.push(item.trim());
+    }
+  });
+  return recipients;
+}
+
+export function gmailDraftApplyAction(
+  result: DynamicGenericToolResult,
+  originalArgs: Object | null
+): A2uiAction | null {
+  if (result.status !== 'success' || originalArgs === null || Array.isArray(originalArgs) ||
+    typeof originalArgs !== 'object') {
+    return null;
+  }
+  const provider = gmailDraftProvider(result);
+  const draftId = gmailDraftIdFromResult(result);
+  const args = originalArgs as GmailDraftRecord;
+  const to = gmailDraftRecipients(args['to']);
+  const body = typeof args['body'] === 'string' ? args['body'] as string : '';
+  if (provider.length === 0 || draftId.length === 0 || to.length === 0 || body.trim().length === 0) {
+    return null;
+  }
+  const actionArgs: GmailDraftApplyActionArgs = {
+    provider: provider,
+    draftId: draftId,
+    to: to,
+    subject: typeof args['subject'] === 'string' ? args['subject'] as string : '',
+    body: body,
+    threadId: typeof args['threadId'] === 'string' ? (args['threadId'] as string).trim() : ''
+  };
+  return action(
+    'gmail.draft.apply',
+    '应用 Gmail 草稿',
+    '确认应用刚才的 Gmail 草稿',
+    'primary',
+    'prompt',
+    actionArgs
+  );
+}
+
 function genericResultsA2ui(
   surfaceId: string,
   title: string,
@@ -174,47 +298,6 @@ function genericResultsFromDynamic(results: DynamicGenericToolResult[]): A2uiGen
   return mapped;
 }
 
-function textValue(value: GmailJsonValue): string {
-  if (value === undefined || value === null) {
-    return '';
-  }
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return value.toString();
-  }
-  return '';
-}
-
-function field(record: Record<string, GmailJsonValue>, names: string[]): string {
-  for (let index = 0; index < names.length; index++) {
-    const value = textValue(record[names[index]]);
-    if (value.length > 0 && value.charAt(0) !== '{') {
-      return value;
-    }
-  }
-  return '';
-}
-
-function nestedField(record: Record<string, GmailJsonValue>, names: string[]): string {
-  const direct = field(record, names);
-  if (direct.length > 0) {
-    return direct;
-  }
-  for (let index = 0; index < names.length; index++) {
-    const value = record[names[index]];
-    if (value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      const nested = value as Record<string, GmailJsonValue>;
-      const text = field(nested, ['email', 'address', 'name', 'displayName', 'display_name', 'value', 'id']);
-      if (text.length > 0) {
-        return text;
-      }
-    }
-  }
-  return '';
-}
-
 function appendRow(rows: A2uiLabelValueData[], label: string, value: string): void {
   const clean = value.trim();
   if (label.length > 0 && clean.length > 0) {
@@ -222,161 +305,78 @@ function appendRow(rows: A2uiLabelValueData[], label: string, value: string): vo
   }
 }
 
-function collectObjects(value: GmailJsonValue, records: Object[], depth: number): void {
-  if (records.length >= 12 || depth > 6 || value === undefined || value === null) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item: GmailJsonValue) => {
-      if (records.length < 12 && item !== undefined && item !== null && typeof item === 'object') {
-        records.push(item as Object);
-      }
-    });
-    return;
-  }
-  if (typeof value !== 'object') {
-    return;
-  }
-  const record = value as Record<string, GmailJsonValue>;
-  const preferred = ['threads', 'messages', 'emails', 'mails', 'items', 'results'];
-  for (let index = 0; index < preferred.length; index++) {
-    const child = record[preferred[index]];
-    if (Array.isArray(child)) {
-      collectObjects(child, records, depth + 1);
-      if (records.length > 0) {
-        return;
-      }
-    }
-  }
-  const nested = ['data', 'result', 'response', 'response_data'];
-  for (let index = 0; index < nested.length; index++) {
-    collectObjects(record[nested[index]], records, depth + 1);
-    if (records.length > 0) {
-      return;
-    }
-  }
-}
-
-function rawRecords(rawPreview: string): Object[] {
-  const records: Object[] = [];
-  if (rawPreview.trim().length === 0) {
-    return records;
-  }
-  try {
-    collectObjects(JSON.parse(rawPreview) as GmailJsonValue, records, 0);
-  } catch (_error) {
-  }
-  return records;
-}
-
-function isComposioGmailReadResult(result: DynamicGenericToolResult): boolean {
+function isGmailReadResult(result: DynamicGenericToolResult): boolean {
   if (result.status !== 'success') {
     return false;
   }
   const source = result.sourceTag.toLowerCase();
   const title = result.title.toLowerCase();
   const tool = result.toolName.toLowerCase();
-  if (source.indexOf('composio') < 0 && title.indexOf('composio') < 0) {
-    return false;
-  }
   if (tool.indexOf('draft') >= 0 || tool.indexOf('send') >= 0 || tool.indexOf('delete') >= 0 ||
     tool.indexOf('update') >= 0 || tool.indexOf('apply') >= 0) {
     return false;
   }
-  return source.indexOf('gmail') >= 0 || title.indexOf('gmail') >= 0 || tool.indexOf('gmail') >= 0;
+  return source.indexOf('gmail') >= 0 || title.indexOf('gmail') >= 0 || tool.indexOf('gmail') >= 0 ||
+    tool.indexOf('users.threads') === 0;
 }
 
-function gmailCardFromRecord(record: Object, fallbackTitle: string, fallbackSummary: string, index: number): A2uiGenericToolResultData {
-  const row = record as Record<string, GmailJsonValue>;
-  const threadId = field(row, ['threadId', 'thread_id', 'threadID', 'id']);
-  const messageId = field(row, ['messageId', 'message_id', 'messageID', 'id']);
-  const from = nestedField(row, ['from', 'sender', 'author']);
-  const to = nestedField(row, ['to', 'recipient', 'recipients']);
-  const date = field(row, ['date', 'receivedDateTime', 'received_at', 'createdAt', 'created_at', 'updatedAt', 'updated_at', 'internalDate']);
-  const subject = field(row, ['subject', 'title', 'name']);
-  const snippet = field(row, ['snippet', 'preview', 'summary', 'description', 'text', 'message', 'messageText', 'message_text']);
-  const title = subject.length > 0 ? subject : (snippet.length > 0 ? snippet.substring(0, 80) :
-    (fallbackTitle.length > 0 ? fallbackTitle : 'Gmail message ' + (index + 1).toString()));
+function gmailCardFromSummary(thread: GmailThreadSummary): A2uiGenericToolResultData {
   const rows: A2uiLabelValueData[] = [];
-  appendRow(rows, 'Thread ID', threadId);
-  appendRow(rows, 'Message ID', messageId);
-  appendRow(rows, 'From', from);
-  appendRow(rows, 'To', to);
-  appendRow(rows, 'Date', date);
-  appendRow(rows, 'Source', 'Composio Gmail');
+  appendRow(rows, 'Provider', thread.provider);
+  appendRow(rows, 'Account', thread.accountLabel);
+  appendRow(rows, 'Thread ID', thread.threadId);
+  appendRow(rows, 'Message ID', thread.messageId);
+  appendRow(rows, 'From', thread.from);
+  appendRow(rows, 'To', thread.to.join(', '));
+  appendRow(rows, 'Date', thread.receivedAt);
+  appendRow(rows, 'Unread', thread.unread ? 'true' : 'false');
+  appendRow(rows, 'Important', thread.important ? 'true' : 'false');
+  appendRow(rows, 'Source', thread.sourceUrl);
   return {
     sourceTag: 'Gmail API',
     toolName: 'users.threads.get',
-    title: title,
+    title: thread.subject,
     status: 'success',
-    summary: snippet.length > 0 ? snippet : fallbackSummary,
+    summary: thread.snippet,
     rows: rows,
-    rawPreview: JSON.stringify({ source: 'Composio Gmail', threadId: threadId, messageId: messageId })
+    rawPreview: JSON.stringify({
+      provider: thread.provider,
+      accountLabel: thread.accountLabel,
+      threadId: thread.threadId,
+      messageId: thread.messageId,
+      rawProviderRef: thread.rawProviderRef
+    })
   };
 }
 
-function firstRowPart(parts: string[], match: (value: string) => boolean): string {
-  for (let index = 0; index < parts.length; index++) {
-    const value = parts[index].trim();
-    if (match(value)) {
-      return value;
-    }
-  }
-  return '';
-}
-
-function gmailCardFromRow(row: A2uiLabelValueData, fallbackSummary: string, index: number): A2uiGenericToolResultData | null {
-  const label = row.label.trim();
-  const value = row.value.trim();
-  const lowerLabel = label.toLowerCase();
-  if (label.length === 0 || value.length === 0 ||
-    label === '执行工具' || label === '查询' || label === '结果数量' ||
-      lowerLabel === 'query' || lowerLabel === 'provider' || lowerLabel === 'tool id') {
-    return null;
-  }
-  const parts = value.split('|');
-  const idPart = firstRowPart(parts, (part: string): boolean => part.charAt(0) === '#');
-  const from = firstRowPart(parts, (part: string): boolean => part.indexOf('@') >= 0 || part.indexOf('<') >= 0);
-  const date = firstRowPart(parts, (part: string): boolean => Date.parse(part) > 0);
-  const summaryPart = firstRowPart(parts, (part: string): boolean =>
-    part.charAt(0) !== '#' && part.indexOf('http://') !== 0 && part.indexOf('https://') !== 0 &&
-      part !== from && part !== date);
-  const threadId = idPart.charAt(0) === '#' ? idPart.substring(1) : '';
-  const rows: A2uiLabelValueData[] = [];
-  appendRow(rows, 'Thread ID', threadId);
-  appendRow(rows, 'Message ID', threadId);
-  appendRow(rows, 'From', from);
-  appendRow(rows, 'Date', date);
-  appendRow(rows, 'Source', 'Composio Gmail');
-  return {
-    sourceTag: 'Gmail API',
-    toolName: 'users.threads.get',
-    title: label.indexOf('结果 ') === 0 ? 'Gmail message ' + (index + 1).toString() : label,
-    status: 'success',
-    summary: summaryPart.length > 0 ? summaryPart : (value.length > 0 ? value : fallbackSummary),
-    rows: rows,
-    rawPreview: JSON.stringify({ source: 'Composio Gmail', threadId: threadId })
-  };
+export function gmailSearchStructuredDataA2ui(
+  surfaceId: string,
+  toolId: string,
+  data: GmailSearchStructuredData
+): string {
+  const mapped: A2uiGenericToolResultData[] = [];
+  data.threads.forEach((thread: GmailThreadSummary) => mapped.push(gmailCardFromSummary(thread)));
+  genericResultsFromDynamic(data.extras).forEach((result: A2uiGenericToolResultData) => mapped.push(result));
+  const count = mapped.length;
+  return genericResultsA2ui(
+    surfaceId,
+    GMAIL_DISPLAY_NAME,
+    'ready',
+    'ready',
+    mapped,
+    summary(count.toString() + (count === 1 ? ' Gmail result returned for review.' : ' Gmail results returned for review.'), toolId, count)
+  );
 }
 
 export function gmailComposioThreadResults(result: DynamicGenericToolResult): A2uiGenericToolResultData[] {
   const mapped: A2uiGenericToolResultData[] = [];
-  if (!isComposioGmailReadResult(result)) {
+  const alreadyNormalizedDetail = result.rows.some((row: A2uiLabelValueData): boolean =>
+    row.label === 'Request Key');
+  if (!isGmailReadResult(result) || alreadyNormalizedDetail) {
     return mapped;
   }
-  const records = rawRecords(result.rawPreview);
-  records.forEach((record: Object, index: number) => {
-    mapped.push(gmailCardFromRecord(record, result.title, result.summary, index));
-  });
-  if (mapped.length > 0) {
-    return mapped;
-  }
-  result.rows.forEach((row: A2uiLabelValueData, index: number) => {
-    const card = gmailCardFromRow(row, result.summary, index);
-    if (card !== null) {
-      mapped.push(card);
-    }
-  });
+  const data = gmailSearchStructuredDataFromResults([result]);
+  data.threads.forEach((thread: GmailThreadSummary) => mapped.push(gmailCardFromSummary(thread)));
   return mapped;
 }
 
@@ -537,44 +537,35 @@ export function gmailThreadResultsA2ui(surfaceId: string, toolId: string, result
   );
 }
 
-export function gmailDraftPreviewA2ui(surfaceId: string, result: DynamicGenericToolResult): string {
-  const mapped = genericResultsFromDynamic([result]);
+export function gmailDraftPreviewA2ui(
+  surfaceId: string,
+  result: DynamicGenericToolResult,
+  originalArgs: Object | null = null,
+  sourceToolId: string = result.toolName
+): string {
+  const draftApply = gmailDraftApplyAction(result, originalArgs);
+  const rendered: DynamicGenericToolResult = {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview,
+    registration: result.registration,
+    providerPhase: result.providerPhase
+  };
+  const mapped = genericResultsFromDynamic([rendered]);
+  if (draftApply !== null && mapped.length > 0) {
+    mapped[0].actions = [draftApply];
+  }
   return genericResultsA2ui(
     surfaceId,
     'Gmail Draft Preview',
     'ready',
     'draft',
     mapped,
-    summary('Draft prepared for review. It has not been sent.', result.toolName, 1)
-  );
-}
-
-export function gmailBlockedSendA2ui(surfaceId: string, toolId: string): string {
-  const blockedSummary = 'UnsafeActionBlocked：不会自动发送 Gmail。请先查看草稿内容，确认收件人和正文后，创建或打开 Gmail 草稿由用户手动发送。';
-  const result: A2uiGenericToolResultData = {
-    sourceTag: 'Safety policy',
-    toolName: toolId,
-    title: 'UnsafeActionBlocked',
-    status: 'blocked',
-    summary: blockedSummary,
-    rows: [
-      { label: 'Blocked action', value: toolId },
-      { label: 'Next step', value: '创建或打开 Gmail 草稿，用户确认后手动发送。' }
-    ],
-    rawPreview: JSON.stringify({
-      blocked: true,
-      reason: 'unsafe_action_blocked',
-      toolId: toolId
-    })
-  };
-
-  return genericResultsA2ui(
-    surfaceId,
-    'UnsafeActionBlocked',
-    'blocked',
-    'blocked',
-    [result],
-    summary(blockedSummary, toolId, 1)
+    summary('Draft prepared for review. It has not been sent.', sourceToolId, 1)
   );
 }
 

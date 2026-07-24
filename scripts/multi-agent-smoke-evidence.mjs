@@ -1,0 +1,1250 @@
+const TURN_STATUSES = new Set(['success', 'partial', 'empty', 'error', 'canceled']);
+const DATA_STATUSES = new Set(['success', 'partial', 'empty', 'error']);
+const ACTION_STATUSES = new Set(['success', 'error', 'canceled']);
+const GENERATED_SURFACE = /^loop_surface_[0-9]+(?:_[0-9]+)?$/;
+const LIFECYCLE_MARKERS = new Set([
+  'MultiAgentInput', 'MultiAgentDataTask', 'MultiAgentDataResult',
+  'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
+  'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
+  'MultiAgentTurnResult', 'DynamicToolDiscovery'
+]);
+const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
+
+export function calendarEvidenceIdentityToken(kind, value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 16777619) >>> 0;
+  }
+  return `${kind}${hash.toString(16).padStart(8, '0')}`;
+}
+
+export function normalizeCalendarQaDate(value) {
+  const text = String(value || '').trim();
+  const match = /^(\d{4})(?:年|-)(\d{1,2})(?:月|-)(\d{1,2})(?:日)?$/.exec(text);
+  if (match === null) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const checked = new Date(Date.UTC(year, month - 1, day));
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 ||
+    checked.getUTCFullYear() !== year || checked.getUTCMonth() + 1 !== month || checked.getUTCDate() !== day) {
+    return '';
+  }
+  return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export async function runC19CleanupFinalizer({ cleanupRequired, runDelete, runAbsence }) {
+  let cleanup = { ok: true, skipped: true };
+  if (cleanupRequired) {
+    try {
+      cleanup = await runDelete();
+    } catch (error) {
+      cleanup = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  let absence;
+  try {
+    absence = await runAbsence();
+  } catch (error) {
+    absence = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  return { cleanup, absence };
+}
+
+function duplicateHilogChannelPair(left, right) {
+  return (left === 'A00000/AIPHONE' && right === 'A03D00/JSAPP') ||
+    (left === 'A03D00/JSAPP' && right === 'A00000/AIPHONE');
+}
+
+function duplicateHilogTimestamp(left, right) {
+  if (left === right) return true;
+  const milliseconds = (value) => Date.parse(`2000-${value.replace(/\s+/, 'T')}Z`);
+  const leftMs = milliseconds(left);
+  const rightMs = milliseconds(right);
+  return Number.isFinite(leftMs) && Number.isFinite(rightMs) &&
+    Math.abs(leftMs - rightMs) <= DUPLICATE_HILOG_MAX_SKEW_MS;
+}
+
+function records(logText) {
+  const result = [];
+  for (const [index, line] of String(logText || '').split('\n').entries()) {
+    const marker = /\[AIPhone\]\[([^\]]+)\]/.exec(line);
+    if (marker === null) continue;
+    const fields = {};
+    for (const match of line.matchAll(/\b([A-Za-z][A-Za-z0-9]*)=([^\s]+)/g)) {
+      fields[match[1]] = match[2];
+    }
+    const channelMatch = /\b(A00000|A03D00)\/(?:[^/\s:]+\/)*(AIPhone|JSAPP):\s*$/i
+      .exec(line.slice(0, marker.index));
+    const channel = channelMatch === null ? '' :
+      `${channelMatch[1].toUpperCase()}/${channelMatch[2].toUpperCase()}`;
+    const timestamp = /^\s*(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\b/.exec(line)?.[1] || '';
+    const normalized = line.slice(marker.index).trim();
+    const previous = result.at(-1);
+    if (LIFECYCLE_MARKERS.has(marker[1]) && previous !== undefined &&
+      previous.duplicatePaired !== true &&
+      timestamp.length > 0 && previous.timestamp.length > 0 &&
+      duplicateHilogTimestamp(previous.timestamp, timestamp) &&
+      previous.normalized === normalized &&
+      duplicateHilogChannelPair(previous.channel, channel)) {
+      previous.duplicatePaired = true;
+      continue;
+    }
+    result.push({
+      marker: marker[1],
+      fields,
+      index,
+      line,
+      channel,
+      timestamp,
+      normalized,
+      duplicatePaired: false
+    });
+  }
+  return result;
+}
+
+export { records as multiAgentEvidenceRecords };
+
+export function latestMultiAgentUiSurface(logText, options = {}) {
+  let latest = null;
+  for (const item of records(logText)) {
+    if (item.marker === 'MultiAgentUiResult' && item.fields.state === 'result' &&
+      GENERATED_SURFACE.test(item.fields.surface || '') && item.index > (options.afterIndex ?? -1) &&
+      (!options.expectedConversationId || item.fields.conversation === options.expectedConversationId) &&
+      (!options.expectedTurnId || item.fields.turn === options.expectedTurnId)) {
+      latest = {
+        conversationId: item.fields.conversation,
+        turnId: item.fields.turn,
+        taskId: item.fields.task,
+        surfaceId: item.fields.surface
+      };
+    }
+  }
+  return latest;
+}
+
+function list(value) {
+  return !value || value === 'none' ? [] : value.split(',').filter(Boolean);
+}
+
+function sameMultiset(actual, expected) {
+  return [...actual].sort().join('\n') === [...expected].sort().join('\n');
+}
+
+function nonnegativeInteger(value) {
+  return /^\d+$/.test(value || '') && Number(value) >= 0;
+}
+
+function targetRecords(all, options) {
+  const inputs = all.filter((item) => item.marker === 'MultiAgentInput');
+  const selected = [...inputs].reverse().find((item) =>
+    (!options.conversationId || item.fields.conversation === options.conversationId) &&
+    (!options.turnId || item.fields.turn === options.turnId));
+  if (selected === undefined) {
+    return { selected: null, events: [], window: [], stale: false, late: [] };
+  }
+  const conversation = selected.fields.conversation || '';
+  const turn = selected.fields.turn || '';
+  const terminal = all.find((item) => item.index > selected.index &&
+    item.marker === 'MultiAgentTurnResult' && item.fields.conversation === conversation &&
+    item.fields.turn === turn && item.fields.task === selected.fields.task);
+  const newerInput = inputs.find((item) => item.index > selected.index &&
+    (terminal === undefined || item.index < terminal.index) &&
+    item.fields.conversation === conversation && item.fields.turn !== turn);
+  const endIndex = terminal?.index ?? Number.MAX_SAFE_INTEGER;
+  const events = all.filter((item) => item.index >= selected.index && item.index <= endIndex &&
+    item.fields.conversation === conversation && item.fields.turn === turn);
+  const late = terminal === undefined ? [] : all.filter((item) =>
+    item.index > terminal.index && item.fields.conversation === conversation &&
+    item.fields.turn === turn && LIFECYCLE_MARKERS.has(item.marker));
+  return {
+    selected,
+    events,
+    stale: newerInput !== undefined,
+    late,
+    window: all.filter((item) => item.index >= selected.index && item.index <= endIndex)
+  };
+}
+
+function externalOrSyntheticError(events) {
+  return events.some((item) =>
+    /(?:ProviderExternalError|LocalToolException|SyntheticFallback)/.test(item.marker) ||
+    /(?:^|\s)synthetic=true(?:\s|$)/.test(item.line) ||
+    /(?:^|\s)(?:source|provider)=(?:mock|fixture|demo|synthetic)(?:\s|$)/i.test(item.line) ||
+    /"(?:status|success)"\s*:\s*(?:"error"|false)/i.test(item.line));
+}
+
+function aggregateStatus(terminals) {
+  if (terminals.length === 0) return '';
+  const statuses = terminals.map((item) => item.status);
+  if (statuses.includes('partial')) return 'partial';
+  const success = statuses.includes('success');
+  const error = statuses.includes('error');
+  if (success) return statuses.every((status) => status === 'success') ? 'success' : 'partial';
+  if (error) return 'error';
+  return 'empty';
+}
+
+function dependencyMatches(task, dependency, dataById) {
+  if (task.fields.tool !== dependency.toolId || task.fields.binding !== 'true' ||
+    task.fields.path !== dependency.path || task.fields.target !== dependency.target) {
+    return false;
+  }
+  const predecessor = dataById.get(task.fields.predecessor);
+  return predecessor !== undefined && predecessor.fields.tool === dependency.predecessorToolId &&
+    Number(predecessor.fields.round) === Number(task.fields.round) - 1 &&
+    predecessor.terminalIndex < task.index;
+}
+
+export function multiAgentTurnEvidence(logText, options = {}) {
+  const all = records(logText);
+  const { selected, events, stale, late, window } = targetRecords(all, options);
+  const failures = [];
+  if (selected === null || !selected.fields.conversation || !selected.fields.turn ||
+    !selected.fields.task) failures.push('missing_input');
+  if (stale) failures.push('stale_turn');
+  if (late.length > 0) failures.push('late_same_turn_marker');
+
+  const dataTasks = events.filter((item) => item.marker === 'MultiAgentDataTask');
+  const dataById = new Map();
+  for (const task of dataTasks) {
+    const round = Number(task.fields.round || 0);
+    if (!task.fields.task || dataById.has(task.fields.task) || !task.fields.tool ||
+      !/^[1-9]\d*$/.test(task.fields.round || '') ||
+      !['true', 'false'].includes(task.fields.binding || 'false')) {
+      failures.push('invalid_data_task');
+      continue;
+    }
+    task.round = round;
+    task.terminalIndex = Number.MAX_SAFE_INTEGER;
+    dataById.set(task.fields.task, task);
+  }
+  const rounds = [...new Set([...dataById.values()].map((item) => item.round))]
+    .sort((left, right) => left - right);
+  if (rounds.some((round, index) => round !== index + 1) ||
+    rounds.length < Number(options.minimumDataRounds || 0)) {
+    failures.push('invalid_data_rounds');
+  }
+
+  const terminalResults = [];
+  for (const task of dataById.values()) {
+    const matches = events.filter((item) => item.fields.task === task.fields.task &&
+      (item.marker === 'MultiAgentDataResult' || item.marker === 'MultiAgentTaskError'));
+    if (matches.length !== 1 || matches[0].index <= task.index) {
+      failures.push('missing_or_duplicate_data_terminal');
+      continue;
+    }
+    const terminal = matches[0];
+    task.terminalIndex = terminal.index;
+    if (terminal.marker === 'MultiAgentTaskError') {
+      terminalResults.push({ taskId: task.fields.task, toolId: task.fields.tool, status: 'error' });
+      continue;
+    }
+    const status = terminal.fields.status || '';
+    const errorPresent = terminal.fields.error === 'true';
+    if (terminal.fields.tool !== task.fields.tool || !DATA_STATUSES.has(status) ||
+      (status === 'error') !== errorPresent) failures.push('invalid_data_terminal');
+    terminalResults.push({ taskId: task.fields.task, toolId: task.fields.tool, status });
+  }
+  for (const result of events.filter((item) => item.marker === 'MultiAgentDataResult')) {
+    if (!dataById.has(result.fields.task)) failures.push('unknown_data_terminal');
+  }
+
+  for (const task of dataById.values()) {
+    if (task.round <= 1) continue;
+    const predecessors = [...dataById.values()].filter((item) => item.round === task.round - 1);
+    if (predecessors.length === 0 ||
+      predecessors.some((item) => item.terminalIndex >= task.index)) {
+      failures.push('overlapping_data_rounds');
+    }
+  }
+  for (const dependency of options.expectedDependencies || []) {
+    const candidates = [...dataById.values()].filter((task) =>
+      dependencyMatches(task, dependency, dataById));
+    if (candidates.length !== 1) failures.push('missing_dependency_binding');
+  }
+
+  const uiTasks = events.filter((item) => item.marker === 'MultiAgentUiTask');
+  const uiById = new Map();
+  const dependencyCounts = new Map();
+  for (const task of uiTasks) {
+    const dependencies = list(task.fields.dataTasks);
+    if (!task.fields.task || uiById.has(task.fields.task) || dependencies.length === 0 ||
+      new Set(dependencies).size !== dependencies.length) {
+      failures.push('invalid_ui_task');
+      continue;
+    }
+    task.dependencies = dependencies;
+    uiById.set(task.fields.task, task);
+    for (const taskId of dependencies) {
+      dependencyCounts.set(taskId, (dependencyCounts.get(taskId) || 0) + 1);
+    }
+  }
+  const uiTerminals = [];
+  let uiFailed = false;
+  for (const task of uiById.values()) {
+    if (task.dependencies.some((taskId) => !dataById.has(taskId))) {
+      failures.push('unknown_ui_dependency');
+    }
+    const results = events.filter((item) => item.marker === 'MultiAgentUiResult' &&
+      item.fields.task === task.fields.task);
+    const taskErrors = events.filter((item) => item.marker === 'MultiAgentTaskError' &&
+      item.fields.task === task.fields.task);
+    const terminals = results.filter((item) => ['result', 'error'].includes(item.fields.state));
+    const terminal = terminals[0] || taskErrors[0];
+    if (terminals.length + taskErrors.length !== 1 || terminal === undefined ||
+      terminal.index <= task.index ||
+      task.dependencies.some((taskId) => (dataById.get(taskId)?.terminalIndex ??
+        Number.MAX_SAFE_INTEGER) >= terminal.index) ||
+      results.some((item) => item.index <= task.index ||
+        !['skeleton', 'result', 'error', 'action'].includes(item.fields.state))) {
+      failures.push('invalid_ui_terminal');
+      continue;
+    }
+    if (taskErrors.length === 1) {
+      uiFailed = true;
+      continue;
+    }
+    const surfaces = new Set(results.map((item) => item.fields.surface));
+    if (surfaces.size !== 1 || !terminal.fields.surface || terminal.fields.surface === 'none') {
+      failures.push('invalid_ui_surface');
+    }
+    terminal.uiState = terminal.fields.state;
+    uiTerminals.push(terminal);
+    if (terminal.fields.state === 'error') uiFailed = true;
+  }
+  for (const result of events.filter((item) => item.marker === 'MultiAgentUiResult')) {
+    if (!uiById.has(result.fields.task)) failures.push('unknown_ui_terminal');
+  }
+  for (const taskId of dataById.keys()) {
+    if (dependencyCounts.get(taskId) !== 1) failures.push('missing_ui_task');
+  }
+
+  const knownTasks = new Set([
+    selected?.fields.task || '', ...dataById.keys(), ...uiById.keys()
+  ]);
+  for (const error of events.filter((item) => item.marker === 'MultiAgentTaskError')) {
+    if (!knownTasks.has(error.fields.task) || error.fields.task === selected?.fields.task) {
+      failures.push('unexpected_task_error');
+    }
+  }
+
+  const virtualPlans = events.filter((item) => item.marker === 'MultiAgentActionPlan' &&
+    item.fields.virtual === 'true' && list(item.fields.dataTasks).length === 0);
+  const toolIds = [
+    ...dataTasks.map((item) => item.fields.tool),
+    ...virtualPlans.flatMap((item) => list(item.fields.actions))
+  ].filter(Boolean);
+  if (Object.hasOwn(options, 'expectedToolIds') &&
+    !sameMultiset(toolIds, options.expectedToolIds || [])) failures.push('planned_tools_mismatch');
+
+  const turnResults = events.filter((item) => item.marker === 'MultiAgentTurnResult' &&
+    selected !== null && item.fields.task === selected.fields.task);
+  if (turnResults.length !== 1) failures.push('missing_or_duplicate_turn_result');
+  const turn = turnResults[0];
+  const status = turn?.fields.status || '';
+  if (!TURN_STATUSES.has(status) || !nonnegativeInteger(turn?.fields.roundCount) ||
+    !nonnegativeInteger(turn?.fields.messageChars) || Number(turn?.fields.messageChars) === 0) {
+    failures.push('invalid_turn_result');
+  }
+  if (rounds.length > 0 && Number(turn?.fields.roundCount || 0) < rounds.at(-1)) {
+    failures.push('invalid_turn_round_count');
+  }
+  const finalUi = [...uiTerminals].sort((left, right) => left.index - right.index).at(-1);
+  const finalUiSurface = finalUi?.fields.surface || '';
+  const finalUiTools = list(uiById.get(finalUi?.fields.task || '')?.fields.dataTasks)
+    .map((taskId) => dataById.get(taskId)?.fields.tool || '')
+    .filter(Boolean);
+  if (uiTasks.length > 0) {
+    if ((finalUiSurface.length > 0 && turn?.fields.surface !== finalUiSurface) ||
+      (finalUiSurface.length === 0 && turn?.fields.surface !== 'none')) {
+      failures.push('turn_surface_mismatch');
+    }
+  }
+
+  const virtualActions = virtualPlans.flatMap((item) => list(item.fields.actions));
+  const action = multiAgentActionEvidence(events.map((item) => item.normalized).join('\n'),
+    virtualPlans.length > 0 ? {
+      expectedActionId: virtualActions.length === 1 ? virtualActions[0] : 'invalid',
+      expectedConversationId: selected?.fields.conversation || 'invalid',
+      expectedTurnId: selected?.fields.turn || 'invalid',
+      expectedVirtual: true
+    } : {});
+  const dataStatus = aggregateStatus(terminalResults);
+  const expectedTurnStatus = uiFailed ? 'error' : dataStatus;
+  if (dataTasks.length > 0 && status !== 'canceled' && expectedTurnStatus !== status) {
+    failures.push('terminal_status_mismatch');
+  }
+  if (dataTasks.length === 0 && toolIds.length > 0 && !action.complete) {
+    failures.push('missing_action_terminal');
+  }
+  if (dataTasks.length === 0 && action.complete && status !== action.status) {
+    failures.push('action_turn_status_mismatch');
+  }
+  const textResult = dataTasks.length === 0 && toolIds.length === 0 &&
+    Number(turn?.fields.messageChars || 0) > 0 && turn?.fields.surface === 'none';
+  if (dataTasks.length === 0 && toolIds.length === 0 && !textResult) failures.push('missing_text_result');
+  if (externalOrSyntheticError(window) &&
+    (status === 'success' || status === 'partial' || status === 'empty')) {
+    failures.push('external_or_synthetic_success');
+  }
+
+  const complete = failures.length === 0;
+  return {
+    complete,
+    ok: complete && (status === 'success' || status === 'partial' || status === 'empty'),
+    status,
+    conversationId: selected?.fields.conversation || '',
+    turnId: selected?.fields.turn || '',
+    toolIds,
+    dataTasks: dataTasks.map((item) => ({
+      taskId: item.fields.task,
+      toolId: item.fields.tool,
+      roundNumber: Number(item.fields.round || 0),
+      predecessorTaskId: item.fields.predecessor || ''
+    })),
+    textResult,
+    surfaceId: turn?.fields.surface || '',
+    finalUiSurfaceId: finalUiSurface,
+    finalUiToolIds: finalUiTools,
+    surfaceIds: events.filter((item) => item.marker === 'MultiAgentUiResult')
+      .map((item) => item.fields.surface),
+    terminalIndex: turn?.index ?? -1,
+    failures
+  };
+}
+
+export function dynamicToolDiscoveryEvidence(logText, options = {}) {
+  const expectedSelectedToolId = String(options.expectedSelectedToolId || '');
+  const expectedProvider = String(options.expectedProvider || '');
+  const expectedQualifiedName = String(options.expectedQualifiedName || '');
+  const lifecycle = multiAgentTurnEvidence(logText, { expectedToolIds: ['dynamic.search'] });
+  const failed = {
+    ok: false,
+    selectedToolId: '',
+    provider: '',
+    qualifiedName: '',
+    status: '',
+    source: false,
+    auth: false,
+    receipt: ''
+  };
+  if (!lifecycle.complete || expectedSelectedToolId.length === 0) return failed;
+  const dynamicTasks = lifecycle.dataTasks.filter((task) => task.toolId === 'dynamic.search');
+  if (dynamicTasks.length !== 1) return failed;
+  const taskId = dynamicTasks[0].taskId;
+  const all = records(logText);
+  const task = all.find((item) => item.marker === 'MultiAgentDataTask' &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId &&
+    item.fields.tool === 'dynamic.search');
+  const terminal = all.find((item) => item.marker === 'MultiAgentDataResult' &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId &&
+    item.fields.tool === 'dynamic.search');
+  if (task === undefined || terminal === undefined || terminal.index <= task.index) return failed;
+  const matches = all.filter((item) => item.marker === 'DynamicToolDiscovery' &&
+    item.index > task.index && item.index < terminal.index &&
+    item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId &&
+    item.fields.task === taskId);
+  if (matches.length !== 1) return failed;
+  const marker = matches[0];
+  const qualifiedName = marker.fields.qualifiedName || '';
+  const provider = marker.fields.provider || '';
+  const status = marker.fields.status || '';
+  const source = marker.fields.source === 'true';
+  const auth = marker.fields.auth === 'true';
+  const authFact = auth || marker.fields.auth === 'false';
+  const receipt = marker.fields.receipt || '';
+  const receiptFact = receipt === 'absent' || receipt === 'matched';
+  const exactQualifiedName = expectedQualifiedName.length === 0 ||
+    qualifiedName === expectedQualifiedName;
+  const correlatedAuth = auth && status === 'error' && qualifiedName === 'dynamic.search';
+  const authStatusConsistent = !auth || status === 'error';
+  const ok = marker.fields.selectedToolId === expectedSelectedToolId &&
+    (expectedProvider.length === 0 || provider === expectedProvider) &&
+    provider !== 'invalid' &&
+    qualifiedName !== 'invalid' &&
+    /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(provider) &&
+    /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(qualifiedName) &&
+    status === terminal.fields.status &&
+    source &&
+    authFact &&
+    authStatusConsistent &&
+    (exactQualifiedName || correlatedAuth) &&
+    receiptFact;
+  return {
+    ok,
+    selectedToolId: marker.fields.selectedToolId || '',
+    provider,
+    qualifiedName,
+    status,
+    source,
+    auth,
+    receipt
+  };
+}
+
+const DYNAMIC_AUTH_CARD_TITLES = {
+  github_find_pull_requests: 'Composio GitHub 结果',
+  googledrive_find_file: 'Composio Google Drive 结果',
+  googledocs_search_documents: 'Composio Google Docs 结果'
+};
+
+export function dynamicAuthOutcomeAssessment({
+  discovery = null,
+  lifecycle = null,
+  expectedQualifiedName = '',
+  layoutText = ''
+} = {}) {
+  const failures = [];
+  const expectedCardTitle = DYNAMIC_AUTH_CARD_TITLES[expectedQualifiedName] || '';
+  if (expectedCardTitle.length === 0) failures.push('unsupported_dynamic_auth_case');
+  if (discovery === null || discovery.ok !== true) failures.push('uncorrelated_dynamic_discovery');
+  if (discovery?.selectedToolId !== 'dynamic.search') failures.push('wrong_selected_tool');
+  if (discovery?.provider !== 'composio') failures.push('wrong_provider');
+  if (discovery?.qualifiedName !== 'dynamic.search') failures.push('wrong_auth_qualified_name');
+  if (discovery?.status !== 'error' || discovery?.auth !== true || discovery?.source !== true) {
+    failures.push('not_truthful_auth_terminal');
+  }
+  if (discovery?.receipt !== 'absent' && discovery?.receipt !== 'matched') {
+    failures.push('invalid_receipt');
+  }
+  if (lifecycle === null || lifecycle.complete !== true || lifecycle.status !== 'error' ||
+    !Array.isArray(lifecycle.toolIds) || lifecycle.toolIds.length !== 1 ||
+    lifecycle.toolIds[0] !== 'dynamic.search') {
+    failures.push('invalid_auth_lifecycle');
+  }
+  const visibleText = String(layoutText || '');
+  if (expectedCardTitle.length > 0 && !visibleText.includes(expectedCardTitle)) {
+    failures.push('missing_provider_auth_card');
+  }
+  if (!/(?:Composio 未配置|尚未授权|未授权|需要授权|授权后|needs_auth|auth_required|待授权)/i.test(visibleText)) {
+    failures.push('missing_auth_ui_state');
+  }
+  const allowsCorrelatedDynamicAuth = failures.length === 0;
+  return {
+    allowsCorrelatedDynamicAuth,
+    ok: false,
+    status: allowsCorrelatedDynamicAuth ? 'BLOCKED' : 'FAIL',
+    failures
+  };
+}
+
+export function toolExecutionEvidence(logText, options = {}) {
+  const expectedToolIds = Array.isArray(options.expectedToolIds) ?
+    options.expectedToolIds.filter((toolId) => typeof toolId === 'string' && toolId.length > 0) : [];
+  const all = records(logText);
+  const hasMultiAgentInput = all.some((item) => item.marker === 'MultiAgentInput');
+  const lifecycle = multiAgentTurnEvidence(logText, {
+    ...options,
+    expectedToolIds
+  });
+  const exactMultiAgentLifecycle = expectedToolIds.length > 0 &&
+    lifecycle.complete && lifecycle.ok;
+  const legacyToolIds = all
+    .filter((item) => item.marker === 'LocalToolRequest' &&
+      item.fields.endpoint === 'local://aiphone-tools')
+    .map((item) => item.fields.toolId)
+    .filter(Boolean);
+  const legacyLocalToolRequest = !hasMultiAgentInput && expectedToolIds.length > 0 &&
+    expectedToolIds.every((toolId) => legacyToolIds.includes(toolId));
+  return {
+    observed: exactMultiAgentLifecycle || legacyLocalToolRequest,
+    exactMultiAgentLifecycle,
+    legacyLocalToolRequest,
+    hasMultiAgentInput,
+    lifecycle
+  };
+}
+
+export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] } = {}) {
+  const values = Array.isArray(textValues) ? textValues.filter((value) => typeof value === 'string') : [];
+  const text = values.join('\n');
+  const requiredApps = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'];
+  const externalOk = externalAuthJumps.length === requiredApps.length && requiredApps.every((app) => externalAuthJumps.some((jump) =>
+    jump?.app === app && jump.opened === true && jump.returned === true));
+  const currentUser = values.some((value) =>
+    value.startsWith('当前用户 ') && value.slice('当前用户 '.length).trim().length > 0);
+  const uiBase = ['应用授权', '刷新'].every((marker) => values.includes(marker)) && currentUser &&
+    externalOk && !/auth_config/i.test(text);
+  const providerError = /(?:2300028|Operation timeout)/i.test(text);
+  const product = ['Gmail', 'GitHub', 'Google Calendar', 'Google Drive', 'Google Docs', 'Slack', 'Notion']
+    .some((name) => values.includes(name));
+  const connected = values.includes('已连接');
+  const toolkitOrAction = values.includes('授权') || values.includes('重新授权') ||
+    values.some((value) => value.startsWith('Composio ·'));
+  const providerOk = uiBase && !providerError && product && connected && toolkitOrAction;
+  const uiOk = uiBase && (providerOk || providerError);
+  return {
+    uiOk,
+    providerOk,
+    status: providerOk ? 'PASS' : (uiOk && providerError ? 'BLOCKED' : 'FAIL')
+  };
+}
+
+export function multiAgentPostCompletionWaitMs(caseId) {
+  return caseId === 'C20' ? 3000 : 0;
+}
+
+export function captureCompletionSettled({ done, doneAt, lifecycleOptions, customCompletion, now }) {
+  const waitMs = lifecycleOptions !== null && Number.isFinite(lifecycleOptions.postCompletionWaitMs) ?
+    Math.max(0, lifecycleOptions.postCompletionWaitMs) :
+    (customCompletion !== null ? 500 : 0);
+  return done && now - doneAt >= waitMs;
+}
+
+export async function collectExternalAuthJumps(apps, collectApp) {
+  const jumps = [];
+  for (const [index, app] of apps.entries()) {
+    const jump = await collectApp(app, index);
+    jumps.push(jump);
+    if (jump?.returned === false) {
+      break;
+    }
+  }
+  return jumps;
+}
+
+function socialRawValues(value) {
+  if (typeof value === 'string') return [value.trim()].filter(Boolean);
+  const values = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    for (const key of ['text', 'content', 'description', 'hint']) {
+      if (typeof attributes[key] === 'string' && attributes[key].trim().length > 0) {
+        values.push(attributes[key].trim());
+      }
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(value);
+  return values;
+}
+
+function socialLines(value) {
+  return socialRawValues(value)
+    .flatMap((item) => item.split('\n'))
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function socialSuffix(lines, prefix) {
+  const value = lines.find((line) => line.startsWith(prefix));
+  if (value === undefined) return '';
+  const suffix = value.slice(prefix.length).trim();
+  return suffix.length > 0 &&
+    !/^(?:未知(?:来源|发信人)?|unknown(?:\s+(?:source|sender))?|暂无|无|不明|未提供|不可用|当前.*不提供|读取失败|尚未连接|没有可读消息|暂无可读消息)$/i.test(suffix) ?
+    suffix : '';
+}
+
+function socialMessageCards(layout) {
+  const cards = [];
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return false;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    let nestedCard = false;
+    for (const child of Array.isArray(node.children) ? node.children : []) {
+      nestedCard = visit(child) || nestedCard;
+    }
+    const clickableColumn = attributes.type === 'Column' &&
+      (attributes.clickable === true || attributes.clickable === 'true');
+    const lines = clickableColumn ? socialLines(node) : [];
+    const candidate = clickableColumn && (lines.some((line) => line.startsWith('来源 ·')) ||
+      lines.some((line) => line.startsWith('发信人 ·')));
+    if (candidate && !nestedCard) {
+      cards.push({ node, lines });
+    }
+    return nestedCard || candidate;
+  };
+  visit(layout);
+  return cards;
+}
+
+function validSocialCard(card) {
+  const source = socialSuffix(card.lines, '来源 ·');
+  const author = socialSuffix(card.lines, '发信人 ·');
+  return source.length > 0 && author.length > 0 &&
+    source.toLowerCase() !== author.toLowerCase();
+}
+
+function exactSocialTextNode(node, expected) {
+  if (node === null || typeof node !== 'object') return null;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  if (['text', 'content', 'description', 'hint']
+    .some((key) => typeof attributes[key] === 'string' && attributes[key].trim() === expected)) {
+    return node;
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    const match = exactSocialTextNode(child, expected);
+    if (match !== null) return match;
+  }
+  return null;
+}
+
+function socialReplyInputNode(node) {
+  if (node === null || typeof node !== 'object') return null;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  if (attributes.type === 'TextInput' &&
+    typeof attributes.hint === 'string' &&
+    attributes.hint.trim() === '输入回复') {
+    return node;
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    const match = socialReplyInputNode(child);
+    if (match !== null) return match;
+  }
+  return null;
+}
+
+function socialReplyControlTextNodes(node, matches = []) {
+  if (node === null || typeof node !== 'object') return matches;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  const clickable = attributes.clickable === true || attributes.clickable === 'true';
+  const lines = clickable ? socialLines(node) : [];
+  if (clickable && lines.length === 1 && lines[0] === '回复') {
+    const textNode = exactSocialTextNode(node, '回复');
+    if (textNode !== null && textNode.attributes?.type === 'Text') matches.push(textNode);
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    socialReplyControlTextNodes(child, matches);
+  }
+  return matches;
+}
+
+function socialBoundsCenter(bounds) {
+  const match = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/.exec(bounds || '');
+  if (match === null) return null;
+  return {
+    x: Math.floor((Number(match[1]) + Number(match[3])) / 2),
+    y: Math.floor((Number(match[2]) + Number(match[4])) / 2)
+  };
+}
+
+export function calendarConfirmationButtonCenter(layout, prefix) {
+  let match = null;
+  const visit = (node) => {
+    if (match !== null || node === null || typeof node !== 'object') return;
+    const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+      node.attributes : {};
+    const clickable = attributes.clickable === true || attributes.clickable === 'true';
+    if (clickable && socialLines(node).some((line) => line.startsWith(prefix))) {
+      match = socialBoundsCenter(attributes.bounds);
+      if (match !== null) return;
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  return match;
+}
+
+export function socialReplyButtonCenter(layout) {
+  for (const card of socialMessageCards(layout)) {
+    if (!validSocialCard(card) || socialReplyInputNode(card.node) !== null) continue;
+    const replies = socialReplyControlTextNodes(card.node);
+    if (replies.length !== 1) continue;
+    const center = socialBoundsCenter(replies[0]?.attributes?.bounds);
+    if (center !== null) return center;
+  }
+  return null;
+}
+
+export function socialDraftUiEvidence(layoutOrText) {
+  const lines = socialLines(layoutOrText);
+  const text = lines.join('\n');
+  const unsent = !/(?:已发送|发送成功)/.test(text);
+  const localDraftPreview = false;
+  const replyComposer = unsent &&
+    lines.includes('SocialHub') &&
+    socialMessageCards(layoutOrText).some((card) =>
+      validSocialCard(card) &&
+      socialReplyInputNode(card.node) !== null &&
+      socialReplyControlTextNodes(card.node).length === 1);
+  return {
+    ok: localDraftPreview || replyComposer,
+    localDraftPreview,
+    replyComposer
+  };
+}
+
+function appLogIdentity(line) {
+  const match = /^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+(\d+)\s+\d+\s+\S+\s+[^/\s]+\/([^/\s:]+)(?:\/[^:\s]+)*:/.exec(line);
+  return match === null ? null : { pid: match[1], process: match[2] };
+}
+
+function sameAppIdentity(line, expected) {
+  const actual = appLogIdentity(line);
+  return actual !== null && expected !== null &&
+    actual.pid === expected.pid && actual.process === expected.process;
+}
+
+function streamingCloudResponse(line) {
+  if (!/\/NETSTACK:/.test(line)) return false;
+  const httpInfo = /"response_code"\s*:\s*200/.test(line) &&
+    /"dst_port"\s*:\s*443/.test(line) &&
+    /"content_type"\s*:\s*"text\/event-stream(?:;[^"\s]*)?"/i.test(line);
+  const streamInfo = /\bRespCode\s*:\s*200\b/.test(line) &&
+    /\bdport\s*:\s*443\b/.test(line) &&
+    /\bisStream\s*:\s*true\b/i.test(line);
+  return httpInfo || streamInfo;
+}
+
+export function modelTransportEvidence(logText, options = {}) {
+  const text = String(logText || '');
+  if (/\[AIPhone\]\[(?:ModelStreamResponse|ModelRawResponse)\] code=200\b/.test(text)) {
+    return true;
+  }
+  if (/"response_code"\s*:\s*200[^\n]*"dst_port"\s*:\s*11434\b/.test(text)) {
+    return true;
+  }
+
+  const lifecycle = multiAgentTurnEvidence(text, options);
+  if (!lifecycle.complete || !lifecycle.ok) return false;
+  const all = records(text);
+  const { selected } = targetRecords(all, options);
+  if (selected === null || selected.fields.conversation !== lifecycle.conversationId ||
+    selected.fields.turn !== lifecycle.turnId) return false;
+  const identity = appLogIdentity(selected.line);
+  if (identity === null) return false;
+  const terminal = all.find((item) => item.index > selected.index &&
+    item.marker === 'MultiAgentTurnResult' &&
+    item.fields.conversation === selected.fields.conversation &&
+    item.fields.turn === selected.fields.turn &&
+    item.fields.task === selected.fields.task);
+  if (terminal === undefined || terminal.index !== lifecycle.terminalIndex ||
+    !sameAppIdentity(terminal.line, identity)) return false;
+  const plannedWork = all.find((item) => item.index > selected.index &&
+    item.index < terminal.index && LIFECYCLE_MARKERS.has(item.marker));
+  const modelEndIndex = plannedWork?.index ?? terminal.index;
+
+  const request = all.find((item) => item.index > selected.index && item.index < modelEndIndex &&
+    item.marker === 'ModelRequestStart' && item.fields.stream === 'true' &&
+    /^https:\/\//.test(item.fields.endpoint || '') && sameAppIdentity(item.line, identity));
+  if (request === undefined) return false;
+  const chunk = all.find((item) => item.index > request.index && item.index < modelEndIndex &&
+    item.marker === 'ModelResponseChunk' && /^[1-9]\d*$/.test(item.fields.seq || '') &&
+    sameAppIdentity(item.line, identity));
+  if (chunk === undefined) return false;
+
+  const lines = text.split('\n');
+  return lines.some((line, index) => index > chunk.index && index < modelEndIndex &&
+    sameAppIdentity(line, identity) && streamingCloudResponse(line));
+}
+
+const DIRECT_TEXT_FORBIDDEN_MARKERS = new Set([
+  'MultiAgentDataTask', 'MultiAgentDataResult', 'MultiAgentUiTask', 'MultiAgentUiResult',
+  'MultiAgentTaskError', 'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
+  'ToolRequestByIntent', 'A2uiHomeToolRequestByIntent', 'ToolRequest', 'A2uiHomeToolRequest',
+  'A2uiHomeToolRequestFromModel', 'LocalToolRequest', 'ToolResult', 'A2uiHomeToolResult'
+]);
+
+function nodeTextValues(node, values) {
+  if (node === null || typeof node !== 'object') return;
+  const attributes = node.attributes !== null && typeof node.attributes === 'object' ?
+    node.attributes : {};
+  for (const key of ['text', 'content', 'description', 'hint']) {
+    const value = attributes[key];
+    if (typeof value === 'string' && value.trim().length > 0) values.push(value.trim());
+  }
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    nodeTextValues(child, values);
+  }
+}
+
+function semanticMessages(layout) {
+  const messages = [];
+  let articleCount = 0;
+  const visit = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (node.attributes?.type === 'article') {
+      articleCount += 1;
+      const values = [];
+      nodeTextValues(node, values);
+      const roleIndexes = values
+        .map((value, index) => value === 'user' || value === 'assistant' ? index : -1)
+        .filter((index) => index >= 0);
+      if (roleIndexes.length === 1) {
+        const roleIndex = roleIndexes[0];
+        messages.push({
+          role: values[roleIndex],
+          text: values.slice(roleIndex + 1)
+            .filter((value) => value !== 'user' && value !== 'assistant')
+            .join('')
+        });
+      }
+      return;
+    }
+    for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+  };
+  visit(layout);
+  const validPairs = articleCount === messages.length && messages.length % 2 === 0 &&
+    messages.every((message, index) => message.text.length > 0 &&
+      message.role === (index % 2 === 0 ? 'user' : 'assistant'));
+  return { articleCount, messages, validPairs };
+}
+
+export function directTextVisibleEvidence(logText, baselineLayout, finalLayout, query, options = {}) {
+  const text = String(logText || '');
+  const failures = [];
+  const capturedRecords = records(text);
+  const capturedTarget = targetRecords(capturedRecords, options).selected;
+  const nextInput = capturedTarget === null ? undefined : capturedRecords.find((item) =>
+    item.index > capturedTarget.index && item.marker === 'MultiAgentInput' &&
+    (item.fields.conversation !== capturedTarget.fields.conversation ||
+      item.fields.turn !== capturedTarget.fields.turn ||
+      item.fields.task !== capturedTarget.fields.task));
+  const capturedLines = text.split('\n');
+  const scopeText = capturedTarget === null ? '' : capturedLines
+    .slice(capturedTarget.index, nextInput?.index ?? capturedLines.length)
+    .join('\n');
+  const lifecycle = multiAgentTurnEvidence(scopeText, options);
+  if (!lifecycle.complete || !lifecycle.ok || lifecycle.status !== 'success' ||
+    !lifecycle.textResult || lifecycle.surfaceId !== 'none' ||
+    lifecycle.finalUiSurfaceId !== '' || lifecycle.toolIds.length !== 0 ||
+    lifecycle.dataTasks.length !== 0 || lifecycle.surfaceIds.length !== 0) {
+    failures.push('invalid_direct_lifecycle');
+  }
+
+  const all = records(scopeText);
+  const { selected } = targetRecords(all, options);
+  const terminal = selected === null ? undefined : all.find((item) =>
+    item.index > selected.index && item.marker === 'MultiAgentTurnResult' &&
+    item.fields.conversation === selected.fields.conversation &&
+    item.fields.turn === selected.fields.turn && item.fields.task === selected.fields.task);
+  if (selected === null || terminal === undefined || terminal.index !== lifecycle.terminalIndex) {
+    failures.push('missing_current_terminal');
+  } else {
+    const currentText = scopeText.split('\n').slice(selected.index, terminal.index + 1).join('\n');
+    if (!modelTransportEvidence(currentText, options)) failures.push('missing_current_transport');
+  }
+  if (all.some((item) => DIRECT_TEXT_FORBIDDEN_MARKERS.has(item.marker))) {
+    failures.push('non_direct_work');
+  }
+  if (externalOrSyntheticError(all) || all.some((item) =>
+    /(?:Error|Exception|Failed)$/.test(item.marker) || item.fields.ok === 'false' ||
+    item.fields.success === 'false' || item.fields.status === 'error')) {
+    failures.push('error_or_synthetic');
+  }
+
+  const baseline = semanticMessages(baselineLayout);
+  const final = semanticMessages(finalLayout);
+  const messages = final.messages;
+  const expectedQuery = String(query || '').trim();
+  const historyMatches = baseline.validPairs && final.validPairs &&
+    messages.length === baseline.messages.length + 2 &&
+    baseline.messages.every((message, index) =>
+      messages[index]?.role === message.role && messages[index]?.text === message.text);
+  const userIndex = baseline.messages.length;
+  const user = historyMatches ? messages[userIndex] : undefined;
+  const assistant = historyMatches ? messages[userIndex + 1] : undefined;
+  const expectedChars = Number(terminal?.fields.messageChars || 0);
+  if (!historyMatches || expectedQuery.length === 0 || user?.role !== 'user' ||
+    user.text !== expectedQuery ||
+    assistant?.role !== 'assistant' || assistant.text.length === 0 ||
+    assistant.text === expectedQuery || assistant.text.length !== expectedChars) {
+    failures.push('missing_current_visible_reply');
+  }
+
+  return {
+    ok: failures.length === 0,
+    replyText: assistant?.text || '',
+    replyChars: assistant?.text.length || 0,
+    baselineMessageCount: baseline.messages.length,
+    finalMessageCount: final.messages.length,
+    failures
+  };
+}
+
+function optionMismatch(item, options, expectedSurface) {
+  return Boolean(
+    (options.expectedActionId && item.fields.action !== options.expectedActionId) ||
+    (expectedSurface && item.fields.surface !== expectedSurface) ||
+    (options.expectedSourceToolId && item.fields.source !== options.expectedSourceToolId) ||
+    (options.expectedConversationId && item.fields.conversation !== options.expectedConversationId) ||
+    (options.expectedTurnId && item.fields.turn !== options.expectedTurnId)
+  );
+}
+
+export function multiAgentActionEvidence(logText, options = {}) {
+  const all = records(logText);
+  const expectedSurface = options.currentSurfaceId || options.surfaceId || '';
+  const actionRuns = options.expectedVirtual === true ? [] : all.filter((item) => item.marker === 'MultiAgentActionRun' &&
+    (!options.expectedActionId || item.fields.action === options.expectedActionId));
+  const candidates = actionRuns.filter((item) => !optionMismatch(item, options, expectedSurface));
+  for (let index = candidates.length - 1; index >= 0; index--) {
+    const run = candidates[index];
+    const matchingResults = all.filter((item) => item.marker === 'MultiAgentActionResult' &&
+      item.fields.conversation === run.fields.conversation && item.fields.turn === run.fields.turn &&
+      item.fields.task === run.fields.task && item.fields.surface === run.fields.surface &&
+      item.fields.plan === run.fields.plan && item.fields.run === run.fields.run);
+    const result = matchingResults[0];
+    if (!run.fields.conversation || !run.fields.turn || !run.fields.task ||
+      !run.fields.surface || run.fields.surface === 'none' || run.fields.surface === 'invalid' || !run.fields.plan ||
+      !run.fields.run || !run.fields.action || !run.fields.source ||
+      matchingResults.length !== 1 || result.index <= run.index ||
+      !ACTION_STATUSES.has(result.fields.status)) continue;
+    const chain = all.filter((item) => item.index >= run.index && item.index <= result.index);
+    const truthful = !externalOrSyntheticError(chain) || result.fields.status !== 'success';
+    return {
+      complete: truthful,
+      ok: truthful && result.fields.status === 'success',
+      status: result.fields.status,
+      actionId: run.fields.action,
+      sourceToolId: run.fields.source,
+      surfaceId: run.fields.surface,
+      conversationId: run.fields.conversation,
+      turnId: run.fields.turn,
+      taskId: run.fields.task,
+      planId: run.fields.plan,
+      runId: run.fields.run,
+      resultIndex: result.index,
+      failures: truthful ? [] : ['external_or_synthetic_success']
+    };
+  }
+  if (actionRuns.length > candidates.length) {
+    return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['stale_action_run'] };
+  }
+
+  const plans = options.expectedVirtual === false ? [] : all.filter((item) => item.marker === 'MultiAgentActionPlan' &&
+    item.fields.virtual === 'true' && list(item.fields.dataTasks).length === 0 &&
+    (!options.expectedActionId || list(item.fields.actions).includes(options.expectedActionId)));
+  for (let index = plans.length - 1; index >= 0; index--) {
+    const plan = plans[index];
+    const actions = list(plan.fields.actions);
+    if ((options.expectedConversationId && plan.fields.conversation !== options.expectedConversationId) ||
+      (options.expectedTurnId && plan.fields.turn !== options.expectedTurnId)) continue;
+    const matchingResults = all.filter((item) => item.marker === 'MultiAgentActionResult' &&
+      item.fields.conversation === plan.fields.conversation && item.fields.turn === plan.fields.turn &&
+      item.fields.task === plan.fields.task);
+    const fabricatedRun = all.some((item) => item.marker === 'MultiAgentActionRun' &&
+      item.fields.conversation === plan.fields.conversation && item.fields.turn === plan.fields.turn &&
+      item.fields.task === plan.fields.task);
+    const result = matchingResults[0];
+    if (!plan.fields.conversation || !plan.fields.turn || !plan.fields.task ||
+      plan.fields.uiTask !== plan.fields.task || actions.length !== 1 ||
+      fabricatedRun || matchingResults.length !== 1 || result.index <= plan.index ||
+      !result.fields.surface || result.fields.surface === 'none' || result.fields.surface === 'invalid' || !result.fields.plan ||
+      !result.fields.run || !ACTION_STATUSES.has(result.fields.status)) continue;
+    const chain = all.filter((item) => item.index >= plan.index && item.index <= result.index);
+    const truthful = !externalOrSyntheticError(chain) || result.fields.status !== 'success';
+    return {
+      complete: truthful,
+      ok: truthful && result.fields.status === 'success',
+      status: result.fields.status,
+      actionId: actions[0],
+      surfaceId: result.fields.surface,
+      conversationId: plan.fields.conversation,
+      turnId: plan.fields.turn,
+      taskId: plan.fields.task,
+      planId: result.fields.plan,
+      runId: result.fields.run,
+      resultIndex: result.index,
+      failures: truthful ? [] : ['external_or_synthetic_success']
+    };
+  }
+  return { complete: false, ok: false, status: '', actionId: '', surfaceId: '', failures: ['missing_action_chain'] };
+}
+
+function decodedEvidenceValue(value) {
+  try {
+    return decodeURIComponent(value || '');
+  } catch (_error) {
+    return '';
+  }
+}
+
+function calendarScope(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function validCalendarSurface(value) {
+  return Boolean(value) && value !== 'none' && value !== 'invalid';
+}
+
+export function calendarProviderActionEvidence(logText, action, options = {}) {
+  const failures = [];
+  if (!action?.ok || !validCalendarSurface(action.surfaceId) || !action.actionId ||
+    !action.conversationId || !action.turnId) {
+    failures.push('invalid_action_chain');
+  }
+  const candidates = records(logText).filter((item) =>
+    item.marker === 'CalendarProviderAction' &&
+    item.fields.conversation === action?.conversationId && item.fields.turn === action?.turnId &&
+    decodedEvidenceValue(item.fields.surface) === action?.surfaceId &&
+    item.fields.action === action?.actionId);
+  const provider = candidates.at(-1);
+  if (provider === undefined) {
+    failures.push('missing_correlated_provider_result');
+  } else {
+    const eventId = decodedEvidenceValue(provider.fields.event);
+    const requestedId = decodedEvidenceValue(provider.fields.requested);
+    const status = decodedEvidenceValue(provider.fields.status).toLowerCase();
+    const start = decodedEvidenceValue(provider.fields.start);
+    if (!validCalendarSurface(decodedEvidenceValue(provider.fields.surface))) {
+      failures.push('invalid_provider_surface');
+    }
+    if (!eventId) failures.push('missing_provider_event_id');
+    if (!['success', 'created', 'updated', 'deleted', 'ok'].includes(status)) {
+      failures.push('provider_write_not_success');
+    }
+    if ((action.actionId === 'calendar.event.update' || action.actionId === 'calendar.event.delete') &&
+      (!requestedId || requestedId !== eventId)) {
+      failures.push('provider_event_id_mismatch');
+    }
+    if (action.actionId === 'calendar.event.update' && options.expectedTime &&
+      !start.includes(options.expectedTime)) {
+      failures.push('provider_time_mismatch');
+    }
+    if (action.actionId === 'calendar.event.delete' && (!eventId || !status)) {
+      failures.push('provider_delete_receipt_missing');
+    }
+  }
+  return {
+    ok: failures.length === 0,
+    providerEventId: provider === undefined ? '' : decodedEvidenceValue(provider.fields.event),
+    providerStatus: provider === undefined ? '' : decodedEvidenceValue(provider.fields.status),
+    failures
+  };
+}
+
+export function calendarProviderAbsenceEvidence(logText, context, options = {}) {
+  const title = String(options.title || '').trim();
+  const date = normalizeCalendarQaDate(options.date);
+  const all = records(logText);
+  const tasks = all.filter((item) => item.marker === 'MultiAgentDataTask' &&
+    item.fields.conversation === context?.conversationId && item.fields.turn === context?.turnId &&
+    item.fields.tool === 'calendar.events.search' && item.fields.calendarScope === calendarScope(title) &&
+    item.fields.calendarDate === date);
+  const task = tasks.at(-1);
+  const provider = task === undefined ? undefined : all.find((item) =>
+    item.marker === 'MultiAgentDataResult' && item.fields.conversation === task.fields.conversation &&
+    item.fields.turn === task.fields.turn && item.fields.task === task.fields.task &&
+    item.fields.tool === 'calendar.events.search');
+  const failures = [];
+  if (!context?.conversationId || !context?.turnId) failures.push('invalid_search_context');
+  if (provider === undefined) {
+    failures.push('missing_correlated_provider_search');
+  } else {
+    if (provider.fields.status !== 'empty' || provider.fields.sources !== '1' || provider.fields.error !== 'false') {
+      failures.push('provider_search_not_empty');
+    }
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+export function mailThreadReadEvidence(logText, options = {}) {
+  const all = records(logText);
+  const action = multiAgentActionEvidence(logText, {
+    expectedActionId: options.expectedActionId,
+    expectedSourceToolId: options.expectedSourceToolId,
+    currentSurfaceId: options.currentSurfaceId,
+    expectedConversationId: options.expectedConversationId,
+    expectedTurnId: options.expectedTurnId,
+    expectedVirtual: false
+  });
+  const failed = (reason) => ({
+    complete: false,
+    ok: false,
+    status: '',
+    dataToolId: '',
+    provider: '',
+    bodyVisible: false,
+    failures: [reason]
+  });
+  if (!action.complete || !action.ok) return failed('missing_action_chain');
+  const run = all.find((item) => item.marker === 'MultiAgentActionRun' &&
+    item.fields.conversation === action.conversationId && item.fields.turn === action.turnId &&
+    item.fields.task === action.taskId && item.fields.run === action.runId);
+  if (run === undefined) return failed('missing_action_run');
+
+  const expectedProvider = options.expectedActionId === 'gmail.thread.read' ? 'gmail' : 'qq';
+  if (run.fields.provider !== expectedProvider || !run.fields.identity ||
+    run.fields.identity === 'invalid') return failed('missing_action_identity');
+
+  const dataTasks = all.filter((item) => item.index > run.index &&
+    item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
+    item.index < action.resultIndex && item.fields.tool === options.expectedActionId &&
+    item.fields.provider === run.fields.provider && item.fields.identity === run.fields.identity);
+  if (dataTasks.length !== 1) return failed('missing_or_duplicate_data_task');
+  const dataTask = dataTasks[0];
+  const uiTasks = all.filter((item) => item.index > run.index &&
+    item.marker === 'MultiAgentUiTask' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn &&
+    list(item.fields.dataTasks).length === 1 && list(item.fields.dataTasks)[0] === dataTask.fields.task);
+  if (uiTasks.length !== 1) return failed('missing_or_duplicate_ui_task');
+  const uiTask = uiTasks[0];
+  const dataTerminals = all.filter((item) => item.index > dataTask.index &&
+    item.fields.conversation === action.conversationId && item.fields.turn === dataTask.fields.turn &&
+    item.fields.task === dataTask.fields.task &&
+    (item.marker === 'MultiAgentDataResult' || item.marker === 'MultiAgentTaskError'));
+  if (dataTerminals.length !== 1) return failed('missing_or_duplicate_data_terminal');
+  const dataTerminal = dataTerminals[0];
+  if (dataTerminal.marker === 'MultiAgentDataResult' &&
+    (dataTerminal.fields.tool !== dataTask.fields.tool ||
+      dataTerminal.fields.provider !== run.fields.provider ||
+      dataTerminal.fields.identity !== run.fields.identity)) return failed('mismatched_data_terminal');
+  const uiTerminals = all.filter((item) => item.index > uiTask.index &&
+    item.fields.conversation === action.conversationId && item.fields.turn === uiTask.fields.turn &&
+    item.fields.task === uiTask.fields.task &&
+    ((item.marker === 'MultiAgentUiResult' && ['result', 'error'].includes(item.fields.state)) ||
+      item.marker === 'MultiAgentTaskError'));
+  if (uiTerminals.length !== 1) return failed('missing_or_duplicate_ui_terminal');
+  const terminal = uiTerminals[0];
+  const inPlace = all.filter((item) => item.index > dataTerminal.index &&
+    item.marker === 'MailDetailInPlace' && item.index < terminal.index &&
+    item.fields.provider === run.fields.provider &&
+    item.fields.identity === run.fields.identity);
+  if (inPlace.length !== 1) return failed('missing_or_duplicate_in_place_terminal');
+  const provider = inPlace[0].fields.provider || '';
+  const status = inPlace[0].fields.status || '';
+  const bodyVisible = /^[1-9]\d*$/.test(inPlace[0].fields.bodyChars || '');
+  const dataStatus = dataTerminal.marker === 'MultiAgentDataResult' ?
+    dataTerminal.fields.status : 'error';
+  const uiSucceeded = terminal.marker === 'MultiAgentUiResult' && terminal.fields.state === 'result';
+  const ok = action.ok && dataStatus === 'success' && uiSucceeded &&
+    status === 'success' && provider === expectedProvider && bodyVisible;
+  const errorComplete = dataStatus === 'error' && !uiSucceeded && status === 'error' &&
+    provider === expectedProvider && !bodyVisible;
+  return {
+    complete: ok || errorComplete,
+    ok,
+    status,
+    dataToolId: dataTask.fields.tool,
+    provider,
+    bodyVisible,
+    conversationId: action.conversationId,
+    actionTurnId: action.turnId,
+    followUpTurnId: dataTask.fields.turn,
+    dataTaskId: dataTask.fields.task,
+    uiTaskId: uiTask.fields.task,
+    failures: ok || errorComplete ? [] : ['invalid_mail_read_terminal']
+  };
+}
+
+export function visibleMailBodyText(value) {
+  if (typeof value !== 'string') return false;
+  const text = value.replace(/\s+/g, ' ').trim();
+  if (text.length === 0 || /正在加载邮件正文|邮件正文加载失败|正文读取失败|PROVIDER_|AUTH_REQUIRED/.test(text)) {
+    return false;
+  }
+  const content = text
+    .replace(/发件人|收件人|抄送|主题|回复|收起|展开|详情\s*\+|生成回复|保存草稿|发送/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return content.length >= 8;
+}

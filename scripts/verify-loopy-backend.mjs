@@ -52,6 +52,48 @@ function assertContains(text, needle, name) {
   assert(text.includes(needle), name, `missing ${needle}`);
 }
 
+function hasNoStaleApprovedRegistryCounts(source) {
+  return !/44 unique fixed tools|split 24\/20|fixed=44, Data=24, Action=20|固定工具（24）|固定工具（20）|执行下列 24 个固定只读工具|\b20 fixed (?:Action tools|definitions)\b|\b44-tool\b|\b44 migrated IDs\b|\.size\)\.assertEqual\(44\)/.test(source);
+}
+
+function personaSkillToolIds(source) {
+  const frontmatter = source.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (frontmatter === null) {
+    return [];
+  }
+  const tools = [];
+  let inTools = false;
+  for (const line of frontmatter[1].split(/\r?\n/)) {
+    if (/^tools:\s*$/.test(line)) {
+      inTools = true;
+      continue;
+    }
+    if (inTools && /^  -\s+/.test(line)) {
+      tools.push(line.replace(/^  -\s+/, '').trim());
+      continue;
+    }
+    if (inTools && /^\S/.test(line)) {
+      break;
+    }
+  }
+  return tools;
+}
+
+function exactPersonaSkillToolIds(source, expectedIds) {
+  const actualIds = personaSkillToolIds(source);
+  return actualIds.length === expectedIds.length &&
+    new Set(actualIds).size === actualIds.length &&
+    expectedIds.every((toolId) => actualIds.includes(toolId));
+}
+
+function personaSkillBody(source) {
+  const frontmatter = source.match(/^---\s*\n[\s\S]*?\n---\s*\n/);
+  if (frontmatter === null) {
+    return '';
+  }
+  return source.substring(frontmatter[0].length).replace(/<!--[\s\S]*?-->/g, '');
+}
+
 function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
 }
@@ -77,6 +119,42 @@ function readAgentRuntimeSources() {
     visit(resolve(repoRoot, 'agent_core/src/main/ets/agent', name));
   }
   return stripComments(sources.join('\n'));
+}
+
+const retiredOrchestrationPatterns = [
+  ['LoopBackend construction', /\bnew\s+LoopBackend\s*\(/],
+  ['ReActAgentRunner construction', /\bnew\s+ReActAgentRunner\s*\(/],
+  ['PersonaRouter call', /\broutePersonaForPrompt\s*\(/],
+  ['migration ownership list', /\bMIGRATED_TOOL_IDS\b/],
+  ['legacy handoff contract', /\bLegacyHandoff\b/]
+];
+
+function retiredOrchestrationViolations(source) {
+  const code = maskNonCode(source);
+  return retiredOrchestrationPatterns
+    .filter(([, pattern]) => pattern.test(code))
+    .map(([name]) => name);
+}
+
+function importsRetiredHotelRuntime(source) {
+  return /\bfrom\s+['"][^'"]*HotelAgentRuntime['"]/.test(stripComments(source));
+}
+
+function readProductionEtsSources() {
+  const sources = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.ets')) {
+        sources.push(readFileSync(entryPath, 'utf8'));
+      }
+    }
+  }
+  visit(resolve(repoRoot, 'agent_core/src/main/ets'));
+  visit(resolve(repoRoot, 'entry/src/main/ets'));
+  return sources.join('\n');
 }
 
 function parseIndexExports(index) {
@@ -149,6 +227,74 @@ function hasNamedPlanStepCap(source) {
     /plan\.steps\.length\s*>\s*MAX_ACTION_PLAN_STEPS/.test(source);
 }
 
+function maskNonCode(source) {
+  return source.replace(
+    /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\/(?:\\.|[^/\\\r\n])+\/[dgimsuvy]*|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
+    (token) => token.replace(/[^\r\n]/g, ' ')
+  );
+}
+
+function hasProductionCanarySubmitTimeout(source) {
+  const code = maskNonCode(source);
+  const declaration = 'const options: MultiAgentCanaryOptions = {';
+  const optionsStart = code.indexOf(declaration);
+  if (optionsStart < 0) {
+    return false;
+  }
+  const bodyStart = code.indexOf('{', optionsStart);
+  let depth = 0;
+  let parentheses = 0;
+  let brackets = 0;
+  let propertyStart = bodyStart + 1;
+  let directProperties = 0;
+  let exactProperties = 0;
+  for (let index = bodyStart; index < code.length; index++) {
+    const char = code.charAt(index);
+    if (char === '{') {
+      depth++;
+      continue;
+    }
+    if (char === '}') {
+      depth--;
+      if (depth === 0) {
+        return directProperties === 1 && exactProperties === 1;
+      }
+      continue;
+    }
+    if (char === '(') {
+      parentheses++;
+      continue;
+    }
+    if (char === ')') {
+      parentheses--;
+      continue;
+    }
+    if (char === '[') {
+      brackets++;
+      continue;
+    }
+    if (char === ']') {
+      brackets--;
+      continue;
+    }
+    if (depth === 1 && parentheses === 0 && brackets === 0 && char === ',') {
+      propertyStart = index + 1;
+      continue;
+    }
+    if (depth !== 1 || parentheses !== 0 || brackets !== 0 ||
+      code.slice(propertyStart, index).trim().length > 0 ||
+      !/^submitTimeoutMs(?![A-Za-z0-9_$])\s*:/.test(code.slice(index))) {
+      continue;
+    }
+    directProperties++;
+    if (/^submitTimeoutMs\s*:\s*45000\s*[,}]/.test(code.slice(index))) {
+      exactProperties++;
+    }
+    index += 'submitTimeoutMs'.length - 1;
+  }
+  return false;
+}
+
 function hasLiveToken(source, token) {
   return source.includes(token);
 }
@@ -183,6 +329,67 @@ function toolDefinitionBody(source, toolId) {
   return blockBody(liveSource, toolIdStart < 0 ? -1 : liveSource.lastIndexOf('{', toolIdStart));
 }
 
+function toolDefinitionStringField(source, toolId, field) {
+  const body = toolDefinitionBody(source, toolId);
+  const match = body.match(new RegExp(`\\b${escapeRegex(field)}\\s*:\\s*'([^']*)'`));
+  return match === null ? '' : match[1];
+}
+
+function toolDefinitionStringArrayField(source, toolId, field) {
+  const body = toolDefinitionBody(source, toolId);
+  const match = body.match(new RegExp(`\\b${escapeRegex(field)}\\s*:\\s*\\[([\\s\\S]*?)\\]`));
+  return match === null ? [] : [...match[1].matchAll(/'([^']*)'/g)].map((item) => item[1]);
+}
+
+function toolDefinitionContract(source, toolId) {
+  return {
+    toolId: toolDefinitionStringField(source, toolId, 'toolId'),
+    domain: toolDefinitionStringField(source, toolId, 'domain'),
+    intent: toolDefinitionStringField(source, toolId, 'intent'),
+    riskLevel: toolDefinitionStringField(source, toolId, 'riskLevel'),
+    backendPriority: toolDefinitionStringArrayField(source, toolId, 'backendPriority'),
+    authModes: toolDefinitionStringArrayField(source, toolId, 'authModes'),
+    inputSchema: toolDefinitionStringField(source, toolId, 'inputSchema'),
+    outputSchema: toolDefinitionStringField(source, toolId, 'outputSchema'),
+    a2uiComponent: toolDefinitionStringField(source, toolId, 'a2uiComponent'),
+    actions: toolDefinitionStringArrayField(source, toolId, 'actions')
+  };
+}
+
+function toolDefinitionContractsMatch(left, right, toolId) {
+  return JSON.stringify(toolDefinitionContract(left, toolId)) ===
+    JSON.stringify(toolDefinitionContract(right, toolId));
+}
+
+const calendarUpdateOptionalSchema =
+  'eventId?:string,query?:string,timeMin?:string,timeMax?:string,title?:string,' +
+  'start?:string,end?:string,timezone?:string,calendarId?:string';
+
+function hasOptionalCalendarUpdateSchema(source) {
+  return toolDefinitionStringField(source, 'calendar.event.update', 'inputSchema') ===
+    calendarUpdateOptionalSchema;
+}
+
+function fencedListAfterHeading(source, heading) {
+  const headingStart = source.indexOf(heading);
+  if (headingStart < 0) {
+    return [];
+  }
+  const fenceStart = source.indexOf('```text', headingStart);
+  if (fenceStart < 0) {
+    return [];
+  }
+  const bodyStart = source.indexOf('\n', fenceStart);
+  const fenceEnd = source.indexOf('```', bodyStart + 1);
+  if (bodyStart < 0 || fenceEnd < 0) {
+    return [];
+  }
+  return source.substring(bodyStart + 1, fenceEnd)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 function hasSystemIntentDefinition(source, toolId) {
   const body = toolDefinitionBody(source, toolId);
   return body.length > 0 && /backendPriority:\s*\[\s*'system_intent'\s*\]/.test(body);
@@ -190,6 +397,25 @@ function hasSystemIntentDefinition(source, toolId) {
 
 function liveDeclarationBody(source, declaration) {
   return declarationBody(stripComments(source), declaration);
+}
+
+function hasBoundedLeaderModelCalls(source) {
+  const live = stripComments(source);
+  const plan = declarationBody(live, 'async plan(');
+  const prompt = declarationBody(live, 'private prompt(');
+  const bounded = declarationBody(live, 'private completeBounded(');
+  const modelCalls = live.match(/this\.model\.complete\s*\(/g) ?? [];
+  return /const\s+MAX_LEADER_TOOL_CATALOG_CHARS\s*:\s*number\s*=\s*64000\s*;/.test(live) &&
+    /const\s+MAX_LEADER_PROMPT_CHARS\s*:\s*number\s*=\s*100000\s*;/.test(live) &&
+    prompt.includes('toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS') &&
+    prompt.includes("throw new Error('LEADER_TOOL_CATALOG_LIMIT')") &&
+    bounded.includes('prompt.length > MAX_LEADER_PROMPT_CHARS') &&
+    bounded.includes("throw new Error('LEADER_PROMPT_LIMIT')") &&
+    bounded.includes('return this.model.complete(prompt, undefined, LEADER_SYSTEM_PROMPT)') &&
+    plan.includes('await this.completeBounded(prompt)') &&
+    plan.includes('await this.completeBounded(prompt +') &&
+    plan.includes('correction') &&
+    modelCalls.length === 1;
 }
 
 function hasStructuredHotelGateway(source) {
@@ -234,6 +460,69 @@ function hasHotelRolesOnBus(source) {
 }
 
 function verifyArchitectureVerifier() {
+  for (const [name, liveSource] of [
+    ['LoopBackend construction', 'const backend = new LoopBackend(options);'],
+    ['ReActAgentRunner construction', 'const runner = new ReActAgentRunner(options);'],
+    ['PersonaRouter call', 'const route = routePersonaForPrompt(prompt);'],
+    ['migration ownership list', 'const ids = MIGRATED_TOOL_IDS;'],
+    ['legacy handoff contract', 'const handoff: LegacyHandoff = value;']
+  ]) {
+    assert(
+      retiredOrchestrationViolations(liveSource).includes(name),
+      `verifier detects live ${name}`
+    );
+    assert(
+      retiredOrchestrationViolations(`// ${liveSource}\n/* ${liveSource} */`).length === 0,
+      `verifier ignores comment-only ${name}`
+    );
+    assert(
+      retiredOrchestrationViolations(`const decoy = ${JSON.stringify(liveSource)};`).length === 0,
+      `verifier ignores string-only ${name}`
+    );
+  }
+  assert(
+    importsRetiredHotelRuntime("import { HotelVisibility } from './HotelAgentRuntime';"),
+    'verifier detects a live HotelAgentRuntime import'
+  );
+  assert(
+    !importsRetiredHotelRuntime("// import { HotelVisibility } from './HotelAgentRuntime';"),
+    'verifier ignores a comment-only HotelAgentRuntime import'
+  );
+
+  const exactSkillFixture = `---
+name: test
+tools:
+  - food.search
+  - maps.place.search
+status: active
+---
+Use Google Maps for explicit provider requests.`;
+  const wrongIndentSkillFixture = exactSkillFixture.replace('  - maps.place.search', '    - maps.place.search');
+  const extraToolSkillFixture = exactSkillFixture.replace(
+    '  - maps.place.search',
+    '  - maps.place.search\n  - gmail.message.send'
+  );
+  const commentOnlyInstructionFixture = exactSkillFixture.replace(
+    'Use Google Maps for explicit provider requests.',
+    '<!-- Use Google Maps for explicit provider requests. -->'
+  );
+  assert(
+    exactPersonaSkillToolIds(exactSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier accepts exact persona skill tool IDs with runtime indentation'
+  );
+  assert(
+    !exactPersonaSkillToolIds(wrongIndentSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier rejects persona skill tools with indentation ignored by runtime parser'
+  );
+  assert(
+    !exactPersonaSkillToolIds(extraToolSkillFixture, ['food.search', 'maps.place.search']),
+    'verifier rejects an extra persona skill tool'
+  );
+  assert(
+    personaSkillBody(commentOnlyInstructionFixture).indexOf('Google Maps') < 0,
+    'verifier ignores comment-only persona skill instructions'
+  );
+
   const fixtureIndex = parseIndexExports(stripComments(`
     export { AgentMessage } from './message/AgentMessage';
     // export { DataResult } from './message/DataResult';
@@ -281,6 +570,53 @@ function verifyArchitectureVerifier() {
   assert(
     !hasNamedPlanStepCap('const MAX_ACTION_PLAN_STEPS: number = 5; plan.steps.length > 5'),
     'verifier rejects an unused action-plan cap'
+  );
+
+  const canaryOptionsFixture = (property) => `
+    const options: MultiAgentCanaryOptions = {
+      model: model,
+      ${property}
+    };
+  `;
+  assert(
+    hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 45000,')),
+    'verifier accepts a live direct production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('// submitTimeoutMs: 45000,')),
+    'verifier rejects a commented production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture("label: 'submitTimeoutMs: 45000',")),
+    'verifier rejects a string production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('nested: { submitTimeoutMs: 45000 },')),
+    'verifier rejects a nested production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('not_submitTimeoutMs: 45000,')),
+    'verifier rejects a longer identifier production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
+      'settingsFingerprint: /submitTimeoutMs: 45000,/.source,'
+    )),
+    'verifier rejects a regex expression production timeout decoy'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('settingsFingerprint: fingerprint,')),
+    'verifier rejects a missing production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture('submitTimeoutMs: 30000,')),
+    'verifier rejects a wrong production timeout'
+  );
+  assert(
+    !hasProductionCanarySubmitTimeout(canaryOptionsFixture(
+      'submitTimeoutMs: 45000,\n      submitTimeoutMs: 45000,'
+    )),
+    'verifier rejects duplicate direct production timeouts'
   );
 
   const commentedRuntime = stripComments('// BATCH_PENDING\n/* class Coordinator {} */');
@@ -378,6 +714,43 @@ function verifyArchitectureVerifier() {
   const decoyConstructor = liveDeclarationBody(decoyBusRuntime, 'constructor(options: HotelAgentRuntimeOptions)');
   assert(['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent'].every((role) => new RegExp(`new\\s+${role}\\s*\\(\\s*this\\.bus\\b`).test(decoyConstructor)), 'fixture reproduces former bus-token predicate');
   assert(!hasHotelRolesOnBus(decoyBusRuntime), 'verifier rejects constructor string bus decoys');
+
+  const registryContract = `{
+    toolId: 'gmail.message.send', domain: 'gmail', intent: 'gmail.message.send',
+    riskLevel: 'confirm_required', backendPriority: ['oauth_api'], authModes: ['oauth'],
+    inputSchema: 'mailReplyCommand', outputSchema: 'mailReplyOperationResult',
+    a2uiComponent: 'GenericToolResults', actions: []
+  }`;
+  const driftedRegistryContract = registryContract.replace("riskLevel: 'confirm_required'", "riskLevel: 'blocked'");
+  assert(
+    toolDefinitionContractsMatch(registryContract, registryContract, 'gmail.message.send'),
+    'verifier accepts semantically equal tool definitions'
+  );
+  assert(
+    !toolDefinitionContractsMatch(registryContract, driftedRegistryContract, 'gmail.message.send'),
+    'verifier rejects tool-definition field drift'
+  );
+  const optionalCalendarContract = `{
+    toolId: 'calendar.event.update', inputSchema: '${calendarUpdateOptionalSchema}'
+  }`;
+  const requiredCalendarContract = optionalCalendarContract.replace('start?:string', 'start:string');
+  assert(hasOptionalCalendarUpdateSchema(optionalCalendarContract), 'verifier accepts optional Calendar update fields');
+  assert(!hasOptionalCalendarUpdateSchema(requiredCalendarContract), 'verifier rejects required Calendar update fields');
+
+  const staleRegistryCountFixtures = [
+    ['20 fixed definitions', 'Add exact executor branches only for the 20 fixed definitions.'],
+    ['20 fixed Action tools', 'Every one of the 20 fixed Action tools has one executor.'],
+    ['complete 44-tool set', 'Produces: complete 44-tool `MIGRATED_TOOL_IDS`.'],
+    ['wave size 44', 'expect(migratedToolIdsForWave(4).size).assertEqual(44);'],
+    ['44 migrated IDs', 'Expected: 44 migrated IDs, zero blocked tools.'],
+    ['completed 44-tool ownership', 'Consumes: completed 44-tool ownership and gates.']
+  ];
+  for (const [label, fixture] of staleRegistryCountFixtures) {
+    assert(
+      !hasNoStaleApprovedRegistryCounts(fixture),
+      `verifier rejects stale approved-plan count form: ${label}`
+    );
+  }
 }
 
 function runHarBuild() {
@@ -437,20 +810,53 @@ function runHarBuild() {
 }
 
 function verifySourceContracts() {
+  const retiredViolations = retiredOrchestrationViolations(readProductionEtsSources());
+  assert(
+    retiredViolations.length === 0,
+    'production sources contain no retired orchestration entry points',
+    retiredViolations.join(', ')
+  );
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  const multiAgentCanary = read(
+    'entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets'
+  );
+  assert(
+    !importsRetiredHotelRuntime(a2uiHome + '\n' + multiAgentCanary),
+    'production host does not import the retired HotelAgentRuntime'
+  );
+  const migrationDesign = read(
+    'docs/superpowers/specs/2026-07-21-full-scenario-multi-agent-migration-design.md'
+  );
+  const foundationPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-runtime-foundation.md'
+  );
+  const domainPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-domain-migration.md'
+  );
+  const cutoverPlan = read(
+    'docs/superpowers/plans/2026-07-21-multi-agent-cutover-regression.md'
+  );
   const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
   const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
   const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
   const aiphoneA2ui = read('agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
   const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
-  const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
-  const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
+  const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
+  const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
+  const liveCanaryLeaderPlanner = stripComments(canaryLeaderPlanner);
   const index = stripComments(read('agent_core/Index.ets'));
   const indexExports = parseIndexExports(index);
   const agentRuntimeSources = readAgentRuntimeSources();
   const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const localGmailTool = liveDeclarationBody(runtimeGateway, 'async function callLocalGmailTool');
+  const registeredGmailReply = liveDeclarationBody(a2uiHome, 'private async executeRegisteredGmailReply');
+  const gmailNormalizer = read('agent_core/src/main/ets/aiphone/runtime/GmailToolNormalizer.ets');
+  const gmailStructuredNormalizer = liveDeclarationBody(
+    gmailNormalizer,
+    'export function gmailSearchStructuredDataFromResults'
+  );
   const hotelA2ui = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelToolA2ui.ets'));
   const hotelActions = stripComments(read('agent_core/src/main/ets/aiphone/runtime/HotelActions.ets'));
   const hotelRuntime = stripComments(read('entry/src/main/ets/pages/A2uiHome/agent/HotelAgentRuntime.ets'));
@@ -461,6 +867,9 @@ function verifySourceContracts() {
   const agentMessage = stripComments(read('agent_core/src/main/ets/agent/message/AgentMessage.ets'));
   const messageBus = stripComments(read('agent_core/src/main/ets/agent/message/LinkedMessageBus.ets'));
   const leaderAgent = stripComments(read('agent_core/src/main/ets/agent/leader/LeaderAgent.ets'));
+  const leaderOwnership = stripComments(
+    read('agent_core/src/main/ets/agent/leader/LeaderCapabilityOwnership.ets')
+  );
   const dataAgent = stripComments(read('agent_core/src/main/ets/agent/data/DataAgent.ets'));
   const uiAgent = stripComments(read('agent_core/src/main/ets/agent/ui/UiAgent.ets'));
   const actionCatalog = stripComments(read('agent_core/src/main/ets/agent/action/ActionCatalog.ets'));
@@ -474,6 +883,18 @@ function verifySourceContracts() {
   const conversationStore = read('agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('agent_core/src/main/ets/skill/SkillStore.ets');
+  const foodSearchSkill = read(
+    'entry/src/main/resources/rawfile/personas/food_companion/skills/food-search/SKILL.md'
+  );
+  const mediaSearchSkill = read(
+    'entry/src/main/resources/rawfile/personas/entertainment_companion/skills/media-search/SKILL.md'
+  );
+  const travelPlanningSkill = read(
+    'entry/src/main/resources/rawfile/personas/travel_companion/skills/travel-planning/SKILL.md'
+  );
+  const workAssistantSkill = read(
+    'entry/src/main/resources/rawfile/personas/work_companion/skills/work-assistant/SKILL.md'
+  );
   const genericMcp = read('agent_core/src/main/ets/aiphone/runtime/GenericMcpClient.ets');
   const modelScope = read('agent_core/src/main/ets/modelscope/ModelScopeDirectClient.ets');
   const modelScopeSearchStart = modelScope.indexOf('async search(useCase: string)');
@@ -540,6 +961,10 @@ function verifySourceContracts() {
     "this.openExternalUrl(uri, ['petalmaps'])",
     'hotel opener only authorizes Petal Maps for navigation'
   );
+  assert(
+    hasProductionCanarySubmitTimeout(a2uiHome),
+    'production multi-agent turn deadline is 45000 ms'
+  );
   assert(!a2uiHome.includes("this.openExternalUrl(uri, ['tel'"), 'hotel opener does not authorize dialer schemes');
   assert(
     !a2uiHome.includes("aiLogInfo('[AIPhone][LuckinWechatPayOpen] url=' + payUrl)") &&
@@ -547,21 +972,89 @@ function verifySourceContracts() {
     'payment handoff logs redact the URL payload'
   );
 
-  const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
-  const uniqueIds = new Set(ids);
   const runtimeUniqueIds = new Set(runtimeIds);
-  const publicOnlyToolIds = ids.filter((id) => !runtimeUniqueIds.has(id));
-  const runtimeOnlyToolIds = runtimeIds.filter((id) => !uniqueIds.has(id));
-  assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
+  assert(
+    !/^\s*toolId:\s*'/m.test(definitions),
+    'public compatibility module has no independently maintained tool definitions'
+  );
+  assertContains(
+    definitions,
+    "from './runtime/ToolDefinitionRegistry'",
+    'public compatibility module derives the runtime registry'
+  );
+  assertContains(
+    migrationDesign,
+    '| Action | 执行下列 21 个固定 Action 工具',
+    'migration design reports all 21 fixed Action tools'
+  );
+  assertContains(
+    migrationDesign,
+    '| Data | 执行下列 25 个固定只读工具',
+    'migration design reports all 25 fixed Data tools'
+  );
+  const documentedDataTools = fencedListAfterHeading(
+    migrationDesign, '### 9.2 Data Agent 固定工具（25）'
+  );
+  const documentedActionTools = fencedListAfterHeading(
+    migrationDesign, '### 9.3 Action Agent 固定工具（21）'
+  );
+  assert(
+    documentedDataTools.length === 25 &&
+      new Set(documentedDataTools).size === 25 &&
+      documentedDataTools.includes('social.community.search'),
+    'migration design Data list has 25 unique tools including social.community.search',
+    `found ${documentedDataTools.length}`
+  );
+  assert(
+    documentedActionTools.length === 21 &&
+      new Set(documentedActionTools).size === 21 &&
+      documentedActionTools.includes('social.post.preview'),
+    'migration design Action list has 21 unique tools including social.post.preview',
+    `found ${documentedActionTools.length}`
+  );
+  assert(
+    foundationPlan.includes('expect(all.length).assertEqual(46);') &&
+      foundationPlan.includes('expect(data.length).assertEqual(25);') &&
+      foundationPlan.includes('expect(action.length).assertEqual(21);') &&
+      foundationPlan.includes('46 unique fixed tools, split 25/21'),
+    'foundation plan ownership example and gate use 46 fixed tools split 25/21'
+  );
+  assertContains(
+    foundationPlan,
+    "indexOf('social.community.search')",
+    'foundation plan ownership example includes social.community.search'
+  );
+  assertContains(
+    foundationPlan,
+    "indexOf('social.post.preview')",
+    'foundation plan ownership example includes social.post.preview'
+  );
+  assertContains(
+    domainPlan,
+    'all 21 fixed Action tools',
+    'domain migration registered executor covers all 21 fixed Action tools'
+  );
+  assertContains(
+    cutoverPlan,
+    'Registry: fixed=46, Data=25, Action=21, virtual=2, blocked=0',
+    'cutover report gate uses the restored fixed-tool counts'
+  );
+  const approvedDocs = [migrationDesign, foundationPlan, domainPlan, cutoverPlan].join('\n');
+  assert(
+    hasNoStaleApprovedRegistryCounts(approvedDocs),
+    'approved specs and plans contain no stale fixed-tool count claims'
+  );
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(ids.length >= 22, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
+  assert(runtimeIds.length === 46, 'AIPhone runtime tool registry has expected fixed count', `found ${runtimeIds.length}`);
   for (const id of [
     'travel.search',
     'train.search',
     'flight.search',
     'food.search',
     'social.feed.search',
+    'social.community.search',
+    'social.post.preview',
     'social.reply.draft',
     'x.post.search',
     'mail.search',
@@ -578,18 +1071,58 @@ function verifySourceContracts() {
     'maps.place.search',
     'maps.place.details'
   ]) {
-    assert(uniqueIds.has(id), `registered ${id}`);
     assert(runtimeUniqueIds.has(id), `runtime registered ${id}`);
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
   assertContains(runtimeGateway, "if (toolId === 'dynamic.search')", 'runtime registry explicitly handles dynamic.search');
-  assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
+  assertContains(
+    runtimeGateway,
+    "if (toolId === 'social.community.search')",
+    'runtime gateway handles the read-only social community route'
+  );
+  assertContains(
+    runtimeGateway,
+    "if (toolId === 'social.post.preview')",
+    'runtime gateway handles the social post preview route'
+  );
+  assertContains(
+    canaryRuntime,
+    'isLuckinOrderToolVisible(definition.toolId, prompt)',
+    'planning projection delegates Luckin order-tool visibility to the intent filter'
+  );
+  assertContains(
+    canaryRuntime,
+    "if (toolId === 'luckin.order.preview')",
+    'planning projection exposes Luckin preview only for explicit ordering prompts'
+  );
+  assertContains(
+    canaryRuntime,
+    "if (toolId === 'luckin.order.create' || toolId === 'luckin.order.status')",
+    'planning projection keeps Luckin create and status behind explicit order intents'
+  );
+  assertContains(
+    canaryRuntime,
+    'return orderIntent || isExplicitLuckinOrderStatusPrompt(prompt);',
+    'planning projection allows Luckin status tools for explicit status prompts'
+  );
+  assertContains(
+    canaryRuntime,
+    'planningContextProvider: (prompt: string): LeaderPlanningContext =>',
+    'planning projection receives the current user prompt'
+  );
+  assertContains(
+    liveCanaryLeaderPlanner,
+    'Social selection contract:',
+    'leader planning prompt defines the social capability selection contract'
+  );
   assert(
-    ids.length === runtimeIds.length &&
-      publicOnlyToolIds.length === 0 &&
-      runtimeOnlyToolIds.length === 0,
-    'public and runtime tool registries align exactly',
-    `public=${ids.length}; runtime=${runtimeIds.length}; public-only=[${publicOnlyToolIds.join(', ')}]; runtime-only=[${runtimeOnlyToolIds.join(', ')}]`
+    definitions.includes('return runtimeToolDefinitions();') &&
+      definitions.includes('return runtimeToolDefinitions().length;'),
+    'public compatibility APIs derive the runtime registry'
+  );
+  assert(
+    hasOptionalCalendarUpdateSchema(runtimeDefinitions),
+    'Calendar update schema keeps lookup and destination fields optional'
   );
 
   const forbiddenHotelTools = ['hotel.book', 'hotel.create', 'hotel.status', 'hotel.cancel'];
@@ -599,8 +1132,8 @@ function verifySourceContracts() {
   assert(hasHotelBookingBackend(runtimeDefinitions), 'hotel booking uses the web session backend');
   assert(hasSystemIntentDefinition(runtimeDefinitions, 'hotel.navigate'), 'hotel navigation is a system intent');
   assert(
-    forbiddenHotelTools.every((toolId) => !uniqueIds.has(toolId) && !runtimeUniqueIds.has(toolId)),
-    'hotel transaction tools are absent from both registries'
+    forbiddenHotelTools.every((toolId) => !runtimeUniqueIds.has(toolId)),
+    'hotel transaction tools are absent from the runtime registry'
   );
   assert(hasHotelRolesOnBus(hotelRuntime), 'HotelAgentRuntime assigns all four roles to one broadcast bus');
   assert(
@@ -628,6 +1161,12 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalFoodSearch', 'runtime includes food execution');
   assertContains(runtimeGateway, 'async function callLocalMailTool', 'runtime includes aggregate mail execution');
   assertContains(runtimeGateway, 'async function callLocalGmailTool', 'runtime includes Gmail execution');
+  assert(
+    gmailStructuredNormalizer.length > 0 &&
+      !/A2ui|gmailComposioThreadResults|Card/.test(gmailStructuredNormalizer) &&
+      !gmailNormalizer.includes("from './GmailToolA2ui'"),
+    'Gmail structured normalization has no A2UI or card round trip'
+  );
   assertContains(runtimeGateway, 'async function callLocalMediaTool', 'runtime includes media video execution');
   assertContains(runtimeGateway, 'async function callLocalYouTubeTool', 'runtime includes YouTube execution');
   assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');
@@ -635,22 +1174,105 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalSocialHubTool', 'runtime includes SocialHub execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
   assertContains(runtimeGateway, 'callComposioDynamic', 'dynamic.search tries Composio fallback');
-  assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
+  assert(
+    localGmailTool.length > 0 && !localGmailTool.includes('sendConfiguredMailReply'),
+    'runtime Gmail fallback cannot invoke the reply provider'
+  );
+  assertContains(registeredGmailReply, 'await sendConfiguredMailReply(command)', 'registered Gmail action owns provider execution');
+  assertContains(composioDynamic, "if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';", 'Gmail reply send pins the exact Composio write tool');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
+  assertContains(
+    a2uiHome,
+    "this.composioSocialHubConnection('reddit', 'Reddit')",
+    'production default SocialHub connections include Reddit'
+  );
+  assertContains(
+    canaryRuntime,
+    "definition.toolId !== 'social.reply.draft'",
+    'multi-agent top-level model catalog excludes social.reply.draft'
+  );
 
-  assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
-  assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
-  assertContains(backend, 'splitJsonl(jsonl)', 'LoopBackend splits AIPhone JSONL');
-  assertContains(backend, 'this.callbacks.onA2uiJsonl?.(line)', 'LoopBackend emits AIPhone JSONL lines');
-  assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
-  assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
-  assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
-  assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
-  assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
-  assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
-
-  assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
+  assertContains(runtimeDefinitions, 'Composio-backed app/toolkit requests', 'registry describes Composio dynamic routing');
+  assertContains(runtimeDefinitions, 'Keep the query focused to the relevant 6-10 OR terms', 'registry preserves Gmail academic query expansion guidance');
+  assertContains(runtimeDefinitions, 'toolPlanningDescriptionForToolId', 'registry owns the shared planning description projection');
+  assertContains(canaryRuntime, 'toolPlanningDescriptionForToolId(definition.toolId)', 'multi-agent canary consumes the registry planning projection');
+  assertContains(canaryRuntime, "definition.toolId !== 'gmail.message.send'", 'multi-agent planner excludes direct Gmail send');
+  assertContains(canaryRuntime, 'domain: definition.domain', 'multi-agent planner projects registry domains');
+  assertContains(canaryRuntime, 'registeredBackends: definition.backendPriority.slice()', 'multi-agent planner projects cloned registered backend candidates');
+  assertContains(leaderAgent, 'registeredBackends: tool.registeredBackends.slice()', 'Leader context clone preserves registered backend candidates');
+  assertContains(
+    leaderOwnership,
+    'sourceDeclaresAction(context, capabilityId)',
+    'shared Leader ownership accepts source-declared dual-role actions'
+  );
+  assertContains(
+    liveCanaryLeaderPlanner,
+    'leaderIsActionCapability(context, ids[index])',
+    'model planner uses shared Action ownership'
+  );
+  assertContains(
+    leaderAgent,
+    'leaderIsActionCapability(this.planningContext, actionId)',
+    'runtime Leader uses shared Action ownership'
+  );
+  assertContains(
+    leaderAgent,
+    'trustedCurrentLocalDate = this.currentLocalDate()',
+    'Leader captures one host date snapshot for each planning round'
+  );
+  assertContains(
+    leaderAgent,
+    'decision.normalizationCurrentLocalDate === trustedCurrentLocalDate',
+    'Leader rejects a planner date that differs from host authority'
+  );
+  assertContains(
+    leaderAgent,
+    'normalizer(input, decision.dataTasks[index], trustedCurrentLocalDate)',
+    'Leader normalizes Data inputs with the trusted date snapshot'
+  );
+  assertContains(
+    canaryRuntime,
+    'currentLocalDateProvider: options.currentLocalDate',
+    'multi-agent runtime delegates date authority to Leader'
+  );
+  assertContains(
+    canaryRuntime,
+    'calendarNow(request.currentLocalDate)',
+    'virtual Calendar actions consume the Leader date snapshot'
+  );
+  assert(
+    !canaryRuntime.includes('new MemoryIntentResolver(options.currentLocalDate)'),
+    'virtual Action resolver does not read the date provider again'
+  );
+  assert(hasBoundedLeaderModelCalls(canaryLeaderPlanner), 'every Leader model call uses the structural prompt and catalog bounds');
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'await this.completeBounded(prompt + \'\\n\' + correction)',
+        'await this.model.complete(prompt + \'\\n\' + correction)'
+      )
+    ),
+    'verifier rejects a repair model call that bypasses the prompt bound'
+  );
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'await this.completeBounded(prompt)',
+        'await this.model.complete(prompt)'
+      )
+    ),
+    'verifier rejects an initial model call that bypasses the prompt bound'
+  );
+  assert(
+    !hasBoundedLeaderModelCalls(
+      canaryLeaderPlanner.replace(
+        'toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS',
+        'false'
+      )
+    ),
+    'verifier rejects removal of the live tool catalog bound'
+  );
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
@@ -671,6 +1293,13 @@ function verifySourceContracts() {
     ['./src/main/ets/agent/MessageDrivenAgent', ['MessageDrivenAgent'], 'message-driven base exports'],
     ['./src/main/ets/agent/leader/LeaderAgent', ['LeaderAgent'], 'Leader Agent exports'],
     ['./src/main/ets/agent/leader/LeaderTypes', ['*'], 'Leader Agent types export'],
+    ['./src/main/ets/agent/leader/LeaderCapabilityOwnership', [
+      'leaderActionCapabilityIds',
+      'leaderDataCapabilityIds',
+      'leaderIsActionCapability',
+      'leaderIsDataCapability',
+      'leaderIsExplicitActionOwner'
+    ], 'Leader capability ownership exports'],
     ['./src/main/ets/agent/data/DataAgent', ['DataAgent'], 'Data Agent exports'],
     ['./src/main/ets/agent/data/DataAgentTypes', ['*'], 'Data Agent types export'],
     ['./src/main/ets/agent/ui/UiAgent', ['UiAgent'], 'UI Agent exports'],
@@ -709,9 +1338,19 @@ function verifySourceContracts() {
   assert(/export\s+class\s+ActionCatalog\b/.test(actionCatalog), 'action catalog is public');
   assert(/export\s+abstract\s+class\s+MessageDrivenAgent\b/.test(messageDrivenAgent), 'single subscriber base is public');
   assert(!index.includes('ReactLinkedMessageBus'), 'public API has no second ReAct message bus');
+  assert(
+    leaderOwnership.includes('toolMetadata(context, capabilityId) === null') &&
+      leaderOwnership.includes('!DATA_OWNER_IDS.has(capabilityId)') &&
+      leaderOwnership.includes('!leaderIsExplicitActionOwner(context, capabilityId)'),
+    'source-declared actions still require metadata and a Data or explicit Action owner'
+  );
+  assertContains(
+    leaderOwnership,
+    'leaderIsActionCapability(context, actionId)',
+    'Leader prompt filters renderer-local actions through executable ownership'
+  );
   assert(!index.includes('ReactLeaderAgent'), 'public API has no second ReAct leader');
   assert(!index.includes('UIMakerAgent'), 'public API has no UIMaker compatibility agent');
-  assertContains(index, 'ReActRunOptions', 'public API exposes role-specific ReAct options');
 
   const obsoleteAgentFiles = [
     'AgentMessageTypes.ets',
@@ -802,8 +1441,6 @@ function verifySourceContracts() {
     'model layout actions can reference only immutable offer ids');
   assertContains(a2uiRunner, 'implements UiLayoutPlanner', 'existing A2UI runner is reused as the layout planner');
   assertContains(a2uiModel, 'Output exactly one compact JSON line', 'A2UI model is constrained to one layout envelope');
-  assertContains(backend, 'new ReActAgentRunner', 'legacy scene backend remains a real ReAct runner caller');
-  assert(!agentRuntimeSources.includes('ReActAgentRunner'), 'four-agent runtime does not create a second ReAct execution loop');
   assert(!hasLiveToken(agentRuntimeSources, 'BATCH_PENDING'), 'agent runtime has no BATCH_PENDING state');
   assert(!hasLiveClass(agentRuntimeSources, 'Coordinator'), 'agent runtime has no Coordinator class');
   assertContains(conversationStore, 'MAX_STORED_TURNS: number = 50', 'conversation store keeps the last 50 turns');
@@ -813,7 +1450,53 @@ function verifySourceContracts() {
   assertContains(skillParser, 'export function parseSkillMarkdown', 'skill markdown parser is present');
   assertContains(skillStore, 'if (pathExists(targetPath))', 'bundled skills do not overwrite sandbox files');
   assertContains(skillStore, 'await ensureBundledSkillsInSandbox(context)', 'sandbox skills are initialized before loading');
-  assertContains(runner, 'AgentEventKind.SKILL', 'ReAct emits selected skills');
+  for (const [skillName, source, expectedIds] of [
+    ['food search', foodSearchSkill, [
+      'food.search', 'luckin.order.preview', 'memory.update',
+      'maps.place.search', 'maps.place.details'
+    ]],
+    ['media search', mediaSearchSkill, [
+      'media.video.search', 'media.aggregate.search', 'youtube.video.search',
+      'youtube.mine.playlists', 'youtube.mine.subscriptions', 'worldcup.open', 'memory.update'
+    ]],
+    ['travel planning', travelPlanningSkill, [
+      'travel.search', 'train.search', 'flight.search', 'memory.update'
+    ]],
+    ['work assistant', workAssistantSkill, [
+      'mail.search', 'mail.thread.read', 'gmail.mail.search', 'gmail.thread.read',
+      'mail.draft.create', 'gmail.draft.create', 'gmail.draft.apply',
+      'calendar.events.search', 'calendar.event.create', 'calendar.event.update',
+      'calendar.event.delete', 'memory.update'
+    ]]
+  ]) {
+    assert(
+      exactPersonaSkillToolIds(source, expectedIds),
+      `${skillName} skill has the exact reviewed tool set`,
+      `actual ${JSON.stringify(personaSkillToolIds(source))}`
+    );
+  }
+  assert(
+    personaSkillBody(foodSearchSkill).includes('Google Maps'),
+    'food search skill tells the model to honor an explicit Google Maps provider request'
+  );
+  for (const [skillName, source] of [
+    ['food search', foodSearchSkill],
+    ['media search', mediaSearchSkill],
+    ['travel planning', travelPlanningSkill],
+    ['work assistant', workAssistantSkill]
+  ]) {
+    const toolIds = personaSkillToolIds(source);
+    for (const restrictedActionId of [
+      'gmail.message.send',
+      'hotel.navigate',
+      'hotel.booking.open'
+    ]) {
+      assert(
+        !toolIds.includes(restrictedActionId),
+        `${skillName} keeps ${restrictedActionId} on the exact-surface action path`
+      );
+    }
+  }
   assertContains(genericMcp, 'annotations: tool.annotations', 'MCP annotations are preserved');
   assertContains(modelScope, "from '../aiphone/runtime/GenericMcpClient'", 'ModelScope reuses GenericMcpClient');
   assertContains(modelScope, 'annotations.readOnlyHint !== true', 'ModelScope requires explicit read-only annotations');
@@ -844,7 +1527,6 @@ function verifySourceContracts() {
   assert(!/飞常准|12306|天气|weather|searchFlightsByDepArr|searchFlightItineraries|getFlightPriceByCities/i.test(modelScope), 'ModelScope has no domain-specific routing');
   assert(!existsSync(streamablePath), 'ModelScope does not duplicate MCP transport');
   assertContains(registry, 'new ModelScopeTool', 'configured registry exposes ModelScope');
-  assertContains(runner, "this.tools.has('modelscope')", 'ModelScope prompt is gated by actual registration');
   assertContains(index, "./src/main/ets/modelscope/ModelScopeTool", 'public export includes ModelScope');
   assert(!legacySocialPaths.some((path) => existsSync(path)), 'obsolete social bridge files are absent');
 }

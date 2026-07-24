@@ -1,6 +1,11 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { A2uiGenericToolResultData } from '@loop/agent-core';
-import { isMediaVideoResult, mediaVideoPlaybackAction } from '@loop/agent-core';
+import { A2uiGenericToolResultData, GenericStructuredData } from '@loop/agent-core';
+import {
+  genericStructuredDataResult,
+  isMediaVideoResult,
+  mediaVideoPlaybackAction,
+  mediaVideoStructuredDataA2ui
+} from '@loop/agent-core';
 
 function result(sourceTag: string, toolName: string, status: string, url: string): A2uiGenericToolResultData {
   return {
@@ -42,6 +47,35 @@ export default function mediaVideoToolA2uiTest() {
       expect(mediaVideoPlaybackAction(nonUrl)).assertEqual(null);
       expect(isMediaVideoResult(playlist)).assertTrue();
       expect(mediaVideoPlaybackAction(playlist)?.prompt).assertEqual('https://www.youtube.com/playlist?list=PL123');
+    });
+
+    it('classifies multi-source media data and renders the same result object', 0, () => {
+      const youtube = result('YouTube Data API', 'media.video.search', 'success', 'https://www.youtube.com/watch?v=abc123');
+      const bilibili = result('哔哩哔哩', 'media.video.search', 'error', '');
+      bilibili.summary = 'Bilibili provider unavailable';
+      const structured = genericStructuredDataResult('media.video.search', 'mediaVideos', [youtube, bilibili]);
+      const data = structured.data as GenericStructuredData;
+      const jsonl = mediaVideoStructuredDataA2ui('surface_media_structured', 'media.video.search', data);
+
+      expect(structured.status).assertEqual('partial');
+      expect(structured.sources.length).assertEqual(2);
+      expect(data.results[0].rawPreview).assertEqual('videoId=abc123');
+      expect(jsonl.indexOf('https://www.youtube.com/watch?v=abc123')).assertLarger(-1);
+      expect(JSON.stringify(structured.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('keeps YouTube empty distinct from provider error', 0, () => {
+      const emptyRow = result('YouTube Data API', 'youtube.video.search', 'success', '');
+      emptyRow.title = '没有找到 YouTube 视频';
+      const errorRow = result('YouTube Data API', 'youtube.video.search', 'error', '');
+      errorRow.summary = 'YOUTUBE_API_KEY missing';
+
+      const empty = genericStructuredDataResult('youtube.video.search', 'youtubeVideos', [emptyRow]);
+      const failed = genericStructuredDataResult('youtube.video.search', 'youtubeVideos', [errorRow]);
+
+      expect(empty.status).assertEqual('empty');
+      expect(failed.status).assertEqual('error');
+      expect(failed.error?.message.indexOf('YOUTUBE_API_KEY')).assertLarger(-1);
     });
   });
 }

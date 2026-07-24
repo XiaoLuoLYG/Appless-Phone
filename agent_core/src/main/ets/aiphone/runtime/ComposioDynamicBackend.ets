@@ -1,8 +1,15 @@
 import { ComposioConfig } from '../../composio/ComposioConfig';
 import { ComposioSessionClient, proxyToolkitAccountsFromAuthConfigs } from '../../composio/ComposioSessionClient';
 import { A2uiLabelValueData } from './A2uiTypes';
-import { isUnsafeMcpTool } from './DynamicToolRegistry';
-import { DynamicGenericToolResult } from './DynamicToolTypes';
+import {
+  dynamicCompoundControlPrefix,
+  dynamicMutationActionPrefix,
+  isDynamicCompoundControlToken,
+  isDynamicMutationActionToken,
+  isUnsafeMcpTool,
+  normalizedDynamicToolTokens
+} from './DynamicToolRegistry';
+import { DynamicGenericToolResult, dynamicReceiptFromProviderPayload } from './DynamicToolTypes';
 
 interface ComposioExecuteArgs {
   operation?: string;
@@ -21,6 +28,12 @@ export interface ComposioSearchTool {
   toolSlug?: string;
   description?: string;
   inputSchema?: string;
+  outputSchema?: string;
+}
+
+export interface ComposioSearchExecuteClient {
+  search(useCase: string): Promise<string>;
+  execute(toolSlug: string, args: Object): Promise<string>;
 }
 
 interface ComposioSearchObservation {
@@ -103,6 +116,18 @@ function parsedExecuteArgs(args: Object | null): ComposioExecuteArgs {
   return args as ComposioExecuteArgs;
 }
 
+function composioToolSchema(rawSchema: string | undefined): Object {
+  const raw = textOf(rawSchema).trim();
+  if (raw.length === 0) {
+    return new Object();
+  }
+  try {
+    return JSON.parse(raw) as Object;
+  } catch (_error) {
+    return new Object();
+  }
+}
+
 function slugContainsAny(slug: string, parts: string[]): boolean {
   for (let index = 0; index < parts.length; index++) {
     if (slug.indexOf(parts[index]) >= 0) {
@@ -124,8 +149,7 @@ function isSafeGmailDraftCreateSlug(slug: string): boolean {
 }
 
 function isSafeGmailDraftApplySlug(slug: string): boolean {
-  return isSafeGmailDraftMutationSlug(slug) &&
-    slugContainsAny(slug, ['create', 'upsert', 'save', 'update', 'edit', 'apply']);
+  return slug.trim().toLowerCase() === 'gmail_update_draft';
 }
 
 function rowsForSearch(payload: ComposioSearchObservation): A2uiLabelValueData[] {
@@ -338,6 +362,24 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
   if (fixedToolId === 'social.instagram.messages.list') {
     return 'List messages in an Instagram conversation';
   }
+  if (fixedToolId === 'social.x.community.search') {
+    return 'Search recent public X Twitter posts';
+  }
+  if (fixedToolId === 'social.linkedin.profile') {
+    return 'Get authenticated LinkedIn member profile';
+  }
+  if (fixedToolId === 'social.linkedin.post.read') {
+    return 'Get one LinkedIn post by resource ID';
+  }
+  if (fixedToolId === 'social.instagram.media.list') {
+    return 'List authenticated Instagram creator media';
+  }
+  if (fixedToolId === 'social.reddit.profile') {
+    return 'Get authenticated Reddit user profile';
+  }
+  if (fixedToolId === 'social.reddit.search') {
+    return 'Search public Reddit posts across subreddits';
+  }
   if (fixedToolId === 'whatsapp.phone_numbers.list') {
     return 'List WhatsApp Business phone numbers for the authenticated account';
   }
@@ -363,7 +405,8 @@ export function normalizedComposioUseCase(prompt: string, fixedToolId: string = 
     return 'List my YouTube subscriptions for the authenticated user';
   }
   if (fixedToolId === 'gmail.draft.create' || fixedToolId === 'gmail.draft.apply') {
-    return 'Create a Gmail draft for review';
+    return fixedToolId === 'gmail.draft.apply' ?
+      'Update an existing Gmail draft for review' : 'Create a Gmail draft for review';
   }
   if (fixedToolId === 'gmail.reply.send') {
     return 'Reply to an existing Gmail thread';
@@ -469,11 +512,39 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
       { source: 'pageSize', targets: ['pageSize', 'page_size', 'limit', 'count', 'maxResults', 'max_results'] }
     ];
   }
+  if (toolId === 'social.x.community.search') {
+    return [
+      { source: 'query', targets: ['query'] },
+      { source: 'maxResults', targets: ['max_results', 'maxResults'] }
+    ];
+  }
+  if (toolId === 'social.linkedin.profile') {
+    return [];
+  }
+  if (toolId === 'social.linkedin.post.read') {
+    return [{ source: 'postId', targets: ['post_id'] }];
+  }
+  if (toolId === 'social.instagram.media.list') {
+    return [
+      { source: 'igUserId', targets: ['ig_user_id'] },
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
+  if (toolId === 'social.reddit.profile') {
+    return [{ source: 'username', targets: ['username'] }];
+  }
+  if (toolId === 'social.reddit.search') {
+    return [
+      { source: 'searchQuery', targets: ['search_query'] },
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
   if (toolId === 'gmail.thread.read') {
     return [{ source: 'threadId', targets: ['threadId', 'thread_id', 'id'] }];
   }
   if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
     return [
+      { source: 'draftId', targets: ['draft_id', 'draftId'] },
       { source: 'to', targets: ['to', 'to_addresses', 'recipients', 'emails'] },
       { source: 'recipientEmail', targets: ['recipient_email'] },
       { source: 'subject', targets: ['subject', 'title'] },
@@ -583,8 +654,11 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
 }
 
 function fixedWritePreservedArgs(toolId: string): string[] {
-  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+  if (toolId === 'gmail.draft.create') {
     return ['to', 'subject', 'body', 'threadId', 'replyMode'];
+  }
+  if (toolId === 'gmail.draft.apply') {
+    return ['draftId', 'to', 'subject', 'body', 'threadId'];
   }
   if (toolId === 'gmail.reply.send') {
     return ['recipientEmail', 'body', 'threadId'];
@@ -635,7 +709,7 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
   }
   if (fixedToolId === 'gmail.draft.apply') {
     const missing: string[] = [];
-    ['threadId', 'to', 'subject', 'replyMode', 'body'].forEach((name: string) => {
+    ['draftId', 'to', 'body'].forEach((name: string) => {
       if (!hasMeaningfulValue(record[name])) {
         missing.push(name);
       }
@@ -702,12 +776,20 @@ export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
   if (fixedToolId === 'social.instagram.profile') return 'INSTAGRAM_GET_USER_INFO';
   if (fixedToolId === 'social.instagram.conversations.list') return 'INSTAGRAM_LIST_ALL_CONVERSATIONS';
   if (fixedToolId === 'social.instagram.messages.list') return 'INSTAGRAM_LIST_ALL_MESSAGES';
+  if (fixedToolId === 'social.x.community.search') return 'TWITTER_RECENT_SEARCH';
+  if (fixedToolId === 'social.linkedin.profile') return 'LINKEDIN_GET_MY_INFO';
+  if (fixedToolId === 'social.linkedin.post.read') return 'LINKEDIN_GET_POST_CONTENT';
+  if (fixedToolId === 'social.instagram.media.list') return 'INSTAGRAM_GET_IG_USER_MEDIA';
+  if (fixedToolId === 'social.reddit.profile') return 'REDDIT_GET_REDDIT_USER_ABOUT';
+  if (fixedToolId === 'social.reddit.search') return 'REDDIT_SEARCH_ACROSS_SUBREDDITS';
   if (fixedToolId === 'whatsapp.phone_numbers.list') return 'WHATSAPP_GET_PHONE_NUMBERS';
   if (fixedToolId === 'whatsapp.message.send') return 'WHATSAPP_SEND_MESSAGE';
   if (fixedToolId === 'calendar.events.search') return 'GOOGLECALENDAR_EVENTS_LIST';
   if (fixedToolId === 'calendar.event.create') return 'GOOGLECALENDAR_CREATE_EVENT';
   if (fixedToolId === 'calendar.event.update') return 'GOOGLECALENDAR_PATCH_EVENT';
   if (fixedToolId === 'calendar.event.delete') return 'GOOGLECALENDAR_DELETE_EVENT';
+  if (fixedToolId === 'gmail.reply.send') return 'GMAIL_REPLY_TO_THREAD';
+  if (fixedToolId === 'gmail.draft.apply') return 'GMAIL_UPDATE_DRAFT';
   return '';
 }
 
@@ -1402,18 +1484,94 @@ function successfulGmailDraftPayload(payload: Object, toolSlug: string): boolean
   return valueLooksLikeGmailDraft(record.data) || valueLooksLikeGmailDraft(record.error) || valueLooksLikeGmailDraft(record);
 }
 
+function successfulCalendarWritePayload(payload: Object, toolSlug: string): boolean {
+  const lower = toolSlug.toLowerCase();
+  const deleting = lower === 'googlecalendar_delete_event';
+  if (lower !== 'googlecalendar_create_event' && lower !== 'googlecalendar_patch_event' && !deleting) {
+    return false;
+  }
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  const data = objectRecord(record.data);
+  const response = data === null ? null : objectRecord(data.response_data);
+  if (response === null ||
+    response.success === false || response.success === 'false' ||
+    response.successful === false || response.successful === 'false') {
+    return false;
+  }
+  const status = stringField(response, ['status']).toLowerCase();
+  if (status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0) {
+    return false;
+  }
+  if (deleting) {
+    return response.success === true || response.success === 'true' ||
+      response.successful === true || response.successful === 'true' ||
+      status === 'success' || status === 'succeeded' || status === 'completed' ||
+      status === 'ok' || status === 'deleted';
+  }
+  return stringField(response, ['id']).length > 0;
+}
+
+function executionStatusValue(
+  record: Record<string, Object | string | number | boolean | null | undefined>,
+  expected: boolean
+): boolean {
+  if (record.successful === expected || record.success === expected) {
+    return true;
+  }
+  const data = record.data;
+  if (data === undefined || data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return false;
+  }
+  const dataRecord = data as Record<string, Object | string | number | boolean | null | undefined>;
+  return dataRecord.successful === expected || dataRecord.success === expected;
+}
+
+function nestedExecutionError(
+  record: Record<string, Object | string | number | boolean | null | undefined>
+): string {
+  const data = record.data;
+  if (data === undefined || data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return '';
+  }
+  return stringField(
+    data as Record<string, Object | string | number | boolean | null | undefined>,
+    ['error']
+  );
+}
+
 function executionErrorMessage(payload: Object, toolSlug: string = ''): string {
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  if (executionStatusValue(record, false)) {
+    const explicitError = stringField(record, ['error']);
+    const nestedError = nestedExecutionError(record);
+    return explicitError.length > 0 ? explicitError :
+      (nestedError.length > 0 ? nestedError : 'Provider returned an unsuccessful execution status.');
+  }
   if (successfulGmailDraftPayload(payload, toolSlug)) {
     return '';
   }
-  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
   const direct = stringField(record, ['error']);
   if (direct.length > 0) {
     return direct;
   }
+  const nestedError = nestedExecutionError(record);
+  if (nestedError.length > 0) {
+    return nestedError;
+  }
+  if (executionStatusValue(record, true)) {
+    return '';
+  }
+  if (successfulCalendarWritePayload(payload, toolSlug)) {
+    return '';
+  }
+  if (isUnsafeComposioExecute(toolSlug, '{}')) {
+    return 'Provider did not return positive execution evidence.';
+  }
   const data = record.data;
   if (data !== undefined && data !== null && typeof data === 'object' && !Array.isArray(data)) {
-    return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['error', 'message']);
+    return stringField(data as Record<string, Object | string | number | boolean | null | undefined>, ['message']);
   }
   return '';
 }
@@ -1715,6 +1873,186 @@ export function isUnsafeComposioExecute(toolSlug: string, _argsJson: string): bo
   return isUnsafeMcpTool(toolSlug, '');
 }
 
+const SELECTED_READ_OPERATIONS: string[] = ['read', 'search', 'list', 'get'];
+const SELECTED_PROVIDER_PREFIXES: string[] = [
+  'googlecalendar', 'googledrive', 'googledocs', 'ticketmaster', 'hackernews', 'salesforce',
+  'composio', 'instagram', 'linkedin', 'whatsapp', 'github', 'twitter', 'youtube',
+  'outlook', 'discord', 'spotify', 'tiktok', 'hubspot', 'notion', 'slack', 'gmail',
+  'reddit', 'linear', 'trello', 'asana', 'google', 'calendar', 'drive', 'hacker',
+  'news', 'git', 'hub', 'x'
+];
+const SELECTED_READ_NOUNS: string[] = [
+  'phonenumbers', 'pullrequests', 'subscriptions', 'conversations', 'repositories',
+  'spreadsheets', 'documents', 'playlists', 'permissions', 'notifications', 'activities',
+  'channels', 'messages', 'threads', 'profiles', 'statuses', 'settings', 'comments',
+  'replies', 'orders', 'posts', 'tweets', 'events', 'emails', 'accounts', 'members',
+  'numbers', 'repository', 'spreadsheet', 'document', 'playlist', 'permission',
+  'notification', 'activity', 'channel', 'message', 'thread', 'profile', 'status',
+  'event', 'email', 'account', 'member', 'phone', 'conversation', 'subscription',
+  'pullrequest', 'pull', 'requests', 'videos', 'video', 'people', 'contacts', 'contact',
+  'files', 'pages', 'users', 'items', 'results', 'details', 'information',
+  'file', 'page', 'user', 'item', 'result', 'data', 'weather', 'forecast', 'info',
+  'code', 'issues', 'issue', 'subreddits', 'subreddit', 'across', 'recent', 'all', 'mine',
+  'my', 'by', 'for', 'from', 'in', 'of'
+];
+
+function stripSelectedProviderPrefixes(value: string): string {
+  let remaining = value;
+  let removed = true;
+  while (remaining.length > 0 && removed) {
+    removed = false;
+    for (let index = 0; index < SELECTED_PROVIDER_PREFIXES.length; index++) {
+      const prefix = SELECTED_PROVIDER_PREFIXES[index];
+      if (remaining === prefix) {
+        return '';
+      }
+      if (remaining.startsWith(prefix) && remaining.length > prefix.length) {
+        remaining = remaining.substring(prefix.length);
+        removed = true;
+        break;
+      }
+    }
+  }
+  return remaining;
+}
+
+function selectedSemanticTokens(toolSlug: string): string[] {
+  const tokens = normalizedDynamicToolTokens(toolSlug);
+  while (tokens.length > 0) {
+    const stripped = stripSelectedProviderPrefixes(tokens[0]);
+    if (stripped.length === 0) {
+      tokens.shift();
+      continue;
+    }
+    if (stripped !== tokens[0]) {
+      tokens[0] = stripped;
+    }
+    break;
+  }
+  return tokens;
+}
+
+function readNounPrefix(value: string): string {
+  for (let index = 0; index < SELECTED_READ_NOUNS.length; index++) {
+    if (value.startsWith(SELECTED_READ_NOUNS[index])) {
+      return SELECTED_READ_NOUNS[index];
+    }
+  }
+  return '';
+}
+
+function compactReadTailAllowed(value: string): boolean {
+  let remaining = value;
+  while (remaining.length > 0) {
+    const noun = readNounPrefix(remaining);
+    if (noun.length > 0) {
+      remaining = remaining.substring(noun.length);
+      continue;
+    }
+    if (dynamicCompoundControlPrefix(remaining).length > 0 || dynamicMutationActionPrefix(remaining).length > 0) {
+      return false;
+    }
+    return false;
+  }
+  return true;
+}
+
+function compactSelectedReadOperation(value: string): string {
+  for (let index = 0; index < SELECTED_READ_OPERATIONS.length; index++) {
+    const operation = SELECTED_READ_OPERATIONS[index];
+    if (value.length > operation.length && value.substring(0, operation.length) === operation) {
+      return operation;
+    }
+  }
+  return '';
+}
+
+function selectedSlugGrammarMessage(toolSlug: string): string {
+  const semantic = selectedSemanticTokens(toolSlug);
+  if (semantic.length === 0) {
+    return 'Selected Composio tool has no semantic operation: ' + toolSlug + '.';
+  }
+  let operation = semantic[0];
+  let compactTail = '';
+  if (SELECTED_READ_OPERATIONS.indexOf(operation) < 0) {
+    const compactOperation = compactSelectedReadOperation(operation);
+    if (compactOperation.length > 0) {
+      operation = compactOperation;
+      compactTail = semantic[0].substring(compactOperation.length);
+    }
+  }
+  if (SELECTED_READ_OPERATIONS.indexOf(operation) < 0) {
+    return 'Selected Composio tool has an unknown operation: ' + toolSlug + '.';
+  }
+  if (compactTail.length > 0 && !compactReadTailAllowed(compactTail)) {
+    return 'Selected Composio tool has an ambiguous compact operation: ' + toolSlug + '.';
+  }
+  for (let index = 1; index < semantic.length; index++) {
+    const token = semantic[index];
+    if (isDynamicCompoundControlToken(token)) {
+      return 'Selected Composio tool is a compound operation: ' + toolSlug + '.';
+    }
+    if (isDynamicMutationActionToken(token)) {
+      return 'Selected Composio tool is write-like: ' + toolSlug + '.';
+    }
+    if (SELECTED_READ_NOUNS.indexOf(token) < 0) {
+      return 'Selected Composio tool has an unknown semantic token: ' + toolSlug + '.';
+    }
+  }
+  return '';
+}
+
+function selectedSlugAuthorizationMessage(
+  toolSlug: string,
+  fixedToolId: string,
+  allowFixedContract: boolean = false
+): string {
+  const lowerSlug = toolSlug.trim().toLowerCase();
+  const exactFixed = composioExactToolSlugForFixedTool(fixedToolId).toLowerCase();
+  if (allowFixedContract && ((exactFixed.length > 0 && lowerSlug === exactFixed) ||
+    fixedToolAllowsSideEffectSlug(fixedToolId, lowerSlug))) {
+    return '';
+  }
+  return selectedSlugGrammarMessage(toolSlug);
+}
+
+function blockedSelectedSlugResult(toolSlug: string, message: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio',
+    toolName: toolSlug.length > 0 ? toolSlug : 'dynamic.search',
+    title: 'UnsafeActionBlocked',
+    status: 'unsafe_action_blocked',
+    summary: message,
+    rows: [
+      { label: 'Blocked action', value: toolSlug.length > 0 ? toolSlug : 'unknown' },
+      { label: 'Next step', value: '使用带确认流程的固定工具。' }
+    ],
+    rawPreview: JSON.stringify({ blocked: true, reason: 'unsafe_action_blocked', toolSlug: toolSlug }),
+    providerPhase: 'discovery'
+  };
+}
+
+function isXPostReadSlug(toolSlug: string): boolean {
+  if (selectedSlugGrammarMessage(toolSlug).length > 0) {
+    return false;
+  }
+  const compact = normalizedDynamicToolTokens(toolSlug).join('');
+  return compact.indexOf('tweet') >= 0 || compact.indexOf('posts') >= 0 || compact.indexOf('status') >= 0;
+}
+
+function xDiscoveryFailure(prompt: string, observation: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio',
+    toolName: 'x.post.search',
+    title: 'Composio X post tool unavailable',
+    status: 'error',
+    summary: 'Composio discovery did not return an executable X post read tool.',
+    rows: [{ label: '查询', value: promptSearchKeyword(prompt) }],
+    rawPreview: observation.substring(0, 16000),
+    providerPhase: 'discovery'
+  };
+}
+
 export function composioDynamicMissingConfigResult(prompt: string): DynamicGenericToolResult {
   const title = composioToolkitFromPrompt(prompt).length > 0 ? resultTitleForPrompt(prompt) : 'Composio 未配置';
   const missing = composioConfig.missingConfiguration();
@@ -1752,7 +2090,8 @@ export function composioDynamicResultFromObservation(
           status: 'error',
           summary: 'Composio 执行 ' + (toolSlug.length > 0 ? toolSlug : 'dynamic.search') + ' 失败：' + errorMessage,
           rows: rows,
-          rawPreview: observation.substring(0, 16000)
+          rawPreview: observation.substring(0, 16000),
+          providerPhase: 'execution'
         };
       }
       return {
@@ -1762,7 +2101,8 @@ export function composioDynamicResultFromObservation(
         status: 'success',
         summary: executeSummary(toolSlug.length > 0 ? toolSlug : 'dynamic.search', rows),
         rows: rows,
-        rawPreview: rawPreviewForExecute(payload as Object, observation)
+        rawPreview: rawPreviewForExecute(payload as Object, observation),
+        providerPhase: 'execution'
       };
     }
     const slug = firstToolSlug(payload);
@@ -1777,10 +2117,12 @@ export function composioDynamicResultFromObservation(
       status: 'success',
       summary: slug.length > 0 ? 'Composio 找到候选工具：' + slug : 'Composio 返回了真实结果。',
       rows: rows,
-      rawPreview: observation.substring(0, 16000)
+      rawPreview: observation.substring(0, 16000),
+      providerPhase: 'discovery'
     };
   } catch (_error) {
-    const failed = observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 ||
+    const unparseableWrite = phase === 'execute' && isUnsafeComposioExecute(toolSlug, '{}');
+    const failed = unparseableWrite || observation.indexOf('失败') >= 0 || observation.indexOf('错误') >= 0 ||
       observation.indexOf('未配置') >= 0 || observation.indexOf('没有') >= 0;
     const rows: A2uiLabelValueData[] = [{ label: '阶段', value: phase }];
     if (prompt.length > 0) {
@@ -1789,20 +2131,22 @@ export function composioDynamicResultFromObservation(
     appendRow(rows, '结果摘要', observation);
     return {
       sourceTag: 'Composio',
-      toolName: 'dynamic.search',
+      toolName: toolSlug.length > 0 ? toolSlug : 'dynamic.search',
       title: prompt.length > 0 ? resultTitleForPrompt(prompt) : (failed ? 'Composio 调用失败' : 'Composio 返回'),
       status: failed ? 'error' : 'success',
-      summary: observation.substring(0, 240),
+      summary: unparseableWrite ? 'Composio 写工具返回了无法验证的非 JSON 结果。' : observation.substring(0, 240),
       rows: rows,
-      rawPreview: observation.substring(0, 16000)
+      rawPreview: observation.substring(0, 16000),
+      providerPhase: phase === 'execute' ? 'execution' : 'discovery'
     };
   }
 }
 
-async function callComposioSearchAndExecute(
-  current: ComposioSessionClient,
+async function callComposioSearchAndExecuteParsed(
+  current: ComposioSearchExecuteClient | ComposioSessionClient,
   prompt: string,
-  parsed: ComposioExecuteArgs
+  parsed: ComposioExecuteArgs,
+  allowFixedContract: boolean
 ): Promise<DynamicGenericToolResult> {
   const fixedToolId = textOf(parsed.fixedToolId).trim();
   const searchObservation = await current.search(normalizedComposioUseCase(prompt, fixedToolId));
@@ -1810,27 +2154,74 @@ async function callComposioSearchAndExecute(
   try {
     payload = JSON.parse(searchObservation) as ComposioSearchObservation;
   } catch (_error) {
+    if (fixedToolId === 'x.post.search') {
+      return xDiscoveryFailure(prompt, searchObservation);
+    }
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
-  const tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  let tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  const expected = composioExactToolSlugForFixedTool(fixedToolId);
+  if (tool === null && expected.length > 0) {
+    return {
+      sourceTag: 'Composio',
+      toolName: fixedToolId,
+      title: 'Composio 工具不可用',
+      status: 'error',
+      summary: 'Composio 没有返回必需工具 ' + expected + '。',
+      rows: [{ label: 'Expected Tool', value: expected }],
+      rawPreview: searchObservation.substring(0, 16000),
+      providerPhase: 'discovery'
+    };
+  }
+  if (tool === null && Array.isArray(payload.tools) && payload.tools.length === 1) {
+    tool = payload.tools[0] as ComposioSearchTool;
+  }
   if (tool === null) {
-    const expected = composioExactToolSlugForFixedTool(fixedToolId);
-    if (expected.length > 0) {
-      return {
-        sourceTag: 'Composio',
-        toolName: fixedToolId,
-        title: 'Composio 工具不可用',
-        status: 'error',
-        summary: 'Composio 没有返回必需工具 ' + expected + '。',
-        rows: [{ label: 'Expected Tool', value: expected }],
-        rawPreview: searchObservation.substring(0, 16000)
-      };
+    if (fixedToolId === 'x.post.search') {
+      return xDiscoveryFailure(prompt, searchObservation);
     }
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
   const slug = textOf(tool.toolSlug).trim();
+  if (fixedToolId === 'x.post.search' && !isXPostReadSlug(slug)) {
+    return xDiscoveryFailure(prompt, searchObservation);
+  }
   const args = composioArgumentsForTool(tool, prompt, fixedToolId, parsed.fixedArgs ?? null);
-  return composioDynamicResultFromObservation('execute', await current.execute(slug, args), slug, prompt);
+  const authorizationMessage = selectedSlugAuthorizationMessage(slug, fixedToolId, allowFixedContract);
+  if (authorizationMessage.length > 0) {
+    return blockedSelectedSlugResult(slug, authorizationMessage);
+  }
+  const executionObservation = await current.execute(slug, args);
+  const result = composioDynamicResultFromObservation('execute', executionObservation, slug, prompt);
+  result.registration = {
+    provider: 'Composio',
+    qualifiedName: slug,
+    inputSchema: composioToolSchema(tool.inputSchema),
+    outputSchema: composioToolSchema(tool.outputSchema),
+    receipt: dynamicReceiptFromProviderPayload(executionObservation)
+  };
+  return result;
+}
+
+export async function callComposioSearchAndExecute(
+  current: ComposioSearchExecuteClient | ComposioSessionClient,
+  prompt: string,
+  requestArgs: Object | null
+): Promise<DynamicGenericToolResult> {
+  return callComposioSearchAndExecuteParsed(current, prompt, parsedExecuteArgs(requestArgs), false);
+}
+
+export async function callComposioFixedSearchAndExecuteForTest(
+  current: ComposioSearchExecuteClient,
+  prompt: string,
+  fixedToolId: string,
+  fixedArgs: Object
+): Promise<DynamicGenericToolResult> {
+  const parsed: ComposioExecuteArgs = {
+    fixedToolId: fixedToolId,
+    fixedArgs: fixedArgs
+  };
+  return callComposioSearchAndExecuteParsed(current, prompt, parsed, true);
 }
 
 export async function callComposioFixedRaw(
@@ -1853,9 +2244,14 @@ export async function callComposioFixedRaw(
   }
   const toolSlug = textOf(tool.toolSlug).trim();
   const toolArgs = composioArgumentsForTool(tool, prompt, fixedToolId, fixedArgs);
+  const authorizationMessage = selectedSlugAuthorizationMessage(toolSlug, fixedToolId, true);
+  if (authorizationMessage.length > 0) {
+    throw new Error(authorizationMessage);
+  }
+  const observation = await current.execute(toolSlug, toolArgs);
   const result: ComposioRawExecution = {
     toolSlug: toolSlug,
-    observation: await current.execute(toolSlug, toolArgs)
+    observation: observation
   };
   return result;
 }
@@ -1882,8 +2278,11 @@ async function clientForPrompt(prompt: string): Promise<ComposioSessionClient> {
   return scoped;
 }
 
-export async function callComposioDynamic(prompt: string, args: Object | null): Promise<DynamicGenericToolResult | null> {
-  const parsed = parsedExecuteArgs(args);
+async function callComposioParsed(
+  prompt: string,
+  parsed: ComposioExecuteArgs,
+  allowFixedContract: boolean
+): Promise<DynamicGenericToolResult | null> {
   const fixedToolId = textOf(parsed.fixedToolId).trim();
   const missingFixedArgs = missingFixedWriteArgs(fixedToolId, parsed.fixedArgs ?? null);
   if (missingFixedArgs.length > 0) {
@@ -1895,20 +2294,9 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
   }
   if (operation === 'execute') {
     const slug = textOf(parsed.toolSlug).trim();
-    if (isUnsafeComposioExecute(slug, JSON.stringify(parsed.arguments ?? new Object()))) {
-      const summary = 'UnsafeActionBlocked：dynamic.search 只允许读取、搜索、列出或获取操作；写操作必须使用带确认流程的固定工具。';
-      return {
-        sourceTag: 'Composio',
-        toolName: slug.length > 0 ? slug : 'dynamic.search',
-        title: 'UnsafeActionBlocked',
-        status: 'unsafe_action_blocked',
-        summary: summary,
-        rows: [
-          { label: 'Blocked action', value: slug.length > 0 ? slug : 'unknown' },
-          { label: 'Next step', value: '使用带确认流程的固定工具。' }
-        ],
-        rawPreview: JSON.stringify({ blocked: true, reason: 'unsafe_action_blocked', toolSlug: slug })
-      };
+    const authorizationMessage = selectedSlugAuthorizationMessage(slug, fixedToolId, allowFixedContract);
+    if (authorizationMessage.length > 0) {
+      return blockedSelectedSlugResult(slug, authorizationMessage);
     }
   }
   if (!composioConfig.isConfigured()) {
@@ -1917,7 +2305,27 @@ export async function callComposioDynamic(prompt: string, args: Object | null): 
   const current = await clientForPrompt(prompt);
   if (operation === 'execute') {
     const slug = textOf(parsed.toolSlug).trim();
+    const authorizationMessage = selectedSlugAuthorizationMessage(slug, fixedToolId, allowFixedContract);
+    if (authorizationMessage.length > 0) {
+      return blockedSelectedSlugResult(slug, authorizationMessage);
+    }
     return composioDynamicResultFromObservation('execute', await current.execute(slug, parsed.arguments ?? new Object()), slug, prompt);
   }
-  return callComposioSearchAndExecute(current, prompt, parsed);
+  return callComposioSearchAndExecuteParsed(current, prompt, parsed, allowFixedContract);
+}
+
+export async function callComposioDynamic(prompt: string, args: Object | null): Promise<DynamicGenericToolResult | null> {
+  return callComposioParsed(prompt, parsedExecuteArgs(args), false);
+}
+
+export async function callComposioFixedDynamic(
+  prompt: string,
+  fixedToolId: string,
+  fixedArgs: Object | null
+): Promise<DynamicGenericToolResult | null> {
+  const parsed: ComposioExecuteArgs = {
+    fixedToolId: fixedToolId,
+    fixedArgs: fixedArgs ?? new Object()
+  };
+  return callComposioParsed(prompt, parsed, true);
 }

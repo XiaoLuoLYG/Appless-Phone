@@ -6,17 +6,80 @@ import {
   hasPopulatedHotelActionEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
+  hotelMultiAgentDetailEvidence,
   hotelDetailLifecycleFromLogs,
+  hotelMultiAgentSearchEvidence,
   hotelSearchActionEvidence,
   hotelToolLifecycleFromLogs,
   hasSafeHotelSystemIntentOpen,
   isExpectedHotelSystemBundle,
   matchesHotelDetailAccessibleLabel,
+  restoredHotelSearchSurface,
   shouldRetryHotelReturnToApp,
   validateHotelDetailBookingEvidence,
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
+
+const realC20DetailLog = `
+  [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search
+  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail
+  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false
+  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=calling_tool components=2
+  [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
+  [AIPhone][MultiAgentDataResult] conversation=c20 turn=detail-1 task=data-detail tool=hotel.detail status=success sources=1 error=false
+  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=ready components=3
+  [AIPhone][MultiAgentUiResult] conversation=c20 turn=detail-1 task=ui-detail surface=detail-1 state=result
+  [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 status=success
+`;
+
+test('accepts the preserved C20 detail order with a provider request before the skeleton', () => {
+  const evidence = hotelMultiAgentDetailEvidence(realC20DetailLog, {
+    expectedConversationId: 'c20',
+    currentSurfaceId: 'search-1'
+  });
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.surfaceId, 'detail-1');
+  assert.equal(evidence.operation, 'getHotelDetail');
+});
+
+test('rejects C20 detail evidence with a wrong task, surface, operation, response, or terminal order', () => {
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  [
+    realC20DetailLog.replace('task=data-detail round=1 tool=hotel.detail', 'task=wrong-data round=1 tool=hotel.detail'),
+    realC20DetailLog.replaceAll('surface=detail-1', 'surface=wrong-surface'),
+    realC20DetailLog.replaceAll('operation=getHotelDetail', 'operation=searchHotels'),
+    realC20DetailLog.replace('[AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1\n', ''),
+    realC20DetailLog.replace(
+      '[AIPhone][MultiAgentDataResult] conversation=c20 turn=detail-1 task=data-detail tool=hotel.detail status=success sources=1 error=false\n  [AIPhone][HtmlHomeDocument]',
+      '[AIPhone][HtmlHomeDocument]'
+    )
+  ].forEach((logs) => assert.equal(hotelMultiAgentDetailEvidence(logs, options).ok, false));
+});
+
+test('rejects C20 detail evidence when either correlated task begins after the provider request', () => {
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  const lateUiTask = realC20DetailLog.replace(
+    '  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail\n',
+    ''
+  ).replace(
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n',
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n' +
+      '  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail\n'
+  );
+  const lateDataTask = realC20DetailLog.replace(
+    '  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false\n',
+    ''
+  ).replace(
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n',
+    '  [AIPhone][RollingGoHotelRequest] operation=getHotelDetail\n' +
+      '  [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false\n'
+  );
+  assert.equal(hotelMultiAgentDetailEvidence(lateUiTask, options).ok, false);
+  assert.equal(hotelMultiAgentDetailEvidence(lateDataTask, options).ok, false);
+});
 
 const validBooking = {
   id: 'hotel.booking.open',
@@ -93,15 +156,84 @@ test('does not treat empty welcome evidence as completed hotel action evidence',
 test('requires one hotel surface to progress from calling_tool through real blocks to ready', () => {
   const complete = hotelDetailLifecycleFromLogs(`
     [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool components=2
-    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
+    [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
     [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
     [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready components=3
   `);
   assert.equal(complete.ok, true);
   assert.equal(complete.blocks, 64);
+  assert.equal(hotelDetailLifecycleFromLogs(`
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=calling_tool components=2
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready components=3
+  `).ok, false);
   assert.equal(hotelToolLifecycleFromLogs(
     '[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-detail-2 status=ready'
   ).requested, false);
+});
+
+test('combines generic turn correlation with specialized hotel provider evidence', () => {
+  const complete = hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000000 status=calling_tool components=2
+    [AIPhone][RollingGoHotelRequest] operation=searchHotels
+    [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000000 state=skeleton
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000000 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000000 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=loop_surface_1784700000000 roundCount=1 messageChars=12
+  `);
+  assert.equal(complete.ok, true);
+  assert.equal(complete.lifecycle.toolIds[0], 'hotel.search');
+  assert.equal(complete.provider.blocks, 64);
+  assert.equal(complete.provider.surfaceId, complete.lifecycle.surfaceId);
+  assert.equal(hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000001 status=calling_tool components=2
+    [AIPhone][RollingGoHotelRequest] operation=searchHotels
+    [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=loop_surface_1784700000002 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1784700000001 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=loop_surface_1784700000002 roundCount=1 messageChars=12
+  `).ok, false);
+  assert.equal(hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=calling_tool components=2
+    com.example.aiphonedemo/NETSTACK RespCode:200 method:POST
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=hotel-search-1 roundCount=1 messageChars=12
+  `).ok, false);
+  assert.equal(hotelMultiAgentSearchEvidence(`
+    [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=input-1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=t1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=t1 task=ui-1 dataTasks=data-1
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=calling_tool components=2
+    [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
+    [AIPhone][RollingGoHotelRequest] operation=searchHotels
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=t1 task=data-1 tool=hotel.search status=success sources=1 error=false
+    [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=t1 task=ui-1 surface=hotel-search-1 state=result
+    [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready components=3
+    [AIPhone][MultiAgentTurnResult] conversation=c1 turn=t1 task=input-1 status=success surface=hotel-search-1 roundCount=1 messageChars=12
+  `).ok, false);
+  assert.equal(hotelMultiAgentSearchEvidence(
+    complete.raw || '[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready'
+  ).ok, false);
 });
 
 test('validates exactly one booking action on a detail surface', () => {
@@ -182,6 +314,17 @@ test('requires exact search detail and restored surface identity', () => {
   assert.equal(validateHotelSurfaceIdentity('', 'hotel-detail-2', '').ok, false);
   assert.equal(validateHotelSurfaceIdentity('same', 'same', 'same').ok, false);
   assert.equal(validateHotelSurfaceIdentity('hotel-search-1', 'hotel-detail-2', 'other').ok, false);
+});
+
+test('uses validated restored action evidence with the original search conversation', () => {
+  const context = { conversationId: 'c20', surfaceId: 'hotel-search-1' };
+  const restored = {
+    surfaceId: 'hotel-search-1',
+    actions: hotelSearchActionEvidence('hotel-search-1', validActions.slice(0, 2)).actions
+  };
+  assert.deepEqual(restoredHotelSearchSurface(context, restored), context);
+  assert.equal(restoredHotelSearchSurface(context, { ...restored, surfaceId: 'other' }), null);
+  assert.equal(restoredHotelSearchSurface({ ...context, conversationId: '' }, restored), null);
 });
 
 test('derives the live detail click locator only from an exact valid action', () => {

@@ -2,10 +2,12 @@ import {
   normalizeSocialHubConnection,
   normalizeSocialHubDraft,
   normalizeSocialHubItem,
+  normalizeSocialHubPublication,
   SocialHubConnectionData,
   SocialHubDraftData,
   SocialHubItemData,
-  SocialHubPlatform
+  SocialHubPlatform,
+  SocialHubPublicationData
 } from './SocialHubTypes';
 
 export interface SocialHubFeedResult {
@@ -19,6 +21,14 @@ export interface SocialHubProviderConfig {
   xUserAccessToken: string;
   slackUserToken: string;
   slackBotToken: string;
+}
+
+export interface SocialHubPublicationPreviewInput {
+  platform: SocialHubPlatform;
+  operation: string;
+  accountId?: string;
+  accountName?: string;
+  text?: string;
 }
 
 interface SocialHubBridgeFeedPayload {
@@ -85,7 +95,11 @@ interface ComposioSocialErrorPayload {
 interface ComposioSocialEnvelope {
   data?: Object | null;
   error?: Object | string | number | boolean | null;
+  successful?: boolean | string;
 }
+
+type SocialCommunityValue = Object | string | number | boolean | null | undefined;
+type SocialCommunityRecord = Record<string, SocialCommunityValue>;
 
 interface SlackChannelPayload {
   id?: string;
@@ -144,6 +158,37 @@ function textOf(value: Object | string | number | boolean | null | undefined): s
   return JSON.stringify(value);
 }
 
+export function createSocialHubPublicationPreview(
+  input: SocialHubPublicationPreviewInput,
+  nowIso: string = new Date().toISOString()
+): SocialHubPublicationData {
+  const platform = input.platform;
+  const text = (input.text ?? '').trim();
+  const accountId = (input.accountId ?? '').trim();
+  const supported = platform === 'x' || platform === 'linkedin' ||
+    platform === 'instagram' || platform === 'reddit';
+  let error = '';
+  if (input.operation !== 'publish') {
+    error = 'Social post preview requires operation=publish.';
+  } else if (!supported) {
+    error = '请选择 X、LinkedIn、Instagram 或 Reddit。';
+  } else if (text.length === 0 || text.length > 3000) {
+    error = '公开帖子预览需要 1–3000 个字符的正文。';
+  } else if (accountId.length === 0) {
+    error = 'Provider 没有返回真实账号 ID；不会创建或发布帖子。';
+  }
+  return normalizeSocialHubPublication({
+    platform,
+    operation: 'publish',
+    accountId,
+    accountName: (input.accountName ?? '').trim(),
+    text,
+    status: error.length > 0 ? 'error' : 'preview',
+    updatedAt: nowIso,
+    error
+  });
+}
+
 function platformDisplayName(platform: SocialHubPlatform): string {
   if (platform === 'x') {
     return 'X';
@@ -165,6 +210,9 @@ function platformDisplayName(platform: SocialHubPlatform): string {
   }
   if (platform === 'instagram') {
     return 'Instagram';
+  }
+  if (platform === 'reddit') {
+    return 'Reddit';
   }
   return 'SocialHub';
 }
@@ -270,15 +318,16 @@ export function parseSocialHubFeedPayload(raw: string): SocialHubFeedResult {
 }
 
 function composioSocialError(payload: ComposioSocialEnvelope): string {
-  if (payload.error === undefined || payload.error === null) {
-    return '';
+  if (payload.error !== undefined && payload.error !== null) {
+    if (typeof payload.error === 'object') {
+      const error = payload.error as ComposioSocialErrorPayload;
+      const message = textOf(error.message).trim();
+      return message.length > 0 ? message : textOf(payload.error);
+    }
+    return textOf(payload.error);
   }
-  if (typeof payload.error === 'object') {
-    const error = payload.error as ComposioSocialErrorPayload;
-    const message = textOf(error.message).trim();
-    return message.length > 0 ? message : textOf(payload.error);
-  }
-  return textOf(payload.error);
+  return payload.successful === false || payload.successful === 'false' ?
+    'Provider returned an unsuccessful execution status.' : '';
 }
 
 function xUserForId(includes: XIncludesPayload | undefined, id: string): XUserPayload {
@@ -434,6 +483,147 @@ export function parseComposioSocialFeed(
   }
   return {
     items: items,
+    connections: [connection(platform, 'connected', platformDisplayName(platform) + ' 已连接')]
+  };
+}
+
+function communityString(record: SocialCommunityRecord, names: string[]): string {
+  for (let index = 0; index < names.length; index++) {
+    const value = textOf(record[names[index]]).trim();
+    if (value.length > 0 && value.charAt(0) !== '{' && value.charAt(0) !== '[') {
+      return value;
+    }
+  }
+  return '';
+}
+
+function communityNestedString(
+  record: SocialCommunityRecord,
+  key: string,
+  names: string[]
+): string {
+  const value = record[key];
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+  return communityString(value as SocialCommunityRecord, names);
+}
+
+function looksLikeCommunityItem(record: SocialCommunityRecord): boolean {
+  return communityString(record, [
+    'title', 'text', 'full_text', 'selftext', 'caption', 'commentary', 'body',
+    'permalink', 'media_url', 'web_url'
+  ]).length > 0;
+}
+
+function collectCommunityRecords(
+  value: SocialCommunityValue,
+  records: Object[],
+  depth: number
+): void {
+  if (depth > 7 || value === undefined || value === null) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item: SocialCommunityValue) =>
+      collectCommunityRecords(item, records, depth + 1)
+    );
+    return;
+  }
+  if (typeof value !== 'object') {
+    return;
+  }
+  const record = value as SocialCommunityRecord;
+  if (looksLikeCommunityItem(record)) {
+    records.push(record as Object);
+    return;
+  }
+  const preferred = ['data', 'children', 'results', 'items', 'posts', 'media', 'elements', 'response'];
+  for (let index = 0; index < preferred.length; index++) {
+    const nested = record[preferred[index]];
+    if (nested !== undefined && nested !== null) {
+      collectCommunityRecords(nested, records, depth + 1);
+    }
+  }
+}
+
+function communityRecordItem(platform: SocialHubPlatform, value: Object): SocialHubItemData {
+  const record = value as SocialCommunityRecord;
+  const id = communityString(record, ['id', 'name', 'fullname', 'post_id', 'media_id', 'urn']);
+  const title = communityString(record, ['title']);
+  const body = communityString(
+    record,
+    ['full_text', 'text', 'selftext', 'caption', 'commentary', 'body']
+  );
+  const author = communityString(record, ['author', 'username', 'user_name', 'owner_name']);
+  const nestedAuthor = communityNestedString(record, 'author', ['name', 'username', 'id']);
+  const nestedUser = communityNestedString(record, 'user', ['name', 'username', 'screen_name', 'id']);
+  const resolvedAuthor = author.length > 0 ? author :
+    (nestedAuthor.length > 0 ? nestedAuthor : nestedUser);
+  const directUrl = communityString(record, ['permalink', 'url', 'web_url', 'webLink']);
+  let url = directUrl.charAt(0) === '/' ? 'https://www.reddit.com' + directUrl : directUrl;
+  if (url.length === 0 && platform === 'x' && /^[0-9]{1,19}$/.test(id)) {
+    url = 'https://x.com/i/web/status/' + id;
+  }
+  const mediaUrl = communityString(
+    record,
+    ['media_url', 'thumbnail', 'image_url', 'preview_image_url']
+  );
+  const timestamp = communityString(
+    record,
+    ['created_at', 'created_time', 'timestamp', 'publishedAt', 'created_utc']
+  );
+  const subreddit = communityString(record, ['subreddit', 'subreddit_name_prefixed']);
+  const text = title.length > 0 && body.length > 0 && title !== body ?
+    title + '\n' + body : (title.length > 0 ? title : body);
+  return normalizeSocialHubItem({
+    id,
+    platform,
+    kind: 'post',
+    author: resolvedAuthor,
+    handle: resolvedAuthor,
+    text,
+    timestamp,
+    url,
+    mediaUrl,
+    channel: subreddit,
+    channelId: subreddit.replace(/^r\//, ''),
+    threadId: id,
+    unread: false
+  });
+}
+
+export function parseComposioCommunityFeed(
+  platform: SocialHubPlatform,
+  raw: string
+): SocialHubFeedResult {
+  let payload: ComposioSocialEnvelope;
+  try {
+    payload = JSON.parse(raw) as ComposioSocialEnvelope;
+  } catch (_error) {
+    return {
+      items: [],
+      connections: [connection(platform, 'error', 'Provider 返回了无法解析的数据。')]
+    };
+  }
+  const error = composioSocialError(payload);
+  if (error.length > 0) {
+    return { items: [], connections: [connection(platform, 'error', error)] };
+  }
+  const records: Object[] = [];
+  collectCommunityRecords(payload.data, records, 0);
+  const items: SocialHubItemData[] = [];
+  const seen: string[] = [];
+  records.forEach((record: Object) => {
+    const item = communityRecordItem(platform, record);
+    const key = item.id.length > 0 ? item.id : item.url;
+    if ((key.length > 0 || item.text.length > 0) && seen.indexOf(key) < 0) {
+      seen.push(key);
+      items.push(item);
+    }
+  });
+  return {
+    items,
     connections: [connection(platform, 'connected', platformDisplayName(platform) + ' 已连接')]
   };
 }

@@ -50,7 +50,14 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
     if (toolId === 'hotel.search') {
       return definition('hotel.search', 'read', 'local_adapter', this.sourceActions);
     }
-    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' || toolId === 'hotel.booking.open') {
+    if (toolId === 'hotel.detail' || toolId === 'hotel.navigate' ||
+      toolId === 'hotel.booking.open' || toolId === 'worldcup.open' ||
+      toolId === 'maps.route.open' || toolId === 'calendar.event.create' ||
+      toolId === 'luckin.order.preview' || toolId === 'payment.send' ||
+      toolId === 'payment.account.setup' || toolId === 'whatsapp.message.send' ||
+      toolId === 'luckin.order.create' || toolId === 'whatsapp.message.send.confirm' ||
+      toolId === 'payment.confirm' || toolId === 'payment.capture' ||
+      toolId === 'ride.order.create' || toolId === 'memory.update') {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
@@ -251,6 +258,135 @@ export default function actionCatalogTest() {
       expect(result.ok).assertFalse();
       expect(result.code).assertEqual('ACTION_NOT_DECLARED');
       expect(surface.calls).assertEqual(0);
+    });
+
+    it('rejects self-source placement and limits actionIntent authority to deterministic registered actions', 0, () => {
+      const detailArgs = args('{"hotelId":47675}');
+      const lookup = new FakeToolDefinitionLookup([]);
+      const surface = new ExactSurfaceAuthorizer(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        detailArgs
+      );
+      const actionCatalog = catalog(
+        lookup,
+        surface,
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const placement = actionCatalog.validatePlacement(
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const surfaceExecution = actionCatalog.validateSurfaceExecution(
+        'conversation-1',
+        'turn-1',
+        'virtual:request-1',
+        'hotel.detail',
+        'hotel.detail',
+        detailArgs
+      );
+      const worldCupIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('worldcup.open', new Object());
+      const mapsIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'maps.route.open',
+        args('{"origin":"深圳北","destination":"香港西九龙"}')
+      );
+      const calendarIntent: ActionCatalogResult = actionCatalog.validateActionIntentExecution(
+        'calendar.event.create',
+        args('{"title":"QA","start":"2026-07-30T15:00:00+08:00",' +
+          '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+      );
+      const hotelIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('hotel.detail', detailArgs);
+      const memoryIntent: ActionCatalogResult =
+        actionCatalog.validateActionIntentExecution('memory.update', new Object());
+
+      expect(placement.ok).assertFalse();
+      expect(placement.code).assertEqual('ACTION_NOT_DECLARED');
+      expect(surfaceExecution.ok).assertFalse();
+      expect(surface.calls).assertEqual(0);
+      expect(worldCupIntent.ok).assertTrue();
+      expect(mapsIntent.ok).assertTrue();
+      expect(calendarIntent.ok).assertTrue();
+      expect(hotelIntent.code).assertEqual('ACTION_INTENT_DENIED');
+      expect(memoryIntent.code).assertEqual('ACTION_INTENT_DENIED');
+    });
+
+    it('limits actionIntent execution to safe initial surfaces', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const allowed: string[] = [
+        'worldcup.open',
+        'maps.route.open',
+        'calendar.event.create',
+        'luckin.order.preview',
+        'payment.send',
+        'payment.account.setup',
+        'whatsapp.message.send'
+      ];
+      const denied: string[] = [
+        'luckin.order.create',
+        'whatsapp.message.send.confirm',
+        'payment.confirm',
+        'payment.capture',
+        'ride.order.create',
+        'memory.update'
+      ];
+
+      for (let index = 0; index < allowed.length; index++) {
+        const intentArgs = allowed[index] === 'payment.send' ?
+          args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}') : new Object();
+        expect(actionCatalog.validateActionIntentExecution(
+          allowed[index], intentArgs
+        ).ok).assertTrue();
+      }
+      for (let index = 0; index < denied.length; index++) {
+        expect(actionCatalog.validateActionIntentExecution(
+          denied[index], new Object()
+        ).code).assertEqual('ACTION_INTENT_DENIED');
+      }
+    });
+
+    it('allows only the resolver-owned payment preview shape from actionIntent', 0, () => {
+      const actionCatalog = catalog(
+        new FakeToolDefinitionLookup([]),
+        new ExactSurfaceAuthorizer('', '', '', '', new Object()),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+      const preview = args('{"originalQuery":"用 PayPal 给罗一格转 1 美元"}');
+      const confirm = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"confirm"}'
+      );
+      const capture = args(
+        '{"originalQuery":"用 PayPal 给罗一格转 1 美元","phase":"capture",' +
+          '"providerSessionId":"provider-order-forged"}'
+      );
+      const structured = args(
+        '{"provider":"paypal","recipient":"罗一格","amountText":"1","currency":"USD"}'
+      );
+
+      expect(actionCatalog.validateActionIntentExecution('payment.send', preview).ok).assertTrue();
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', confirm
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', capture
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateActionIntentExecution(
+        'payment.send', structured
+      ).code).assertEqual('ACTION_INTENT_ARGS_DENIED');
+      expect(actionCatalog.validateRegisteredStep('payment.send', confirm).ok).assertTrue();
+      expect(actionCatalog.validateRegisteredStep('payment.send', capture).ok).assertTrue();
     });
 
     it('recognizes only workflow run as the fixed workflow entry', 0, () => {

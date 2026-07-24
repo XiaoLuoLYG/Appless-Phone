@@ -7,9 +7,12 @@ import {
   DataAgent,
   DataResult,
   DataSource,
+  DataStepDecision,
   DataTaskAuthorizationResult,
   DataTaskExecutor,
+  DataTaskPlanner,
   LinkedMessageBus,
+  ObservationDigest,
   TaskErrorPayload
 } from '@loop/agent-core';
 
@@ -24,6 +27,16 @@ interface HotelSearchArgs {
   checkIn: string;
   checkOut: string;
   guests: number;
+}
+
+interface DynamicResultData {
+  entityRefs: string[];
+  recordId: string;
+  privatePayload: string;
+}
+
+interface DynamicQueryArgs {
+  query: string;
 }
 
 class TestGate {
@@ -58,6 +71,48 @@ class ScriptedDataExecutor implements DataTaskExecutor {
     this.calls++;
     this.lastTask = task;
     return this.scriptedResult;
+  }
+}
+
+class SequenceDataExecutor implements DataTaskExecutor {
+  calls: number = 0;
+  tasks: CreateDataTaskPayload[] = [];
+  private readonly results: DataResult[];
+
+  constructor(results: DataResult[]) {
+    this.results = results.slice();
+  }
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls++;
+    this.tasks.push(task);
+    if (this.results.length === 0) {
+      throw new Error('No scripted Data result');
+    }
+    return this.results.shift() as DataResult;
+  }
+}
+
+class ScriptedDataPlanner implements DataTaskPlanner {
+  steps: number[] = [];
+  observationJson: string[] = [];
+  private readonly decisions: DataStepDecision[];
+
+  constructor(decisions: DataStepDecision[]) {
+    this.decisions = decisions.slice();
+  }
+
+  async next(
+    _task: CreateDataTaskPayload,
+    observations: ObservationDigest[],
+    step: number
+  ): Promise<DataStepDecision> {
+    this.steps.push(step);
+    this.observationJson.push(JSON.stringify(observations));
+    if (this.decisions.length === 0) {
+      throw new Error('No scripted Data decision');
+    }
+    return this.decisions.shift() as DataStepDecision;
   }
 }
 
@@ -122,9 +177,11 @@ class TwoControlledDataExecutor implements DataTaskExecutor {
 
 class SingleControlledDataExecutor implements DataTaskExecutor {
   readonly started: TestGate = new TestGate();
+  calls: number = 0;
   private resolveResult: ((result: DataResult) => void) | null = null;
 
   async execute(_task: CreateDataTaskPayload): Promise<DataResult> {
+    this.calls++;
     return new Promise<DataResult>((resolve: (result: DataResult) => void) => {
       this.resolveResult = resolve;
       this.started.open();
@@ -163,6 +220,84 @@ function hotelDataResult(status: 'success' | 'partial' = 'partial'): DataResult 
   };
 }
 
+function dynamicDataResult(index: number = 1): DataResult {
+  const source: DataSource = {
+    provider: 'composio',
+    backend: 'mcp_remote',
+    operation: 'WEATHER_SEARCH',
+    fetchedAt: '2026-07-21T10:00:00.000Z'
+  };
+  const entityRefs: string[] = [];
+  for (let refIndex = 0; refIndex < 20; refIndex++) {
+    entityRefs.push('weather-record-' + refIndex.toString() + '-'.repeat(130));
+  }
+  const data: DynamicResultData = {
+    entityRefs,
+    recordId: 'weather-record-real-' + index.toString(),
+    privatePayload: 'provider-secret-must-not-reach-model'
+  };
+  return {
+    toolId: 'dynamic.search',
+    outputSchema: 'dynamicToolConnect',
+    status: 'success',
+    sources: [source],
+    data,
+    warnings: []
+  };
+}
+
+function dynamicErrorDataResult(index: number): DataResult {
+  const result: DataResult = dynamicDataResult(index);
+  result.status = 'error';
+  return result;
+}
+
+function genericDataResult(toolId: string, outputSchema: string): DataResult {
+  return {
+    toolId,
+    outputSchema,
+    status: 'success',
+    sources: [],
+    data: new Object(),
+    warnings: []
+  };
+}
+
+function gmailSearchResult(): DataResult {
+  const source: DataSource = {
+    provider: 'google',
+    backend: 'oauth_api',
+    operation: 'gmail.mail.search',
+    fetchedAt: '2026-07-21T11:00:00.000Z'
+  };
+  const data: DynamicResultData = {
+    entityRefs: ['gmail-thread-real-1'],
+    recordId: 'gmail-thread-real-1',
+    privatePayload: ''
+  };
+  return {
+    toolId: 'gmail.mail.search',
+    outputSchema: 'mailThreads',
+    status: 'success',
+    sources: [source],
+    data,
+    warnings: []
+  };
+}
+
+function decision(
+  kind: 'call' | 'finish',
+  toolId: string,
+  args: Object = new Object()
+): DataStepDecision {
+  return {
+    kind,
+    toolId,
+    args,
+    summary: kind === 'finish' ? 'invented model summary must be ignored' : 'read provider'
+  };
+}
+
 function dataTaskMessage(
   conversationId: string = 'conversation-hotel',
   turnId: string = 'turn-1',
@@ -176,15 +311,68 @@ function dataTaskMessage(
   };
   const payload: CreateDataTaskPayload = {
     taskId,
+    roundId: turnId,
     skillId: 'hotel-search',
+    goal: 'hotel.search',
+    allowedToolIds: ['hotel.search'],
     toolId: 'hotel.search',
     outputSchema: 'hotelSearchResults',
-    args
+    args,
+    required: true
   };
   return {
     type: AgentMessageType.TASK_CREATE_DATA,
     conversationId,
     turnId,
+    taskId,
+    payload
+  };
+}
+
+function dynamicDataTaskMessage(
+  taskId: string,
+  allowedToolIds: string[] = ['dynamic.search']
+): AgentMessage {
+  const payload: CreateDataTaskPayload = {
+    taskId,
+    roundId: 'round-1',
+    skillId: '',
+    goal: '查天气',
+    allowedToolIds,
+    toolId: 'dynamic.search',
+    outputSchema: 'dynamicToolConnect',
+    args: new Object(),
+    required: true
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_DATA,
+    conversationId: 'conversation-data-planner',
+    turnId: 'turn-data-planner',
+    taskId,
+    payload
+  };
+}
+
+function customDataTaskMessage(
+  taskId: string,
+  toolId: string,
+  outputSchema: string
+): AgentMessage {
+  const payload: CreateDataTaskPayload = {
+    taskId,
+    roundId: 'round-custom',
+    skillId: '',
+    goal: toolId,
+    allowedToolIds: [toolId],
+    toolId,
+    outputSchema,
+    args: new Object(),
+    required: true
+  };
+  return {
+    type: AgentMessageType.TASK_CREATE_DATA,
+    conversationId: 'conversation-custom',
+    turnId: 'turn-custom',
     taskId,
     payload
   };
@@ -229,13 +417,307 @@ async function receiveType(reader: AgentMessageReader, type: AgentMessageType): 
   }
 }
 
-async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+async function receiveDataTerminal(reader: AgentMessageReader): Promise<AgentMessage> {
+  while (true) {
+    const received: AgentMessage = await receive(reader);
+    if (received.type === AgentMessageType.TASK_RESULT_DATA ||
+      received.type === AgentMessageType.TASK_ERROR) {
+      return received;
+    }
+  }
+}
+
+async function settle(rounds: number = 2): Promise<void> {
+  for (let index = 0; index < rounds; index++) {
+    await Promise.resolve();
+  }
 }
 
 export default function dataAgentTest() {
   describe('dataAgent', () => {
+    it('keeps custom authorized tools compatible on the three-argument one-shot path', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: ScriptedDataExecutor = new ScriptedDataExecutor(
+        genericDataResult('test.custom.read', 'testCustomResult')
+      );
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-custom', 'test.custom.read', 'testCustomResult'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect(terminal.taskId).assertEqual('data-custom');
+      expect(authorizationCalls).assertEqual(1);
+      expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('allows a planned Gmail read owned by Data despite its web-session fallback', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([gmailSearchResult()]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'gmail.mail.search'), decision('finish', 'gmail.mail.search')
+      ]);
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-gmail', 'gmail.mail.search', 'mailThreads'));
+      const result: DataResult = (await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).payload as DataResult;
+
+      expect(result.toolId).assertEqual('gmail.mail.search');
+      expect(result.sources[0].provider).assertEqual('google');
+      expect(authorizationCalls).assertEqual(1);
+      expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('observes a supporting read before returning the successful primary read', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        dynamicDataResult(),
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
+      const args: DynamicQueryArgs = { query: '深圳天气' };
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'dynamic.search', args),
+        decision('call', 'travel.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage('data-react', 'travel.search', 'travelOptions');
+      (task.payload as CreateDataTaskPayload).allowedToolIds = ['dynamic.search', 'travel.search'];
+      agent.start();
+
+      bus.publish(task);
+      const resultMessage: AgentMessage = await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
+      const result: DataResult = resultMessage.payload as DataResult;
+
+      expect(executor.calls).assertEqual(2);
+      expect(planner.steps.join(',')).assertEqual('1,2');
+      expect(planner.observationJson[0]).assertEqual('[]');
+      expect(planner.observationJson[1].indexOf('provider-secret-must-not-reach-model')).assertEqual(-1);
+      expect((JSON.parse(planner.observationJson[1]) as ObservationDigest[])[0].entityRefs.length)
+        .assertEqual(16);
+      expect(result.toolId).assertEqual('travel.search');
+      expect(resultMessage.taskId).assertEqual('data-react');
+
+      bus.publish(message(AgentMessageType.ACTION_RUN, 'marker', 'marker', 'marker'));
+      expect((await receiveType(observer, AgentMessageType.ACTION_RUN)).type)
+        .assertEqual(AgentMessageType.ACTION_RUN);
+      agent.stop();
+      observer.close();
+    });
+
+    it('keeps trusted original args when the planner calls the selected Data tool', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
+      const incompleteArgs: Object = JSON.parse(
+        '{"origin":"北京","destination":"上海","date":"2026-07-25"}'
+      ) as Object;
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'travel.search', incompleteArgs),
+        decision('finish', 'travel.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage(
+        'data-travel-preserve',
+        'travel.search',
+        'travelOptions'
+      );
+      const trustedArgs: Object = JSON.parse(
+        '{"origin":"北京","destination":"上海","date":"2026-07-25",' +
+        '"query":"我明天要从北京去上海，帮我搜索出行方案"}'
+      ) as Object;
+      (task.payload as CreateDataTaskPayload).args = trustedArgs;
+      agent.start();
+
+      bus.publish(task);
+      await receiveType(observer, AgentMessageType.TASK_RESULT_DATA);
+
+      expect(executor.tasks.length).assertEqual(1);
+      expect(JSON.stringify(executor.tasks[0].args)).assertEqual(JSON.stringify(trustedArgs));
+      agent.stop();
+      observer.close();
+    });
+
+    it('returns a successful primary read without letting the planner repeat it', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        genericDataResult('travel.search', 'travelOptions')
+      ]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'travel.search'),
+        decision('call', 'travel.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-primary-terminal', 'travel.search', 'travelOptions'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((terminal.payload as DataResult).toolId).assertEqual('travel.search');
+      expect(executor.calls).assertEqual(1);
+      expect(planner.steps.join(',')).assertEqual('1');
+      agent.stop();
+      observer.close();
+    });
+
+    it('returns a primary provider error to Leader without requiring a model finish', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const providerError: DataResult = genericDataResult('maps.place.search', 'places');
+      providerError.status = 'error';
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([providerError]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'maps.place.search'),
+        decision('finish', '')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(customDataTaskMessage('data-primary-error', 'maps.place.search', 'places'));
+      const terminal: AgentMessage = await receiveDataTerminal(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      expect((terminal.payload as DataResult).status).assertEqual('error');
+      expect(executor.calls).assertEqual(1);
+      expect(planner.steps.join(',')).assertEqual('1');
+      agent.stop();
+      observer.close();
+    });
+
+    it('rejects an attempted fourth read before invoking the executor', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        dynamicErrorDataResult(1), dynamicErrorDataResult(2), dynamicErrorDataResult(3)
+      ]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'dynamic.search'), decision('call', 'dynamic.search'),
+        decision('call', 'dynamic.search'), decision('call', 'dynamic.search')
+      ]);
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = customDataTaskMessage('data-step-limit', 'travel.search', 'travelOptions');
+      (task.payload as CreateDataTaskPayload).allowedToolIds = ['dynamic.search', 'travel.search'];
+      agent.start();
+
+      bus.publish(task);
+      const errorMessage: AgentMessage = await receiveType(observer, AgentMessageType.TASK_ERROR);
+      const error: TaskErrorPayload = errorMessage.payload as TaskErrorPayload;
+
+      expect(error.code).assertEqual('DATA_STEP_LIMIT');
+      expect(executor.calls).assertEqual(3);
+      expect(authorizationCalls).assertEqual(3);
+      expect(planner.steps.join(',')).assertEqual('1,2,3,4');
+      agent.stop();
+      observer.close();
+    });
+
+    it('fails closed for write unknown and outside-allowlist calls before authorization', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'hotel.booking.open'),
+        decision('call', 'missing.search'),
+        decision('call', 'hotel.search')
+      ]);
+      let authorizationCalls: number = 0;
+      const agent: DataAgent = new DataAgent(bus, (task: CreateDataTaskPayload): DataTaskAuthorizationResult => {
+        authorizationCalls++;
+        return allowDataTask(task);
+      }, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      agent.start();
+
+      bus.publish(dynamicDataTaskMessage('data-write', ['dynamic.search', 'hotel.booking.open']));
+      const write: TaskErrorPayload = (await receiveType(observer, AgentMessageType.TASK_ERROR)).payload as TaskErrorPayload;
+      bus.publish(dynamicDataTaskMessage('data-unknown', ['dynamic.search', 'missing.search']));
+      const unknown: TaskErrorPayload = (await receiveType(observer, AgentMessageType.TASK_ERROR)).payload as TaskErrorPayload;
+      bus.publish(dynamicDataTaskMessage('data-outside'));
+      const outside: TaskErrorPayload = (await receiveType(observer, AgentMessageType.TASK_ERROR)).payload as TaskErrorPayload;
+
+      expect(write.code).assertEqual('TOOL_NOT_ALLOWED');
+      expect(unknown.code).assertEqual('TOOL_NOT_ALLOWED');
+      expect(outside.code).assertEqual('TOOL_NOT_ALLOWED');
+      expect(executor.calls).assertEqual(0);
+      expect(authorizationCalls).assertEqual(0);
+      agent.stop();
+      observer.close();
+    });
+
+    it('suppresses only a concurrent duplicate while a planned task is in flight', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SingleControlledDataExecutor = new SingleControlledDataExecutor();
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'dynamic.search'), decision('finish', 'dynamic.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = dynamicDataTaskMessage('data-duplicate');
+      agent.start();
+
+      bus.publish(task);
+      bus.publish(task);
+      await executor.started.promise;
+      await settle(4);
+      expect(executor.calls).assertEqual(1);
+      executor.complete(dynamicDataResult());
+      expect((await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).taskId)
+        .assertEqual('data-duplicate');
+
+      expect(executor.calls).assertEqual(1);
+      agent.stop();
+      observer.close();
+    });
+
+    it('releases planned task identity after completion so a replay can run again', 0, async () => {
+      const bus: LinkedMessageBus = new LinkedMessageBus();
+      const executor: SequenceDataExecutor = new SequenceDataExecutor([
+        dynamicDataResult(1), dynamicDataResult(2)
+      ]);
+      const planner: ScriptedDataPlanner = new ScriptedDataPlanner([
+        decision('call', 'dynamic.search'), decision('call', 'dynamic.search')
+      ]);
+      const agent: DataAgent = new DataAgent(bus, allowDataTask, executor, planner);
+      const observer: AgentMessageReader = bus.openReader();
+      const task: AgentMessage = dynamicDataTaskMessage('data-replay');
+      agent.start();
+
+      bus.publish(task);
+      expect((await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).taskId)
+        .assertEqual('data-replay');
+      bus.publish(task);
+      await settle(12);
+
+      expect(executor.calls).assertEqual(2);
+      const replay: DataResult = (await receiveType(observer, AgentMessageType.TASK_RESULT_DATA)).payload as DataResult;
+      expect((replay.data as DynamicResultData).recordId).assertEqual('weather-record-real-2');
+      agent.stop();
+      observer.close();
+    });
+
     it('accepts only Data tasks and preserves the full structured result with correlation', 0, async () => {
       const bus: LinkedMessageBus = new LinkedMessageBus();
       const executor: ScriptedDataExecutor = new ScriptedDataExecutor(hotelDataResult());

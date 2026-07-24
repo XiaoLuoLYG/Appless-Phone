@@ -48,6 +48,7 @@ import {
   socialHubConnections,
   socialHubDraft,
   socialHubItems,
+  socialHubPublication,
   stripeReceivingAccount,
   trainOptions,
   travelOptions
@@ -68,7 +69,12 @@ import {
 import { gmailOpenDraftAction, gmailReplyDraftAction } from '@loop/agent-core';
 import { mailReplyDraftAction } from '@loop/agent-core';
 import { isMediaVideoResult, mediaVideoPlaybackAction, officialMediaVideoPlaybackUrl } from '@loop/agent-core';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData } from '@loop/agent-core';
+import {
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData,
+  SocialHubPublicationData
+} from '@loop/agent-core';
 import {
   HtmlHomeAction,
   HtmlHomeBlock,
@@ -94,6 +100,10 @@ interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
 
 interface StripeOnboardingActionArgs {
   onboardingUrl: string;
+}
+
+interface TrainBookingActionArgs {
+  bookingUrl: string;
 }
 
 interface MailDetailActionArgs {
@@ -335,6 +345,7 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.metrics, 'depart', item.depart);
     appendMetric(block.metrics, 'arrive', item.arrive);
     appendMetric(block.metrics, 'duration', item.duration);
+    appendMetric(block.metrics, 'price', item.price);
     appendMetric(block.rows, 'seats', item.seats);
     appendMetric(block.rows, 'business', item.business);
     appendMetric(block.rows, 'first', item.first);
@@ -342,6 +353,20 @@ function appendTrainBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceState
     appendMetric(block.rows, 'noSeat', item.noSeat);
     appendMetric(block.rows, 'hardSeat', item.hardSeat);
     appendMetric(block.rows, 'sleeperSoft', item.sleeperSoft);
+    if (item.bookingUrl !== undefined && item.bookingUrl.trim().length > 0) {
+      const bookingArgs: TrainBookingActionArgs = {
+        bookingUrl: item.bookingUrl.trim()
+      };
+      block.actions.push({
+        id: 'train.booking.open',
+        label: '去购票',
+        prompt: '',
+        variant: 'primary',
+        kind: 'client',
+        sourceComponentId: component.id,
+        args: bookingArgs
+      });
+    }
     block.actions.push(clientAction('html_pin_train', '固定到桌面', JSON.stringify({
       index: index,
       trainCode: textOf(item.trainCode),
@@ -628,7 +653,8 @@ function appendSocialHubBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
     appendMetric(block.rows, 'channel', item.channel);
     appendMetric(block.rows, 'threadId', item.threadId);
     appendMetric(block.rows, 'unread', item.unread);
-    if (item.id.length > 0) {
+    const community = item.kind === 'post' || item.kind === 'mention';
+    if (!community && item.id.length > 0) {
       block.actions.push(clientAction('social_hub_select_item', '查看', item.id, component.id));
       block.actions.push(clientAction('social_hub_draft_reply', '生成草稿', item.id, component.id));
     }
@@ -664,6 +690,20 @@ function appendSocialHubBlocks(document: HtmlHomeDocument, surface: A2uiSurfaceS
     appendMetric(block.rows, 'itemId', draft.itemId);
     appendMetric(block.rows, 'localOnly', draft.localOnly);
     appendMetric(block.rows, 'sent', draft.sent);
+    document.blocks.push(block);
+  }
+
+  const publication: SocialHubPublicationData = socialHubPublication(surface);
+  if (publication.status !== 'empty') {
+    const block = newBlock(component.id + '-publication', 'social-hub-publication', '公开帖子预览');
+    block.subtitle = publication.error;
+    block.status = publication.status;
+    block.source = publication.platform;
+    appendMetric(block.metrics, 'platform', publication.platform);
+    appendMetric(block.metrics, 'status', publication.status);
+    appendMetric(block.rows, 'account', publication.accountName);
+    appendMetric(block.rows, 'text', publication.text);
+    appendMetric(block.rows, 'error', publication.error);
     document.blocks.push(block);
   }
 }

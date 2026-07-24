@@ -14,7 +14,11 @@ import {
   A2uiSurfaceState,
   A2uiTravelOptionData,
   A2uiTrainData,
+  FlightStructuredData,
+  FoodStructuredData,
   StripeReceivingAccountCardData,
+  TrainStructuredData,
+  TravelStructuredData,
   defaultA2uiCapabilities,
   emptyA2uiSurface
 } from './A2uiTypes';
@@ -30,12 +34,24 @@ import {
   GOOGLE_OAUTH_SETUP_URL,
   calendarAuthRequiredA2ui,
   gmailAuthRequiredA2ui,
-  gmailBlockedSendA2ui,
   gmailDraftPreviewA2ui,
   gmailOpenWebA2ui,
+  gmailSearchStructuredDataA2ui,
   gmailThreadResultsA2ui
 } from './GmailToolA2ui';
-import { mailDraftPreviewA2ui, mailResultsA2ui, mailResultsFromDynamicA2ui } from './MailToolA2ui';
+import {
+  gmailSearchStructuredDataFromResults,
+  GmailSearchStructuredData,
+  GmailThreadSummary
+} from './GmailToolNormalizer';
+import {
+  mailDraftPreviewA2ui,
+  mailResultsFromDynamicA2ui,
+  mailSearchStructuredDataA2ui,
+  mailThreadSummary,
+  MailSearchStructuredData,
+  MailThreadSummary
+} from './MailToolA2ui';
 import {
   MailDetail,
   MailDetailRequest,
@@ -65,6 +81,11 @@ import {
 } from './GmailOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
+import {
+  errorDataResult,
+  partialDataResult,
+  successfulDataResult
+} from '../../agent/message/DataResultFactory';
 import { ActionCatalog } from '../../agent/action/ActionCatalog';
 import {
   ActionArgsValidator,
@@ -91,37 +112,69 @@ import {
 import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
+import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
 import {
   CalendarEventArgs,
+  calendarDateFromPrompt,
   calendarEventRequiredFields,
-  calendarDeleteTargetFromResultsForTest,
-  calendarUpdateArgsFromResultsForTest,
-  calendarUpdateNeedsInputResults,
   calendarMissingArgsResult,
   calendarProviderDateTime,
   calendarResultsFromComposioObservation,
+  calendarTimeFromPrompt,
   normalizedCalendarArgsForPrompt
 } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
+import {
+  callMapsPlaceDetailsProvider,
+  callMapsPlaceSearch,
+  callMapsPlaceSearchProvider,
+  mapsFoodRecordFromResult,
+  mapsPlaceProviderResultsForA2ui,
+  mapsRouteResult,
+  MapsPlaceProviderResult,
+  MapsStructuredData
+} from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
-import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
-import { parseComposioSocialFeed, SocialHubClient, SocialHubFeedResult } from './SocialHubClient';
-import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
+import {
+  socialHubCommunityA2ui,
+  socialHubDraftA2ui,
+  socialHubFeedA2ui,
+  socialHubPublicationA2ui,
+  socialHubStructuredDataA2ui,
+  SocialHubStructuredData
+} from './SocialHubA2ui';
+import {
+  createSocialHubPublicationPreview,
+  parseComposioCommunityFeed,
+  parseComposioSocialFeed,
+  SocialHubClient,
+  SocialHubFeedResult,
+  SocialHubPublicationPreviewInput
+} from './SocialHubClient';
+import {
+  SocialHubConnectionData,
+  SocialHubDraftData,
+  SocialHubItemData,
+  SocialHubPlatform,
+  SocialHubPublicationData
+} from './SocialHubTypes';
 import {
   callComposioDynamic,
+  callComposioFixedDynamic,
   callComposioFixedRaw,
   composioDynamicResultFromObservation,
   composioPhoneNumberIdsFromObservation,
   ComposioRawExecution,
+  isComposioConfigured,
   refreshComposioConnections
 } from './ComposioDynamicBackend';
 import { aggregateSearchA2ui } from './AggregateSearchA2ui';
 import { callAggregateSearch } from './AggregateSearchClient';
+import { AggregateSearchResult, AggregateSearchSourceStatus } from './AggregateSearchTypes';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
-import { ToolDefinition } from './ToolDefinitionTypes';
+import { dataAgentToolDefinitions, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
+import { ToolBackendType, ToolDefinition } from './ToolDefinitionTypes';
 import {
   PaymentAccount,
   PaymentMode,
@@ -169,9 +222,15 @@ import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
   DynamicMcpTool,
+  DynamicReadExecution,
+  DynamicReadExecutor,
+  DynamicRegistrationMetadata,
+  DynamicStructuredData,
   DynamicToolManifest,
   DynamicToolRegistration,
-  DynamicToolTransport
+  DynamicToolTransport,
+  GenericStructuredData,
+  dynamicReceiptFromProviderPayload
 } from './DynamicToolTypes';
 import {
   A2uiPartialDataPatch,
@@ -203,11 +262,6 @@ interface HttpTextResponse {
   text: string;
   cookies: string;
   headers: string;
-}
-
-interface ComposioFixedRequestPayload {
-  fixedToolId: string;
-  fixedArgs?: Object;
 }
 
 interface SlackComposioReplyArgs {
@@ -293,6 +347,7 @@ interface LocalProviderConfig {
   amapMcpKey: string;
   amapMcpUrl: string;
   rideMockEnabled: string;
+  whatsappTestTo: string;
   googleMapsApiKey: string;
   googleOauthClientId: string;
   googleOauthClientSecret: string;
@@ -365,6 +420,7 @@ interface LocalProviderRawConfig {
   AMAP_MCP_KEY?: string;
   AMAP_MCP_URL?: string;
   RIDE_MOCK_ENABLED?: string;
+  AIPHONE_WHATSAPP_TEST_TO?: string;
   GOOGLE_MAPS_API_KEY?: string;
   GMAIL_AUTH_URL?: string;
   GMAIL_OAUTH_CLIENT_ID?: string;
@@ -431,6 +487,7 @@ interface LocalProviderRawConfig {
   amapMcpKey?: string;
   amapMcpUrl?: string;
   rideMockEnabled?: string;
+  whatsappTestTo?: string;
   googleMapsApiKey?: string;
   googleOauthClientId?: string;
   googleOauthClientSecret?: string;
@@ -681,6 +738,9 @@ export interface FoodProviderResult {
   provider: string;
   foods: A2uiFoodData[];
   error: string;
+  attempted?: boolean;
+  succeeded?: boolean;
+  operation?: string;
 }
 
 export interface FoodAggregationResult {
@@ -1168,15 +1228,6 @@ interface FoodQuery {
   keyword: string;
 }
 
-interface ToolA2uiSnapshot {
-  title: string;
-  summary: string;
-  error: string;
-  trains: A2uiTrainData[];
-  flights: A2uiFlightData[];
-  rows: A2uiLabelValueData[];
-}
-
 const LOCAL_TOOL_GATEWAY_URL: string = 'local://aiphone-tools';
 const LOCAL_PROVIDER_CONFIG_RAWFILE: string = 'aiphone_provider_config.json';
 const DEFAULT_VARIFLIGHT_API_URL: string = 'https://mcp.variflight.com/api/v1/mcp/data';
@@ -1270,6 +1321,7 @@ let localProviderConfig: LocalProviderConfig = {
   amapMcpKey: '',
   amapMcpUrl: DEFAULT_AMAP_MCP_URL,
   rideMockEnabled: 'false',
+  whatsappTestTo: '',
   googleMapsApiKey: '',
   googleOauthClientId: '',
   googleOauthClientSecret: '',
@@ -1335,7 +1387,6 @@ interface WhatsAppSendArgs {
   phoneNumberId?: ToolArgValue;
   wabaId?: ToolArgValue;
   previewUrl?: ToolArgValue;
-  confirmed?: ToolArgValue;
 }
 
 interface WhatsAppProviderArgs {
@@ -1351,7 +1402,6 @@ interface WhatsAppConfirmArgs {
   phoneNumberId: string;
   wabaId: string;
   previewUrl: boolean;
-  confirmed: boolean;
 }
 
 interface WhatsAppPhoneNumbersArgs {
@@ -1359,17 +1409,7 @@ interface WhatsAppPhoneNumbersArgs {
 }
 
 interface CalendarComposioArgs extends CalendarEventArgs {
-  confirmed?: boolean;
   sendUpdates?: string;
-}
-
-interface CalendarDeleteConfirmArgs {
-  eventId: string;
-  calendarId: string;
-  title: string;
-  start: string;
-  end: string;
-  confirmed: boolean;
 }
 
 type ToolArgValue = Object | string | number | boolean | null | undefined;
@@ -1393,8 +1433,6 @@ interface RideOrderArgs {
   estimateTraceId?: ToolArgValue;
   estimate_trace_id?: ToolArgValue;
   traceId?: ToolArgValue;
-  confirmed?: ToolArgValue;
-  confirmation?: ToolArgValue;
   orderId?: ToolArgValue;
   order_id?: ToolArgValue;
   reason?: ToolArgValue;
@@ -1457,8 +1495,6 @@ interface RideOrderActionArgs {
   estimateTraceId?: string;
   estimate_trace_id?: string;
   traceId?: string;
-  confirmed?: boolean;
-  confirmation?: string;
   orderId?: string;
   order_id?: string;
   reason?: string;
@@ -1685,6 +1721,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     amapMcpKey: config.amapMcpKey.trim().length > 0 ? config.amapMcpKey.trim() : config.amapKey.trim(),
     amapMcpUrl: config.amapMcpUrl.trim().length > 0 ? config.amapMcpUrl.trim() : DEFAULT_AMAP_MCP_URL,
     rideMockEnabled: config.rideMockEnabled.trim().toLowerCase() === 'true' ? 'true' : 'false',
+    whatsappTestTo: config.whatsappTestTo.trim(),
     googleMapsApiKey: config.googleMapsApiKey.trim(),
     googleOauthClientId: config.googleOauthClientId.trim(),
     googleOauthClientSecret: config.googleOauthClientSecret.trim(),
@@ -1738,6 +1775,7 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
     ' amapMcpKeyChars=' + localProviderConfig.amapMcpKey.length.toString() +
     ' rideMockEnabled=' + localProviderConfig.rideMockEnabled +
+    ' whatsappTestToPresent=' + (localProviderConfig.whatsappTestTo.length > 0 ? 'true' : 'false') +
     ' googleMapsApiKeyChars=' + localProviderConfig.googleMapsApiKey.length.toString() +
     ' googleOauthClientIdChars=' + localProviderConfig.googleOauthClientId.length.toString() +
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
@@ -1810,6 +1848,7 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     amapMcpKey: firstText([parsed.AMAP_MCP_KEY, parsed.amapMcpKey]),
     amapMcpUrl: firstText([parsed.AMAP_MCP_URL, parsed.amapMcpUrl]),
     rideMockEnabled: firstText([parsed.RIDE_MOCK_ENABLED, parsed.rideMockEnabled]),
+    whatsappTestTo: firstText([parsed.AIPHONE_WHATSAPP_TEST_TO, parsed.whatsappTestTo]),
     googleMapsApiKey: firstText([parsed.GOOGLE_MAPS_API_KEY, parsed.googleMapsApiKey]),
     googleOauthClientId: firstText([parsed.GOOGLE_OAUTH_CLIENT_ID, parsed.GMAIL_OAUTH_CLIENT_ID, parsed.googleOauthClientId]),
     googleOauthClientSecret: firstText([parsed.GOOGLE_OAUTH_CLIENT_SECRET, parsed.GMAIL_OAUTH_CLIENT_SECRET, parsed.googleOauthClientSecret]),
@@ -1868,6 +1907,7 @@ export function localProviderConfigDebugSummary(): string {
     ', amapMcpKey=' + (localProviderConfig.amapMcpKey.length > 0 ? 'present(' + localProviderConfig.amapMcpKey.length.toString() + ')' : 'missing') +
     ', amapMcpUrl=' + (localProviderConfig.amapMcpUrl.length > 0 ? 'present' : 'missing') +
     ', rideMockEnabled=' + localProviderConfig.rideMockEnabled +
+    ', whatsappTestTo=' + (localProviderConfig.whatsappTestTo.length > 0 ? 'present' : 'missing') +
     ', googleMapsApiKey=' + (localProviderConfig.googleMapsApiKey.length > 0 ? 'present(' + localProviderConfig.googleMapsApiKey.length.toString() + ')' : 'missing') +
     ', googleOauthClientId=' + (localProviderConfig.googleOauthClientId.length > 0 ? 'present(' + localProviderConfig.googleOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
@@ -1935,95 +1975,6 @@ function pad2(value: number): string {
     return '0' + value.toString();
   }
   return value.toString();
-}
-
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date.getTime());
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatDate(date: Date): string {
-  return date.getFullYear().toString() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
-}
-
-function parseTravelDate(source: string): string {
-  const now = new Date();
-  if (/后天/.test(source)) {
-    return formatDate(addDays(now, 2));
-  }
-  if (/明天|明日/.test(source)) {
-    return formatDate(addDays(now, 1));
-  }
-  if (/今天|今日/.test(source)) {
-    return formatDate(now);
-  }
-
-  const iso = /20\d{2}[-/年](\d{1,2})[-/月](\d{1,2})/.exec(source);
-  if (iso !== null) {
-    return source.substring(iso.index, iso.index + 4) + '-' + pad2(Number(iso[1])) + '-' + pad2(Number(iso[2]));
-  }
-
-  const monthDay = /(\d{1,2})\s*(?:月|-|\/)\s*(\d{1,2})\s*(?:日|号)?/.exec(source);
-  if (monthDay !== null) {
-    return now.getFullYear().toString() + '-' + pad2(Number(monthDay[1])) + '-' + pad2(Number(monthDay[2]));
-  }
-  return '';
-}
-
-function parseChineseNumberToken(token: string): number {
-  const raw = token.trim();
-  if (/^\d+$/.test(raw)) {
-    return Number(raw);
-  }
-  const chars = ['零', '一', '二', '两', '三', '四', '五', '六', '七', '八', '九', '十'];
-  const values = [0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  if (raw.length === 1) {
-    const index = chars.indexOf(raw);
-    return index >= 0 ? values[index] : -1;
-  }
-  if (raw.startsWith('十') && raw.length === 2) {
-    const index = chars.indexOf(raw.substring(1));
-    return index >= 0 ? 10 + values[index] : -1;
-  }
-  if (raw.endsWith('十') && raw.length === 2) {
-    const index = chars.indexOf(raw.substring(0, 1));
-    return index >= 0 ? values[index] * 10 : -1;
-  }
-  const tens = /^([一二三四五六七八九])十([一二三四五六七八九])?$/.exec(raw);
-  if (tens !== null) {
-    const tenIndex = chars.indexOf(tens[1]);
-    const oneIndex = tens[2] === undefined ? -1 : chars.indexOf(tens[2]);
-    return values[tenIndex] * 10 + (oneIndex >= 0 ? values[oneIndex] : 0);
-  }
-  return -1;
-}
-
-function parseDepartAfter(source: string): string {
-  const colon = /(\d{1,2})\s*[:：]\s*(\d{2})\s*(?:之)?(?:后|以后|之后|起)?/.exec(source);
-  if (colon !== null) {
-    const hour = Number(colon[1]);
-    const minute = Number(colon[2]);
-    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      return pad2(hour) + ':' + pad2(minute);
-    }
-  }
-  const point = /(凌晨|早上|上午|中午|下午|傍晚|晚上|夜间)?\s*([零一二三四五六七八九十两\d]{1,4})\s*点(?:\s*([零一二三四五六七八九十\d]{1,2})\s*分)?(?:\s*(?:之)?(?:后|以后|之后|起))?/.exec(source);
-  if (point !== null) {
-    let hour = parseChineseNumberToken(point[2]);
-    const minute = point[3] === undefined ? 0 : parseChineseNumberToken(point[3]);
-    if (hour < 0 || minute < 0) {
-      return '';
-    }
-    const period = point[1] === undefined ? '' : point[1];
-    if ((period === '下午' || period === '晚上' || period === '傍晚') && hour >= 1 && hour <= 11) {
-      hour += 12;
-    }
-    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      return pad2(hour) + ':' + pad2(minute);
-    }
-  }
-  return '';
 }
 
 function normalizeTrainStationName(name: string, source: string): string {
@@ -2922,20 +2873,6 @@ function rideOrderArgText(args: RideOrderArgs, keys: string[]): string {
   return '';
 }
 
-function rideOrderConfirmed(args: RideOrderArgs): boolean {
-  const record = args as ToolArgRecord;
-  const confirmed = record.confirmed;
-  if (confirmed === true) {
-    return true;
-  }
-  const confirmedText = textOf(confirmed).trim().toLowerCase();
-  if (confirmedText === 'true' || confirmedText === 'yes') {
-    return true;
-  }
-  const confirmation = textOf(record.confirmation).trim();
-  return confirmation.indexOf('确认') >= 0 && confirmation.indexOf('下单') >= 0;
-}
-
 function rideDidiCreateOrderArgs(args: Object | null): RideDidiCreateOrderArgs {
   const parsed = rideOrderArgs(args);
   return {
@@ -3027,8 +2964,8 @@ export function rideDidiDriverLocationArgsForTest(args: Object | null): Object {
   return rideDidiDriverLocationArgs(args);
 }
 
-export function rideOrderConfirmedForTest(args: Object | null): boolean {
-  return rideOrderConfirmed(rideOrderArgs(args));
+export function rideOrderConfirmedForTest(actionId: string): boolean {
+  return actionId === 'ride.order.confirm';
 }
 
 function rideErrorResult(
@@ -3309,9 +3246,7 @@ function rideOrderConfirmAction(product: RideProduct, traceId: string, origin: R
     estimateCacheJson: estimateCacheJson,
     estimateTraceId: traceId,
     estimate_trace_id: traceId,
-    traceId: traceId,
-    confirmed: true,
-    confirmation: '确认下单'
+    traceId: traceId
   };
   return {
     id: 'ride.order.confirm',
@@ -3358,7 +3293,7 @@ function rideEstimateResult(origin: RidePoint, destination: RidePoint, estimateP
   if (traceId.length > 0) {
     rows.push({
       label: 'traceId',
-      value: traceId.length > 16 ? traceId.substring(0, 8) + '...' + traceId.substring(traceId.length - 6) : traceId
+      value: traceId
     });
   }
   rows.push({ label: '来源', value: '滴滴 taxi_estimate' });
@@ -3470,6 +3405,44 @@ function rideOrderPayloadText(payload: Object, keys: string[]): string {
   return '';
 }
 
+function rideWriteFailure(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  const records: Object[] = [root];
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    records.push(data);
+  }
+  const items = ridePayloadItems(payload);
+  if (items.length > 0) {
+    records.push(items[0]);
+  }
+  for (let index = 0; index < records.length; index++) {
+    const success = rideObjectValue(records[index], 'success');
+    const successful = rideObjectValue(records[index], 'successful');
+    if (success === false || success === 'false' ||
+      successful === false || successful === 'false') {
+      return firstText([
+        rideObjectValue(records[index], 'message'),
+        rideObjectValue(records[index], 'error'),
+        'Provider explicitly reported failure.'
+      ]);
+    }
+    const status = firstText([
+      rideObjectValue(records[index], 'status'),
+      rideObjectValue(records[index], 'orderStatus'),
+      rideObjectValue(records[index], 'order_status'),
+      rideObjectValue(records[index], 'cancelStatus'),
+      rideObjectValue(records[index], 'cancel_status')
+    ]).trim();
+    const lower = status.toLowerCase();
+    if (lower.indexOf('fail') >= 0 || lower.indexOf('error') >= 0 ||
+      lower.indexOf('reject') >= 0 || lower.indexOf('denied') >= 0) {
+      return 'Provider returned failure status: ' + status;
+    }
+  }
+  return '';
+}
+
 function rideCancelAction(orderId: string, context: RideOrderRouteContext | null = null): A2uiAction {
   const args: RideOrderActionArgs = {
     orderId: orderId,
@@ -3564,6 +3537,17 @@ function rideChangeVehicleAction(context: RideOrderRouteContext | null = null): 
 function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrderArgs, context: RideOrderRouteContext): DynamicGenericToolResult {
   const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status']);
+  const lowerStatus = status.toLowerCase();
+  const providerFailure = rideWriteFailure(payload);
+  if (orderId.length === 0 || providerFailure.length > 0 || lowerStatus.indexOf('fail') >= 0 ||
+    lowerStatus.indexOf('error') >= 0 || lowerStatus.indexOf('reject') >= 0 ||
+    lowerStatus.indexOf('denied') >= 0) {
+    return rideErrorResult(
+      '滴滴', 'ride.order.create', '滴滴下单未确认完成',
+      orderId.length === 0 ? 'Provider 未返回订单号，本次不能视为下单成功。' :
+        (providerFailure.length > 0 ? providerFailure : 'Provider 返回失败状态：' + status)
+    );
+  }
   const rows: A2uiLabelValueData[] = [
     { label: '车型', value: context.selectedVehicleText.length > 0 ? context.selectedVehicleText : requestArgs.product_category },
     { label: 'traceId', value: requestArgs.estimate_trace_id.length > 16 ? requestArgs.estimate_trace_id.substring(0, 8) + '...' + requestArgs.estimate_trace_id.substring(requestArgs.estimate_trace_id.length - 6) : requestArgs.estimate_trace_id }
@@ -3581,15 +3565,44 @@ function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrder
     toolName: 'ride.order.create',
     title: '滴滴订单已提交',
     status: 'success',
-    summary: orderId.length > 0 ? '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 下单接口，但响应里没有返回订单号。',
+    summary: '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。',
     rows: rows,
     rawPreview: JSON.stringify(payload).substring(0, 1200),
-    actions: orderId.length > 0 ? [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)] : []
+    actions: [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)]
   };
+}
+
+export function rideCreateOrderResultForTest(
+  payload: Object,
+  productCategory: string,
+  estimateTraceId: string
+): DynamicGenericToolResult {
+  return rideCreateOrderResult(payload, {
+    product_category: productCategory,
+    estimate_trace_id: estimateTraceId
+  }, {
+    routeText: '测试起点 → 测试终点',
+    pickupLocation: '114.0,22.5',
+    destinationLocation: '114.1,22.6',
+    selectedVehicleText: productCategory,
+    estimateCacheJson: ''
+  });
 }
 
 function rideCancelOrderResult(payload: Object, requestArgs: RideDidiCancelOrderArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'cancelStatus', 'cancel_status']);
+  const lowerStatus = status.toLowerCase();
+  const providerFailure = rideWriteFailure(payload);
+  const confirmed = providerFailure.length === 0 &&
+    (lowerStatus === 'cancel' || lowerStatus === 'canceled' || lowerStatus === 'cancelled' ||
+      lowerStatus === 'success' || lowerStatus === 'succeeded' ||
+      lowerStatus === 'completed' || lowerStatus === 'ok');
+  if (!confirmed) {
+    return rideErrorResult(
+      '滴滴', 'ride.order.cancel', '滴滴取消未确认完成',
+      status.length === 0 ? 'Provider 未返回取消状态，本次不能视为取消成功。' : 'Provider 返回未确认状态：' + status
+    );
+  }
   const rows: A2uiLabelValueData[] = [
     { label: '订单号', value: requestArgs.order_id }
   ];
@@ -3681,6 +3694,7 @@ function rideDriverEtaText(payload: Object): string {
 function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLocationArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
   const location = rideDriverCoordinate(payload, ['lng', 'lon', 'longitude', 'driver_lng', 'driverLng'], ['lat', 'latitude', 'driver_lat', 'driverLat']);
   const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'driverStatus', 'driver_status']);
+  const driverId = rideOrderPayloadText(payload, ['driverId', 'driver_id']);
   const driverName = rideOrderPayloadText(payload, ['driverName', 'driver_name', 'name']);
   const etaText = rideDriverEtaText(payload);
   const rows: A2uiLabelValueData[] = [
@@ -3691,6 +3705,9 @@ function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLo
   }
   if (location.length > 0) {
     rows.push({ label: '司机位置', value: location });
+  }
+  if (driverId.length > 0) {
+    rows.push({ label: '司机 ID', value: driverId });
   }
   if (driverName.length > 0) {
     rows.push({ label: '司机', value: driverName });
@@ -3905,15 +3922,10 @@ function rideOrderCreateErrorSummary(message: string): string {
 async function callLocalDidiRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
-  const parsed = rideOrderArgs(args);
   const requestArgs = rideDidiCreateOrderArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (didiKey.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 下单接口。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
-  }
-  if (!rideOrderConfirmed(parsed)) {
-    results.push(rideErrorResult('滴滴', 'ride.order.create', '需要明确确认车型', '请先查看滴滴价格预估，并明确点击某个车型的确认下单按钮。'));
     return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
   }
   if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
@@ -3971,18 +3983,18 @@ async function callLocalDidiRideCancelOrder(surfaceId: string, args: Object | nu
   return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
 }
 
-async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+async function callDidiRideDriverLocationResults(args: Object | null): Promise<DynamicGenericToolResult[]> {
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
   const requestArgs = rideDidiDriverLocationArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (didiKey.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 司机位置接口。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+    return results;
   }
   if (requestArgs.order_id.length === 0) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少订单号', '刷新滴滴司机位置需要 order_id；请从订单卡片点击刷新。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+    return results;
   }
   try {
     const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', requestArgs);
@@ -3990,15 +4002,15 @@ async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object |
   } catch (error) {
     results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(error)));
   }
-  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  return results;
 }
 
-async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args: Object | null): Promise<string> {
+async function callMockRideEstimateResults(toolId: string, args: Object | null): Promise<DynamicGenericToolResult[]> {
   const route = rideRouteFromArgs(args);
   if (route.origin.length === 0 || route.destination.length === 0) {
-    return genericToolResultsA2ui(surfaceId, toolId, [
+    return [
       rideErrorResult('模拟打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；模拟数据也需要明确路线。')
-    ]);
+    ];
   }
   const originPoint = rideMockPoint(route.origin, '114.066231,22.657805');
   const destinationPoint = rideMockPoint(route.destination, '114.060432,22.548829');
@@ -4017,18 +4029,13 @@ async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args
       destinationPoint.location
     ));
   }
-  return genericToolResultsA2ui(surfaceId, toolId, results);
+  return results;
 }
 
 async function callLocalMockRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
   const results: DynamicGenericToolResult[] = [];
-  const parsed = rideOrderArgs(args);
   const requestArgs = rideDidiCreateOrderArgs(args);
   const routeContext = rideOrderRouteContext(args);
-  if (!rideOrderConfirmed(parsed)) {
-    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '需要明确确认车型', '请先查看模拟价格预估，并明确点击某个车型的确认叫车按钮。'));
-    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
-  }
   if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
     results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '缺少下单参数', '模拟下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
     return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
@@ -4057,37 +4064,31 @@ async function callLocalMockRideCancelOrder(surfaceId: string, args: Object | nu
   ]);
 }
 
-async function callLocalMockRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+async function callMockRideDriverLocationResults(args: Object | null): Promise<DynamicGenericToolResult[]> {
   const requestArgs = rideDidiDriverLocationArgs(args);
   const routeContext = rideOrderRouteContext(args);
   if (requestArgs.order_id.length === 0) {
-    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+    return [
       rideErrorResult('模拟滴滴', 'ride.driver.location', '缺少订单号', '刷新模拟司机位置需要 order_id；请从订单卡片点击刷新。')
-    ]);
+    ];
   }
-  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+  return [
     rideDriverLocationResult(rideMockDriverPayload(requestArgs), requestArgs, routeContext)
-  ]);
+  ];
 }
 
-async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  if (toolId === 'ride.order.create') {
-    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
-  }
-  if (toolId === 'ride.order.cancel') {
-    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
-  }
+async function callStructuredRideReadResults(toolId: string, args: Object | null): Promise<DynamicGenericToolResult[]> {
   if (toolId === 'ride.driver.location') {
-    return rideMockEnabled() ? callLocalMockRideDriverLocation(surfaceId, args) : callLocalDidiRideDriverLocation(surfaceId, args);
+    return rideMockEnabled() ? callMockRideDriverLocationResults(args) : callDidiRideDriverLocationResults(args);
   }
   if (rideMockEnabled() && (toolId === 'ride.estimate' || toolId === 'ride.app.link')) {
-    return callLocalMockRideEstimate(surfaceId, toolId, args);
+    return callMockRideEstimateResults(toolId, args);
   }
   const route = rideRouteFromArgs(args);
   if (route.origin.length === 0 || route.destination.length === 0) {
-    return genericToolResultsA2ui(surfaceId, toolId, [
+    return [
       rideErrorResult('打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；AIPhone 不会使用记忆坐标或猜测坐标。')
-    ]);
+    ];
   }
   const results: DynamicGenericToolResult[] = [];
   const didiKey = localProviderConfig.didiMcpKey.trim();
@@ -4175,7 +4176,33 @@ async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: str
     const destinationLocation = destinationPoint !== null ? destinationPoint.location : (amapDestinationPoint !== null ? amapDestinationPoint.location : '');
     results.push(rideLinkResult(route.origin, route.destination, didiLink, amapLink, originLocation, destinationLocation));
   }
-  return genericToolResultsA2ui(surfaceId, toolId, results);
+  return results;
+}
+
+async function callLocalRideTool(
+  toolId: string,
+  _prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
+  if (toolId === 'ride.order.create') {
+    if (!rideOrderConfirmedForTest(actionId)) {
+      return genericToolResultsA2ui(surfaceId, toolId, [
+        rideErrorResult('滴滴', toolId, '需要明确确认车型', '请从当前价格预估卡片点击确认叫车。')
+      ]);
+    }
+    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.order.cancel') {
+    if (actionId !== 'ride.order.cancel') {
+      return genericToolResultsA2ui(surfaceId, toolId, [
+        rideErrorResult('滴滴', toolId, '需要当前订单取消操作', '请从当前订单卡片点击取消。')
+      ]);
+    }
+    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, await callStructuredRideReadResults(toolId, args));
 }
 
 function build12306LeftTicketUrl(path: string, date: string, fromCode: string, toCode: string): string {
@@ -4184,6 +4211,20 @@ function build12306LeftTicketUrl(path: string, date: string, fromCode: string, t
     '&leftTicketDTO.from_station=' + encodeURIComponent(fromCode) +
     '&leftTicketDTO.to_station=' + encodeURIComponent(toCode) +
     '&purpose_codes=ADULT';
+}
+
+export function build12306BookingUrl(
+  date: string,
+  fromName: string,
+  fromCode: string,
+  toName: string,
+  toCode: string
+): string {
+  return 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
+    '&fs=' + encodeURIComponent(fromName) + ',' + encodeURIComponent(fromCode) +
+    '&ts=' + encodeURIComponent(toName) + ',' + encodeURIComponent(toCode) +
+    '&date=' + encodeURIComponent(date) +
+    '&flag=N,N,Y';
 }
 
 function redirected12306Url(text: string, date: string, fromCode: string, toCode: string): string {
@@ -4308,6 +4349,87 @@ async function load12306Stations(): Promise<StationCache> {
   return stationCache;
 }
 
+function trainField(fields: string[], index: number): string {
+  return fields.length > index ? fields[index].trim() : '';
+}
+
+function isAvailableTrainSeat(value: string): boolean {
+  const text = value.trim();
+  return text === '有' || /^[1-9]\d*$/.test(text);
+}
+
+function trainSeatAvailabilityForPriceCode(code: string, fields: string[]): string {
+  if (code === '9') {
+    return trainField(fields, 32);
+  }
+  if (code === 'P') {
+    return trainField(fields, 25);
+  }
+  if (code === 'M') {
+    return trainField(fields, 31);
+  }
+  if (code === 'O' || code === 'S') {
+    return trainField(fields, 30);
+  }
+  if (code === '6' || code === 'A') {
+    return trainField(fields, 21);
+  }
+  if (code === '4' || code === 'I') {
+    return trainField(fields, 23);
+  }
+  if (code === 'F') {
+    return trainField(fields, 33);
+  }
+  if (code === '3' || code === 'J') {
+    return trainField(fields, 28);
+  }
+  if (code === '2') {
+    return trainField(fields, 24);
+  }
+  if (code === '1') {
+    return trainField(fields, 29);
+  }
+  if (code === 'W') {
+    return trainField(fields, 26);
+  }
+  return '';
+}
+
+function lowestAvailable12306Price(fields: string[]): string {
+  const ypInfoNew = trainField(fields, 39);
+  if (ypInfoNew.length === 0 || ypInfoNew.length % 10 !== 0) {
+    return '';
+  }
+  let minimumJiao = -1;
+  for (let offset = 0; offset < ypInfoNew.length; offset += 10) {
+    const chunk = ypInfoNew.substring(offset, offset + 10);
+    const inventoryText = chunk.substring(6, 10);
+    const availability = /^\d{4}$/.test(inventoryText) && Number.parseInt(inventoryText, 10) >= 3000 ?
+      trainField(fields, 26) : trainSeatAvailabilityForPriceCode(chunk.substring(0, 1), fields);
+    const priceText = chunk.substring(1, 6);
+    if (!isAvailableTrainSeat(availability) || !/^\d{5}$/.test(priceText)) {
+      continue;
+    }
+    const priceJiao = Number.parseInt(priceText, 10);
+    if (priceJiao <= 0) {
+      continue;
+    }
+    if (minimumJiao < 0 || priceJiao < minimumJiao) {
+      minimumJiao = priceJiao;
+    }
+  }
+  if (minimumJiao < 0) {
+    return '';
+  }
+  const yuan = Math.floor(minimumJiao / 10);
+  const jiao = minimumJiao % 10;
+  return jiao === 0 ? yuan.toString() : yuan.toString() + '.' + jiao.toString();
+}
+
+export function trainLowestAvailablePriceForTest(row: string): string {
+  return lowestAvailable12306Price(row.split('|'));
+}
+
 function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
   const fields = row.split('|');
   const trainCode = fields.length > 3 ? fields[3] : '';
@@ -4325,7 +4447,8 @@ function parse12306Row(row: string, stations: StationCache): A2uiTrainData {
     second: fields.length > 30 ? fields[30] : '',
     noSeat: fields.length > 26 ? fields[26] : '',
     hardSeat: fields.length > 29 ? fields[29] : '',
-    sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : '')
+    sleeperSoft: fields.length > 23 && fields[23].length > 0 ? fields[23] : (fields.length > 28 ? fields[28] : ''),
+    price: lowestAvailable12306Price(fields)
   };
 }
 
@@ -4352,7 +4475,7 @@ function formatTrainSeatsSummary(item: A2uiTrainData): string {
   return seats.join(' / ');
 }
 
-function normalizeTrainRecord(item: A2uiTrainData): A2uiTrainData {
+function normalizeTrainRecord(item: A2uiTrainData, bookingUrl: string = ''): A2uiTrainData {
   return {
     trainCode: item.trainCode,
     from: item.from,
@@ -4368,7 +4491,9 @@ function normalizeTrainRecord(item: A2uiTrainData): A2uiTrainData {
     second: item.second,
     noSeat: item.noSeat,
     hardSeat: item.hardSeat,
-    sleeperSoft: item.sleeperSoft
+    sleeperSoft: item.sleeperSoft,
+    price: item.price === undefined ? '' : item.price,
+    bookingUrl: bookingUrl
   };
 }
 
@@ -4462,6 +4587,57 @@ function dataLabelForTool(toolId: string): string {
     return 'foods';
   }
   return 'rows';
+}
+
+function structuredCollectionResult(
+  toolId: string,
+  outputSchema: string,
+  data: Object,
+  itemCount: number,
+  sources: DataSource[],
+  warnings: string[]
+): DataResult {
+  if (itemCount > 0) {
+    return warnings.length > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  const result = successfulDataResult(toolId, outputSchema, data, sources);
+  result.status = 'empty';
+  result.warnings = warnings.slice();
+  return result;
+}
+
+export function travelStructuredDataResult(
+  data: TravelStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('travel.search', 'travelOptions', data, data.options.length, sources, warnings);
+}
+
+export function trainStructuredDataResult(
+  data: TrainStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('train.search', 'trains', data, data.trains.length, sources, warnings);
+}
+
+export function flightStructuredDataResult(
+  data: FlightStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('flight.search', 'flights', data, data.flights.length, sources, warnings);
+}
+
+export function foodStructuredDataResult(
+  data: FoodStructuredData,
+  sources: DataSource[],
+  warnings: string[] = []
+): DataResult {
+  return structuredCollectionResult('food.search', 'foodChoices', data, data.foods.length, sources, warnings);
 }
 
 function titleForTool(toolId: string): string {
@@ -4645,6 +4821,17 @@ function errorA2ui(surfaceId: string, toolId: string, title: string, body: strin
       }
     }
   ]);
+}
+
+function legacyToolExceptionA2ui(surfaceId: string, toolId: string, message: string): string {
+  return errorA2ui(
+    surfaceId,
+    toolId,
+    '工具供应商调用异常',
+    message,
+    ['本机工具已运行，但真实供应商调用失败。', '请检查设备网络、供应商 TLS/接口状态，或稍后重试。'],
+    ['重新查询']
+  );
 }
 
 function trainResultA2ui(surfaceId: string, title: string, body: string, summaryText: string, trains: A2uiTrainData[]): string {
@@ -4850,6 +5037,18 @@ function travelResultA2ui(surfaceId: string, title: string, body: string, summar
   ]);
 }
 
+export function travelStructuredDataA2ui(surfaceId: string, data: TravelStructuredData): string {
+  return travelResultA2ui(surfaceId, data.title, data.body, data.summary, data.options, data.rows);
+}
+
+export function trainStructuredDataA2ui(surfaceId: string, data: TrainStructuredData): string {
+  return trainResultA2ui(surfaceId, data.title, data.body, data.summary, data.trains);
+}
+
+export function flightStructuredDataA2ui(surfaceId: string, data: FlightStructuredData): string {
+  return flightResultA2ui(surfaceId, data.title, data.body, data.summary, data.flights);
+}
+
 function compactTime(value: string): string {
   const text = value.trim();
   const match = /(\d{1,2}):(\d{2})/.exec(text);
@@ -4945,7 +5144,7 @@ function trainToTravelOption(item: A2uiTrainData, index: number): A2uiTravelOpti
     depart: compactTime(item.depart),
     arrive: compactTime(item.arrive),
     duration: item.duration,
-    price: '',
+    price: item.price === undefined ? '' : item.price,
     availability: item.seats,
     status: item.status.length > 0 ? item.status : '可查',
     detail: ''
@@ -4972,120 +5171,94 @@ function flightToTravelOption(item: A2uiFlightData, index: number): A2uiTravelOp
   };
 }
 
-function snapshotFromToolA2ui(raw: string): ToolA2uiSnapshot {
-  const parsed = parseA2uiJsonl(raw);
-  const snapshot: ToolA2uiSnapshot = {
-    title: '',
-    summary: '',
-    error: parsed.error,
-    trains: [],
-    flights: [],
-    rows: []
-  };
-  parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
-    if (envelope.createSurface !== undefined && envelope.createSurface !== null) {
-      snapshot.title = envelope.createSurface.title === undefined ? snapshot.title : envelope.createSurface.title;
-    }
-    if (envelope.updateComponents !== undefined && envelope.updateComponents !== null) {
-      envelope.updateComponents.components.forEach((component: A2uiComponent) => {
-        if (component.component === 'ErrorNotice') {
-          const title = component.title === undefined ? '' : component.title;
-          const body = component.body === undefined ? '' : component.body;
-          snapshot.error = (title + ' ' + body).trim();
-        }
-      });
-    }
-    if (envelope.updateDataModel !== undefined && envelope.updateDataModel !== null) {
-      const update = envelope.updateDataModel;
-      if (update.path === '/trains' && Array.isArray(update.value)) {
-        snapshot.trains = update.value as A2uiTrainData[];
-      } else if (update.path === '/flights' && Array.isArray(update.value)) {
-        snapshot.flights = update.value as A2uiFlightData[];
-      } else if (update.path === '/rows' && Array.isArray(update.value)) {
-        snapshot.rows = update.value as A2uiLabelValueData[];
-      } else if (update.path === '/summary') {
-        const summary = update.value as A2uiSummaryData;
-        snapshot.summary = summary.text === undefined ? '' : summary.text;
-      }
-    }
-  });
-  return snapshot;
-}
-
-function issueRow(label: string, snapshot: ToolA2uiSnapshot, emptyText: string): A2uiLabelValueData | null {
-  if (snapshot.error.length > 0) {
-    return {
-      label: label,
-      value: snapshot.error
-    };
+function travelIssueRow(label: string, result: DataResult, emptyText: string): A2uiLabelValueData {
+  if (result.error !== undefined && result.error.message.length > 0) {
+    return { label: label, value: result.error.message };
   }
-  const message = snapshot.summary.length > 0 ? snapshot.summary : emptyText;
-  return {
-    label: label,
-    value: message
-  };
+  if (result.toolId === 'train.search') {
+    const data = result.data as TrainStructuredData;
+    return { label: label, value: data.summary.length > 0 ? data.summary : emptyText };
+  }
+  const data = result.data as FlightStructuredData;
+  return { label: label, value: data.summary.length > 0 ? data.summary : emptyText };
 }
 
-async function callLocalTravelSearch(prompt: string, surfaceId: string): Promise<string> {
-  const trainPrompt = /高铁|动车|\bG\d+|\bD\d+/i.test(prompt) ? prompt : prompt + ' 高铁';
-  const flightPrompt = /航班|机票|飞机/.test(prompt) ? prompt : prompt + ' 航班';
-  const results = await Promise.all([
-    callLocalTrainSearch(trainPrompt, surfaceId + '_train'),
-    callLocalFlightSearch(flightPrompt, surfaceId + '_flight')
-  ]);
-  const trainSnapshot = snapshotFromToolA2ui(results[0]);
-  const flightSnapshot = snapshotFromToolA2ui(results[1]);
+export function combineTravelStructuredResults(
+  prompt: string,
+  trainResult: DataResult,
+  flightResult: DataResult
+): DataResult {
+  const trainData = trainResult.data as TrainStructuredData;
+  const flightData = flightResult.data as FlightStructuredData;
   let options: A2uiTravelOptionData[] = [];
-  trainSnapshot.trains.forEach((item: A2uiTrainData, index: number) => {
+  trainData.trains.forEach((item: A2uiTrainData, index: number) => {
     options.push(trainToTravelOption(item, index));
   });
-  flightSnapshot.flights.forEach((item: A2uiFlightData, index: number) => {
+  flightData.flights.forEach((item: A2uiFlightData, index: number) => {
     options.push(flightToTravelOption(item, index));
   });
   options = sortTravelOptionsByDeparture(options);
 
   const rows: A2uiLabelValueData[] = [];
-  if (trainSnapshot.error.length > 0 || trainSnapshot.trains.length === 0) {
-    const row = issueRow('高铁 · 12306', trainSnapshot, '12306 没有返回可展示车次。');
-    if (row !== null) {
-      rows.push(row);
-    }
+  if (trainResult.status === 'error' || trainData.trains.length === 0) {
+    rows.push(travelIssueRow('高铁 · 12306', trainResult, '12306 没有返回可展示车次。'));
   }
-  if (flightSnapshot.error.length > 0 || flightSnapshot.flights.length === 0) {
-    const row = issueRow('飞机 · 飞常准', flightSnapshot, '飞常准没有返回可展示航班。');
-    if (row !== null) {
-      rows.push(row);
-    }
+  if (flightResult.status === 'error' || flightData.flights.length === 0) {
+    rows.push(travelIssueRow('飞机 · 飞常准', flightResult, '飞常准没有返回可展示航班。'));
   }
 
-  aiLogInfo('[AIPhone][LocalToolTravelResult] trains=' + trainSnapshot.trains.length.toString() +
-    ' flights=' + flightSnapshot.flights.length.toString() +
+  aiLogInfo('[AIPhone][LocalToolTravelResult] trains=' + trainData.trains.length.toString() +
+    ' flights=' + flightData.flights.length.toString() +
     ' options=' + options.length.toString() +
     ' issues=' + rows.length.toString());
 
-  if (options.length === 0) {
-    const messages: string[] = [];
-    rows.forEach((row: A2uiLabelValueData) => {
-      messages.push(row.label + '：' + row.value);
-    });
-    return errorA2ui(
-      surfaceId,
-      'travel.search',
-      '出行方案查询失败',
+  const data: TravelStructuredData = {
+    title: options.length > 0 ? '出行方案查询' : '出行方案查询失败',
+    body: options.length > 0 ? '用户请求：' + prompt :
       '高铁和航班工具都没有返回可展示结果。为避免编造行程，当前只展示真实错误或空结果说明。',
-      messages.length > 0 ? messages : ['12306 和飞常准都没有返回可展示结果。'],
+    summary: options.length > 0 ? '已查询高铁和航班，共 ' + options.length.toString() + ' 个可展示方案。' :
+      '12306 和飞常准都没有返回可展示结果。',
+    options: options,
+    rows: rows
+  };
+  const sources = trainResult.sources.concat(flightResult.sources);
+  const warnings: string[] = [];
+  rows.forEach((row: A2uiLabelValueData) => warnings.push(row.label + '：' + row.value));
+  if (options.length === 0) {
+    const retryable = trainResult.error?.retryable === true || flightResult.error?.retryable === true;
+    const result = structuredErrorWithData(
+      'travel.search', 'travelOptions', data, 'TRAVEL_PROVIDERS_UNAVAILABLE', data.body, retryable, sources
+    );
+    result.warnings = warnings;
+    return result;
+  }
+  return travelStructuredDataResult(data, sources, warnings);
+}
+
+async function callStructuredTravelTool(prompt: string): Promise<DataResult> {
+  const trainPrompt = /高铁|动车|\bG\d+|\bD\d+/i.test(prompt) ? prompt : prompt + ' 高铁';
+  const flightPrompt = /航班|机票|飞机/.test(prompt) ? prompt : prompt + ' 航班';
+  const results = await Promise.all([
+    callStructuredTrainTool(trainPrompt),
+    callStructuredFlightTool(flightPrompt)
+  ]);
+  return combineTravelStructuredResults(prompt, results[0], results[1]);
+}
+
+function travelDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as TravelStructuredData;
+  if (result.status === 'error') {
+    return errorA2ui(
+      surfaceId, 'travel.search', data.title, data.body,
+      result.warnings.length > 0 ? result.warnings : [data.summary],
       ['换日期或城市', '只查高铁', '只查飞机']
     );
   }
+  return travelStructuredDataA2ui(surfaceId, data);
+}
 
-  return travelResultA2ui(
-    surfaceId,
-    '出行方案查询',
-    '用户请求：' + prompt,
-    '已查询高铁和航班，共 ' + options.length.toString() + ' 个可展示方案。',
-    options,
-    rows
-  );
+async function callLocalTravelSearch(prompt: string, surfaceId: string): Promise<string> {
+  return travelDataResultA2ui(surfaceId, await callStructuredTravelTool(prompt));
 }
 
 function foodDataSignature(foods: A2uiFoodData[]): string {
@@ -5180,6 +5353,12 @@ export function foodA2uiRenderState(surfaceId: string, title: string, body: stri
     componentsSignature: 'food-result-v1|rows=' + (rows.length > 0 ? '1' : '0') + '|status=' + status,
     dataPatches: dataPatches
   };
+}
+
+export function foodStructuredDataA2ui(surfaceId: string, data: FoodStructuredData): string {
+  return planA2uiPartialUpdate(null, foodA2uiRenderState(
+    surfaceId, data.title, data.body, data.summary, data.foods, data.rows, 'ready'
+  )).jsonl;
 }
 
 function missingConfigA2ui(surfaceId: string, toolId: string): string {
@@ -5361,88 +5540,388 @@ function flightRecordHasData(item: A2uiFlightData): boolean {
     item.arrTime.length > 0;
 }
 
-async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise<string> {
-  const apiKey = localProviderConfig.flightMcpKey;
-  if (apiKey.length === 0) {
-    return missingConfigA2ui(surfaceId, 'flight.search');
-  }
+function localAdapterSource(provider: string, operation: string): DataSource {
+  return {
+    provider: provider,
+    backend: 'local_adapter',
+    operation: operation,
+    fetchedAt: new Date().toISOString()
+  };
+}
 
-  const source = prompt;
-  const date = parseTravelDate(source);
-  const flightNumber = extractFlightNumber(source);
-  const flightRoute = extractFlightCityCodes(source);
-  const wantsPrice = /票价|价格|多少钱|最低价|机票/.test(source);
-  if (date.length === 0 || (flightNumber.length === 0 && (flightRoute.depCode.length === 0 || flightRoute.arrCode.length === 0))) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准查询参数不足',
-      '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。',
-      ['示例：明天北京到上海航班', '示例：2026-06-10 深圳到杭州机票价格', '示例：明天 MU2157 航班'],
-      ['补充日期', '补充城市']
+function structuredErrorWithData(
+  toolId: string,
+  outputSchema: string,
+  data: Object,
+  code: string,
+  message: string,
+  retryable: boolean = false,
+  sources: DataSource[] = [],
+  warnings: string[] = []
+): DataResult {
+  const result = errorDataResult(toolId, outputSchema, code, message, retryable, sources);
+  result.data = data;
+  result.warnings = warnings.slice();
+  return result;
+}
+
+function sourceAlreadyIncluded(sources: DataSource[], provider: string, operation: string): boolean {
+  return sources.some((source: DataSource): boolean =>
+    source.provider === provider && source.operation === operation);
+}
+
+function genericResultSource(result: DynamicGenericToolResult): DataSource {
+  return {
+    provider: result.sourceTag,
+    backend: result.sourceTag.startsWith('Composio') ? 'oauth_api' : 'local_adapter',
+    operation: result.toolName,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+function genericResultHasData(result: DynamicGenericToolResult): boolean {
+  if (result.status !== 'success') {
+    return false;
+  }
+  if (mediaVideoPlaybackUrl(result as A2uiGenericToolResultData).length > 0) {
+    return true;
+  }
+  if (result.title.indexOf('没有找到') >= 0 || result.rawPreview === 'empty places') {
+    return false;
+  }
+  for (let index = 0; index < result.rows.length; index++) {
+    if (result.rows[index].label === '结果数量' && result.rows[index].value.trim() === '0') {
+      return false;
+    }
+  }
+  return result.rows.length > 0 || result.rawPreview.trim().length > 0;
+}
+
+function genericResultIsFailure(result: DynamicGenericToolResult): boolean {
+  return result.status !== 'success' && result.status !== 'empty';
+}
+
+function firstGenericFailure(results: DynamicGenericToolResult[]): string {
+  for (let index = 0; index < results.length; index++) {
+    if (genericResultIsFailure(results[index])) {
+      return results[index].summary.length > 0 ? results[index].summary : results[index].title;
+    }
+  }
+  return 'Provider returned no successful result.';
+}
+
+export function genericStructuredDataResult(
+  toolId: string,
+  outputSchema: string,
+  results: DynamicGenericToolResult[]
+): DataResult {
+  const data: GenericStructuredData = { results: results };
+  const sources: DataSource[] = [];
+  const warnings: string[] = [];
+  let dataCount = 0;
+  let failureCount = 0;
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (genericResultHasData(result)) {
+      dataCount += 1;
+    }
+    if (genericResultIsFailure(result)) {
+      failureCount += 1;
+      warnings.push(result.sourceTag + '：' + (result.summary.length > 0 ? result.summary : result.title));
+    }
+    if (!sourceAlreadyIncluded(sources, result.sourceTag, result.toolName)) {
+      sources.push(genericResultSource(result));
+    }
+  });
+  if (dataCount > 0) {
+    return failureCount > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  if (failureCount > 0) {
+    return structuredErrorWithData(
+      toolId, outputSchema, data, 'PROVIDER_ERROR', firstGenericFailure(results), false, sources, warnings
     );
   }
+  const empty = successfulDataResult(toolId, outputSchema, data, sources);
+  empty.status = 'empty';
+  return empty;
+}
 
-  let requestBody = '';
-  let routeText = '';
-  if (flightNumber.length > 0) {
-    requestBody = '{"endpoint":"flight","params":{"fnum":' + JSON.stringify(flightNumber) +
-      ',"date":' + JSON.stringify(date) + '}}';
-    routeText = flightNumber + ' ' + date;
-  } else if (wantsPrice) {
-    requestBody = '{"endpoint":"getFlightPriceByCities","params":{"dep_city":' + JSON.stringify(flightRoute.depCode) +
-      ',"arr_city":' + JSON.stringify(flightRoute.arrCode) +
-      ',"dep_date":' + JSON.stringify(date) +
-      ',"price_mode":"lowest"}}';
-    routeText = flightRoute.routeNames[0] + ' 到 ' + flightRoute.routeNames[1] + ' ' + date;
-  } else {
-    requestBody = '{"endpoint":"flights","params":{"depcity":' + JSON.stringify(flightRoute.depCode) +
-      ',"arrcity":' + JSON.stringify(flightRoute.arrCode) +
-      ',"date":' + JSON.stringify(date) + '}}';
-    routeText = flightRoute.routeNames[0] + ' 到 ' + flightRoute.routeNames[1] + ' ' + date;
+function remainingReadText(result: DynamicGenericToolResult): string {
+  return (result.title + ' ' + result.summary).toLowerCase();
+}
+
+function remainingReadAuthFailure(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result).replace(/\s+/g, ' ').trim();
+  return result.status === 'needs_auth' ||
+    text.indexOf('oauth') >= 0 || text.indexOf('未授权') >= 0 || text.indexOf('未配置') >= 0 ||
+    text.indexOf('disconnected') >= 0 || text.indexOf('access token') >= 0 ||
+    text.indexOf('mcp key') >= 0 || text.indexOf('_token') >= 0 ||
+    text.indexOf('没有 active connected account') >= 0 || text.indexOf('no active connection found') >= 0;
+}
+
+function remainingReadInputFailure(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result);
+  return result.status === 'needs_input' || text.indexOf('缺少订单号') >= 0 || text.indexOf('order_id') >= 0 ||
+    text.indexOf('需要补充起点') >= 0 || text.indexOf('需要补充城市') >= 0 ||
+    text.indexOf('requestkey') >= 0 || text.indexOf('threadid') >= 0 ||
+    text.indexOf('required input') >= 0;
+}
+
+function remainingReadRetryable(result: DynamicGenericToolResult): boolean {
+  const text = remainingReadText(result);
+  return text.indexOf('timeout') >= 0 || text.indexOf('timed out') >= 0 ||
+    text.indexOf('transport') >= 0 || text.indexOf('http 5') >= 0 ||
+    text.indexOf('failed to resolve') >= 0 || text.indexOf('network') >= 0;
+}
+
+function remainingReadSource(result: DynamicGenericToolResult): DataSource {
+  const lower = result.sourceTag.toLowerCase();
+  let backend: ToolBackendType = 'local_adapter';
+  if (lower.indexOf('gmail') >= 0 || lower.indexOf('calendar') >= 0 ||
+    lower.indexOf('youtube') >= 0 || lower.indexOf('composio') >= 0) {
+    backend = 'oauth_api';
+  } else if (lower.indexOf('qq') >= 0) {
+    backend = 'imap';
   }
+  return {
+    provider: result.sourceTag,
+    backend: backend,
+    operation: result.toolName,
+    fetchedAt: new Date().toISOString()
+  };
+}
 
-  const endpoint = localProviderConfig.variflightApiUrl.length > 0 ? localProviderConfig.variflightApiUrl : DEFAULT_VARIFLIGHT_API_URL;
-  aiLogInfo('[AIPhone][LocalToolFlightRequest] endpoint=' + endpoint + ' keyChars=' + apiKey.length.toString() + ' bodyChars=' + requestBody.length.toString());
-  const response = await postJsonText(endpoint, {
-    'Content-Type': 'application/json',
-    'X-VARIFLIGHT-KEY': apiKey
-  }, requestBody);
+export function remainingReadStructuredDataResult(
+  toolId: string,
+  outputSchema: string,
+  results: DynamicGenericToolResult[]
+): DataResult {
+  const data: GenericStructuredData = { results: results };
+  const sources: DataSource[] = [];
+  const warnings: string[] = [];
+  let dataCount = 0;
+  let failureCount = 0;
+  let authCount = 0;
+  let inputCount = 0;
+  let retryable = false;
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (genericResultHasData(result)) {
+      dataCount += 1;
+    }
+    if (genericResultIsFailure(result)) {
+      failureCount += 1;
+      if (remainingReadAuthFailure(result)) {
+        authCount += 1;
+      } else if (remainingReadInputFailure(result)) {
+        inputCount += 1;
+      }
+      if (remainingReadRetryable(result)) {
+        retryable = true;
+      }
+      warnings.push(result.sourceTag + '：' + (result.summary.length > 0 ? result.summary : result.title));
+    }
+    if (result.providerPhase === 'execution' &&
+      !sourceAlreadyIncluded(sources, result.sourceTag, result.toolName)) {
+      sources.push(remainingReadSource(result));
+    }
+  });
+  if (dataCount > 0) {
+    return failureCount > 0 ?
+      partialDataResult(toolId, outputSchema, data, sources, warnings) :
+      successfulDataResult(toolId, outputSchema, data, sources);
+  }
+  if (failureCount > 0) {
+    let code = 'PROVIDER_ERROR';
+    if (authCount === failureCount) {
+      code = 'AUTH_REQUIRED';
+    } else if (inputCount === failureCount) {
+      code = 'INPUT_REQUIRED';
+    }
+    return structuredErrorWithData(
+      toolId, outputSchema, data, code, firstGenericFailure(results), retryable, sources, warnings
+    );
+  }
+  const empty = successfulDataResult(toolId, outputSchema, data, sources);
+  empty.status = 'empty';
+  return empty;
+}
 
+export function mapsStructuredDataResult(toolId: string, provider: MapsPlaceProviderResult): DataResult {
+  const outputSchema = toolId === 'maps.place.details' ? 'place' : 'places';
+  const entityRefs: string[] = [];
+  if (provider.status === 'success') {
+    for (let index = 0; index < provider.places.length && entityRefs.length < 16; index++) {
+      const placeId: string = provider.places[index].placeId;
+      if (placeId.trim().length > 0 && entityRefs.indexOf(placeId) < 0) {
+        entityRefs.push(placeId);
+      }
+    }
+  }
+  const data: MapsStructuredData = {
+    places: provider.places,
+    query: provider.query,
+    entityRefs
+  };
+  const sources: DataSource[] = provider.attempted ? [localAdapterSource('Google Places API',
+    toolId === 'maps.place.details' ? 'details' : 'search')] : [];
+  if (provider.status === 'error') {
+    return structuredErrorWithData(
+      toolId,
+      outputSchema,
+      data,
+      provider.attempted ? 'MAPS_PROVIDER_ERROR' : 'MAPS_INPUT_OR_CONFIG_ERROR',
+      provider.message,
+      provider.attempted,
+      sources
+    );
+  }
+  const result = successfulDataResult(toolId, outputSchema, data, sources);
+  if (provider.status === 'empty') {
+    result.status = 'empty';
+    result.warnings = provider.message.length > 0 ? [provider.message] : [];
+  }
+  return result;
+}
+
+export function mapsDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as MapsStructuredData;
+  const provider: MapsPlaceProviderResult = {
+    toolId: result.toolId,
+    status: result.status === 'error' ? 'error' : (data.places.length > 0 ? 'success' : 'empty'),
+    places: data.places,
+    query: data.query,
+    message: result.error?.message === undefined ?
+      (result.warnings.length > 0 ? result.warnings[0] : '') : result.error.message,
+    attempted: result.sources.length > 0
+  };
+  return genericToolResultsA2ui(surfaceId, result.toolId, mapsPlaceProviderResultsForA2ui(provider));
+}
+
+function aggregateStatusFailed(status: AggregateSearchSourceStatus): boolean {
+  return status.status === 'error' || status.status === 'needs_auth' || status.status === 'unsupported';
+}
+
+export function aggregateStructuredDataResult(data: AggregateSearchResult): DataResult {
+  const sources: DataSource[] = data.sourceStatuses.map((status: AggregateSearchSourceStatus): DataSource => ({
+    provider: status.label,
+    backend: status.source === 'x' || status.source === 'hackernews' || status.source === 'reddit' ?
+      'oauth_api' : 'local_adapter',
+    operation: 'search',
+    fetchedAt: new Date().toISOString()
+  }));
+  const warnings = data.sourceStatuses
+    .filter((status: AggregateSearchSourceStatus): boolean => aggregateStatusFailed(status))
+    .map((status: AggregateSearchSourceStatus): string => status.label + '：' + status.message);
+  const itemCount = data.videos.length + data.posts.length;
+  if (itemCount > 0) {
+    return warnings.length > 0 ?
+      partialDataResult('media.aggregate.search', 'aggregateSearch', data, sources, warnings) :
+      successfulDataResult('media.aggregate.search', 'aggregateSearch', data, sources);
+  }
+  if (warnings.length > 0) {
+    return structuredErrorWithData(
+      'media.aggregate.search', 'aggregateSearch', data, 'AGGREGATE_PROVIDERS_FAILED',
+      warnings.join('；'), false, sources, warnings
+    );
+  }
+  const empty = successfulDataResult('media.aggregate.search', 'aggregateSearch', data, sources);
+  empty.status = 'empty';
+  return empty;
+}
+
+function socialConnectionFailed(connection: SocialHubConnectionData): boolean {
+  return connection.status !== 'connected';
+}
+
+function socialConnectionAttempted(connection: SocialHubConnectionData): boolean {
+  return connection.status === 'connected' || connection.status === 'error';
+}
+
+function socialConnectionUnsupported(connection: SocialHubConnectionData): boolean {
+  return connection.status === 'limited' || connection.status === 'disabled';
+}
+
+export function socialHubStructuredDataResult(
+  feed: SocialHubFeedResult,
+  toolId: string = 'social.feed.search'
+): DataResult {
+  const data: SocialHubStructuredData = { items: feed.items, connections: feed.connections };
+  const sources: DataSource[] = feed.connections
+    .filter((connection: SocialHubConnectionData): boolean => socialConnectionAttempted(connection))
+    .map((connection: SocialHubConnectionData): DataSource => ({
+      provider: connection.displayName.length > 0 ? connection.displayName : connection.platform,
+      backend: 'oauth_api',
+      operation: 'feed',
+      fetchedAt: new Date().toISOString(),
+      accountHint: connection.accountId
+    }));
+  const warnings = feed.connections
+    .filter((connection: SocialHubConnectionData): boolean => socialConnectionFailed(connection))
+    .map((connection: SocialHubConnectionData): string =>
+      (connection.displayName.length > 0 ? connection.displayName : connection.platform) + '：' + connection.message);
+  if (feed.items.length > 0) {
+    return warnings.length > 0 ?
+      partialDataResult(toolId, 'socialHubFeed', data, sources, warnings) :
+      successfulDataResult(toolId, 'socialHubFeed', data, sources);
+  }
+  const attemptedFailure = feed.connections.some((connection: SocialHubConnectionData): boolean =>
+    connection.status === 'error');
+  if (attemptedFailure) {
+    return structuredErrorWithData(
+      toolId, 'socialHubFeed', data, 'SOCIAL_PROVIDERS_FAILED', warnings.join('；'), false, sources, warnings
+    );
+  }
+  if (sources.length === 0 && feed.connections.length > 0 &&
+    feed.connections.every((connection: SocialHubConnectionData): boolean => socialConnectionUnsupported(connection))) {
+    return structuredErrorWithData(
+      toolId, 'socialHubFeed', data, 'SOCIAL_SOURCES_UNSUPPORTED', warnings.join('；'), false, [], warnings
+    );
+  }
+  const empty = successfulDataResult(toolId, 'socialHubFeed', data, sources);
+  empty.status = 'empty';
+  empty.warnings = warnings;
+  return empty;
+}
+
+function flightErrorData(title: string, body: string): FlightStructuredData {
+  return { title: title, body: body, summary: body, flights: [] };
+}
+
+export function flightDataResultFromProviderResponse(
+  responseCode: number,
+  responseText: string,
+  source: DataSource,
+  wantsPrice: boolean,
+  routeText: string,
+  requestDiagnostic: string = ''
+): DataResult {
+  const sources: DataSource[] = [source];
   let payload: FlightProviderPayload = {};
   try {
-    payload = JSON.parse(response.text) as FlightProviderPayload;
+    payload = JSON.parse(responseText) as FlightProviderPayload;
   } catch (_error) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准返回格式异常',
-      '飞常准返回的内容不是 JSON。为避免编造航班信息，当前只展示原始返回摘要。',
-      [response.text.substring(0, 700)],
-      ['重新查询', '检查供应商返回']
+    const message = '飞常准返回的内容不是 JSON。为避免编造航班信息，当前只展示原始返回摘要。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准返回格式异常', message),
+      'FLIGHT_INVALID_RESPONSE', message, false, sources, [responseText.substring(0, 700)]
     );
   }
 
-  if (response.code < 200 || response.code >= 300) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准航班查询失败',
-      '飞常准返回 HTTP ' + response.code.toString() + '。当前只展示供应商返回的真实错误。',
-      [response.text.substring(0, 700)],
-      ['重新查询', '检查飞常准 Key']
+  if (responseCode < 200 || responseCode >= 300) {
+    const message = '飞常准返回 HTTP ' + responseCode.toString() + '。当前只展示供应商返回的真实错误。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准航班查询失败', message),
+      'FLIGHT_PROVIDER_HTTP_ERROR', message, responseCode >= 500, sources, [responseText.substring(0, 700)]
     );
   }
 
   const providerError = extractProviderError(payload);
   if (providerError.length > 0) {
-    return errorA2ui(
-      surfaceId,
-      'flight.search',
-      '飞常准 Key 或参数需要检查',
-      providerError,
-      [requestBody.substring(0, 240)],
-      ['检查 Key', '换日期或城市']
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准 Key 或参数需要检查', providerError),
+      'FLIGHT_PROVIDER_ERROR', providerError, false, sources,
+      requestDiagnostic.length > 0 ? [requestDiagnostic.substring(0, 240)] : []
     );
   }
 
@@ -5459,25 +5938,143 @@ async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise
     }
   }
 
-  aiLogInfo('[AIPhone][LocalToolFlightResult] providerCode=' + response.code.toString() + ' rows=' + results.length.toString() + ' returned=' + flights.length.toString());
+  aiLogInfo('[AIPhone][LocalToolFlightResult] providerCode=' + responseCode.toString() +
+    ' rows=' + results.length.toString() + ' returned=' + flights.length.toString());
   if (flights.length === 0) {
-    return errorA2ui(
-      surfaceId,
+    const message = '供应商请求成功，但没有返回可展示的航班列表。';
+    return flightStructuredDataResult({
+      title: '飞常准未返回航班列表',
+      body: message,
+      summary: message,
+      flights: []
+    }, sources, [message]);
+  }
+
+  return flightStructuredDataResult({
+    title: wantsPrice ? '飞常准航班价格查询' : '飞常准航班查询',
+    body: '以下为飞常准返回的查询结果。',
+    summary: '已通过飞常准查询到 ' + routeText + ' 的航班信息。',
+    flights: flights
+  }, sources);
+}
+
+async function callStructuredFlightTool(prompt: string): Promise<DataResult> {
+  const apiKey = localProviderConfig.flightMcpKey;
+  if (apiKey.length === 0) {
+    return structuredErrorWithData(
       'flight.search',
-      '飞常准未返回航班列表',
-      '供应商请求成功，但返回体里没有可渲染的航班列表。为避免编造航班信息，当前只展示原始返回摘要。',
-      [response.text.substring(0, 700)],
-      ['换日期或城市', '检查供应商返回结构']
+      'flights',
+      flightErrorData('飞常准未配置', '缺少 FLIGHT_MCP_KEY。'),
+      'FLIGHT_CONFIG_MISSING',
+      '缺少 FLIGHT_MCP_KEY。'
     );
   }
 
-  return flightResultA2ui(
-    surfaceId,
-    wantsPrice ? '飞常准航班价格查询' : '飞常准航班查询',
-    '以下为飞常准返回的查询结果。',
-    '已通过飞常准查询到 ' + routeText + ' 的航班信息。',
-    flights
+  const source = prompt;
+  const date = calendarDateFromPrompt(source);
+  const flightNumber = extractFlightNumber(source);
+  const flightRoute = extractFlightCityCodes(source);
+  const wantsPrice = /票价|价格|多少钱|最低价|机票/.test(source);
+  if (date.length === 0 || (flightNumber.length === 0 && (flightRoute.depCode.length === 0 || flightRoute.arrCode.length === 0))) {
+    const message = '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。';
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准查询参数不足', message),
+      'FLIGHT_INVALID_ARGUMENTS',
+      '飞常准查询需要明确的日期，并提供航班号，或提供出发城市和到达城市。',
+      false
+    );
+  }
+
+  let requestBody = '';
+  let routeText = '';
+  let operation = '';
+  if (flightNumber.length > 0) {
+    operation = 'flight';
+    requestBody = '{"endpoint":"flight","params":{"fnum":' + JSON.stringify(flightNumber) +
+      ',"date":' + JSON.stringify(date) + '}}';
+    routeText = flightNumber + ' ' + date;
+  } else if (wantsPrice) {
+    operation = 'getFlightPriceByCities';
+    requestBody = '{"endpoint":"getFlightPriceByCities","params":{"dep_city":' + JSON.stringify(flightRoute.depCode) +
+      ',"arr_city":' + JSON.stringify(flightRoute.arrCode) +
+      ',"dep_date":' + JSON.stringify(date) +
+      ',"price_mode":"lowest"}}';
+    routeText = flightRoute.routeNames[0] + ' 到 ' + flightRoute.routeNames[1] + ' ' + date;
+  } else {
+    operation = 'flights';
+    requestBody = '{"endpoint":"flights","params":{"depcity":' + JSON.stringify(flightRoute.depCode) +
+      ',"arrcity":' + JSON.stringify(flightRoute.arrCode) +
+      ',"date":' + JSON.stringify(date) + '}}';
+    routeText = flightRoute.routeNames[0] + ' 到 ' + flightRoute.routeNames[1] + ' ' + date;
+  }
+
+  const endpoint = localProviderConfig.variflightApiUrl.length > 0 ? localProviderConfig.variflightApiUrl : DEFAULT_VARIFLIGHT_API_URL;
+  aiLogInfo('[AIPhone][LocalToolFlightRequest] endpoint=' + endpoint + ' keyChars=' + apiKey.length.toString() + ' bodyChars=' + requestBody.length.toString());
+  let response: HttpTextResponse;
+  try {
+    response = await postJsonText(endpoint, {
+      'Content-Type': 'application/json',
+      'X-VARIFLIGHT-KEY': apiKey
+    }, requestBody);
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'flight.search', 'flights', flightErrorData('飞常准航班查询失败', message),
+      'FLIGHT_TRANSPORT_EXCEPTION', message, true
+    );
+  }
+  return flightDataResultFromProviderResponse(
+    response.code,
+    response.text,
+    localAdapterSource('飞常准', operation),
+    wantsPrice,
+    routeText,
+    requestBody
   );
+}
+
+export function flightDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as FlightStructuredData;
+  if (result.status === 'error') {
+    const code = result.error?.code === undefined ? '' : result.error?.code;
+    if (code === 'FLIGHT_CONFIG_MISSING') {
+      return missingConfigA2ui(surfaceId, 'flight.search');
+    }
+    if (code === 'FLIGHT_INVALID_ARGUMENTS') {
+      return errorA2ui(
+        surfaceId, 'flight.search', data.title, data.body,
+        ['示例：明天北京到上海航班', '示例：2026-06-10 深圳到杭州机票价格', '示例：明天 MU2157 航班'],
+        ['补充日期', '补充城市']
+      );
+    }
+    if (code === 'FLIGHT_TRANSPORT_EXCEPTION') {
+      return legacyToolExceptionA2ui(surfaceId, 'flight.search', data.body);
+    }
+    const details = result.warnings.length > 0 ? result.warnings : [data.summary];
+    if (code === 'FLIGHT_INVALID_RESPONSE') {
+      return errorA2ui(
+        surfaceId, 'flight.search', data.title, data.body, details, ['重新查询', '检查供应商返回']
+      );
+    }
+    if (code === 'FLIGHT_PROVIDER_HTTP_ERROR') {
+      return errorA2ui(
+        surfaceId, 'flight.search', data.title, data.body, details, ['重新查询', '检查飞常准 Key']
+      );
+    }
+    if (code === 'FLIGHT_PROVIDER_ERROR') {
+      return errorA2ui(
+        surfaceId, 'flight.search', data.title, data.body, details, ['检查 Key', '换日期或城市']
+      );
+    }
+    return errorA2ui(
+      surfaceId, 'flight.search', data.title, data.body, details, ['重新查询', '换日期或城市']
+    );
+  }
+  return flightStructuredDataA2ui(surfaceId, data);
+}
+
+async function callLocalFlightSearch(prompt: string, surfaceId: string): Promise<string> {
+  return flightDataResultA2ui(surfaceId, await callStructuredFlightTool(prompt));
 }
 
 function parseCoordinatePair(text: string): string {
@@ -7101,6 +7698,11 @@ function luckinDeepScanPayFields(root: Object): LuckinOrderActionArgs {
 
 function luckinPayloadErrorMessage(payload: Object): string {
   const wrapped = payload as LuckinPayload;
+  const record = payload as ToolArgRecord;
+  const explicitError = textOf(record['error']).trim();
+  if (explicitError.length > 0) {
+    return explicitError;
+  }
   const code = textOf(wrapped.code).trim();
   if (code.length > 0 && code !== '0' && code !== '200' && code !== '0000') {
     return firstText([wrapped.message, wrapped.msg, '瑞幸返回错误码 ' + code]);
@@ -7108,7 +7710,33 @@ function luckinPayloadErrorMessage(payload: Object): string {
   if (wrapped.success === false || wrapped.success === 'false') {
     return firstText([wrapped.message, wrapped.msg, '瑞幸创建订单失败']);
   }
+  const records: Object[] = [payload];
+  const nested = mcpPayloadData(wrapped);
+  if (nested !== undefined && nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    records.push(nested as Object);
+  }
+  for (let index = 0; index < records.length; index++) {
+    const current = records[index] as ToolArgRecord;
+    if (current['success'] === false || current['success'] === 'false' ||
+      current['successful'] === false || current['successful'] === 'false') {
+      return firstText([current['message'], current['msg'], current['error'], '瑞幸创建订单失败']);
+    }
+    const status = textOf(current['status']).trim();
+    const lower = status.toLowerCase();
+    if (lower.indexOf('fail') >= 0 || lower.indexOf('error') >= 0 ||
+      lower.indexOf('reject') >= 0 || lower.indexOf('denied') >= 0) {
+      return firstText([current['message'], current['msg'], current['error'], '瑞幸返回失败状态：' + status]);
+    }
+  }
   return '';
+}
+
+export function luckinOrderCreateSucceededForTest(payload: Object): boolean {
+  if (luckinPayloadErrorMessage(payload).length > 0) {
+    return false;
+  }
+  const created = luckinOrderRecordFromPayload(payload);
+  return firstText([created.orderIdStr, created.orderId]).length > 0;
 }
 
 function luckinOrderPayloadCandidates(payload: Object): LuckinOrderRecord[] {
@@ -7266,27 +7894,41 @@ function luckinOrderProduct(item: LuckinProductRecord, quantity: number): Luckin
 }
 
 function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: string, summary: string, rows: A2uiLabelValueData[], rawPreview: string, actions: A2uiAction[]): string {
-  const results: A2uiGenericToolResultData[] = [{
+  return luckinDynamicResultA2ui(surfaceId, {
     sourceTag: '瑞幸',
     toolName: toolId,
     title: title,
     status: 'success',
     summary: summary,
     rows: rows,
-    rawPreview: rawPreview
+    rawPreview: rawPreview,
+    actions: actions
+  });
+}
+
+function luckinDynamicResultA2ui(surfaceId: string, result: DynamicGenericToolResult): string {
+  const actions = result.actions === undefined ? [] : result.actions;
+  const results: A2uiGenericToolResultData[] = [{
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview
   }];
   const components: A2uiComponent[] = [
     {
       id: 'root',
       component: 'SurfaceRoot',
       child: 'results',
-      title: title,
+      title: result.title,
       status: 'ready'
     },
     {
       id: 'results',
       component: 'GenericToolResults',
-      title: title,
+      title: result.title,
       body: '以下展示瑞幸 MCP 的真实返回字段。',
       status: 'ready',
       dataPath: '/genericToolResults',
@@ -7294,8 +7936,8 @@ function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: strin
     }
   ];
   const summaryData: A2uiSummaryData = {
-    text: summary,
-    toolName: toolId,
+    text: result.summary,
+    toolName: result.toolName,
     dataLabel: 'genericToolResults',
     count: 1
   };
@@ -7304,7 +7946,7 @@ function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: strin
       createSurface: {
         surfaceId: surfaceId,
         root: 'root',
-        title: title,
+        title: result.title,
         intent: 'luckin',
         status: 'ready',
         sendDataModel: true
@@ -7335,7 +7977,15 @@ function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: strin
 }
 
 function luckinErrorA2ui(surfaceId: string, toolId: string, title: string, message: string): string {
-  return luckinGenericResultA2ui(surfaceId, toolId, title, message, [{ label: '错误', value: message }], '', []);
+  return luckinDynamicResultA2ui(surfaceId, {
+    sourceTag: '瑞幸',
+    toolName: toolId,
+    title: title,
+    status: 'error',
+    summary: message,
+    rows: [{ label: '错误', value: message }],
+    rawPreview: ''
+  });
 }
 
 async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -7528,13 +8178,14 @@ async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Pr
   }
   const createPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'createOrder', createArgs);
   const createError = luckinPayloadErrorMessage(createPayload);
+  if (!luckinOrderCreateSucceededForTest(createPayload)) {
+    const failure = createError.length > 0 ? createError : 'Provider 未返回订单号，本次不能视为创建成功。';
+    return luckinErrorA2ui(surfaceId, 'luckin.order.create', '瑞幸订单创建失败', failure);
+  }
   let created = luckinOrderRecordFromPayload(createPayload);
-  let orderId = firstText([created.orderIdStr, created.orderId, request.orderId]);
+  let orderId = firstText([created.orderIdStr, created.orderId]);
   let payOrderUrl = textOf(created.payOrderUrl);
   let payOrderQrCodeUrl = textOf(created.payOrderQrCodeUrl);
-  if (orderId.length === 0 && createError.length > 0) {
-    aiLogInfo('[AIPhone][LuckinOrderCreateDeferred] error=' + createError);
-  }
   if (orderId.length > 0 && payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
     try {
       const detailArgs: LuckinOrderActionArgs = {
@@ -7601,22 +8252,49 @@ async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Pr
     aiLogInfo('[AIPhone][LuckinOrderCreateMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(createPayload) +
       ' payloadPreview=' + JSON.stringify(createPayload).substring(0, 400));
   }
-  const summary = createError.length > 0 ? createError : '';
-  return luckinGenericResultA2ui(surfaceId, 'luckin.order.create', '瑞幸订单已创建', summary, rows, JSON.stringify(createPayload).substring(0, 1200), createActions);
+  return luckinGenericResultA2ui(
+    surfaceId, 'luckin.order.create', '瑞幸订单已创建',
+    'Provider 已返回真实订单号。', rows,
+    JSON.stringify(createPayload).substring(0, 1200), createActions
+  );
 }
 
-async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+async function callStructuredLuckinStatusResult(args: Object | null): Promise<DynamicGenericToolResult> {
   const token = localProviderConfig.luckinMcpToken;
   const request = luckinActionArgs(args);
   const orderId = textOf(request.orderId);
   if (token.length === 0 || orderId.length === 0) {
-    return luckinErrorA2ui(surfaceId, 'luckin.order.status', '无法查询瑞幸订单', token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。');
+    const message = token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。';
+    return {
+      sourceTag: '瑞幸',
+      toolName: 'luckin.order.status',
+      title: '无法查询瑞幸订单',
+      status: token.length === 0 ? 'needs_auth' : 'error',
+      summary: message,
+      rows: [{ label: '错误', value: message }],
+      rawPreview: ''
+    };
   }
   const detailArgs: LuckinOrderActionArgs = {
     orderId: orderId
   };
-  const payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  let payload: Object;
+  try {
+    payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  } catch (error) {
+    return {
+      sourceTag: '瑞幸',
+      toolName: 'luckin.order.status',
+      title: '瑞幸订单状态查询失败',
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '错误', value: describeThrown(error) }],
+      rawPreview: '',
+      providerPhase: 'execution'
+    };
+  }
   const detail = luckinOrderRecordFromPayload(payload);
+  const traceId = rideOrderPayloadText(payload, ['traceId', 'trace_id', 'requestId', 'request_id']);
   const rows: A2uiLabelValueData[] = [
     { label: '订单号', value: firstText([detail.orderIdStr, detail.orderId, orderId]) },
     { label: '订单状态', value: firstText([detail.orderStatusName, detail.orderStatus]) },
@@ -7625,6 +8303,9 @@ async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Pr
     { label: '支付链接', value: firstText([detail.payOrderUrl, request.payOrderUrl]) },
     { label: '支付二维码', value: firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]) }
   ];
+  if (traceId.length > 0) {
+    rows.push({ label: 'Trace ID', value: traceId });
+  }
   const payOrderUrl = firstText([detail.payOrderUrl, request.payOrderUrl]);
   const payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]);
   const statusArgs: LuckinOrderActionArgs = {
@@ -7667,11 +8348,39 @@ async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Pr
   if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
     aiLogInfo('[AIPhone][LuckinOrderStatusMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(payload));
   }
-  return luckinGenericResultA2ui(surfaceId, 'luckin.order.status', '瑞幸订单状态', firstText([detail.orderStatusName, detail.orderStatus, '已返回订单状态']), rows, JSON.stringify(payload).substring(0, 1200), statusActions);
+  const providerError = luckinPayloadErrorMessage(payload);
+  return {
+    sourceTag: '瑞幸',
+    toolName: 'luckin.order.status',
+    title: providerError.length > 0 ? '瑞幸订单状态查询失败' : '瑞幸订单状态',
+    status: providerError.length > 0 ? 'error' :
+      (firstText([detail.orderStatusName, detail.orderStatus]).length > 0 ? 'success' : 'empty'),
+    summary: providerError.length > 0 ? providerError :
+      firstText([detail.orderStatusName, detail.orderStatus, '瑞幸查询成功，但没有返回订单状态。']),
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: statusActions,
+    providerPhase: 'execution'
+  };
 }
 
-async function callLocalLuckinTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+  return luckinDynamicResultA2ui(surfaceId, await callStructuredLuckinStatusResult(args));
+}
+
+async function callLocalLuckinTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'luckin.order.create') {
+    if (actionId !== 'luckin.order.create') {
+      return luckinErrorA2ui(
+        surfaceId, toolId, '需要当前瑞幸订单确认', '请从当前订单预览点击确认下单。'
+      );
+    }
     return callLocalLuckinCreate(surfaceId, args);
   }
   if (toolId === 'luckin.order.status') {
@@ -8094,11 +8803,19 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
   };
 }
 
-function emptyProviderResult(provider: string, error: string): FoodProviderResult {
+function emptyProviderResult(
+  provider: string,
+  error: string,
+  attempted: boolean = false,
+  operation: string = 'search'
+): FoodProviderResult {
   return {
     provider: provider,
     foods: [],
-    error: error
+    error: error,
+    attempted: attempted,
+    succeeded: false,
+    operation: operation
   };
 }
 
@@ -8197,7 +8914,7 @@ async function safeFoodProviderSearch(adapter: FoodProviderAdapter, prompt: stri
   try {
     return await adapter.search(prompt, query, keyword, location, locationSource);
   } catch (error) {
-    return emptyProviderResult(adapter.name, describeThrown(error));
+    return emptyProviderResult(adapter.name, describeThrown(error), true);
   }
 }
 
@@ -8222,6 +8939,7 @@ class AmapFoodProvider implements FoodProviderAdapter {
     const names: string[] = [];
     let totalPois = 0;
     let providerError = '';
+    let providerSucceeded = false;
     const keywords = splitFoodSearchKeywords(keyword);
     for (let keywordIndex = 0; keywordIndex < keywords.length && keywordIndex < 4 && foods.length < FOOD_PROVIDER_RESULT_LIMIT; keywordIndex++) {
       const currentKeyword = keywords[keywordIndex];
@@ -8239,6 +8957,7 @@ class AmapFoodProvider implements FoodProviderAdapter {
         }
         continue;
       }
+      providerSucceeded = true;
       const pois = payload.pois === undefined ? [] : payload.pois;
       totalPois += pois.length;
       for (let index = 0; index < pois.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
@@ -8255,7 +8974,10 @@ class AmapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : '高德没有返回可展示餐饮 POI。')
+      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : '高德没有返回可展示餐饮 POI。'),
+      attempted: true,
+      succeeded: providerSucceeded,
+      operation: 'search'
     };
   }
 }
@@ -8285,12 +9007,12 @@ class TencentMapFoodProvider implements FoodProviderAdapter {
       [key, keyword, boundary, '10', '1', '_distance']
     ), userAgentHeaders());
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as TencentMapPayload;
     if (textOf(payload.status) !== '0') {
       const message = firstText([payload.message, payload.status]);
-      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300));
+      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300), true);
     }
     const places = payload.data === undefined ? [] : payload.data;
     const foods: A2uiFoodData[] = [];
@@ -8304,7 +9026,10 @@ class TencentMapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '腾讯地图没有返回可展示餐饮 POI。'
+      error: foods.length > 0 ? '' : '腾讯地图没有返回可展示餐饮 POI。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
@@ -8333,12 +9058,12 @@ class BaiduMapFoodProvider implements FoodProviderAdapter {
       [ak, keyword, latitude + ',' + longitude, localProviderConfig.amapRadius, 'json', '2', '2', 'gcj02ll', '10', '0']
     ), userAgentHeaders());
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as BaiduPlacePayload;
     if (textOf(payload.status) !== '0') {
       const message = firstText([payload.message, payload.status]);
-      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300));
+      return emptyProviderResult(this.name, message.length > 0 ? message : response.text.substring(0, 300), true);
     }
     const places = payload.results === undefined ? [] : payload.results;
     const foods: A2uiFoodData[] = [];
@@ -8352,7 +9077,10 @@ class BaiduMapFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '百度地图没有返回可展示餐饮 POI。'
+      error: foods.length > 0 ? '' : '百度地图没有返回可展示餐饮 POI。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
@@ -8365,6 +9093,7 @@ class GoogleMapsFoodProvider implements FoodProviderAdapter {
     const results = await callMapsPlaceSearch(searchQuery, localProviderConfig.googleMapsApiKey);
     const foods: A2uiFoodData[] = [];
     let providerError = '';
+    let providerSucceeded = results.length === 0;
     for (let index = 0; index < results.length && foods.length < FOOD_PROVIDER_RESULT_LIMIT; index++) {
       const result = results[index];
       if (result.status !== 'success') {
@@ -8373,6 +9102,7 @@ class GoogleMapsFoodProvider implements FoodProviderAdapter {
         }
         continue;
       }
+      providerSucceeded = true;
       const food = mapsFoodRecordFromResult(result);
       if (food.name.length > 0 && food.location !== undefined && food.location.length > 0) {
         foods.push(food);
@@ -8382,7 +9112,10 @@ class GoogleMapsFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : 'Google Maps 没有返回可展示餐饮 POI。')
+      error: foods.length > 0 ? '' : (providerError.length > 0 ? providerError : 'Google Maps 没有返回可展示餐饮 POI。'),
+      attempted: true,
+      succeeded: providerSucceeded,
+      operation: 'search'
     };
   }
 }
@@ -8424,12 +9157,12 @@ class MeituanUnionFoodProvider implements FoodProviderAdapter {
       'S-Ca-Signature': signature
     }, body);
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as MeituanUnionPayload;
     const providerError = meituanProviderError(payload);
     if (providerError.length > 0) {
-      return emptyProviderResult(this.name, providerError);
+      return emptyProviderResult(this.name, providerError, true);
     }
     const records = meituanRecordsFromContainer(payload.data).length > 0 ?
       meituanRecordsFromContainer(payload.data) :
@@ -8445,7 +9178,10 @@ class MeituanUnionFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '美团联盟没有返回可展示外卖商品券。'
+      error: foods.length > 0 ? '' : '美团联盟没有返回可展示外卖商品券。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
@@ -8494,12 +9230,12 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
       'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
     }, body);
     if (response.code < 200 || response.code >= 300) {
-      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+      return emptyProviderResult(this.name, 'HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300), true);
     }
     const payload = JSON.parse(response.text) as TaobaoFlashPayload;
     const providerError = taobaoProviderError(payload);
     if (providerError.length > 0) {
-      return emptyProviderResult(this.name, providerError);
+      return emptyProviderResult(this.name, providerError, true);
     }
     const result = taobaoResponseResult(payload);
     const records = taobaoRecordsFromResult(result);
@@ -8514,7 +9250,10 @@ class TaobaoFlashFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '淘宝闪购没有返回可展示店铺推广结果。'
+      error: foods.length > 0 ? '' : '淘宝闪购没有返回可展示店铺推广结果。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
@@ -8598,7 +9337,10 @@ class McDonaldsMcpFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '麦当劳 MCP 没有返回可展示的门店或菜单结果。'
+      error: foods.length > 0 ? '' : '麦当劳 MCP 没有返回可展示的门店或菜单结果。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
@@ -8640,17 +9382,73 @@ class LuckinMcpFoodProvider implements FoodProviderAdapter {
     return {
       provider: this.name,
       foods: foods,
-      error: foods.length > 0 ? '' : '瑞幸 MCP 没有返回可展示的门店或商品结果。'
+      error: foods.length > 0 ? '' : '瑞幸 MCP 没有返回可展示的门店或商品结果。',
+      attempted: true,
+      succeeded: true,
+      operation: 'search'
     };
   }
 }
 
-async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+type FoodStructuredPartialObserver = (
+  providerNames: string[], snapshot: FoodProviderPartialSnapshot
+) => void;
+
+export function foodStructuredDataResultFromProviders(
+  data: FoodStructuredData,
+  providerResults: FoodProviderResult[]
+): DataResult {
+  const sources: DataSource[] = [];
+  const sourceKeys: string[] = [];
+  const warnings: string[] = [];
+  let searchSucceeded = false;
+  let operationAttempted = false;
+  providerResults.forEach((providerResult: FoodProviderResult) => {
+    const operation = providerResult.operation === undefined || providerResult.operation.length === 0 ?
+      'search' : providerResult.operation;
+    if (providerResult.attempted === true) {
+      operationAttempted = true;
+      const key = providerResult.provider + '\nlocal_adapter\n' + operation;
+      if (sourceKeys.indexOf(key) < 0) {
+        sourceKeys.push(key);
+        sources.push(localAdapterSource(providerResult.provider, operation));
+      }
+    }
+    if (operation === 'search' && (providerResult.succeeded === true || providerResult.foods.length > 0)) {
+      searchSucceeded = true;
+    }
+    if (providerResult.error.length > 0) {
+      warnings.push(providerResult.provider + '：' + providerResult.error);
+    }
+  });
+
+  if (data.foods.length > 0 || searchSucceeded) {
+    return foodStructuredDataResult(data, sources, warnings);
+  }
+  const error = structuredErrorWithData(
+    'food.search',
+    'foodChoices',
+    data,
+    operationAttempted ? 'FOOD_PROVIDER_ERROR' : 'FOOD_CONFIG_MISSING',
+    data.summary,
+    operationAttempted,
+    sources,
+    warnings
+  );
+  return error;
+}
+
+async function callStructuredFoodTool(
+  prompt: string,
+  args: Object | null,
+  onPartial: FoodStructuredPartialObserver | null = null
+): Promise<DataResult> {
   const key = localProviderConfig.amapKey;
   const preferences = foodPreferenceArgs(args);
 
   const query = extractFoodQuery(prompt);
   const preflightResults: FoodProviderResult[] = [];
+  const provenanceResults: FoodProviderResult[] = [];
   let locationSource = 'none';
   let location = parseCoordinatePair(prompt);
   if (location.length > 0) {
@@ -8660,8 +9458,11 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
       const resolved = await resolveFoodSearchLocation(query.place, key);
       location = resolved.location;
       locationSource = resolved.locationSource;
+      provenanceResults.push({
+        provider: '高德', foods: [], error: '', attempted: true, succeeded: true, operation: 'geocode'
+      });
     } catch (error) {
-      preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error)));
+      preflightResults.push(emptyProviderResult('高德', '地点解析失败：' + describeThrown(error), true, 'geocode'));
       locationSource = 'geocode_error';
     }
   }
@@ -8712,19 +9513,13 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
   for (let index = 0; index < adapters.length; index++) {
     tasks.push(safeFoodProviderSearch(adapters[index], prompt, query, keyword, location, locationSource));
   }
-  let foodPartialCache: A2uiPartialUpdateCache | null = null;
   const streamed = await streamFoodProviderResultsWithPartials(tasks, providerResults, (snapshot: FoodProviderPartialSnapshot) => {
     aiLogInfo('[AIPhone][LocalToolFoodPartial] provider=' + snapshot.provider +
       ' completed=' + snapshot.completed.toString() + '/' + snapshot.total.toString() +
       ' foods=' + snapshot.foods.length.toString() +
       ' issues=' + snapshot.issues.length.toString());
-    if (emitJsonl !== null) {
-      const planned = foodPartialA2ui(surfaceId, prompt, providerNames, snapshot, foodPartialCache);
-      foodPartialCache = planned.cache;
-      aiLogInfo('[AIPhone][LocalToolFoodPartialEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
-        ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
-        ' dataPaths=' + planned.updatedDataPaths.join(','));
-      emitJsonl(planned.jsonl);
+    if (onPartial !== null) {
+      onPartial(providerNames, snapshot);
     }
   }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0, preferences);
   const aggregated = streamed.aggregation;
@@ -8737,42 +9532,76 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
     ' foods=' + aggregated.foods.length.toString() +
     ' issues=' + rows.length.toString());
 
-  const finalState = foodA2uiRenderState(
-    surfaceId,
-    '外卖聚合搜索',
-    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
-    aggregated.foods.length > 0 ?
+  const data: FoodStructuredData = {
+    title: '外卖聚合搜索',
+    body: '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
+    summary: aggregated.foods.length > 0 ?
       '已聚合 ' + aggregated.foods.length.toString() + ' 个可展示结果；' + rows.length.toString() + ' 个来源状态见下方。' :
       '所有来源都没有可展示外卖结果；下面只列出真实 provider 状态。',
-    aggregated.foods,
-    rows,
-    'ready'
-  );
-  if (emitJsonl !== null) {
-    const planned = planA2uiPartialUpdate(foodPartialCache, finalState);
-    foodPartialCache = planned.cache;
-    aiLogInfo('[AIPhone][LocalToolFoodFinalEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
-      ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
-      ' dataPaths=' + planned.updatedDataPaths.join(','));
-    return planned.jsonl;
-  }
-  return planA2uiPartialUpdate(null, finalState).jsonl;
+    foods: aggregated.foods,
+    rows: rows
+  };
+  return foodStructuredDataResultFromProviders(data, provenanceResults.concat(streamed.results));
 }
 
-async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<string> {
+async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  let foodPartialCache: A2uiPartialUpdateCache | null = null;
+  const result = await callStructuredFoodTool(prompt, args, (providerNames: string[], snapshot: FoodProviderPartialSnapshot) => {
+    if (emitJsonl === null) {
+      return;
+    }
+    const planned = foodPartialA2ui(surfaceId, prompt, providerNames, snapshot, foodPartialCache);
+    foodPartialCache = planned.cache;
+    aiLogInfo('[AIPhone][LocalToolFoodPartialEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
+      ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
+      ' dataPaths=' + planned.updatedDataPaths.join(','));
+    emitJsonl(planned.jsonl);
+  });
+  const data = result.data as FoodStructuredData;
+  if (emitJsonl === null) {
+    return foodStructuredDataA2ui(surfaceId, data);
+  }
+  const finalState = foodA2uiRenderState(
+    surfaceId, data.title, data.body, data.summary, data.foods, data.rows, 'ready'
+  );
+  const planned = planA2uiPartialUpdate(foodPartialCache, finalState);
+  aiLogInfo('[AIPhone][LocalToolFoodFinalEmit] envelopes=' + planned.emittedEnvelopeCount.toString() +
+    ' components=' + (planned.componentsUpdated ? 'true' : 'false') +
+    ' dataPaths=' + planned.updatedDataPaths.join(','));
+  return planned.jsonl;
+}
+
+function trainErrorData(title: string, body: string): TrainStructuredData {
+  return { title: title, body: body, summary: body, trains: [] };
+}
+
+async function callStructuredTrainTool(prompt: string): Promise<DataResult> {
   const source = prompt;
-  const stations = await load12306Stations();
+  const date = calendarDateFromPrompt(source);
+  if (date.length === 0) {
+    const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询参数不足', message),
+      'TRAIN_INVALID_ARGUMENTS', message
+    );
+  }
+  let stations: StationCache;
+  try {
+    stations = await load12306Stations();
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 车站数据加载失败', message),
+      'TRAIN_STATION_LOAD_ERROR', message, true, [], [message]
+    );
+  }
   const routeNames = extractRouteNames(source, stations.names);
-  const date = parseTravelDate(source);
-  const departAfter = parseDepartAfter(source);
-  if (routeNames.length < 2 || date.length === 0) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '12306 查询参数不足',
-      '查询 12306 余票需要明确的出发地、目的地和日期。',
-      ['示例：明天北京到上海高铁票', '示例：2026-06-10 北京南到上海虹桥'],
-      ['补充日期', '补充城市']
+  const departAfter = calendarTimeFromPrompt(source);
+  if (routeNames.length < 2) {
+    const message = '查询 12306 余票需要明确的出发地、目的地和日期。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询参数不足', message),
+      'TRAIN_INVALID_ARGUMENTS', message
     );
   }
 
@@ -8781,32 +9610,48 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const fromCode = stationCodeFor(fromName, stations).length > 0 ? stationCodeFor(fromName, stations) : stationCodeFor(routeNames[0], stations);
   const toCode = stationCodeFor(toName, stations).length > 0 ? stationCodeFor(toName, stations) : stationCodeFor(routeNames[1], stations);
   if (fromCode.length === 0 || toCode.length === 0) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '车站识别失败',
-      '请使用更完整的车站名，例如北京南、上海虹桥、广州南、深圳北。',
-      routeNames,
-      ['补充车站名']
+    const message = '请使用更完整的车站名，例如北京南、上海虹桥、广州南、深圳北。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('车站识别失败', message),
+      'TRAIN_STATION_NOT_FOUND', message, false, [], routeNames
     );
   }
 
-  const init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
-  const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
-  aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
-  const response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
+  const bookingUrl = build12306BookingUrl(date, fromName, fromCode, toName, toCode);
+
+  let init: HttpTextResponse;
+  let response: HttpTextResponse;
+  try {
+    init = await requestText('https://kyfw.12306.cn/otn/leftTicket/init', userAgentHeaders());
+    const cookieHeader = cookieHeaderFromRaw(init.cookies + '\n' + init.headers);
+    aiLogInfo('[AIPhone][LocalTool12306Request] from=' + fromName + '(' + fromCode + ') to=' + toName + '(' + toCode + ') date=' + date + ' initCode=' + init.code.toString() + ' cookieChars=' + cookieHeader.length.toString() + ' headerChars=' + init.headers.length.toString());
+    response = await request12306LeftTicket(date, fromCode, toCode, leftTicketHeaders(cookieHeader));
+  } catch (error) {
+    const message = describeThrown(error);
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询失败', message),
+      'TRAIN_TRANSPORT_EXCEPTION', message, true, [], [message]
+    );
+  }
+  const sources: DataSource[] = [localAdapterSource('12306', 'leftTicket')];
   if (response.code < 200 || response.code >= 300) {
-    return errorA2ui(
-      surfaceId,
-      'train.search',
-      '12306 查询失败',
-      '12306 返回 HTTP ' + response.code.toString() + '。这是供应商或网络返回，不是 Mac gateway 连接失败。',
-      [response.text.substring(0, 500)],
-      ['重新查询', '换日期或车站']
+    const message = '12306 返回 HTTP ' + response.code.toString() + '。这是供应商或网络返回，不是 Mac gateway 连接失败。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 查询失败', message),
+      'TRAIN_PROVIDER_HTTP_ERROR', message, response.code >= 500, sources, [response.text.substring(0, 500)]
     );
   }
 
-  const payload = JSON.parse(response.text) as LeftTicketPayload;
+  let payload: LeftTicketPayload;
+  try {
+    payload = JSON.parse(response.text) as LeftTicketPayload;
+  } catch (_error) {
+    const message = '12306 返回的内容不是有效 JSON。';
+    return structuredErrorWithData(
+      'train.search', 'trains', trainErrorData('12306 返回格式异常', message),
+      'TRAIN_INVALID_RESPONSE', message, false, sources, [response.text.substring(0, 500)]
+    );
+  }
   const result = payload.data === undefined ? [] : payload.data.result;
   const rows = Array.isArray(result) ? result : [];
   let parsed: A2uiTrainData[] = [];
@@ -8819,7 +9664,7 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
   const top: A2uiTrainData[] = [];
   const count = parsed.length > TRAIN_RESULT_LIMIT ? TRAIN_RESULT_LIMIT : parsed.length;
   for (let index = 0; index < count; index++) {
-    top.push(normalizeTrainRecord(parsed[index]));
+    top.push(normalizeTrainRecord(parsed[index], bookingUrl));
   }
 
   const timeSummary = departAfter.length > 0 ? departAfter + ' 后' : '';
@@ -8827,7 +9672,9 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
     const emptyBody = timeSummary.length > 0
       ? date + ' ' + fromName + ' 到 ' + toName + ' ' + timeSummary + '暂时没有查询到可展示车次，可尝试调整时段或日期。'
       : date + ' ' + fromName + ' 到 ' + toName + ' 暂时没有查询到可展示车次，可能是日期未开售、线路调整或接口限制。';
-    return trainResultA2ui(surfaceId, '12306 查询结果为空', emptyBody, '12306 暂无可展示车次。', []);
+    return trainStructuredDataResult({
+      title: '12306 查询结果为空', body: emptyBody, summary: '12306 暂无可展示车次。', trains: []
+    }, sources, ['12306 暂无可展示车次。']);
   }
 
   const summaryText = timeSummary.length > 0
@@ -8837,7 +9684,47 @@ async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<
     ? '以下为 ' + timeSummary + '出发的 12306 实时查询结果，默认先展示 ' + TRAIN_INITIAL_VISIBLE.toString() + ' 趟。'
     : '以下为 12306 实时查询结果摘要，默认先展示 ' + TRAIN_INITIAL_VISIBLE.toString() + ' 趟。';
   aiLogInfo('[AIPhone][LocalTool12306Result] rows=' + rows.length.toString() + ' filtered=' + parsed.length.toString() + ' returned=' + top.length.toString());
-  return trainResultA2ui(surfaceId, '12306 余票查询', body, summaryText, top);
+  return trainStructuredDataResult({
+    title: '12306 余票查询', body: body, summary: summaryText, trains: top
+  }, sources);
+}
+
+export function trainDataResultA2ui(surfaceId: string, result: DataResult): string {
+  const data = result.data as TrainStructuredData;
+  if (result.status === 'error') {
+    const code = result.error?.code === undefined ? '' : result.error?.code;
+    if (code === 'TRAIN_INVALID_ARGUMENTS') {
+      return errorA2ui(
+        surfaceId, 'train.search', data.title, data.body,
+        ['示例：明天北京到上海高铁票', '示例：2026-06-10 北京南到上海虹桥'],
+        ['补充日期', '补充城市']
+      );
+    }
+    if (code === 'TRAIN_STATION_LOAD_ERROR' ||
+      code === 'TRAIN_TRANSPORT_EXCEPTION' ||
+      code === 'TRAIN_INVALID_RESPONSE') {
+      return legacyToolExceptionA2ui(surfaceId, 'train.search', data.body);
+    }
+    const details = result.warnings.length > 0 ? result.warnings : [data.summary];
+    if (code === 'TRAIN_STATION_NOT_FOUND') {
+      return errorA2ui(
+        surfaceId, 'train.search', data.title, data.body, details, ['补充车站名']
+      );
+    }
+    if (code === 'TRAIN_PROVIDER_HTTP_ERROR') {
+      return errorA2ui(
+        surfaceId, 'train.search', data.title, data.body, details, ['重新查询', '换日期或车站']
+      );
+    }
+    return errorA2ui(
+      surfaceId, 'train.search', data.title, data.body, details, ['重新查询', '换日期或车站']
+    );
+  }
+  return trainStructuredDataA2ui(surfaceId, data);
+}
+
+async function callLocalTrainSearch(prompt: string, surfaceId: string): Promise<string> {
+  return trainDataResultA2ui(surfaceId, await callStructuredTrainTool(prompt));
 }
 
 interface DynamicPromptArgs {
@@ -8854,7 +9741,9 @@ const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
 const socialHubClient: SocialHubClient = new SocialHubClient();
+let dynamicReadExecutor: DynamicReadExecutor = defaultDynamicReadExecutor;
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
+let gmailComposioResultForTests: DynamicGenericToolResult | null = null;
 let hotelMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
 export type HotelTimestampProvider = () => string;
@@ -8863,6 +9752,14 @@ let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvid
 
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
+}
+
+export function configureGmailComposioResultForTests(result: DynamicGenericToolResult | null): void {
+  gmailComposioResultForTests = result;
+}
+
+export function configureDynamicReadExecutorForTests(executor: DynamicReadExecutor | null): void {
+  dynamicReadExecutor = executor === null ? defaultDynamicReadExecutor : executor;
 }
 
 export function configureHotelMcpClientForTests(client: GenericMcpClient | null): void {
@@ -8940,6 +9837,249 @@ function dynamicArgsFromPrompt(prompt: string): DynamicPromptArgs {
     weatherTargetLabel: dynamicWeatherTargetLabel(weatherTargetOffset),
     weatherForecast: weatherTargetOffset > 0
   };
+}
+
+interface DynamicReadRequestArgs {
+  operation?: Object | string | number | boolean | null;
+  qualifiedName?: Object | string | number | boolean | null;
+  toolSlug?: Object | string | number | boolean | null;
+}
+
+function dynamicReadRequestArgs(args: Object | null): DynamicReadRequestArgs {
+  return args === null ? JSON.parse('{}') as DynamicReadRequestArgs : args as DynamicReadRequestArgs;
+}
+
+function dynamicQualifiedName(args: DynamicReadRequestArgs): string {
+  const qualified = textOf(args.qualifiedName).trim();
+  return qualified.length > 0 ? qualified : textOf(args.toolSlug).trim();
+}
+
+function dynamicVerbTokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((token: string): boolean => token.length > 0);
+}
+
+function containsDynamicVerb(tokens: string[], verbs: string[]): boolean {
+  return tokens.some((token: string): boolean => verbs.indexOf(token) >= 0);
+}
+
+function dynamicReadAuthorizationMessage(args: Object | null): string {
+  const request = dynamicReadRequestArgs(args);
+  const operation = textOf(request.operation).trim().toLowerCase();
+  const qualifiedName = dynamicQualifiedName(request);
+  const operationTokens = dynamicVerbTokens(operation.length > 0 ? operation : 'search');
+  const qualifiedTokens = dynamicVerbTokens(qualifiedName);
+  const writeVerbs = ['delete', 'create', 'update', 'send', 'write', 'execute', 'append', 'upload', 'publish'];
+  const readVerbs = ['read', 'search', 'list', 'get', 'find', 'query', 'fetch', 'lookup'];
+  if (containsDynamicVerb(operationTokens, writeVerbs) || containsDynamicVerb(qualifiedTokens, writeVerbs)) {
+    return 'dynamic.search only allows read/search/list/get operations.';
+  }
+  if (!containsDynamicVerb(operationTokens, readVerbs)) {
+    return 'Unknown dynamic operation: ' + (operation.length > 0 ? operation : 'unknown') + '.';
+  }
+  if (qualifiedName.length > 0 && !containsDynamicVerb(qualifiedTokens, readVerbs)) {
+    return 'Unknown dynamic tool verb: ' + qualifiedName + '.';
+  }
+  return '';
+}
+
+function dynamicRegistration(
+  provider: string,
+  qualifiedName: string,
+  inputSchema: Object,
+  outputSchema: Object,
+  receipt: string,
+  selectedToolId: string = 'dynamic.search'
+): DynamicRegistrationMetadata {
+  return {
+    provider: provider,
+    qualifiedName: qualifiedName,
+    inputSchema: inputSchema,
+    outputSchema: outputSchema,
+    receipt: receipt,
+    selectedToolId: selectedToolId
+  };
+}
+
+function dynamicExecutionResult(
+  result: DynamicGenericToolResult,
+  registration: DynamicRegistrationMetadata
+): DynamicReadExecution {
+  return { results: [result], registration: registration };
+}
+
+function dynamicReadFailure(
+  provider: string,
+  qualifiedName: string,
+  inputSchema: Object,
+  message: string,
+  status: string = 'error'
+): DynamicReadExecution {
+  const result = dynamicErrorResult(provider, qualifiedName, '动态读取失败', message);
+  result.status = status;
+  const registration = dynamicRegistration(provider, qualifiedName, inputSchema, new Object(), '');
+  return dynamicExecutionResult(result, registration);
+}
+
+export function dynamicManifestRegistrationMetadata(
+  provider: string,
+  tool: DynamicMcpTool,
+  result: DynamicGenericToolResult,
+  selectedToolId: string = tool.name
+): DynamicRegistrationMetadata {
+  return dynamicRegistration(
+    provider,
+    tool.name,
+    tool.inputSchema,
+    tool.outputSchema ?? new Object(),
+    dynamicReceiptFromProviderPayload(result.rawPreview),
+    selectedToolId
+  );
+}
+
+function dynamicManifestTool(manifest: DynamicToolManifest, name: string): DynamicMcpTool | null {
+  for (let index = 0; index < manifest.tools.length; index++) {
+    if (manifest.tools[index].name === name) {
+      return manifest.tools[index];
+    }
+  }
+  return null;
+}
+
+function dynamicManifestReadAllowed(tool: DynamicMcpTool, transport: DynamicToolTransport): boolean {
+  if (tool.annotations?.readOnlyHint === true || transport.type === 'http_api' &&
+    transportOption(transport, 'method', 'GET').toUpperCase() === 'GET') {
+    return true;
+  }
+  const request: DynamicReadRequestArgs = {
+    operation: 'read',
+    qualifiedName: tool.name
+  };
+  return dynamicReadAuthorizationMessage(request as Object).length === 0;
+}
+
+async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResult, prompt: string): Promise<DynamicReadExecution> {
+  const manifest = discovery.manifest;
+  const transport = selectBestRemoteTransport(manifest);
+  const toolName = firstSafeToolName(manifest);
+  const tool = dynamicManifestTool(manifest, toolName);
+  if (transport === null || tool === null) {
+    return dynamicReadFailure(manifest.displayName, toolName, new Object(),
+      'No safe HAP-runnable dynamic read tool is available.');
+  }
+  if (!dynamicManifestReadAllowed(tool, transport)) {
+    return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+      'Dynamic tool is not a recognized read/search/list/get operation.', 'unsafe_action_blocked');
+  }
+  let credentialRef = '';
+  let credentialValue = '';
+  const requiredCredential = firstRequiredCredential(manifest);
+  if (requiredCredential !== null) {
+    credentialRef = credentialRefFor(manifest.id, requiredCredential.name);
+    credentialValue = await dynamicCredentialStore.get(credentialRef);
+    if (credentialValue.length === 0) {
+      return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+        'Dynamic read requires configured credentials.', 'needs_auth');
+    }
+  }
+  const registration: DynamicToolRegistration = {
+    toolId: discovery.toolId,
+    manifestId: manifest.id,
+    displayName: manifest.displayName,
+    status: 'candidate',
+    transport: transport,
+    mcpToolName: tool.name,
+    credentialRef: credentialRef,
+    sourceUrl: manifest.sourceUrl,
+    lastError: ''
+  };
+  let result: DynamicGenericToolResult;
+  if (transport.type === 'http_api') {
+    result = await callDynamicHttpApiTool(registration, credentialValue, prompt);
+  } else {
+    const preflight = await genericMcpClient.preflight(registration, credentialValue);
+    if (!preflight.ok) {
+      return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
+        preflight.message.length > 0 ? preflight.message : 'Dynamic MCP preflight failed.');
+    }
+    result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
+  }
+  const metadata = dynamicManifestRegistrationMetadata(manifest.displayName, tool, result, discovery.toolId);
+  return dynamicExecutionResult(result, metadata);
+}
+
+async function defaultDynamicReadExecutor(prompt: string, args: Object | null): Promise<DynamicReadExecution> {
+  const discovery = discoverDynamicToolForPrompt(prompt);
+  if (discovery !== null) {
+    return dynamicManifestReadExecution(discovery, prompt);
+  }
+  const result = await callComposioDynamic(prompt, args);
+  if (result === null) {
+    return dynamicReadFailure('dynamic.search', dynamicQualifiedName(dynamicReadRequestArgs(args)),
+      new Object(), 'No matching dynamic read provider was found.');
+  }
+  const providedRegistration = result.registration;
+  const qualifiedName = providedRegistration?.qualifiedName ??
+    (dynamicQualifiedName(dynamicReadRequestArgs(args)).length > 0 ?
+      dynamicQualifiedName(dynamicReadRequestArgs(args)) : result.toolName);
+  const metadata = providedRegistration ?? dynamicRegistration(
+    result.sourceTag,
+    qualifiedName,
+    new Object(),
+    new Object(),
+    dynamicReceiptFromProviderPayload(result.rawPreview)
+  );
+  result.registration = undefined;
+  return dynamicExecutionResult(result, metadata);
+}
+
+function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResult {
+  const base = genericStructuredDataResult('dynamic.search', 'dynamicToolConnect', execution.results);
+  const data: DynamicStructuredData = {
+    results: execution.results,
+    registration: execution.registration
+  };
+  base.data = data;
+  const source: DataSource = {
+    provider: execution.registration.provider,
+    backend: execution.registration.provider === 'Composio' ? 'oauth_api' :
+      (execution.registration.provider === 'unavailable' ? 'local_adapter' : 'mcp_remote'),
+    operation: execution.registration.qualifiedName,
+    fetchedAt: new Date().toISOString()
+  };
+  if (execution.registration.receipt.length > 0) {
+    source.receipt = execution.registration.receipt;
+  }
+  base.sources = [source];
+  return base;
+}
+
+async function callStructuredDynamicTool(prompt: string, args: Object | null): Promise<DataResult> {
+  const authorizationMessage = dynamicReadAuthorizationMessage(args);
+  if (authorizationMessage.length > 0) {
+    return errorDataResult(
+      'dynamic.search', 'dynamicToolConnect', 'DYNAMIC_WRITE_NOT_ALLOWED', authorizationMessage
+    );
+  }
+  try {
+    return dynamicStructuredDataResult(await dynamicReadExecutor(prompt, args));
+  } catch (error) {
+    const message = describeThrown(error);
+    const qualifiedName = dynamicQualifiedName(dynamicReadRequestArgs(args));
+    const failed = dynamicStructuredDataResult(
+      dynamicReadFailure(
+        'unavailable',
+        qualifiedName.length > 0 ? qualifiedName : 'dynamic.search',
+        new Object(),
+        message
+      )
+    );
+    if (failed.error !== undefined) {
+      failed.error.code = 'DYNAMIC_PROVIDER_ERROR';
+      failed.error.message = message;
+      failed.error.retryable = true;
+    }
+    return failed;
+  }
 }
 
 function transportOption(transport: DynamicToolTransport, key: string, fallback: string = ''): string {
@@ -9418,45 +10558,18 @@ async function buildDynamicToolJsonlWithManifest(toolId: string, prompt: string,
   return preflightAndCallDynamicTool(candidate, manifest, credentialValue, prompt, surfaceId);
 }
 
-function dynamicDiscoveryMissingManifest(prompt: string): DynamicToolManifest {
-  const manifest = missingDynamicManifest('dynamic.search');
-  manifest.displayName = '动态工具搜索';
-  manifest.sourceUrl = 'modelscope-local-catalog';
-  manifest.capabilities = ['dynamic.discovery'];
-  manifest.tools = [{
-    name: 'dynamic.search',
-    description: 'Search the local ModelScope-derived MCP catalog for a matching remote tool.',
-    inputSchema: new Object()
-  }];
-  manifest.fromSiteUrl = 'https://modelscope.cn/mcp';
-  return manifest;
-}
-
 async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  const discovery: DynamicToolDiscoveryResult | null = discoverDynamicToolForPrompt(prompt);
-  if (discovery === null) {
-    const composioResult = await callComposioDynamic(prompt, args);
-    if (composioResult !== null) {
-      aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=dynamic.search source=composio status=' + composioResult.status);
-      return genericToolResultsA2ui(surfaceId, 'dynamic.search', [composioResult]);
-    }
-    aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=none source=modelscope-local-catalog');
-    return connectCardA2ui(
-      surfaceId,
-      'dynamic.search',
-      dynamicDiscoveryMissingManifest(prompt),
-      'no_tool_found',
-      '已根据用户请求搜索本机 ModelScope MCP 候选目录，但没有找到可直接接入的远程 MCP/API。',
-      prompt
-    );
+  const result = await callStructuredDynamicTool(prompt, args);
+  const data = result.data as DynamicStructuredData;
+  if (Array.isArray(data.results)) {
+    return genericToolResultsA2ui(surfaceId, 'dynamic.search', data.results);
   }
-  aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt +
-    ' selectedToolId=' + discovery.toolId +
-    ' manifestId=' + discovery.manifest.id +
-    ' source=' + discovery.source +
-    ' score=' + discovery.score.toString() +
-    ' reason=' + discovery.reason);
-  return buildDynamicToolJsonlWithManifest(discovery.toolId, prompt, surfaceId, discovery.manifest);
+  return genericToolResultsA2ui(surfaceId, 'dynamic.search', [dynamicErrorResult(
+    'dynamic.search',
+    'dynamic.search',
+    '动态读取失败',
+    result.error?.message === undefined ? 'Dynamic read failed.' : result.error.message
+  )]);
 }
 
 async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -9870,7 +10983,46 @@ function qqMailConfig(): QqMailConfig {
   };
 }
 
-async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailDetail> {
+export type MailDetailReader = (request: MailDetailRequest) => Promise<MailDetail>;
+
+let mailDetailReaderForTests: MailDetailReader | null = null;
+
+export function configureMailDetailReaderForTests(reader: MailDetailReader | null): void {
+  mailDetailReaderForTests = reader;
+}
+
+interface ConfiguredMailDetailResult {
+  detail: MailDetail;
+  sources: DataSource[];
+}
+
+function mailDetailSource(
+  provider: string,
+  backend: 'oauth_api' | 'imap',
+  operation: string
+): DataSource {
+  return {
+    provider,
+    backend,
+    operation,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+async function readConfiguredGmailDetailWithSource(
+  args: MailDetailRequest
+): Promise<ConfiguredMailDetailResult> {
+  if (gmailMcpClient !== genericMcpClient) {
+    const results = await gmailOAuthFallbackResults('gmail.thread.read', '', args as Object);
+    if (results.length === 0 || results[0].status !== 'success') {
+      const message = results.length === 0 ? 'Gmail OAuth detail is unavailable.' : results[0].summary;
+      throw new Error(message);
+    }
+    return {
+      detail: gmailMailDetailFromPayload(JSON.parse(results[0].rawPreview) as Object, args),
+      sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
+    };
+  }
   try {
     const execution: ComposioRawExecution = await callComposioFixedRaw(
       'Gmail read full thread ' + args.threadId,
@@ -9883,7 +11035,10 @@ async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailD
     const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
       Object.keys(payload).slice(0, 12).join(',') : '';
     aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
-    return gmailMailDetailFromPayload(payload, args);
+    return {
+      detail: gmailMailDetailFromPayload(payload, args),
+      sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.thread.read')]
+    };
   } catch (composioError) {
     const message = describeThrown(composioError);
     aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
@@ -9892,8 +11047,33 @@ async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailD
       throw new Error(message);
     }
     aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
-    return readGmailMailDetail(accessToken, args);
+    return {
+      detail: await readGmailMailDetail(accessToken, args),
+      sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
+    };
   }
+}
+
+async function readConfiguredMailDetailWithSource(
+  args: MailDetailRequest
+): Promise<ConfiguredMailDetailResult> {
+  if (mailDetailReaderForTests !== null) {
+    return {
+      detail: await mailDetailReaderForTests(args),
+      sources: []
+    };
+  }
+  const provider = args.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    return {
+      detail: await new QqMailImapClient(qqMailConfig()).readDetail(args),
+      sources: [mailDetailSource('QQ Mail', 'imap', 'thread.read')]
+    };
+  }
+  if (provider === 'gmail') {
+    return readConfiguredGmailDetailWithSource(args);
+  }
+  throw new Error('Mail detail provider is not supported: ' + provider);
 }
 
 export async function readConfiguredMailDetail(args: MailDetailRequest): Promise<MailDetail> {
@@ -9902,14 +11082,7 @@ export async function readConfiguredMailDetail(args: MailDetailRequest): Promise
     ' requestKeyChars=' + args.requestKey.length.toString() +
     ' threadIdChars=' + args.threadId.length.toString() +
     ' messageIdChars=' + args.messageId.length.toString());
-  let detail: MailDetail;
-  if (provider === 'qq') {
-    detail = await new QqMailImapClient(qqMailConfig()).readDetail(args);
-  } else if (provider === 'gmail') {
-    detail = await readConfiguredGmailDetail(args);
-  } else {
-    throw new Error('Mail detail provider is not supported: ' + provider);
-  }
+  const detail = (await readConfiguredMailDetailWithSource(args)).detail;
   aiLogInfo('[AIPhone][MailDetailReadDone] provider=' + provider +
     ' bodyChars=' + detail.bodyText.length.toString() +
     ' to=' + detail.to.length.toString() +
@@ -9924,6 +11097,263 @@ function mailProviderError(provider: string, message: string): MailProviderStatu
     title: provider === 'qq' ? 'QQ 邮箱调用失败' : (provider === 'outlook' ? 'Outlook 调用失败' : 'Gmail 调用失败'),
     message: message
   };
+}
+
+type MailEntityJsonValue = Object | string | number | boolean | null | undefined;
+
+function mailEntityRecord(record: Record<string, MailEntityJsonValue>): boolean {
+  const threadId = textOf(record['threadId']).trim();
+  const messageId = textOf(record['messageId']).trim();
+  const internetMessageId = textOf(record['internetMessageId']).trim();
+  if (threadId.length > 0 || messageId.length > 0 || internetMessageId.length > 0) {
+    return true;
+  }
+  const id = textOf(record['id']).trim();
+  const subject = textOf(record['subject']).trim();
+  const sender = textOf(record['from']).trim() + textOf(record['sender']).trim() + textOf(record['to']).trim();
+  return id.length > 0 && (subject.length > 0 || sender.length > 0);
+}
+
+function mailRawHasEntity(value: MailEntityJsonValue, depth: number = 0): boolean {
+  if (depth > 6 || value === undefined || value === null || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const item = value[index] as MailEntityJsonValue;
+      if (item !== undefined && item !== null && typeof item === 'object' &&
+        (mailEntityRecord(item as Record<string, MailEntityJsonValue>) || mailRawHasEntity(item, depth + 1))) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as Record<string, MailEntityJsonValue>;
+  if (mailEntityRecord(record)) {
+    return true;
+  }
+  const nested = ['threads', 'messages', 'emails', 'mails', 'items', 'results', 'data', 'result', 'response'];
+  for (let index = 0; index < nested.length; index++) {
+    if (mailRawHasEntity(record[nested[index]], depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mailExtraHasEntity(result: DynamicGenericToolResult): boolean {
+  if (result.status !== 'success') {
+    return false;
+  }
+  for (let index = 0; index < result.rows.length; index++) {
+    const label = result.rows[index].label.trim().toLowerCase();
+    const value = result.rows[index].value.trim();
+    if (value.length > 0 &&
+      (label === 'message id' || label === 'messageid' || label === 'thread id' || label === 'threadid' ||
+        label === 'internet message id' || label === 'internetmessageid' || label.indexOf('结果 ') === 0)) {
+      return true;
+    }
+  }
+  if (result.rawPreview.trim().length === 0) {
+    return false;
+  }
+  try {
+    return mailRawHasEntity(JSON.parse(result.rawPreview) as MailEntityJsonValue);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function mailSearchDataResult(
+  data: MailSearchStructuredData,
+  sources: DataSource[]
+): DataResult {
+  data.entityRefs = [];
+  const actualSources = sources.slice();
+  const warnings: string[] = [];
+  let failureCount = 0;
+  let authFailureCount = 0;
+  let retryable = false;
+  let successfulResponse = data.threads.length > 0;
+  let entityCount = data.threads.length;
+  let failureMessage = '';
+  data.statuses.forEach((status: MailProviderStatus) => {
+    if (status.status === 'success' || status.status === 'empty') {
+      successfulResponse = true;
+      return;
+    }
+    const evidence: DynamicGenericToolResult = {
+      sourceTag: status.provider,
+      toolName: 'mail.search',
+      title: status.title,
+      status: status.status,
+      summary: status.message,
+      rows: [],
+      rawPreview: ''
+    };
+    failureCount += 1;
+    if (remainingReadAuthFailure(evidence)) {
+      authFailureCount += 1;
+    }
+    if (remainingReadRetryable(evidence)) {
+      retryable = true;
+    }
+    const warning = status.title + '：' + status.message;
+    if (warnings.indexOf(warning) < 0) {
+      warnings.push(warning);
+    }
+    if (failureMessage.length === 0) {
+      failureMessage = status.message.length > 0 ? status.message : status.title;
+    }
+  });
+  data.extras.forEach((result: DynamicGenericToolResult) => {
+    if (mailExtraHasEntity(result)) {
+      entityCount += 1;
+    }
+    if (result.status === 'success' || result.status === 'empty') {
+      successfulResponse = true;
+    }
+    if (genericResultIsFailure(result)) {
+      failureCount += 1;
+      if (remainingReadAuthFailure(result)) {
+        authFailureCount += 1;
+      }
+      if (remainingReadRetryable(result)) {
+        retryable = true;
+      }
+      const warning = result.title + '：' + result.summary;
+      if (warnings.indexOf(warning) < 0) {
+        warnings.push(warning);
+      }
+      if (result.providerPhase === 'execution' || failureMessage.length === 0) {
+        failureMessage = result.summary.length > 0 ? result.summary : result.title;
+      }
+    }
+    if (result.providerPhase === 'execution' &&
+      !sourceAlreadyIncluded(actualSources, result.sourceTag, result.toolName)) {
+      actualSources.push(remainingReadSource(result));
+    }
+  });
+  if (entityCount > 0) {
+    data.entityRefs = mailSearchEntityRefs(data.threads);
+    return failureCount > 0 ?
+      partialDataResult('mail.search', 'mailThreads', data, actualSources, warnings) :
+      successfulDataResult('mail.search', 'mailThreads', data, actualSources);
+  }
+  if (successfulResponse) {
+    const empty = successfulDataResult('mail.search', 'mailThreads', data, actualSources);
+    empty.status = 'empty';
+    empty.warnings = warnings;
+    return empty;
+  }
+  if (failureCount > 0) {
+    return structuredErrorWithData(
+      'mail.search', 'mailThreads', data, authFailureCount === failureCount ? 'AUTH_REQUIRED' : 'PROVIDER_ERROR',
+      failureMessage.length > 0 ? failureMessage : warnings.join('；'), retryable, actualSources, warnings
+    );
+  }
+  const empty = successfulDataResult('mail.search', 'mailThreads', data, actualSources);
+  empty.status = 'empty';
+  return empty;
+}
+
+function mailSearchEntityRefs(threads: MailThreadSummary[]): string[] {
+  const refs: string[] = [];
+  for (let index = 0; index < threads.length && refs.length < 16; index++) {
+    const candidates: string[] = [
+      threads[index].requestKey,
+      threads[index].threadId,
+      threads[index].messageId
+    ];
+    for (let candidateIndex = 0; candidateIndex < candidates.length && refs.length < 16; candidateIndex++) {
+      const candidate: string = candidates[candidateIndex];
+      if (candidate.trim().length > 0 && refs.indexOf(candidate) < 0) {
+        refs.push(candidate);
+      }
+    }
+  }
+  return refs;
+}
+
+export function mailSearchDataResultForTest(data: MailSearchStructuredData, sources: DataSource[]): DataResult {
+  return mailSearchDataResult(data, sources);
+}
+
+async function callStructuredMailSearch(prompt: string, args: Object | null): Promise<DataResult> {
+  const parsed = mailSearchArgs(prompt, args);
+  const data: MailSearchStructuredData = { threads: [], statuses: [], extras: [] };
+  const sources: DataSource[] = [];
+  if (parsed.providers.indexOf('gmail') >= 0) {
+    try {
+      const gmailResult = await callStructuredGmailReadTool('gmail.mail.search', parsed.query, parsed as Object);
+      const gmailData = gmailResult.data as GmailSearchStructuredData;
+      gmailData.threads.forEach((thread: GmailThreadSummary) => data.threads.push(mailThreadSummary(thread)));
+      gmailData.statuses.forEach((status: MailProviderStatus) => data.statuses.push(status));
+      gmailData.extras.forEach((extra: DynamicGenericToolResult) => data.extras.push(extra));
+      gmailResult.sources.forEach((source: DataSource) => sources.push(source));
+    } catch (error) {
+      data.statuses.push(mailProviderError('gmail', describeThrown(error)));
+    }
+  }
+  if (parsed.providers.indexOf('qq') >= 0) {
+    const configured = localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0;
+    try {
+      const rows = await new QqMailImapClient(qqMailConfig()).search(parsed);
+      rows.forEach((thread: MailThreadResult) => data.threads.push(mailThreadSummary(thread)));
+      if (configured) {
+        sources.push({
+          provider: 'QQ Mail', backend: 'imap', operation: 'search', fetchedAt: new Date().toISOString()
+        });
+      }
+      if (rows.length === 0) {
+        data.statuses.push({
+          provider: 'qq', status: 'success', title: 'QQ Mail 没有找到匹配邮件',
+          message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
+        });
+      }
+    } catch (error) {
+      data.statuses.push(mailProviderError('qq', describeThrown(error)));
+      if (configured) {
+        sources.push({
+          provider: 'QQ Mail', backend: 'imap', operation: 'search', fetchedAt: new Date().toISOString()
+        });
+      }
+    }
+  }
+  if (parsed.providers.indexOf('outlook') >= 0) {
+    const outlook = await composioAppResult('Outlook', parsed.query, '的邮件');
+    data.extras.push(outlook);
+  }
+  return mailSearchDataResult(data, sources);
+}
+
+async function callStructuredMailThreadRead(toolId: string, args: Object | null): Promise<DataResult> {
+  const request = mailDetailRequestFromArgs(args);
+  const identityError = mailDetailIdentityError(toolId, 'mailThread', request);
+  if (identityError !== null) {
+    return identityError;
+  }
+  const configured = request.provider === 'qq' ?
+    localProviderConfig.qqMailAddress.length > 0 && localProviderConfig.qqMailAuthCode.length > 0 :
+    isComposioConfigured() || localProviderConfig.gmailOauthClientId.length > 0;
+  let sources: DataSource[] = [];
+  try {
+    const configuredDetail = await readConfiguredMailDetailWithSource(request);
+    const detail = configuredDetail.detail;
+    sources = configuredDetail.sources;
+    if (!mailDetailMatchesRequest(detail, request)) {
+      return structuredErrorWithData(
+        toolId, 'mailThread', new Object(), 'PROVIDER_IDENTITY_MISMATCH',
+        'Mail provider returned a stale identity or no full message body.', false, sources
+      );
+    }
+    return successfulDataResult(toolId, 'mailThread', mailThreadStructuredData(detail), sources);
+  } catch (error) {
+    return structuredErrorWithData(
+      toolId, 'mailThread', new Object(), configured ? 'PROVIDER_ERROR' : 'AUTH_REQUIRED',
+      describeThrown(error), configured, sources
+    );
+  }
 }
 
 function composioResultTitle(appName: string): string {
@@ -9965,16 +11395,6 @@ async function composioAppResult(appName: string, query: string, kind: string): 
   }
 }
 
-function composioFixedRequestArgs(toolId: string, args: Object | null = null): Object {
-  const payload: ComposioFixedRequestPayload = {
-    fixedToolId: toolId
-  };
-  if (args !== null) {
-    payload.fixedArgs = args;
-  }
-  return payload;
-}
-
 function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
   if (args === null || Array.isArray(args) || typeof args !== 'object') {
     return [];
@@ -9994,6 +11414,7 @@ function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
 function composioFixedResult(toolId: string, appName: string, result: DynamicGenericToolResult, args: Object | null = null): DynamicGenericToolResult {
   result.toolName = toolId;
   result.sourceTag = 'Composio ' + appName;
+  result.registration = undefined;
   if (result.rows.find((row: A2uiLabelValueData) => row.label === 'Tool ID') === undefined) {
     result.rows.push({ label: 'Tool ID', value: toolId });
   }
@@ -10014,7 +11435,7 @@ async function composioFixedAppResult(
 ): Promise<DynamicGenericToolResult> {
   const prompt = composioProviderPrompt(appName, query, kind);
   try {
-    const result = await callComposioDynamic(prompt, composioFixedRequestArgs(toolId, args));
+    const result = await callComposioFixedDynamic(prompt, toolId, args);
     if (result !== null) {
       result.rows.push({ label: 'provider', value: appName });
       return composioFixedResult(toolId, appName, result, args);
@@ -10039,17 +11460,6 @@ async function composioFixedAppResult(
       rawPreview: prompt
     }, args);
   }
-}
-
-function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
-  return results.length > 0 && results[0].status === 'error';
-}
-
-function gmailResultErrorSummary(results: DynamicGenericToolResult[]): string {
-  if (results.length === 0) {
-    return 'empty Gmail API result';
-  }
-  return results[0].summary.length > 0 ? results[0].summary : results[0].title;
 }
 
 async function gmailOAuthFallbackResults(
@@ -10077,10 +11487,35 @@ async function gmailOAuthFallbackResults(
       gmailMcpArgsForPrompt(toolId, prompt, args)
     )];
   } catch (error) {
+    const message = describeThrown(error);
     aiLogError('[AIPhone][GmailLocalOAuthFallbackFailed] toolId=' + toolId +
-      ' reason=' + describeThrown(error).substring(0, 200));
-    return [];
+      ' reason=' + message.substring(0, 200));
+    return [{
+      sourceTag: 'Gmail OAuth',
+      toolName: toolId,
+      title: 'Gmail OAuth 调用失败',
+      status: 'error',
+      summary: message,
+      rows: [{ label: 'Error', value: message.substring(0, 240) }],
+      rawPreview: '',
+      providerPhase: 'execution'
+    }];
   }
+}
+
+function clonedGmailResult(result: DynamicGenericToolResult): DynamicGenericToolResult {
+  return {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows.map((row: A2uiLabelValueData): A2uiLabelValueData => ({ label: row.label, value: row.value })),
+    rawPreview: result.rawPreview,
+    actions: result.actions,
+    registration: result.registration,
+    providerPhase: result.providerPhase
+  };
 }
 
 async function configuredGmailResults(
@@ -10088,18 +11523,167 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
-  const composioResult = await composioFixedAppResult(
-    toolId,
-    'Gmail',
-    prompt,
-    toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
-    args
-  );
-  if (composioResult.status === 'success') {
+  let pinnedProvider = '';
+  if (toolId === 'gmail.draft.apply' && args !== null && !Array.isArray(args) && typeof args === 'object') {
+    const values = args as ToolArgRecord;
+    pinnedProvider = textOf(values.provider).trim().toLowerCase();
+    if (pinnedProvider !== 'gmail_oauth' && pinnedProvider !== 'composio') {
+      return [gmailErrorResult(toolId, 'Gmail draft provider is missing or invalid.')];
+    }
+  }
+  if (pinnedProvider === 'gmail_oauth') {
+    const pinnedFallback = await gmailOAuthFallbackResults(toolId, prompt, args);
+    pinnedFallback.forEach((result: DynamicGenericToolResult) => {
+      result.providerPhase = 'execution';
+    });
+    return pinnedFallback.length > 0 ?
+      pinnedFallback : [gmailErrorResult(toolId, 'Gmail OAuth draft provider is unavailable.')];
+  }
+  const composioResult = gmailComposioResultForTests === null ?
+    await composioFixedAppResult(
+      toolId,
+      'Gmail',
+      prompt,
+      toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
+      args
+    ) : clonedGmailResult(gmailComposioResultForTests);
+  if (pinnedProvider === 'composio') {
+    return [composioResult];
+  }
+  if (composioResult.status === 'success' && composioResult.providerPhase === 'execution') {
     return [composioResult];
   }
   const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
-  return fallbackResults.length > 0 ? fallbackResults : [composioResult];
+  fallbackResults.forEach((result: DynamicGenericToolResult) => {
+    result.providerPhase = 'execution';
+  });
+  if (fallbackResults.length > 0) {
+    const fallbackSucceeded = fallbackResults.some((result: DynamicGenericToolResult): boolean =>
+      result.status === 'success' || result.status === 'empty');
+    if (fallbackSucceeded) {
+      return fallbackResults;
+    }
+    fallbackResults.push(composioResult);
+    return fallbackResults;
+  }
+  return [composioResult];
+}
+
+export interface MailThreadStructuredData {
+  requestKey: string;
+  provider: string;
+  threadId: string;
+  messageId: string;
+  internetMessageId: string;
+  subject: string;
+  from: string;
+  replyTo: string;
+  to: string[];
+  cc: string[];
+  body: string;
+  bodyHtml: string;
+}
+
+function mailDetailRequestFromArgs(args: Object | null): MailDetailRequest {
+  const request = args === null ? {} as MailDetailRequest : args as MailDetailRequest;
+  return {
+    requestKey: textOf(request.requestKey).trim(),
+    provider: textOf(request.provider).trim().toLowerCase(),
+    threadId: textOf(request.threadId).trim(),
+    messageId: textOf(request.messageId).trim(),
+    subject: textOf(request.subject).trim()
+  };
+}
+
+function mailDetailIdentityError(toolId: string, outputSchema: string, request: MailDetailRequest): DataResult | null {
+  const identity = request.provider === 'gmail' ? request.threadId : request.messageId;
+  const providerIdentityValid = request.provider === 'gmail' ?
+    request.threadId.length > 0 && request.messageId.length > 0 :
+    request.provider === 'qq' && /^\d+$/.test(request.messageId);
+  if ((request.provider !== 'gmail' && request.provider !== 'qq') || identity.length === 0 ||
+    !providerIdentityValid ||
+    request.requestKey !== request.provider + ':' + identity) {
+    return errorDataResult(
+      toolId,
+      outputSchema,
+      'INPUT_REQUIRED',
+      'mail thread read requires a matching provider, requestKey, and provider thread/message identity.'
+    );
+  }
+  return null;
+}
+
+function mailThreadStructuredData(detail: MailDetail): MailThreadStructuredData {
+  return {
+    requestKey: detail.requestKey,
+    provider: detail.provider,
+    threadId: detail.threadId,
+    messageId: detail.messageId,
+    internetMessageId: detail.internetMessageId === undefined ? '' : detail.internetMessageId,
+    subject: detail.subject,
+    from: detail.from,
+    replyTo: detail.replyTo,
+    to: detail.to.slice(),
+    cc: detail.cc.slice(),
+    body: detail.bodyText,
+    bodyHtml: detail.bodyHtml
+  };
+}
+
+function mailDetailMatchesRequest(detail: MailDetail, request: MailDetailRequest): boolean {
+  return detail.provider === request.provider && detail.requestKey === request.requestKey &&
+    (request.threadId.length === 0 || detail.threadId === request.threadId) &&
+    (request.messageId.length === 0 || detail.messageId === request.messageId) &&
+    (detail.bodyText.trim().length > 0 || detail.bodyHtml.trim().length > 0);
+}
+
+async function callStructuredGmailReadTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null,
+  providerToolId: string = toolId
+): Promise<DataResult> {
+  if (toolId === 'gmail.thread.read') {
+    return callStructuredMailThreadRead(toolId, args);
+  }
+  if (toolId === 'gmail.mail.search') {
+    const results = await configuredGmailResults(providerToolId, prompt, args);
+    const data: GmailSearchStructuredData = gmailSearchStructuredDataFromResults(results);
+    const base = remainingReadStructuredDataResult(toolId, 'mailThreads', results);
+    data.entityRefs = base.status === 'success' || base.status === 'partial' ?
+      mailSearchEntityRefs(data.threads as MailThreadSummary[]) : [];
+    base.data = data;
+    return base;
+  }
+  const request = mailDetailRequestFromArgs(args);
+  if (request.provider.length === 0) {
+    request.provider = 'gmail';
+  }
+  const identityError = mailDetailIdentityError(toolId, 'mailThread', request);
+  if (identityError !== null) {
+    return identityError;
+  }
+  const results = await configuredGmailResults(providerToolId, prompt, request as Object);
+  const base = remainingReadStructuredDataResult(toolId, 'mailThread', results);
+  if (base.status !== 'success' || results.length === 0) {
+    return base;
+  }
+  try {
+    const detail = gmailMailDetailFromPayload(JSON.parse(results[0].rawPreview) as Object, request);
+    if (!mailDetailMatchesRequest(detail, request)) {
+      return structuredErrorWithData(
+        toolId, 'mailThread', new Object(), 'PROVIDER_IDENTITY_MISMATCH',
+        'Gmail returned a stale identity or no full message body.', false, base.sources
+      );
+    }
+    base.data = mailThreadStructuredData(detail);
+    return base;
+  } catch (error) {
+    return structuredErrorWithData(
+      toolId, 'mailThread', new Object(), 'PROVIDER_INVALID_RESPONSE',
+      describeThrown(error), false, base.sources
+    );
+  }
 }
 
 function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
@@ -10127,6 +11711,45 @@ interface SocialHubDraftRequestArgs {
 
 interface SocialHubFeedRequestArgs {
   platforms?: Object[];
+}
+
+interface SocialCommunityRequestArgs {
+  platform?: Object | string | number | boolean | null;
+  query?: Object | string | number | boolean | null;
+  resourceId?: Object | string | number | boolean | null;
+  limit?: number;
+}
+
+interface SocialPublicationPreviewRequestArgs {
+  platform?: Object | string | number | boolean | null;
+  operation?: Object | string | number | boolean | null;
+  text?: Object | string | number | boolean | null;
+}
+
+interface SocialXCommunityArgs {
+  query: string;
+  maxResults: number;
+}
+
+interface EmptySocialProviderArgs {
+}
+
+interface SocialLinkedInPostArgs {
+  postId: string;
+}
+
+interface SocialInstagramMediaArgs {
+  igUserId: string;
+  limit: number;
+}
+
+interface SocialRedditProfileArgs {
+  username: string;
+}
+
+interface SocialRedditCommunityArgs {
+  searchQuery: string;
+  limit: number;
 }
 
 interface SocialXListArgs {
@@ -10200,14 +11823,16 @@ function socialHubPlatformFromText(value: string): SocialHubPlatform {
   if (text === 'wecom' || text === 'wework' || text === '企业微信') {
     return 'wecom';
   }
-  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' ||
+    text === 'instagram' || text === 'reddit') {
     return text as SocialHubPlatform;
   }
   return 'unknown';
 }
 
 function isSocialHubToolId(toolId: string): boolean {
-  return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
+  return toolId === 'social.feed.search' || toolId === 'social.reply.draft' ||
+    toolId === 'social.community.search' || toolId === 'social.post.preview';
 }
 
 function socialHubDefaultPlatforms(): SocialHubPlatform[] {
@@ -10333,6 +11958,166 @@ function socialProfileId(raw: string): string {
     return textOf((profile.data as SocialProfilePayload).id).trim();
   } catch (_error) {
     return '';
+  }
+}
+
+interface SocialProfileIdentity {
+  id: string;
+  name: string;
+}
+
+function socialProfileIdentityRecord(value: Object | null | undefined): SocialProfileIdentity {
+  if (value === undefined || value === null) {
+    return { id: '', name: '' };
+  }
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  const nested = record.data;
+  if (nested !== undefined && nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    const identity = socialProfileIdentityRecord(nested as Object);
+    if (identity.id.length > 0 || identity.name.length > 0) {
+      return identity;
+    }
+  }
+  const id = textOf(record.id).trim();
+  const username = textOf(record.username).trim();
+  const name = textOf(record.name).trim();
+  return {
+    id: id.length > 0 ? id : (username.length > 0 ? username : name),
+    name: username.length > 0 ? username : name
+  };
+}
+
+function socialProfileIdentityFromObservation(raw: string): SocialProfileIdentity {
+  try {
+    return socialProfileIdentityRecord(JSON.parse(raw) as Object);
+  } catch (_error) {
+    return { id: '', name: '' };
+  }
+}
+
+async function socialProfileForPreview(platform: SocialHubPlatform): Promise<SocialProfileIdentity> {
+  if (platform === 'x') {
+    const args: SocialXProfileArgs = { userFields: ['id', 'name', 'username'] };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw('Authenticated Twitter X profile', 'social.x.profile', args)).observation
+    );
+  }
+  if (platform === 'linkedin') {
+    const args: EmptySocialProviderArgs = {};
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated LinkedIn profile', 'social.linkedin.profile', args
+      )).observation
+    );
+  }
+  if (platform === 'instagram') {
+    const args: SocialInstagramProfileArgs = { igUserId: 'me' };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated Instagram profile', 'social.instagram.profile', args
+      )).observation
+    );
+  }
+  if (platform === 'reddit') {
+    const args: SocialRedditProfileArgs = { username: 'me' };
+    return socialProfileIdentityFromObservation(
+      (await callComposioFixedRaw(
+        'Authenticated Reddit profile', 'social.reddit.profile', args
+      )).observation
+    );
+  }
+  return { id: '', name: '' };
+}
+
+async function composioSocialCommunity(args: Object | null): Promise<SocialHubFeedResult> {
+  const request = args === null ? {} as SocialCommunityRequestArgs :
+    args as SocialCommunityRequestArgs;
+  const platform = socialHubPlatformFromText(textOf(request.platform));
+  const query = textOf(request.query).trim();
+  const resourceId = textOf(request.resourceId).trim();
+  const limit = typeof request.limit === 'number' ?
+    Math.max(1, Math.min(25, request.limit)) : 10;
+  try {
+    if (platform === 'x') {
+      const fixedArgs: SocialXCommunityArgs = {
+        query,
+        maxResults: Math.max(10, limit)
+      };
+      const execution = await callComposioFixedRaw(
+        'Search recent public X posts', 'social.x.community.search', fixedArgs
+      );
+      return parseComposioCommunityFeed('x', execution.observation);
+    }
+    if (platform === 'reddit') {
+      const fixedArgs: SocialRedditCommunityArgs = { searchQuery: query, limit };
+      const execution = await callComposioFixedRaw(
+        'Search public Reddit posts', 'social.reddit.search', fixedArgs
+      );
+      return parseComposioCommunityFeed('reddit', execution.observation);
+    }
+    if (platform === 'instagram') {
+      const profile = await socialProfileForPreview('instagram');
+      if (profile.id.length === 0) {
+        return socialHubConnectionResult(
+          'instagram', 'Instagram', 'error', 'Provider profile 没有返回真实账号 ID。'
+        );
+      }
+      const fixedArgs: SocialInstagramMediaArgs = { igUserId: profile.id, limit };
+      const execution = await callComposioFixedRaw(
+        'List authenticated Instagram media', 'social.instagram.media.list', fixedArgs
+      );
+      return parseComposioCommunityFeed('instagram', execution.observation);
+    }
+    if (platform === 'linkedin') {
+      if (resourceId.length === 0) {
+        const profile = await socialProfileForPreview('linkedin');
+        const result = socialHubConnectionResult(
+          'linkedin',
+          'LinkedIn',
+          'limited',
+          '当前账号没有公开社区列表读取权限；请提供可读 resource ID 或补充读 scope。'
+        );
+        result.connections[0].accountId = profile.id;
+        return result;
+      }
+      const fixedArgs: SocialLinkedInPostArgs = { postId: resourceId };
+      const execution = await callComposioFixedRaw(
+        'Read one LinkedIn post', 'social.linkedin.post.read', fixedArgs
+      );
+      return parseComposioCommunityFeed('linkedin', execution.observation);
+    }
+    return socialHubConnectionResult(
+      platform, 'SocialHub', 'error', '请选择 X、LinkedIn、Instagram 或 Reddit。'
+    );
+  } catch (error) {
+    return socialHubConnectionResult(platform, 'SocialHub', 'error', describeThrown(error));
+  }
+}
+
+async function socialPublicationPreview(args: Object | null): Promise<SocialHubPublicationData> {
+  const request = args === null ? {} as SocialPublicationPreviewRequestArgs :
+    args as SocialPublicationPreviewRequestArgs;
+  const platform = socialHubPlatformFromText(textOf(request.platform));
+  const text = textOf(request.text).trim();
+  const base: SocialHubPublicationPreviewInput = {
+    platform,
+    operation: textOf(request.operation).trim().toLowerCase(),
+    text
+  };
+  if (base.operation !== 'publish' || text.length === 0 || text.length > 3000 ||
+    (platform !== 'x' && platform !== 'linkedin' &&
+      platform !== 'instagram' && platform !== 'reddit')) {
+    return createSocialHubPublicationPreview(base);
+  }
+  try {
+    const identity = await socialProfileForPreview(platform);
+    base.accountId = identity.id;
+    base.accountName = identity.name;
+    return createSocialHubPublicationPreview(base);
+  } catch (error) {
+    const failed = createSocialHubPublicationPreview(base);
+    failed.error = '读取真实 provider 账号失败：' + describeThrown(error);
+    return failed;
   }
 }
 
@@ -10484,68 +12269,218 @@ export async function sendLocalSocialHubReply(item: SocialHubItemData, text: str
   return socialHubClient.sendReply(item, text);
 }
 
-async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+async function callLocalSocialHubTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'social.reply.draft') {
+    if (actionId !== 'social.reply.draft') {
+      const unauthorized: SocialHubDraftData = {
+        itemId: '',
+        platform: 'unknown',
+        text: '',
+        status: 'error',
+        error: 'Social reply draft requires a selected-item page action.',
+        localOnly: true,
+        sent: false
+      };
+      return socialHubDraftA2ui(surfaceId, unauthorized);
+    }
     const request: SocialHubDraftRequestArgs = args === null ? emptySocialHubDraftRequestArgs() : args as SocialHubDraftRequestArgs;
     const itemId = textOf(request.itemId).trim();
+    const platform = socialHubPlatformFromText(textOf(request.platform));
     const instruction = textOf(request.instruction).trim();
-    const draft = await socialHubClient.draft(
-      itemId.length > 0 ? itemId : prompt,
-      socialHubPlatformFromText(textOf(request.platform)),
-      instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿'
-    );
+    if (itemId.length === 0 || platform === 'unknown' || instruction.length === 0) {
+      const failed: SocialHubDraftData = {
+        itemId,
+        platform,
+        text: '',
+        status: 'error',
+        error: 'Social reply draft requires a selected real item ID, platform, and instruction.',
+        localOnly: true,
+        sent: false
+      };
+      return socialHubDraftA2ui(surfaceId, failed);
+    }
+    const draft = await socialHubClient.draft(itemId, platform, instruction);
     return socialHubDraftA2ui(surfaceId, draft);
   }
   if (toolId === 'social.feed.search') {
-    const result = await composioSocialAggregate(args);
-    return socialHubFeedA2ui(surfaceId, result.items, result.connections);
+    const result = await callStructuredSocialHubTool(args);
+    return socialHubStructuredDataA2ui(surfaceId, result.data as SocialHubStructuredData);
+  }
+  if (toolId === 'social.community.search') {
+    const result = await composioSocialCommunity(args);
+    return socialHubCommunityA2ui(surfaceId, result.items, result.connections);
+  }
+  if (toolId === 'social.post.preview') {
+    return socialHubPublicationA2ui(surfaceId, await socialPublicationPreview(args));
   }
   return socialHubFeedA2ui(surfaceId, [], []);
 }
 
-async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  return genericToolResultsA2ui(surfaceId, toolId, [
+async function callStructuredSocialHubTool(args: Object | null): Promise<DataResult> {
+  return socialHubStructuredDataResult(await composioSocialAggregate(args));
+}
+
+async function callStructuredSocialCommunityTool(args: Object | null): Promise<DataResult> {
+  return socialHubStructuredDataResult(
+    await composioSocialCommunity(args),
+    'social.community.search'
+  );
+}
+
+interface XPostPreviewEnvelope {
+  posts?: Object[];
+  tweets?: Object[];
+  statuses?: Object[];
+  items?: Object[];
+  data?: Object | Object[] | null;
+}
+
+function xPostPreviewItems(value: Object | Object[] | null | undefined): Object[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const envelope = value as XPostPreviewEnvelope;
+  const candidates = [envelope.posts, envelope.tweets, envelope.statuses, envelope.items];
+  for (let index = 0; index < candidates.length; index++) {
+    if (Array.isArray(candidates[index])) {
+      return candidates[index] as Object[];
+    }
+  }
+  if (envelope.data !== value) {
+    return xPostPreviewItems(envelope.data);
+  }
+  return [];
+}
+
+function xPostPreviewHasRealPost(rawPreview: string): boolean {
+  try {
+    const items = xPostPreviewItems(JSON.parse(rawPreview) as Object);
+    for (let index = 0; index < items.length; index++) {
+      const record = items[index] as Record<string, Object | string | number | boolean | null | undefined>;
+      const id = textOf(record.id ?? record.tweet_id ?? record.post_id).trim();
+      const content = textOf(record.text ?? record.messageText ?? record.content ?? record.url).trim();
+      if (id.length > 0 && content.length > 0) {
+        return true;
+      }
+    }
+  } catch (_error) {
+  }
+  return false;
+}
+
+export function xPostStructuredDataResult(result: DynamicGenericToolResult): DataResult {
+  const data: GenericStructuredData = { results: [result] };
+  if (result.providerPhase !== 'execution') {
+    const message = result.summary.trim().length > 0 ? result.summary :
+      'Composio discovery did not execute an X post read tool.';
+    return structuredErrorWithData(
+      'x.post.search', 'genericToolResults', data, 'X_POST_TOOL_NOT_EXECUTED', message, false, [], [message]
+    );
+  }
+  if (result.status !== 'success') {
+    return genericStructuredDataResult('x.post.search', 'genericToolResults', [result]);
+  }
+  if (!xPostPreviewHasRealPost(result.rawPreview)) {
+    const empty = successfulDataResult(
+      'x.post.search', 'genericToolResults', data, [genericResultSource(result)]
+    );
+    empty.status = 'empty';
+    return empty;
+  }
+  return genericStructuredDataResult('x.post.search', 'genericToolResults', [result]);
+}
+
+async function callStructuredXTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
+  return xPostStructuredDataResult(
     await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
-  ]);
+  );
+}
+
+async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const result = await callStructuredXTool(toolId, prompt, args);
+  return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
+}
+
+async function callStructuredYouTubeVideoTool(prompt: string, args: Object | null): Promise<DataResult> {
+  return genericStructuredDataResult(
+    'youtube.video.search',
+    'youtubeVideos',
+    await callYouTubeVideoSearch(
+      youtubeQueryFromArgs(prompt, args),
+      localProviderConfig.youtubeApiKey,
+      youtubeSearchOptionsFromArgs(args)
+    )
+  );
+}
+
+async function callStructuredYouTubeAccountTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  const configured = isComposioConfigured();
+  const result = await composioFixedAppResult(
+    toolId,
+    'YouTube',
+    prompt,
+    toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表',
+    args
+  );
+  if (configured || result.status === 'success') {
+    result.providerPhase = 'execution';
+  }
+  return remainingReadStructuredDataResult(
+    toolId,
+    toolId === 'youtube.mine.subscriptions' ? 'youtubeSubscriptions' : 'youtubePlaylists',
+    [result]
+  );
 }
 
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'youtube.video.search') {
-    return genericToolResultsA2ui(
-      surfaceId,
+    const result = await callStructuredYouTubeVideoTool(prompt, args);
+    return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
+  }
+  const result = await callStructuredYouTubeAccountTool(toolId, prompt, args);
+  return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
+}
+
+async function callStructuredMediaTool(toolId: string, prompt: string, args: Object | null): Promise<DataResult> {
+  if (toolId === 'media.video.search') {
+    return genericStructuredDataResult(
       toolId,
-      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
+      'mediaVideos',
+      await callMediaVideoSearch(prompt, args, localProviderConfig.youtubeApiKey)
     );
   }
-  return genericToolResultsA2ui(surfaceId, toolId, [
-    await composioFixedAppResult(toolId, 'YouTube', prompt, toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表', args)
-  ]);
+  if (toolId === 'media.aggregate.search') {
+    return aggregateStructuredDataResult(await callAggregateSearch(
+      prompt,
+      args,
+      localProviderConfig.youtubeApiKey,
+      { apiKey: localProviderConfig.zhihuApiKey }
+    ));
+  }
+  return errorDataResult(toolId, '', 'MEDIA_TOOL_UNSUPPORTED', 'Unsupported media tool: ' + toolId + '.');
 }
 
 async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'media.video.search') {
-    return genericToolResultsA2ui(
-      surfaceId,
-      toolId,
-      await callMediaVideoSearch(
-        prompt,
-        args,
-        localProviderConfig.youtubeApiKey
-      )
-    );
+    const result = await callStructuredMediaTool(toolId, prompt, args);
+    return mediaVideoStructuredDataA2ui(surfaceId, toolId, result.data as GenericStructuredData);
   }
   if (toolId === 'media.aggregate.search') {
-    return aggregateSearchA2ui(
-      surfaceId,
-      await callAggregateSearch(
-        prompt,
-        args,
-        localProviderConfig.youtubeApiKey,
-        {
-          apiKey: localProviderConfig.zhihuApiKey
-        }
-      )
-    );
+    const result = await callStructuredMediaTool(toolId, prompt, args);
+    return aggregateSearchA2ui(surfaceId, result.data as AggregateSearchResult);
   }
   return genericToolResultsA2ui(surfaceId, toolId, [{
     sourceTag: '媒体聚合',
@@ -10558,17 +12493,70 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
   }]);
 }
 
-async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+function mailDetailDynamicResult(toolId: string, data: MailThreadStructuredData): DynamicGenericToolResult {
+  return {
+    sourceTag: data.provider === 'gmail' ? 'Gmail API' : 'QQ Mail',
+    toolName: data.provider === 'gmail' ? 'users.threads.get' : toolId,
+    title: data.subject.length > 0 ? data.subject : '(no subject)',
+    status: 'success',
+    summary: data.body.length > 0 ? data.body : data.bodyHtml,
+    rows: [
+      { label: 'Provider', value: data.provider },
+      { label: 'Request Key', value: data.requestKey },
+      { label: 'Thread ID', value: data.threadId },
+      { label: 'Message ID', value: data.messageId },
+      { label: 'From', value: data.from },
+      { label: 'To', value: data.to.join(', ') }
+    ],
+    rawPreview: JSON.stringify({
+      provider: data.provider, requestKey: data.requestKey,
+      threadId: data.threadId, messageId: data.messageId
+    })
+  };
+}
+
+async function callLocalGmailTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  args: Object | null = null
+): Promise<string> {
   if (toolId === 'gmail.message.send') {
-    return gmailBlockedSendA2ui(surfaceId, toolId);
+    return genericToolResultsA2ui(surfaceId, toolId, [{
+      sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 回复未发送', status: 'error',
+      summary: 'Gmail replies require the registered current Gmail surface action.',
+      rows: [{ label: 'Error', value: 'GMAIL_REPLY_REGISTERED_ACTION_REQUIRED' }], rawPreview: ''
+    }]);
   }
   if (toolId === 'gmail.open.web') {
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
   try {
+    if (toolId === 'gmail.mail.search') {
+      const result = await callStructuredGmailReadTool(toolId, prompt, args);
+      return gmailSearchStructuredDataA2ui(surfaceId, toolId, result.data as GmailSearchStructuredData);
+    }
+    if (toolId === 'gmail.thread.read') {
+      const result = await callStructuredGmailReadTool(toolId, prompt, args);
+      if (result.status === 'success') {
+        return gmailThreadResultsA2ui(surfaceId, toolId, [
+          mailDetailDynamicResult(toolId, result.data as MailThreadStructuredData)
+        ]);
+      }
+      const message = result.error?.message === undefined ? 'Gmail thread read failed.' : result.error.message;
+      return gmailThreadResultsA2ui(surfaceId, toolId, [{
+        sourceTag: 'Gmail', toolName: toolId, title: 'Gmail 正文读取失败', status: 'error',
+        summary: message, rows: [{ label: '错误', value: message }], rawPreview: ''
+      }]);
+    }
     const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-      return gmailDraftPreviewA2ui(surfaceId, results[0]);
+      return gmailDraftPreviewA2ui(
+        surfaceId,
+        results[0],
+        toolId === 'gmail.draft.create' ? args : null,
+        toolId
+      );
     }
     return gmailThreadResultsA2ui(surfaceId, toolId, results);
   } catch (error) {
@@ -10578,50 +12566,22 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
 
 async function callLocalMailTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'mail.search') {
-    const parsed = mailSearchArgs(prompt, args);
-    const threads: MailThreadResult[] = [];
-    const statuses: MailProviderStatus[] = [];
-    const extras: DynamicGenericToolResult[] = [];
+    const result = await callStructuredMailSearch(prompt, args);
+    return mailSearchStructuredDataA2ui(surfaceId, toolId, result.data as MailSearchStructuredData);
+  }
 
-    if (parsed.providers.indexOf('gmail') >= 0) {
-      try {
-        const gmailResults = await configuredGmailResults('gmail.mail.search', parsed.query, parsed as Object);
-        const gmailResult = gmailResults[0];
-        statuses.push({
-          provider: 'gmail',
-          status: gmailResult.status,
-          title: gmailResult.title,
-          message: gmailResult.summary
-        });
-        gmailResults.forEach((result: DynamicGenericToolResult) => extras.push(result));
-      } catch (error) {
-        statuses.push(mailProviderError('gmail', describeThrown(error)));
-      }
+  if (toolId === 'mail.thread.read') {
+    const result = await callStructuredMailThreadRead(toolId, args);
+    if (result.status === 'success') {
+      return mailResultsFromDynamicA2ui(surfaceId, toolId, [
+        mailDetailDynamicResult(toolId, result.data as MailThreadStructuredData)
+      ]);
     }
-
-    if (parsed.providers.indexOf('qq') >= 0) {
-      try {
-        const qq = new QqMailImapClient(qqMailConfig());
-        const qqRows = await qq.search(parsed);
-        qqRows.forEach((row: MailThreadResult) => threads.push(row));
-        if (qqRows.length === 0) {
-          statuses.push({
-            provider: 'qq',
-            status: 'success',
-            title: 'QQ Mail 没有找到匹配邮件',
-            message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
-          });
-        }
-      } catch (error) {
-        statuses.push(mailProviderError('qq', describeThrown(error)));
-      }
-    }
-
-    if (parsed.providers.indexOf('outlook') >= 0) {
-      extras.push(await composioAppResult('Outlook', parsed.query, '的邮件'));
-    }
-
-    return mailResultsA2ui(surfaceId, toolId, threads, statuses, extras);
+    const message = result.error?.message === undefined ? 'Mail thread read failed.' : result.error.message;
+    return mailResultsFromDynamicA2ui(surfaceId, toolId, [{
+      sourceTag: 'Mail', toolName: toolId, title: '邮件正文读取失败', status: 'error',
+      summary: message, rows: [{ label: '错误', value: message }], rawPreview: ''
+    }]);
   }
 
   if (toolId === 'mail.draft.create') {
@@ -10708,7 +12668,6 @@ function calendarComposioArgs(toolId: string, prompt: string, args: Object | nul
   const source = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
   const normalized = normalizedCalendarArgsForPrompt(toolId, prompt, source) as CalendarComposioArgs;
   normalized.calendarId = textOf(normalized.calendarId).trim().length > 0 ? textOf(normalized.calendarId).trim() : 'primary';
-  normalized.confirmed = source.confirmed === true;
   if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
     normalized.start = calendarProviderDateTime(textOf(normalized.start));
     normalized.end = calendarProviderDateTime(textOf(normalized.end));
@@ -10719,71 +12678,76 @@ function calendarComposioArgs(toolId: string, prompt: string, args: Object | nul
   return normalized;
 }
 
-export function calendarDeleteConfirmedForTest(actionId: string, args: Object | null): boolean {
-  const parsed = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
-  return actionId === 'calendar.event.delete.confirm' && parsed.confirmed === true;
+export function calendarDeleteConfirmedForTest(actionId: string): boolean {
+  return actionId === 'calendar.event.delete.confirm';
 }
 
-function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
-  const eventId = textOf(args.eventId).trim();
-  if (eventId.length === 0) {
-    return {
-      sourceTag: 'Composio Google Calendar',
-      toolName: 'calendar.event.delete',
-      title: '需要日程 Event ID',
-      status: 'needs_input',
-      summary: '请先选择一条真实日程再删除。',
-      rows: [{ label: 'Missing', value: 'eventId' }],
-      rawPreview: 'missing=eventId'
-    };
+function calendarWriteActionAllowed(toolId: string, actionId: string): boolean {
+  if (toolId === 'calendar.event.delete') {
+    return actionId === 'calendar.event.delete.confirm';
   }
-  const confirmArgs: CalendarDeleteConfirmArgs = {
-    eventId: eventId,
-    calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
-    title: textOf(args.title),
-    start: textOf(args.start),
-    end: textOf(args.end),
-    confirmed: true
-  };
-  return {
-    sourceTag: 'Composio Google Calendar',
-    toolName: 'calendar.event.delete',
-    title: '确认删除日程',
-    status: 'confirm_required',
-    summary: '删除后无法在本 App 内撤销，请确认。',
-    rows: [
-      { label: 'Event ID', value: eventId },
-      { label: 'Title', value: textOf(args.title) },
-      { label: 'Start', value: textOf(args.start) }
-    ],
-    rawPreview: 'confirm calendar delete eventId=' + eventId,
-    actions: [{
-      id: 'calendar.event.delete.confirm',
-      label: '确认删除',
-      prompt: '确认删除 Google Calendar 日程',
-      variant: 'danger',
-      kind: 'prompt',
-      args: confirmArgs as Object
-    }]
-  };
+  return (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') &&
+    actionId === toolId;
 }
 
-function calendarDeleteSelectorResult(): DynamicGenericToolResult {
+function isCalendarWriteTool(toolId: string): boolean {
+  return toolId === 'calendar.event.create' || toolId === 'calendar.event.update' ||
+    toolId === 'calendar.event.delete';
+}
+
+function calendarRegisteredActionRequired(toolId: string): DynamicGenericToolResult {
   return {
     sourceTag: 'Composio Google Calendar',
-    toolName: 'calendar.event.delete',
-    title: '请选择要删除的日程',
-    status: 'needs_input',
-    summary: '请说明日期和时间段，或先从日程列表中选择一条日程。',
+    toolName: toolId,
+    title: '需要当前日程操作确认',
+    status: 'blocked',
+    summary: 'Calendar 写操作只能由当前已注册的精确页面操作执行。',
     rows: [],
-    rawPreview: 'missing structured calendar delete selector'
+    rawPreview: 'registered Calendar action required'
   };
 }
 
-function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
-  const start = Date.parse(textOf(args.timeMin));
-  const end = Date.parse(textOf(args.timeMax));
-  return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
+async function callStructuredCalendarRead(prompt: string, args: Object | null): Promise<DataResult> {
+  const toolId = 'calendar.events.search';
+  const normalized = calendarComposioArgs(toolId, prompt, args);
+  const missing = calendarEventRequiredFields(toolId, normalized);
+  if (missing.length > 0) {
+    return remainingReadStructuredDataResult(
+      toolId, 'calendarEvents', [calendarMissingArgsResult(toolId, missing)]
+    );
+  }
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('Google Calendar', prompt, '日程'),
+      toolId,
+      normalized as Object
+    );
+    const generic = composioDynamicResultFromObservation('execute', execution.observation, execution.toolSlug, prompt);
+    let results: DynamicGenericToolResult[];
+    if (generic.status === 'error') {
+      results = [composioFixedResult(toolId, 'Google Calendar', generic, normalized as Object)];
+    } else {
+      results = calendarResultsFromComposioObservation(toolId, execution.observation, normalized);
+    }
+    results.forEach((result: DynamicGenericToolResult) => {
+      result.providerPhase = 'execution';
+    });
+    return remainingReadStructuredDataResult(toolId, 'calendarEvents', results);
+  } catch (error) {
+    const result: DynamicGenericToolResult = {
+      sourceTag: 'Composio Google Calendar',
+      toolName: toolId,
+      title: isComposioConfigured() ? 'Google Calendar 调用失败' : 'Composio 未配置',
+      status: isComposioConfigured() ? 'error' : 'needs_auth',
+      summary: describeThrown(error),
+      rows: [],
+      rawPreview: ''
+    };
+    if (isComposioConfigured()) {
+      result.providerPhase = 'execution';
+    }
+    return remainingReadStructuredDataResult(toolId, 'calendarEvents', [result]);
+  }
 }
 
 async function callLocalCalendarTool(
@@ -10793,77 +12757,17 @@ async function callLocalCalendarTool(
   actionId: string,
   args: Object | null = null
 ): Promise<string> {
+  if (toolId === 'calendar.events.search') {
+    const result = await callStructuredCalendarRead(prompt, args);
+    return genericToolResultsA2ui(surfaceId, toolId, (result.data as GenericStructuredData).results);
+  }
+  if (!calendarWriteActionAllowed(toolId, actionId)) {
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarRegisteredActionRequired(toolId)]);
+  }
   const normalized = calendarComposioArgs(toolId, prompt, args);
-  let updateMatches: DynamicGenericToolResult[] = [];
-  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
-    if (textOf(normalized.eventId).trim().length === 0) {
-      if (!hasCalendarLookupSelector(normalized)) {
-        return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
-      }
-      try {
-        const lookup = await callComposioFixedRaw(
-          composioProviderPrompt('Google Calendar', prompt, '待删除日程'),
-          'calendar.events.search',
-          normalized as Object
-        );
-        const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
-        if (generic.status === 'error') {
-          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-            composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
-          ]);
-        }
-        const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
-        const target = calendarDeleteTargetFromResultsForTest(matches);
-        if (target === null) {
-          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
-        }
-        normalized.eventId = target.eventId;
-        normalized.title = target.title;
-        normalized.start = target.start;
-        normalized.end = target.end;
-      } catch (_error) {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-          await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待删除日程', normalized as Object)
-        ]);
-      }
-    }
-    return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteConfirmationResult(normalized)]);
-  }
-  if (toolId === 'calendar.event.update' && textOf(normalized.eventId).trim().length === 0 &&
-    hasCalendarLookupSelector(normalized)) {
-    try {
-      const lookup = await callComposioFixedRaw(
-        composioProviderPrompt('Google Calendar', prompt, '待修改日程'),
-        'calendar.events.search',
-        normalized as Object
-      );
-      const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
-      if (generic.status === 'error') {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-          composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
-        ]);
-      }
-      const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
-      const resolved = calendarUpdateArgsFromResultsForTest(normalized, matches);
-      if (resolved === null) {
-        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
-      }
-      updateMatches = matches;
-      normalized.eventId = resolved.eventId;
-      normalized.title = resolved.title;
-      normalized.start = resolved.start;
-      normalized.end = resolved.end;
-    } catch (_error) {
-      return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
-        await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
-      ]);
-    }
-  }
   const missing = calendarEventRequiredFields(toolId, normalized);
   if (missing.length > 0) {
-    const results = toolId === 'calendar.event.update' && updateMatches.length > 0 ?
-      calendarUpdateNeedsInputResults(updateMatches, missing) : [calendarMissingArgsResult(toolId, missing)];
-    return genericToolResultsA2ui(surfaceId, toolId, results);
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarMissingArgsResult(toolId, missing)]);
   }
   try {
     const execution = await callComposioFixedRaw(
@@ -10889,6 +12793,134 @@ function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
   return args === null ? JSON.parse('{}') as WhatsAppSendArgs : args as WhatsAppSendArgs;
 }
 
+type WhatsAppObservationValue = Object | string | number | boolean | null | undefined;
+type WhatsAppObservationRecord = Record<string, WhatsAppObservationValue>;
+
+interface WhatsAppObservationTruth {
+  messageId: string;
+  failed: boolean;
+}
+
+function whatsAppErrorValue(value: WhatsAppObservationValue): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length > 0 && value.trim().toLowerCase() !== 'null';
+  }
+  return true;
+}
+
+function inspectWhatsAppObservation(
+  value: WhatsAppObservationValue,
+  depth: number,
+  messageIds: string[]
+): boolean {
+  if (depth > 10) {
+    return true;
+  }
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    const items = value as WhatsAppObservationValue[];
+    for (let index = 0; index < items.length; index++) {
+      if (inspectWhatsAppObservation(items[index], depth + 1, messageIds)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const record = value as WhatsAppObservationRecord;
+  if (record['success'] === false || record['success'] === 'false' ||
+    record['successful'] === false || record['successful'] === 'false') {
+    return true;
+  }
+  const keys = Object.keys(record);
+  if (keys.indexOf('error') >= 0 && whatsAppErrorValue(record['error'])) {
+    return true;
+  }
+  const status = typeof record['status'] === 'string' ? record['status'].trim().toLowerCase() : '';
+  if (status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0) {
+    return true;
+  }
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (key === 'messages') {
+      const messages = record[key];
+      if (!Array.isArray(messages) || messages.length !== 1) {
+        return true;
+      }
+      const item = (messages as WhatsAppObservationValue[])[0];
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        return true;
+      }
+      const id = (item as WhatsAppObservationRecord)['id'];
+      if (typeof id !== 'string' || !id.trim().startsWith('wamid.')) {
+        return true;
+      }
+      messageIds.push(id.trim());
+    }
+    if (inspectWhatsAppObservation(record[key], depth + 1, messageIds)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseWhatsAppObservation(raw: string): WhatsAppObservationTruth {
+  try {
+    const messageIds: string[] = [];
+    const failed = inspectWhatsAppObservation(JSON.parse(raw) as Object, 0, messageIds);
+    return {
+      messageId: !failed && messageIds.length === 1 ? messageIds[0] : '',
+      failed: failed || messageIds.length !== 1
+    };
+  } catch (_error) {
+    return { messageId: '', failed: true };
+  }
+}
+
+function normalizedWhatsAppProviderResult(result: DynamicGenericToolResult): DynamicGenericToolResult {
+  const truth = parseWhatsAppObservation(result.rawPreview);
+  if (truth.failed) {
+    return {
+      sourceTag: 'Composio WhatsApp Business',
+      toolName: 'whatsapp.message.send',
+      title: 'WhatsApp Business 返回无效',
+      status: 'error',
+      summary: 'Provider 未返回唯一有效的 WhatsApp Message ID。',
+      rows: [],
+      rawPreview: result.rawPreview
+    };
+  }
+  result.status = 'success';
+  result.sourceTag = 'Composio WhatsApp Business';
+  result.toolName = 'whatsapp.message.send';
+  result.rows = result.rows.filter(
+    (row: A2uiLabelValueData): boolean => row.label.trim().toLowerCase() !== 'message id'
+  );
+  result.rows.push({ label: 'Message ID', value: truth.messageId });
+  result.actions = undefined;
+  return result;
+}
+
+export function whatsAppProviderResultFromObservationForTest(
+  observation: string
+): DynamicGenericToolResult {
+  const parsed = composioDynamicResultFromObservation(
+    'execute', observation, 'WHATSAPP_SEND_MESSAGE', 'WhatsApp Business send'
+  );
+  parsed.rawPreview = observation.substring(0, 16000);
+  return normalizedWhatsAppProviderResult(composioFixedResult(
+    'whatsapp.message.send',
+    'WhatsApp Business',
+    parsed
+  ));
+}
+
 function whatsAppRecipientDigits(value: string): string {
   const input = value.trim();
   if (input.length === 0 || input.charAt(0) !== '+') {
@@ -10906,9 +12938,14 @@ function whatsAppRecipientDigits(value: string): string {
   return digits.length >= 8 && digits.length <= 15 ? digits : '';
 }
 
-export function whatsAppSendConfirmedForTest(actionId: string, args: Object | null): boolean {
-  const parsed = whatsAppArgs(args);
-  return actionId === 'whatsapp.message.send.confirm' && parsed.confirmed === true;
+export function whatsAppSendConfirmedForTest(actionId: string): boolean {
+  return actionId === 'whatsapp.message.send.confirm';
+}
+
+export function whatsAppSafeTargetAllowedForTest(toNumber: string): boolean {
+  const configured = whatsAppRecipientDigits(localProviderConfig.whatsappTestTo);
+  const requested = whatsAppRecipientDigits(toNumber);
+  return configured.length > 0 && requested === configured;
 }
 
 export function whatsAppProviderFailureSummaryForTest(raw: string): string {
@@ -10963,6 +13000,21 @@ function whatsAppInputResult(toNumber: string, text: string): DynamicGenericTool
   };
 }
 
+function whatsAppUnsafeTargetResult(): DynamicGenericToolResult {
+  const configured = localProviderConfig.whatsappTestTo.trim().length > 0;
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: 'WhatsApp 测试目标未授权',
+    status: 'blocked',
+    summary: configured ?
+      '当前收件人与 AIPHONE_WHATSAPP_TEST_TO 不匹配，已阻止发送。' :
+      '未配置 AIPHONE_WHATSAPP_TEST_TO，已阻止发送且不会猜测号码。',
+    rows: [],
+    rawPreview: configured ? 'safe target mismatch' : 'safe target missing'
+  };
+}
+
 function whatsAppConfirmationResult(
   toNumber: string,
   text: string,
@@ -10975,8 +13027,7 @@ function whatsAppConfirmationResult(
     text: text,
     phoneNumberId: phoneNumberId,
     wabaId: wabaId,
-    previewUrl: previewUrl,
-    confirmed: true
+    previewUrl: previewUrl
   };
   return {
     sourceTag: 'Composio WhatsApp Business',
@@ -11025,7 +13076,10 @@ async function callLocalWhatsAppTool(
   if (inputError !== null) {
     return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [inputError]);
   }
-  if (!whatsAppSendConfirmedForTest(actionId, args)) {
+  if (!whatsAppSafeTargetAllowedForTest(toNumber)) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [whatsAppUnsafeTargetResult()]);
+  }
+  if (!whatsAppSendConfirmedForTest(actionId)) {
     return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
       whatsAppConfirmationResult(
         toNumber,
@@ -11075,7 +13129,23 @@ async function callLocalWhatsAppTool(
     phoneNumberId: phoneNumberId,
     previewUrl: parsed.previewUrl === true
   };
-  const result = await composioFixedAppResult('whatsapp.message.send', 'WhatsApp Business', prompt, '消息', providerArgs as Object);
+  let result: DynamicGenericToolResult;
+  try {
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('WhatsApp Business', prompt, '消息'),
+      'whatsapp.message.send',
+      providerArgs as Object
+    );
+    const generic = composioDynamicResultFromObservation(
+      'execute', execution.observation, execution.toolSlug, prompt
+    );
+    generic.rawPreview = execution.observation.substring(0, 16000);
+    result = normalizedWhatsAppProviderResult(composioFixedResult(
+      'whatsapp.message.send', 'WhatsApp Business', generic, providerArgs as Object
+    ));
+  } catch (error) {
+    result = whatsAppProviderFailureResult(describeThrown(error));
+  }
   if (result.status === 'success') {
     result.title = 'WhatsApp Business 消息已发送';
     result.summary = 'Provider 已确认发送成功。';
@@ -11116,11 +13186,21 @@ async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: stri
     return genericToolResultsA2ui(surfaceId, toolId, [mapsRouteResult(args)]);
   }
   const parsed = mapsArgs(args);
+  return mapsDataResultA2ui(surfaceId, await callStructuredMapsTool(toolId, prompt, parsed));
+}
+
+async function callStructuredMapsTool(toolId: string, prompt: string, args: MapsToolArgs): Promise<DataResult> {
   if (toolId === 'maps.place.details') {
-    return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceDetails(mapsPlaceId(parsed), localProviderConfig.googleMapsApiKey));
+    return mapsStructuredDataResult(
+      toolId,
+      await callMapsPlaceDetailsProvider(mapsPlaceId(args), localProviderConfig.googleMapsApiKey)
+    );
   }
-  const query = mapsSearchQuery(parsed);
-  return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceSearch(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey));
+  const query = mapsSearchQuery(args);
+  return mapsStructuredDataResult(
+    toolId,
+    await callMapsPlaceSearchProvider(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey)
+  );
 }
 
 function paymentArgs(args: Object | null): PaymentToolActionArgs {
@@ -11996,19 +14076,7 @@ function hotelDataError(
   sources: DataSource[] = [],
   retryable: boolean = false
 ): DataResult {
-  return {
-    toolId: toolId,
-    outputSchema: outputSchema,
-    status: 'error',
-    sources: sources,
-    data: new Object(),
-    warnings: [],
-    error: {
-      code: code,
-      message: message,
-      retryable: retryable
-    }
-  };
+  return errorDataResult(toolId, outputSchema, code, message, retryable, sources);
 }
 
 function hotelDataSource(operation: string): DataSource {
@@ -12031,6 +14099,12 @@ function sanitizedHotelTransportMessage(message: string): string {
   return sanitized.substring(0, 1200);
 }
 
+function logRollingGoHotelResponse(operation: string, result: DataResult): void {
+  aiLogInfo('[AIPhone][RollingGoHotelResponse] operation=' + operation +
+    ' provider=RollingGo status=' + result.status +
+    ' sources=' + result.sources.length.toString());
+}
+
 export async function callStructuredHotelTool(toolId: string, args: Object | null): Promise<DataResult> {
   if (toolId !== 'hotel.search' && toolId !== 'hotel.detail') {
     return hotelDataError(toolId, '', 'HOTEL_TOOL_UNSUPPORTED', 'Unsupported hotel tool: ' + toolId + '.');
@@ -12051,6 +14125,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     }
     const operation = 'searchHotels';
     try {
+      aiLogInfo('[AIPhone][RollingGoHotelRequest] operation=' + operation);
       const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
         hotelMcpRegistration(toolId, operation),
         localProviderConfig.hotelMcpKey,
@@ -12058,13 +14133,19 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
       );
       const source = hotelDataSource(operation);
       if (!response.ok || response.result === null) {
-        return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+        const failure = hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+        logRollingGoHotelResponse(operation, failure);
+        return failure;
       }
       const result = normalizeHotelSearchResult(response.result, parsed.value);
-      return hotelSearchDataResult(result, [source]);
+      const dataResult = hotelSearchDataResult(result, [source]);
+      logRollingGoHotelResponse(operation, dataResult);
+      return dataResult;
     } catch (error) {
       const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
-      return hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+      const failure = hotelDataError(toolId, 'hotelSearchResults', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+      logRollingGoHotelResponse(operation, failure);
+      return failure;
     }
   }
   const parsed: HotelDetailParseResult = parseHotelDetailRequest(rawArgs);
@@ -12073,6 +14154,7 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
   }
   const operation = 'getHotelDetail';
   try {
+    aiLogInfo('[AIPhone][RollingGoHotelRequest] operation=' + operation);
     const response: McpToolCallResult = await hotelMcpClient.callToolPayload(
       hotelMcpRegistration(toolId, operation),
       localProviderConfig.hotelMcpKey,
@@ -12080,13 +14162,125 @@ export async function callStructuredHotelTool(toolId: string, args: Object | nul
     );
     const source = hotelDataSource(operation);
     if (!response.ok || response.result === null) {
-      return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+      const failure = hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_PROVIDER_TRANSPORT_ERROR', response.errorMessage, [source], true);
+      logRollingGoHotelResponse(operation, failure);
+      return failure;
     }
-    return hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
+    const dataResult = hotelDetailDataResult(normalizeHotelDetailResult(response.result, parsed.value), [source]);
+    logRollingGoHotelResponse(operation, dataResult);
+    return dataResult;
   } catch (error) {
     const message = sanitizedHotelTransportMessage(error instanceof Error ? error.message : JSON.stringify(error));
-    return hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+    const failure = hotelDataError(toolId, 'hotelRatePlans', 'HOTEL_TRANSPORT_EXCEPTION', message, [], true);
+    logRollingGoHotelResponse(operation, failure);
+    return failure;
   }
+}
+
+async function callStructuredRideReadTool(toolId: string, args: Object | null): Promise<DataResult> {
+  const results = await callStructuredRideReadResults(toolId, args);
+  results.forEach((result: DynamicGenericToolResult) => {
+    if (result.status === 'success' || result.status === 'empty') {
+      result.providerPhase = 'execution';
+      return;
+    }
+    const lower = result.sourceTag.toLowerCase();
+    if ((lower.indexOf('滴滴') >= 0 && localProviderConfig.didiMcpKey.trim().length > 0) ||
+      (lower.indexOf('高德') >= 0 && localProviderConfig.amapMcpKey.trim().length > 0)) {
+      result.providerPhase = 'execution';
+    }
+  });
+  return remainingReadStructuredDataResult(toolId, 'genericToolResults', results);
+}
+
+async function callStructuredLuckinStatus(args: Object | null): Promise<DataResult> {
+  return remainingReadStructuredDataResult(
+    'luckin.order.status',
+    'genericToolResults',
+    [await callStructuredLuckinStatusResult(args)]
+  );
+}
+
+export async function callStructuredTool(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DataResult> {
+  if (toolId === 'dynamic.search') {
+    return callStructuredDynamicTool(prompt, args);
+  }
+  const definition = toolDefinitionForToolId(toolId);
+  const allowed = definition !== null && dataAgentToolDefinitions().some(
+    (candidate: ToolDefinition): boolean => candidate.toolId === toolId
+  );
+  if (definition === null || !allowed) {
+    return errorDataResult(
+      toolId,
+      definition === null ? '' : definition.outputSchema,
+      'TOOL_NOT_ALLOWED',
+      'DataAgent cannot execute ' + toolId + '.'
+    );
+  }
+  if (toolId === 'hotel.search' || toolId === 'hotel.detail') {
+    return callStructuredHotelTool(toolId, args);
+  }
+  if (toolId === 'travel.search') {
+    return callStructuredTravelTool(prompt);
+  }
+  if (toolId === 'train.search') {
+    return callStructuredTrainTool(prompt);
+  }
+  if (toolId === 'flight.search') {
+    return callStructuredFlightTool(prompt);
+  }
+  if (toolId === 'food.search') {
+    return callStructuredFoodTool(prompt, args);
+  }
+  if (toolId === 'maps.place.search' || toolId === 'maps.place.details') {
+    return callStructuredMapsTool(toolId, prompt, mapsArgs(args));
+  }
+  if (toolId === 'media.video.search' || toolId === 'media.aggregate.search') {
+    return callStructuredMediaTool(toolId, prompt, args);
+  }
+  if (toolId === 'youtube.video.search') {
+    return callStructuredYouTubeVideoTool(prompt, args);
+  }
+  if (toolId === 'x.post.search') {
+    return callStructuredXTool(toolId, prompt, args);
+  }
+  if (toolId === 'social.feed.search') {
+    return callStructuredSocialHubTool(args);
+  }
+  if (toolId === 'social.community.search') {
+    return callStructuredSocialCommunityTool(args);
+  }
+  if (toolId === 'mail.search') {
+    return callStructuredMailSearch(prompt, args);
+  }
+  if (toolId === 'mail.thread.read') {
+    return callStructuredMailThreadRead(toolId, args);
+  }
+  if (toolId === 'gmail.mail.search' || toolId === 'gmail.thread.read') {
+    return callStructuredGmailReadTool(toolId, prompt, args);
+  }
+  if (toolId === 'youtube.mine.playlists' || toolId === 'youtube.mine.subscriptions') {
+    return callStructuredYouTubeAccountTool(toolId, prompt, args);
+  }
+  if (toolId === 'calendar.events.search') {
+    return callStructuredCalendarRead(prompt, args);
+  }
+  if (toolId === 'luckin.order.status') {
+    return callStructuredLuckinStatus(args);
+  }
+  if (toolId === 'ride.estimate' || toolId === 'ride.app.link' || toolId === 'ride.driver.location') {
+    return callStructuredRideReadTool(toolId, args);
+  }
+  return errorDataResult(
+    toolId,
+    definition.outputSchema,
+    'STRUCTURED_ADAPTER_MISSING',
+    'Structured adapter is not migrated for ' + toolId + '.'
+  );
 }
 
 class CurrentHotelToolLookup implements ToolDefinitionLookup {
@@ -12179,7 +14373,7 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalYouTubeTool(toolId, prompt, surfaceId, args);
   }
   if (isSocialHubToolId(toolId)) {
-    return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+    return callLocalSocialHubTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (toolId === 'x.post.search') {
     return callLocalXTool(toolId, prompt, surfaceId, args);
@@ -12191,10 +14385,10 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalPaymentTool(toolId, prompt, surfaceId, args);
   }
   if (isRideToolId(toolId)) {
-    return callLocalRideTool(toolId, prompt, surfaceId, args);
+    return callLocalRideTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isLuckinToolId(toolId)) {
-    return callLocalLuckinTool(toolId, prompt, surfaceId, args);
+    return callLocalLuckinTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isHotelToolId(toolId) || toolId.startsWith('hotel.')) {
     return callLocalHotelTool(toolId, surfaceId, args);
@@ -12290,14 +14484,7 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
   } catch (error) {
     const message = error instanceof Error ? error.message : JSON.stringify(error);
     aiLogError('[AIPhone][LocalToolException] ' + message);
-    const exceptionJsonl = errorA2ui(
-      surfaceId,
-      toolId,
-      '工具供应商调用异常',
-      message,
-      ['本机工具已运行，但真实供应商调用失败。', '请检查设备网络、供应商 TLS/接口状态，或稍后重试。'],
-      ['重新查询']
-    );
+    const exceptionJsonl = legacyToolExceptionA2ui(surfaceId, toolId, message);
     rawResponse += exceptionJsonl;
     parsed = parseA2uiJsonl(exceptionJsonl);
     streamError = parsed.error.length > 0 ? parsed.error : applyEnvelopes(store, parsed.envelopes);
@@ -12316,7 +14503,8 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
 
 export async function callToolGateway(baseUrl: string, toolId: string, prompt: string, surfaceId: string, actionId: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null, args: Object | null = null): Promise<A2uiCallResult> {
   const endpoint = buildToolGatewayUrl(baseUrl);
-  if (isLocalToolGatewayUrl(endpoint)) {
+  if (isLocalToolGatewayUrl(endpoint) ||
+    (isCalendarWriteTool(toolId) && !calendarWriteActionAllowed(toolId, actionId))) {
     return callLocalTool(toolId, prompt, surfaceId, actionId, onSurface, initialSurface, args);
   }
 

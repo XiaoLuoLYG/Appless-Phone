@@ -112,6 +112,23 @@ export class GmailCreateDraftArgs {
   }
 }
 
+export class GmailUpdateDraftArgs extends GmailCreateDraftArgs {
+  draftId: string;
+
+  constructor(
+    draftId: string,
+    to: string[],
+    subject: string,
+    body: string,
+    threadId: string = '',
+    inReplyTo: string = '',
+    references: string = ''
+  ) {
+    super(to, subject, body, threadId, '', inReplyTo, references);
+    this.draftId = draftId;
+  }
+}
+
 type GmailArgRecord = Record<string, Object | string | number | boolean | null | undefined>;
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -695,8 +712,11 @@ export function gmailMcpToolNameForToolId(toolId: string): string {
   if (toolId === 'gmail.thread.read') {
     return 'get_thread';
   }
-  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+  if (toolId === 'gmail.draft.create') {
     return 'create_draft';
+  }
+  if (toolId === 'gmail.draft.apply') {
+    return 'update_draft';
   }
   return '';
 }
@@ -713,13 +733,22 @@ export function gmailMcpArgsForPrompt(toolId: string, prompt: string, args: Obje
     const threadId = stringArg(record, 'threadId').trim();
     return new GmailGetThreadArgs(threadId.length > 0 ? threadId : prompt.trim(), 'FULL_CONTENT');
   }
-  if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
+  if (toolId === 'gmail.draft.create') {
     return new GmailCreateDraftArgs(
       stringArrayArg(record, 'to'),
       stringArg(record, 'subject'),
       stringArg(record, 'body'),
       stringArg(record, 'threadId').trim(),
       stringArg(record, 'replyMode').trim()
+    );
+  }
+  if (toolId === 'gmail.draft.apply') {
+    return new GmailUpdateDraftArgs(
+      stringArg(record, 'draftId').trim(),
+      stringArrayArg(record, 'to'),
+      stringArg(record, 'subject'),
+      stringArg(record, 'body'),
+      stringArg(record, 'threadId').trim()
     );
   }
   return new Object();

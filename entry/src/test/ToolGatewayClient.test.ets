@@ -1,34 +1,57 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   A2uiCallResult,
+  A2uiFlightData,
   A2uiFoodData,
   A2uiLabelValueData,
   A2uiSurfaceState,
+  A2uiTrainData,
   A2uiTravelOptionData,
-  HotelSearchResult
+  DataResult,
+  DataSource,
+  FlightStructuredData,
+  FoodStructuredData,
+  HotelSearchResult,
+  TrainStructuredData,
+  TravelStructuredData
 } from '@loop/agent-core';
 import { genericToolResults, dynamicToolConnect } from '@loop/agent-core';
 import { planA2uiPartialUpdate, A2uiPartialUpdateResult } from '@loop/agent-core';
 import { buildSystemFoodNavigationUri, foodMapsLatLng } from '@loop/agent-core';
+import { build12306BookingUrl, trainLowestAvailablePriceForTest } from '@loop/agent-core';
 import { DynamicGenericToolResult } from '@loop/agent-core';
 import { DynamicToolRegistration, GenericMcpClient, McpToolCallResult, MemoryCredentialStore } from '@loop/agent-core';
 import { GMAIL_ACCESS_TOKEN_REF } from '@loop/agent-core';
-import { MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
+import { MailDetail, MailDetailRequest, MailDraftArgs, MailReplyCommand, MailSearchArgs } from '@loop/agent-core';
+import { gmailReplyDraftAction } from '@loop/agent-core';
 import {
   aggregateFoodProviderResults,
   buildToolGatewayUrl,
+  combineTravelStructuredResults,
+  callStructuredTool,
   callToolGateway,
   callStructuredHotelTool,
   configureComposioConfigFromRawJson,
   configureDidiMcpSandboxForRuntime,
+  configureGmailComposioResultForTests,
   configureGmailCredentialStoreForTests,
   configureGmailMcpClientForTests,
+  configureMailDetailReaderForTests,
   configureHotelMcpClientForTests,
   configureHotelTimestampProviderForTests,
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
+  emptyDataResult,
+  errorDataResult,
+  flightDataResultA2ui,
+  flightDataResultFromProviderResponse,
+  flightStructuredDataA2ui,
+  flightStructuredDataResult,
   foodA2uiRenderState,
+  foodStructuredDataA2ui,
+  foodStructuredDataResult,
+  foodStructuredDataResultFromProviders,
   foodDistanceMeters,
   foodProviderProgressRows,
   foodRecordFromBaiduPlace,
@@ -43,14 +66,20 @@ import {
   isRegisteredToolId,
   isTransientPayPalRequestErrorForTest,
   localProviderConfigDebugSummary,
+  mailSearchDataResultForTest,
   mailSearchArgs,
+  mailThreadSummary,
   payPalApiFallbackUrlForTest,
   paypalGooglePayNetworkHelpForTest,
   providerIssueRows,
+  remainingReadStructuredDataResult,
+  partialDataResult,
   rideAmapGeocodePointForTest,
   rideAmapGeocodeKeyForTest,
   rideAmapRequestArgsForTest,
   rideDidiCityFromAmapGeocodeForTest,
+  socialHubDraft,
+  socialHubPublication,
   rideDidiCancelOrderArgsForTest,
   rideDidiCreateOrderArgsForTest,
   rideDidiDriverLocationArgsForTest,
@@ -59,6 +88,7 @@ import {
   rideDidiQueryMcpUrlForTest,
   rideOrderCreateDedupBlockedForTest,
   rideOrderCreateErrorTitleForTest,
+  rideCreateOrderResultForTest,
   rideCancelOrderResultForTest,
   rideDriverLocationResultForTest,
   rideLinkFromMcpResponseTextForTest,
@@ -67,18 +97,30 @@ import {
   rideShouldSurfaceAppLinkErrorForTest,
   calendarDeleteConfirmedForTest,
   calendarDeleteTargetFromResultsForTest,
+  luckinOrderCreateSucceededForTest,
+  whatsAppSafeTargetAllowedForTest,
   whatsAppSendConfirmedForTest,
   whatsAppProviderFailureSummaryForTest,
   resolveLuckinLocationForTest,
   saveConfiguredMailDraft,
   sortTravelOptionsByDeparture,
   streamFoodProviderResultsWithPartials,
+  successfulDataResult,
+  trainStructuredDataA2ui,
+  trainDataResultA2ui,
+  trainStructuredDataResult,
+  travelStructuredDataA2ui,
+  travelStructuredDataResult,
   FoodProviderPartialSnapshot,
-  FoodProviderResult
+  FoodProviderResult,
+  MailSearchStructuredData
 } from '@loop/agent-core';
 
 class SuccessfulGmailMcpClient extends GenericMcpClient {
+  callCount: number = 0;
+
   async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
     return {
       sourceTag: 'Gmail OAuth',
       toolName: 'search_threads',
@@ -88,6 +130,60 @@ class SuccessfulGmailMcpClient extends GenericMcpClient {
       rows: [{ label: 'Subject', value: 'Latest important mail' }],
       rawPreview: 'gmail-oauth-result'
     };
+  }
+}
+
+class ScriptedGmailMcpClient extends GenericMcpClient {
+  private readonly response: DynamicGenericToolResult;
+  callCount: number = 0;
+
+  constructor(response: DynamicGenericToolResult) {
+    super();
+    this.response = response;
+  }
+
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
+    return this.response;
+  }
+}
+
+class RecordingGmailDraftMcpClient extends GenericMcpClient {
+  operations: string[] = [];
+  argsJson: string[] = [];
+
+  async callTool(
+    registration: DynamicToolRegistration,
+    _credentialValue: string,
+    args: Object
+  ): Promise<DynamicGenericToolResult> {
+    this.operations.push(registration.mcpToolName);
+    this.argsJson.push(JSON.stringify(args));
+    const updating = registration.mcpToolName === 'update_draft';
+    return {
+      sourceTag: 'Gmail OAuth',
+      toolName: registration.mcpToolName,
+      title: updating ? 'Gmail 草稿已更新' : 'Gmail 草稿已创建',
+      status: 'success',
+      summary: updating ? 'Updated exact Gmail draft.' : 'Created exact Gmail draft.',
+      rows: [
+        { label: 'To', value: 'alice@example.com' },
+        { label: 'Subject', value: '' },
+        { label: 'Draft ID', value: 'draft-provider-1' },
+        { label: 'Message ID', value: 'message-provider-1' }
+      ],
+      rawPreview: '{"draftId":"draft-provider-1"}',
+      providerPhase: 'execution'
+    };
+  }
+}
+
+class ThrowingGmailMcpClient extends GenericMcpClient {
+  callCount: number = 0;
+
+  async callTool(_registration: DynamicToolRegistration, _credentialValue: string, _args: Object): Promise<DynamicGenericToolResult> {
+    this.callCount += 1;
+    throw new Error('Gmail OAuth transport timeout');
   }
 }
 
@@ -142,6 +238,24 @@ interface PaymentTestArgs {
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
+}
+
+function gmailFullDetailResult(threadId: string, messageId: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Gmail OAuth',
+    toolName: 'gmail.thread.read',
+    title: 'Gmail thread',
+    status: 'success',
+    summary: 'full thread',
+    rows: [{ label: 'Thread ID', value: threadId }],
+    rawPreview: '{"successful":true,"data":{"id":' + JSON.stringify(threadId) + ',"messages":[{' +
+      '"id":' + JSON.stringify(messageId) + ',"threadId":' + JSON.stringify(threadId) + ',"payload":{' +
+      '"mimeType":"multipart/alternative","headers":[' +
+      '{"name":"Subject","value":"Status update"},' +
+      '{"name":"From","value":"Alice <alice@example.com>"},' +
+      '{"name":"To","value":"Me <me@example.com>"}],' +
+      '"parts":[{"mimeType":"text/plain","body":{"data":"SGVsbG8gR21haWw="}}]}}]}}'
+  };
 }
 
 function searchArgsForGateway(): Object {
@@ -265,8 +379,108 @@ interface LuckinProductsPayloadFixture {
   data: LuckinProductFixture[];
 }
 
+function trainRowForPrice(
+  ypInfoNew: string,
+  business: string,
+  first: string,
+  second: string,
+  noSeat: string = '',
+  hardSeat: string = '',
+  softSleeper: string = ''
+): string {
+  const fields: string[] = [];
+  for (let index = 0; index < 40; index++) {
+    fields.push('');
+  }
+  fields[23] = softSleeper;
+  fields[26] = noSeat;
+  fields[29] = hardSeat;
+  fields[30] = second;
+  fields[31] = first;
+  fields[32] = business;
+  fields[39] = ypInfoNew;
+  return fields.join('|');
+}
+
 export default function toolGatewayClientTest() {
   describe('toolGatewayClient', () => {
+    it('uses the lowest priced seat that is currently available', 0, () => {
+      const row = trainRowForPrice(
+        '9174800000M093300000O055300000',
+        '有',
+        '2',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('553');
+    });
+
+    it('uses no-seat availability for 12306 inventory price chunks', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067203065',
+        '2',
+        '无',
+        '无',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('672');
+    });
+
+    it('ignores unavailable no-seat inventory price chunks', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067203065',
+        '2',
+        '无',
+        '无',
+        '无'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('2350');
+    });
+
+    it('formats no-seat prices with non-zero jiao', 0, () => {
+      const row = trainRowForPrice(
+        '9235000002M107500000O067200000O067253065',
+        '2',
+        '无',
+        '无',
+        '有'
+      );
+      expect(trainLowestAvailablePriceForTest(row)).assertEqual('672.5');
+    });
+
+    it('ignores cheaper unavailable, waitlist, and malformed train prices', 0, () => {
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O040000000M055300000', '', '3', '无')
+      )).assertEqual('553');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O040000000', '', '', '候补')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('O0553', '', '', '有')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('OABCDE0000', '', '', '有')
+      )).assertEqual('');
+      expect(trainLowestAvailablePriceForTest(
+        trainRowForPrice('', '', '', '有')
+      )).assertEqual('');
+    });
+
+    it('builds the official route-level 12306 booking URL', 0, () => {
+      const url = build12306BookingUrl(
+        '2026-07-22',
+        '深圳北',
+        'IOQ',
+        '香港西九龙',
+        'XJA'
+      );
+      expect(url).assertEqual(
+        'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc' +
+        '&fs=%E6%B7%B1%E5%9C%B3%E5%8C%97,IOQ' +
+        '&ts=%E9%A6%99%E6%B8%AF%E8%A5%BF%E4%B9%9D%E9%BE%99,XJA' +
+        '&date=2026-07-22&flag=N,N,Y'
+      );
+    });
+
     it('falls back to the configured location for Luckin preview', 0, () => {
       expect(resolveLuckinLocationForTest('', '点一杯咖啡', '114.029506,22.609878'))
         .assertEqual('114.029506,22.609878');
@@ -295,6 +509,75 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('flight.search')).assertTrue();
       expect(isRegisteredToolId('food.search')).assertTrue();
       expect(isRegisteredToolId('social.reply.send')).assertFalse();
+    });
+
+    it('fails closed when a legacy social reply draft lacks a selected real item', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'social.reply.draft',
+        '帮我回复这条消息，谢谢反馈',
+        'surface_social_reply_missing_selection',
+        'social.reply.draft',
+        noop,
+        null,
+        null
+      );
+      const draft = socialHubDraft(result.surface);
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.itemId).assertEqual('');
+      expect(draft.error).assertEqual(
+        'Social reply draft requires a selected real item ID, platform, and instruction.'
+      );
+    });
+
+    it('rejects an invented social reply selection from a model-owned legacy route', 0, async () => {
+      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+      const result = await callToolGateway(
+        defaultToolGatewayUrl(),
+        'social.reply.draft',
+        'draft a reply',
+        'surface_social_reply_invented',
+        'model_tool_request',
+        noop,
+        null,
+        looseObject(
+          '{"itemId":"invented-item","platform":"x","instruction":"draft a reply"}'
+        )
+      );
+      const draft = socialHubDraft(result.surface);
+
+      expect(draft.status).assertEqual('error');
+      expect(draft.itemId).assertEqual('');
+      expect(draft.error).assertEqual(
+        'Social reply draft requires a selected-item page action.'
+      );
+    });
+
+    it('rejects non-publish legacy social preview operations before provider lookup', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'social.post.preview',
+          'reply to a post',
+          'surface_social_preview_invalid_operation',
+          '',
+          noop,
+          null,
+          looseObject('{"platform":"x","operation":"reply","text":"Thanks"}')
+        );
+        const publication = socialHubPublication(result.surface);
+
+        expect(publication.status).assertEqual('error');
+        expect(publication.error).assertEqual(
+          'Social post preview requires operation=publish.'
+        );
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
     });
 
     it('allows only explicit dynamic catalog aliases to enter the local tool host', 0, () => {
@@ -437,6 +720,839 @@ export default function toolGatewayClientTest() {
       } finally {
         configureLocalProviderConfigFromRawJson('{}');
       }
+    });
+
+    it('builds exact immutable structured data envelopes', 0, () => {
+      const source: DataSource = {
+        provider: 'Provider A',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-21T00:00:00.000Z'
+      };
+      const sources: DataSource[] = [source];
+      const successData = looseObject('{"items":[{"id":"real-1"}]}');
+      const success = successfulDataResult('travel.search', 'travelOptions', successData, sources);
+      const partial = partialDataResult(
+        'media.aggregate.search',
+        'genericToolResults',
+        looseObject('{"items":[{"id":"real-2"}]}'),
+        sources,
+        ['One provider failed.']
+      );
+      const empty = emptyDataResult('food.search', 'foodChoices', [], 'No stores returned.');
+      const error = errorDataResult(
+        'maps.place.search',
+        'genericToolResults',
+        'PROVIDER_TIMEOUT',
+        'Provider timed out.',
+        true,
+        sources
+      );
+      sources.push({
+        provider: 'Provider B',
+        backend: 'mcp_remote',
+        operation: 'search',
+        fetchedAt: '2026-07-21T00:00:01.000Z'
+      });
+
+      expect(JSON.stringify(success)).assertEqual(
+        '{"toolId":"travel.search","outputSchema":"travelOptions","status":"success",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{"items":[{"id":"real-1"}]},"warnings":[]}'
+      );
+      expect(JSON.stringify(partial)).assertEqual(
+        '{"toolId":"media.aggregate.search","outputSchema":"genericToolResults","status":"partial",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{"items":[{"id":"real-2"}]},' +
+        '"warnings":["One provider failed."]}'
+      );
+      expect(JSON.stringify(empty)).assertEqual(
+        '{"toolId":"food.search","outputSchema":"foodChoices","status":"empty","sources":[],' +
+        '"data":{},"warnings":["No stores returned."]}'
+      );
+      expect(JSON.stringify(error)).assertEqual(
+        '{"toolId":"maps.place.search","outputSchema":"genericToolResults","status":"error",' +
+        '"sources":[{"provider":"Provider A","backend":"local_adapter","operation":"search",' +
+        '"fetchedAt":"2026-07-21T00:00:00.000Z"}],"data":{},"warnings":[],' +
+        '"error":{"code":"PROVIDER_TIMEOUT","message":"Provider timed out.","retryable":true}}'
+      );
+    });
+
+    it('fails closed for action-owned unknown and unmigrated structured tools', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const actionOwned = await callStructuredTool('hotel.navigate', '', detailArgsForGateway());
+        const unknown = await callStructuredTool('unknown.tool', '', new Object());
+
+        expect(actionOwned.status).assertEqual('error');
+        expect(actionOwned.outputSchema).assertEqual('systemIntentResult');
+        expect(actionOwned.error?.code).assertEqual('TOOL_NOT_ALLOWED');
+        expect(unknown.status).assertEqual('error');
+        expect(unknown.outputSchema).assertEqual('');
+        expect(unknown.error?.code).assertEqual('TOOL_NOT_ALLOWED');
+        expect(client.callCount).assertEqual(0);
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('dispatches travel train flight and food to structured adapters without A2UI payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        const results = await Promise.all([
+          callStructuredTool('travel.search', '', new Object()),
+          callStructuredTool('train.search', '', new Object()),
+          callStructuredTool('flight.search', '', new Object()),
+          callStructuredTool('food.search', '', new Object())
+        ]);
+
+        expect(results.length).assertEqual(4);
+        results.forEach((result) => {
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('createSurface')).assertEqual(-1);
+        });
+        expect(results[0].outputSchema).assertEqual('travelOptions');
+        expect(results[1].outputSchema).assertEqual('trains');
+        expect(results[2].outputSchema).assertEqual('flights');
+        expect(results[3].outputSchema).assertEqual('foodChoices');
+        expect(results[0].error?.code).assertEqual('TRAVEL_PROVIDERS_UNAVAILABLE');
+        expect(results[1].error?.code).assertEqual('TRAIN_INVALID_ARGUMENTS');
+        expect(results[2].error?.code).assertEqual('FLIGHT_CONFIG_MISSING');
+        expect(results[3].error?.code).assertEqual('FOOD_CONFIG_MISSING');
+        expect(results[3].error?.retryable).assertFalse();
+        expect(results[3].warnings.length).assertLarger(0);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('dispatches maps media social and public X reads without rendered payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+        const tools: string[] = [
+          'maps.place.search', 'maps.place.details', 'media.video.search', 'media.aggregate.search',
+          'youtube.video.search', 'x.post.search', 'social.feed.search'
+        ];
+        for (let index = 0; index < tools.length; index++) {
+          let args: Object = new Object();
+          if (tools[index] === 'media.video.search' || tools[index] === 'media.aggregate.search') {
+            args = looseObject('{"query":"Codex","sources":["youtube"]}');
+          }
+          const result = await callStructuredTool(tools[index], 'Codex', args);
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('createSurface')).assertEqual(-1);
+          expect(JSON.stringify(result.data).indexOf('updateDataModel')).assertEqual(-1);
+          if (tools[index] === 'x.post.search') {
+            expect(result.status).assertEqual('error');
+            expect(result.error?.code).assertEqual('X_POST_TOOL_NOT_EXECUTED');
+            expect(result.sources.length).assertEqual(0);
+          }
+        }
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('dispatches every remaining read tool to a structured adapter without rendered payloads', 0, async () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{}');
+        configureComposioConfigFromRawJson('{}');
+        const tools: string[] = [
+          'mail.search', 'mail.thread.read', 'gmail.mail.search', 'gmail.thread.read',
+          'youtube.mine.playlists', 'youtube.mine.subscriptions', 'calendar.events.search',
+          'luckin.order.status', 'ride.estimate', 'ride.app.link', 'ride.driver.location'
+        ];
+        const schemas: string[] = [
+          'mailThreads', 'mailThread', 'mailThreads', 'mailThread',
+          'youtubePlaylists', 'youtubeSubscriptions', 'calendarEvents',
+          'genericToolResults', 'genericToolResults', 'genericToolResults', 'genericToolResults'
+        ];
+        for (let index = 0; index < tools.length; index++) {
+          const result = await callStructuredTool(tools[index], '', new Object());
+          const serialized = JSON.stringify(result.data);
+          expect(result.error?.code === 'STRUCTURED_ADAPTER_MISSING').assertFalse();
+          expect(result.outputSchema).assertEqual(schemas[index]);
+          expect(serialized.indexOf('updateComponents')).assertEqual(-1);
+          expect(serialized.indexOf('createSurface')).assertEqual(-1);
+          expect(serialized.indexOf('updateDataModel')).assertEqual(-1);
+          expect(serialized.indexOf('jsonl')).assertEqual(-1);
+        }
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('executes Gmail search once and preserves exact summary identities without a body', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth',
+        toolName: 'gmail.mail.search',
+        title: 'Gmail result',
+        status: 'success',
+        summary: 'one real result',
+        rows: [{ label: '结果数量', value: '1' }],
+        rawPreview: '{"messages":[{"threadId":"thread-once-1","messageId":"message-once-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Provider once","snippet":"Summary only",' +
+          '"body":"FULL BODY MUST NOT ENTER SEARCH DATA"}]}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest important mail',
+          looseObject('{"query":"newer_than:30d","pageSize":10,"providers":["gmail"]}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(serialized.indexOf('gmail:thread-once-1')).assertLarger(-1);
+        expect(serialized.indexOf('message-once-1')).assertLarger(-1);
+        expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
+        expect(serialized.indexOf('FULL BODY MUST NOT ENTER SEARCH DATA')).assertEqual(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('updates the exact OAuth Gmail draft in place without a second create or send', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new RecordingGmailDraftMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const created = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.create',
+          '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+          'surface_gmail_exact_draft_create',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"to":["alice@example.com"],"subject":"","body":"我收到了"}')
+        );
+        const createResult = genericToolResults(created.surface)[0];
+        const applyActions = createResult.actions === undefined ? [] :
+          createResult.actions.filter((action): boolean => action.id === 'gmail.draft.apply');
+        expect(applyActions.length).assertEqual(1);
+        const applyArgs = applyActions[0].args as Object;
+        const applied = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.draft.apply',
+          '确认应用刚才的 Gmail 草稿',
+          'surface_gmail_exact_draft_apply',
+          'registered_action',
+          noop,
+          null,
+          applyArgs
+        );
+        expect(genericToolResults(applied.surface)[0].status).assertEqual('success');
+        expect(client.operations.join(',')).assertEqual('create_draft,update_draft');
+        expect(client.operations.filter((operation: string): boolean =>
+          operation === 'create_draft'
+        ).length).assertEqual(1);
+        expect(client.operations.indexOf('send_draft')).assertEqual(-1);
+        expect(client.argsJson[1].indexOf('"draftId":"draft-provider-1"')).assertLarger(-1);
+        expect(client.argsJson[1].indexOf('"body":"我收到了"')).assertLarger(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects Gmail detail identities before provider execution', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new SuccessfulGmailMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const wrong = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:stale-thread",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1"}')
+        );
+        const missing = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","threadId":"thread-real-1","messageId":"message-real-1"}')
+        );
+
+        expect(wrong.status === 'success').assertFalse();
+        expect(missing.status === 'success').assertFalse();
+        expect(wrong.sources.length).assertEqual(0);
+        expect(missing.sources.length).assertEqual(0);
+        expect(client.callCount).assertEqual(0);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('executes Gmail detail once and requires a full body for the exact request identity', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth',
+        toolName: 'gmail.thread.read',
+        title: 'Gmail thread',
+        status: 'success',
+        summary: 'full thread',
+        rows: [{ label: 'Thread ID', value: 'thread-real-1' }],
+        rawPreview: '{"successful":true,"data":{"id":"thread-real-1","messages":[{' +
+          '"id":"message-real-1","threadId":"thread-real-1","payload":{' +
+          '"mimeType":"multipart/alternative","headers":[' +
+          '{"name":"Subject","value":"Status update"},' +
+          '{"name":"From","value":"Alice <alice@example.com>"},' +
+          '{"name":"To","value":"Me <me@example.com>"}],' +
+          '"parts":[{"mimeType":"text/plain","body":{"data":"SGVsbG8gR21haWw="}}]}}]}}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const gmailResult = await callStructuredTool(
+          'gmail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"Status update"}')
+        );
+        const callsAfterGmail = client.callCount;
+        const mailResult = await callStructuredTool(
+          'mail.thread.read', '',
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-real-1",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"Status update"}')
+        );
+        const serialized = JSON.stringify(gmailResult.data);
+
+        expect(callsAfterGmail).assertEqual(1);
+        expect(client.callCount).assertEqual(2);
+        expect(gmailResult.toolId).assertEqual('gmail.thread.read');
+        expect(gmailResult.outputSchema).assertEqual('mailThread');
+        expect(mailResult.toolId).assertEqual('mail.thread.read');
+        expect(mailResult.outputSchema).assertEqual('mailThread');
+        expect(gmailResult.status).assertEqual('success');
+        expect(mailResult.status).assertEqual('success');
+        expect(serialized.indexOf('gmail:thread-real-1')).assertLarger(-1);
+        expect(serialized.indexOf('message-real-1')).assertLarger(-1);
+        expect(serialized.indexOf('Hello Gmail')).assertLarger(-1);
+        expect(serialized.indexOf('Me <me@example.com>')).assertLarger(-1);
+        expect(JSON.stringify(mailResult.data)).assertEqual(serialized);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('routes legacy Gmail thread reads through the same exact structured detail contract', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient(gmailFullDetailResult('thread-legacy-1', 'message-legacy-1'));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.thread.read',
+          '打开这封 Gmail 正文',
+          'surface_gmail_legacy_detail',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-legacy-1",' +
+            '"threadId":"thread-legacy-1","messageId":"message-legacy-1","subject":"Status update"}')
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(client.callCount).assertEqual(1);
+        expect(rendered.length).assertEqual(1);
+        expect(rendered[0].sourceTag).assertEqual('Gmail API');
+        expect(rendered[0].toolName).assertEqual('users.threads.get');
+        expect(rendered[0].status).assertEqual('success');
+        expect(rendered[0].summary.indexOf('Hello Gmail')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('gmail:thread-legacy-1')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('message-legacy-1')).assertLarger(-1);
+        const action = gmailReplyDraftAction(rendered[0]);
+        expect(action !== null).assertTrue();
+        if (action !== null) {
+          expect(action.id).assertEqual('gmail.ai.reply.draft');
+          expect(JSON.stringify(action.args).indexOf('thread-legacy-1')).assertLarger(-1);
+          expect(JSON.stringify(action.args).indexOf('alice@example.com')).assertLarger(-1);
+        }
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('rejects invalid stale and summary-only legacy Gmail detail requests', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient(gmailFullDetailResult('thread-stale-provider', 'message-stale-provider'));
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const invalid = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_invalid_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:wrong",' +
+            '"threadId":"thread-requested","messageId":"message-requested"}')
+        );
+        expect(client.callCount).assertEqual(0);
+        expect(genericToolResults(invalid.surface)[0].status).assertEqual('error');
+
+        const stale = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_stale_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-requested",' +
+            '"threadId":"thread-requested","messageId":"message-requested"}')
+        );
+        expect(client.callCount).assertEqual(1);
+        expect(genericToolResults(stale.surface)[0].status).assertEqual('error');
+
+        const summaryClient = new ScriptedGmailMcpClient({
+          sourceTag: 'Gmail OAuth', toolName: 'gmail.thread.read', title: 'Gmail summary',
+          status: 'success', summary: 'summary only', rows: [{ label: 'Thread ID', value: 'thread-summary' }],
+          rawPreview: '{"threadId":"thread-summary","messageId":"message-summary","snippet":"No full body"}'
+        });
+        configureGmailMcpClientForTests(summaryClient);
+        const summaryOnly = await callToolGateway(
+          defaultToolGatewayUrl(), 'gmail.thread.read', '', 'surface_gmail_summary_detail',
+          'model_tool_request', noop, null,
+          looseObject('{"provider":"gmail","requestKey":"gmail:thread-summary",' +
+            '"threadId":"thread-summary","messageId":"message-summary"}')
+        );
+        expect(summaryClient.callCount).assertEqual(1);
+        expect(genericToolResults(summaryOnly.surface)[0].status).assertEqual('error');
+        expect(JSON.stringify(genericToolResults(summaryOnly.surface)).indexOf('No full body')).assertEqual(-1);
+      } finally {
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
+    it('keeps exact Luckin order and trace identities with current status actions', 0, () => {
+      const provider: DynamicGenericToolResult = {
+        sourceTag: '瑞幸',
+        toolName: 'luckin.order.status',
+        title: '瑞幸订单状态',
+        status: 'success',
+        summary: '制作中',
+        rows: [
+          { label: '订单号', value: 'luckin-order-real-88' },
+          { label: 'Trace ID', value: 'luckin-trace-real-123456789' }
+        ],
+        rawPreview: '{"orderId":"luckin-order-real-88","traceId":"luckin-trace-real-123456789"}',
+        actions: [{
+          id: 'luckin.order.status', label: '刷新订单状态', prompt: '查询瑞幸订单状态',
+          variant: 'secondary', kind: 'prompt', args: looseObject('{"orderId":"luckin-order-real-88"}')
+        }],
+        providerPhase: 'execution'
+      };
+      const result = remainingReadStructuredDataResult(
+        'luckin.order.status', 'genericToolResults', [provider]
+      );
+      const serialized = JSON.stringify(result.data);
+
+      expect(result.status).assertEqual('success');
+      expect(serialized.indexOf('luckin-order-real-88')).assertLarger(-1);
+      expect(serialized.indexOf('luckin-trace-real-123456789')).assertLarger(-1);
+      expect(serialized.indexOf('luckin.order.status')).assertLarger(-1);
+      expect(result.sources.length).assertEqual(1);
+    });
+
+    it('returns unsupported for a limited-only SocialHub platform without a provider source', 0, async () => {
+      const result = await callStructuredTool(
+        'social.feed.search',
+        'read my WhatsApp inbox',
+        looseObject('{"platforms":["whatsapp"]}')
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('SOCIAL_SOURCES_UNSUPPORTED');
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('keeps normalized travel and food records intact in structured DataResults', 0, () => {
+      const sources: DataSource[] = [{
+        provider: 'fixture',
+        backend: 'local_adapter',
+        operation: 'search',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      }];
+      const train: A2uiTrainData = {
+        trainCode: 'G5612', from: '深圳北', to: '香港西九龙', depart: '18:05', arrive: '18:23',
+        duration: '18分', seats: '二等座有票', status: '可预订', business: '--', first: '--',
+        second: '有', noSeat: '--', hardSeat: '--', sleeperSoft: '--', price: '¥75',
+        bookingUrl: 'https://kyfw.12306.cn/otn/leftTicket/init?real=1'
+      };
+      const flight: A2uiFlightData = {
+        flightNo: 'CZ355', airline: '南方航空', dep: 'SZX', arr: 'SHA', depTime: '2026-07-23 08:00',
+        arrTime: '2026-07-23 10:20', status: '计划', price: '¥680'
+      };
+      const option: A2uiTravelOptionData = {
+        id: 'train-G5612-18:05', source: 'train', sourceTag: '高铁 · 12306', title: 'G5612',
+        from: '深圳北', to: '香港西九龙', depart: '18:05', arrive: '18:23', duration: '18分',
+        price: '¥75', availability: '二等座有票', status: '可预订', detail: ''
+      };
+      const food: A2uiFoodData = {
+        name: '瑞幸咖啡 科技园店', category: '咖啡', address: '深圳科技园', distance: '320米',
+        location: '113.9500,22.5400', sourceTags: ['高德', '瑞幸']
+      };
+      const travelData: TravelStructuredData = {
+        title: '出行方案查询', body: '用户请求', summary: '1 个方案', options: [option], rows: []
+      };
+      const trainData: TrainStructuredData = {
+        title: '12306 余票查询', body: '实时结果', summary: '1 趟车次', trains: [train]
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准航班查询', body: '实时结果', summary: '1 个航班', flights: [flight]
+      };
+      const foodData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '1 个结果', foods: [food], rows: []
+      };
+      const results: DataResult[] = [
+        travelStructuredDataResult(travelData, sources),
+        trainStructuredDataResult(trainData, sources),
+        flightStructuredDataResult(flightData, sources),
+        foodStructuredDataResult(foodData, sources)
+      ];
+
+      expect(JSON.stringify(results[0].data)).assertEqual(JSON.stringify(travelData));
+      expect(JSON.stringify(results[1].data)).assertEqual(JSON.stringify(trainData));
+      expect(JSON.stringify(results[2].data)).assertEqual(JSON.stringify(flightData));
+      expect(JSON.stringify(results[3].data)).assertEqual(JSON.stringify(foodData));
+      results.forEach((result: DataResult) => {
+        expect(result.status).assertEqual('success');
+        expect(result.sources[0].provider).assertEqual('fixture');
+        expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+      });
+      const legacyJsonl: string[] = [
+        travelStructuredDataA2ui('travel_fixture', travelData),
+        trainStructuredDataA2ui('train_fixture', trainData),
+        flightStructuredDataA2ui('flight_fixture', flightData),
+        foodStructuredDataA2ui('food_fixture', foodData)
+      ];
+      expect(legacyJsonl[0].indexOf('"id":"train-G5612-18:05"')).assertLarger(-1);
+      expect(legacyJsonl[1].indexOf('"trainCode":"G5612"')).assertLarger(-1);
+      expect(legacyJsonl[2].indexOf('"flightNo":"CZ355"')).assertLarger(-1);
+      expect(legacyJsonl[3].indexOf('"name":"瑞幸咖啡 科技园店"')).assertLarger(-1);
+      legacyJsonl.forEach((jsonl: string) => {
+        expect(jsonl.indexOf('updateComponents')).assertLarger(-1);
+      });
+      expect(foodStructuredDataResult(foodData, sources, ['百度地图超时']).status).assertEqual('partial');
+      const emptyTrain: TrainStructuredData = {
+        title: '12306 查询结果为空', body: '没有车次', summary: '暂无车次', trains: []
+      };
+      expect(trainStructuredDataResult(emptyTrain, sources, ['暂无车次']).status).assertEqual('empty');
+    });
+
+    it('derives aggregate travel retryability only from child error flags', 0, () => {
+      const trainSource: DataSource = {
+        provider: '12306', backend: 'local_adapter', operation: 'leftTicket',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      };
+      const flightSource: DataSource = {
+        provider: '飞常准', backend: 'local_adapter', operation: 'flights',
+        fetchedAt: '2026-07-22T00:00:01.000Z'
+      };
+      const trainData: TrainStructuredData = {
+        title: '12306 查询失败', body: 'HTTP 401', summary: 'HTTP 401', trains: []
+      };
+      const flightData: FlightStructuredData = {
+        title: '飞常准查询失败', body: '参数错误', summary: '参数错误', flights: []
+      };
+      const trainNonRetryable = errorDataResult(
+        'train.search', 'trains', 'TRAIN_PROVIDER_HTTP_ERROR', 'HTTP 401', false, [trainSource]
+      );
+      trainNonRetryable.data = trainData;
+      const flightNonRetryable = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_PROVIDER_ERROR', '参数错误', false, [flightSource]
+      );
+      flightNonRetryable.data = flightData;
+
+      const nonRetryable = combineTravelStructuredResults(
+        '北京到上海', trainNonRetryable, flightNonRetryable
+      );
+      expect(nonRetryable.status).assertEqual('error');
+      expect(nonRetryable.sources.length).assertEqual(2);
+      expect(nonRetryable.error?.retryable).assertFalse();
+
+      const flightRetryable = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_TRANSPORT_EXCEPTION', 'timeout', true, [flightSource]
+      );
+      flightRetryable.data = flightData;
+      const retryable = combineTravelStructuredResults('北京到上海', trainNonRetryable, flightRetryable);
+      expect(retryable.error?.retryable).assertTrue();
+    });
+
+    it('treats a successful VariFlight empty list as typed empty data', 0, () => {
+      const source: DataSource = {
+        provider: '飞常准', backend: 'local_adapter', operation: 'flights',
+        fetchedAt: '2026-07-22T00:00:00.000Z'
+      };
+      const result = flightDataResultFromProviderResponse(
+        200,
+        '{"success":true,"data":{"flights":[]}}',
+        source,
+        false,
+        '深圳到上海 2026-07-23'
+      );
+
+      expect(result.status).assertEqual('empty');
+      expect(result.error).assertUndefined();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].operation).assertEqual('flights');
+      expect((result.data as FlightStructuredData).flights.length).assertEqual(0);
+      expect(JSON.stringify(result.data).indexOf('updateComponents')).assertEqual(-1);
+    });
+
+    it('dedupes food operation provenance and preserves empty partial and error states', 0, () => {
+      const emptyData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '没有可展示结果', foods: [], rows: []
+      };
+      const successfulEmpty: FoodProviderResult = {
+        provider: '高德', foods: [], error: '高德没有返回可展示餐饮 POI。',
+        attempted: true, succeeded: true, operation: 'search'
+      };
+      const duplicateSuccessfulEmpty: FoodProviderResult = {
+        provider: '高德', foods: [], error: '', attempted: true, succeeded: true, operation: 'search'
+      };
+      const geocodeFailure: FoodProviderResult = {
+        provider: '高德', foods: [], error: '地点解析超时', attempted: true, succeeded: false, operation: 'geocode'
+      };
+      const configOmission: FoodProviderResult = {
+        provider: '腾讯地图', foods: [], error: '未配置 TENCENT_MAP_KEY',
+        attempted: false, succeeded: false, operation: 'search'
+      };
+
+      const empty = foodStructuredDataResultFromProviders(
+        emptyData,
+        [geocodeFailure, successfulEmpty, duplicateSuccessfulEmpty, configOmission]
+      );
+      expect(empty.status).assertEqual('empty');
+      expect(empty.error).assertUndefined();
+      expect(empty.sources.length).assertEqual(2);
+      expect(empty.sources[0].operation).assertEqual('geocode');
+      expect(empty.sources[1].operation).assertEqual('search');
+      expect(empty.sources[0].provider).assertEqual('高德');
+      expect(empty.sources[1].provider).assertEqual('高德');
+      expect(empty.warnings.length).assertLarger(0);
+
+      const food: A2uiFoodData = {
+        name: '真实餐厅', category: '餐饮', address: '深圳', distance: '100米', sourceTags: ['高德']
+      };
+      const partialData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '1 个结果', foods: [food], rows: []
+      };
+      const successWithData: FoodProviderResult = {
+        provider: '高德', foods: [food], error: '', attempted: true, succeeded: true, operation: 'search'
+      };
+      expect(foodStructuredDataResultFromProviders(
+        partialData, [successWithData, geocodeFailure]
+      ).status).assertEqual('partial');
+
+      const providerFailure: FoodProviderResult = {
+        provider: '百度地图', foods: [], error: 'HTTP 500', attempted: true, succeeded: false, operation: 'search'
+      };
+      const error = foodStructuredDataResultFromProviders(emptyData, [providerFailure, configOmission]);
+      expect(error.status).assertEqual('error');
+      expect(error.error?.code).assertEqual('FOOD_PROVIDER_ERROR');
+      expect(error.sources.length).assertEqual(1);
+    });
+
+    it('classifies an attempted geocode-only failure as a retryable provider error', 0, () => {
+      const emptyData: FoodStructuredData = {
+        title: '外卖聚合搜索', body: '真实来源', summary: '地点解析失败', foods: [], rows: []
+      };
+      const geocodeFailure: FoodProviderResult = {
+        provider: '高德', foods: [], error: '地点解析失败：Operation timeout',
+        attempted: true, succeeded: false, operation: 'geocode'
+      };
+
+      const result = foodStructuredDataResultFromProviders(emptyData, [geocodeFailure]);
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('FOOD_PROVIDER_ERROR');
+      expect(result.error?.retryable).assertTrue();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('高德');
+      expect(result.sources[0].operation).assertEqual('geocode');
+    });
+
+    it('preserves code-specific flight error details and actions in legacy A2UI', 0, () => {
+      const invalid = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_INVALID_ARGUMENTS', '参数不足'
+      );
+      invalid.data = {
+        title: '飞常准查询参数不足', body: '参数不足', summary: '参数不足', flights: []
+      } as FlightStructuredData;
+      const invalidJsonl = flightDataResultA2ui('flight_invalid', invalid);
+      expect(invalidJsonl.indexOf('示例：明天北京到上海航班')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充日期')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充城市')).assertLarger(-1);
+
+      const malformed = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_INVALID_RESPONSE', '返回内容不是 JSON'
+      );
+      malformed.data = {
+        title: '飞常准返回格式异常', body: '返回内容不是 JSON', summary: '返回内容不是 JSON', flights: []
+      } as FlightStructuredData;
+      malformed.warnings = ['not-json-provider-body'];
+      const malformedJsonl = flightDataResultA2ui('flight_malformed', malformed);
+      expect(malformedJsonl.indexOf('not-json-provider-body')).assertLarger(-1);
+      expect(malformedJsonl.indexOf('检查供应商返回')).assertLarger(-1);
+
+      const providerError = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_PROVIDER_ERROR', 'invalid key'
+      );
+      providerError.data = {
+        title: '飞常准 Key 或参数需要检查', body: 'invalid key', summary: 'invalid key', flights: []
+      } as FlightStructuredData;
+      providerError.warnings = ['{"endpoint":"flights"}'];
+      const providerJsonl = flightDataResultA2ui('flight_provider', providerError);
+      expect(providerJsonl.indexOf('endpoint')).assertLarger(-1);
+      expect(providerJsonl.indexOf('检查 Key')).assertLarger(-1);
+      expect(providerJsonl.indexOf('换日期或城市')).assertLarger(-1);
+    });
+
+    it('restores the legacy outer error surface for a thrown flight transport failure', 0, () => {
+      const transport = errorDataResult(
+        'flight.search', 'flights', 'FLIGHT_TRANSPORT_EXCEPTION', 'socket timeout', true
+      );
+      transport.data = {
+        title: '飞常准航班查询失败', body: 'socket timeout', summary: 'socket timeout', flights: []
+      } as FlightStructuredData;
+
+      const jsonl = flightDataResultA2ui('flight_transport', transport);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或城市')).assertEqual(-1);
+    });
+
+    it('preserves code-specific train error details and actions in legacy A2UI', 0, () => {
+      const invalid = errorDataResult(
+        'train.search', 'trains', 'TRAIN_INVALID_ARGUMENTS', '参数不足'
+      );
+      invalid.data = {
+        title: '12306 查询参数不足', body: '参数不足', summary: '参数不足', trains: []
+      } as TrainStructuredData;
+      const invalidJsonl = trainDataResultA2ui('train_invalid', invalid);
+      expect(invalidJsonl.indexOf('示例：明天北京到上海高铁票')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充日期')).assertLarger(-1);
+      expect(invalidJsonl.indexOf('补充城市')).assertLarger(-1);
+
+      const station = errorDataResult(
+        'train.search', 'trains', 'TRAIN_STATION_NOT_FOUND', '车站识别失败'
+      );
+      station.data = {
+        title: '车站识别失败', body: '车站识别失败', summary: '车站识别失败', trains: []
+      } as TrainStructuredData;
+      station.warnings = ['深圳科技园', '香港'];
+      const stationJsonl = trainDataResultA2ui('train_station', station);
+      expect(stationJsonl.indexOf('深圳科技园')).assertLarger(-1);
+      expect(stationJsonl.indexOf('香港')).assertLarger(-1);
+      expect(stationJsonl.indexOf('补充车站名')).assertLarger(-1);
+    });
+
+    it('restores the legacy outer error surface for a thrown train station-load failure', 0, () => {
+      const stationLoad = errorDataResult(
+        'train.search', 'trains', 'TRAIN_STATION_LOAD_ERROR', 'station file unavailable', true
+      );
+      stationLoad.data = {
+        title: '12306 车站数据加载失败', body: 'station file unavailable',
+        summary: 'station file unavailable', trains: []
+      } as TrainStructuredData;
+
+      const jsonl = trainDataResultA2ui('train_station_load', stationLoad);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或车站')).assertEqual(-1);
+    });
+
+    it('restores the legacy outer error surface for a 12306 JSON parse failure', 0, () => {
+      const invalidResponse = errorDataResult(
+        'train.search', 'trains', 'TRAIN_INVALID_RESPONSE', '12306 返回的内容不是有效 JSON。', false
+      );
+      invalidResponse.data = {
+        title: '12306 返回格式异常', body: '12306 返回的内容不是有效 JSON。',
+        summary: '12306 返回的内容不是有效 JSON。', trains: []
+      } as TrainStructuredData;
+      invalidResponse.warnings = ['not-json-provider-body'];
+
+      const jsonl = trainDataResultA2ui('train_invalid_response', invalidResponse);
+
+      expect(jsonl.indexOf('工具供应商调用异常')).assertLarger(-1);
+      expect(jsonl.indexOf('本机工具已运行，但真实供应商调用失败。')).assertLarger(-1);
+      expect(jsonl.indexOf('请检查设备网络、供应商 TLS/接口状态，或稍后重试。')).assertLarger(-1);
+      expect(jsonl.indexOf('"label":"重新查询"')).assertLarger(-1);
+      expect(jsonl.indexOf('"id":"tool_action_1"')).assertEqual(-1);
+      expect(jsonl.indexOf('检查供应商返回')).assertEqual(-1);
+      expect(jsonl.indexOf('换日期或车站')).assertEqual(-1);
+    });
+
+    it('delegates structured hotel reads without rewriting sources or errors', 0, async () => {
+      const client = new ScriptedHotelMcpClient(hotelSearchResponse(1));
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          ROLLINGGO_HOTEL_MCP_KEY: 'hotel-test-secret',
+          ROLLINGGO_HOTEL_MCP_URL: 'https://hotel.example/mcp'
+        }));
+        configureHotelMcpClientForTests(client);
+
+        const success = await callStructuredTool('hotel.search', 'ignored prompt', searchArgsForGateway());
+
+        expect(success.status).assertEqual('success');
+        expect(success.outputSchema).assertEqual('hotelSearchResults');
+        expect(success.sources.length).assertEqual(1);
+        expect(success.sources[0].provider).assertEqual('RollingGo');
+        expect(success.sources[0].operation).assertEqual('searchHotels');
+        expect(client.callCount).assertEqual(1);
+      } finally {
+        configureHotelMcpClientForTests(null);
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+
+      const error = await callStructuredTool('hotel.detail', '', detailArgsForGateway());
+      expect(error.status).assertEqual('error');
+      expect(error.error?.code).assertEqual('HOTEL_CONFIG_MISSING');
+      expect(error.sources.length).assertEqual(0);
     });
 
     it('returns a structured missing-config hotel error', 0, async () => {
@@ -775,7 +1891,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '给我明天下午3点创建一个标题为 CalendarCRUDQA-C-20260716 的30分钟日程',
           'surface_calendar_create_invalid_time',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"title":"CalendarCRUDQA-C-20260716","start":"明天 15:00","end":"明天 15:30","timezone":"Asia/Shanghai"}')
@@ -789,6 +1905,49 @@ export default function toolGatewayClientTest() {
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
+      }
+    });
+
+    it('blocks model-originated Calendar writes before provider authorization or execution', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson(JSON.stringify({
+          COMPOSIO_API_KEY: 'authorized-fake'
+        }));
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.create',
+          '创建日程',
+          'surface_calendar_model_write_blocked',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"title":"Blocked","start":"2026-07-30T15:00:00+08:00",' +
+            '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+        );
+
+        const rendered = genericToolResults(result.surface);
+        expect(rendered[0].status).assertEqual('blocked');
+        expect(rendered[0].summary.indexOf('已注册')).assertLarger(-1);
+        expect(rendered[0].status === 'needs_auth').assertFalse();
+
+        const remoteResult = await callToolGateway(
+          'http://127.0.0.1:1',
+          'calendar.event.create',
+          '创建日程',
+          'surface_calendar_remote_model_write_blocked',
+          'model_tool_request',
+          noop,
+          null,
+          looseObject('{"title":"Blocked","start":"2026-07-30T15:00:00+08:00",' +
+            '"end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
+        );
+        const remoteRendered = genericToolResults(remoteResult.surface);
+        expect(remoteRendered.length).assertEqual(1);
+        expect(remoteRendered[0].status).assertEqual('blocked');
+        expect(remoteResult.requestDebug.indexOf('127.0.0.1')).assertEqual(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
       }
     });
 
@@ -845,15 +2004,17 @@ export default function toolGatewayClientTest() {
       expect(actionArgs.indexOf('"destinationLocation":"114.060432,22.548829"')).assertLarger(-1);
       expect(actionArgs.indexOf('"estimateCacheJson"')).assertLarger(-1);
       expect(actionArgs.indexOf('约 48 元')).assertLarger(-1);
+      expect(actionArgs.indexOf('"confirmed"')).assertEqual(-1);
+      expect(actionArgs.indexOf('"confirmation"')).assertEqual(-1);
     });
 
-    it('normalizes ride order create and cancel args behind explicit confirmation', 0, () => {
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmed":true}'))).assertTrue();
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"确认下单"}'))).assertTrue();
-      expect(rideOrderConfirmedForTest(looseObject('{"confirmation":"帮我叫车"}'))).assertFalse();
+    it('normalizes ride order create and cancel args behind exact rendered action authority', 0, () => {
+      expect(rideOrderConfirmedForTest('ride.order.confirm')).assertTrue();
+      expect(rideOrderConfirmedForTest('ride.order.create')).assertFalse();
+      expect(rideOrderConfirmedForTest('')).assertFalse();
 
       const createArgs = JSON.stringify(rideDidiCreateOrderArgsForTest(
-        looseObject('{"productCategory":"express","estimateTraceId":"trace-123","confirmed":true}')
+        looseObject('{"productCategory":"express","estimateTraceId":"trace-123"}')
       ));
       expect(createArgs.indexOf('"product_category":"express"')).assertLarger(-1);
       expect(createArgs.indexOf('"estimate_trace_id":"trace-123"')).assertLarger(-1);
@@ -927,6 +2088,59 @@ export default function toolGatewayClientTest() {
         expect(result.actions[1].variant).assertEqual('secondary');
         expect(result.actions[1].kind).assertEqual('client');
       }
+    });
+
+    it('requires a real ride order receipt and positive cancel status', 0, () => {
+      const created: DynamicGenericToolResult = rideCreateOrderResultForTest(
+        looseObject('{"orderId":"order-123","status":"accepted"}'), 'express', 'trace-123'
+      );
+      const missingReceipt: DynamicGenericToolResult = rideCreateOrderResultForTest(
+        looseObject('{"status":"accepted"}'), 'express', 'trace-123'
+      );
+      const cancelled = rideCancelOrderResultForTest(
+        looseObject('{"status":"cancelled"}'), 'order-123'
+      );
+      const malformedCancel = rideCancelOrderResultForTest(looseObject('{}'), 'order-123');
+
+      expect(created.status).assertEqual('success');
+      expect(missingReceipt.status).assertEqual('error');
+      expect(cancelled.status).assertEqual('success');
+      expect(malformedCancel.status).assertEqual('error');
+    });
+
+    it('rejects nested Ride write failures even when receipt-shaped fields exist', 0, () => {
+      const create = rideCreateOrderResultForTest(
+        looseObject('{"data":{"success":false,"orderId":"order-fake","status":"created"}}'),
+        'express', 'trace-real-1'
+      );
+      const cancel = rideCancelOrderResultForTest(
+        looseObject('{"data":{"successful":false,"status":"cancelled"}}'), 'order-real-1'
+      );
+      const failedStatus = rideCancelOrderResultForTest(
+        looseObject('{"status":"cancel_failed"}'), 'order-real-1'
+      );
+
+      expect(create.status).assertEqual('error');
+      expect(cancel.status).assertEqual('error');
+      expect(failedStatus.status).assertEqual('error');
+    });
+
+    it('accepts Luckin completion only with a provider order receipt and no inner error', 0, () => {
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"orderId":"luckin-order-1","status":"created"}}')
+      )).assertTrue();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"status":"created"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"success":false,"error":"quota exceeded","data":{"orderId":"fake"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"success":false,"orderId":"luckin-fake"}}')
+      )).assertFalse();
+      expect(luckinOrderCreateSucceededForTest(
+        looseObject('{"data":{"status":"failed","orderId":"luckin-fake"}}')
+      )).assertFalse();
     });
 
     it('routes ride order create to the configured Didi MCP when sandbox is disabled', 0, () => {
@@ -1107,6 +2321,166 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('derives aggregate mail entity status retryability and sources from actual provider evidence', 0, () => {
+      const outlookEntity: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook result',
+        status: 'success', summary: 'one message', rows: [{ label: 'Message ID', value: 'outlook-message-1' }],
+        rawPreview: '{"messages":[{"id":"outlook-message-1"}]}', providerPhase: 'execution'
+      };
+      const outlookEmpty: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook empty',
+        status: 'empty', summary: 'no matching message', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const outlookTechnicalSuccess: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook query completed',
+        status: 'success', summary: 'provider returned no mail entity',
+        rows: [{ label: 'Query', value: 'latest' }, { label: 'provider', value: 'Outlook' }],
+        rawPreview: '{"successful":true,"query":"latest"}', providerPhase: 'execution'
+      };
+      const outlookAuth: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook auth required',
+        status: 'needs_auth', summary: 'Outlook OAuth is not connected', rows: [], rawPreview: ''
+      };
+      const outlookTimeout: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook', toolName: 'outlook.mail.search', title: 'Outlook transport error',
+        status: 'error', summary: 'Outlook transport timeout', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const gmailEmpty: DynamicGenericToolResult = {
+        sourceTag: 'Gmail OAuth', toolName: 'gmail.mail.search', title: 'Gmail empty',
+        status: 'empty', summary: 'no matching message', rows: [], rawPreview: '', providerPhase: 'execution'
+      };
+      const gmailThread = mailThreadSummary({
+        provider: 'gmail', accountLabel: 'work@example.com', threadId: 'gmail-thread-1',
+        messageId: 'gmail-message-1', subject: 'Mail result', from: 'alice@example.com',
+        to: ['me@example.com'], participants: ['alice@example.com', 'me@example.com'],
+        snippet: 'Actual entity', receivedAt: '2026-07-22T01:00:00Z', unread: true, important: true,
+        sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/gmail-thread-1', rawProviderRef: 'gmail-ref-1'
+      });
+
+      const entity = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookEntity] } as MailSearchStructuredData, []
+      );
+      expect(entity.status).assertEqual('success');
+      expect(entity.sources.length).assertEqual(1);
+      expect(entity.sources[0].provider).assertEqual('Composio Outlook');
+      expect(entity.sources[0].backend).assertEqual('oauth_api');
+      expect(entity.sources[0].operation).assertEqual('outlook.mail.search');
+
+      const empty = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookEmpty] } as MailSearchStructuredData, []
+      );
+      expect(empty.status).assertEqual('empty');
+      expect(empty.sources.length).assertEqual(1);
+
+      const technicalOnly = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookTechnicalSuccess] } as MailSearchStructuredData, []
+      );
+      expect(technicalOnly.status).assertEqual('empty');
+      expect(technicalOnly.sources.length).assertEqual(1);
+
+      const auth = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookAuth] } as MailSearchStructuredData, []
+      );
+      expect(auth.status).assertEqual('error');
+      expect(auth.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(auth.error?.retryable).assertFalse();
+      expect(auth.sources.length).assertEqual(0);
+
+      const transport = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [outlookTimeout] } as MailSearchStructuredData, []
+      );
+      expect(transport.status).assertEqual('error');
+      expect(transport.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(transport.error?.retryable).assertTrue();
+      expect(transport.sources.length).assertEqual(1);
+      expect(transport.sources[0].operation).assertEqual('outlook.mail.search');
+
+      const mixed = mailSearchDataResultForTest(
+        { threads: [gmailThread], statuses: [], extras: [outlookTimeout] } as MailSearchStructuredData,
+        [{ provider: 'Gmail OAuth', backend: 'oauth_api', operation: 'gmail.mail.search', fetchedAt: '2026-07-22T01:00:00Z' }]
+      );
+      expect(mixed.status).assertEqual('partial');
+      expect(mixed.sources.length).assertEqual(2);
+      const mixedData = mixed.data as MailSearchStructuredData;
+      expect(mixedData.entityRefs!.indexOf('gmail:gmail-thread-1')).assertLarger(-1);
+      expect(mixedData.entityRefs!.indexOf('gmail-thread-1')).assertLarger(-1);
+      expect(mixedData.entityRefs!.indexOf('gmail-message-1')).assertLarger(-1);
+
+      const successfulEmptyWithFailure = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [gmailEmpty, outlookTimeout] } as MailSearchStructuredData, []
+      );
+      expect(successfulEmptyWithFailure.status).assertEqual('empty');
+      expect((successfulEmptyWithFailure.data as MailSearchStructuredData).entityRefs!.length).assertEqual(0);
+      expect(successfulEmptyWithFailure.warnings.length).assertLarger(0);
+      expect(successfulEmptyWithFailure.sources.length).assertEqual(2);
+      expect(successfulEmptyWithFailure.error === undefined).assertTrue();
+    });
+
+    it('classifies the exact Composio Outlook disconnected-account message as auth required', 0, () => {
+      const disconnected: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook',
+        toolName: 'outlook.mail.search',
+        title: 'Composio Outlook discovery failed',
+        status: 'error',
+        summary: 'Composio 用户 aiphone-luoyige 没有 ACTIVE connected account',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [disconnected] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(result.error?.retryable).assertFalse();
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('normalizes case and whitespace only around the exact disconnected-account phrase', 0, () => {
+      const disconnected: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail discovery failed',
+        status: 'error',
+        summary: 'HTTP 400: NO\n  ACTIVE\tCONNECTION   FOUND for toolkit gmail',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [disconnected] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+      expect(result.error?.retryable).assertFalse();
+      expect(result.sources.length).assertEqual(0);
+    });
+
+    it('keeps a disconnected-message lookalike transport failure as provider evidence', 0, () => {
+      const providerFailure: DynamicGenericToolResult = {
+        sourceTag: 'Composio Outlook',
+        toolName: 'outlook.mail.search',
+        title: 'Outlook provider failed',
+        status: 'error',
+        summary: 'Provider error: no active connection candidates found; HTTP 503 transport timeout',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'execution'
+      };
+      const result = mailSearchDataResultForTest(
+        { threads: [], statuses: [], extras: [providerFailure] } as MailSearchStructuredData, []
+      );
+
+      expect(result.status).assertEqual('error');
+      expect(result.error?.code).assertEqual('PROVIDER_ERROR');
+      expect(result.error?.retryable).assertTrue();
+      expect(result.sources.length).assertEqual(1);
+      expect(result.sources[0].provider).assertEqual('Composio Outlook');
+      expect(result.sources[0].operation).assertEqual('outlook.mail.search');
+    });
+
     it('extracts aggregate mail keyword when model timeout falls back without args', 0, () => {
       const parsed = mailSearchArgs('聚合搜索 Gmail 和 QQ 邮箱里关键词 loopy 的邮件', null);
 
@@ -1184,15 +2558,25 @@ export default function toolGatewayClientTest() {
       expect(isRegisteredToolId('whatsapp.message.send')).assertTrue();
     });
 
-    it('requires the exact client confirmation action for WhatsApp and Calendar delete', 0, () => {
-      expect(whatsAppSendConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":false}'))).assertFalse();
-      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm', looseObject('{"confirmed":true}'))).assertTrue();
-      expect(calendarDeleteConfirmedForTest('', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('wrong.action', looseObject('{"confirmed":true}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":false}'))).assertFalse();
-      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm', looseObject('{"confirmed":true}'))).assertTrue();
+    it('requires exact rendered action identity without payload confirmation flags', 0, () => {
+      expect(whatsAppSendConfirmedForTest('')).assertFalse();
+      expect(whatsAppSendConfirmedForTest('wrong.action')).assertFalse();
+      expect(whatsAppSendConfirmedForTest('whatsapp.message.send.confirm')).assertTrue();
+      expect(calendarDeleteConfirmedForTest('')).assertFalse();
+      expect(calendarDeleteConfirmedForTest('wrong.action')).assertFalse();
+      expect(calendarDeleteConfirmedForTest('calendar.event.delete.confirm')).assertTrue();
+    });
+
+    it('allows WhatsApp only for the configured safe test target', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson('{"AIPHONE_WHATSAPP_TEST_TO":"+8613800138000"}');
+
+        expect(whatsAppSafeTargetAllowedForTest('+86 138-0013-8000')).assertTrue();
+        expect(whatsAppSafeTargetAllowedForTest('+8613900139000')).assertFalse();
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
+      expect(whatsAppSafeTargetAllowedForTest('+8613800138000')).assertFalse();
     });
 
     it('keeps WhatsApp provider errors concise and actionable', 0, () => {
@@ -1208,26 +2592,32 @@ export default function toolGatewayClientTest() {
     });
 
     it('preserves the configured WhatsApp Business sender through confirmation', 0, async () => {
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const result = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'whatsapp.message.send',
-        '用 WhatsApp 发送消息',
-        'surface_whatsapp_confirmation',
-        '',
-        noop,
-        null,
-        looseObject('{"toNumber":"+8613800138000","text":"十分钟后到","phoneNumberId":"712594308615206","wabaId":"123456789"}')
-      );
-      const rendered = genericToolResults(result.surface);
-      const actionJson = JSON.stringify(rendered[0].actions);
-      expect(rendered[0].status).assertEqual('confirm_required');
-      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
-      expect(actionJson.indexOf('712594308615206')).assertLarger(-1);
-      expect(actionJson.indexOf('123456789')).assertLarger(-1);
+      try {
+        configureLocalProviderConfigFromRawJson('{"AIPHONE_WHATSAPP_TEST_TO":"+8613800138000"}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'whatsapp.message.send',
+          '用 WhatsApp 发送消息',
+          'surface_whatsapp_confirmation',
+          '',
+          noop,
+          null,
+          looseObject('{"toNumber":"+8613800138000","text":"十分钟后到","phoneNumberId":"712594308615206","wabaId":"123456789"}')
+        );
+        const rendered = genericToolResults(result.surface);
+        const actionJson = JSON.stringify(rendered[0].actions);
+        expect(rendered[0].status).assertEqual('confirm_required');
+        expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+        expect(actionJson.indexOf('"confirmed"')).assertEqual(-1);
+        expect(actionJson.indexOf('712594308615206')).assertLarger(-1);
+        expect(actionJson.indexOf('123456789')).assertLarger(-1);
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
-    it('dispatches Calendar delete confirmation back through the fixed tool path', 0, async () => {
+    it('blocks unregistered Calendar delete requests before confirmation or provider work', 0, async () => {
       const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
       const result = await callToolGateway(
         defaultToolGatewayUrl(),
@@ -1240,10 +2630,36 @@ export default function toolGatewayClientTest() {
         looseObject('{"eventId":"event-1","calendarId":"primary"}')
       );
       const rendered = genericToolResults(result.surface);
-      const actionJson = JSON.stringify(rendered[0].actions);
-      expect(rendered[0].status).assertEqual('confirm_required');
-      expect(actionJson.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
-      expect(actionJson.indexOf('"kind":"prompt"')).assertLarger(-1);
+      expect(rendered[0].status).assertEqual('blocked');
+      const actions = rendered[0].actions === undefined ? [] : rendered[0].actions;
+      expect(JSON.stringify(actions).indexOf('calendar.event.delete.confirm')).assertEqual(-1);
+    });
+
+    it('lets the exact Calendar delete-confirm alias reach the real gateway adapter', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const result = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'calendar.event.delete',
+          '删除当前精确日程',
+          'surface_calendar_delete_gateway',
+          'calendar.event.delete.confirm',
+          noop,
+          null,
+          looseObject('{"eventId":"event-provider-real-1","calendarId":"primary"}')
+        );
+        const rendered = genericToolResults(result.surface);
+
+        expect(rendered[0].toolName).assertEqual('calendar.event.delete');
+        expect(rendered[0].status).assertEqual('needs_auth');
+        expect(rendered[0].summary.indexOf('registered Calendar action required')).assertEqual(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('event-provider-real-1')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+        configureLocalProviderConfigFromRawJson('{}');
+      }
     });
 
     it('resolves a natural-language Calendar delete only when the Provider search has one event', 0, () => {
@@ -1349,33 +2765,47 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps Gmail blocked-send and open-web A2UI on the local gateway', 0, async () => {
-      const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
-      const blockedResult: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.message.send',
-        '帮我 Gmail 直接发送这封邮件',
-        'surface_gmail_blocked',
-        'client_intent_fallback',
-        noop
-      );
-      const webResult: A2uiCallResult = await callToolGateway(
-        defaultToolGatewayUrl(),
-        'gmail.open.web',
-        '打开 Gmail 网页版',
-        'surface_gmail_web',
-        'client_intent_fallback',
-        noop
-      );
+    it('keeps Gmail reply send outside the registered surface executor fail closed', 0, async () => {
+      try {
+        configureComposioConfigFromRawJson('{}');
+        const noop = (_surface: A2uiSurfaceState, _raw: string): void => {};
+        const providerResult: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.message.send',
+          '发送当前 Gmail 回复',
+          'surface_gmail_send',
+          'html_mail_reply_send',
+          noop,
+          null,
+          looseObject('{"requestKey":"gmail:thread-1","provider":"gmail",' +
+            '"accountLabel":"work@example.com","threadId":"thread-1","messageId":"message-1",' +
+            '"to":["alice@example.com"],"subject":"Re: Demo","body":"Confirmed.",' +
+            '"replyMode":"reply","contextSummary":"Demo"}')
+        );
+        const webResult: A2uiCallResult = await callToolGateway(
+          defaultToolGatewayUrl(),
+          'gmail.open.web',
+          '打开 Gmail 网页版',
+          'surface_gmail_web',
+          'client_intent_fallback',
+          noop
+        );
 
-      expect(blockedResult.ok).assertTrue();
-      expect(genericToolResults(blockedResult.surface)[0].status).assertEqual('blocked');
-      expect(genericToolResults(blockedResult.surface)[0].summary.indexOf('不会自动发送 Gmail')).assertLarger(-1);
+        expect(providerResult.ok).assertTrue();
+        expect(genericToolResults(providerResult.surface)[0].status).assertEqual('error');
+        expect(genericToolResults(providerResult.surface)[0].summary.indexOf('registered current Gmail surface action'))
+          .assertLarger(-1);
+        expect(providerResult.raw.indexOf('Composio 未配置')).assertEqual(-1);
+        expect(providerResult.raw.indexOf('UnsafeActionBlocked')).assertEqual(-1);
+        expect(providerResult.raw.indexOf('Gmail 回复已发送')).assertEqual(-1);
 
-      expect(webResult.ok).assertTrue();
-      expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
-      expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
-      expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+        expect(webResult.ok).assertTrue();
+        expect(genericToolResults(webResult.surface)[0].toolName).assertEqual('gmail.open.web');
+        expect(genericToolResults(webResult.surface)[0].status).assertEqual('needs_user');
+        expect(webResult.raw.indexOf('https://mail.google.com/mail/u/0/#inbox')).assertLarger(-1);
+      } finally {
+        configureComposioConfigFromRawJson('{}');
+      }
     });
 
     it('uses Composio auth state for Gmail fixed tools when no Composio config exists', 0, async () => {
@@ -1429,6 +2859,210 @@ export default function toolGatewayClientTest() {
       }
     });
 
+    it('keeps the real local Gmail timeout when Composio only failed discovery', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ThrowingGmailMcpClient();
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio discovery failed',
+        status: 'needs_auth', summary: 'Composio Gmail is not connected', rows: [], rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('error');
+        expect(result.error?.message.indexOf('Gmail OAuth transport timeout')).assertLarger(-1);
+        expect(result.error?.retryable).assertTrue();
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('Gmail OAuth');
+        expect(result.sources[0].backend).assertEqual('oauth_api');
+        expect(result.sources[0].operation).assertEqual('gmail.mail.search');
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses the full Gmail detail observation without Dynamic rawPreview truncation', 0, async () => {
+      const body = '完整正文'.repeat(700);
+      let calls = 0;
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.thread.read',
+        title: 'Truncated dynamic preview',
+        status: 'success',
+        summary: 'dynamic path must not be used',
+        rows: [],
+        rawPreview: '{"threadId":"thread-real-1","body":"截断正文"}'
+      });
+      configureMailDetailReaderForTests(async (_request: MailDetailRequest): Promise<MailDetail> => {
+        calls++;
+        return {
+          requestKey: 'gmail:thread-real-1',
+          provider: 'gmail',
+          threadId: 'thread-real-1',
+          messageId: 'message-real-1',
+          internetMessageId: '<message-real-1@example.com>',
+          subject: '真实 Gmail 线程',
+          from: 'Alice <alice@example.com>',
+          replyTo: 'alice@example.com',
+          to: ['qa@example.com'],
+          cc: [],
+          bodyText: body,
+          bodyHtml: '<p>' + body + '</p>'
+        };
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.thread.read',
+          '',
+          looseObject('{"requestKey":"gmail:thread-real-1","provider":"gmail",' +
+            '"threadId":"thread-real-1","messageId":"message-real-1","subject":"真实 Gmail 线程"}')
+        );
+        const data = result.data as Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(calls).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect((data['body'] as string).length).assertEqual(body.length);
+        expect(data['body'] as string).assertEqual(body);
+        expect(data['threadId'] as string).assertEqual('thread-real-1');
+        expect(data['messageId'] as string).assertEqual('message-real-1');
+      } finally {
+        configureMailDetailReaderForTests(null);
+        configureGmailComposioResultForTests(null);
+      }
+    });
+
+    it('classifies the exact Composio Gmail no-active-connection discovery message as auth required', 0, async () => {
+      const emptyStore = new MemoryCredentialStore();
+      configureGmailCredentialStoreForTests(emptyStore);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail',
+        toolName: 'gmail.mail.search',
+        title: 'Composio Gmail discovery failed',
+        status: 'error',
+        summary: 'HTTP 400: no active connection found for toolkit gmail',
+        rows: [],
+        rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+        expect(result.error?.retryable).assertFalse();
+        expect(result.sources.length).assertEqual(0);
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses a real local Gmail success after discovery failure without a stale Composio source', 0, async () => {
+      const store = new MemoryCredentialStore();
+      await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+      const client = new ScriptedGmailMcpClient({
+        sourceTag: 'Gmail OAuth', toolName: 'gmail.mail.search', title: 'Local Gmail result',
+        status: 'success', summary: 'one local result', rows: [{ label: 'Result size', value: '1' }],
+        rawPreview: '{"messages":[{"provider":"gmail","accountLabel":"work@example.com",' +
+          '"threadId":"local-thread-1","messageId":"local-message-1",' +
+          '"sender":"Alice <alice@example.com>","to":"Me <me@example.com>",' +
+          '"subject":"Local fallback","snippet":"Actual local result","unread":true,"important":true,' +
+          '"rawProviderRef":"local-provider-ref-1"}]}'
+      });
+      configureGmailCredentialStoreForTests(store);
+      configureGmailMcpClientForTests(client);
+      configureGmailComposioResultForTests({
+        sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio discovery failed',
+        status: 'needs_auth', summary: 'Composio Gmail is not connected', rows: [], rawPreview: '',
+        providerPhase: 'discovery'
+      });
+      try {
+        const result = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        const serialized = JSON.stringify(result.data);
+
+        expect(client.callCount).assertEqual(1);
+        expect(result.status).assertEqual('success');
+        expect(result.sources.length).assertEqual(1);
+        expect(result.sources[0].provider).assertEqual('Gmail OAuth');
+        expect(serialized.indexOf('local-thread-1')).assertLarger(-1);
+        expect(serialized.indexOf('local-provider-ref-1')).assertLarger(-1);
+        expect(serialized.indexOf('Composio discovery failed')).assertEqual(-1);
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+      }
+    });
+
+    it('uses Composio execution phase for Gmail source and never invents it from configuration', 0, async () => {
+      const emptyStore = new MemoryCredentialStore();
+      configureGmailCredentialStoreForTests(emptyStore);
+      try {
+        configureGmailComposioResultForTests({
+          sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio Gmail error',
+          status: 'error', summary: 'Composio execution transport timeout', rows: [], rawPreview: '',
+          providerPhase: 'execution'
+        });
+        const executionError = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(executionError.status).assertEqual('error');
+        expect(executionError.error?.retryable).assertTrue();
+        expect(executionError.sources.length).assertEqual(1);
+        expect(executionError.sources[0].provider).assertEqual('Composio Gmail');
+        expect(executionError.sources[0].operation).assertEqual('gmail.mail.search');
+
+        const localClient = new SuccessfulGmailMcpClient();
+        const tokenStore = new MemoryCredentialStore();
+        await tokenStore.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
+        configureGmailCredentialStoreForTests(tokenStore);
+        configureGmailMcpClientForTests(localClient);
+        configureGmailComposioResultForTests({
+          sourceTag: 'Composio Gmail', toolName: 'gmail.mail.search', title: 'Composio Gmail result',
+          status: 'success', summary: 'one result', rows: [{ label: 'Result size', value: '1' }],
+          rawPreview: '{"messages":[{"threadId":"composio-thread-1","messageId":"composio-message-1",' +
+            '"sender":"Composio <composio@example.com>","subject":"Composio success","snippet":"Actual result"}]}',
+          providerPhase: 'execution'
+        });
+        const executionSuccess = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(executionSuccess.status).assertEqual('success');
+        expect(executionSuccess.sources.length).assertEqual(1);
+        expect(executionSuccess.sources[0].provider).assertEqual('Composio Gmail');
+        expect(localClient.callCount).assertEqual(0);
+
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(emptyStore);
+        configureComposioConfigFromRawJson('{}');
+        const notConfigured = await callStructuredTool(
+          'gmail.mail.search', 'latest mail', looseObject('{"query":"newer_than:30d","pageSize":10}')
+        );
+        expect(notConfigured.status).assertEqual('error');
+        expect(notConfigured.error?.code).assertEqual('AUTH_REQUIRED');
+        expect(notConfigured.sources.length).assertEqual(0);
+      } finally {
+        configureGmailComposioResultForTests(null);
+        configureGmailMcpClientForTests(null);
+        configureGmailCredentialStoreForTests(null);
+        configureComposioConfigFromRawJson('{}');
+      }
+    });
+
     it('uses the same Gmail OAuth fallback when saving a reply draft', 0, async () => {
       const store = new MemoryCredentialStore();
       await store.put(GMAIL_ACCESS_TOKEN_REF, 'gmail-access-token');
@@ -1460,7 +3094,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('keeps Gmail thread-read args visible on the fixed Composio path', 0, async () => {
+    it('rejects incomplete Gmail thread-read identity before the fixed provider path', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -1478,8 +3112,8 @@ export default function toolGatewayClientTest() {
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.thread.read');
-        expect(rendered[0].status).assertEqual('needs_auth');
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-123')).assertLarger(-1);
+        expect(rendered[0].status).assertEqual('error');
+        expect(rendered[0].summary.indexOf('matching provider, requestKey')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -1526,13 +3160,14 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later.","threadId":"thread-345","replyMode":"reply"}')
+          looseObject('{"provider":"composio","draftId":"draft-345","to":["alice@example.com"],' +
+            '"subject":"AIPhoneDemo","body":"Please send later.","threadId":"thread-345"}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('needs_auth');
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('draft-345')).assertLarger(-1);
         expect(JSON.stringify(rendered[0].rows).indexOf('Please send later.')).assertLarger(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -1610,14 +3245,14 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"threadId":"thread-345"}')
+          looseObject('{"provider":"composio","draftId":"draft-345","to":["alice@example.com"]}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('error');
         expect(rendered[0].summary.indexOf('body')).assertLarger(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('draft-345')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -1625,7 +3260,7 @@ export default function toolGatewayClientTest() {
       }
     });
 
-    it('blocks Gmail draft-apply when reply context is missing even if body is present', 0, async () => {
+    it('blocks Gmail draft-apply when provider draft identity is missing even if body is present', 0, async () => {
       try {
         configureComposioConfigFromRawJson('{}');
         configureLocalProviderConfigFromRawJson('{}');
@@ -1638,15 +3273,16 @@ export default function toolGatewayClientTest() {
           'model_tool_request',
           noop,
           null,
-          looseObject('{"threadId":"thread-345","to":["alice@example.com"],"subject":"AIPhoneDemo","body":"Please send later."}')
+          looseObject('{"provider":"composio","to":["alice@example.com"],' +
+            '"subject":"AIPhoneDemo","body":"Please send later."}')
         );
 
         const rendered = genericToolResults(result.surface);
         expect(rendered[0].toolName).assertEqual('gmail.draft.apply');
         expect(rendered[0].status).assertEqual('error');
-        expect(rendered[0].summary.indexOf('replyMode')).assertLarger(-1);
+        expect(rendered[0].summary.indexOf('draftId')).assertLarger(-1);
         expect(rendered[0].summary.indexOf('Composio 未配置')).assertEqual(-1);
-        expect(JSON.stringify(rendered[0].rows).indexOf('thread-345')).assertLarger(-1);
+        expect(JSON.stringify(rendered[0].rows).indexOf('gmail.draft.apply')).assertLarger(-1);
         expect(result.raw.indexOf('Composio 未配置')).assertEqual(-1);
       } finally {
         configureComposioConfigFromRawJson('{}');
@@ -1687,7 +3323,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '帮我创建一个日程',
           'surface_calendar_create_missing',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"title":"AIPhoneDemo sync","start":"2026-07-30T15:00:00+08:00","end":"2026-07-30T15:30:00+08:00","timezone":"Asia/Shanghai"}')
@@ -1714,7 +3350,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.update',
           '帮我更新这个日程',
           'surface_calendar_update_missing',
-          'model_tool_request',
+          'calendar.event.update',
           noop,
           null,
           looseObject('{"eventId":"evt-456","title":"AIPhoneDemo moved","start":"2026-07-30T16:00:00+08:00","end":"2026-07-30T16:30:00+08:00","timezone":"Asia/Shanghai"}')
@@ -1741,7 +3377,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.create',
           '帮我在 2026年7月30日下午3点创建一个标题为 AIPhoneDemo 的30分钟日程',
           'surface_calendar_create_missing_required',
-          'model_tool_request',
+          'calendar.event.create',
           noop,
           null,
           looseObject('{"end":"2026-07-30T15:30:00+08:00"}')
@@ -1769,7 +3405,7 @@ export default function toolGatewayClientTest() {
           'calendar.event.update',
           '把刚才的日程改到下午4点',
           'surface_calendar_update_missing_required',
-          'model_tool_request',
+          'calendar.event.update',
           noop,
           null,
           looseObject('{"timezone":"Asia/Shanghai"}')
