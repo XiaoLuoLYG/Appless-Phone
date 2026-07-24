@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - codex/self-hosted-hypium-ci
   workflow_dispatch:
 
 permissions:
