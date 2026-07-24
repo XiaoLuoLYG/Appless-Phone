@@ -25,7 +25,7 @@ const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
 const REACT_TAGS: string[] = ['Thought:', 'Execution:', 'Action:', 'Observation:', 'Final:'];
 
-type ExecutionMode = 'parallel' | 'serial';
+type ExecutionMode = 'parallel' | 'serial' | 'serial_fallback';
 
 function padDatePart(value: number): string {
   return value < 10 ? '0' + value.toString() : value.toString();
@@ -98,6 +98,7 @@ export class ReActAgentRunner {
   private maxSteps: number;
   private uiHandler: UiRenderHandler | null;
   private batchHost: ReActBatchHost | null;
+  private serialChainComposer: MultiToolSurfaceComposer | null;
 
   constructor(
     model: LocalModel,
@@ -115,10 +116,12 @@ export class ReActAgentRunner {
     this.maxSteps = maxSteps;
     this.uiHandler = uiHandler ?? null;
     this.batchHost = batchHost ?? null;
+    this.serialChainComposer = null;
   }
 
   async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
     const scratchpad: string[] = [];
+    this.serialChainComposer = null;
 
     for (let step = 0; step < this.maxSteps; step++) {
       let response: string;
@@ -127,6 +130,7 @@ export class ReActAgentRunner {
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
         listener(new AgentEvent(AgentEventKind.ERROR, message));
+        this.finishSerialChain();
         return;
       }
 
@@ -134,7 +138,7 @@ export class ReActAgentRunner {
 
       const finalAnswer = this.readLineValue(response, 'Final:');
       if (finalAnswer !== null) {
-        listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
+        this.emitFinalAnswer(finalAnswer, listener);
         return;
       }
 
@@ -145,6 +149,7 @@ export class ReActAgentRunner {
           AgentEventKind.ERROR,
           `Model did not return an Action or Final answer.\n\nLLM response:\n${responseText}`
         ));
+        this.finishSerialChain();
         return;
       }
 
@@ -155,24 +160,46 @@ export class ReActAgentRunner {
         if (plan.mode === 'parallel' && plan.calls.length > 1) {
           const batchObservations = await this.executeBatchToolCalls(plan.calls, listener);
           if (batchObservations === null) {
+            this.finishSerialChain();
             return;
           }
           for (let index = 0; index < batchObservations.length; index++) {
             observationsForModel.push(batchObservations[index]);
           }
-        } else if (plan.mode === 'serial' && plan.calls.length > 1 && this.batchHost !== null) {
-          const serialObservations = await this.executeSerialToolCalls(plan.calls, listener);
-          if (serialObservations === null) {
+        } else if (plan.mode === 'serial_fallback' && plan.calls.length > 1) {
+          const fallbackObservations = await this.executeSerialFallbackToolCalls(plan.calls, listener);
+          if (fallbackObservations === null) {
+            this.finishSerialChain();
             return;
           }
-          for (let index = 0; index < serialObservations.length; index++) {
-            observationsForModel.push(serialObservations[index]);
+          for (let index = 0; index < fallbackObservations.length; index++) {
+            observationsForModel.push(fallbackObservations[index]);
+          }
+        } else if (plan.mode === 'serial') {
+          if (plan.calls.length > 1) {
+            skillLogWarn(
+              'ReActAgentRunner: serial chain received ' + plan.calls.length.toString() +
+              ' Action lines; only the first will run. Emit one Action per turn after each Observation.'
+            );
+          }
+          const chainObservation = await this.executeSerialChainStep(plan.calls[0], listener);
+          if (chainObservation === null) {
+            this.finishSerialChain();
+            return;
+          }
+          observationsForModel.push(chainObservation);
+          if (plan.calls.length > 1) {
+            observationsForModel.push(
+              'Observation: Only the first Action was executed for this serial chain step. ' +
+              'Use the Observation above to decide the next Action with complete args, or Final if done.'
+            );
           }
         } else {
           for (let index = 0; index < plan.calls.length; index++) {
             const call = plan.calls[index];
             const observation = await this.executeToolCall(call, listener);
             if (observation === null) {
+              this.finishSerialChain();
               return;
             }
             listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
@@ -181,10 +208,12 @@ export class ReActAgentRunner {
             const isLastCall = index === plan.calls.length - 1;
             if (processed.failureKey.length > 0) {
               this.emitDigestFinal(processed, listener);
+              this.finishSerialChain();
               return;
             }
             if (processed.shouldStop && isLastCall) {
               this.emitDigestFinal(processed, listener);
+              this.finishSerialChain();
               return;
             }
           }
@@ -192,16 +221,107 @@ export class ReActAgentRunner {
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
         listener(new AgentEvent(AgentEventKind.ERROR, message));
+        this.finishSerialChain();
         return;
       }
 
-      scratchpad.push(response);
+      if (plan.mode === 'serial' && plan.calls.length > 1) {
+        scratchpad.push(this.firstActionScratchpad(response, plan.calls[0]));
+      } else {
+        scratchpad.push(response);
+      }
       for (const observationForModel of observationsForModel) {
         scratchpad.push(observationForModel);
       }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+    this.finishSerialChain();
+  }
+
+  private firstActionScratchpad(response: string, call: ToolCall): string {
+    const thought = this.readLineValue(response, 'Thought:');
+    let text = '';
+    if (thought !== null) {
+      text += 'Thought: ' + thought + '\n';
+    }
+    text += 'Execution: serial\n';
+    text += 'Action: ' + call.name + '(' + call.input + ')';
+    return text;
+  }
+
+  private emitFinalAnswer(finalAnswer: string, listener: AgentListener): void {
+    if (this.serialChainComposer !== null) {
+      this.serialChainComposer.setAwaitingNextStep(false);
+      const composerFinal = this.serialChainComposer.buildFinalText();
+      this.emitDigestFinal(new ProcessedObservation(
+        this.serialChainComposer.buildBatchObservationText(),
+        true,
+        this.serialChainComposer.batchFailureKey(),
+        composerFinal.length > 0 ? composerFinal : finalAnswer
+      ), listener);
+      this.finishSerialChain();
+      return;
+    }
+    listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
+  }
+
+  private finishSerialChain(): void {
+    if (this.serialChainComposer === null) {
+      return;
+    }
+    this.serialChainComposer.setAwaitingNextStep(false);
+    this.clearBatchExecution(this.serialChainComposer);
+    this.serialChainComposer = null;
+  }
+
+  private async executeSerialChainStep(call: ToolCall, listener: AgentListener): Promise<string | null> {
+    if (this.batchHost !== null) {
+      if (this.serialChainComposer === null) {
+        const composer = this.createBatchComposer([call], listener);
+        if (composer === null) {
+          return null;
+        }
+        composer.setExecutionMode('serial');
+        this.serialChainComposer = composer;
+      }
+      const composer = this.serialChainComposer;
+      composer.setAwaitingNextStep(false);
+      const slotId = composer.appendSlot({ name: call.name, input: call.input });
+      composer.emitShell();
+      composer.markRunning(slotId);
+      const observation = await this.executeToolCall(
+        call,
+        listener,
+        this.batchToolRunOptions(composer, slotId)
+      );
+      if (observation === null) {
+        return null;
+      }
+      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      composer.ingestSlotObservation(slotId, observation);
+      const processed = this.processObservation(observation, listener, true);
+      if (processed.failureKey.length > 0) {
+        composer.setAwaitingNextStep(false);
+        this.emitDigestFinal(processed, listener);
+        return null;
+      }
+      composer.setAwaitingNextStep(true);
+      composer.emitShell();
+      return processed.text;
+    }
+
+    const observation = await this.executeToolCall(call, listener);
+    if (observation === null) {
+      return null;
+    }
+    listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+    const processed = this.processObservation(observation, listener, true);
+    if (processed.failureKey.length > 0) {
+      this.emitDigestFinal(processed, listener);
+      return null;
+    }
+    return processed.text;
   }
 
   private async executeBatchToolCalls(
@@ -287,6 +407,53 @@ export class ReActAgentRunner {
     }
 
     this.clearBatchExecution(composer);
+    return observationsForModel;
+  }
+
+  private async executeSerialFallbackToolCalls(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    if (this.batchHost !== null) {
+      return await this.executeSerialToolCalls(calls, listener);
+    }
+
+    const observationsForModel: string[] = [];
+    let sawA2ui = false;
+    let mergedFailureKey = '';
+    let mergedFinalText = '';
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const observation = await this.executeToolCall(call, listener);
+      if (observation === null) {
+        return null;
+      }
+      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      const processed = this.processObservation(observation, listener, true);
+      observationsForModel.push(processed.text);
+      if (processed.isA2ui) {
+        sawA2ui = true;
+      }
+      if (mergedFailureKey.length === 0 && processed.failureKey.length > 0) {
+        mergedFailureKey = processed.failureKey;
+      }
+      if (processed.finalText.length > 0) {
+        mergedFinalText = processed.finalText;
+      }
+      if (processed.failureKey.length > 0) {
+        this.emitDigestFinal(processed, listener);
+        return null;
+      }
+    }
+    if (sawA2ui) {
+      this.emitDigestFinal(new ProcessedObservation(
+        observationsForModel.join('\n\n'),
+        true,
+        mergedFailureKey,
+        mergedFinalText
+      ), listener);
+      return null;
+    }
     return observationsForModel;
   }
 
@@ -519,10 +686,11 @@ export class ReActAgentRunner {
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
-      prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output, return Final with a concise summary.\n';
+      prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output and the overall user task is complete, return Final with a concise summary.\n';
     }
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
-    prompt += 'If a tool observation already contains UI or A2UI protocol output, return Final; the visible result is already on screen.\n';
+    prompt += 'After a serial step Observation, continue with the next dependent Action using that Observation. Only return Final when the full user task is done.\n';
+    prompt += 'If a tool observation already contains UI or A2UI protocol output and no further dependent tool is needed, return Final; the visible result is already on screen.\n';
     prompt += 'Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
     if (this.tools.has('modelscope')) {
       prompt += 'Call modelscope only for an activated ModelScope MCP. First call modelscope with operation=search and the full task; then execute one returned qualifiedName whose risk is read.\n';
@@ -561,7 +729,7 @@ export class ReActAgentRunner {
       + 'Use Execution: serial when tools depend on each other, or when modelscope needs search then execute across steps.\n'
       + 'For parallel execution, emit up to ' + MAX_PARALLEL_SLOTS.toString() + ' Action: lines (one tool per line). More than '
       + MAX_PARALLEL_SLOTS.toString() + ' parallel actions will run serially.\n'
-      + 'For serial execution with multiple tools, also emit multiple Action: lines in the required order.\n'
+      + 'For Execution: serial with dependent tools, emit exactly one Action per reply. After the Observation is returned, emit the next Action with args derived from that Observation. Do not pre-fill later Actions before their inputs are known.\n'
       + 'For a single independent tool, use Execution: serial with one Action: line.\n'
       + 'Parallel ride-hailing rule: if the user asks to 打车/叫车/出租车/滴滴 (alone or together with other tasks), always use ride.estimate, never ride.app.link, unless the user explicitly says they only want App links and do not want prices or vehicle options.\n'
       + 'Every parallel Action must still include complete JSON args when the tool requires them. For ride.estimate, always pass {"origin":"...","destination":"...","city":"..."} in the Action input; never emit ride.estimate[] or ride.app.link[] without origin and destination.\n'
@@ -659,16 +827,16 @@ export class ReActAgentRunner {
     const normalized = raw.trim().toLowerCase();
     if (normalized === 'parallel' && calls.length > 1) {
       if (calls.length > MAX_PARALLEL_SLOTS) {
-        return 'serial';
+        return 'serial_fallback';
       }
       const families: string[] = [];
       for (let index = 0; index < calls.length; index++) {
         if (!this.tools.isParallelSafe(calls[index].name)) {
-          return 'serial';
+          return 'serial_fallback';
         }
         const family = calls[index].name.split('.')[0];
         if (families.indexOf(family) >= 0) {
-          return 'serial';
+          return 'serial_fallback';
         }
         families.push(family);
       }
