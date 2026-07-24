@@ -1,4 +1,5 @@
 import { AgentTool } from '../agent/AgentTool';
+import { AgentToolRunOptions } from '../agent/AgentToolRunOptions';
 import { AgentSkill } from './AgentSkill';
 import { skillLogInfo, skillLogWarn } from './SkillLog';
 import { SkillSnapshot } from './SkillSnapshot';
@@ -21,7 +22,7 @@ export class SkillReadTool implements AgentTool {
       'the returned instructions.';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     const trimmed = input.trim();
     if (trimmed.length === 0) {
       skillLogWarn('SkillReadTool: read requested without a skill name');

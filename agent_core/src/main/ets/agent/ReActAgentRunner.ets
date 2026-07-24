@@ -1,19 +1,33 @@
 import { AgentEvent, AgentEventKind } from './AgentEvent';
 import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
+import { MultiToolSurfaceComposer } from './MultiToolSurfaceComposer';
+import { MultiToolSlotCall } from './MultiToolTypes';
+import { AgentToolRunOptions } from './AgentToolRunOptions';
+import { LoopBackendRequest } from '../aiphone/LoopBackendTypes';
+import { A2uiSurfaceState } from '../aiphone/runtime/A2uiTypes';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
 import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
 import { skillLogInfo, skillLogWarn } from '../skill/SkillLog';
 import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
-import { parseToolCallText, StreamingToolCallParser, ToolCall } from './StreamingToolCallParser';
+import { StreamingToolCallParser, ToolCall } from './StreamingToolCallParser';
 
 export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
+export const MAX_PARALLEL_SLOTS: number = 4;
+
+export interface ReActBatchHost {
+  request: LoopBackendRequest;
+  emitSurface: (surface: A2uiSurfaceState, raw: string) => void;
+  emitJsonlLine: (line: string) => void;
+}
 
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
-const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
+const REACT_TAGS: string[] = ['Thought:', 'Execution:', 'Action:', 'Observation:', 'Final:'];
+
+type ExecutionMode = 'parallel' | 'serial';
 
 function padDatePart(value: number): string {
   return value < 10 ? '0' + value.toString() : value.toString();
@@ -28,21 +42,53 @@ function currentLocalDateTime(now: Date = new Date()): string {
     sign + padDatePart(Math.floor(absoluteOffset / 60)) + ':' + padDatePart(absoluteOffset % 60);
 }
 
-class ToolRunOutcome {
-  observation: string;
-  error: string;
+class ActionPlan {
+  mode: ExecutionMode;
+  calls: ToolCall[];
 
-  constructor(observation: string, error: string) {
+  constructor(mode: ExecutionMode, calls: ToolCall[]) {
+    this.mode = mode;
+    this.calls = calls;
+  }
+}
+
+class ProcessedObservation {
+  text: string;
+  shouldStop: boolean;
+  failureKey: string;
+  finalText: string;
+  isA2ui: boolean;
+
+  constructor(text: string, shouldStop: boolean, failureKey: string, finalText: string, isA2ui: boolean = false) {
+    this.text = text;
+    this.shouldStop = shouldStop;
+    this.failureKey = failureKey;
+    this.finalText = finalText;
+    this.isA2ui = isA2ui;
+  }
+}
+
+class ParallelToolFinish {
+  index: number;
+  call: ToolCall;
+  observation: string | null;
+  failed: boolean;
+
+  constructor(index: number, call: ToolCall, observation: string | null, failed: boolean = false) {
+    this.index = index;
+    this.call = call;
     this.observation = observation;
-    this.error = error;
+    this.failed = failed;
   }
 }
 
 class StreamingStepState {
-  call: ToolCall | null = null;
-  tool: Promise<ToolRunOutcome> | null = null;
+  calls: ToolCall[] = [];
+  runs: Promise<ParallelToolFinish>[] = [];
   thoughtEmitted: boolean = false;
   contentReceived: boolean = false;
+  mode: ExecutionMode | null = null;
+  composer: MultiToolSurfaceComposer | null = null;
 }
 
 export class ReActAgentRunner {
@@ -52,6 +98,7 @@ export class ReActAgentRunner {
   private skillsInSystemPrompt: boolean;
   private maxSteps: number;
   private uiHandler: UiRenderHandler | null;
+  private batchHost: ReActBatchHost | null;
 
   constructor(
     model: LocalModel,
@@ -59,7 +106,8 @@ export class ReActAgentRunner {
     maxSteps: number,
     uiHandler?: UiRenderHandler,
     skillSnapshot?: SkillSnapshot,
-    skillsInSystemPrompt: boolean = false
+    skillsInSystemPrompt: boolean = false,
+    batchHost?: ReActBatchHost
   ) {
     this.model = model;
     this.tools = tools;
@@ -67,6 +115,7 @@ export class ReActAgentRunner {
     this.skillsInSystemPrompt = skillsInSystemPrompt;
     this.maxSteps = maxSteps;
     this.uiHandler = uiHandler ?? null;
+    this.batchHost = batchHost ?? null;
   }
 
   async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
@@ -98,7 +147,7 @@ export class ReActAgentRunner {
         this.emitResponse(response, listener);
       }
 
-      if (streamState.call === null) {
+      if (streamState.calls.length === 0) {
         const finalAnswer = this.readLineValue(response, 'Final:');
         if (finalAnswer !== null) {
           listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
@@ -106,77 +155,80 @@ export class ReActAgentRunner {
         }
       }
 
-      const call = streamState.call ?? this.parseAction(response);
-      if (call === null) {
-        listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
+      const plan = streamState.calls.length > 0 ?
+        new ActionPlan(this.parseExecutionMode(response, streamState.calls), streamState.calls) :
+        this.parseActionPlan(response);
+      if (plan === null) {
+        const responseText = response.length > 0 ? response : '(empty response)';
+        listener(new AgentEvent(
+          AgentEventKind.ERROR,
+          `Model did not return an Action or Final answer.\n\nLLM response:\n${responseText}`
+        ));
         return;
       }
 
-      if (streamState.call === null) {
-        listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
-      }
+      skillLogInfo(`ReActAgentRunner: execution=${plan.mode} toolCount=${plan.calls.length}`);
 
-      let observation: string;
+      const observationsForModel: string[] = [];
       try {
-        if (call.name === UI_TOOL_NAME) {
-          if (this.uiHandler === null) {
-            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+        if (streamState.runs.length > 0) {
+          const streamedObservations = await this.finishStreamingToolCalls(streamState, listener);
+          if (streamedObservations === null) {
             return;
           }
-          observation = await this.runUiTool(call.input, listener);
+          for (let index = 0; index < streamedObservations.length; index++) {
+            observationsForModel.push(streamedObservations[index]);
+          }
+        } else if (plan.mode === 'parallel' && plan.calls.length > 1) {
+          const batchObservations = await this.executeBatchToolCalls(plan.calls, listener);
+          if (batchObservations === null) {
+            return;
+          }
+          for (let index = 0; index < batchObservations.length; index++) {
+            observationsForModel.push(batchObservations[index]);
+          }
+        } else if (plan.mode === 'serial' && plan.calls.length > 1 && this.batchHost !== null) {
+          const serialObservations = await this.executeSerialToolCalls(plan.calls, listener);
+          if (serialObservations === null) {
+            return;
+          }
+          for (let index = 0; index < serialObservations.length; index++) {
+            observationsForModel.push(serialObservations[index]);
+          }
         } else {
-          if (call.name === READ_TOOL_NAME && streamState.tool === null) {
-            skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
-          }
-          if (streamState.tool !== null) {
-            const outcome = await streamState.tool;
-            if (outcome.error.length > 0) {
-              throw new Error(outcome.error);
+          for (let index = 0; index < plan.calls.length; index++) {
+            const call = plan.calls[index];
+            const observation = await this.executeToolCall(call, listener);
+            if (observation === null) {
+              return;
             }
-            observation = outcome.observation;
-          } else {
-            observation = await this.tools.run(call.name, call.input);
-          }
-          if (call.name === READ_TOOL_NAME) {
-            this.emitSkillRead(call.input, observation, listener);
+            listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+            const processed = this.processObservation(observation, listener);
+            observationsForModel.push(processed.text);
+            const isLastCall = index === plan.calls.length - 1;
+            if (processed.failureKey.length > 0) {
+              this.emitDigestFinal(processed, listener);
+              return;
+            }
+            if (processed.shouldStop && isLastCall) {
+              this.emitDigestFinal(processed, listener);
+              return;
+            }
           }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
-        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        listener(new AgentEvent(AgentEventKind.ERROR, message));
         return;
       }
 
-      const digest = summarizeA2uiObservation(observation);
-      const observationForModel = digest.isA2ui ? digest.text : `Observation: ${observation}`;
       scratchpad.push(response);
-      scratchpad.push(observationForModel);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observationForModel));
-
-      if (digest.isA2ui && digest.shouldStop) {
-        if (digest.failureKey.indexOf(':error') >= 0) {
-          listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
-        } else if (digest.failureKey.length > 0) {
-          listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
-        } else {
-          listener(new AgentEvent(AgentEventKind.FINAL,
-            digest.finalText.length > 0 ? digest.finalText : '工具结果已更新到主页。'));
-        }
-        return;
+      for (const observationForModel of observationsForModel) {
+        scratchpad.push(observationForModel);
       }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
-  }
-
-  private startTool(call: ToolCall): Promise<ToolRunOutcome> {
-    return this.tools.run(call.name, call.input).then(
-      (observation: string): ToolRunOutcome => new ToolRunOutcome(observation, ''),
-      (error: Error | Object | string | number | boolean | null | undefined): ToolRunOutcome => {
-        const message = error instanceof Error ? error.message : `${error}`;
-        return new ToolRunOutcome('', message);
-      }
-    );
   }
 
   private handleModelContent(
@@ -189,23 +241,413 @@ export class ReActAgentRunner {
       return;
     }
     state.contentReceived = true;
-    const call = parser.feed(delta);
-    if (call === null || state.call !== null) {
+    const calls = parser.feed(delta);
+    if (calls.length === 0) {
       return;
     }
 
-    state.call = call;
-    this.emitResponse(parser.leadingText(), listener);
-    state.thoughtEmitted = true;
-    listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
-    aiLogInfo('[AIPhone][ModelToolCallReady] toolId=' + call.name +
-      ' inputChars=' + call.input.length.toString());
-    if (call.name !== UI_TOOL_NAME) {
-      if (call.name === READ_TOOL_NAME) {
-        skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
-      }
-      state.tool = this.startTool(call);
+    if (!state.thoughtEmitted) {
+      this.emitResponse(parser.leadingText(), listener);
+      state.thoughtEmitted = true;
+      state.mode = this.declaredExecutionMode(parser.leadingText());
     }
+
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      state.calls.push(call);
+      if (state.mode === 'serial') {
+        continue;
+      }
+      if (state.mode === null && state.calls.length > 1) {
+        throw new Error('Multiple streamed tool calls require an Execution: parallel or Execution: serial line.');
+      }
+      if (state.mode === 'parallel') {
+        this.assertParallelStreamCall(state.calls, call);
+      }
+      if (call.name === UI_TOOL_NAME) {
+        continue;
+      }
+
+      let composer: MultiToolSurfaceComposer | null = null;
+      let slotId = 'slot_' + (state.calls.length - 1).toString();
+      if (state.mode === 'parallel' && this.batchHost !== null) {
+        if (state.composer === null) {
+          state.composer = this.createStreamingComposer();
+        }
+        composer = state.composer;
+        if (composer !== null) {
+          slotId = composer.appendSlot({ name: call.name, input: call.input });
+        }
+      }
+
+      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      aiLogInfo('[AIPhone][ModelToolCallReady] toolId=' + call.name +
+        ' inputChars=' + call.input.length.toString() +
+        ' callIndex=' + (state.calls.length - 1).toString() +
+        ' execution=' + (state.mode ?? 'single'));
+      state.runs.push(this.executeBatchSlot(call, state.calls.length - 1, slotId, composer, listener));
+    }
+  }
+
+  private declaredExecutionMode(text: string): ExecutionMode | null {
+    const raw = this.readSingleLineValue(text, 'Execution:');
+    if (raw === null) {
+      return null;
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'parallel' || normalized === 'serial') {
+      return normalized;
+    }
+    throw new Error('Execution must be parallel or serial.');
+  }
+
+  private assertParallelStreamCall(calls: ToolCall[], call: ToolCall): void {
+    if (calls.length > MAX_PARALLEL_SLOTS) {
+      throw new Error('Parallel tool call count exceeds the configured limit.');
+    }
+    if (!this.tools.isParallelSafe(call.name)) {
+      throw new Error(`Tool ${call.name} is not safe for parallel execution.`);
+    }
+    const family = call.name.split('.')[0];
+    for (let index = 0; index < calls.length - 1; index++) {
+      if (calls[index].name.split('.')[0] === family) {
+        throw new Error(`Parallel tool calls cannot repeat tool family ${family}.`);
+      }
+    }
+  }
+
+  private createStreamingComposer(): MultiToolSurfaceComposer | null {
+    if (this.batchHost === null) {
+      return null;
+    }
+    const host = this.batchHost;
+    const composer = new MultiToolSurfaceComposer(host.request.surfaceId, (surface: A2uiSurfaceState, raw: string): void => {
+      host.emitSurface(surface, raw);
+    });
+    composer.setExecutionMode('parallel');
+    host.request.batchComposer = composer;
+    return composer;
+  }
+
+  private async finishStreamingToolCalls(
+    state: StreamingStepState,
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    const results = await Promise.all(state.runs);
+    if (state.composer !== null) {
+      for (let index = 0; index < results.length; index++) {
+        if (results[index].observation === null && !results[index].failed) {
+          this.clearBatchExecution(state.composer);
+          return null;
+        }
+      }
+      this.emitDigestFinal(new ProcessedObservation(
+        state.composer.buildBatchObservationText(),
+        true,
+        state.composer.batchFailureKey(),
+        state.composer.buildFinalText()
+      ), listener);
+      this.clearBatchExecution(state.composer);
+      return null;
+    }
+
+    const observationsForModel: string[] = [];
+    let sawA2ui = false;
+    let mergedFailureKey = '';
+    let mergedFinalText = '';
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.failed && state.mode !== 'parallel') {
+        throw new Error(result.observation ?? `Tool ${result.call.name} failed.`);
+      }
+      if (result.observation === null && !result.failed) {
+        return null;
+      }
+      const observation = result.observation ?? `Tool ${result.call.name} failed.`;
+      const processed = this.processObservation(observation, listener, state.mode === 'parallel');
+      observationsForModel.push(processed.text);
+      if (state.mode === 'parallel') {
+        sawA2ui = sawA2ui || processed.isA2ui;
+        if (mergedFailureKey.length === 0 && processed.failureKey.length > 0) {
+          mergedFailureKey = processed.failureKey;
+        }
+        if (processed.finalText.length > 0) {
+          mergedFinalText = processed.finalText;
+        }
+      } else if (processed.failureKey.length > 0 || processed.shouldStop) {
+        this.emitDigestFinal(processed, listener);
+        return null;
+      }
+    }
+    if (state.mode === 'parallel' && sawA2ui) {
+      this.emitDigestFinal(new ProcessedObservation(
+        observationsForModel.join('\n\n'),
+        true,
+        mergedFailureKey,
+        mergedFinalText,
+        true
+      ), listener);
+      return null;
+    }
+    return observationsForModel;
+  }
+
+  private async executeBatchToolCalls(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    const composer = this.createBatchComposer(calls, listener);
+    const useComposer = composer !== null;
+    if (useComposer && composer !== null) {
+      composer.setExecutionMode('parallel');
+      const slotCalls: MultiToolSlotCall[] = [];
+      for (let index = 0; index < calls.length; index++) {
+        slotCalls.push({ name: calls[index].name, input: calls[index].input });
+      }
+      composer.registerSlots(slotCalls);
+      composer.emitShell();
+    }
+
+    const pending: Promise<ParallelToolFinish>[] = [];
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const slotId = 'slot_' + index.toString();
+      pending.push(this.executeBatchSlot(call, index, slotId, composer, listener));
+    }
+
+    const results = await Promise.all(pending);
+
+    if (useComposer && composer !== null) {
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        if (result.observation === null && !result.failed) {
+          this.clearBatchExecution(composer);
+          return null;
+        }
+        listener(new AgentEvent(AgentEventKind.ACTION, `${result.call.name}(${result.call.input})`));
+      }
+      this.emitDigestFinal(new ProcessedObservation(
+        composer.buildBatchObservationText(),
+        true,
+        composer.batchFailureKey(),
+        composer.buildFinalText()
+      ), listener);
+      this.clearBatchExecution(composer);
+      return null;
+    }
+
+    const observationsForModel: string[] = [];
+    let sawA2ui = false;
+    let mergedFailureKey = '';
+    let mergedFinalText = '';
+
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.observation === null && !result.failed) {
+        this.clearBatchExecution(composer);
+        return null;
+      }
+
+      listener(new AgentEvent(AgentEventKind.ACTION, `${result.call.name}(${result.call.input})`));
+      const observation = result.observation ?? `Tool ${result.call.name} failed.`;
+      const processed = this.processObservation(observation, listener, true);
+      observationsForModel.push(processed.text);
+      if (processed.isA2ui) {
+        sawA2ui = true;
+      }
+      if (mergedFailureKey.length === 0 && processed.failureKey.length > 0) {
+        mergedFailureKey = processed.failureKey;
+      }
+      if (processed.finalText.length > 0) {
+        mergedFinalText = processed.finalText;
+      }
+    }
+
+    if (sawA2ui) {
+      this.emitDigestFinal(new ProcessedObservation(
+        observationsForModel.join('\n\n'),
+        true,
+        mergedFailureKey,
+        mergedFinalText
+      ), listener);
+      this.clearBatchExecution(composer);
+      return null;
+    }
+
+    this.clearBatchExecution(composer);
+    return observationsForModel;
+  }
+
+  private async executeSerialToolCalls(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): Promise<string[] | null> {
+    const composer = this.createBatchComposer(calls, listener);
+    if (composer === null) {
+      return null;
+    }
+    composer.setExecutionMode('serial');
+    const slotCalls: MultiToolSlotCall[] = [];
+    for (let index = 0; index < calls.length; index++) {
+      slotCalls.push({ name: calls[index].name, input: calls[index].input });
+    }
+    composer.registerSlots(slotCalls);
+    composer.emitShell();
+
+    for (let index = 0; index < calls.length; index++) {
+      const call = calls[index];
+      const slotId = 'slot_' + index.toString();
+      composer.markRunning(slotId);
+      const observation = await this.executeToolCall(
+        call,
+        listener,
+        this.batchToolRunOptions(composer, slotId)
+      );
+      if (observation === null) {
+        this.clearBatchExecution(composer);
+        return null;
+      }
+      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      composer.ingestSlotObservation(slotId, observation);
+      const processed = this.processObservation(observation, listener, true);
+      if (processed.failureKey.length > 0) {
+        this.emitDigestFinal(processed, listener);
+        this.clearBatchExecution(composer);
+        return null;
+      }
+    }
+
+    this.emitDigestFinal(new ProcessedObservation(
+      composer.buildBatchObservationText(),
+      true,
+      composer.batchFailureKey(),
+      composer.buildFinalText()
+    ), listener);
+    this.clearBatchExecution(composer);
+    return null;
+  }
+
+  private async executeBatchSlot(
+    call: ToolCall,
+    index: number,
+    slotId: string,
+    composer: MultiToolSurfaceComposer | null,
+    listener: AgentListener
+  ): Promise<ParallelToolFinish> {
+    if (composer !== null) {
+      composer.markRunning(slotId);
+    }
+    const batchOptions = this.batchToolRunOptions(composer, slotId);
+    try {
+      const observation = await this.executeToolCall(call, listener, batchOptions);
+      if (composer !== null && observation !== null && observation.length > 0) {
+        composer.ingestSlotObservation(slotId, observation);
+      } else if (composer !== null && observation === null) {
+        composer.markSlotError(slotId, `Tool ${call.name} returned no observation.`);
+      }
+      return new ParallelToolFinish(index, call, observation, false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      if (composer !== null) {
+        composer.markSlotError(slotId, message);
+      }
+      return new ParallelToolFinish(index, call, `Tool ${call.name} failed: ${message}`, true);
+    }
+  }
+
+  private batchToolRunOptions(
+    composer: MultiToolSurfaceComposer | null,
+    slotId: string
+  ): AgentToolRunOptions | undefined {
+    if (composer === null || this.batchHost === null) {
+      return undefined;
+    }
+    return {
+      batchSlotId: slotId,
+      batchComposer: composer,
+      compositeSurfaceId: this.batchHost.request.surfaceId
+    };
+  }
+
+  private createBatchComposer(
+    calls: ToolCall[],
+    listener: AgentListener
+  ): MultiToolSurfaceComposer | null {
+    if (this.batchHost === null) {
+      return null;
+    }
+    const host = this.batchHost;
+    const composer = new MultiToolSurfaceComposer(host.request.surfaceId, (surface: A2uiSurfaceState, raw: string): void => {
+      host.emitSurface(surface, raw);
+    });
+    host.request.batchComposer = composer;
+    return composer;
+  }
+
+  private clearBatchExecution(composer: MultiToolSurfaceComposer | null): void {
+    if (this.batchHost === null) {
+      return;
+    }
+    this.batchHost.request.batchComposer = null;
+    composer?.cancel();
+  }
+
+  private async executeToolCall(
+    call: ToolCall,
+    listener: AgentListener,
+    options?: AgentToolRunOptions
+  ): Promise<string | null> {
+    if (call.name === UI_TOOL_NAME && this.tools.has(UI_TOOL_NAME)) {
+      if (this.uiHandler === null) {
+        listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+        return null;
+      }
+      return await this.runUiTool(call.input, listener);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+    }
+
+    let observation: string;
+    try {
+      observation = await this.tools.run(call.name, call.input, options);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      throw new Error(`Tool ${call.name} failed: ${message}`);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      this.emitSkillRead(call.input, observation, listener);
+    }
+    return observation;
+  }
+
+  private processObservation(observation: string, listener: AgentListener, batchMode: boolean = false): ProcessedObservation {
+    const digest = summarizeA2uiObservation(observation);
+    const text = digest.isA2ui ? digest.text : `Observation: ${observation}`;
+    listener(new AgentEvent(AgentEventKind.OBSERVATION, text));
+    const shouldStop = batchMode ? false : digest.isA2ui && digest.shouldStop;
+    return new ProcessedObservation(
+      text,
+      shouldStop,
+      digest.failureKey,
+      digest.finalText,
+      digest.isA2ui
+    );
+  }
+
+  private emitDigestFinal(processed: ProcessedObservation, listener: AgentListener): void {
+    if (processed.failureKey.indexOf(':error') >= 0) {
+      listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
+      return;
+    }
+    if (processed.failureKey.length > 0) {
+      listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
+      return;
+    }
+    listener(new AgentEvent(AgentEventKind.FINAL,
+      processed.finalText.length > 0 ? processed.finalText : '工具结果已更新到主页。'));
   }
 
   private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
@@ -222,9 +664,25 @@ export class ReActAgentRunner {
     }
   }
 
+  private parseJsonAction(action: string): ToolCall | null {
+    const trimmed = action.trim();
+    if (!trimmed.startsWith('{')) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
+      const operation = `${parsed.operation ?? ''}`;
+      if (operation === 'search' || operation === 'execute') {
+        return new ToolCall('modelscope', trimmed);
+      }
+    } catch (_error) {
+    }
+    return null;
+  }
+
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
     if (this.uiHandler === null) {
-      return 'UI rendering is not available in this session.';
+      throw new Error('UI rendering is not available for this agent.');
     }
 
     const prompt = description.trim().length > 0 ? description : 'Simple information card';
@@ -245,8 +703,9 @@ export class ReActAgentRunner {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
     prompt += 'Use Thought, tool calls, Observation, and Final. Never end a response after Thought alone.\n';
-    prompt += 'When calling a tool, output exactly one <appless_tool>tool.name({"query":"value"})</appless_tool> on the line immediately after Thought. For example: Thought: I need nearby restaurants.\n<appless_tool>food.search({"query":"restaurants near Hongqiao Railway Station"})</appless_tool>\n';
-    prompt += 'Do not merely say that you will use a tool: emit the XML tool call. Use a JSON object in parentheses, use normal JSON arrays like ["a@example.com"], and do not pass bare keywords. After </appless_tool>, you may continue with ordinary status text, but never emit another tool call in the same response.\n';
+    prompt += this.buildParallelExecutionRules();
+    prompt += 'Every tool call must use exactly this syntax on one line: <appless_tool>tool_name(input)</appless_tool> or <appless_tool>tool_name[input]</appless_tool>. The tool name is mandatory; never put raw JSON directly inside the tag.\n';
+    prompt += 'When a tool needs parameters, follow its description and pass structured values as valid JSON inside the parentheses or brackets; use normal JSON arrays like ["a@example.com"], and do not pass bare keywords when a schema is required.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -260,6 +719,7 @@ export class ReActAgentRunner {
       prompt += 'Never invent a ModelScope qualifiedName. If ModelScope blocks an unsafe or unannotated tool, stop and explain that a real confirmation flow is required.\n';
     }
     prompt += 'Calendar write rule: when the requested end state creates, updates, moves, or deletes a Google Calendar event, use the matching calendar.event.* write tool, never calendar.events.search. For an update or move with an incomplete destination time, call calendar.event.update with the existing-event query/timeMin/timeMax selector and omit missing new start or end; the client will keep real matches visible and ask for the missing time without writing. Never ask the user for an Event ID.\n';
+    prompt += 'Ride-hailing rule: default to ride.estimate for any 打车/叫车/出租车 request so the UI can show vehicle types and prices. Use ride.app.link only when the user clearly asks for App handoff links without fare estimates.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
@@ -283,15 +743,32 @@ export class ReActAgentRunner {
       prompt += `${item}\n`;
     }
     prompt += '\nOutput contract for the next step:\n';
-    prompt += 'If a tool is needed, do not stop after Thought or merely announce the tool. Emit exactly one <appless_tool>tool.name({"key":"value"})</appless_tool>. Ordinary status text may follow its closing tag.\n';
+    prompt += 'If exactly one tool is needed, emit Thought then exactly one <appless_tool>tool.name({"key":"value"})</appless_tool>, without an Execution line.\n';
+    prompt += 'If multiple tools are needed, emit Thought, Execution: parallel or Execution: serial, then one complete <appless_tool>...</appless_tool> per tool. Ordinary status text may follow the last closing tag.\n';
     prompt += 'If no tool is needed, emit Thought followed by Final.\n';
     return prompt;
+  }
+
+  private buildParallelExecutionRules(): string {
+    return 'Before calling multiple tools, decide whether they can run in parallel. Add Execution: parallel or Execution: serial on its own line after Thought:. Do not add Execution for a single tool.\n'
+      + 'Use Execution: parallel only when every tool call in this reply is independent (no output from one is needed by another). Good examples: time[] plus note[...], or flight.search plus food.search.\n'
+      + 'Use Execution: serial when tools depend on each other, or when modelscope needs search then execute across steps.\n'
+      + 'For parallel execution, emit up to ' + MAX_PARALLEL_SLOTS.toString() + ' <appless_tool> tags (one tool per tag). More than '
+      + MAX_PARALLEL_SLOTS.toString() + ' tool calls must use Execution: serial.\n'
+      + 'For serial execution with multiple tools, emit multiple <appless_tool> tags in the required order.\n'
+      + 'Parallel ride-hailing rule: if the user asks to 打车/叫车/出租车/滴滴 (alone or together with other tasks), always use ride.estimate, never ride.app.link, unless the user explicitly says they only want App links and do not want prices or vehicle options.\n'
+      + 'Every parallel tool tag must still include complete JSON args when the tool requires them. For ride.estimate, always pass {"origin":"...","destination":"...","city":"..."}; never emit ride.estimate[] or ride.app.link[] without origin and destination.\n'
+      + 'For luckin.order.preview in parallel batches, pass only the Luckin-specific clause in args.prompt or args.query, for example {"prompt":"帮我点一杯瑞幸咖啡"}; never pass the full multi-task user text or unrelated ride/payment clauses.\n';
   }
 
   private emitResponse(response: string, listener: AgentListener): void {
     const thought = this.readLineValue(response, 'Thought:');
     if (thought !== null) {
       listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
+    }
+    const execution = this.readSingleLineValue(response, 'Execution:');
+    if (execution !== null) {
+      skillLogInfo(`ReActAgentRunner: model chose execution=${execution.trim().toLowerCase()}`);
     }
   }
 
@@ -305,6 +782,15 @@ export class ReActAgentRunner {
     const next = this.findNextTagStart(tail, prefix);
     const value = next < 0 ? tail : tail.substring(0, next);
     return value.trim();
+  }
+
+  private readSingleLineValue(text: string, prefix: string): string | null {
+    const value = this.readLineValue(text, prefix);
+    if (value === null) {
+      return null;
+    }
+    const lineBreak = value.search(/[\r\n]/);
+    return (lineBreak < 0 ? value : value.substring(0, lineBreak)).trim();
   }
 
   private findTagStart(text: string, prefix: string): number {
@@ -345,11 +831,88 @@ export class ReActAgentRunner {
     return previous === '\n' || previous === '\r' || previous === ' ' || previous === '\t';
   }
 
-  private parseAction(response: string): ToolCall | null {
-    const action = this.readLineValue(response, 'Action:');
-    if (action === null) {
+  private parseActionPlan(response: string): ActionPlan | null {
+    const actionTexts = this.extractTaggedLines(response, 'Action:');
+    if (actionTexts.length === 0) {
       return null;
     }
-    return parseToolCallText(action);
+    const calls: ToolCall[] = [];
+    for (let index = 0; index < actionTexts.length; index++) {
+      const call = this.parseActionText(actionTexts[index]);
+      if (call === null) {
+        return null;
+      }
+      calls.push(call);
+    }
+    if (calls.length === 0) {
+      return null;
+    }
+
+    return new ActionPlan(this.parseExecutionMode(response, calls), calls);
+  }
+
+  private parseExecutionMode(response: string, calls: ToolCall[]): ExecutionMode {
+    const raw = this.readSingleLineValue(response, 'Execution:');
+    if (raw === null) {
+      return 'serial';
+    }
+
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'parallel' && calls.length > 1) {
+      if (calls.length > MAX_PARALLEL_SLOTS) {
+        return 'serial';
+      }
+      const families: string[] = [];
+      for (let index = 0; index < calls.length; index++) {
+        if (!this.tools.isParallelSafe(calls[index].name)) {
+          return 'serial';
+        }
+        const family = calls[index].name.split('.')[0];
+        if (families.indexOf(family) >= 0) {
+          return 'serial';
+        }
+        families.push(family);
+      }
+      return 'parallel';
+    }
+    return 'serial';
+  }
+
+  private extractTaggedLines(text: string, prefix: string): string[] {
+    const values: string[] = [];
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const trimmed = lines[index].trim();
+      if (trimmed.startsWith(prefix)) {
+        values.push(trimmed.substring(prefix.length).trim());
+      }
+    }
+    return values;
+  }
+
+  private parseActionText(action: string): ToolCall | null {
+    const parenCall = this.parseDelimitedAction(action, '(', ')');
+    if (parenCall !== null) {
+      return parenCall;
+    }
+
+    const bracketCall = this.parseDelimitedAction(action, '[', ']');
+    if (bracketCall !== null) {
+      return bracketCall;
+    }
+
+    return this.parseJsonAction(action);
+  }
+
+  private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {
+    const open = action.indexOf(openToken);
+    const close = action.lastIndexOf(closeToken);
+    if (open <= 0 || close < open) {
+      return null;
+    }
+
+    const name = action.substring(0, open).trim();
+    const input = action.substring(open + 1, close).trim();
+    return new ToolCall(name, input);
   }
 }

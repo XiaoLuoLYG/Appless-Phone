@@ -1,4 +1,6 @@
 import { AgentEvent } from '../agent/AgentEvent';
+import { MultiToolSurfaceComposer } from '../agent/MultiToolSurfaceComposer';
+import { LoopBatchExecution } from '../agent/MultiToolTypes';
 import { A2uiSurfaceState } from './runtime/A2uiTypes';
 
 export interface LoopModelSettings {
@@ -25,6 +27,8 @@ export interface LoopBackendRequest {
   persona?: Object;
   ignoreToolSurfaceUpdates?: boolean;
   maxSteps: number;
+  batchExecution?: LoopBatchExecution | null;
+  batchComposer?: MultiToolSurfaceComposer | null;
 }
 
 export interface LoopBackendCallbacks {

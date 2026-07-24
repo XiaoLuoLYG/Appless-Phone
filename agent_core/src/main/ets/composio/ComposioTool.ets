@@ -1,4 +1,5 @@
 import { AgentTool } from '../agent/AgentTool';
+import { AgentToolRunOptions } from '../agent/AgentToolRunOptions';
 import { ComposioSessionClient } from './ComposioSessionClient';
 
 interface ComposioToolInput {
@@ -23,7 +24,7 @@ export class ComposioTool implements AgentTool {
     return this.client.toolDescription();
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     let parsed: ComposioToolInput;
     try {
       parsed = JSON.parse(input) as ComposioToolInput;

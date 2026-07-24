@@ -2108,6 +2108,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('luckin-payment-option-chip')).assertLarger(-1);
       expect(html.indexOf('瑞幸咖啡 深圳科技园店')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/wechat_pay.jpeg')).assertLarger(-1);
+      expect(html.indexOf('patchLuckinPaymentStatus')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/alipay.jpeg')).assertLarger(-1);
       expect(html.indexOf('resource://rawfile/google_pay.jpeg')).assertLarger(-1);
     });

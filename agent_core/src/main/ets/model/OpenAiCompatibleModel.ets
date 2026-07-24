@@ -2,7 +2,7 @@ import http from '@ohos.net.http';
 import util from '@ohos.util';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
 import { aiLogInfo } from '../aiphone/runtime/AiphoneLogger';
-import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
+import { buildReActFormatRules, buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 import { ChatCompletionSseParser } from './ChatCompletionSseParser';
 import { LocalModel, ModelContentListener } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
@@ -268,10 +268,9 @@ export class OpenAiCompatibleModel implements LocalModel {
   }
 
   private systemPrompt(): string {
-    let content = 'You are Loop, a concise ReAct agent on HarmonyOS. Every response must use exactly one of these two forms:\n' +
-      'Thought: brief reasoning\n<appless_tool>tool.name({"key":"value"})</appless_tool>\n' +
-      'or:\nThought: brief reasoning\nFinal: answer\n' +
-      'A response that ends after Thought is invalid. If Thought says a tool will be used, the very next line must be <appless_tool>...</appless_tool>. Never merely describe or announce a tool call. After </appless_tool>, you may continue with ordinary status text, but never emit another tool call in the same response. Use only listed tools and follow the tool-routing rules in the prompt exactly.';
+    let content = 'You are Loop, a concise ReAct agent on HarmonyOS.';
+    content += buildReActFormatRules();
+    content += ' Follow the tool-routing rules in the prompt exactly.';
     const skills = buildSkillsSection(this.skillSnapshot);
     if (skills.length > 0) {
       content += `\n\n${skills}`;

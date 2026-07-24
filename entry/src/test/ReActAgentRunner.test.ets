@@ -4,6 +4,7 @@ import {
   AgentEventKind,
   AgentSkill,
   AgentTool,
+  AgentToolRunOptions,
   aiphoneToolSurfaceCallback,
   A2uiEnvelope,
   A2uiSurfaceState,
@@ -50,7 +51,7 @@ class CaptureTool implements AgentTool {
     return 'capture tool input';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     this.called = true;
     this.input = input;
     return 'captured';
@@ -79,11 +80,13 @@ class SequenceModel implements LocalModel {
 class FixedTool implements AgentTool {
   private toolName: string;
   private output: string;
+  private timeline: string[] | null;
   calls: string[] = [];
 
-  constructor(toolName: string, output: string) {
+  constructor(toolName: string, output: string, timeline: string[] | null = null) {
     this.toolName = toolName;
     this.output = output;
+    this.timeline = timeline;
   }
 
   name(): string {
@@ -94,8 +97,13 @@ class FixedTool implements AgentTool {
     return 'fixed tool output';
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     this.calls.push(input);
+    if (this.timeline !== null) {
+      this.timeline.push(this.toolName + ':start');
+      await Promise.resolve();
+      this.timeline.push(this.toolName + ':end');
+    }
     return this.output;
   }
 }
@@ -124,6 +132,36 @@ class StreamingXmlModel implements LocalModel {
       onContent?.(chunks[index]);
     }
     this.startedBeforeComplete = this.tool.calls.length === 1;
+    return chunks.join('');
+  }
+}
+
+class ParallelStreamingXmlModel implements LocalModel {
+  private first: FixedTool;
+  private second: FixedTool;
+  firstStartedBeforeSecondTag: boolean = false;
+  bothStartedBeforeComplete: boolean = false;
+
+  constructor(first: FixedTool, second: FixedTool) {
+    this.first = first;
+    this.second = second;
+  }
+
+  async complete(
+    _prompt: string,
+    _conversation?: ConversationContext,
+    onContent?: ModelContentListener
+  ): Promise<string> {
+    const chunks: string[] = [
+      'Thought: run two independent lookups\nExecution: parallel\n<appless_tool>train.search[]</appless_tool>\nStatus: first lookup dispatched.\n',
+      '<appless_tool>food.search({"query":"near station"})</appless_',
+      'tool>\nStatus: both lookups dispatched.'
+    ];
+    onContent?.(chunks[0]);
+    this.firstStartedBeforeSecondTag = this.first.calls.length === 1 && this.second.calls.length === 0;
+    onContent?.(chunks[1]);
+    onContent?.(chunks[2]);
+    this.bothStartedBeforeComplete = this.first.calls.length === 1 && this.second.calls.length === 1;
     return chunks.join('');
   }
 }
@@ -208,14 +246,28 @@ export default function reActAgentRunnerTest() {
     it('emits one tool call only after a split closing XML tag is complete', 0, () => {
       const parser = new StreamingToolCallParser();
 
-      expect(parser.feed('Thought: search now\n<appless_') === null).assertTrue();
-      expect(parser.feed('tool>train.search({"departure":"北京"})</appless_') === null).assertTrue();
-      const call = parser.feed('tool>');
+      expect(parser.feed('Thought: search now\n<appless_').length).assertEqual(0);
+      expect(parser.feed('tool>train.search({"departure":"北京"})</appless_').length).assertEqual(0);
+      const calls = parser.feed('tool>');
 
-      expect(call !== null).assertTrue();
-      expect(call?.name).assertEqual('train.search');
-      expect(call?.input).assertEqual('{"departure":"北京"}');
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].name).assertEqual('train.search');
+      expect(calls[0].input).assertEqual('{"departure":"北京"}');
       expect(parser.leadingText()).assertEqual('Thought: search now\n');
+    });
+
+    it('emits every complete XML tool call even when one chunk contains multiple tags', 0, () => {
+      const parser = new StreamingToolCallParser();
+      const calls = parser.feed(
+        'Thought: parallel\nExecution: parallel\n' +
+        '<appless_tool>train.search[]</appless_tool>\n' +
+        '<appless_tool>food.search({"query":"station"})</appless_tool>'
+      );
+
+      expect(calls.length).assertEqual(2);
+      expect(calls[0].name).assertEqual('train.search');
+      expect(calls[1].name).assertEqual('food.search');
+      parser.finish();
     });
 
     it('starts a streamed XML tool before model completion and emits one action', 0, async () => {
@@ -236,6 +288,29 @@ export default function reActAgentRunnerTest() {
       expect(tool.calls.length).assertEqual(1);
       expect(tool.calls[0]).assertEqual('{"departure":"北京","arrival":"上海"}');
       expect(actionCount).assertEqual(1);
+    });
+
+    it('starts each parallel XML tool as soon as its own closing tag arrives', 0, async () => {
+      const first = new FixedTool('train.search', 'trains');
+      const second = new FixedTool('food.search', 'restaurants');
+      const model = new ParallelStreamingXmlModel(first, second);
+      const registry = new ToolRegistry();
+      registry.register(first, true);
+      registry.register(second, true);
+      const runner = new ReActAgentRunner(model, registry, 1);
+      let actionCount = 0;
+
+      await runner.run('search trains and food', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actionCount++;
+        }
+      });
+
+      expect(model.firstStartedBeforeSecondTag).assertTrue();
+      expect(model.bothStartedBeforeComplete).assertTrue();
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(1);
+      expect(actionCount).assertEqual(2);
     });
 
     it('forwards or ignores tool surfaces according to the runtime switch', 0, () => {
@@ -407,7 +482,7 @@ export default function reActAgentRunnerTest() {
         expect(digest.shouldStop).assertTrue();
       });
 
-      const failureStatuses: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
+      const failureStatuses: string[] = ['error', 'blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
       failureStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(genericToolResultsA2ui('surface_media', 'youtube.video.search', [mediaResult(status)]));
         expect(digest.failureKey.indexOf('youtube.video.search')).assertLarger(-1);
@@ -416,7 +491,7 @@ export default function reActAgentRunnerTest() {
     });
 
     it('sets failure keys from component-only terminal statuses', 0, () => {
-      const failureStatuses: string[] = ['error', 'blocked', 'auth_required'];
+      const failureStatuses: string[] = ['error', 'blocked', 'confirm_required', 'needs_input', 'auth_required'];
       failureStatuses.forEach((status: string) => {
         const digest = summarizeA2uiObservation(componentOnlyStatusJsonl(status));
 
@@ -611,6 +686,250 @@ export default function reActAgentRunnerTest() {
 
       expect(withoutModelScope.prompts[0].indexOf('Call modelscope only')).assertEqual(-1);
       expect(withModelScope.prompts[0].indexOf('Call modelscope only')).assertLarger(-1);
+    });
+
+    it('runs independent tools in parallel when Execution is parallel', 0, async () => {
+      const timeline: string[] = [];
+      const timeTool = new FixedTool('time', '2026-07-21T10:00:00', timeline);
+      const noteTool = new FixedTool('note', 'shopping list', timeline);
+      const registry = new ToolRegistry();
+      registry.register(timeTool, true);
+      registry.register(noteTool, true);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: need time and note independently\nExecution: parallel\nAction: time[]\nAction: note[shopping list]'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+
+      await runner.run('time and note', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(timeTool.calls.length).assertEqual(1);
+      expect(noteTool.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+      expect(timeline.join(',')).assertEqual('time:start,note:start,time:end,note:end');
+    });
+
+    it('falls back to serial for tools not marked parallel-safe', 0, async () => {
+      const timeline: string[] = [];
+      const first = new FixedTool('tool.a', 'result-a', timeline);
+      const second = new FixedTool('tool.b', 'result-b', timeline);
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: requested parallel writes\nExecution: parallel\nAction: tool.a[]\nAction: tool.b[]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('unsafe tools', (_event: AgentEvent): void => {});
+
+      expect(timeline.join(',')).assertEqual('tool.a:start,tool.a:end,tool.b:start,tool.b:end');
+    });
+
+    it('falls back to serial for parallel-safe tools from the same family', 0, async () => {
+      const timeline: string[] = [];
+      const estimate = new FixedTool('ride.estimate', 'estimate', timeline);
+      const location = new FixedTool('ride.driver.location', 'location', timeline);
+      const registry = new ToolRegistry();
+      registry.register(estimate, true);
+      registry.register(location, true);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: two ride calls\nExecution: parallel\nAction: ride.estimate[]\nAction: ride.driver.location[]'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('ride calls', (_event: AgentEvent): void => {});
+
+      expect(timeline.join(',')).assertEqual(
+        'ride.estimate:start,ride.estimate:end,ride.driver.location:start,ride.driver.location:end'
+      );
+    });
+
+    it('runs multiple actions serially in declaration order', 0, async () => {
+      const first = new FixedTool('tool.a', 'result-a');
+      const second = new FixedTool('tool.b', 'result-b');
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: second depends on first\nExecution: serial\nAction: tool.a({})\nAction: tool.b({})'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+
+      await runner.run('serial tools', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+      expect(actions[0].indexOf('tool.a')).assertLarger(-1);
+      expect(actions[1].indexOf('tool.b')).assertLarger(-1);
+    });
+
+    it('runs all serial A2UI tools before emitting final', 0, async () => {
+      const calendar = new FixedTool('calendar.event.create', componentOnlyStatusJsonl('ready', 'surface_calendar'));
+      const gmail = new FixedTool('gmail.draft.create', componentOnlyStatusJsonl('ready', 'surface_gmail'));
+      const registry = new ToolRegistry();
+      registry.register(calendar);
+      registry.register(gmail);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: create event then draft email\nExecution: serial\n' +
+          'Action: calendar.event.create({"title":"会议"})\n' +
+          'Action: gmail.draft.create({"to":"test@example.com","subject":"会议","body":"明天见"})'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+      let finalCount = 0;
+      let observationCount = 0;
+
+      await runner.run('serial a2ui chain', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+        if (event.kind === AgentEventKind.FINAL) {
+          finalCount++;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observationCount++;
+        }
+      });
+
+      expect(calendar.calls.length).assertEqual(1);
+      expect(gmail.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+      expect(observationCount).assertEqual(2);
+      expect(finalCount).assertEqual(1);
+    });
+
+    it('waits for all parallel A2UI tools before emitting final', 0, async () => {
+      const first = new FixedTool('tool.a', componentOnlyStatusJsonl('ready', 'surface_a'));
+      const second = new FixedTool('service.b', componentOnlyStatusJsonl('ready', 'surface_b'));
+      const registry = new ToolRegistry();
+      registry.register(first, true);
+      registry.register(second, true);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: two independent A2UI tools\nExecution: parallel\nAction: tool.a[]\nAction: service.b[]'
+        ),
+        registry,
+        1
+      );
+      let finalCount = 0;
+      let observationCount = 0;
+
+      await runner.run('parallel a2ui', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.FINAL) {
+          finalCount++;
+        }
+        if (event.kind === AgentEventKind.OBSERVATION) {
+          observationCount++;
+        }
+      });
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(1);
+      expect(observationCount).assertEqual(2);
+      expect(finalCount).assertEqual(1);
+    });
+
+    it('runs read and time in parallel when Execution is parallel', 0, async () => {
+      const readTool = new FixedTool('read', '# Skill: weather\n\nUse weather API.');
+      const timeTool = new FixedTool('time', '2026-07-21T10:00:00');
+      const registry = new ToolRegistry();
+      registry.register(readTool, true);
+      registry.register(timeTool, true);
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: read skill and get time\nExecution: parallel\nAction: read[weather]\nAction: time[]'
+        ),
+        registry,
+        1
+      );
+      const actions: string[] = [];
+
+      await runner.run('read and time', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(readTool.calls.length).assertEqual(1);
+      expect(timeTool.calls.length).assertEqual(1);
+      expect(actions.length).assertEqual(2);
+    });
+
+    it('rejects malformed action plans without executing tools', 0, async () => {
+      const first = new FixedTool('tool.a', 'result-a');
+      const second = new FixedTool('tool.b', 'result-b');
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      let errorText = '';
+      const runner = new ReActAgentRunner(
+        new SingleActionModel(
+          'Thought: broken plan\nExecution: serial\nAction: tool.a({})\nAction: tool.b[{invalid json}'
+        ),
+        registry,
+        1
+      );
+
+      await runner.run('broken plan', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ERROR) {
+          errorText = event.text;
+        }
+      });
+
+      expect(first.calls.length).assertEqual(0);
+      expect(second.calls.length).assertEqual(0);
+      expect(errorText.indexOf('Action or Final')).assertLarger(-1);
+    });
+
+    it('downgrades parallel to serial when more than four actions are requested', 0, async () => {
+      const tools: FixedTool[] = [];
+      const registry = new ToolRegistry();
+      for (let index = 0; index < 5; index++) {
+        const tool = new FixedTool('tool.' + index.toString(), 'result-' + index.toString());
+        tools.push(tool);
+        registry.register(tool, true);
+      }
+      const response =
+        'Thought: too many parallel actions\nExecution: parallel\n' +
+        'Action: tool.0[]\nAction: tool.1[]\nAction: tool.2[]\nAction: tool.3[]\nAction: tool.4[]';
+      const runner = new ReActAgentRunner(new SingleActionModel(response), registry, 1);
+      const actions: string[] = [];
+
+      await runner.run('too many tools', (event: AgentEvent) => {
+        if (event.kind === AgentEventKind.ACTION) {
+          actions.push(event.text);
+        }
+      });
+
+      expect(actions.length).assertEqual(5);
+      expect(actions[0].indexOf('tool.0')).assertLarger(-1);
+      expect(actions[4].indexOf('tool.4')).assertLarger(-1);
     });
   });
 }

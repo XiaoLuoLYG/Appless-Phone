@@ -241,6 +241,10 @@ function verifySourceContracts() {
   assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
   assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
   assertContains(runner, 'digest.isA2ui && digest.shouldStop', 'ReAct runner stops after terminal A2UI tool observations');
+  assertContains(runner, 'executeBatchToolCalls', 'ReAct runner supports parallel tool execution');
+  assertContains(runner, 'MAX_PARALLEL_SLOTS', 'ReAct runner caps parallel slots');
+  assertContains(runner, 'parseActionPlan', 'ReAct runner parses multi-action plans');
+  assertContains(runner, "Execution: parallel or Execution: serial", 'ReAct runner documents execution mode in prompt');
 
   assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');

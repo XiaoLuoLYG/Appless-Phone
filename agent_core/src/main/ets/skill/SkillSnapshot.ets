@@ -65,8 +65,11 @@ export function buildLoopSystemPrompt(snapshot: SkillSnapshot | null): string {
 
 export function buildReActFormatRules(): string {
   return ' Every reply MUST include Thought: on its own line, then exactly one of:\n'
-    + '- <appless_tool>tool_name[input]</appless_tool>  (e.g. <appless_tool>time[]</appless_tool>, <appless_tool>read[weather]</appless_tool>)\n'
+    + '- Single tool: one <appless_tool>tool_name[input]</appless_tool> and no Execution line\n'
+    + '- Multiple independent tools: Execution: parallel, then one <appless_tool>...</appless_tool> per tool\n'
+    + '- Multiple dependent tools: Execution: serial, then one <appless_tool>...</appless_tool> per tool in dependency order\n'
     + '- Final: answer\n'
-    + 'Output at most one tool call. After </appless_tool>, ordinary status text is allowed, but do not emit another tool call. Do not use markdown bold, bullets, or code blocks around tool calls or Final lines. '
+    + 'Every tool tag must be closed before starting another. Ordinary status text may follow the last closing tag. '
+    + 'Do not use markdown bold, bullets, or code blocks around tool calls or Final lines. '
     + 'Use only listed tools.';
 }

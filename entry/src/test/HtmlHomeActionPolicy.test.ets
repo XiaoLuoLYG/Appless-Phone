@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { A2uiAction } from '@loop/agent-core';
 import { isHtmlHomeActionAllowed } from '../main/ets/pages/A2uiHome/html/HtmlHomeActionPolicy';
-import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 
 interface ThreadOnlyArgsFixture {
   threadId: string;
@@ -56,6 +56,14 @@ interface LuckinArgsFixture {
   attrChoice?: string;
   locationSource?: string;
   orderId?: string;
+}
+
+interface LuckinShopArgsFixture {
+  deptId: string;
+  deptName: string;
+  address: string;
+  distance: string;
+  status: string;
 }
 
 function action(id: string, prompt: string, kind: string = 'client', args: Object | null = null): A2uiAction {
@@ -561,6 +569,56 @@ export default function htmlHomeActionPolicyTest() {
 
       expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://connect.stripe.com/setup/s/acct_123', 'client', allowedArgs))).assertTrue();
       expect(isHtmlHomeActionAllowed(doc, action('stripe.account.open', 'https://evil.example/setup', 'client', blockedArgs))).assertFalse();
+    });
+
+    it('allows luckin actions from embedded multi_task sections', 0, () => {
+      const luckinDoc = documentFixture();
+      luckinDoc.kind = 'luckin';
+      const shopArgs: LuckinShopArgsFixture = {
+        deptId: '1001',
+        deptName: '瑞幸咖啡 深圳科技园店',
+        address: '深圳市南山区科技园',
+        distance: '120m',
+        status: '营业中'
+      };
+      const shopBlock: HtmlHomeBlock = {
+        id: 'luckin-shop',
+        kind: 'generic-tool-result',
+        title: '选择瑞幸门店',
+        subtitle: '',
+        status: 'ready',
+        source: '瑞幸',
+        metrics: [],
+        rows: [],
+        actions: [{
+          id: 'luckin.order.preview',
+          label: '科技园店',
+          prompt: '生椰拿铁',
+          variant: 'primary',
+          kind: 'prompt',
+          args: shopArgs
+        }]
+      };
+      luckinDoc.blocks = [shopBlock];
+      const multiTaskDoc = documentFixture();
+      multiTaskDoc.kind = 'multi-task';
+      const multiTaskBlock: HtmlHomeBlock = {
+        id: 'slot_0',
+        kind: 'multi-task-section',
+        title: '瑞幸点单',
+        sectionId: 'slot_0',
+        toolId: 'luckin.order.preview',
+        status: 'ready',
+        metrics: [],
+        rows: [],
+        actions: [],
+        embeddedDocument: luckinDoc
+      };
+      multiTaskDoc.blocks = [multiTaskBlock];
+
+      const shopAction = action('luckin.order.preview', '生椰拿铁', 'prompt', shopArgs);
+      expect(isHtmlHomeActionAllowed(multiTaskDoc, shopAction)).assertTrue();
+      expect(isHtmlHomeActionAllowed(multiTaskDoc, action('luckin.order.preview', 'evil', 'prompt'))).assertFalse();
     });
   });
 }

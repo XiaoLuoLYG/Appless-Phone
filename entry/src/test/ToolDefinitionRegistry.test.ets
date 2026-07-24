@@ -164,6 +164,15 @@ export default function toolDefinitionRegistryTest() {
       expect(detail.indexOf('does not create')).assertLarger(-1);
     });
 
+    it('requires exact Gmail search keywords without inferred expansions', 0, () => {
+      const description = aiphoneToolDescriptionForModel('gmail.mail.search');
+
+      expect(description.indexOf('only from exact keywords')).assertLarger(-1);
+      expect(description.indexOf('Never add synonyms')).assertLarger(-1);
+      expect(description.indexOf('never "ECCV OR paper OR manuscript OR review OR conference"')).assertLarger(-1);
+      expect(description.indexOf('expand the Gmail query with likely English terms')).assertEqual(-1);
+    });
+
     it('registers Calendar writes and Maps POI search explicitly', 0, () => {
       const calendarCreate = toolDefinitionForToolId('calendar.event.create') as ToolDefinition;
       const calendarUpdate = toolDefinitionForToolId('calendar.event.update') as ToolDefinition;

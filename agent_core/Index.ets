@@ -2,14 +2,23 @@ export { ChatMessage, ConversationContext, ConversationRole } from './src/main/e
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
-export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
+export { AgentToolRunOptions } from './src/main/ets/agent/AgentToolRunOptions';
+export { A2uiObservationDigest, summarizeA2uiObservation, summarizeAppliedA2uiSurface } from './src/main/ets/agent/A2uiObservationDigest';
 export {
   ToolRegistry,
   ToolRegistryCloseHandler,
   createConfiguredLoopToolRegistry,
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
-export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
+export { ReActAgentRunner, AgentListener, UiRenderHandler, MAX_PARALLEL_SLOTS, ReActBatchHost } from './src/main/ets/agent/ReActAgentRunner';
+export { MultiToolSurfaceComposer } from './src/main/ets/agent/MultiToolSurfaceComposer';
+export {
+  childSurfaceIdForMultiTaskSlot,
+  isMultiTaskSurface,
+  mergeSlotObservationIntoMultiTaskSurface,
+  resolveMultiTaskSlotId
+} from './src/main/ets/agent/MultiTaskSurfaceMerge';
+export { LoopBatchExecution, MultiTaskBoardData } from './src/main/ets/agent/MultiToolTypes';
 export { StreamingToolCallParser, ToolCall, parseToolCallText } from './src/main/ets/agent/StreamingToolCallParser';
 export { ChatCompletionSseParser } from './src/main/ets/model/ChatCompletionSseParser';
 export { LocalModel, ModelContentListener } from './src/main/ets/model/LocalModel';

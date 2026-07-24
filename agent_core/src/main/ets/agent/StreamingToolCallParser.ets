@@ -3,8 +3,7 @@ const APPLESS_TOOL_CLOSE_TAG = '</appless_tool>';
 
 enum ToolCallParserState {
   TEXT,
-  TOOL_BODY,
-  DONE
+  TOOL_BODY
 }
 
 export class ToolCall {
@@ -51,51 +50,54 @@ export class StreamingToolCallParser {
   private leading: string = '';
   private body: string = '';
 
-  feed(delta: string): ToolCall | null {
+  feed(delta: string): ToolCall[] {
     if (delta.length > 0) {
       this.pending += delta;
     }
 
-    if (this.state === ToolCallParserState.TEXT) {
-      const open = this.pending.indexOf(APPLESS_TOOL_OPEN_TAG);
-      if (open < 0) {
-        this.moveSafePrefixToLeading();
-        return null;
+    const calls: ToolCall[] = [];
+    while (true) {
+      if (this.state === ToolCallParserState.TEXT) {
+        const open = this.pending.indexOf(APPLESS_TOOL_OPEN_TAG);
+        if (open < 0) {
+          this.moveSafePrefixToLeading();
+          break;
+        }
+
+        this.leading += this.pending.substring(0, open);
+        this.pending = this.pending.substring(open + APPLESS_TOOL_OPEN_TAG.length);
+        this.state = ToolCallParserState.TOOL_BODY;
       }
 
-      this.leading += this.pending.substring(0, open);
-      this.pending = this.pending.substring(open + APPLESS_TOOL_OPEN_TAG.length);
-      this.state = ToolCallParserState.TOOL_BODY;
+      if (this.state === ToolCallParserState.TOOL_BODY) {
+        const close = this.pending.indexOf(APPLESS_TOOL_CLOSE_TAG);
+        if (close < 0) {
+          this.moveSafePrefixToBody();
+          break;
+        }
+
+        this.body += this.pending.substring(0, close);
+        this.pending = this.pending.substring(close + APPLESS_TOOL_CLOSE_TAG.length);
+        const call = parseToolCallText(this.body);
+        this.body = '';
+        this.state = ToolCallParserState.TEXT;
+        if (call === null) {
+          throw new Error('Malformed tool call inside <appless_tool>.');
+        }
+        calls.push(call);
+      }
     }
-
-    if (this.state === ToolCallParserState.TOOL_BODY) {
-      const close = this.pending.indexOf(APPLESS_TOOL_CLOSE_TAG);
-      if (close < 0) {
-        this.moveSafePrefixToBody();
-        return null;
-      }
-
-      this.body += this.pending.substring(0, close);
-      this.pending = this.pending.substring(close + APPLESS_TOOL_CLOSE_TAG.length);
-      this.state = ToolCallParserState.DONE;
-      const call = parseToolCallText(this.body);
-      if (call === null) {
-        throw new Error('Malformed tool call inside <appless_tool>.');
-      }
-      return call;
-    }
-
-    return null;
+    return calls;
   }
 
-  finish(): void {
+  finish(): ToolCall[] {
+    const calls = this.feed('');
     if (this.state === ToolCallParserState.TOOL_BODY) {
       throw new Error('Tool call stream ended before </appless_tool>.');
     }
-    if (this.state === ToolCallParserState.TEXT) {
-      this.leading += this.pending;
-      this.pending = '';
-    }
+    this.leading += this.pending;
+    this.pending = '';
+    return calls;
   }
 
   leadingText(): string {

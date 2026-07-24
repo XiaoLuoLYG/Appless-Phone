@@ -91,7 +91,7 @@ export function preparePersonaPrompt(prompt: string): PreparedPersonaPrompt {
     'Memory:',
     pack.memory,
     'Tool args instruction:',
-    'Call exactly one best-fit tool when a tool is needed, using the enclosing <appless_tool>tool.name({"key":"value"})</appless_tool> format instead of merely naming or announcing the tool. Preserve the original user task. For food.search, include brandPreference and sweetness JSON args when memory says 瑞幸 or 半糖. Include brandStrict=true when memory says 只喝瑞幸.',
+    'When tools are needed, use one enclosing <appless_tool>tool.name({"key":"value"})</appless_tool> per call instead of merely naming or announcing tools. Use Execution: parallel only for multiple independent calls, and Execution: serial for multiple dependent calls. Preserve the original user task. For food.search, include brandPreference and sweetness JSON args when memory says 瑞幸 or 半糖. Include brandStrict=true when memory says 只喝瑞幸.',
     'Memory update instruction:',
     'When the user states a durable preference, identity fact, or stable constraint for the active persona, call memory.update with JSON { personaId, summary, memoryText, reason, suggestedAction }. Do not call search tools in the same turn. For the coffee preference example, suggestedAction should let the user rerun the previous coffee task, such as label=按新偏好重新查咖啡 and prompt=点一杯咖啡.',
     'User task:',

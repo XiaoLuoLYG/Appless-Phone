@@ -11,12 +11,12 @@ export class ScriptedLocalModel implements LocalModel {
       const task = this.extractTask(prompt);
       const lower = task.toLowerCase();
       if (lower.includes('time') || lower.includes('date')) {
-        return this.emit('Thought: I should inspect the device clock.\nAction: time[]', onContent);
+        return this.emit('Thought: I should inspect the device clock.\n<appless_tool>time[]</appless_tool>', onContent);
       }
       if (this.wantsUi(lower)) {
-        return this.emit(`Thought: The user wants a visual UI on screen.\nAction: ui[${task}]`, onContent);
+        return this.emit(`Thought: The user wants a visual UI on screen.\n<appless_tool>ui[${task}]</appless_tool>`, onContent);
       }
-      return this.emit(`Thought: I should preserve the user's request as local context.\nAction: note[${task}]`, onContent);
+      return this.emit(`Thought: I should preserve the user's request as local context.\n<appless_tool>note[${task}]</appless_tool>`, onContent);
     }
 
     if (prompt.toLowerCase().includes('rendered on-screen ui')) {

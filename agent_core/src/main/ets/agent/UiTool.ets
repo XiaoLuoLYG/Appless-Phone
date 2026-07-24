@@ -1,4 +1,5 @@
 import { AgentTool } from './AgentTool';
+import { AgentToolRunOptions } from './AgentToolRunOptions';
 
 /** Registered for prompts; actual rendering is handled by ReActAgentRunner. */
 export class UiTool implements AgentTool {
@@ -12,7 +13,7 @@ export class UiTool implements AgentTool {
       'visualize, or build a card, form, or dashboard — not for plain text answers.';
   }
 
-  async run(_input: string): Promise<string> {
+  async run(_input: string, _options?: AgentToolRunOptions): Promise<string> {
     return 'UI rendering is handled by the agent runtime.';
   }
 }
