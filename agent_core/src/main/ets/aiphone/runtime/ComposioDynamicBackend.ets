@@ -1484,6 +1484,28 @@ function successfulGmailDraftPayload(payload: Object, toolSlug: string): boolean
   return valueLooksLikeGmailDraft(record.data) || valueLooksLikeGmailDraft(record.error) || valueLooksLikeGmailDraft(record);
 }
 
+function successfulCalendarWritePayload(payload: Object, toolSlug: string): boolean {
+  const lower = toolSlug.toLowerCase();
+  if (lower !== 'googlecalendar_create_event' && lower !== 'googlecalendar_patch_event') {
+    return false;
+  }
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  const data = objectRecord(record.data);
+  const response = data === null ? null : objectRecord(data.response_data);
+  if (response === null ||
+    response.success === false || response.success === 'false' ||
+    response.successful === false || response.successful === 'false') {
+    return false;
+  }
+  const status = stringField(response, ['status']).toLowerCase();
+  if (status.indexOf('fail') >= 0 || status.indexOf('error') >= 0 ||
+    status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
+    status.indexOf('invalid') >= 0) {
+    return false;
+  }
+  return stringField(response, ['id']).length > 0;
+}
+
 function executionStatusValue(
   record: Record<string, Object | string | number | boolean | null | undefined>,
   expected: boolean
@@ -1532,6 +1554,9 @@ function executionErrorMessage(payload: Object, toolSlug: string = ''): string {
     return nestedError;
   }
   if (executionStatusValue(record, true)) {
+    return '';
+  }
+  if (successfulCalendarWritePayload(payload, toolSlug)) {
     return '';
   }
   if (isUnsafeComposioExecute(toolSlug, '{}')) {

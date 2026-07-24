@@ -834,6 +834,29 @@ export default function composioDynamicBackendTest() {
       expect(result.rawPreview.indexOf('mail.google.com')).assertLarger(-1);
     });
 
+    it('accepts the real Calendar write response_data id without a generic success flag', 0, () => {
+      const observation = '{"data":{"composio_execution_message":null,' +
+        '"response_data":{"id":"event-created-real","summary":"Appless QA",' +
+        '"start":{"dateTime":"2026-07-31T15:00:00+08:00"},' +
+        '"end":{"dateTime":"2026-07-31T15:30:00+08:00"}}},"error":null}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GOOGLECALENDAR_CREATE_EVENT',
+        '创建 Google Calendar 日程'
+      );
+      const rejected: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{"success":false,"id":"event-must-not-pass"}},"error":null}',
+        'GOOGLECALENDAR_CREATE_EVENT',
+        '创建 Google Calendar 日程'
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.rawPreview.indexOf('event-created-real')).assertLarger(-1);
+      expect(rejected.status).assertEqual('error');
+    });
+
     it('maps Google Docs file payload to display rows', 0, () => {
       const observation = '{"data":{"files":[{"id":"doc_1","name":"AIPhoneDemo 设计文档","modifiedTime":"2026-07-06T12:41:26.011Z","webViewLink":"https://docs.google.com/document/d/doc_1/edit"}]}}';
       const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
