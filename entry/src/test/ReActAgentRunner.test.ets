@@ -565,7 +565,7 @@ export default function reActAgentRunnerTest() {
       expect(timeline.join(',')).assertEqual('time:start,note:start,time:end,note:end');
     });
 
-    it('falls back to serial for tools not marked parallel-safe', 0, async () => {
+    it('falls back to ordered execution for tools not marked parallel-safe', 0, async () => {
       const timeline: string[] = [];
       const first = new FixedTool('tool.a', 'result-a', timeline);
       const second = new FixedTool('tool.b', 'result-b', timeline);
@@ -585,7 +585,7 @@ export default function reActAgentRunnerTest() {
       expect(timeline.join(',')).assertEqual('tool.a:start,tool.a:end,tool.b:start,tool.b:end');
     });
 
-    it('falls back to serial for parallel-safe tools from the same family', 0, async () => {
+    it('falls back to ordered execution for parallel-safe tools from the same family', 0, async () => {
       const timeline: string[] = [];
       const estimate = new FixedTool('ride.estimate', 'estimate', timeline);
       const location = new FixedTool('ride.driver.location', 'location', timeline);
@@ -607,48 +607,74 @@ export default function reActAgentRunnerTest() {
       );
     });
 
-    it('runs multiple actions serially in declaration order', 0, async () => {
+    it('chains serial tools across model turns using prior observations', 0, async () => {
       const first = new FixedTool('tool.a', 'result-a');
       const second = new FixedTool('tool.b', 'result-b');
       const registry = new ToolRegistry();
       registry.register(first);
       registry.register(second);
-      const runner = new ReActAgentRunner(
-        new SingleActionModel(
-          'Thought: second depends on first\nExecution: serial\nAction: tool.a({})\nAction: tool.b({})'
-        ),
-        registry,
-        1
-      );
+      const model = new SequenceModel([
+        'Thought: need a first\nExecution: serial\nAction: tool.a({})',
+        'Thought: use prior result\nExecution: serial\nAction: tool.b({"from":"result-a"})',
+        'Final: done'
+      ]);
+      const runner = new ReActAgentRunner(model, registry, 4);
       const actions: string[] = [];
+      let finalCount = 0;
 
       await runner.run('serial tools', (event: AgentEvent) => {
         if (event.kind === AgentEventKind.ACTION) {
           actions.push(event.text);
         }
+        if (event.kind === AgentEventKind.FINAL) {
+          finalCount++;
+        }
       });
 
       expect(first.calls.length).assertEqual(1);
       expect(second.calls.length).assertEqual(1);
+      expect(second.calls[0].indexOf('result-a')).assertLarger(-1);
       expect(actions.length).assertEqual(2);
       expect(actions[0].indexOf('tool.a')).assertLarger(-1);
       expect(actions[1].indexOf('tool.b')).assertLarger(-1);
+      expect(finalCount).assertEqual(1);
+      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts[1].indexOf('Observation: result-a')).assertLarger(-1);
     });
 
-    it('runs all serial A2UI tools before emitting final', 0, async () => {
+    it('runs only the first Action when serial reply lists multiple Actions', 0, async () => {
+      const first = new FixedTool('tool.a', 'result-a');
+      const second = new FixedTool('tool.b', 'result-b');
+      const registry = new ToolRegistry();
+      registry.register(first);
+      registry.register(second);
+      const model = new SequenceModel([
+        'Thought: second depends on first\nExecution: serial\nAction: tool.a({})\nAction: tool.b({})',
+        'Final: stopped after first'
+      ]);
+      const runner = new ReActAgentRunner(model, registry, 3);
+
+      await runner.run('serial tools', (_event: AgentEvent): void => {});
+
+      expect(first.calls.length).assertEqual(1);
+      expect(second.calls.length).assertEqual(0);
+      expect(model.prompts[1].indexOf('Only the first Action was executed')).assertLarger(-1);
+    });
+
+    it('chains serial A2UI tools across turns before emitting final', 0, async () => {
       const calendar = new FixedTool('calendar.event.create', componentOnlyStatusJsonl('ready', 'surface_calendar'));
       const gmail = new FixedTool('gmail.draft.create', componentOnlyStatusJsonl('ready', 'surface_gmail'));
       const registry = new ToolRegistry();
       registry.register(calendar);
       registry.register(gmail);
       const runner = new ReActAgentRunner(
-        new SingleActionModel(
-          'Thought: create event then draft email\nExecution: serial\n' +
-          'Action: calendar.event.create({"title":"会议"})\n' +
-          'Action: gmail.draft.create({"to":"test@example.com","subject":"会议","body":"明天见"})'
-        ),
+        new SequenceModel([
+          'Thought: create event\nExecution: serial\nAction: calendar.event.create({"title":"会议"})',
+          'Thought: draft email\nExecution: serial\nAction: gmail.draft.create({"to":"test@example.com","subject":"会议","body":"明天见"})',
+          'Final: both done'
+        ]),
         registry,
-        1
+        4
       );
       const actions: string[] = [];
       let finalCount = 0;
@@ -756,7 +782,7 @@ export default function reActAgentRunnerTest() {
       expect(errorText.indexOf('Action or Final')).assertLarger(-1);
     });
 
-    it('downgrades parallel to serial when more than four actions are requested', 0, async () => {
+    it('runs all actions in order when parallel is downgraded beyond four slots', 0, async () => {
       const tools: FixedTool[] = [];
       const registry = new ToolRegistry();
       for (let index = 0; index < 5; index++) {

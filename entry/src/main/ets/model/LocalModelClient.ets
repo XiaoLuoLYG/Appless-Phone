@@ -266,7 +266,7 @@ export async function callLocalModel(
     args: mergeToolArgs(preparedPersona.toolArgs, toolArgs),
     persona: preparedPersona.runtime as Object,
     ignoreToolSurfaceUpdates: settings.ignoreToolSurfaceUpdates,
-    maxSteps: 6
+    maxSteps: 8
   };
 
   try {

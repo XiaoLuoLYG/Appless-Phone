@@ -76,6 +76,7 @@ export class MultiToolSurfaceComposer {
   private generation: number;
   private emitGeneration: number;
   private executionMode: MultiToolExecutionMode;
+  private awaitingNextStep: boolean;
 
   constructor(compositeSurfaceId: string, onEmit: MultiToolSurfaceEmitHandler) {
     this.batchId = 'batch_' + Date.now().toString();
@@ -89,10 +90,19 @@ export class MultiToolSurfaceComposer {
     this.generation = 0;
     this.emitGeneration = 0;
     this.executionMode = 'parallel';
+    this.awaitingNextStep = false;
   }
 
   setExecutionMode(mode: MultiToolExecutionMode): void {
     this.executionMode = mode;
+  }
+
+  setAwaitingNextStep(awaiting: boolean): void {
+    this.awaitingNextStep = awaiting;
+  }
+
+  slotCount(): number {
+    return this.slots.length;
   }
 
   childSurfaceId(slotId: string): string {
@@ -108,19 +118,25 @@ export class MultiToolSurfaceComposer {
     this.slots = [];
     this.slotById = {};
     for (let index = 0; index < calls.length; index++) {
-      const slotId = 'slot_' + index.toString();
-      const slot = new MultiToolSlot(
-        slotId,
-        index,
-        calls[index].name,
-        calls[index].input,
-        this.compositeSurfaceId + '_' + slotId
-      );
-      this.slots.push(slot);
-      this.slotById[slotId] = slot;
+      this.appendSlot(calls[index]);
     }
     this.activeSectionId = '';
     this.completionOrder = [];
+  }
+
+  appendSlot(call: MultiToolSlotCall): string {
+    const index = this.slots.length;
+    const slotId = 'slot_' + index.toString();
+    const slot = new MultiToolSlot(
+      slotId,
+      index,
+      call.name,
+      call.input,
+      this.compositeSurfaceId + '_' + slotId
+    );
+    this.slots.push(slot);
+    this.slotById[slotId] = slot;
+    return slotId;
   }
 
   emitShell(): void {
@@ -167,6 +183,9 @@ export class MultiToolSurfaceComposer {
   }
 
   isBatchTerminal(): boolean {
+    if (this.awaitingNextStep) {
+      return false;
+    }
     if (this.slots.length === 0) {
       return true;
     }

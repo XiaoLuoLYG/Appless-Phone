@@ -730,5 +730,45 @@ export default function multiTaskA2uiTest() {
     expect(html.indexOf('multi-serial-replies')).assertEqual(-1);
     expect(html.indexOf('multi-tabs-track')).assertLarger(-1);
   });
+
+  it('serial_chain_appends_slots_across_steps', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_serial_chain', (surface) => {
+      latestSurface = surface;
+    });
+    composer.setExecutionMode('serial');
+    const firstId = composer.appendSlot({ name: 'time', input: '' });
+    composer.emitShell();
+    composer.setAwaitingNextStep(true);
+    expect(firstId).assertEqual('slot_0');
+    expect(composer.isBatchTerminal()).assertFalse();
+    composer.setAwaitingNextStep(false);
+    composer.markRunning('slot_0');
+    composer.ingestSlotObservation('slot_0', '7/24/2026, 11:24:25 AM');
+    composer.setAwaitingNextStep(true);
+    expect(composer.isBatchTerminal()).assertFalse();
+    const secondId = composer.appendSlot({ name: 'calendar.event.create', input: '{"title":"会议"}' });
+    composer.emitShell();
+    expect(secondId).assertEqual('slot_1');
+    composer.setAwaitingNextStep(false);
+    composer.markRunning('slot_1');
+    composer.ingestSlotObservation('slot_1', genericToolResultsA2ui('surface_calendar', 'calendar.event.create', [{
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.create',
+      title: '会议',
+      status: 'success',
+      summary: '已直接写入真实 Google Calendar。',
+      rows: [{ label: 'Event ID', value: 'evt_123' }],
+      rawPreview: ''
+    }]));
+    composer.setAwaitingNextStep(false);
+    expect(composer.isBatchTerminal()).assertTrue();
+    expect(latestSurface !== null).assertTrue();
+    const parsed = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
+    const board = parsed.multiTask as Record<string, Object | string>;
+    const sections = board.sections as Array<Record<string, string>>;
+    expect(sections.length).assertEqual(2);
+    expect(board.activeSectionId as string).assertEqual('slot_1');
+  });
 });
 }
