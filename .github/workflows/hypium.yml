@@ -1,0 +1,58 @@
+name: Hypium
+
+# The target event keeps fork-authored workflow changes off the personal Mac runner.
+on:
+  pull_request_target:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - self-hosted
+      - macOS
+      - harmonyos
+    timeout-minutes: 30
+    env:
+      DEVECO_SDK_HOME: /Users/luoyige/.aiphone/deveco-sdk
+      OHOS_SDK_HOME: /Users/luoyige/.aiphone/deveco-sdk/default/openharmony
+      JAVA_HOME: /Applications/DevEco-Studio.app/Contents/jbr/Contents/Home
+      NODE_HOME: /Applications/DevEco-Studio.app/Contents/tools/node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install dependencies
+        run: /Applications/DevEco-Studio.app/Contents/tools/ohpm/bin/ohpm install --all
+
+      - name: Run Hypium
+        run: |
+          /Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw test \
+            -p product=default \
+            -p module=entry@default \
+            -p testType=unit \
+            --no-daemon
+
+      - name: Verify Hypium result
+        run: |
+          result=entry/.test/default/intermediates/test/coverage_data/test_result.txt
+          test -f "$result"
+          tail -5 "$result"
+          grep -Eq '^Tests run: [1-9][0-9]*, Failure: 0, Error: 0, Pass: [0-9]+, Ignore: [0-9]+$' "$result"
+
+      - name: Upload Hypium result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypium-result
+          path: entry/.test/default/intermediates/test/coverage_data/test_result.txt
+          if-no-files-found: ignore
+          retention-days: 7
