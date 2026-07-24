@@ -68,6 +68,9 @@ const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
 const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
+const PREMATURE_MAPS_DETAILS_ERROR: string = 'LEADER_PREMATURE_MAPS_DETAILS';
+const REQUESTED_CAPABILITY_MISMATCH_ERROR: string =
+  'Leader requested capabilities do not exactly match its execution plan.';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
 const COMPLETED_TOOL_REPAIR_INSTRUCTION: string =
   'Correction: previous decision repeated a completed Data tool. ' +
@@ -117,6 +120,11 @@ const EXPLICIT_MAPS_SELECTION_REPAIR_INSTRUCTION: string =
   'food.search as its substitute. Preserve every unrelated requested Data or Action capability exactly. ' +
   'You may change personaId, skillId, the mistaken place-search task, and uiIntent only as needed for this ' +
   'correction. Do not add an unrelated capability. ' + FULL_DECISION_CONTRACT;
+const PREMATURE_MAPS_DETAILS_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_PREMATURE_MAPS_DETAILS. This is round 1 and no real placeId exists yet. ' +
+  'Remove only maps.place.details from requestedCapabilityIds. Preserve personaId, skillId, roundAction, ' +
+  'every dataTasks field, uiIntent, actionIntent, answer, and every other requested capability exactly. ' +
+  'Do not add, remove, or rewrite any task. ' + FULL_DECISION_CONTRACT;
 const MAX_COMPLETED_TOOL_IDS: number = 8;
 const MAX_LEADER_TOOL_CATALOG_CHARS: number = 64000;
 const MAX_LEADER_PROMPT_CHARS: number = 100000;
@@ -285,6 +293,42 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
           return repairedDecision;
         } catch (_repairError) {
           throw new Error(EXPLICIT_MAPS_SELECTION_ERROR);
+        }
+      }
+      if (error instanceof Error && error.message === REQUESTED_CAPABILITY_MISMATCH_ERROR &&
+        this.prematureMapsDetailsScope(input, output)) {
+        const repaired: string = await this.completeBounded(
+          prompt + '\n' + PREMATURE_MAPS_DETAILS_REPAIR_INSTRUCTION +
+            '\nRejected decision: ' + output
+        );
+        try {
+          if (!this.prematureMapsDetailsOnlyRepair(output, repaired)) {
+            throw new Error(PREMATURE_MAPS_DETAILS_ERROR);
+          }
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          this.rejectSkillCapabilityViolation(repairedDecision, context);
+          this.rejectOverlappingVideoTools(repairedDecision);
+          this.rejectExplicitMapsSelection(input, repairedDecision);
+          this.normalizeSameRoundDependency(
+            repairedDecision,
+            leaderSameRoundDependencyProducerTaskToolIds(repairedDecision.dataTasks),
+            leaderSameRoundDependencyConsumerTaskToolIds(repairedDecision.dataTasks)
+          );
+          this.rejectSameRoundDependency(repairedDecision);
+          this.rejectCompletedToolReuse(
+            repairedDecision,
+            this.currentTurnCompletedToolIds(message, input, context, round)
+          );
+          this.rejectUnboundLaterTool(
+            repairedDecision,
+            this.currentTurnDependencyObservations(message, input, round),
+            round
+          );
+          this.validateDecisionInputs(input, repairedDecision, currentLocalDate);
+          repairedDecision.normalizationCurrentLocalDate = currentLocalDate;
+          return repairedDecision;
+        } catch (_repairError) {
+          throw new Error(PREMATURE_MAPS_DETAILS_ERROR);
         }
       }
       const frozenScope: LeaderRepairScope | null = this.repairScope(output);
@@ -877,6 +921,46 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       }
     }
     return mapsTaskCount === 1;
+  }
+
+  private prematureMapsDetailsScope(input: InputUserPayload, output: string): boolean {
+    const text: string = input.text.trim().toLowerCase();
+    const explicitMaps: boolean = text.indexOf('google maps') >= 0 ||
+      text.indexOf('google places') >= 0 ||
+      text.indexOf('gmap') >= 0 ||
+      text.indexOf('谷歌地图') >= 0;
+    const scope: LeaderRepairScope | null = this.repairScope(output);
+    return explicitMaps && scope !== null && scope.roundAction === 'execute' &&
+      scope.requestedCapabilityIds.indexOf('maps.place.search') >= 0 &&
+      scope.requestedCapabilityIds.indexOf('maps.place.details') >= 0 &&
+      scope.dataCapabilityIds.indexOf('maps.place.search') >= 0 &&
+      scope.dataCapabilityIds.indexOf('maps.place.details') < 0;
+  }
+
+  private prematureMapsDetailsOnlyRepair(originalOutput: string, repairedOutput: string): boolean {
+    const original = this.rawDecisionObject(originalOutput);
+    const repaired = this.rawDecisionObject(repairedOutput);
+    if (original === null || repaired === null ||
+      !this.sameJsonValue(original['personaId'], repaired['personaId']) ||
+      !this.sameJsonValue(original['skillId'], repaired['skillId']) ||
+      !this.sameJsonValue(original['roundAction'], repaired['roundAction']) ||
+      !this.sameJsonValue(original['dataTasks'], repaired['dataTasks']) ||
+      !this.sameJsonValue(original['uiIntent'], repaired['uiIntent']) ||
+      !this.sameJsonValue(original['actionIntent'], repaired['actionIntent']) ||
+      !this.sameJsonValue(original['answer'], repaired['answer'])) {
+      return false;
+    }
+    const originalScope: LeaderRepairScope | null = this.repairScope(originalOutput);
+    const repairedScope: LeaderRepairScope | null = this.repairScope(repairedOutput);
+    if (originalScope === null || repairedScope === null) {
+      return false;
+    }
+    const expectedRequested: string[] = originalScope.requestedCapabilityIds.filter(
+      (capabilityId: string): boolean => capabilityId !== 'maps.place.details'
+    );
+    return this.sameStrings(expectedRequested, repairedScope.requestedCapabilityIds) &&
+      this.sameStrings(originalScope.dataCapabilityIds, repairedScope.dataCapabilityIds) &&
+      this.sameStrings(originalScope.actionCapabilityIds, repairedScope.actionCapabilityIds);
   }
 
   private rejectSameRoundDependency(decision: LeaderDecision): void {

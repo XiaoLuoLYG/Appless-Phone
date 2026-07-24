@@ -123,6 +123,10 @@ const EXPLICIT_GOOGLE_MAPS_DECISION: string =
   '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
   '"requiredSections":["places"]}}';
+const PREMATURE_GOOGLE_MAPS_DETAILS_DECISION: string = EXPLICIT_GOOGLE_MAPS_DECISION.replace(
+  '["maps.place.search"]',
+  '["maps.place.search","maps.place.details"]'
+);
 const ANSWER_FROM_TRAVEL_OBSERVATION: string = '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["travel.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"总结真实出行结果","preferredDensity":"comfortable",' +
@@ -1418,6 +1422,25 @@ export default function multiAgentLeaderPlannerTest() {
 
       expect(errorCode).assertEqual('LEADER_EXPLICIT_MAPS_SELECTION');
       expect(model.prompts.length).assertEqual(2);
+    });
+
+    it('asks the Leader model once to remove only premature Maps details scope', 0, async () => {
+      const model = new QueueLocalModel([
+        PREMATURE_GOOGLE_MAPS_DETAILS_DECISION,
+        EXPLICIT_GOOGLE_MAPS_DECISION
+      ]);
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '先用 Google Maps 搜索国王十字车站，再用真实 placeId 查询详情' },
+        planningContext(),
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('LEADER_PREMATURE_MAPS_DETAILS') >= 0).assertTrue();
     });
 
     it('keeps tool scope closed while preserving an explicitly requested parallel domain', 0, async () => {
