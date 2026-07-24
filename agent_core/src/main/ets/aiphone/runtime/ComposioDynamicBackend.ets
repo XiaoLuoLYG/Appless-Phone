@@ -1486,7 +1486,8 @@ function successfulGmailDraftPayload(payload: Object, toolSlug: string): boolean
 
 function successfulCalendarWritePayload(payload: Object, toolSlug: string): boolean {
   const lower = toolSlug.toLowerCase();
-  if (lower !== 'googlecalendar_create_event' && lower !== 'googlecalendar_patch_event') {
+  const deleting = lower === 'googlecalendar_delete_event';
+  if (lower !== 'googlecalendar_create_event' && lower !== 'googlecalendar_patch_event' && !deleting) {
     return false;
   }
   const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
@@ -1502,6 +1503,12 @@ function successfulCalendarWritePayload(payload: Object, toolSlug: string): bool
     status.indexOf('reject') >= 0 || status.indexOf('denied') >= 0 ||
     status.indexOf('invalid') >= 0) {
     return false;
+  }
+  if (deleting) {
+    return response.success === true || response.success === 'true' ||
+      response.successful === true || response.successful === 'true' ||
+      status === 'success' || status === 'succeeded' || status === 'completed' ||
+      status === 'ok' || status === 'deleted';
   }
   return stringField(response, ['id']).length > 0;
 }

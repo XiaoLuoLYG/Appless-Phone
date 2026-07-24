@@ -197,6 +197,36 @@ const CALENDAR_UPDATE_ACTION_DECISION: string = '{"personaId":"work_companion","
   '"requiredSections":["events","review"]},"actionIntent":{' +
   '"goal":"update the one real Calendar event",' +
   '"allowedActionIds":["calendar.event.update"]},"reasonCode":"calendar_update_action"}';
+const CALENDAR_UPDATE_PREMATURE_ACTION_MISMATCH_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
+  '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
+  '"input":{"query":"产品评审","timeMin":"2026-07-31T00:00:00+08:00",' +
+  '"timeMax":"2026-07-31T23:59:59+08:00","timezone":"Asia/Shanghai"},"required":true}],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["events","review"]},"actionIntent":{' +
+  '"goal":"update the found event to 16:00","allowedActionIds":["calendar.event.update"]}}';
+const CALENDAR_UPDATE_REPAIRED_SEARCH_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"calendar-search","goal":"find the exact current event",' +
+  '"allowedToolIds":["calendar.events.search"],"toolId":"calendar.events.search",' +
+  '"input":{"query":"产品评审","timeMin":"2026-07-31T00:00:00+08:00",' +
+  '"timeMax":"2026-07-31T23:59:59+08:00","timezone":"Asia/Shanghai"},"required":true}],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["events","review"]}}';
+const CALENDAR_UPDATE_PREMATURE_LATER_ACTION_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"actionIntent":{' +
+  '"goal":"update the found event to 16:00","allowedActionIds":["calendar.event.update"]}}';
+const CALENDAR_UPDATE_REPAIRED_DONE_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"answer":"已找到唯一日程，请在卡片中核对并确认更新。"}';
 const CALENDAR_UPDATE_DIRECT_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["calendar.event.update"],"roundAction":"execute","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.update","preferredDensity":"comfortable",' +
@@ -219,6 +249,19 @@ const CALENDAR_DELETE_DONE_DECISION: string = '{"personaId":"work_companion","sk
   '"requestedCapabilityIds":["calendar.events.search"],"roundAction":"answer","dataTasks":[],' +
   '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
   '"requiredSections":[]},"answer":"已找到唯一日程，请在卡片中核对并确认删除。",' +
+  '"reasonCode":"calendar_delete_review_ready"}';
+const CALENDAR_DELETE_PREMATURE_ACTION_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"execute","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"actionIntent":{' +
+  '"goal":"delete the exact event","allowedActionIds":["calendar.event.delete"]},' +
+  '"reasonCode":"calendar_delete_action"}';
+const CALENDAR_DELETE_REPAIRED_DONE_DECISION: string =
+  '{"personaId":"work_companion","skillId":"",' +
+  '"requestedCapabilityIds":["calendar.event.delete"],"roundAction":"answer","dataTasks":[],' +
+  '"uiIntent":{"purpose":"calendar.event.delete","preferredDensity":"comfortable",' +
+  '"requiredSections":["review"]},"answer":"已找到唯一日程，请在卡片中核对并确认删除。",' +
   '"reasonCode":"calendar_delete_review_ready"}';
 const MAIL_DECISION: string = '{"personaId":"work_companion","skillId":"",' +
   '"requestedCapabilityIds":["mail.search"],"roundAction":"execute",' +
@@ -2525,6 +2568,78 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
+    it('repairs the device-observed premature C19c update action into the existing read-first flow', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
+      const model = new QueueModel([
+        CALENDAR_UPDATE_PREMATURE_ACTION_MISMATCH_DECISION,
+        CALENDAR_UPDATE_REPAIRED_SEARCH_DECISION,
+        CALENDAR_UPDATE_DONE_DECISION
+      ]);
+      const surfaces: A2uiSurfaceState[] = [];
+      const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      ));
+
+      const outcome = await runtime.submit(
+        '把 2026年7月31日 的产品评审日程改到下午4点',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('calendar.events.search');
+      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts[1].indexOf('LEADER_PREMATURE_CALENDAR_UPDATE_ACTION')).assertLarger(-1);
+      expect(renderedAction(
+        surfaces[surfaces.length - 1], 'calendar.event.update'
+      ) === null).assertFalse();
+      runtime.dispose();
+    });
+
+    it('repairs the device-observed later C19c update action into the existing review surface', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
+      const model = new QueueModel([
+        CALENDAR_UPDATE_SEARCH_DECISION,
+        CALENDAR_UPDATE_PREMATURE_LATER_ACTION_DECISION,
+        CALENDAR_UPDATE_REPAIRED_DONE_DECISION
+      ]);
+      const surfaces: A2uiSurfaceState[] = [];
+      let providerCalls: number = 0;
+      const options = canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.pageAction = async (): Promise<ActionExecutionResult> => {
+        providerCalls++;
+        return { status: 'success', output: JSON.parse('{"eventId":"event-provider-real-1"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '把 2026年7月31日 的产品评审日程改到下午4点',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(model.prompts.length).assertEqual(3);
+      expect(model.prompts[2].indexOf(
+        'LEADER_PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH'
+      )).assertLarger(-1);
+      expect(renderedAction(
+        surfaces[surfaces.length - 1], 'calendar.event.update'
+      ) === null).assertFalse();
+      expect(providerCalls).assertEqual(0);
+      runtime.dispose();
+    });
+
     it('rejects a zero-Data Calendar update decision without host semantic replacement', 0, async () => {
       const executor = new CalendarUpdateExecutor(['event-provider-real-1']);
       const surfaces: A2uiSurfaceState[] = [];
@@ -2622,6 +2737,44 @@ export default function multiAgentCanaryRuntimeTest() {
       current = null;
       expect(await runtime.runPageAction(exact)).assertFalse();
       expect(calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('repairs a premature C19e delete action after search into the existing review surface', 0, async () => {
+      const executor = new CalendarUpdateExecutor(['event-provider-delete-1']);
+      const model = new QueueModel([
+        CALENDAR_DELETE_SEARCH_DECISION,
+        CALENDAR_DELETE_PREMATURE_ACTION_DECISION,
+        CALENDAR_DELETE_REPAIRED_DONE_DECISION
+      ]);
+      const surfaces: A2uiSurfaceState[] = [];
+      let providerCalls = 0;
+      const options = canaryOptions(
+        model,
+        executor,
+        new RecordingOpener(),
+        surfaces,
+        []
+      );
+      options.pageAction = async (): Promise<ActionExecutionResult> => {
+        providerCalls++;
+        return { status: 'success', output: JSON.parse('{"status":"deleted"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+
+      const outcome = await runtime.submit(
+        '删除 2026年7月30日 标题为 Appless QA run-1 的 Google Calendar 日程',
+        { text: '' }
+      ) as MultiAgentSettledOutcome;
+
+      expect(outcome.status).assertEqual('success');
+      expect(executor.tasks.length).assertEqual(1);
+      expect(executor.tasks[0].toolId).assertEqual('calendar.events.search');
+      expect(model.prompts.length).assertEqual(3);
+      expect(renderedAction(
+        surfaces[surfaces.length - 1], 'calendar.event.delete.confirm'
+      ) === null).assertFalse();
+      expect(providerCalls).assertEqual(0);
       runtime.dispose();
     });
 

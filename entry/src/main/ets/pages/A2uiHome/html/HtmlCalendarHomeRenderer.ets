@@ -1,4 +1,4 @@
-import { HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric } from './HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric } from './HtmlHomeTypes';
 
 type CalendarTextValue = Object | string | number | boolean | null | undefined;
 
@@ -9,6 +9,8 @@ interface CalendarHomeEvent {
   status: string;
   source: string;
   toolName: string;
+  writeActionId: string;
+  writeActionLabel: string;
   writeActionJson: string;
   eventId: string;
   startRaw: string;
@@ -250,6 +252,17 @@ h1, h2, h3, p { margin: 0; }
   margin-top: 6px;
   color: rgba(255, 250, 242, 0.82);
   font-size: 11px;
+}
+.calendar-write-confirm {
+  min-height: 38px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: var(--accent);
+  color: #fffaf2;
+  font-size: 13px;
+  font-weight: 840;
 }
 .calendar-view-switch {
   position: sticky;
@@ -656,6 +669,11 @@ const CALENDAR_HOME_JS: string = `
   var cancelDelete = document.querySelector('.calendar-cancel-delete');
   var selectedEventId = '';
   var selectedTitle = '';
+  var selectedDeleteAction = '';
+  var selectedDeleteActionId = '';
+  Array.prototype.slice.call(document.querySelectorAll('.calendar-write-confirm')).forEach(function (button) {
+    button.addEventListener('click', function () { postCalendarWrite(button); });
+  });
   function hideDeleteConfirmation() {
     if (deleteConfirmation) { deleteConfirmation.classList.remove('visible'); }
   }
@@ -688,7 +706,11 @@ const CALENDAR_HOME_JS: string = `
     drawer.querySelector('[data-detail-time]').textContent = time;
     selectedEventId = eventId;
     selectedTitle = title;
-    if (deleteButton) { deleteButton.style.display = eventId.length > 0 ? 'inline-flex' : 'none'; }
+    selectedDeleteAction = card.getAttribute('data-calendar-action') || '';
+    selectedDeleteActionId = card.getAttribute('data-calendar-action-id') || '';
+    if (deleteButton) {
+      deleteButton.style.display = selectedDeleteActionId === 'calendar.event.delete.confirm' ? 'inline-flex' : 'none';
+    }
     hideDeleteConfirmation();
     var open = drawer.querySelector('[data-detail-link]');
     if (open) {
@@ -698,7 +720,9 @@ const CALENDAR_HOME_JS: string = `
   }
   if (deleteButton) {
     deleteButton.addEventListener('click', function () {
-      if (selectedEventId.length === 0 || !deleteConfirmation) { return; }
+      if (selectedEventId.length === 0 ||
+        selectedDeleteActionId !== 'calendar.event.delete.confirm' ||
+        !deleteConfirmation) { return; }
       if (deleteConfirmationText) {
         deleteConfirmationText.textContent = '确定删除“' + selectedTitle + '”吗？此操作会提交到真实 Google Calendar。';
       }
@@ -710,22 +734,13 @@ const CALENDAR_HOME_JS: string = `
   }
   if (confirmDelete) {
     confirmDelete.addEventListener('click', function () {
-      if (selectedEventId.length === 0) { return; }
+      if (selectedEventId.length === 0 || selectedDeleteAction.length === 0) { return; }
       try {
-        if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
+        var action = JSON.parse(selectedDeleteAction);
+        if (action && action.id === 'calendar.event.delete.confirm' &&
+            window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
           confirmDelete.disabled = true;
-          window.AIPhoneHome.postAction(JSON.stringify({
-            id: 'calendar.event.delete.confirm',
-            label: '确认删除日程',
-            prompt: '删除 Google Calendar 日程 ' + selectedTitle,
-            variant: 'danger',
-            kind: 'prompt',
-            args: {
-              eventId: selectedEventId,
-              calendarId: 'primary',
-              sendUpdates: 'none'
-            }
-          }));
+          window.AIPhoneHome.postAction(JSON.stringify(action));
         }
       } catch (error) {
         confirmDelete.disabled = false;
@@ -888,6 +903,7 @@ function calendarEventFromBlock(block: HtmlHomeBlock): CalendarHomeEvent {
   const startLabel = formatTimeLabel(startRaw, start);
   const endLabel = formatTimeLabel(endRaw, end);
   const isEmptyResult = block.title.indexOf('没有找到') >= 0 && startRaw.length === 0 && windowStartRaw.length > 0;
+  const writeAction = calendarWriteAction(block);
   return {
     id: block.id,
     title: block.title.length > 0 ? block.title : '未命名日程',
@@ -895,7 +911,9 @@ function calendarEventFromBlock(block: HtmlHomeBlock): CalendarHomeEvent {
     status: textOf(block.status),
     source: textOf(block.source).length > 0 ? textOf(block.source) : 'Google Calendar API',
     toolName: calendarToolName(block),
-    writeActionJson: calendarWriteActionJson(block),
+    writeActionId: writeAction === null ? '' : writeAction.id,
+    writeActionLabel: writeAction === null ? '' : writeAction.label,
+    writeActionJson: writeAction === null ? '' : JSON.stringify(writeAction),
     eventId: rowValue(block, 'Event ID'),
     startRaw: startRaw,
     endRaw: endRaw,
@@ -914,16 +932,16 @@ function calendarEventFromBlock(block: HtmlHomeBlock): CalendarHomeEvent {
   };
 }
 
-function calendarWriteActionJson(block: HtmlHomeBlock): string {
+function calendarWriteAction(block: HtmlHomeBlock): HtmlHomeAction | null {
   for (let index = 0; index < block.actions.length; index++) {
     const action = block.actions[index];
     if (action.id === 'calendar.event.create' ||
       action.id === 'calendar.event.update' ||
       action.id === 'calendar.event.delete.confirm') {
-      return JSON.stringify(action);
+      return action;
     }
   }
-  return '';
+  return null;
 }
 
 function calendarEvents(document: HtmlHomeDocument): CalendarHomeEvent[] {
@@ -962,8 +980,10 @@ function isUpdateDocument(events: CalendarHomeEvent[]): boolean {
 
 function isPendingCalendarWrite(events: CalendarHomeEvent[]): boolean {
   return events.some((event: CalendarHomeEvent): boolean =>
-    (event.toolName === 'calendar.event.create' || event.toolName === 'calendar.event.update') &&
-    event.status === 'confirm_required');
+    ((event.toolName === 'calendar.event.create' || event.toolName === 'calendar.event.update') &&
+      event.status === 'confirm_required') ||
+    event.writeActionId === 'calendar.event.create' ||
+    event.writeActionId === 'calendar.event.update');
 }
 
 function eventCountLabel(events: CalendarHomeEvent[]): string {
@@ -991,6 +1011,7 @@ function targetDate(events: CalendarHomeEvent[], generatedAt: string): Date {
 function eventDataAttrs(event: CalendarHomeEvent): string {
   return ' data-calendar-event="' + escapeAttribute(event.id) + '"' +
     ' data-delete-confirm="' + (event.status === 'confirm_required' ? 'true' : 'false') + '"' +
+    ' data-calendar-action-id="' + escapeAttribute(event.writeActionId) + '"' +
     ' data-calendar-action="' + escapeAttribute(event.writeActionJson) + '"' +
     ' data-title="' + escapeAttribute(event.title) + '"' +
     ' data-time="' + escapeAttribute(event.dateLabel + ' ' + event.timeRange) + '"' +
@@ -1009,7 +1030,12 @@ function confirmation(event: CalendarHomeEvent | null, pending: boolean, updated
   }
   return '<aside class="calendar-confirmation">' +
     '<div><h2>' + (pending ? '等待确认' : (updated ? '已更新 Google Calendar' : '已写入 Google Calendar')) + '</h2><p>' +
-    escapeHtmlText(event.title) + '</p></div>' +
+    escapeHtmlText(event.title) + '</p>' +
+    (pending && event.writeActionJson.length > 0 ?
+      '<button type="button" class="calendar-write-confirm" data-calendar-action="' +
+        escapeAttribute(event.writeActionJson) + '">' +
+        escapeHtmlText(event.writeActionLabel) + '</button>' : '') +
+    '</div>' +
     '<div class="calendar-time-capsule"><strong>' + escapeHtmlText(event.startLabel) + '</strong><strong>' +
     escapeHtmlText(event.endLabel) + '</strong><span>' + escapeHtmlText(event.durationLabel) + '</span></div>' +
     '</aside>';
@@ -1169,7 +1195,9 @@ function detailDrawer(events: CalendarHomeEvent[]): string {
     '<a class="calendar-open-link" data-detail-link href="' + escapeAttribute(link) + '" target="_blank" rel="noreferrer"' +
     (link.length === 0 ? ' style="display:none"' : '') + '>打开 Google Calendar</a>' +
     '<button type="button" class="calendar-delete-button"' +
-    (first === null || first.eventId.length === 0 ? ' style="display:none"' : '') + '>删除日程</button>' +
+    (first === null || first.eventId.length === 0 ||
+      first.writeActionId !== 'calendar.event.delete.confirm' ? ' style="display:none"' : '') +
+    '>删除日程</button>' +
     '</div>' +
     '<div class="calendar-delete-confirmation" role="alertdialog" aria-label="确认删除日程">' +
     '<p data-delete-confirmation-text>确定删除这个日程吗？此操作会提交到真实 Google Calendar。</p>' +

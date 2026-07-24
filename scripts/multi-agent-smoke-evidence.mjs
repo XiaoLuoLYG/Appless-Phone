@@ -1085,7 +1085,8 @@ export function calendarProviderActionEvidence(logText, action, options = {}) {
   const candidates = records(logText).filter((item) =>
     item.marker === 'CalendarProviderAction' &&
     item.fields.conversation === action?.conversationId && item.fields.turn === action?.turnId &&
-    item.fields.surface === action?.surfaceId && item.fields.action === action?.actionId);
+    decodedEvidenceValue(item.fields.surface) === action?.surfaceId &&
+    item.fields.action === action?.actionId);
   const provider = candidates.at(-1);
   if (provider === undefined) {
     failures.push('missing_correlated_provider_result');
@@ -1094,7 +1095,9 @@ export function calendarProviderActionEvidence(logText, action, options = {}) {
     const requestedId = decodedEvidenceValue(provider.fields.requested);
     const status = decodedEvidenceValue(provider.fields.status).toLowerCase();
     const start = decodedEvidenceValue(provider.fields.start);
-    if (!validCalendarSurface(provider.fields.surface)) failures.push('invalid_provider_surface');
+    if (!validCalendarSurface(decodedEvidenceValue(provider.fields.surface))) {
+      failures.push('invalid_provider_surface');
+    }
     if (!eventId) failures.push('missing_provider_event_id');
     if (!['success', 'created', 'updated', 'deleted', 'ok'].includes(status)) {
       failures.push('provider_write_not_success');

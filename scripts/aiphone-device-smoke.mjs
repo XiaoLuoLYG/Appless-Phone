@@ -2168,8 +2168,9 @@ async function verifyCalendarWriteAction(
 
 async function verifyCalendarDeleteAction(layout, index, appPid, _actionContext) {
   let currentLayout = layout;
+  let confirmationOpened = false;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const center = findTextCenter(currentLayout, '确认删除');
+    const center = findExactTextCenter(currentLayout, '确认删除');
     if (center !== null) {
       clearHilog();
       const actionLogs = await captureWhile(appPid, async () => {
@@ -2194,6 +2195,19 @@ async function verifyCalendarDeleteAction(layout, index, appPid, _actionContext)
         textPath,
         screenPath: captureScreen(`query-${index + 1}-calendar-delete-screen.png`)
       };
+    }
+    if (!confirmationOpened) {
+      const deleteCenter = findExactTextCenter(currentLayout, '删除日程');
+      if (deleteCenter !== null) {
+        hdc(['shell', 'uitest', 'uiInput', 'click', String(deleteCenter.x), String(deleteCenter.y)]);
+        await sleep(600);
+        currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-confirmation.json`);
+        confirmationOpened = true;
+        swipeResultsUp();
+        await sleep(800);
+        currentLayout = dumpLayout(`query-${index + 1}-calendar-delete-confirmation-ready.json`);
+        continue;
+      }
     }
     swipeResultsUp();
     await sleep(800);

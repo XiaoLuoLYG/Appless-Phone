@@ -851,10 +851,24 @@ export default function composioDynamicBackendTest() {
         'GOOGLECALENDAR_CREATE_EVENT',
         '创建 Google Calendar 日程'
       );
+      const removed: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{"successful":true}},"error":null}',
+        'GOOGLECALENDAR_DELETE_EVENT',
+        '删除 Google Calendar 日程'
+      );
+      const unconfirmedRemove: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"data":{"response_data":{}},"error":null}',
+        'GOOGLECALENDAR_DELETE_EVENT',
+        '删除 Google Calendar 日程'
+      );
 
       expect(result.status).assertEqual('success');
       expect(result.rawPreview.indexOf('event-created-real')).assertLarger(-1);
       expect(rejected.status).assertEqual('error');
+      expect(removed.status).assertEqual('success');
+      expect(unconfirmedRemove.status).assertEqual('error');
     });
 
     it('maps Google Docs file payload to display rows', 0, () => {

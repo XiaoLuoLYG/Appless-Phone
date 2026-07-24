@@ -69,6 +69,12 @@ const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
 const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
 const PREMATURE_MAPS_DETAILS_ERROR: string = 'LEADER_PREMATURE_MAPS_DETAILS';
+const PREMATURE_CALENDAR_UPDATE_ACTION_ERROR: string =
+  'LEADER_PREMATURE_CALENDAR_UPDATE_ACTION';
+const PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR: string =
+  'LEADER_PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH';
+const PREMATURE_CALENDAR_DELETE_ACTION_ERROR: string =
+  'LEADER_PREMATURE_CALENDAR_DELETE_ACTION';
 const REQUESTED_CAPABILITY_MISMATCH_ERROR: string =
   'Leader requested capabilities do not exactly match its execution plan.';
 const REPAIR_SCOPE_INVALID_ERROR: string = 'LEADER_REPAIR_SCOPE_INVALID';
@@ -82,6 +88,24 @@ const UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION: string =
   'from a successful or partial earlier round. Return answer or clarify from existing observations, or execute ' +
   'only tasks whose own input contains an exact earlier entity reference. Base any terminal summary only on real ' +
   'recentObservations; do not reschedule a completed tool or invent provider facts. ' + FULL_DECISION_CONTRACT;
+const PREMATURE_CALENDAR_DELETE_ACTION_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_PREMATURE_CALENDAR_DELETE_ACTION. calendar.events.search already completed for this delete ' +
+  'request, and the host owns the exact provider-bound delete confirmation on the review surface. Return answer ' +
+  'with empty dataTasks and no actionIntent. Preserve personaId, skillId, requestedCapabilityIds, uiIntent, and ' +
+  'the user intent exactly. The answer may only say that the exact event is ready for review and confirmation; ' +
+  'do not execute delete, invent an Event ID, or claim deletion succeeded. ' + FULL_DECISION_CONTRACT;
+const PREMATURE_CALENDAR_UPDATE_ACTION_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_PREMATURE_CALENDAR_UPDATE_ACTION. This Calendar update still needs the real provider Event ' +
+  'ID from calendar.events.search. Remove only actionIntent from the rejected first-round decision. Preserve ' +
+  'personaId, skillId, requestedCapabilityIds, roundAction, every dataTasks field, uiIntent, answer, and every ' +
+  'other field exactly. The host will offer the existing update confirmation only after one exact provider ' +
+  'result; do not execute update or invent an Event ID. ' + FULL_DECISION_CONTRACT;
+const PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_REPAIR_INSTRUCTION: string =
+  'Correction: LEADER_PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH. calendar.events.search already completed for this ' +
+  'update request, and the host owns the exact provider-bound update confirmation on the review surface. Return ' +
+  'answer with empty dataTasks and no actionIntent. Preserve personaId, skillId, requestedCapabilityIds, uiIntent, ' +
+  'and the user intent exactly. The answer may only say that the exact event is ready for review and confirmation; ' +
+  'do not execute update, invent an Event ID, or claim the update succeeded. ' + FULL_DECISION_CONTRACT;
 const OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION: string =
   'Correction: LEADER_OVERLAPPING_VIDEO_TOOLS. media.video.search already covers both YouTube and Bilibili. ' +
   'For a request naming both sources, return exactly one media.video.search Data task with sources ' +
@@ -242,6 +266,16 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         decision,
         this.currentTurnCompletedToolIds(message, input, context, round)
       );
+      this.rejectPrematureCalendarDeleteAction(
+        input,
+        decision,
+        this.currentTurnCompletedToolIds(message, input, context, round)
+      );
+      this.rejectPrematureCalendarUpdateAfterSearch(
+        input,
+        decision,
+        this.currentTurnCompletedToolIds(message, input, context, round)
+      );
       this.rejectUnboundLaterTool(
         decision,
         this.currentTurnDependencyObservations(message, input, round),
@@ -296,6 +330,42 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         }
       }
       if (error instanceof Error && error.message === REQUESTED_CAPABILITY_MISMATCH_ERROR &&
+        this.prematureCalendarUpdateActionScope(input, output)) {
+        const repaired: string = await this.completeBounded(
+          prompt + '\n' + PREMATURE_CALENDAR_UPDATE_ACTION_REPAIR_INSTRUCTION +
+            '\nRejected decision: ' + output
+        );
+        try {
+          if (!this.prematureCalendarUpdateActionOnlyRepair(output, repaired)) {
+            throw new Error(PREMATURE_CALENDAR_UPDATE_ACTION_ERROR);
+          }
+          const repairedDecision: LeaderDecision = this.parseDecision(repaired, context);
+          this.rejectSkillCapabilityViolation(repairedDecision, context);
+          this.rejectOverlappingVideoTools(repairedDecision);
+          this.rejectExplicitMapsSelection(input, repairedDecision);
+          this.normalizeSameRoundDependency(
+            repairedDecision,
+            leaderSameRoundDependencyProducerTaskToolIds(repairedDecision.dataTasks),
+            leaderSameRoundDependencyConsumerTaskToolIds(repairedDecision.dataTasks)
+          );
+          this.rejectSameRoundDependency(repairedDecision);
+          this.rejectCompletedToolReuse(
+            repairedDecision,
+            this.currentTurnCompletedToolIds(message, input, context, round)
+          );
+          this.rejectUnboundLaterTool(
+            repairedDecision,
+            this.currentTurnDependencyObservations(message, input, round),
+            round
+          );
+          this.validateDecisionInputs(input, repairedDecision, currentLocalDate);
+          repairedDecision.normalizationCurrentLocalDate = currentLocalDate;
+          return repairedDecision;
+        } catch (_repairError) {
+          throw new Error(PREMATURE_CALENDAR_UPDATE_ACTION_ERROR);
+        }
+      }
+      if (error instanceof Error && error.message === REQUESTED_CAPABILITY_MISMATCH_ERROR &&
         this.prematureMapsDetailsScope(input, output)) {
         const repaired: string = await this.completeBounded(
           prompt + '\n' + PREMATURE_MAPS_DETAILS_REPAIR_INSTRUCTION +
@@ -342,6 +412,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         correction = COMPLETED_TOOL_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === UNBOUND_LATER_TOOL_ERROR) {
         correction = UNBOUND_LATER_TOOL_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error &&
+        error.message === PREMATURE_CALENDAR_DELETE_ACTION_ERROR) {
+        correction = PREMATURE_CALENDAR_DELETE_ACTION_REPAIR_INSTRUCTION;
+      } else if (error instanceof Error &&
+        error.message === PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR) {
+        correction = PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === OVERLAPPING_VIDEO_TOOLS_ERROR) {
         correction = OVERLAPPING_VIDEO_TOOLS_REPAIR_INSTRUCTION;
       } else if (error instanceof Error && error.message === TASK_INPUT_INVALID_ERROR) {
@@ -355,7 +431,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         error.message === ACTION_OWNED_DATA_TASK_ERROR;
       const allowsTerminalExecutionDrop: boolean = error instanceof Error &&
         (error.message === COMPLETED_TOOL_REUSE_ERROR ||
-          error.message === UNBOUND_LATER_TOOL_ERROR);
+          error.message === UNBOUND_LATER_TOOL_ERROR ||
+          error.message === PREMATURE_CALENDAR_DELETE_ACTION_ERROR ||
+          error.message === PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR);
       correction += '\nFrozen requestedCapabilityIds: ' +
         JSON.stringify(frozenScope.requestedCapabilityIds) +
         '\nFrozen Data-position capability IDs: ' +
@@ -398,6 +476,16 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         );
         this.rejectSameRoundDependency(repairedDecision);
         this.rejectCompletedToolReuse(
+          repairedDecision,
+          this.currentTurnCompletedToolIds(message, input, context, round)
+        );
+        this.rejectPrematureCalendarDeleteAction(
+          input,
+          repairedDecision,
+          this.currentTurnCompletedToolIds(message, input, context, round)
+        );
+        this.rejectPrematureCalendarUpdateAfterSearch(
+          input,
           repairedDecision,
           this.currentTurnCompletedToolIds(message, input, context, round)
         );
@@ -833,6 +921,52 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
   }
 
+  private prematureCalendarUpdateActionScope(input: InputUserPayload, output: string): boolean {
+    const text: string = input.text.trim().toLowerCase();
+    const updateRequest: boolean = text.indexOf('改') >= 0 ||
+      text.indexOf('更新') >= 0 ||
+      text.indexOf('移动') >= 0 ||
+      text.indexOf('update') >= 0 ||
+      text.indexOf('move') >= 0;
+    const scope: LeaderRepairScope | null = this.repairScope(output);
+    return updateRequest && scope !== null && scope.roundAction === 'execute' &&
+      scope.requestedCapabilityIds.indexOf('calendar.events.search') >= 0 &&
+      scope.requestedCapabilityIds.indexOf('calendar.event.update') < 0 &&
+      scope.dataCapabilityIds.indexOf('calendar.events.search') >= 0 &&
+      scope.actionCapabilityIds.length === 1 &&
+      scope.actionCapabilityIds[0] === 'calendar.event.update';
+  }
+
+  private prematureCalendarUpdateActionOnlyRepair(
+    originalOutput: string,
+    repairedOutput: string
+  ): boolean {
+    const original = this.rawDecisionObject(originalOutput);
+    const repaired = this.rawDecisionObject(repairedOutput);
+    if (original === null || repaired === null ||
+      !this.sameJsonValue(original['personaId'], repaired['personaId']) ||
+      !this.sameJsonValue(original['skillId'], repaired['skillId']) ||
+      !this.sameJsonValue(original['requestedCapabilityIds'], repaired['requestedCapabilityIds']) ||
+      !this.sameJsonValue(original['roundAction'], repaired['roundAction']) ||
+      !this.sameJsonValue(original['dataTasks'], repaired['dataTasks']) ||
+      !this.sameJsonValue(original['uiIntent'], repaired['uiIntent']) ||
+      !this.sameJsonValue(original['answer'], repaired['answer']) ||
+      repaired['actionIntent'] !== undefined) {
+      return false;
+    }
+    const originalScope: LeaderRepairScope | null = this.repairScope(originalOutput);
+    const repairedScope: LeaderRepairScope | null = this.repairScope(repairedOutput);
+    return originalScope !== null && repairedScope !== null &&
+      originalScope.actionCapabilityIds.length === 1 &&
+      originalScope.actionCapabilityIds[0] === 'calendar.event.update' &&
+      repairedScope.actionCapabilityIds.length === 0 &&
+      this.sameStrings(
+        originalScope.requestedCapabilityIds,
+        repairedScope.requestedCapabilityIds
+      ) &&
+      this.sameStrings(originalScope.dataCapabilityIds, repairedScope.dataCapabilityIds);
+  }
+
   private rejectExplicitMapsSelection(
     input: InputUserPayload,
     decision: LeaderDecision
@@ -1065,6 +1199,42 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         }
       }
     }
+  }
+
+  private rejectPrematureCalendarDeleteAction(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    completedToolIds: string[]
+  ): void {
+    if (input.text.indexOf('删除') < 0 ||
+      completedToolIds.indexOf('calendar.events.search') < 0 ||
+      decision.roundAction !== 'execute' ||
+      decision.actionIntent === undefined ||
+      decision.actionIntent.allowedActionIds.indexOf('calendar.event.delete') < 0) {
+      return;
+    }
+    throw new Error(PREMATURE_CALENDAR_DELETE_ACTION_ERROR);
+  }
+
+  private rejectPrematureCalendarUpdateAfterSearch(
+    input: InputUserPayload,
+    decision: LeaderDecision,
+    completedToolIds: string[]
+  ): void {
+    const text: string = input.text.trim().toLowerCase();
+    const updateRequest: boolean = text.indexOf('改') >= 0 ||
+      text.indexOf('更新') >= 0 ||
+      text.indexOf('移动') >= 0 ||
+      text.indexOf('update') >= 0 ||
+      text.indexOf('move') >= 0;
+    if (!updateRequest ||
+      completedToolIds.indexOf('calendar.events.search') < 0 ||
+      decision.roundAction !== 'execute' ||
+      decision.actionIntent === undefined ||
+      decision.actionIntent.allowedActionIds.indexOf('calendar.event.update') < 0) {
+      return;
+    }
+    throw new Error(PREMATURE_CALENDAR_UPDATE_AFTER_SEARCH_ERROR);
   }
 
   private parseDecision(output: string, context: LeaderPlanningContext): LeaderDecision {

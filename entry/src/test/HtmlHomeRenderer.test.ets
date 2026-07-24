@@ -1814,8 +1814,17 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('calendar-view-month')).assertLarger(-1);
       expect(html.indexOf('data-calendar-view="day"')).assertLarger(-1);
       expect(html.indexOf('calendar-delete-button')).assertLarger(-1);
+      expect(html.indexOf('<button type="button" class="calendar-delete-button" style="display:none"'))
+        .assertLarger(-1);
+      expect(html.indexOf(
+        "deleteButton.style.display = selectedDeleteActionId === 'calendar.event.delete.confirm' ? " +
+        "'inline-flex' : 'none';"
+      )).assertLarger(-1);
       expect(html.indexOf('calendar-confirm-delete')).assertLarger(-1);
       expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
+      expect(html.indexOf("var selectedDeleteAction = '';")).assertLarger(-1);
+      expect(html.indexOf('var action = JSON.parse(selectedDeleteAction);')).assertLarger(-1);
+      expect(html.indexOf("label: '确认删除日程'")).assertEqual(-1);
       expect(html.indexOf('confirmed: true')).assertEqual(-1);
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
       expect(html.indexOf('Google Calendar API')).assertLarger(-1);
@@ -2001,6 +2010,25 @@ export default function htmlHomeRendererTest() {
         expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
         expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
       });
+    });
+
+    it('renders the provider-bound Calendar update offer as the existing confirmation control', 0, () => {
+      const update = calendarSearchDocumentFixture();
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新日程',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-1","title":"产品同步",' +
+          '"start":"2026-07-02T16:00:00+08:00","end":"2026-07-02T16:30:00+08:00"}') as Object
+      }];
+
+      const html = renderHtmlHomeDocument(update);
+
+      expect(html.indexOf('calendar-write-confirm')).assertLarger(-1);
+      expect(html.indexOf('确认更新日程')).assertLarger(-1);
+      expect(html.indexOf('postCalendarWrite')).assertLarger(-1);
     });
 
     it('does not show a write confirmation for a failed Calendar create', 0, () => {

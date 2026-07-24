@@ -329,6 +329,11 @@ test('accepts C19 writes only from a correlated provider result and rejects inva
     '[AIPhone][CalendarProviderAction] conversation=c19 turn=page-turn-7 surface=calendar-review:1 action=calendar.event.update event=provider-1 requested=provider-1 status=updated start=2026-07-30T16%3A00%3A00%2B08%3A00'
   ].join('\n');
   assert.equal(calendarProviderActionEvidence(good, action, { expectedTime: '16:00' }).ok, true);
+  assert.equal(calendarProviderActionEvidence(
+    good.replaceAll('surface=calendar-review:1', 'surface=calendar-review%3A1'),
+    action,
+    { expectedTime: '16:00' }
+  ).ok, true);
   assert.equal(calendarProviderActionEvidence(good.replace('surface=calendar-review:1 action=calendar.event.update event=provider-1 requested=provider-1 status=updated start=', 'surface=invalid action=calendar.event.update event=provider-1 requested=provider-1 status=updated start='), action, { expectedTime: '16:00' }).ok, false);
   assert.equal(calendarProviderActionEvidence(good.replace('requested=provider-1', 'requested=model-forged'), action, { expectedTime: '16:00' }).ok, false);
   assert.equal(calendarProviderActionEvidence(good.replace('status=updated', 'status=error'), action, { expectedTime: '16:00' }).ok, false);
@@ -358,6 +363,19 @@ test('locates only a clickable contextual C19 confirmation label', () => {
   };
   assert.deepEqual(calendarConfirmationButtonCenter(layout, '确认创建'), { x: 300, y: 240 });
   assert.equal(calendarConfirmationButtonCenter(layout, '确认更新'), null);
+});
+
+test('clicks the exact second-stage C19 delete button instead of its confirmation heading', () => {
+  const source = readFileSync('scripts/aiphone-device-smoke.mjs', 'utf8');
+  const start = source.indexOf('async function verifyCalendarDeleteAction');
+  const end = source.indexOf('async function locateHotelSystemAction', start);
+  const deleteSmoke = source.slice(start, end);
+  assert.match(deleteSmoke, /findExactTextCenter\(currentLayout,\s*'确认删除'\)/);
+  assert.doesNotMatch(deleteSmoke, /findTextCenter\(currentLayout,\s*'确认删除'\)/);
+  assert.match(
+    deleteSmoke,
+    /confirmationOpened = true;\s*swipeResultsUp\(\);\s*await sleep\(800\);\s*currentLayout = dumpLayout\(`query-\$\{index \+ 1\}-calendar-delete-confirmation-ready\.json`\);/
+  );
 });
 
 test('requires an exact provider-correlated empty C19f search, not generic absent UI text', () => {
@@ -1692,4 +1710,17 @@ test('lists Gmail reply send only behind explicit safe manual configuration', ()
   assert.deepEqual(manual.map((item) => item.id), ['M01']);
   assert.equal(manual[0].automated, false);
   assert.deepEqual(manual[0].expectedToolIds, ['gmail.message.send']);
+});
+
+test('gives production provider actions the same deadline as multi-agent turns', () => {
+  const source = readFileSync(
+    'entry/src/main/ets/pages/A2uiHome/Index.ets',
+    'utf8'
+  ).replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
+  const options = source.slice(
+    source.indexOf('const options: MultiAgentCanaryOptions = {'),
+    source.indexOf('this.multiAgentRuntime = new MultiAgentCanaryRuntime(options);')
+  );
+  assert.match(options, /\bsubmitTimeoutMs\s*:\s*45000\s*,/);
+  assert.match(options, /\bactionTimeoutMs\s*:\s*45000\s*,/);
 });
