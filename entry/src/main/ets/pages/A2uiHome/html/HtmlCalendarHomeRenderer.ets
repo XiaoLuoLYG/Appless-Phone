@@ -9,6 +9,7 @@ interface CalendarHomeEvent {
   status: string;
   source: string;
   toolName: string;
+  writeActionJson: string;
   eventId: string;
   startRaw: string;
   endRaw: string;
@@ -658,24 +659,20 @@ const CALENDAR_HOME_JS: string = `
   function hideDeleteConfirmation() {
     if (deleteConfirmation) { deleteConfirmation.classList.remove('visible'); }
   }
-  function postCalendarDelete(card) {
-    var eventId = card.getAttribute('data-event-id') || '';
-    if (eventId.length === 0) { return; }
+  function postCalendarWrite(card) {
+    var raw = card.getAttribute('data-calendar-action') || '';
+    if (raw.length === 0) { return; }
     try {
+      var action = JSON.parse(raw);
+      var actionId = action && typeof action.id === 'string' ? action.id : '';
+      if (actionId !== 'calendar.event.create' &&
+          actionId !== 'calendar.event.update' &&
+          actionId !== 'calendar.event.delete.confirm') {
+        return;
+      }
       if (window.AIPhoneHome && typeof window.AIPhoneHome.postAction === 'function') {
         card.disabled = true;
-        window.AIPhoneHome.postAction(JSON.stringify({
-          id: 'calendar.event.delete.confirm',
-          label: '确认删除',
-          prompt: '确认删除 Google Calendar 日程',
-          variant: 'danger',
-          kind: 'prompt',
-          args: {
-            eventId: eventId,
-            calendarId: 'primary',
-            sendUpdates: 'none'
-          }
-        }));
+        window.AIPhoneHome.postAction(JSON.stringify(action));
       }
     } catch (error) {
       card.disabled = false;
@@ -738,7 +735,7 @@ const CALENDAR_HOME_JS: string = `
   Array.prototype.slice.call(document.querySelectorAll('[data-calendar-event]')).forEach(function (card) {
     card.addEventListener('click', function () {
       if (card.getAttribute('data-delete-confirm') === 'true') {
-        postCalendarDelete(card);
+        postCalendarWrite(card);
         return;
       }
       pick(card);
@@ -898,6 +895,7 @@ function calendarEventFromBlock(block: HtmlHomeBlock): CalendarHomeEvent {
     status: textOf(block.status),
     source: textOf(block.source).length > 0 ? textOf(block.source) : 'Google Calendar API',
     toolName: calendarToolName(block),
+    writeActionJson: calendarWriteActionJson(block),
     eventId: rowValue(block, 'Event ID'),
     startRaw: startRaw,
     endRaw: endRaw,
@@ -914,6 +912,18 @@ function calendarEventFromBlock(block: HtmlHomeBlock): CalendarHomeEvent {
     top: eventTop(start),
     height: eventHeight(start, end)
   };
+}
+
+function calendarWriteActionJson(block: HtmlHomeBlock): string {
+  for (let index = 0; index < block.actions.length; index++) {
+    const action = block.actions[index];
+    if (action.id === 'calendar.event.create' ||
+      action.id === 'calendar.event.update' ||
+      action.id === 'calendar.event.delete.confirm') {
+      return JSON.stringify(action);
+    }
+  }
+  return '';
 }
 
 function calendarEvents(document: HtmlHomeDocument): CalendarHomeEvent[] {
@@ -981,6 +991,7 @@ function targetDate(events: CalendarHomeEvent[], generatedAt: string): Date {
 function eventDataAttrs(event: CalendarHomeEvent): string {
   return ' data-calendar-event="' + escapeAttribute(event.id) + '"' +
     ' data-delete-confirm="' + (event.status === 'confirm_required' ? 'true' : 'false') + '"' +
+    ' data-calendar-action="' + escapeAttribute(event.writeActionJson) + '"' +
     ' data-title="' + escapeAttribute(event.title) + '"' +
     ' data-time="' + escapeAttribute(event.dateLabel + ' ' + event.timeRange) + '"' +
     ' data-event-id="' + escapeAttribute(event.eventId) + '"' +

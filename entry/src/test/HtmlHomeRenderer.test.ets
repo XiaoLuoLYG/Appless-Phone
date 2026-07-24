@@ -1884,7 +1884,8 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(calendarDeleteConfirmationDocumentFixture());
 
       expect(html.indexOf('data-delete-confirm="true"')).assertLarger(-1);
-      expect(html.indexOf('function postCalendarDelete(card)')).assertLarger(-1);
+      expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+      expect(html.indexOf('calendar.event.delete.confirm')).assertLarger(-1);
       expect(html.indexOf('<aside class="calendar-detail-drawer">')).assertEqual(-1);
     });
 
@@ -1974,10 +1975,29 @@ export default function htmlHomeRendererTest() {
       update.blocks[0].status = 'confirm_required';
       update.blocks[0].subtitle = update.subtitle;
       update.blocks[0].metrics[1].value = 'calendar.event.update';
+      create.blocks[0].actions = [{
+        id: 'calendar.event.create',
+        label: '确认创建',
+        prompt: 'calendar.event.create',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"title":"一对一会议","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
+      update.blocks[0].actions = [{
+        id: 'calendar.event.update',
+        label: '确认更新',
+        prompt: 'calendar.event.update',
+        variant: 'primary',
+        kind: 'prompt',
+        args: JSON.parse('{"eventId":"event-create-1","start":"2026-07-02T16:30:00+08:00","end":"2026-07-02T17:00:00+08:00"}') as Object
+      }];
 
       [create, update].forEach((doc: HtmlHomeDocument): void => {
         const html = renderHtmlHomeDocument(doc);
         expect(html.indexOf('等待确认')).assertLarger(-1);
+        expect(html.indexOf('data-calendar-action=')).assertLarger(-1);
+        expect(html.indexOf('function postCalendarWrite(card)')).assertLarger(-1);
+        expect(html.indexOf(doc.blocks[0].actions[0].id)).assertLarger(-1);
         expect(html.indexOf('已写入 Google Calendar')).assertEqual(-1);
         expect(html.indexOf('已更新 Google Calendar')).assertEqual(-1);
       });
