@@ -1250,6 +1250,16 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
     });
 
+    it('updates a multi-task iframe when equal-length provider content changes', 0, () => {
+      const previousProviderHtml = '<main>Provider status: ready</main>';
+      const updatedProviderHtml = '<main>Provider status: error</main>';
+      const html = renderHtmlHomeDocument(documentFixture());
+
+      expect(previousProviderHtml.length).assertEqual(updatedProviderHtml.length);
+      expect(previousProviderHtml === updatedProviderHtml).assertFalse();
+      expect(html.indexOf('if (iframe.srcdoc !== embedHtml) {')).assertLarger(-1);
+    });
+
     it('renders ride tool panel with no fake map before driver coordinates', 0, () => {
       const html = renderHtmlHomeDocument(rideDocumentFixture());
 

@@ -219,9 +219,6 @@ const MULTI_TASK_SCRIPT: string = `
     }
     return '';
   }
-  function embedKey(html) {
-    return text(html).length.toString() + ':' + text(html).slice(0, 96);
-  }
   function isLoadingStatus(status) {
     var value = text(status);
     return value === 'running' || value === 'queued' || value === 'loading';
@@ -303,14 +300,12 @@ const MULTI_TASK_SCRIPT: string = `
         iframe = add(panel, 'iframe', 'multi-embed-frame');
         iframe.setAttribute('title', text(block.title) || sectionId);
       }
-      var nextKey = embedKey(embedHtml);
-      if (text(iframe.getAttribute('data-embed-key')) !== nextKey) {
+      if (iframe.srcdoc !== embedHtml) {
         iframe.srcdoc = embedHtml;
-        iframe.setAttribute('data-embed-key', nextKey);
       }
       return;
     }
-    if (iframe !== null && text(iframe.getAttribute('data-embed-key')).length > 0) {
+    if (iframe !== null && iframe.srcdoc.length > 0) {
       if (fallback !== null) { panel.removeChild(fallback); }
       return;
     }
