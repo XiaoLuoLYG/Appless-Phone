@@ -1,4 +1,5 @@
 import { AgentTool } from '../agent/AgentTool';
+import { AgentToolRunOptions } from '../agent/AgentToolRunOptions';
 import { ModelScopeClient } from './ModelScopeClient';
 
 interface ModelScopeToolInput {
@@ -23,7 +24,7 @@ export class ModelScopeTool implements AgentTool {
     return this.client.toolDescription();
   }
 
-  async run(input: string): Promise<string> {
+  async run(input: string, _options?: AgentToolRunOptions): Promise<string> {
     let parsed: ModelScopeToolInput;
     try {
       parsed = JSON.parse(input) as ModelScopeToolInput;

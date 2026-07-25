@@ -61,6 +61,8 @@ export struct HomePage {
   @Prop messages: A2uiMessage[] = [];
   @Prop currentSurface: A2uiSurfaceState = emptyA2uiSurface();
   @Prop htmlHomeHtml: string = '';
+  @Prop multiTaskPayloadJson: string = '';
+  @Prop multiTaskPayloadTick: number = 0;
   @Prop mailDetailEventJson: string = '';
   @Prop mailReplyEventJson: string = '';
   @Prop mailCalendarEventJson: string = '';
@@ -141,6 +143,14 @@ export struct HomePage {
 
   private useNativeSurface(): boolean {
     return this.currentSurface.intent === 'social';
+  }
+
+  private isMultiTaskSurface(): boolean {
+    return this.currentSurface.intent === 'multi-task';
+  }
+
+  private surfaceTopGap(): number {
+    return this.isMultiTaskSurface() ? 2 : A2UI_HOME_SECTION_GAP;
   }
 
   private voiceWaveHeight(index: number): number {
@@ -380,10 +390,12 @@ export struct HomePage {
           onAction: this.onAction
         })
         .layoutWeight(1)
-        .margin({ top: A2UI_HOME_SECTION_GAP })
+        .margin({ top: this.surfaceTopGap() })
       } else {
         HtmlHomeSurfaceView({
           html: this.htmlHomeHtml,
+          multiTaskPayloadJson: this.multiTaskPayloadJson,
+          multiTaskPayloadTick: this.multiTaskPayloadTick,
           mailDetailEventJson: this.mailDetailEventJson,
           mailReplyEventJson: this.mailReplyEventJson,
           mailCalendarEventJson: this.mailCalendarEventJson,
@@ -394,7 +406,7 @@ export struct HomePage {
           onAction: this.onAction
         })
         .layoutWeight(1)
-        .margin({ top: A2UI_HOME_SECTION_GAP })
+        .margin({ top: this.surfaceTopGap() })
       }
 
       Column() {

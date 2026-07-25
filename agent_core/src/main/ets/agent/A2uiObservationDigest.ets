@@ -24,7 +24,7 @@ export interface A2uiObservationDigest {
   finalText: string;
 }
 
-const FAILURE_STATUSES: string[] = ['error', 'blocked', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
+const FAILURE_STATUSES: string[] = ['error', 'blocked', 'confirm_required', 'needs_input', 'needs_user', 'auth_required', 'needs_auth', 'unsafe_action_blocked'];
 const MAX_DETAILED_RESULTS: number = 5;
 const MAX_TEXT_LENGTH: number = 180;
 const USEFUL_ROW_LABELS: string[] = [
@@ -146,28 +146,15 @@ function appendResults(lines: string[], results: A2uiGenericToolResultData[]): v
   }
 }
 
-export function summarizeA2uiObservation(observation: string): A2uiObservationDigest {
-  const parsed = parseA2uiJsonl(observation);
-  if (parsed.error.length > 0 || parsed.envelopes.length === 0) {
+export function summarizeAppliedA2uiSurface(
+  observation: string,
+  surface: A2uiSurfaceState,
+  parseError: string = ''
+): A2uiObservationDigest {
+  if (parseError.length > 0) {
     return emptyDigest(observation);
   }
 
-  const store = new A2uiSurfaceStore();
-  for (let index = 0; index < parsed.envelopes.length; index++) {
-    const envelope: A2uiEnvelope = parsed.envelopes[index];
-    const applied: A2uiApplyResult = store.apply(envelope);
-    if (!applied.ok) {
-      return {
-        isA2ui: true,
-        text: 'ObservationDigest\nerror: ' + applied.error,
-        shouldStop: true,
-        failureKey: 'a2ui:error',
-        finalText: ''
-      };
-    }
-  }
-
-  const surface = store.getSurface();
   const results = genericToolResults(surface);
   const summary: A2uiSummaryData = summaryData(surface);
   const connect = dynamicToolConnect(surface);
@@ -216,4 +203,28 @@ export function summarizeA2uiObservation(observation: string): A2uiObservationDi
     failureKey: failureKeyFor(toolId, surface, connect, results),
     finalText: finalText
   };
+}
+
+export function summarizeA2uiObservation(observation: string): A2uiObservationDigest {
+  const parsed = parseA2uiJsonl(observation);
+  if (parsed.error.length > 0 || parsed.envelopes.length === 0) {
+    return emptyDigest(observation);
+  }
+
+  const store = new A2uiSurfaceStore();
+  for (let index = 0; index < parsed.envelopes.length; index++) {
+    const envelope: A2uiEnvelope = parsed.envelopes[index];
+    const applied: A2uiApplyResult = store.apply(envelope);
+    if (!applied.ok) {
+      return {
+        isA2ui: true,
+        text: 'ObservationDigest\nerror: ' + applied.error,
+        shouldStop: true,
+        failureKey: 'a2ui:error',
+        finalText: ''
+      };
+    }
+  }
+
+  return summarizeAppliedA2uiSurface(observation, store.getSurface());
 }

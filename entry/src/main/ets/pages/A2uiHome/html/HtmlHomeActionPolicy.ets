@@ -65,7 +65,29 @@ interface LuckinPaymentArgs {
 }
 
 export function isHtmlHomeActionAllowed(document: HtmlHomeDocument, action: A2uiAction): boolean {
-  if (action.id.length === 0 || action.id === 'hotel.book') {
+  if (action.id === 'hotel.book') {
+    return false;
+  }
+  if (isHtmlHomeActionAllowedInDocument(document, action)) {
+    return true;
+  }
+  if (document.kind !== 'multi-task') {
+    return false;
+  }
+  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
+    const block = document.blocks[blockIndex];
+    if (block.kind !== 'multi-task-section' || block.embeddedDocument === undefined) {
+      continue;
+    }
+    if (isHtmlHomeActionAllowedInDocument(block.embeddedDocument, action)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (action.id.length === 0) {
     return false;
   }
   if (action.id === 'flight_retry_date') {

@@ -109,7 +109,7 @@ import {
   parseHotelDetailRequest,
   parseHotelSearchRequest
 } from './HotelToolTypes';
-import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
+import { callGmailApiTool, gmailMailDetailFromComposioObservation, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
 import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
 import { mediaVideoPlaybackUrl, mediaVideoStructuredDataA2ui } from './MediaVideoToolA2ui';
@@ -11023,6 +11023,22 @@ async function readConfiguredGmailDetailWithSource(
       sources: [mailDetailSource('Gmail OAuth', 'oauth_api', 'gmail.thread.read')]
     };
   }
+  if (args.messageId.trim().length > 0) {
+    try {
+      const execution: ComposioRawExecution = await callComposioFixedRaw(
+        'Fetch exactly one Gmail message by message ID',
+        'gmail.message.read',
+        args as Object
+      );
+      return {
+        detail: gmailMailDetailFromComposioObservation(execution.observation, args),
+        sources: [mailDetailSource('Composio Gmail', 'oauth_api', 'gmail.message.read')]
+      };
+    } catch (messageError) {
+      aiLogError('[AIPhone][GmailDetailMessageComposioFailed] ' +
+        describeThrown(messageError).substring(0, 240));
+    }
+  }
   try {
     const execution: ComposioRawExecution = await callComposioFixedRaw(
       'Gmail read full thread ' + args.threadId,
@@ -11523,16 +11539,17 @@ async function configuredGmailResults(
   prompt: string,
   args: Object | null
 ): Promise<DynamicGenericToolResult[]> {
+  const providerArgs = toolId === 'gmail.mail.search' ? gmailMcpArgsForPrompt(toolId, prompt, args) : args;
   let pinnedProvider = '';
-  if (toolId === 'gmail.draft.apply' && args !== null && !Array.isArray(args) && typeof args === 'object') {
-    const values = args as ToolArgRecord;
+  if (toolId === 'gmail.draft.apply' && providerArgs !== null && !Array.isArray(providerArgs) && typeof providerArgs === 'object') {
+    const values = providerArgs as ToolArgRecord;
     pinnedProvider = textOf(values.provider).trim().toLowerCase();
     if (pinnedProvider !== 'gmail_oauth' && pinnedProvider !== 'composio') {
       return [gmailErrorResult(toolId, 'Gmail draft provider is missing or invalid.')];
     }
   }
   if (pinnedProvider === 'gmail_oauth') {
-    const pinnedFallback = await gmailOAuthFallbackResults(toolId, prompt, args);
+    const pinnedFallback = await gmailOAuthFallbackResults(toolId, prompt, providerArgs);
     pinnedFallback.forEach((result: DynamicGenericToolResult) => {
       result.providerPhase = 'execution';
     });
@@ -11545,7 +11562,7 @@ async function configuredGmailResults(
       'Gmail',
       prompt,
       toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
-      args
+      providerArgs
     ) : clonedGmailResult(gmailComposioResultForTests);
   if (pinnedProvider === 'composio') {
     return [composioResult];
@@ -11553,7 +11570,7 @@ async function configuredGmailResults(
   if (composioResult.status === 'success' && composioResult.providerPhase === 'execution') {
     return [composioResult];
   }
-  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
+  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, providerArgs);
   fallbackResults.forEach((result: DynamicGenericToolResult) => {
     result.providerPhase = 'execution';
   });
