@@ -31,7 +31,6 @@ import {
 import {
   leaderInputHasEntityAuthority,
   leaderSameRoundDependencyConsumerTaskToolIds,
-  leaderSameRoundDependencyConsumerTasksLackEntityInput,
   leaderTasksHaveSameRoundDependency
 } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
@@ -534,9 +533,6 @@ export class LeaderAgent extends MessageDrivenAgent {
     if (decision.roundAction !== 'execute' ||
       !leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
       return true;
-    }
-    if (!leaderSameRoundDependencyConsumerTasksLackEntityInput(decision.dataTasks)) {
-      return false;
     }
     const consumerToolIds: Set<string> = new Set<string>(
       leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks)

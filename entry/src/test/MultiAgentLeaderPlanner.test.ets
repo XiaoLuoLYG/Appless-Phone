@@ -995,7 +995,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(1);
     });
 
-    it('fails closed for every same-round consumer with an explicit entity input', 0, async () => {
+    it('drops every same-round consumer with a hostile explicit entity input', 0, async () => {
       const sources: string[] = [
         'maps.place.search',
         'mail.search',
@@ -1012,13 +1012,18 @@ export default function multiAgentLeaderPlannerTest() {
         '{"threadId":"gmail-thread-explicit"}'
       ];
       for (let index = 0; index < sources.length; index++) {
-        expect(await sameRoundDependencyError(
+        const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([
           sameRoundDependencyDecision(sources[index], consumers[index], inputs[index])
-        )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+        ])).plan(inputMessage(), { text: 'search then details' }, planningContext(), 1,
+          (): boolean => true);
+        expect(decision.requestedCapabilityIds.join(',')).assertEqual(sources[index]);
+        expect(decision.dataTasks.length).assertEqual(1);
+        expect(decision.dataTasks[0].toolId).assertEqual(sources[index]);
+        expect(decision.reasonCode).assertEqual('dependency_requires_next_round');
       }
     });
 
-    it('fails closed for mail and Gmail consumers with a supplied provider', 0, async () => {
+    it('drops mail consumers with a hostile supplied provider', 0, async () => {
       const sources: string[] = ['mail.search', 'gmail.mail.search'];
       const consumers: string[] = ['mail.thread.read', 'gmail.thread.read'];
       const providerInputs: string[] = [
@@ -1029,13 +1034,17 @@ export default function multiAgentLeaderPlannerTest() {
       ];
       for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
         for (let inputIndex = 0; inputIndex < providerInputs.length; inputIndex++) {
-          expect(await sameRoundDependencyError(
+          const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([
             sameRoundDependencyDecision(
               sources[sourceIndex],
               consumers[sourceIndex],
               providerInputs[inputIndex]
             )
-          )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+          ])).plan(inputMessage(), { text: 'search then details' }, planningContext(), 1,
+            (): boolean => true);
+          expect(decision.requestedCapabilityIds.join(',')).assertEqual(sources[sourceIndex]);
+          expect(decision.dataTasks.length).assertEqual(1);
+          expect(decision.dataTasks[0].toolId).assertEqual(sources[sourceIndex]);
         }
       }
     });
@@ -1068,14 +1077,18 @@ export default function multiAgentLeaderPlannerTest() {
       }
     });
 
-    it('fails closed when one same-round Maps consumer is unbound and another has a placeId', 0, async () => {
-      expect(await sameRoundDependencyError(
+    it('drops every same-round Maps consumer when one carries a forged placeId', 0, async () => {
+      const decision = await new MultiAgentLeaderPlanner(new QueueLocalModel([
         sameRoundDependencyDecisionWithConsumers(
           'maps.place.search',
           'maps.place.details',
           ['{}', '{"placeId":"place-explicit"}']
         )
-      )).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
+      ])).plan(inputMessage(), { text: 'search then details' }, planningContext(), 1,
+        (): boolean => true);
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+      expect(decision.dataTasks.length).assertEqual(1);
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
     });
 
     it('keeps direct Maps details available without a same-round producer', 0, async () => {

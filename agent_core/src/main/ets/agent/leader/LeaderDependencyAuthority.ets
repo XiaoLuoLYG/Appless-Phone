@@ -114,19 +114,15 @@ function consumerTaskDefinitelyLacksEntityInput(task: LeaderDecisionDataTask): b
     return optionalEntityInputDefinitelyEmpty(values, 'placeId') &&
       optionalEntityInputDefinitelyEmpty(values, 'id');
   }
-  // mail.thread.read normalizes provider before choosing threadId or
-  // messageId; requestKey also binds that entity. Any supplied value is
-  // ambiguous without an earlier observation, so it must not be erased.
   return optionalEntityInputDefinitelyEmpty(values, 'provider') &&
     optionalEntityInputDefinitelyEmpty(values, 'threadId') &&
     optionalEntityInputDefinitelyEmpty(values, 'messageId') &&
     optionalEntityInputDefinitelyEmpty(values, 'requestKey');
 }
 
-// A same-round rewrite is safe only for consumers that provably omit every
-// entity input required by their dependency contract. An explicit or malformed
-// identity may represent an independent direct-details request and is rejected
-// by the caller rather than silently dropped.
+// This public inspector remains available for callers that need to distinguish
+// blank consumer inputs; Leader normalization intentionally discards every
+// recognized same-round consumer before any of those inputs are trusted.
 export function leaderSameRoundDependencyConsumerTasksLackEntityInput(
   tasks: LeaderDecisionDataTask[]
 ): boolean {

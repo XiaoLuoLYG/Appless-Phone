@@ -1101,7 +1101,7 @@ export default function leaderAgentTest() {
       const search = semanticDataTask('place-search', 'maps.place.search');
       search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const details = semanticDataTask('place-details', 'maps.place.details');
-      details.input = new Object();
+      details.input = JSON.parse('{"placeId":"place-forged"}') as Object;
       const planner = new RoundScriptedPlanner([
         withNormalizationDate(semanticDecision([details, search]))
       ]);
