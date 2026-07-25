@@ -952,6 +952,7 @@ export default function multiAgentLeaderPlannerTest() {
         expect(decision.dataTasks[0].required).assertTrue();
         expect(decision.personaId).assertEqual('travel_companion');
         expect(decision.skillId).assertEqual('');
+        expect(decision.reasonCode).assertEqual('dependency_requires_next_round');
         expect(decision.uiIntent.purpose).assertEqual('read source and dependent detail');
         expect(decision.uiIntent.preferredDensity).assertEqual('comfortable');
         expect(decision.uiIntent.requiredSections.join(',')).assertEqual('source,detail');
@@ -964,6 +965,11 @@ export default function multiAgentLeaderPlannerTest() {
         expect(model.prompts.length).assertEqual(1);
         expect(model.prompts[0].indexOf(
           'requestedCapabilityIds is the exact current-round execution union'
+        )).assertLarger(-1);
+        expect(model.prompts[0].indexOf(
+          'For dependent serial tools, emit exactly one data task in this planning round.\n' +
+          'Wait for its Observation, then emit the next task with args derived from that real output.\n' +
+          'Never pre-fill placeId, eventId, threadId, messageId, orderId, or provider receipt.'
         )).assertLarger(-1);
       }
     });
@@ -1615,6 +1621,7 @@ export default function multiAgentLeaderPlannerTest() {
 
       expect(dependent.dataTasks.length).assertEqual(1);
       expect(dependent.dataTasks[0].toolId).assertEqual('maps.place.details');
+      expect(dependentModel.prompts[0].indexOf('place-real-1')).assertLarger(-1);
       expect(dependentModel.prompts[0].indexOf(
         'A different later-round tool is allowed only when it requires real prior output.'
       ) >= 0).assertTrue();

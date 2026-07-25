@@ -1097,11 +1097,11 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
-    it('rejects a custom planner same-round dependency after normalization and before observation or tasks', 0, async () => {
+    it('publishes only the source from a hostile custom same-round dependency', 0, async () => {
       const search = semanticDataTask('place-search', 'maps.place.search');
       search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
       const details = semanticDataTask('place-details', 'maps.place.details');
-      details.input = JSON.parse('{"placeId":"place-forged"}') as Object;
+      details.input = new Object();
       const planner = new RoundScriptedPlanner([
         withNormalizationDate(semanticDecision([details, search]))
       ]);
@@ -1131,14 +1131,41 @@ export default function leaderAgentTest() {
 
       bus.publish(inputMessage());
       expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const source = await receive(observer);
+
+      expect(source.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((source.payload as CreateDataTaskPayload).toolId).assertEqual('maps.place.search');
+      expect(normalized).assertEqual(1);
+      expect(observed).assertEqual(1);
+      bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'same-round-marker'));
+      expect((await receive(observer)).taskId).assertEqual('same-round-marker');
+      leader.stop();
+      observer.close();
+    });
+
+    it('does not publish guessed Maps details after an error Observation', 0, async () => {
+      const search = semanticDataTask('place-search', 'maps.place.search');
+      search.input = JSON.parse('{"query":"深圳咖啡"}') as Object;
+      const details = semanticDataTask('place-details', 'maps.place.details');
+      details.input = JSON.parse('{"placeId":"place-guessed"}') as Object;
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([search]),
+        semanticDecision([details])
+      ]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, dependentDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      await receive(observer);
+      const source = await receive(observer);
+      bus.publish(dataResultMessageWithStatus(source, 'error'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
       const blocked = await receive(observer);
 
       expect(blocked.type).assertEqual(AgentMessageType.TASK_ERROR);
-      expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_SAME_ROUND_DEPENDENCY');
-      expect(normalized).assertEqual(2);
-      expect(observed).assertEqual(0);
-      bus.publish(terminalMessage(AgentMessageType.ACTION_RESULT, 'same-round-marker'));
-      expect((await receive(observer)).taskId).assertEqual('same-round-marker');
+      expect((blocked.payload as TaskErrorPayload).code).assertEqual('LEADER_UNBOUND_LATER_TOOL');
       leader.stop();
       observer.close();
     });

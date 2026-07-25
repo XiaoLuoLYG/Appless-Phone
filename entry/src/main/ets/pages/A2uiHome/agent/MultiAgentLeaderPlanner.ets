@@ -1163,6 +1163,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     }
     decision.dataTasks = retained;
     decision.requestedCapabilityIds = normalizedRequested;
+    decision.reasonCode = 'dependency_requires_next_round';
   }
 
   private rejectUnboundLaterTool(
@@ -1345,6 +1346,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
         'the unique union of every selected Data tool, allowed tool, and Action ID. In other words, ' +
         'requestedCapabilityIds is the exact current-round execution union, not a list of future-round tools.',
       'Tasks in this round must be independent. Put dependent work in a later round.',
+      'For dependent serial tools, emit exactly one data task in this planning round.\n' +
+        'Wait for its Observation, then emit the next task with args derived from that real output.\n' +
+        'Never pre-fill placeId, eventId, threadId, messageId, orderId, or provider receipt.',
       'Ownership contract: Data-owned capability IDs belong in dataTasks toolId and allowedToolIds. ' +
         'Action-owned capability IDs belong in actionIntent.allowedActionIds. A Data-owned ID may also appear in ' +
         'actionIntent only when a source tool explicitly declares that exact ID in actions. Never place an ' +

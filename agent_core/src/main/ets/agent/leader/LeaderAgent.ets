@@ -30,6 +30,8 @@ import {
 } from './LeaderTypes';
 import {
   leaderInputHasEntityAuthority,
+  leaderSameRoundDependencyConsumerTaskToolIds,
+  leaderSameRoundDependencyConsumerTasksLackEntityInput,
   leaderTasksHaveSameRoundDependency
 } from './LeaderDependencyAuthority';
 import { CreateUiTaskPayload, UiRenderResultPayload } from '../ui/UiAgentTypes';
@@ -427,22 +429,21 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.finishTurn(state);
       return;
     }
-    try {
-      this.normalizeDecisionInputs(state.input, decision, trustedCurrentLocalDate);
-    } catch (error) {
-      this.finishTurn(state);
-      const detail: string = error instanceof Error ? error.message : `${error}`;
-      this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
-      return;
-    }
-    if (decision.roundAction === 'execute' &&
-      leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
+    if (!this.normalizeSameRoundDependency(decision)) {
       this.finishTurn(state);
       this.publishError(
         message,
         'LEADER_SAME_ROUND_DEPENDENCY',
         'Leader cannot execute an entity producer and its dependent consumer in the same round'
       );
+      return;
+    }
+    try {
+      this.normalizeDecisionInputs(state.input, decision, trustedCurrentLocalDate);
+    } catch (error) {
+      this.finishTurn(state);
+      const detail: string = error instanceof Error ? error.message : `${error}`;
+      this.publishError(message, 'LEADER_TASK_INPUT_INVALID', detail);
       return;
     }
     if (this.reusesCompletedDataTool(state, decision)) {
@@ -526,6 +527,59 @@ export class LeaderAgent extends MessageDrivenAgent {
         dataTaskIds,
         dataTaskIds.length === 0
       );
+    }
+  }
+
+  private normalizeSameRoundDependency(decision: LeaderDecision): boolean {
+    if (decision.roundAction !== 'execute' ||
+      !leaderTasksHaveSameRoundDependency(decision.dataTasks)) {
+      return true;
+    }
+    if (!leaderSameRoundDependencyConsumerTasksLackEntityInput(decision.dataTasks)) {
+      return false;
+    }
+    const consumerToolIds: Set<string> = new Set<string>(
+      leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks)
+    );
+    const retained: LeaderDecisionDataTask[] = [];
+    const currentRoundCapabilityIds: string[] = [];
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      const task: LeaderDecisionDataTask = decision.dataTasks[index];
+      if (consumerToolIds.has(task.toolId)) {
+        continue;
+      }
+      retained.push(task);
+      this.rememberCapabilityId(currentRoundCapabilityIds, task.toolId);
+      for (let allowedIndex = 0; allowedIndex < task.allowedToolIds.length; allowedIndex++) {
+        const allowedToolId: string = task.allowedToolIds[allowedIndex];
+        if (consumerToolIds.has(allowedToolId)) {
+          return false;
+        }
+        this.rememberCapabilityId(currentRoundCapabilityIds, allowedToolId);
+      }
+    }
+    if (retained.length === 0) {
+      return false;
+    }
+    if (decision.actionIntent !== undefined) {
+      for (let index = 0; index < decision.actionIntent.allowedActionIds.length; index++) {
+        this.rememberCapabilityId(
+          currentRoundCapabilityIds,
+          decision.actionIntent.allowedActionIds[index]
+        );
+      }
+    }
+    decision.dataTasks = retained;
+    decision.requestedCapabilityIds = decision.requestedCapabilityIds.filter(
+      (capabilityId: string): boolean => currentRoundCapabilityIds.indexOf(capabilityId) >= 0
+    );
+    decision.reasonCode = 'dependency_requires_next_round';
+    return true;
+  }
+
+  private rememberCapabilityId(capabilityIds: string[], capabilityId: string): void {
+    if (capabilityIds.indexOf(capabilityId) < 0) {
+      capabilityIds.push(capabilityId);
     }
   }
 
