@@ -1,5 +1,6 @@
 import localUnitTest from './LocalUnit.test';
 import conversationContextTest from './ConversationContext.test';
+import agentCorePublicContractTest from './AgentCorePublicContract.test';
 import a2uiParserTest from './A2uiParser.test';
 import localModelClientTest from './LocalModelClient.test';
 import toolGatewayClientTest from './ToolGatewayClient.test';
@@ -92,6 +93,7 @@ import checkoutWebOverlayTest from './CheckoutWebOverlay.test';
 export default function testsuite() {
   localUnitTest();
   conversationContextTest();
+  agentCorePublicContractTest();
   a2uiParserTest();
   localModelClientTest();
   toolGatewayClientTest();

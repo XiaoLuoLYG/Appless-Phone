@@ -43,6 +43,14 @@ export { clearStoredConversation, loadConversation, saveConversation } from './s
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { AgentToolRunOptions } from './src/main/ets/agent/AgentToolRunOptions';
+export { MultiToolSurfaceComposer, MultiToolSurfaceEmitHandler } from './src/main/ets/agent/MultiToolSurfaceComposer';
+export {
+  childSurfaceIdForMultiTaskSlot,
+  isMultiTaskSurface,
+  mergeSlotObservationIntoMultiTaskSurface,
+  resolveMultiTaskSlotId
+} from './src/main/ets/agent/MultiTaskSurfaceMerge';
+export { LoopBatchExecution, MultiTaskBoardData } from './src/main/ets/agent/MultiToolTypes';
 export { A2uiObservationDigest, summarizeA2uiObservation, summarizeAppliedA2uiSurface } from './src/main/ets/agent/A2uiObservationDigest';
 export {
   ToolRegistry,
@@ -82,7 +90,7 @@ export { AiphoneToolSurfaceCallback, aiphoneToolSurfaceCallback, ignoreSurface }
 export { aiphoneToolDefinitionCount, allToolDefinitions as allAiphoneToolDefinitions, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel } from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export { GMAIL_TOOL_IDS, actionAgentToolDefinitions, aiphoneToolDescriptionForModel, allToolDefinitions, backendLabel, dataAgentToolDefinitions, isCalendarToolId, isExplicitLuckinOrderPrompt, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isSurfaceDerivedHotelActionId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId, toolPlanningDescriptionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
-export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
+export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalStripeReceivingAgentJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, prepareXOAuthAuthorizationUrl, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
 export { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from './src/main/ets/aiphone/runtime/GmailToolA2ui';
 export { AssetCredentialStore, CredentialStore, credentialRefFor } from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
 export { GmailOAuthConfig, GmailOAuthRedirectResult, GmailOAuthTokenSet, handleGmailOAuthRedirect } from './src/main/ets/aiphone/runtime/GmailOAuthClient';
