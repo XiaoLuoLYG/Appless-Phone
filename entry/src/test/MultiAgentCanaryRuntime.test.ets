@@ -11,6 +11,7 @@ import {
   AgentMessageType,
   ConversationContext,
   CreateDataTaskPayload,
+  CreateUiTaskPayload,
   DataResult,
   DataStepDecision,
   DataTaskExecutor,
@@ -3060,22 +3061,42 @@ export default function multiAgentCanaryRuntimeTest() {
       detailPending.then((_ok: boolean): void => {
         detailSettled = true;
       });
+      expect(runtime.currentActionContext()?.sourceToolId === 'hotel.search').assertFalse();
       await flush();
       expect(executor.calls.join(',')).assertEqual('hotel.search,hotel.detail');
       await executor.detailStarted.promise;
       await flush();
+      expect(runtime.currentActionContext()?.sourceToolId === 'hotel.search').assertFalse();
       expect(bus.count(AgentMessageType.TASK_CREATE_UI)).assertEqual(2);
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
+      const detailUiMessage = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_UI &&
+        (message.payload as CreateUiTaskPayload).intent === 'hotel.detail'
+      )[0];
+      const detailDataMessage = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.TASK_CREATE_DATA &&
+        (message.payload as CreateDataTaskPayload).toolId === 'hotel.detail'
+      )[0];
+      const detailUiTask = detailUiMessage.payload as CreateUiTaskPayload;
+      const detailDataTask = detailDataMessage.payload as CreateDataTaskPayload;
+      expect(detailUiTask.dataTaskIds[0]).assertEqual(detailDataTask.taskId);
+      expect(detailUiMessage.turnId === restoredSearchContext?.turnId).assertFalse();
       expect(detailSettled).assertFalse();
       executor.detailRelease.open();
       expect(await detailPending).assertTrue();
 
       const detailContext = runtime.currentActionContext();
       expect(detailContext?.sourceToolId).assertEqual('hotel.detail');
+      expect(detailContext?.surfaceId === originalSearchSurfaceId).assertFalse();
       const booking = renderedAction(surfaces[surfaces.length - 1], 'hotel.booking.open');
       expect(booking === null).assertFalse();
+      expect(booking?.id).assertEqual('hotel.booking.open');
+      expect((booking?.args as Record<string, string>).bookingUrl).assertEqual(hotelItem().bookingUrl);
+      expect(await runtime.runAction(booking!, restoredSearchContext!)).assertFalse();
       expect(await runtime.runAction(booking!, detailContext!)).assertTrue();
       expect(opener.uris[opener.uris.length - 1].indexOf('https://rollinggo.cn/')).assertEqual(0);
+      expect(runtime.currentActionContext()?.surfaceId).assertEqual(detailContext?.surfaceId);
+      expect(runtime.currentActionContext()?.sourceToolId).assertEqual('hotel.detail');
 
       const visibleDetail = surfaces[surfaces.length - 1];
       const newerHost = pageSurface('hotel.detail', booking!, 202);

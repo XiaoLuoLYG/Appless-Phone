@@ -1715,6 +1715,7 @@ struct Index {
       if (!isRollingGoHotelBookingUrl(uri)) {
         return Promise.resolve(false);
       }
+      this.rememberHotelReturnSurface();
       this.checkoutWebKind = 'hotel';
       this.checkoutWebUrl = uri;
       this.showCheckoutWeb = true;
@@ -5201,7 +5202,11 @@ struct Index {
         },
         onCloseCheckoutWeb: () => {
           const closedTrainBooking = this.checkoutWebKind === 'train';
+          const closedHotelBooking = this.checkoutWebKind === 'hotel';
           this.showCheckoutWeb = false;
+          if (closedHotelBooking) {
+            this.restoreHotelReturnSurface('hotel_booking_closed');
+          }
           if (closedTrainBooking) {
             this.applyPanelState(updateConnectionPanelState(this.currentPanelState(), {
               ok: true,

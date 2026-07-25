@@ -72,6 +72,7 @@ import { MultiAgentTurnOutcome } from './MultiAgentRuntimeTypes';
 import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
 import {
   authorizeHotelDataTask,
+  HotelActionContext,
   HotelRuntimeSurfaceWriter,
   HotelSurfaceAuthority,
   HotelVisibility,
@@ -1268,6 +1269,7 @@ export function rememberedPersonaAfterOutcome(
 export class MultiAgentCanaryRuntime {
   private readonly runtime: MultiAgentRuntime;
   private readonly authority: HotelSurfaceAuthority;
+  private readonly followUpIds: PreparedHotelFollowUpIds;
   private readonly surfaceWriter: HotelRuntimeSurfaceWriter;
   private readonly conversationId: string;
   private readonly aiphoneExecutor: AiphoneRegisteredActionExecutor;
@@ -1308,6 +1310,7 @@ export class MultiAgentCanaryRuntime {
       );
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
+    this.followUpIds = followUpIds;
     this.authority = new HotelSurfaceAuthority();
     const visibility = new HotelVisibility();
     const onOwnedSurface = (
@@ -1451,6 +1454,18 @@ export class MultiAgentCanaryRuntime {
     if (action.id === 'hotel.detail' && !this.currentHotelDetailContext(context)) {
       return Promise.resolve(false);
     }
+    if (action.id === 'hotel.detail') {
+      this.followUpIds.prepare();
+      const hotelContext: HotelActionContext = {
+        conversationId: context.conversationId,
+        turnId: context.turnId,
+        surfaceId: context.surfaceId,
+        sourceToolId: context.sourceToolId
+      };
+      if (!this.authority.beginHotelDetailFollowUp(hotelContext, action)) {
+        return Promise.resolve(false);
+      }
+    }
     const execution: ActionExecutionContext = {
       conversationId: context.conversationId,
       turnId: context.turnId,
@@ -1463,6 +1478,9 @@ export class MultiAgentCanaryRuntime {
     };
     return this.runtime.runAction(action, execution, this.currentHostGeneration())
       .then((ok: boolean): boolean => {
+        if (action.id === 'hotel.detail' && !ok) {
+          this.authority.clearHotelDetailFollowUp();
+        }
         this.mailDetailBridge.actionSettled(ok);
         return ok;
       });

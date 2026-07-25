@@ -69,6 +69,13 @@ interface HotelSearchSurfaceSnapshot {
   lease: UiSurfaceWriteLease;
 }
 
+interface HotelFollowUpAuthorityLease {
+  conversationId: string;
+  turnId: string;
+  surfaceId: string;
+  actionKey: string;
+}
+
 export class MonotonicHotelIds implements HotelPlannerIdFactory, HotelActionIdFactory {
   private next: number = 0;
 
@@ -107,6 +114,9 @@ export class PreparedHotelFollowUpIds implements HotelActionIdFactory {
       const value = this.preparedUiTaskId;
       this.preparedUiTaskId = '';
       return value;
+    }
+    if (prefix === 'hotel-detail-data' || prefix === 'hotel-detail-ui') {
+      return '';
     }
     return this.ids.nextId(prefix);
   }
@@ -173,6 +183,7 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
   private surfaceId: string = '';
   private sourceToolId: string = '';
   private readonly allowed: Set<string> = new Set<string>();
+  private pendingFollowUpLease: HotelFollowUpAuthorityLease | null = null;
 
   activate(
     conversationId: string,
@@ -202,6 +213,27 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     this.surfaceId = '';
     this.sourceToolId = '';
     this.allowed.clear();
+    this.pendingFollowUpLease = null;
+  }
+
+  beginHotelDetailFollowUp(
+    context: HotelActionContext,
+    action: A2uiAction
+  ): boolean {
+    if (action.args === undefined) {
+      return false;
+    }
+    this.pendingFollowUpLease = {
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      surfaceId: context.surfaceId,
+      actionKey: this.actionKey(action.id, action.args)
+    };
+    return true;
+  }
+
+  clearHotelDetailFollowUp(): void {
+    this.pendingFollowUpLease = null;
   }
 
   allows(
@@ -211,14 +243,22 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
     actionId: string,
     args: Object
   ): boolean {
-    return conversationId === this.conversationId &&
+    const pending = this.pendingFollowUpLease;
+    if (pending !== null) {
+      return conversationId === pending.conversationId && turnId === pending.turnId &&
+        surfaceId === pending.surfaceId && this.actionKey(actionId, args) === pending.actionKey;
+    }
+    if (conversationId === this.conversationId &&
       turnId === this.turnId &&
       surfaceId === this.surfaceId &&
-      this.allowed.has(this.actionKey(actionId, args));
+      this.allowed.has(this.actionKey(actionId, args))) {
+      return true;
+    }
+    return false;
   }
 
   context(): HotelActionContext | null {
-    if (this.conversationId.length === 0 || this.turnId.length === 0 ||
+    if (this.pendingFollowUpLease !== null || this.conversationId.length === 0 || this.turnId.length === 0 ||
       this.surfaceId.length === 0 || this.sourceToolId.length === 0) {
       return null;
     }
