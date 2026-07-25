@@ -28,6 +28,43 @@ const f16ExternalReturns = ['QQ 邮箱', '瑞幸咖啡', '滴滴出行'].map((ap
   returned: true
 }));
 
+function productionMultiTaskPanelUpdater() {
+  const source = readFileSync('entry/src/main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer.ets', 'utf8');
+  const start = source.indexOf('  function upsertPanelBody(panel, block, sectionId, embedHtml) {');
+  const end = source.indexOf('\n  function upsertPanel(block, sectionId, embeds) {', start);
+  assert.ok(start >= 0 && end > start, 'production multi-task panel updater is present');
+  const functionSource = source.slice(start, end);
+  return new Function('text', 'add', `${functionSource}\nreturn upsertPanelBody;`)(
+    (value) => value === undefined || value === null ? '' : String(value),
+    () => { throw new Error('existing iframe should be reused'); }
+  );
+}
+
+test('refreshes an iframe when equal-length provider HTML changes', () => {
+  const stablePrefix = '<main>Provider detail: ' + 'x'.repeat(120);
+  const previous = stablePrefix + 'ready</main>';
+  const updated = stablePrefix + 'error</main>';
+  const attributes = new Map();
+  const iframe = {
+    srcdoc: previous,
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    setAttribute(name, value) { attributes.set(name, value); }
+  };
+  const panel = {
+    querySelector(selector) {
+      return selector === '.multi-embed-frame' ? iframe : null;
+    },
+    removeChild() {}
+  };
+  const updatePanel = productionMultiTaskPanelUpdater();
+
+  assert.equal(previous.length, updated.length);
+  assert.equal(previous.slice(0, 96), updated.slice(0, 96));
+  updatePanel(panel, { title: 'Provider' }, 'provider', previous);
+  updatePanel(panel, { title: 'Provider' }, 'provider', updated);
+  assert.equal(iframe.srcdoc, updated);
+});
+
 test('keeps F16 provider timeout as truthful usable UI evidence but BLOCKED overall', () => {
   const evidence = composioAuthEvidence({
     textValues: ['应用授权', '当前用户 aiphone-luoyige', '刷新', '2300028', 'Operation timeout'],
