@@ -1577,22 +1577,19 @@ export default function actionAgentTest() {
         'turn-1',
         'cancel-all'
       ));
-      const pausedCanceled = (await receiveType(
-        observer,
-        AgentMessageType.ACTION_RESULT
-      )).payload as ActionResultPayload;
-      const activeCanceled = (await receiveType(
-        observer,
-        AgentMessageType.ACTION_RESULT
-      )).payload as ActionResultPayload;
-      const thirdCanceled = (await receiveType(
-        observer,
-        AgentMessageType.ACTION_RESULT
-      )).payload as ActionResultPayload;
+      const pausedCanceledMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      const pausedCanceled = pausedCanceledMessage.payload as ActionResultPayload;
+      const activeCanceledMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      const activeCanceled = activeCanceledMessage.payload as ActionResultPayload;
+      const thirdCanceledMessage = await receiveType(observer, AgentMessageType.ACTION_RESULT);
+      const thirdCanceled = thirdCanceledMessage.payload as ActionResultPayload;
 
       expect(pausedCanceled.status).assertEqual('canceled');
       expect(activeCanceled.status).assertEqual('canceled');
       expect(thirdCanceled.status).assertEqual('canceled');
+      expect(pausedCanceledMessage.taskId).assertEqual('action-task-1');
+      expect(activeCanceledMessage.taskId).assertEqual('action-task-1');
+      expect(thirdCanceledMessage.taskId).assertEqual('run-late-task');
       expect(agent.inspectPausedRun(
         'conversation-1',
         'turn-1',

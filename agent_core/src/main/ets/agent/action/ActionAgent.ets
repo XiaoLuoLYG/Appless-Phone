@@ -1685,7 +1685,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       if (this.sameTurn(stored.context, message)) {
         this.readyRuns.delete(key);
         canceled.add(key);
-        this.publishCanceled(stored, message.taskId, [], []);
+        this.publishCanceled(stored, [], []);
       }
     });
     this.pausedRuns.forEach((paused: PausedActionRun, key: string) => {
@@ -1697,9 +1697,9 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
           runId: paused.runId,
           plan: paused.plan,
           context: paused.context,
-          taskId: message.taskId,
+          taskId: paused.context.taskId,
           followUpPublished: paused.followUpPublished
-        }, message.taskId, this.outputStepIds(paused.outputs), paused.outputs);
+        }, this.outputStepIds(paused.outputs), paused.outputs);
       }
     });
     this.activeRuns.forEach((active: ActiveActionRun, key: string) => {
@@ -1709,7 +1709,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
         if (!canceled.has(key)) {
           this.publishCanceled(
             active.stored,
-            message.taskId,
             active.completedStepIds,
             active.outputs
           );
@@ -1720,7 +1719,6 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   private publishCanceled(
     stored: StoredActionRun,
-    taskId: string,
     completedStepIds: string[],
     outputs: ActionPlanStepOutput[]
   ): void {
@@ -1743,7 +1741,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       type: AgentMessageType.ACTION_RESULT,
       conversationId: stored.context.conversationId,
       turnId: stored.context.turnId,
-      taskId,
+      taskId: stored.taskId,
       payload
     });
   }
