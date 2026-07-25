@@ -1415,6 +1415,41 @@ export default function multiAgentRuntimeTest() {
       const surfaceId: string = 'virtual:' + request.taskId;
       const planId: string = 'direct:' + surfaceId;
       const accepted: boolean[] = [];
+      const exact = {
+        surfaceId,
+        planId,
+        runId: surfaceId,
+        status: 'success',
+        completedStepIds: []
+      } as ActionResultPayload;
+      const wrongIdentities: AgentMessage[] = [
+        {
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: 'wrong-conversation',
+          turnId: request.turnId,
+          taskId: request.taskId,
+          payload: exact
+        },
+        {
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: request.conversationId,
+          turnId: 'wrong-turn',
+          taskId: request.taskId,
+          payload: exact
+        },
+        {
+          type: AgentMessageType.ACTION_RESULT,
+          conversationId: request.conversationId,
+          turnId: request.turnId,
+          taskId: 'wrong-task',
+          payload: exact
+        }
+      ];
+      for (let index = 0; index < wrongIdentities.length; index++) {
+        bus.publish(wrongIdentities[index]);
+        await settle();
+        accepted.push(resolved);
+      }
       const forgeries: ActionResultPayload[] = [
         {
           surfaceId: 'virtual:forged',
@@ -1461,7 +1496,7 @@ export default function multiAgentRuntimeTest() {
       executor.release.open();
       const result = await pending as MultiAgentSettledOutcome;
 
-      expect(accepted.join(',')).assertEqual('false,false,false,false,false');
+      expect(accepted.join(',')).assertEqual('false,false,false,false,false,false,false,false');
       expect(result.status).assertEqual('success');
       runtime.dispose();
     });

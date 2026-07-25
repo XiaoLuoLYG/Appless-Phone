@@ -910,13 +910,17 @@ export class MultiAgentRuntime {
   }
 
   private observeVirtualActionResult(message: AgentMessage, pending: PendingTurn): void {
-    if (message.taskId !== pending.virtualActionTaskId || pending.virtualActionTaskId.length === 0) {
-      return;
-    }
     const result: ActionResultPayload = message.payload as ActionResultPayload;
-    if (result.surfaceId !== pending.virtualActionSurfaceId ||
-      result.planId !== pending.virtualActionPlanId ||
-      result.runId !== pending.virtualActionRunId ||
+    if (!this.matchesActionTerminal(
+      message,
+      result,
+      pending.conversationId,
+      pending.turnId,
+      pending.virtualActionTaskId,
+      pending.virtualActionSurfaceId,
+      pending.virtualActionPlanId,
+      pending.virtualActionRunId
+    ) ||
       (result.status !== 'success' && result.status !== 'error' && result.status !== 'canceled')) {
       return;
     }
@@ -1001,18 +1005,40 @@ export class MultiAgentRuntime {
 
   private observeActionResult(message: AgentMessage, pending: PendingAction): void {
     const result: ActionResultPayload = message.payload as ActionResultPayload;
-    if (pending.generation !== this.generation ||
-      message.conversationId !== pending.conversationId ||
-      message.turnId !== pending.turnId ||
-      result.surfaceId !== pending.surfaceId ||
-      result.planId !== pending.planId ||
-      result.runId !== pending.runId ||
+    if (pending.generation !== this.generation || !this.matchesActionTerminal(
+      message,
+      result,
+      pending.conversationId,
+      pending.turnId,
+      pending.taskId,
+      pending.surfaceId,
+      pending.planId,
+      pending.runId
+    ) ||
       result.status === 'paused') {
       return;
     }
     pending.directTerminal = true;
     pending.directSucceeded = result.status === 'success';
     this.trySettleAction(pending);
+  }
+
+  private matchesActionTerminal(
+    message: AgentMessage,
+    result: ActionResultPayload,
+    conversationId: string,
+    turnId: string,
+    taskId: string,
+    surfaceId: string,
+    planId: string,
+    runId: string
+  ): boolean {
+    return message.conversationId === conversationId &&
+      message.turnId === turnId &&
+      message.taskId === taskId &&
+      result.surfaceId === surfaceId &&
+      result.planId === planId &&
+      result.runId === runId;
   }
 
   private followUpAction(message: AgentMessage): PendingAction | null {

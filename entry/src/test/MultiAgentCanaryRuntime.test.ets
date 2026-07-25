@@ -4,6 +4,7 @@ import {
   A2uiRuntimeDataModel,
   A2uiSurfaceStore,
   A2uiSurfaceState,
+  ActionResultPayload,
   ActionExecutionContext,
   ActionExecutionResult,
   AgentMessage,
@@ -2149,15 +2150,17 @@ export default function multiAgentCanaryRuntimeTest() {
       }
     });
 
-    it('owns C11 as one virtual memory action and renders the real update', 0, async () => {
+    it('owns C11b as one provider write and one exact success terminal', 0, async () => {
       const updates: PersonaMemoryUpdateRequest[] = [];
       const surfaces: A2uiSurfaceState[] = [];
+      const bus = new TrackingBus();
       const runtime = new MultiAgentCanaryRuntime(canaryOptions(
         new QueueModel([MEMORY_DECISION]),
         new CanaryHotelExecutor(),
         new RecordingOpener(),
         surfaces,
-        updates
+        updates,
+        bus
       ));
 
       const outcome = await runtime.submit('我只喝瑞幸咖啡', {
@@ -2170,6 +2173,17 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(updates[0].personaId).assertEqual('food_companion');
       expect(updates[0].memoryText).assertEqual('我只喝瑞幸咖啡');
       expect(surfaces.length).assertEqual(1);
+      const actionResults = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_RESULT
+      );
+      const actionRequest = bus.messages.filter((message: AgentMessage): boolean =>
+        message.type === AgentMessageType.ACTION_PLAN_REQUEST
+      )[0];
+      const terminal = actionResults[0].payload as ActionResultPayload;
+      expect(updates.length).assertEqual(1);
+      expect(actionResults.length).assertEqual(1);
+      expect(terminal.status).assertEqual('success');
+      expect(terminal.runId).assertEqual('virtual:' + actionRequest.taskId);
       runtime.dispose();
     });
 
