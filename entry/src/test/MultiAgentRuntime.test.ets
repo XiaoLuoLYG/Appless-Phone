@@ -1568,7 +1568,8 @@ export default function multiAgentRuntimeTest() {
     it('correlates C19 create update delete terminals to distinct exact page runs', 0, async () => {
       const bus = new CountingBus();
       const executor = new BlockingCalendarLifecycleExecutor();
-      const options = runtimeOptions(bus, new HangingPlanner(), new ControlledWriter(), 1000);
+      const actionTimeoutMs = 1000;
+      const options = runtimeOptions(bus, new HangingPlanner(), new ControlledWriter(), actionTimeoutMs);
       options.actionExecutor = executor;
       const runtime = new MultiAgentRuntime(options);
       const action = (id: string, args: Object): A2uiAction => ({
@@ -1584,8 +1585,12 @@ export default function multiAgentRuntimeTest() {
       const run = async (id: string, args: Object, status: 'success' | 'canceled' | 'error',
         forge: boolean = false): Promise<ActionRunPayload> => {
         let settled = false;
+        let settledAt = 0;
         const pending = runtime.runAction(action(id, args), context(id));
-        pending.then((): void => { settled = true; });
+        pending.then((): void => {
+          settled = true;
+          settledAt = Date.now();
+        });
         await settle();
         const actionRun = messages(AgentMessageType.ACTION_RUN).slice(-1)[0];
         const expected = actionRun.payload as ActionRunPayload;
@@ -1613,12 +1618,17 @@ export default function multiAgentRuntimeTest() {
           }
         }
         const terminalIndex = messages(AgentMessageType.ACTION_RESULT).length;
+        const releasedAt = Date.now();
         executor.release(executor.calls.length - 1);
-        expect(await pending).assertEqual(status === 'success');
+        await settle();
         const terminal = messages(AgentMessageType.ACTION_RESULT)[terminalIndex]
           .payload as ActionResultPayload;
         expect(terminal.runId).assertEqual(expected.runId);
         expect(terminal.status).assertEqual(status);
+        expect(settled).assertTrue();
+        expect(settledAt >= releasedAt).assertTrue();
+        expect(settledAt - releasedAt < actionTimeoutMs).assertTrue();
+        expect(await pending).assertEqual(status === 'success');
         return expected;
       };
       const create = await run('calendar.event.create', JSON.parse(
