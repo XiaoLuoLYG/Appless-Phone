@@ -9986,7 +9986,7 @@ async function dynamicManifestReadExecution(
     return dynamicReadFailure(manifest.displayName, toolName, new Object(),
       'No safe HAP-runnable dynamic read tool is available.', 'unsupported_transport');
   }
-  if (!dynamicManifestReadAllowed(tool, transport)) {
+  if (!isSafeDynamicManifestTool(tool) || !dynamicManifestReadAllowed(tool, transport)) {
     return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
       'Dynamic tool is not a recognized read/search/list/get operation.', 'unsafe_action_blocked');
   }
@@ -10382,11 +10382,15 @@ async function callDynamicHttpApiTool(registration: DynamicToolRegistration, cre
 
 function firstSafeToolName(manifest: DynamicToolManifest): string {
   for (let index = 0; index < manifest.tools.length; index++) {
-    if (!isUnsafeMcpTool(manifest.tools[index].name, manifest.tools[index].description)) {
+    if (isSafeDynamicManifestTool(manifest.tools[index])) {
       return manifest.tools[index].name;
     }
   }
   return '';
+}
+
+function isSafeDynamicManifestTool(tool: DynamicMcpTool): boolean {
+  return !isUnsafeMcpTool(tool.name, tool.description);
 }
 
 function firstRequiredCredential(manifest: DynamicToolManifest): DynamicCredentialSpec | null {

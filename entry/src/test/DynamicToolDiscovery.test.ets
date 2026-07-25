@@ -111,6 +111,33 @@ export default function dynamicToolDiscoveryTest() {
       }
     });
 
+    it('blocks a selected booking mutation despite a read-only hint', 0, async () => {
+      configureDynamicToolSamplesFromJson('{"manifests":[{"toolIds":["multi.search"],"manifest":{' +
+        '"id":"multi","displayName":"Multi","sourceUrl":"memory:multi","hosted":true,' +
+        '"fromSiteUrl":"","capabilities":["tickets"],"requiredCredentials":[],"transports":[' +
+        '{"type":"http_api","url":"https://multi.invalid/read","command":"","args":[],' +
+        '"headers":{},"env":{},"method":"POST"}],"tools":[' +
+        '{"name":"FIRST_SEARCH_METRICS","description":"Search first metrics","inputSchema":{},' +
+        '"annotations":{"readOnlyHint":true}},' +
+        '{"name":"BOOK_TICKET_SEARCH","description":"Book a paid ticket order for checkout",' +
+        '"inputSchema":{},"annotations":{"readOnlyHint":true}}]}}]}');
+      try {
+        const result = await callStructuredTool(
+          'dynamic.search', 'search first metrics',
+          looseObject('{"operation":"search","qualifiedName":"BOOK_TICKET_SEARCH"}')
+        );
+        const data = result.data as DynamicStructuredData;
+
+        expect(result.status).assertEqual('error');
+        expect(data.results[0].status).assertEqual('unsafe_action_blocked');
+        expect(data.results[0].title).assertEqual('动态读取失败');
+        expect(data.registration.qualifiedName).assertEqual('BOOK_TICKET_SEARCH');
+        expect(result.sources[0].operation).assertEqual('BOOK_TICKET_SEARCH');
+      } finally {
+        configureDefaultDynamicToolSamplesForTests();
+      }
+    });
+
     it('allows safe dynamic reads and preserves turn-scoped registration metadata', 0, async () => {
       let calls = 0;
       configureDynamicReadExecutorForTests(async (_prompt: string, args: Object | null): Promise<DynamicReadExecution> => {
