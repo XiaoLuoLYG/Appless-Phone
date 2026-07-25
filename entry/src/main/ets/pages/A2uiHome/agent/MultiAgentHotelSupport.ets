@@ -74,6 +74,7 @@ interface HotelFollowUpAuthorityLease {
   turnId: string;
   surfaceId: string;
   actionKey: string;
+  ownerRunId: string;
 }
 
 export class MonotonicHotelIds implements HotelPlannerIdFactory, HotelActionIdFactory {
@@ -218,22 +219,29 @@ export class HotelSurfaceAuthority implements SurfaceActionAuthorizer {
 
   beginHotelDetailFollowUp(
     context: HotelActionContext,
-    action: A2uiAction
+    action: A2uiAction,
+    ownerRunId: string
   ): boolean {
-    if (action.args === undefined) {
+    if (action.id !== 'hotel.detail' || action.args === undefined ||
+      context.conversationId !== this.conversationId || context.turnId !== this.turnId ||
+      context.surfaceId !== this.surfaceId || context.sourceToolId !== 'hotel.search' ||
+      ownerRunId.trim().length === 0 || !this.allowed.has(this.actionKey(action.id, action.args))) {
       return false;
     }
     this.pendingFollowUpLease = {
       conversationId: context.conversationId,
       turnId: context.turnId,
       surfaceId: context.surfaceId,
-      actionKey: this.actionKey(action.id, action.args)
+      actionKey: this.actionKey(action.id, action.args),
+      ownerRunId
     };
     return true;
   }
 
-  clearHotelDetailFollowUp(): void {
-    this.pendingFollowUpLease = null;
+  clearHotelDetailFollowUp(ownerRunId: string): void {
+    if (this.pendingFollowUpLease !== null && this.pendingFollowUpLease.ownerRunId === ownerRunId) {
+      this.pendingFollowUpLease = null;
+    }
   }
 
   allows(

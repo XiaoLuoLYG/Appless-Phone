@@ -1,5 +1,6 @@
 import {
   ActionCatalog,
+  ActionExecutionContext,
   ActionOfferResolver,
   ActionPlanCompiler,
   A2uiAction,
@@ -67,6 +68,7 @@ export interface MultiAgentRuntimeOptions {
   settingsFingerprint?: string;
   surfaceTurnActivator?: (turnId: string, hostGeneration: number) => void;
   turnGenerationObserver?: (turnId: string, hostGeneration: number) => void;
+  directActionAdmission?: (action: A2uiAction, context: ActionExecutionContext) => boolean;
 }
 
 export interface MultiAgentActionRequest {

@@ -1284,6 +1284,8 @@ export class MultiAgentCanaryRuntime {
   private surfaceGeneration: number = 0;
   private lastLeaderPersonaId: string = '';
   private submissionSequence: number = 0;
+  private hotelDetailAdmissionSequence: number = 0;
+  private lastHotelDetailAdmissionRunId: string = '';
 
   constructor(options: MultiAgentCanaryOptions) {
     const conversationId: string = options.conversationId === undefined ?
@@ -1417,6 +1419,8 @@ export class MultiAgentCanaryRuntime {
         this.rememberTurnHostGeneration(turnId, hostGeneration);
         writer.activateAutomaticTurn(turnId);
       },
+      directActionAdmission: (action: A2uiAction, context: ActionExecutionContext): boolean =>
+        this.admitHotelDetailFollowUp(action, context),
       turnGenerationObserver: (turnId: string, hostGeneration: number): void => {
         this.rememberTurnHostGeneration(turnId, hostGeneration);
       }
@@ -1454,18 +1458,6 @@ export class MultiAgentCanaryRuntime {
     if (action.id === 'hotel.detail' && !this.currentHotelDetailContext(context)) {
       return Promise.resolve(false);
     }
-    if (action.id === 'hotel.detail') {
-      this.followUpIds.prepare();
-      const hotelContext: HotelActionContext = {
-        conversationId: context.conversationId,
-        turnId: context.turnId,
-        surfaceId: context.surfaceId,
-        sourceToolId: context.sourceToolId
-      };
-      if (!this.authority.beginHotelDetailFollowUp(hotelContext, action)) {
-        return Promise.resolve(false);
-      }
-    }
     const execution: ActionExecutionContext = {
       conversationId: context.conversationId,
       turnId: context.turnId,
@@ -1476,10 +1468,14 @@ export class MultiAgentCanaryRuntime {
       stepId: '',
       pageActionId: context.pageActionId
     };
-    return this.runtime.runAction(action, execution, this.currentHostGeneration())
+    const admissionSequence: number = this.hotelDetailAdmissionSequence;
+    const actionResult = this.runtime.runAction(action, execution, this.currentHostGeneration());
+    const ownerRunId: string = action.id === 'hotel.detail' &&
+      this.hotelDetailAdmissionSequence !== admissionSequence ? this.lastHotelDetailAdmissionRunId : '';
+    return actionResult
       .then((ok: boolean): boolean => {
-        if (action.id === 'hotel.detail' && !ok) {
-          this.authority.clearHotelDetailFollowUp();
+        if (action.id === 'hotel.detail' && !ok && ownerRunId.length > 0) {
+          this.authority.clearHotelDetailFollowUp(ownerRunId);
         }
         this.mailDetailBridge.actionSettled(ok);
         return ok;
@@ -1595,6 +1591,25 @@ export class MultiAgentCanaryRuntime {
       context.sourceToolId === 'hotel.search' &&
       registeredPageSourceToolId(surface) === context.sourceToolId;
     return exact;
+  }
+
+  private admitHotelDetailFollowUp(action: A2uiAction, context: ActionExecutionContext): boolean {
+    if (action.id !== 'hotel.detail') {
+      return true;
+    }
+    const hotelContext: HotelActionContext = {
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      surfaceId: context.surfaceId,
+      sourceToolId: context.sourceToolId
+    };
+    if (!this.authority.beginHotelDetailFollowUp(hotelContext, action, context.runId)) {
+      return false;
+    }
+    this.followUpIds.prepare();
+    this.hotelDetailAdmissionSequence++;
+    this.lastHotelDetailAdmissionRunId = context.runId;
+    return true;
   }
 
   private rememberTurnHostGeneration(turnId: string, hostGeneration: number): void {

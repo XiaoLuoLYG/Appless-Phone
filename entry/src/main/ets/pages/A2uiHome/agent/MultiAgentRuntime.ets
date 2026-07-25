@@ -446,6 +446,7 @@ export class MultiAgentRuntime {
   private readonly actionTimeoutMs: number;
   private readonly surfaceTurnActivator: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
+  private readonly directActionAdmission: ((action: A2uiAction, context: ActionExecutionContext) => boolean) | null;
   private readonly leader: LeaderAgent;
   private readonly planningContextProvider: ((prompt: string) => LeaderPlanningContext) | null;
   private readonly data: DataAgent;
@@ -474,6 +475,8 @@ export class MultiAgentRuntime {
       null : options.surfaceTurnActivator;
     this.turnGenerationObserver = options.turnGenerationObserver === undefined ?
       null : options.turnGenerationObserver;
+    this.directActionAdmission = options.directActionAdmission === undefined ?
+      null : options.directActionAdmission;
     this.leader = new LeaderAgent(
       this.bus,
       options.planner,
@@ -671,6 +674,21 @@ export class MultiAgentRuntime {
         this.timeoutAction(pending);
       }, this.actionTimeoutMs);
       this.pendingActions.set(taskId, pending);
+      const admit = this.directActionAdmission;
+      if (admit !== null && !admit(action, {
+        conversationId: context.conversationId,
+        turnId: context.turnId,
+        surfaceId: context.surfaceId,
+        sourceToolId: context.sourceToolId,
+        planId,
+        runId,
+        stepId: 'step-1'
+      })) {
+        clearTimeout(pending.timerId);
+        this.pendingActions.delete(taskId);
+        resolve(false);
+        return;
+      }
       this.bus.publish(message);
     });
   }

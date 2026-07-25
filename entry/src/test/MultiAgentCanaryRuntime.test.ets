@@ -45,6 +45,7 @@ import {
   updatePersonaPackText
 } from '../main/ets/model/PersonaStore';
 import {
+  MultiAgentCanaryActionContext,
   MultiAgentCanaryOptions,
   MultiAgentCanaryRuntime,
   rememberedPersonaAfterOutcome
@@ -3056,11 +3057,30 @@ export default function multiAgentCanaryRuntimeTest() {
 
       const detail = renderedAction(surfaces[surfaces.length - 1], 'hotel.detail');
       expect(detail === null).assertFalse();
+      const forgedDetail = JSON.parse(JSON.stringify(detail)) as A2uiAction;
+      (forgedDetail.args as Record<string, Object | string | number | boolean | null | undefined>)['hotelId'] =
+        999999;
+      const mismatchedDetailContext: MultiAgentCanaryActionContext = {
+        conversationId: restoredSearchContext!.conversationId,
+        turnId: restoredSearchContext!.turnId + '-forged',
+        surfaceId: restoredSearchContext!.surfaceId,
+        sourceToolId: restoredSearchContext!.sourceToolId
+      };
+      expect(await runtime.runAction(forgedDetail, restoredSearchContext!)).assertFalse();
+      expect(await runtime.runAction(detail!, mismatchedDetailContext)).assertFalse();
+      expect(executor.calls.join(',')).assertEqual('hotel.search');
+      expect(runtime.currentActionContext()?.sourceToolId).assertEqual('hotel.search');
       let detailSettled = false;
       const detailPending = runtime.runAction(detail!, restoredSearchContext!);
       detailPending.then((_ok: boolean): void => {
         detailSettled = true;
       });
+      expect(await runtime.runAction(detail!, restoredSearchContext!)).assertFalse();
+      const concurrentDifferentDetail = JSON.parse(JSON.stringify(detail)) as A2uiAction;
+      (concurrentDifferentDetail.args as Record<string, Object | string | number | boolean | null | undefined>)[
+        'hotelId'
+      ] = 999999;
+      expect(await runtime.runAction(concurrentDifferentDetail, restoredSearchContext!)).assertFalse();
       expect(runtime.currentActionContext()?.sourceToolId === 'hotel.search').assertFalse();
       await flush();
       expect(executor.calls.join(',')).assertEqual('hotel.search,hotel.detail');
@@ -3080,6 +3100,8 @@ export default function multiAgentCanaryRuntimeTest() {
       const detailUiTask = detailUiMessage.payload as CreateUiTaskPayload;
       const detailDataTask = detailDataMessage.payload as CreateDataTaskPayload;
       expect(detailUiTask.dataTaskIds[0]).assertEqual(detailDataTask.taskId);
+      expect(detailUiTask.taskId).assertEqual('hotel-detail-ui-2');
+      expect(detailDataTask.taskId).assertEqual('hotel-detail-data-1');
       expect(detailUiMessage.turnId === restoredSearchContext?.turnId).assertFalse();
       expect(detailSettled).assertFalse();
       executor.detailRelease.open();
