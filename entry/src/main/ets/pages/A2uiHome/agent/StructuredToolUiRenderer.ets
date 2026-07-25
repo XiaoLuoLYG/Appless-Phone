@@ -428,6 +428,9 @@ function authJsonl(data: DataResult, surfaceId: string): string | null {
     return calendarAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
   }
   if (data.toolId === 'dynamic.search') {
+    if (dynamicDataWithOffers(data, []) === null) {
+      return null;
+    }
     const record = recordOf(data.data);
     const registration = recordOf(record === null ? null : record['registration']);
     if (registration !== null && hasText(registration, 'provider')) {

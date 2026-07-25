@@ -13,6 +13,7 @@ import { DynamicGenericToolResult, dynamicReceiptFromProviderPayload } from './D
 
 interface ComposioExecuteArgs {
   operation?: string;
+  qualifiedName?: string;
   toolSlug?: string;
   arguments?: Object;
   fixedToolId?: string;
@@ -114,6 +115,10 @@ function parsedExecuteArgs(args: Object | null): ComposioExecuteArgs {
     return {};
   }
   return args as ComposioExecuteArgs;
+}
+
+function selectedQualifiedName(parsed: ComposioExecuteArgs): string {
+  return textOf(parsed.qualifiedName).trim();
 }
 
 function composioToolSchema(rawSchema: string | undefined): Object {
@@ -2076,15 +2081,16 @@ function xDiscoveryFailure(prompt: string, observation: string): DynamicGenericT
   };
 }
 
-export function composioDynamicMissingConfigResult(prompt: string): DynamicGenericToolResult {
-  const title = composioToolkitFromPrompt(prompt).length > 0 ? resultTitleForPrompt(prompt) : 'Composio 未配置';
+export function composioDynamicMissingConfigResult(prompt: string, qualifiedName: string = ''): DynamicGenericToolResult {
+  const title = qualifiedName.length > 0 ? 'Composio 未配置' :
+    (composioToolkitFromPrompt(prompt).length > 0 ? resultTitleForPrompt(prompt) : 'Composio 未配置');
   const missing = composioConfig.missingConfiguration();
   const summary = 'Composio 未配置' + (missing.length > 0 ? '：' + missing : '') + '，无法查询已授权应用工具。';
   return {
     sourceTag: 'Composio',
-    toolName: 'dynamic.search',
+    toolName: qualifiedName.length > 0 ? qualifiedName : 'dynamic.search',
     title: title,
-    status: 'needs_auth',
+    status: qualifiedName.length > 0 ? 'missing_config' : 'needs_auth',
     summary: summary,
     rows: [
       { label: '请求', value: prompt.substring(0, 240) },
@@ -2172,7 +2178,8 @@ async function callComposioSearchAndExecuteParsed(
   allowFixedContract: boolean
 ): Promise<DynamicGenericToolResult> {
   const fixedToolId = textOf(parsed.fixedToolId).trim();
-  const searchObservation = await current.search(normalizedComposioUseCase(prompt, fixedToolId));
+  const selected = selectedQualifiedName(parsed);
+  const searchObservation = await current.search(selected.length > 0 ? selected : normalizedComposioUseCase(prompt, fixedToolId));
   let payload: ComposioSearchObservation;
   try {
     payload = JSON.parse(searchObservation) as ComposioSearchObservation;
@@ -2182,7 +2189,25 @@ async function callComposioSearchAndExecuteParsed(
     }
     return composioDynamicResultFromObservation('search', searchObservation, '', prompt);
   }
-  let tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  let tool: ComposioSearchTool | null = null;
+  if (selected.length > 0 && Array.isArray(payload.tools)) {
+    for (let index = 0; index < payload.tools.length; index++) {
+      const candidate = payload.tools[index] as ComposioSearchTool;
+      if (textOf(candidate.toolSlug).trim() === selected) {
+        tool = candidate;
+        break;
+      }
+    }
+    if (tool === null) {
+      return {
+        sourceTag: 'Composio', toolName: selected, title: 'Composio 工具不可用', status: 'no_tool_found',
+        summary: 'Composio 没有返回所选读取工具。', rows: [], rawPreview: searchObservation.substring(0, 16000),
+        providerPhase: 'discovery'
+      };
+    }
+  } else {
+    tool = bestToolForPrompt(payload, prompt, fixedToolId);
+  }
   const expected = composioExactToolSlugForFixedTool(fixedToolId);
   if (tool === null && expected.length > 0) {
     return {
@@ -2312,7 +2337,8 @@ async function callComposioParsed(
     return missingFixedWriteArgsResult(prompt, fixedToolId, missingFixedArgs);
   }
   const operation = textOf(parsed.operation).trim();
-  if (!shouldAttemptComposioDynamic(prompt, operation, composioConfig.isConfigured())) {
+  if (selectedQualifiedName(parsed).length === 0 &&
+    !shouldAttemptComposioDynamic(prompt, operation, composioConfig.isConfigured())) {
     return null;
   }
   if (operation === 'execute') {
@@ -2323,9 +2349,9 @@ async function callComposioParsed(
     }
   }
   if (!composioConfig.isConfigured()) {
-    return composioDynamicMissingConfigResult(prompt);
+    return composioDynamicMissingConfigResult(prompt, selectedQualifiedName(parsed));
   }
-  const current = await clientForPrompt(prompt);
+  const current = selectedQualifiedName(parsed).length > 0 ? await client() : await clientForPrompt(prompt);
   if (operation === 'execute') {
     const slug = textOf(parsed.toolSlug).trim();
     const authorizationMessage = selectedSlugAuthorizationMessage(slug, fixedToolId, allowFixedContract);

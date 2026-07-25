@@ -7,11 +7,17 @@ import {
   DynamicStructuredData,
   DynamicGenericToolResult,
   DynamicToolDiscoveryResult,
+  configureDynamicToolSamplesFromJson,
   configureDefaultDynamicToolSamplesForTests
 } from '@loop/agent-core';
 
 type DynamicArgValue = Object | string | null | undefined;
 type DynamicArgRecord = Record<string, DynamicArgValue>;
+
+interface DynamicStatusCase {
+  status: string;
+  code: string;
+}
 
 function looseObject(raw: string): Object {
   return JSON.parse(raw) as Object;
@@ -43,6 +49,38 @@ export default function dynamicToolDiscoveryTest() {
       const result = discoverDynamicToolForPrompt('帮我查明天深圳到珠海的船票');
 
       expect(result === null).assertTrue();
+    });
+
+    it('executes the selected manifest instead of a prompt-discovered competitor', 0, async () => {
+      configureDynamicToolSamplesFromJson('{"manifests":[' +
+        '{"toolIds":["statistics.search"],"manifest":{"id":"stats","displayName":"Stats",' +
+        '"sourceUrl":"memory:stats","hosted":true,"fromSiteUrl":"","capabilities":["gdp"],' +
+        '"requiredCredentials":[{"name":"STATS_KEY","description":"","required":true,' +
+        '"placement":"header","scheme":"Bearer","testValue":""}],"transports":[' +
+        '{"type":"streamable_http","url":"https://stats.invalid/mcp","command":"","args":[],' +
+        '"headers":{},"env":{}}],"tools":[{"name":"GITHUB_LIST_PULL_REQUESTS",' +
+        '"description":"GDP search","inputSchema":{}}]}},' +
+        '{"toolIds":["maps.weather"],"manifest":{"id":"maps","displayName":"Maps",' +
+        '"sourceUrl":"memory:maps","hosted":true,"fromSiteUrl":"","capabilities":["weather"],' +
+        '"requiredCredentials":[{"name":"MAPS_KEY","description":"","required":true,' +
+        '"placement":"header","scheme":"Bearer","testValue":""}],"transports":[' +
+        '{"type":"streamable_http","url":"https://maps.invalid/mcp","command":"","args":[],' +
+        '"headers":{},"env":{}}],"tools":[{"name":"GOOGLEDRIVE_SEARCH_FILES",' +
+        '"description":"weather search","inputSchema":{}}]}}]}');
+      try {
+        const result = await callStructuredTool(
+          'dynamic.search', 'find GDP data',
+          looseObject('{"operation":"search","qualifiedName":"GOOGLEDRIVE_SEARCH_FILES"}')
+        );
+        const data = result.data as DynamicStructuredData;
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('AUTH_REQUIRED');
+        expect(data.registration.qualifiedName).assertEqual('GOOGLEDRIVE_SEARCH_FILES');
+        expect(result.sources[0].operation).assertEqual('GOOGLEDRIVE_SEARCH_FILES');
+      } finally {
+        configureDefaultDynamicToolSamplesForTests();
+      }
     });
 
     it('allows safe dynamic reads and preserves turn-scoped registration metadata', 0, async () => {
@@ -188,6 +226,36 @@ export default function dynamicToolDiscoveryTest() {
       } finally {
         configureDynamicReadExecutorForTests(null);
       }
+    });
+
+    it('maps real dynamic execution statuses without collapsing them into provider error', 0, async () => {
+      const cases: DynamicStatusCase[] = [
+        { status: 'needs_auth', code: 'AUTH_REQUIRED' },
+        { status: 'missing_config', code: 'DYNAMIC_CONFIG_MISSING' },
+        { status: 'unsupported_transport', code: 'DYNAMIC_UNSUPPORTED_TRANSPORT' },
+        { status: 'no_tool_found', code: 'DYNAMIC_NO_PROVIDER' },
+        { status: 'error', code: 'DYNAMIC_PROVIDER_ERROR' }
+      ];
+      for (let index = 0; index < cases.length; index++) {
+        const current = cases[index];
+        configureDynamicReadExecutorForTests(async (): Promise<DynamicReadExecution> => ({
+          results: [{
+            sourceTag: 'Composio', toolName: 'GITHUB_LIST_PULL_REQUESTS', title: current.status,
+            status: current.status, summary: current.status, rows: [], rawPreview: ''
+          }],
+          registration: {
+            provider: 'Composio', qualifiedName: 'GITHUB_LIST_PULL_REQUESTS',
+            inputSchema: looseObject('{}'), outputSchema: looseObject('{}'), receipt: ''
+          }
+        }));
+        const result = await callStructuredTool(
+          'dynamic.search', 'selected provider read',
+          looseObject('{"operation":"list","qualifiedName":"GITHUB_LIST_PULL_REQUESTS"}')
+        );
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual(current.code);
+      }
+      configureDynamicReadExecutorForTests(null);
     });
   });
 }

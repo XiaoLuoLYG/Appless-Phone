@@ -1216,6 +1216,10 @@ export default function structuredToolUiRendererTest() {
       ));
       result.status = 'error';
       result.error = { code: 'AUTH_REQUIRED', message: 'GitHub authorization required' };
+      result.sources = [{
+        provider: 'Composio', backend: 'oauth_api', operation: 'GITHUB_LIST_PULL_REQUESTS',
+        fetchedAt: '2026-07-25T00:00:00Z'
+      }];
 
       const rendered = await new StructuredToolUiRenderer().result(
         uiTask(), [result], [], 'surface-github-auth'
@@ -1225,6 +1229,28 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.indexOf('GenericToolResults')).assertEqual(-1);
       expect(rendered.jsonl.indexOf('GITHUB_LIST_PULL_REQUESTS')).assertEqual(-1);
       expect(rendered.jsonl.indexOf('"results"')).assertEqual(-1);
+    });
+
+    it('rejects stale dynamic authorization identity before rendering the provider card', 0, async () => {
+      const result = dataResult('dynamic.search', 'dynamicToolConnect', object(
+        '{"results":[],"registration":{"provider":"Composio",' +
+        '"qualifiedName":"GITHUB_LIST_PULL_REQUESTS","inputSchema":{},' +
+        '"outputSchema":{},"receipt":""}}'
+      ));
+      result.status = 'error';
+      result.error = { code: 'AUTH_REQUIRED', message: 'must not render stale auth' };
+      result.sources = [{
+        provider: 'Composio', backend: 'oauth_api', operation: 'GOOGLEDRIVE_SEARCH_FILES',
+        fetchedAt: '2026-07-25T00:00:00Z'
+      }];
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], [], 'surface-stale-github-auth'
+      );
+
+      expect(rendered.jsonl.indexOf('结构化结果格式无效')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('must not render stale auth')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('GITHUB_LIST_PULL_REQUESTS')).assertEqual(-1);
     });
 
     it('rejects a dynamic result whose source identity differs from its registration', 0, async () => {

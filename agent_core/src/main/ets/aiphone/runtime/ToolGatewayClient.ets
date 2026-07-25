@@ -172,7 +172,7 @@ import { callAggregateSearch } from './AggregateSearchClient';
 import { AggregateSearchResult, AggregateSearchSourceStatus } from './AggregateSearchTypes';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
-import { sampleManifestForToolId } from './DynamicToolSamples';
+import { sampleManifestForToolId, sampleRecordsForDiscovery } from './DynamicToolSamples';
 import { dataAgentToolDefinitions, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, toolDefinitionForToolId } from './ToolDefinitionRegistry';
 import { ToolBackendType, ToolDefinition } from './ToolDefinitionTypes';
 import {
@@ -9945,6 +9945,22 @@ function dynamicManifestTool(manifest: DynamicToolManifest, name: string): Dynam
   return null;
 }
 
+function selectedDynamicManifest(qualifiedName: string): DynamicToolDiscoveryResult | null {
+  const records = sampleRecordsForDiscovery();
+  for (let recordIndex = 0; recordIndex < records.length; recordIndex++) {
+    const manifest = records[recordIndex].manifest;
+    for (let toolIndex = 0; toolIndex < manifest.tools.length; toolIndex++) {
+      if (manifest.tools[toolIndex].name === qualifiedName) {
+        return {
+          toolId: records[recordIndex].toolIds[0], manifest: manifest, query: qualifiedName,
+          source: 'modelscope-local-catalog', score: 0, reason: 'selected qualifiedName'
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function dynamicManifestReadAllowed(tool: DynamicMcpTool, transport: DynamicToolTransport): boolean {
   if (tool.annotations?.readOnlyHint === true || transport.type === 'http_api' &&
     transportOption(transport, 'method', 'GET').toUpperCase() === 'GET') {
@@ -9964,7 +9980,7 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
   const tool = dynamicManifestTool(manifest, toolName);
   if (transport === null || tool === null) {
     return dynamicReadFailure(manifest.displayName, toolName, new Object(),
-      'No safe HAP-runnable dynamic read tool is available.');
+      'No safe HAP-runnable dynamic read tool is available.', 'unsupported_transport');
   }
   if (!dynamicManifestReadAllowed(tool, transport)) {
     return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
@@ -9981,7 +9997,7 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
         'Dynamic read requires configured credentials.', 'needs_auth');
     }
   }
-  const registration: DynamicToolRegistration = {
+  const candidate: DynamicToolRegistration = {
     toolId: discovery.toolId,
     manifestId: manifest.id,
     displayName: manifest.displayName,
@@ -9992,6 +10008,8 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
     sourceUrl: manifest.sourceUrl,
     lastError: ''
   };
+  dynamicToolRegistry.setRegistration(candidate);
+  const registration = dynamicToolRegistry.registrationForToolId(discovery.toolId) ?? candidate;
   let result: DynamicGenericToolResult;
   if (transport.type === 'http_api') {
     result = await callDynamicHttpApiTool(registration, credentialValue, prompt);
@@ -10008,14 +10026,21 @@ async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResul
 }
 
 async function defaultDynamicReadExecutor(prompt: string, args: Object | null): Promise<DynamicReadExecution> {
-  const discovery = discoverDynamicToolForPrompt(prompt);
+  const selected = dynamicQualifiedName(dynamicReadRequestArgs(args));
+  if (selected.length > 0) {
+    const selectedManifest = selectedDynamicManifest(selected);
+    if (selectedManifest !== null) {
+      return dynamicManifestReadExecution(selectedManifest, prompt);
+    }
+  }
+  const discovery = selected.length === 0 ? discoverDynamicToolForPrompt(prompt) : null;
   if (discovery !== null) {
     return dynamicManifestReadExecution(discovery, prompt);
   }
   const result = await callComposioDynamic(prompt, args);
   if (result === null) {
-    return dynamicReadFailure('dynamic.search', dynamicQualifiedName(dynamicReadRequestArgs(args)),
-      new Object(), 'No matching dynamic read provider was found.');
+    return dynamicReadFailure('dynamic.search', selected,
+      new Object(), 'No matching dynamic read provider was found.', 'no_tool_found');
   }
   const providedRegistration = result.registration;
   const qualifiedName = providedRegistration?.qualifiedName ??
@@ -10050,6 +10075,27 @@ function dynamicStructuredDataResult(execution: DynamicReadExecution): DataResul
     source.receipt = execution.registration.receipt;
   }
   base.sources = [source];
+  const status = execution.results.length > 0 ? execution.results[0].status : 'empty';
+  let code = '';
+  if (status === 'needs_auth') {
+    code = 'AUTH_REQUIRED';
+  } else if (status === 'missing_config') {
+    code = 'DYNAMIC_CONFIG_MISSING';
+  } else if (status === 'unsupported_transport') {
+    code = 'DYNAMIC_UNSUPPORTED_TRANSPORT';
+  } else if (status === 'no_tool_found') {
+    code = 'DYNAMIC_NO_PROVIDER';
+  } else if (status !== 'success' && status !== 'empty') {
+    code = 'DYNAMIC_PROVIDER_ERROR';
+  }
+  if (code.length > 0) {
+    base.status = 'error';
+    base.error = {
+      code: code,
+      message: execution.results[0].summary,
+      retryable: code === 'DYNAMIC_PROVIDER_ERROR'
+    };
+  }
   return base;
 }
 

@@ -75,6 +75,7 @@ interface SelectedSlugCase {
 class RecordingComposioSearchExecuteClient implements ComposioSearchExecuteClient {
   searchObservation: string;
   executionObservation: string;
+  searchedUseCases: string[] = [];
   executedSlugs: string[] = [];
 
   constructor(searchObservation: string, executionObservation: string) {
@@ -82,7 +83,8 @@ class RecordingComposioSearchExecuteClient implements ComposioSearchExecuteClien
     this.executionObservation = executionObservation;
   }
 
-  async search(_useCase: string): Promise<string> {
+  async search(useCase: string): Promise<string> {
+    this.searchedUseCases.push(useCase);
     return this.searchObservation;
   }
 
@@ -162,6 +164,24 @@ export default function composioDynamicBackendTest() {
       expect(isUnsafeComposioExecute('GMAIL_REPLY_TO_THREAD', '{}')).assertTrue();
       expect(isUnsafeComposioExecute('NOTION_CREATE_PAGE', '{"title":"AIPhoneDemo"}')).assertTrue();
       expect(isUnsafeComposioExecute('GITHUB_FIND_PULL_REQUESTS', '{"sort":"updated"}')).assertFalse();
+    });
+
+    it('executes the selected qualifiedName instead of a prompt-ranked candidate', 0, async () => {
+      const client = new RecordingComposioSearchExecuteClient(
+        '{"source":"Composio","authorizedToolkits":["github","googledrive"],"tools":[' +
+          '{"toolSlug":"GOOGLEDRIVE_SEARCH_FILES","description":"Search Drive files","inputSchema":"{}"},' +
+          '{"toolSlug":"GITHUB_LIST_PULL_REQUESTS","description":"List pull requests","inputSchema":"{}"}' +
+        '],"instruction":"execute selected tool"}', successfulExecutionObservation()
+      );
+      const result = await callComposioSearchAndExecute(
+        client, 'search Google Drive files',
+        looseObject('{"operation":"list","qualifiedName":"GITHUB_LIST_PULL_REQUESTS"}')
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(result.registration?.qualifiedName).assertEqual('GITHUB_LIST_PULL_REQUESTS');
+      expect(client.searchedUseCases[0]).assertEqual('GITHUB_LIST_PULL_REQUESTS');
+      expect(client.executedSlugs[0]).assertEqual('GITHUB_LIST_PULL_REQUESTS');
     });
 
     it('reauthorizes every actual selected Composio slug before execute', 0, async () => {
