@@ -170,6 +170,7 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
     context as Object as Record<string, JsonValue | undefined>;
   if (!isNonemptyString(record['conversationId']) ||
     !isNonemptyString(record['turnId']) ||
+    !isNonemptyString(record['taskId']) ||
     !isNonemptyString(record['surfaceId']) ||
     !isNonemptyString(record['sourceToolId']) ||
     !isNonemptyString(record['planId']) ||
@@ -184,14 +185,12 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
   const value: ActionPlanRunContext = {
     conversationId: record['conversationId'] as string,
     turnId: record['turnId'] as string,
+    taskId: record['taskId'] as string,
     surfaceId: record['surfaceId'] as string,
     sourceToolId: record['sourceToolId'] as string,
     planId: record['planId'] as string,
     runId: record['runId'] as string
   };
-  if (typeof record['taskId'] === 'string' && (record['taskId'] as string).length > 0) {
-    value.taskId = record['taskId'] as string;
-  }
   if (typeof record['pageActionId'] === 'string' &&
     (record['pageActionId'] as string).length > 0) {
     value.pageActionId = record['pageActionId'] as string;
@@ -354,10 +353,14 @@ export class ActionPlanRunner {
       }
       if (plan === null ||
         typeof plan !== 'object' ||
+        !isNonemptyString(plan.conversationId) ||
+        !isNonemptyString(plan.taskId) ||
         !isNonemptyString(plan.planId) ||
         !isNonemptyString(plan.turnId) ||
         !isNonemptyString(plan.surfaceId) ||
         !isNonemptyString(plan.label) ||
+        plan.conversationId !== context.conversationId ||
+        plan.taskId !== context.taskId ||
         plan.planId !== context.planId ||
         plan.turnId !== context.turnId ||
         plan.surfaceId !== context.surfaceId) {

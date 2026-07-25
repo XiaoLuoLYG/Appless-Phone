@@ -224,13 +224,15 @@ function frozenPlan(
   surfaceId: string,
   label: string,
   steps: ActionPlanStep[],
-  catalog: ActionCatalog,
-  freezeDefinitions: boolean = true
-): ActionPlan {
+  catalog: ActionCatalog
+): ActionPlan | null {
   const frozenSteps: FrozenActionPlanStep[] = [];
   for (let index = 0; index < steps.length; index++) {
     const step = steps[index];
-    const fingerprint = freezeDefinitions ? catalog.definitionFingerprint(step.actionId) : '';
+    const fingerprint = catalog.definitionFingerprint(step.actionId);
+    if (fingerprint.length === 0) {
+      return null;
+    }
     const frozen: FrozenActionPlanStep = {
       stepId: step.stepId,
       actionId: step.actionId,
@@ -1258,6 +1260,17 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       storedDraft.draft.steps,
       this.catalog
     );
+    if (plan === null) {
+      this.publishInputError(
+        this.draftMessage(storedDraft),
+        storedDraft.draft.planId,
+        storedDraft.draft.runId,
+        surfaceId,
+        'ACTION_PLAN_FINGERPRINT_UNAVAILABLE',
+        'Registered action definition is unavailable.'
+      );
+      return;
+    }
     const context: ActionPlanRunContext = {
       conversationId: storedDraft.conversationId,
       turnId: storedDraft.turnId,
@@ -2036,6 +2049,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       stored.runId === payload.runId &&
       stored.context.conversationId === message.conversationId &&
       stored.context.turnId === message.turnId &&
+      stored.context.taskId === message.taskId &&
       stored.context.surfaceId === payload.surfaceId;
   }
 
@@ -2074,6 +2088,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       paused.stepId === payload.confirmedStepId &&
       paused.context.conversationId === message.conversationId &&
       paused.context.turnId === message.turnId &&
+      paused.context.taskId === message.taskId &&
       paused.context.surfaceId === payload.surfaceId;
   }
 

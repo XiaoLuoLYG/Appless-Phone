@@ -936,7 +936,8 @@ export default function aiphoneRegisteredActionExecutorTest() {
       );
       const runner = new ActionPlanRunner(currentCatalog, executor);
       const actionPlan = object(
-        '{"planId":"calendar-lifecycle","turnId":"turn-1","surfaceId":"surface-1",' +
+        '{"conversationId":"conversation-1","taskId":"calendar-lifecycle-task",' +
+        '"planId":"calendar-lifecycle","turnId":"turn-1","surfaceId":"surface-1",' +
         '"label":"Calendar lifecycle","steps":[' +
         '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
         '{"stepId":"update","actionId":"calendar.event.update",' +
@@ -952,6 +953,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
       const runContext: ActionPlanRunContext = {
         conversationId: 'conversation-1',
         turnId: 'turn-1',
+        taskId: 'calendar-lifecycle-task',
         surfaceId: 'surface-1',
         sourceToolId: 'calendar.event.create',
         planId: 'calendar-lifecycle',
@@ -987,7 +989,8 @@ export default function aiphoneRegisteredActionExecutorTest() {
         '"end":"2026-07-29T15:30:00+08:00","calendarId":"primary"}'
       );
       const actionPlan = object(
-        '{"planId":"calendar-stop","turnId":"turn-1","surfaceId":"surface-1",' +
+        '{"conversationId":"conversation-1","taskId":"calendar-stop-task",' +
+        '"planId":"calendar-stop","turnId":"turn-1","surfaceId":"surface-1",' +
         '"label":"Calendar stop","steps":[' +
         '{"stepId":"create","actionId":"calendar.event.create","args":' + JSON.stringify(createArgs) + '},' +
         '{"stepId":"update","actionId":"calendar.event.update",' +
@@ -997,7 +1000,7 @@ export default function aiphoneRegisteredActionExecutorTest() {
         '"path":"/data/genericToolResults/0/rows/0/value"}]}]}'
       ) as ActionPlan;
       const runContext: ActionPlanRunContext = {
-        conversationId: 'conversation-1', turnId: 'turn-1', surfaceId: 'surface-1',
+        conversationId: 'conversation-1', turnId: 'turn-1', taskId: 'calendar-stop-task', surfaceId: 'surface-1',
         sourceToolId: 'calendar.event.create', planId: 'calendar-stop', runId: 'provider-error',
         pageActionId: 'calendar.event.create'
       };

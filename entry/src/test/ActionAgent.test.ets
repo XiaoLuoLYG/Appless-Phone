@@ -46,9 +46,17 @@ type JsonRecord = Record<string, JsonValue | undefined>;
 class ActionLookup implements ToolDefinitionLookup {
   confirmCall: boolean = false;
   calls: number = 0;
+  failAtLookupCall: number = 0;
+  throwAtLookupCall: boolean = false;
 
   find(toolId: string): ToolDefinition | null {
     this.calls++;
+    if (this.failAtLookupCall === this.calls) {
+      if (this.throwAtLookupCall) {
+        throw new Error('definition lookup failed during freeze');
+      }
+      return null;
+    }
     if (toolId === 'hotel.search') {
       return definition(toolId, 'read', ['hotel.detail', 'hotel.navigate']);
     }
@@ -1317,12 +1325,26 @@ export default function actionAgentTest() {
       expect(pausedResult.status).assertEqual('paused');
       expect(pausedResult.stepId).assertEqual('step-1');
       expect(executor.actionIds.length).assertEqual(0);
+
       expect(paused === null).assertFalse();
       expect(Object.keys(paused as PausedActionRun).sort().join(',')).assertEqual(
         'context,followUpPublished,nextStepIndex,outputs,plan,planId,runId,stepId'
       );
 
       const resumeReady = readyIdentity(pausedResult.planId, 'run-confirm');
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(resumeReady, 'step-1'),
+        'turn-1',
+        'wrong-action-task'
+      ));
+      const wrongTask = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(wrongTask.status).assertEqual('error');
+      expect(executor.actionIds.length).assertEqual(0);
+
       bus.publish(message(
         AgentMessageType.ACTION_RUN,
         workflowRun(resumeReady, 'step-1'),
@@ -1365,8 +1387,7 @@ export default function actionAgentTest() {
       bus.publish(message(
         AgentMessageType.ACTION_RUN,
         workflowRun(resumeReady, 'step-1'),
-        'turn-1',
-        'resume-exact'
+        'turn-1'
       ));
       const completed = (await receiveType(
         observer,
@@ -1390,6 +1411,74 @@ export default function actionAgentTest() {
 
       agent.stop();
       observer.close();
+    });
+
+    it('rejects a different task from starting a ready workflow', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const executor = new RecordingRegisteredExecutor();
+      const agent = new ActionAgent(bus, catalog(new ActionLookup()), noOffers, executor);
+      const observer = bus.openReader();
+      agent.start();
+
+      publishPlan(bus, planCreate('wrong-task-start', compositePlan('wrong-task-plan')));
+      const ready = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_PLAN_READY
+      )).payload as ActionPlanReadyPayload;
+      bus.publish(message(
+        AgentMessageType.ACTION_RUN,
+        workflowRun(ready),
+        'turn-1',
+        'wrong-action-task'
+      ));
+      const rejected = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+
+      expect(rejected.status).assertEqual('error');
+      expect(rejected.errorCode).assertEqual('ACTION_RUN_IDENTITY_MISMATCH');
+      expect(executor.actionIds.length).assertEqual(0);
+
+      bus.publish(message(AgentMessageType.ACTION_RUN, workflowRun(ready)));
+      const completed = (await receiveType(
+        observer,
+        AgentMessageType.ACTION_RESULT
+      )).payload as ActionResultPayload;
+      expect(completed.status).assertEqual('success');
+      expect(executor.actionIds.length).assertEqual(2);
+
+      agent.stop();
+      observer.close();
+    });
+
+    it('fails closed when a registered workflow lookup fails while freezing', 0, async () => {
+      for (let index = 0; index < 2; index++) {
+        const bus = new LinkedMessageBus();
+        const lookup = new ActionLookup();
+        lookup.failAtLookupCall = 4;
+        lookup.throwAtLookupCall = index === 1;
+        const executor = new RecordingRegisteredExecutor();
+        const agent = new ActionAgent(bus, catalog(lookup), noOffers, executor);
+        const observer = bus.openReader();
+        agent.start();
+
+        publishPlan(bus, planCreate('freeze-failure-' + index, compositePlan('freeze-plan-' + index)));
+        bus.publish(message(
+          AgentMessageType.ACTION_RUN,
+          workflowRun(readyIdentity('freeze-plan-' + index, 'freeze-failure-' + index))
+        ));
+        const observed = await receiveUntilResult(observer);
+        const rejected = observed[observed.length - 1].payload as ActionResultPayload;
+
+        expect(rejected.status).assertEqual('error');
+        expect(rejected.errorCode).assertEqual('ACTION_PLAN_FINGERPRINT_UNAVAILABLE');
+        expect(messagesOfType(observed, AgentMessageType.ACTION_PLAN_READY).length).assertEqual(0);
+        expect(executor.actionIds.length).assertEqual(0);
+
+        agent.stop();
+        observer.close();
+      }
     });
 
     it('reauthorizes the exact surface and full args immediately before confirmed execution', 0, async () => {
@@ -1693,8 +1782,7 @@ export default function actionAgentTest() {
       bus.publish(message(
         AgentMessageType.ACTION_RUN,
         workflowRun(readyIdentity(paused.planId, paused.runId), paused.stepId),
-        'turn-1',
-        'resume-follow-confirm'
+        'turn-1'
       ));
       const afterResume = await receiveUntilResult(observer);
       const completed = afterResume[afterResume.length - 1].payload as ActionResultPayload;
@@ -1815,7 +1903,7 @@ export default function actionAgentTest() {
         AgentMessageType.ACTION_RUN,
         workflowRun(readyB),
         'turn-2',
-        'run-b',
+        'create-b',
         'conversation-2'
       ));
       await receiveType(observer, AgentMessageType.ACTION_RESULT);
