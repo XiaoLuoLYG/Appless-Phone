@@ -157,8 +157,7 @@ import {
 import { RegisteredPageActionContext } from './agent/AiphoneRegisteredActionExecutor';
 import { socialHubComposioToolkitCandidates } from './components/SocialHubViewData';
 import { createHtmlHomeDocument } from './html/HtmlHomeSnapshot';
-import { renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
-import { buildMultiTaskHomePayload, renderMultiTaskHomeDocument } from './html/HtmlMultiTaskHomeRenderer';
+import { buildMultiTaskHomePayload, renderHtmlHomeDocument } from './html/HtmlHomeRenderer';
 import { isHtmlHomeActionAllowed } from './html/HtmlHomeActionPolicy';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './html/HtmlHomeTypes';
 import {
@@ -1045,7 +1044,7 @@ struct Index {
       return;
     }
     const shellDocument = this.stripMultiTaskEmbedsForShell(document);
-    this.multiTaskShellHtml = renderMultiTaskHomeDocument(shellDocument, false);
+    this.multiTaskShellHtml = renderHtmlHomeDocument(shellDocument, false);
   }
 
   private syncMultiTaskPayloadUpdate(document: HtmlHomeDocument): void {

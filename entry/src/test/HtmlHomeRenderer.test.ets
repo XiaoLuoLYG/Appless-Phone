@@ -9,7 +9,7 @@ import {
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
-import { HtmlHomeAction, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
 interface GooglePayCheckoutArgsFixture {
@@ -26,6 +26,10 @@ interface GooglePayCheckoutArgsFixture {
 
 interface BookingUrlArgsFixture {
   bookingUrl: string;
+}
+
+interface MapsOpenArgsFixture {
+  url: string;
 }
 
 function documentFixture(): HtmlHomeDocument {
@@ -1213,6 +1217,47 @@ function expectCalmUtilityPalette(document: HtmlHomeDocument): void {
 
 export default function htmlHomeRendererTest() {
   describe('htmlHomeRenderer', () => {
+    it('keeps the existing auth card beside a successful result without object or raw JSON UI', 0, () => {
+      const doc = dynamicCredentialDocumentFixture();
+      const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=Shenzhen';
+      const mapsArgs: MapsOpenArgsFixture = { url: mapsUrl };
+      const openMaps: HtmlHomeAction = {
+        id: 'maps.open.web',
+        label: '打开地图',
+        prompt: mapsUrl,
+        variant: 'secondary',
+        kind: 'client',
+        args: mapsArgs
+      };
+      const mapsResult: HtmlHomeBlock = {
+        id: 'maps-success',
+        kind: 'generic-tool-result',
+        title: '深圳湾',
+        subtitle: '真实地点结果',
+        status: 'success',
+        source: 'Google Maps',
+        metrics: [],
+        rows: [{ label: '地址', value: '深圳湾' }],
+        actions: [openMaps]
+      };
+      doc.blocks.push(mapsResult);
+      doc.actions = [openMaps];
+
+      const html = renderHtmlHomeDocument(doc);
+      const buttonIds = doc.blocks[1].actions.map((action: HtmlHomeAction): string => action.id);
+
+      expect(doc.blocks[0].kind).assertEqual('dynamic-tool-connect');
+      expect(doc.blocks[0].status).assertEqual('needs_auth');
+      expect(doc.blocks[1].status).assertEqual('success');
+      expect(buttonIds.join(',')).assertEqual('maps.open.web');
+      expect(html.indexOf('Amap Maps')).assertLarger(-1);
+      expect(html.indexOf('深圳湾')).assertLarger(-1);
+      expect(html.indexOf('"id":"maps.open.web"')).assertLarger(-1);
+      expect(html.indexOf('https://www.google.com/maps/search/?api=1\\u0026query=Shenzhen')).assertLarger(-1);
+      expect(html.indexOf('[object Object]')).assertEqual(-1);
+      expect(html.indexOf('raw JSON')).assertEqual(-1);
+    });
+
     it('uses the calm utility palette across result templates', 0, () => {
       expectCalmUtilityPalette(documentFixture());
       expectCalmUtilityPalette(calendarSearchDocumentFixture());

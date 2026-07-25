@@ -157,6 +157,34 @@ function readProductionEtsSources() {
   return sources.join('\n');
 }
 
+function readEntryProductionEtsSources() {
+  const sources = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.ets')) {
+        sources.push(readFileSync(entryPath, 'utf8'));
+      }
+    }
+  }
+  visit(resolve(repoRoot, 'entry/src/main/ets'));
+  return sources.join('\n');
+}
+
+function productionEntryViolations(source) {
+  const code = maskNonCode(source);
+  return [
+    ['ReActAgentRunner construction', /\bnew\s+ReActAgentRunner\s*\(/],
+    ['LoopBackend fallback reference', /\bLoopBackend\b/]
+  ].filter(([, pattern]) => pattern.test(code)).map(([name]) => name);
+}
+
+function importsMultiTaskRendererFromProductPage(source) {
+  return /\bfrom\s+['"][^'"]*HtmlMultiTaskHomeRenderer['"]/.test(stripComments(source));
+}
+
 function parseIndexExports(index) {
   const exports = new Map();
   for (const match of index.matchAll(/export\s+(\*|\{[\s\S]*?\})\s+from\s+'([^']+)';/g)) {
@@ -488,6 +516,22 @@ function verifyArchitectureVerifier() {
     !importsRetiredHotelRuntime("// import { HotelVisibility } from './HotelAgentRuntime';"),
     'verifier ignores a comment-only HotelAgentRuntime import'
   );
+  assert(
+    productionEntryViolations('const runner = new ReActAgentRunner(options);').includes('ReActAgentRunner construction'),
+    'verifier detects a live production ReActAgentRunner construction'
+  );
+  assert(
+    productionEntryViolations('const fallback: LoopBackend = backend;').includes('LoopBackend fallback reference'),
+    'verifier detects a live production LoopBackend fallback reference'
+  );
+  assert(
+    productionEntryViolations('// new ReActAgentRunner(options);\n/* LoopBackend */').length === 0,
+    'verifier ignores comment-only production fallback references'
+  );
+  assert(
+    !importsMultiTaskRendererFromProductPage("// import { renderMultiTaskHomeDocument } from './HtmlMultiTaskHomeRenderer';"),
+    'verifier ignores a comment-only multi-task renderer import'
+  );
 
   const exactSkillFixture = `---
 name: test
@@ -816,7 +860,17 @@ function verifySourceContracts() {
     'production sources contain no retired orchestration entry points',
     retiredViolations.join(', ')
   );
+  const entryProductionViolations = productionEntryViolations(readEntryProductionEtsSources());
+  assert(
+    entryProductionViolations.length === 0,
+    'production entry contains no ReAct or LoopBackend fallback',
+    entryProductionViolations.join(', ')
+  );
   const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  assert(
+    !importsMultiTaskRendererFromProductPage(a2uiHome),
+    'production host routes multi-task HTML through the Main renderer'
+  );
   const multiAgentCanary = read(
     'entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets'
   );
