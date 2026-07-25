@@ -292,6 +292,36 @@ export default function gmailToolA2uiTest() {
       expect(accepted.dataModelJson.indexOf('"draftId":"draft-1"')).assertLarger(-1);
     });
 
+    it('preserves a nested Composio draft identity and the exact reviewed content for apply only', 0, () => {
+      const providerResult: DynamicGenericToolResult = {
+        sourceTag: 'Composio Gmail',
+        toolName: 'GMAIL_CREATE_EMAIL_DRAFT',
+        title: 'Composio Gmail 结果',
+        status: 'success',
+        summary: 'Composio 已创建 Gmail 草稿。',
+        rows: [{ label: '结果数量', value: '0' }],
+        rawPreview: '{"data":{"response_data":{"draft_id":"draft-provider-raw-1",' +
+          '"thread_id":"thread-provider-raw-1"}},"error":null}'
+      };
+      const originalArgs = JSON.parse(
+        '{"to":["alice@example.com"],"subject":"Re: Project launch notes",' +
+          '"body":"我收到了，会在周五前确认。","threadId":"thread-original-1"}'
+      ) as Object;
+      const surface = surfaceFromJsonl(
+        gmailDraftPreviewA2ui('gmail_draft_nested', providerResult, originalArgs)
+      ).getSurface();
+      const serialized = surface.dataModelJson;
+
+      expect(serialized.indexOf('"id":"gmail.draft.apply"')).assertLarger(-1);
+      expect(serialized.indexOf('"provider":"composio"')).assertLarger(-1);
+      expect(serialized.indexOf('"draftId":"draft-provider-raw-1"')).assertLarger(-1);
+      expect(serialized.indexOf('"to":["alice@example.com"]')).assertLarger(-1);
+      expect(serialized.indexOf('"subject":"Re: Project launch notes"')).assertLarger(-1);
+      expect(serialized.indexOf('"body":"我收到了，会在周五前确认。"')).assertLarger(-1);
+      expect(serialized.indexOf('"threadId":"thread-original-1"')).assertLarger(-1);
+      expect(serialized.indexOf('gmail.message.send')).assertEqual(-1);
+    });
+
     it('renders Gmail Web as a needs-user system intent row', 0, () => {
       const url = 'https://mail.google.com/mail/u/0/#inbox/thread_fixture_1';
       const store = surfaceFromJsonl(gmailOpenWebA2ui('gmail_web', url));

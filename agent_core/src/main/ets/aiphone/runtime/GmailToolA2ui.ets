@@ -178,12 +178,16 @@ function gmailDraftIdFromJson(rawPreview: string): string {
       return '';
     }
     const containers: GmailDraftRecord[] = [root];
-    ['data', 'result', 'draft'].forEach((key: string) => {
-      const nested = gmailDraftRecord(root[key]);
-      if (nested !== null) {
-        containers.push(nested);
-      }
-    });
+    const containerKeys: string[] = ['data', 'result', 'draft', 'response_data', 'responseData'];
+    for (let containerIndex = 0; containerIndex < containers.length; containerIndex++) {
+      const container = containers[containerIndex];
+      containerKeys.forEach((key: string) => {
+        const nested = gmailDraftRecord(container[key]);
+        if (nested !== null) {
+          containers.push(nested);
+        }
+      });
+    }
     for (let index = 0; index < containers.length; index++) {
       const record = containers[index];
       const candidate = gmailDraftText(record['draftId']).length > 0 ?
@@ -323,6 +327,7 @@ function isGmailReadResult(result: DynamicGenericToolResult): boolean {
 function gmailCardFromSummary(thread: GmailThreadSummary): A2uiGenericToolResultData {
   const rows: A2uiLabelValueData[] = [];
   appendRow(rows, 'Provider', thread.provider);
+  appendRow(rows, 'Request Key', thread.requestKey);
   appendRow(rows, 'Account', thread.accountLabel);
   appendRow(rows, 'Thread ID', thread.threadId);
   appendRow(rows, 'Message ID', thread.messageId);
