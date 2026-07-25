@@ -116,6 +116,20 @@ const TWO_TOOL_DONE_DECISION: string = '{"personaId":"travel_companion","skillId
   '"dataTasks":[],"uiIntent":{"purpose":"travel.compare",' +
   '"preferredDensity":"comfortable","requiredSections":[]},' +
   '"answer":"出行结果已就绪","reasonCode":"two_tool_ready"}';
+const FLIGHT_TRAIN_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"execute",' +
+  '"dataTasks":[{"localId":"flight","goal":"search flights",' +
+  '"allowedToolIds":["flight.search"],"toolId":"flight.search",' +
+  '"input":{"query":"北京到上海"},"required":true},{"localId":"train",' +
+  '"goal":"search trains","allowedToolIds":["train.search"],"toolId":"train.search",' +
+  '"input":{"query":"北京到上海"},"required":true}],' +
+  '"uiIntent":{"purpose":"flight and train","preferredDensity":"comfortable",' +
+  '"requiredSections":["flight","train"]},"reasonCode":"flight_train_compare"}';
+const FLIGHT_TRAIN_DONE_DECISION: string = '{"personaId":"travel_companion","skillId":"",' +
+  '"requestedCapabilityIds":["flight.search","train.search"],"roundAction":"answer",' +
+  '"dataTasks":[],"uiIntent":{"purpose":"flight and train",' +
+  '"preferredDensity":"comfortable","requiredSections":[]},' +
+  '"answer":"航班和高铁结果已就绪","reasonCode":"flight_train_ready"}';
 const C02_QUERY: string = '我明天要从北京去上海，帮我搜索出行方案';
 const F01_QUERY: string = '帮我查明天北京到上海的航班';
 const F02_QUERY: string = '帮我查询明天晚上六点以后深圳北到香港西九龙的高铁';
@@ -529,6 +543,34 @@ class TwoToolExecutor implements DataTaskExecutor {
       data,
       warnings: []
     };
+  }
+}
+
+class DeferredFlightTrainExecutor implements DataTaskExecutor {
+  readonly started: string[] = [];
+  readonly bothStarted: TestGate = new TestGate();
+  private readonly flightRelease: TestGate = new TestGate();
+  private readonly trainRelease: TestGate = new TestGate();
+
+  async execute(task: CreateDataTaskPayload): Promise<DataResult> {
+    this.started.push(task.toolId);
+    if (this.started.length === 2) {
+      this.bothStarted.open();
+    }
+    if (task.toolId === 'flight.search') {
+      await this.flightRelease.promise;
+    } else {
+      await this.trainRelease.promise;
+    }
+    return canaryStructuredResult(task.toolId, task.outputSchema);
+  }
+
+  releaseFlight(): void {
+    this.flightRelease.open();
+  }
+
+  releaseTrain(): void {
+    this.trainRelease.open();
   }
 }
 
@@ -1101,6 +1143,38 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(bus.count(AgentMessageType.TASK_CREATE_DATA)).assertEqual(2);
       runtime.dispose();
     });
+
+    it('keeps independent flight and train reads concurrent until one aggregate surface is ready', 0,
+      async () => {
+        const executor = new DeferredFlightTrainExecutor();
+        const bus = new TrackingBus();
+        const surfaces: A2uiSurfaceState[] = [];
+        const runtime = new MultiAgentCanaryRuntime(canaryOptions(
+          new QueueModel([FLIGHT_TRAIN_DECISION, FLIGHT_TRAIN_DONE_DECISION]),
+          executor,
+          new RecordingOpener(),
+          surfaces,
+          [],
+          bus
+        ));
+
+        const pending = runtime.submit('比较北京到上海的航班和高铁', { text: '' });
+        await executor.bothStarted.promise;
+
+        expect(executor.started.join(',')).assertEqual('flight.search,train.search');
+        expect(bus.count(AgentMessageType.TASK_RESULT_DATA)).assertEqual(0);
+        executor.releaseFlight();
+        executor.releaseTrain();
+        const outcome = await pending as MultiAgentSettledOutcome;
+
+        expect(outcome.status).assertEqual('success');
+        expect(surfaces.length).assertEqual(2);
+        expect(outcome.surfaceId).assertEqual(surfaces[0].surfaceId);
+        expect(surfaces[1].surfaceId).assertEqual(surfaces[0].surfaceId);
+        expect(surfaces[1].dataModelJson.indexOf('flights')).assertLarger(-1);
+        expect(surfaces[1].dataModelJson.indexOf('trains')).assertLarger(-1);
+        runtime.dispose();
+      });
 
     it('assembles the approved Action Agent prompt on the production canary model seam', 0, async () => {
       const model = new ActionCompilerCanaryModel();
