@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   ActionArgsValidator,
+  A2uiAction,
   ActionCatalog,
   ActionExecutionContext,
   ActionExecutionResult,
@@ -358,6 +359,21 @@ class TestLookup implements ToolDefinitionLookup {
         actions: ['memory.update']
       };
     }
+    if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update' ||
+      toolId === 'calendar.event.delete') {
+      return {
+        toolId,
+        domain: 'calendar',
+        intent: toolId,
+        riskLevel: 'draft',
+        backendPriority: ['oauth_api'],
+        authModes: ['oauth'],
+        inputSchema: 'calendarEventRequest',
+        outputSchema: 'calendarEventResult',
+        a2uiComponent: 'CalendarEvent',
+        actions: [toolId]
+      };
+    }
     if (toolId === 'hotel.detail') {
       return {
         toolId,
@@ -504,6 +520,54 @@ class BlockingVirtualExecutor implements RegisteredActionExecutor {
     this.started.open();
     await this.release.promise;
     return { status: 'success', output: new Object() };
+  }
+}
+
+interface CalendarProviderCall {
+  actionId: string;
+  args: Object;
+  context: ActionExecutionContext;
+}
+
+interface CalendarProviderReceipt {
+  eventId: string;
+}
+
+class BlockingCalendarLifecycleExecutor implements RegisteredActionExecutor {
+  readonly calls: CalendarProviderCall[] = [];
+  readonly receipts: CalendarProviderReceipt[] = [];
+  private readonly releases: TestGate[] = [];
+  private readonly statuses: ('success' | 'canceled' | 'error')[] = [
+    'success', 'success', 'success', 'canceled', 'error'
+  ];
+
+  async execute(
+    actionId: string,
+    args: Object,
+    context: ActionExecutionContext
+  ): Promise<ActionExecutionResult> {
+    const index = this.calls.length;
+    this.calls.push({ actionId, args, context });
+    const release = new TestGate();
+    this.releases.push(release);
+    await release.promise;
+    const status = this.statuses[index];
+    if (status === 'canceled') {
+      return { status, errorCode: 'CALENDAR_CANCELED', message: 'Calendar write canceled.' };
+    }
+    if (status === 'error') {
+      return { status, errorCode: 'CALENDAR_FAILED', message: 'Calendar provider failed.' };
+    }
+    const values = args as Record<string, Object | string | number | boolean | null | undefined>;
+    const receipt: CalendarProviderReceipt = {
+      eventId: actionId === 'calendar.event.create' ? 'evt-real-1' : values['eventId'] as string
+    };
+    this.receipts.push(receipt);
+    return { status, output: receipt };
+  }
+
+  release(index: number): void {
+    this.releases[index].open();
   }
 }
 
@@ -1498,6 +1562,82 @@ export default function multiAgentRuntimeTest() {
 
       expect(accepted.join(',')).assertEqual('false,false,false,false,false,false,false,false');
       expect(result.status).assertEqual('success');
+      runtime.dispose();
+    });
+
+    it('correlates C19 create update delete terminals to distinct exact page runs', 0, async () => {
+      const bus = new CountingBus();
+      const executor = new BlockingCalendarLifecycleExecutor();
+      const options = runtimeOptions(bus, new HangingPlanner(), new ControlledWriter(), 1000);
+      options.actionExecutor = executor;
+      const runtime = new MultiAgentRuntime(options);
+      const action = (id: string, args: Object): A2uiAction => ({
+        id, label: id, prompt: id, variant: 'primary', kind: 'prompt', args
+      });
+      const context = (sourceToolId: string): ActionExecutionContext => ({
+        conversationId: 'conversation-runtime', turnId: 'calendar-turn',
+        surfaceId: 'calendar-surface', sourceToolId, planId: '', runId: '', stepId: ''
+      });
+      const messages = (type: AgentMessageType): AgentMessage[] => bus.published.filter(
+        (message: AgentMessage): boolean => message.type === type
+      );
+      const run = async (id: string, args: Object, status: 'success' | 'canceled' | 'error',
+        forge: boolean = false): Promise<ActionRunPayload> => {
+        let settled = false;
+        const pending = runtime.runAction(action(id, args), context(id));
+        pending.then((): void => { settled = true; });
+        await settle();
+        const actionRun = messages(AgentMessageType.ACTION_RUN).slice(-1)[0];
+        const expected = actionRun.payload as ActionRunPayload;
+        if (forge) {
+          for (const mismatch of ['conversation', 'turn', 'task', 'surface', 'run']) {
+            let conversationId = actionRun.conversationId;
+            let turnId = actionRun.turnId;
+            let taskId = actionRun.taskId;
+            let surfaceId = expected.surfaceId;
+            let runId = expected.runId;
+            if (mismatch === 'conversation') { conversationId = 'wrong-conversation'; }
+            if (mismatch === 'turn') { turnId = 'wrong-turn'; }
+            if (mismatch === 'task') { taskId = 'wrong-task'; }
+            if (mismatch === 'surface') { surfaceId = 'wrong-surface'; }
+            if (mismatch === 'run') { runId = 'wrong-run'; }
+            bus.publish({
+              type: AgentMessageType.ACTION_RESULT, conversationId, turnId, taskId,
+              payload: {
+                surfaceId, planId: 'direct:' + expected.runId, runId,
+                status: 'success', completedStepIds: []
+              } as ActionResultPayload
+            });
+            await settle();
+            expect(settled).assertFalse();
+          }
+        }
+        const terminalIndex = messages(AgentMessageType.ACTION_RESULT).length;
+        executor.release(executor.calls.length - 1);
+        expect(await pending).assertEqual(status === 'success');
+        const terminal = messages(AgentMessageType.ACTION_RESULT)[terminalIndex]
+          .payload as ActionResultPayload;
+        expect(terminal.runId).assertEqual(expected.runId);
+        expect(terminal.status).assertEqual(status);
+        return expected;
+      };
+      const create = await run('calendar.event.create', JSON.parse(
+        '{"title":"Task 7 QA","start":"2026-07-30T15:00:00+08:00",' +
+        '"end":"2026-07-30T15:30:00+08:00","calendarId":"primary"}'
+      ) as Object, 'success', true);
+      const eventId = executor.receipts[0].eventId;
+      const updateArgs = JSON.parse('{"eventId":' + JSON.stringify(eventId) +
+        ',"title":"Task 7 QA","calendarId":"primary"}') as Object;
+      const update = await run('calendar.event.update', updateArgs, 'success');
+      const deleteArgs = JSON.parse('{"eventId":' + JSON.stringify(eventId) +
+        ',"calendarId":"primary"}') as Object;
+      const deleted = await run('calendar.event.delete', deleteArgs, 'success');
+      await run('calendar.event.delete', deleteArgs, 'canceled');
+      await run('calendar.event.update', updateArgs, 'error');
+      expect((executor.calls[1].args as Record<string, string>)['eventId']).assertEqual(eventId);
+      expect((executor.calls[2].args as Record<string, string>)['eventId']).assertEqual(eventId);
+      expect(create.runId === update.runId).assertFalse();
+      expect(update.runId === deleted.runId).assertFalse();
       runtime.dispose();
     });
 
