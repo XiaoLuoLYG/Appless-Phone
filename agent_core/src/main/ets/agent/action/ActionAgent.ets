@@ -37,6 +37,8 @@ import {
   ActionPlanOutcome,
   ActionPlanPausedOutcome,
   ActionPlanRunContext,
+  ActionPlanStep,
+  FrozenActionPlanStep,
   ActionPlanStepOutput,
   ActionStepExecutionResult,
   ActionStepExecutor,
@@ -140,6 +142,7 @@ function copyContext(context: ActionPlanRunContext): ActionPlanRunContext {
   const copy: ActionPlanRunContext = {
     conversationId: context.conversationId,
     turnId: context.turnId,
+    taskId: context.taskId,
     surfaceId: context.surfaceId,
     sourceToolId: context.sourceToolId,
     planId: context.planId,
@@ -215,11 +218,47 @@ function sameJson(left: JsonValue | undefined, right: JsonValue | undefined): bo
   return true;
 }
 
-function directPlan(
+function frozenPlan(
   message: AgentMessage,
-  payload: ActionRunPayload
+  planId: string,
+  surfaceId: string,
+  label: string,
+  steps: ActionPlanStep[],
+  catalog: ActionCatalog,
+  freezeDefinitions: boolean = true
 ): ActionPlan {
+  const frozenSteps: FrozenActionPlanStep[] = [];
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    const fingerprint = freezeDefinitions ? catalog.definitionFingerprint(step.actionId) : '';
+    const frozen: FrozenActionPlanStep = {
+      stepId: step.stepId,
+      actionId: step.actionId,
+      definitionFingerprint: fingerprint
+    };
+    if (step.args !== undefined) {
+      frozen.args = step.args;
+    }
+    if (step.inputFrom !== undefined) {
+      frozen.inputFrom = step.inputFrom;
+    }
+    frozenSteps.push(frozen);
+  }
   return {
+    conversationId: message.conversationId,
+    taskId: message.taskId,
+    planId,
+    turnId: message.turnId,
+    surfaceId,
+    label,
+    steps: frozenSteps
+  };
+}
+
+function directPlan(message: AgentMessage, payload: ActionRunPayload): ActionPlan {
+  return {
+    conversationId: message.conversationId,
+    taskId: message.taskId,
     planId: `direct:${payload.runId}`,
     turnId: message.turnId,
     surfaceId: payload.surfaceId,
@@ -227,7 +266,8 @@ function directPlan(
     steps: [{
       stepId: 'step-1',
       actionId: payload.actionId,
-      args: payload.args
+      args: payload.args,
+      definitionFingerprint: ''
     }]
   };
 }
@@ -1194,16 +1234,34 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       storedDraft.uiTaskId,
       storedDraft.draft.runId
     ));
-    const plan: ActionPlan = {
-      planId: storedDraft.draft.planId,
-      turnId: storedDraft.turnId,
+    const draftValidation = this.runner.validateDraft(
+      storedDraft.draft,
+      storedDraft.sourceToolId
+    );
+    if (!draftValidation.ok) {
+      this.publishInputError(
+        this.draftMessage(storedDraft),
+        storedDraft.draft.planId,
+        storedDraft.draft.runId,
+        surfaceId,
+        draftValidation.errorCode,
+        draftValidation.message,
+        draftValidation.failedStepId
+      );
+      return;
+    }
+    const plan = frozenPlan(
+      this.draftMessage(storedDraft),
+      storedDraft.draft.planId,
       surfaceId,
-      label: storedDraft.draft.label,
-      steps: storedDraft.draft.steps
-    };
+      storedDraft.draft.label,
+      storedDraft.draft.steps,
+      this.catalog
+    );
     const context: ActionPlanRunContext = {
       conversationId: storedDraft.conversationId,
       turnId: storedDraft.turnId,
+      taskId: storedDraft.taskId,
       surfaceId,
       sourceToolId: storedDraft.sourceToolId,
       planId: plan.planId,
@@ -1346,6 +1404,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     const context: ActionPlanRunContext = {
       conversationId: message.conversationId,
       turnId: message.turnId,
+      taskId: message.taskId,
       surfaceId: payload.surfaceId,
       sourceToolId: payload.sourceToolId as string,
       planId: plan.planId,

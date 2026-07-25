@@ -21,6 +21,13 @@ const ACTION_INTENT_IDS: string[] = [
   'whatsapp.message.send'
 ];
 
+interface ActionDefinitionFingerprintMaterial {
+  actionId: string;
+  backend: string[];
+  riskLevel: string;
+  inputSchema: string;
+}
+
 function denied(code: string, message: string): ActionCatalogResult {
   return {
     ok: false,
@@ -64,6 +71,14 @@ function authorityFailed(): ActionCatalogResult {
   return denied('ACTION_AUTHORITY_FAILED', 'Action authority failed.');
 }
 
+function actionDefinitionFingerprintValue(value: string): string {
+  let hash: number = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 export class ActionCatalog {
   private lookup: ToolDefinitionLookup;
   private surfaceAuthorizer: SurfaceActionAuthorizer;
@@ -80,6 +95,24 @@ export class ActionCatalog {
     this.surfaceAuthorizer = surfaceAuthorizer;
     this.clientAuthorizer = clientAuthorizer;
     this.argsValidator = argsValidator;
+  }
+
+  definitionFingerprint(actionId: string): string {
+    try {
+      const definition = this.lookup.find(actionId);
+      if (definition === null) {
+        return '';
+      }
+      const material: ActionDefinitionFingerprintMaterial = {
+        actionId: definition.toolId,
+        backend: definition.backendPriority,
+        riskLevel: definition.riskLevel,
+        inputSchema: definition.inputSchema
+      };
+      return actionDefinitionFingerprintValue(JSON.stringify(material));
+    } catch (_error) {
+      return '';
+    }
   }
 
   validatePlacement(sourceToolId: string, actionId: string, args: Object): ActionCatalogResult {

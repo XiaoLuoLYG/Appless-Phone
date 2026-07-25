@@ -39,6 +39,7 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
   targetRisk: ToolRiskLevel = 'read';
   targetBackend: ToolBackendType = 'local_adapter';
   targetHasBackend: boolean = true;
+  targetInputSchema: string = '';
   calls: number = 0;
 
   constructor(sourceActions: string[]) {
@@ -61,6 +62,9 @@ class FakeToolDefinitionLookup implements ToolDefinitionLookup {
       const target = definition(toolId, this.targetRisk, this.targetBackend, []);
       if (!this.targetHasBackend) {
         target.backendPriority = [];
+      }
+      if (this.targetInputSchema.length > 0) {
+        target.inputSchema = this.targetInputSchema;
       }
       return target;
     }
@@ -217,6 +221,27 @@ export default function actionCatalogTest() {
       expect(execution.ok).assertTrue();
       expect((execution.definition as ToolDefinition).riskLevel).assertEqual('draft');
       expect((execution.definition as ToolDefinition).backendPriority[0]).assertEqual('system_intent');
+    });
+
+    it('fingerprints only the current executable definition authority', 0, () => {
+      const lookup = new FakeToolDefinitionLookup(['hotel.detail']);
+      const actionCatalog = catalog(
+        lookup,
+        new ExactSurfaceAuthorizer('conversation-1', 'turn-1', 'surface-1', 'hotel.detail', args('{"hotelId":47675}')),
+        new RejectClientAuthorizer(),
+        new ControlledArgsValidator()
+      );
+
+      const baseline = actionCatalog.definitionFingerprint('hotel.detail');
+      expect(baseline).assertEqual(actionCatalog.definitionFingerprint('hotel.detail'));
+      lookup.targetRisk = 'draft';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
+      lookup.targetRisk = 'read';
+      lookup.targetBackend = 'system_intent';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
+      lookup.targetBackend = 'local_adapter';
+      lookup.targetInputSchema = 'ChangedHotelDetailRequest';
+      expect(baseline === actionCatalog.definitionFingerprint('hotel.detail')).assertFalse();
     });
 
     it('rejects invented hotel book even when declared and allowed by the surface', 0, () => {

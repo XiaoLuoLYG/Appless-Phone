@@ -15,6 +15,10 @@ export interface ActionPlanStep {
   inputFrom?: ActionInputBinding[];
 }
 
+export interface FrozenActionPlanStep extends ActionPlanStep {
+  definitionFingerprint: string;
+}
+
 export interface ActionPlanDraft {
   planId: string;
   runId: string;
@@ -31,16 +35,19 @@ export interface ActionPlanCompiler {
 }
 
 export interface ActionPlan {
+  conversationId: string;
+  taskId: string;
   planId: string;
   turnId: string;
   surfaceId: string;
   label: string;
-  steps: ActionPlanStep[];
+  steps: FrozenActionPlanStep[];
 }
 
 export interface ActionPlanRunContext {
   conversationId: string;
   turnId: string;
+  taskId?: string;
   surfaceId: string;
   sourceToolId: string;
   planId: string;

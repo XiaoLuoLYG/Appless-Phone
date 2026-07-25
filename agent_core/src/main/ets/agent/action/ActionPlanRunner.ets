@@ -14,6 +14,7 @@ import {
   ActionPlanValidationResult,
   ActionStepExecutionResult,
   ActionStepExecutor,
+  FrozenActionPlanStep,
   JsonValue
 } from './ActionPlanTypes';
 import {
@@ -188,6 +189,9 @@ function snapshotContext(context: ActionPlanRunContext): ContextSnapshotResult {
     planId: record['planId'] as string,
     runId: record['runId'] as string
   };
+  if (typeof record['taskId'] === 'string' && (record['taskId'] as string).length > 0) {
+    value.taskId = record['taskId'] as string;
+  }
   if (typeof record['pageActionId'] === 'string' &&
     (record['pageActionId'] as string).length > 0) {
     value.pageActionId = record['pageActionId'] as string;
@@ -310,15 +314,18 @@ export class ActionPlanRunner {
 
   validateDraft(draft: ActionPlanDraft, sourceToolId: string): ActionPlanValidationResult {
     const plan: ActionPlan = {
+      conversationId: 'draft',
+      taskId: 'draft',
       planId: draft.planId,
       turnId: 'draft',
       surfaceId: 'draft',
       label: draft.label,
-      steps: draft.steps
+      steps: draft.steps as FrozenActionPlanStep[]
     };
     const context: ActionPlanRunContext = {
       conversationId: 'draft',
       turnId: plan.turnId,
+      taskId: plan.taskId,
       surfaceId: plan.surfaceId,
       sourceToolId,
       planId: plan.planId,
@@ -533,6 +540,15 @@ export class ActionPlanRunner {
       let availableConfirmation = confirmedStepId;
       for (let index = nextStepIndex; index < snapshot.steps.length; index++) {
         const step = snapshot.steps[index];
+        if (step.definitionFingerprint !== undefined && step.definitionFingerprint.length > 0 &&
+          this.catalog.definitionFingerprint(step.actionId) !== step.definitionFingerprint) {
+          return errorOutcome(
+            step.stepId,
+            'PLAN_STALE',
+            'Registered action definition changed.',
+            this.completedStepIds(completed)
+          );
+        }
         const bound = this.bindInputs(step, completed);
         if (!bound.ok || !isArgsObject(bound.value)) {
           return errorOutcome(
