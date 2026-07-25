@@ -666,8 +666,8 @@ function gmailDetailFromThread(thread: GmailThread, args: MailDetailRequest): Ma
   const body: GmailBodyParts = { plain: '', html: '' };
   collectGmailBody(newest.payload, body);
   const directText = textOf(newest.messageText).trim();
-  const bodyText = (body.plain.length > 0 ? body.plain :
-    (directText.length > 0 ? directText : gmailTextFromHtml(body.html))).substring(0, 30000);
+  const bodyText = (directText.length > 0 ? directText :
+    (body.plain.length > 0 ? body.plain : gmailTextFromHtml(body.html))).substring(0, 30000);
   const subject = gmailHeader(first, 'Subject').length > 0 ? gmailHeader(first, 'Subject') : args.subject;
   const detail: MailDetail = {
     requestKey: args.requestKey,

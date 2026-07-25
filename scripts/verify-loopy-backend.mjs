@@ -1120,7 +1120,7 @@ function verifySourceContracts() {
   );
 
   assertContains(runtimeDefinitions, 'Composio-backed app/toolkit requests', 'registry describes Composio dynamic routing');
-  assertContains(runtimeDefinitions, 'Keep the query focused to the relevant 6-10 OR terms', 'registry preserves Gmail academic query expansion guidance');
+  assertContains(runtimeDefinitions, 'Never add synonyms or inferred English terms', 'registry preserves exact Gmail keyword guidance');
   assertContains(runtimeDefinitions, 'toolPlanningDescriptionForToolId', 'registry owns the shared planning description projection');
   assertContains(canaryRuntime, 'toolPlanningDescriptionForToolId(definition.toolId)', 'multi-agent canary consumes the registry planning projection');
   assertContains(canaryRuntime, "definition.toolId !== 'gmail.message.send'", 'multi-agent planner excludes direct Gmail send');

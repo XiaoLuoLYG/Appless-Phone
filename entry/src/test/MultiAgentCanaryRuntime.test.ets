@@ -30,6 +30,7 @@ import {
   UiSurfaceWriter,
   createSeedA2uiSurface,
   gmailDraftPreviewA2ui,
+  gmailThreadResultsA2ui,
   hotelSearchDataResult,
   parseA2uiJsonl,
   parseHotelSearchRequest,
@@ -993,6 +994,32 @@ function providerGmailDraftSurface(sequence: number): A2uiSurfaceState {
       JSON.parse('{"to":["alice@example.com"],"subject":"","body":"我收到了"}') as Object,
       'gmail.draft.create'
     )
+  );
+  const store = new A2uiSurfaceStore();
+  parsed.envelopes.forEach((envelope) => store.apply(envelope));
+  const surface = store.getSurface();
+  surface.runtimeOwner = 'multi_agent';
+  surface.runtimeGeneration = sequence;
+  return surface;
+}
+
+function currentGmailReplySurface(sequence: number): A2uiSurfaceState {
+  const result: DynamicGenericToolResult = {
+    sourceTag: 'Gmail API',
+    toolName: 'users.threads.get',
+    title: 'QA',
+    status: 'success',
+    summary: 'QA body',
+    rows: [
+      { label: 'Provider', value: 'gmail' },
+      { label: 'From', value: 'Alice <alice@example.com>' },
+      { label: 'Thread ID', value: 'thread-real-1' },
+      { label: 'Message ID', value: 'message-real-1' }
+    ],
+    rawPreview: ''
+  };
+  const parsed = parseA2uiJsonl(
+    gmailThreadResultsA2ui('gmail-reply-surface', 'gmail.thread.read', [result])
   );
   const store = new A2uiSurfaceStore();
   parsed.envelopes.forEach((envelope) => store.apply(envelope));
@@ -3115,6 +3142,60 @@ export default function multiAgentCanaryRuntimeTest() {
         message.type === AgentMessageType.ACTION_RESULT &&
           JSON.stringify(message.payload).indexOf('"status":"paused"') >= 0
       ).length).assertEqual(0);
+      runtime.dispose();
+    });
+
+    it('does not block Gmail send from the exact current reply surface', 0, async () => {
+      const calls: RecordedPageAction[] = [];
+      const bus = new TrackingBus();
+      const surface = currentGmailReplySurface(29);
+      const document = createHtmlHomeDocument({
+        surface,
+        messages: [],
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+      const options = canaryOptions(
+        new QueueModel([]),
+        new CanaryHotelExecutor(),
+        new RecordingOpener(),
+        [],
+        [],
+        bus
+      );
+      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => ({
+        surface,
+        document,
+        generation: 29
+      });
+      options.pageAction = async (
+        actionId: string,
+        args: Object,
+        context: ActionExecutionContext
+      ): Promise<ActionExecutionResult> => {
+        calls.push({ actionId, args, context });
+        return { status: 'success', output: JSON.parse('{"providerStatus":"sent"}') as Object };
+      };
+      const runtime = new MultiAgentCanaryRuntime(options);
+      const args = JSON.parse(
+        '{"requestKey":"gmail:thread-real-1","provider":"gmail","accountLabel":"",' +
+          '"threadId":"thread-real-1","messageId":"message-real-1",' +
+          '"to":["alice@example.com"],"subject":"Re: QA","body":"Exact reply",' +
+          '"replyMode":"reply","contextSummary":"QA body"}'
+      ) as Object;
+      const clicked: A2uiAction = {
+        id: 'html_mail_reply_send',
+        label: '发送回复',
+        prompt: 'gmail:thread-real-1',
+        variant: 'primary',
+        kind: 'client',
+        args
+      };
+
+      expect(await runtime.runPageAction(clicked)).assertTrue();
+      expect(calls.length).assertEqual(1);
+      expect(calls[0].actionId).assertEqual('gmail.message.send');
+      expect(JSON.stringify(bus.messages).indexOf('ACTION_BLOCKED')).assertEqual(-1);
       runtime.dispose();
     });
 

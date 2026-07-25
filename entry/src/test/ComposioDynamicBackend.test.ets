@@ -354,6 +354,8 @@ export default function composioDynamicBackendTest() {
     });
 
     it('maps Gmail fixed-tool args into the matched Composio schema', 0, () => {
+      expect(composioExactToolSlugForFixedTool('gmail.message.read'))
+        .assertEqual('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID');
       const draftTool = composioTool('{"toolSlug":"GMAIL_CREATE_DRAFT","inputSchema":"{\\"type\\":\\"object\\",\\"properties\\":{\\"to\\":{\\"type\\":\\"array\\"},\\"subject\\":{\\"type\\":\\"string\\"},\\"body\\":{\\"type\\":\\"string\\"},\\"thread_id\\":{\\"type\\":\\"string\\"},\\"reply_mode\\":{\\"type\\":\\"string\\"}}}"}');
       const draftArgs = composioArgumentsForTool(
         draftTool,
