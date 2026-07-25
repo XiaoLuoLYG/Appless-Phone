@@ -10,6 +10,7 @@ import {
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
+import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
 import { renderRideDriverMapHtml } from '../main/ets/pages/A2uiHome/html/RideDriverMapHtmlRenderer';
 
 interface GooglePayCheckoutArgsFixture {
@@ -30,6 +31,29 @@ interface BookingUrlArgsFixture {
 
 interface MapsOpenArgsFixture {
   url: string;
+}
+
+interface RenderedHomeDataFixture {
+  blocks: HtmlHomeBlock[];
+}
+
+function renderedActionByLabel(html: string, label: string): A2uiAction | null {
+  const start = html.indexOf('<script id="home-data" type="application/json">');
+  const end = html.indexOf('</script>', start);
+  if (start < 0 || end < 0) {
+    return null;
+  }
+  const jsonStart = start + '<script id="home-data" type="application/json">'.length;
+  const data = JSON.parse(html.substring(jsonStart, end)) as RenderedHomeDataFixture;
+  for (let blockIndex = 0; blockIndex < data.blocks.length; blockIndex++) {
+    const actions = data.blocks[blockIndex].actions;
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      if (actions[actionIndex].label === label) {
+        return parseHtmlHomeAction(JSON.stringify(actions[actionIndex]));
+      }
+    }
+  }
+  return null;
 }
 
 function documentFixture(): HtmlHomeDocument {
@@ -1244,16 +1268,18 @@ export default function htmlHomeRendererTest() {
       doc.actions = [openMaps];
 
       const html = renderHtmlHomeDocument(doc);
-      const buttonIds = doc.blocks[1].actions.map((action: HtmlHomeAction): string => action.id);
+      const visibleAction = renderedActionByLabel(html, '打开地图');
 
-      expect(doc.blocks[0].kind).assertEqual('dynamic-tool-connect');
-      expect(doc.blocks[0].status).assertEqual('needs_auth');
-      expect(doc.blocks[1].status).assertEqual('success');
-      expect(buttonIds.join(',')).assertEqual('maps.open.web');
       expect(html.indexOf('Amap Maps')).assertLarger(-1);
       expect(html.indexOf('深圳湾')).assertLarger(-1);
-      expect(html.indexOf('"id":"maps.open.web"')).assertLarger(-1);
-      expect(html.indexOf('https://www.google.com/maps/search/?api=1\\u0026query=Shenzhen')).assertLarger(-1);
+      expect(html.indexOf('button.textContent = text(action.label || action.id);')).assertLarger(-1);
+      expect(html.indexOf('addActions(detailHost, block.actions);')).assertLarger(-1);
+      expect(html.indexOf('args: action.args && typeof action.args === \'object\' ? action.args : null')).assertLarger(-1);
+      expect(visibleAction === null).assertFalse();
+      expect((visibleAction as A2uiAction).id).assertEqual('maps.open.web');
+      expect((visibleAction as A2uiAction).label).assertEqual('打开地图');
+      expect((visibleAction as A2uiAction).prompt).assertEqual(mapsUrl);
+      expect(JSON.stringify((visibleAction as A2uiAction).args)).assertEqual(JSON.stringify(mapsArgs));
       expect(html.indexOf('[object Object]')).assertEqual(-1);
       expect(html.indexOf('raw JSON')).assertEqual(-1);
     });

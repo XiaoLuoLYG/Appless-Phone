@@ -173,6 +173,22 @@ function readEntryProductionEtsSources() {
   return sources.join('\n');
 }
 
+function readEntryProductPageSources() {
+  const sources = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && entry.name === 'Index.ets') {
+        sources.push(readFileSync(entryPath, 'utf8'));
+      }
+    }
+  }
+  visit(resolve(repoRoot, 'entry/src/main/ets/pages'));
+  return sources;
+}
+
 function productionEntryViolations(source) {
   const code = maskNonCode(source);
   return [
@@ -181,8 +197,32 @@ function productionEntryViolations(source) {
   ].filter(([, pattern]) => pattern.test(code)).map(([name]) => name);
 }
 
-function importsMultiTaskRendererFromProductPage(source) {
-  return /\bfrom\s+['"][^'"]*HtmlMultiTaskHomeRenderer['"]/.test(stripComments(source));
+function productPageImportViolations(source) {
+  const code = maskNonCode(source);
+  const declarations = source.matchAll(
+    /^\s*import\s+(?:type\s+)?[\s\S]*?\s+from\s+(['"])([^'"]+)\1\s*;?/gm
+  );
+  const forbiddenImports = [
+    ['HtmlMultiTaskHomeRenderer import', 'HtmlMultiTaskHomeRenderer'],
+    ['ReActAgentRunner import', 'ReActAgentRunner'],
+    ['MultiToolSurfaceComposer import', 'MultiToolSurfaceComposer'],
+    ['LoopBackend fallback import', 'LoopBackend']
+  ];
+  const violations = [];
+  for (const declaration of declarations) {
+    const importStart = source.indexOf('import', declaration.index);
+    if (code.substring(importStart, importStart + 'import'.length) !== 'import') {
+      continue;
+    }
+    const statement = declaration[0];
+    const modulePath = declaration[2];
+    for (const [name, token] of forbiddenImports) {
+      if (statement.includes(token) || modulePath.includes(token)) {
+        violations.push(name);
+      }
+    }
+  }
+  return violations;
 }
 
 function parseIndexExports(index) {
@@ -528,9 +568,26 @@ function verifyArchitectureVerifier() {
     productionEntryViolations('// new ReActAgentRunner(options);\n/* LoopBackend */').length === 0,
     'verifier ignores comment-only production fallback references'
   );
+  const liveProductPageImportViolations = productPageImportViolations([
+    "import { renderMultiTaskHomeDocument } from './HtmlMultiTaskHomeRenderer';",
+    "import { ReActAgentRunner, MultiToolSurfaceComposer, LoopBackend } from './LegacyRuntime';"
+  ].join('\n'));
+  for (const violation of [
+    'HtmlMultiTaskHomeRenderer import',
+    'ReActAgentRunner import',
+    'MultiToolSurfaceComposer import',
+    'LoopBackend fallback import'
+  ]) {
+    assert(
+      liveProductPageImportViolations.includes(violation),
+      `verifier detects a live product-page ${violation}`
+    );
+  }
   assert(
-    !importsMultiTaskRendererFromProductPage("// import { renderMultiTaskHomeDocument } from './HtmlMultiTaskHomeRenderer';"),
-    'verifier ignores a comment-only multi-task renderer import'
+    productPageImportViolations(
+      "const diagnostic = `\nimport { renderMultiTaskHomeDocument } from './HtmlMultiTaskHomeRenderer';\n`;"
+    ).length === 0,
+    'verifier ignores a string-only multi-task renderer import'
   );
 
   const exactSkillFixture = `---
@@ -866,11 +923,14 @@ function verifySourceContracts() {
     'production entry contains no ReAct or LoopBackend fallback',
     entryProductionViolations.join(', ')
   );
-  const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
+  const productPageImportViolationsFound = readEntryProductPageSources()
+    .flatMap((source) => productPageImportViolations(source));
   assert(
-    !importsMultiTaskRendererFromProductPage(a2uiHome),
-    'production host routes multi-task HTML through the Main renderer'
+    productPageImportViolationsFound.length === 0,
+    'production pages do not import retired or multi-task renderers',
+    productPageImportViolationsFound.join(', ')
   );
+  const a2uiHome = read('entry/src/main/ets/pages/A2uiHome/Index.ets');
   const multiAgentCanary = read(
     'entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets'
   );

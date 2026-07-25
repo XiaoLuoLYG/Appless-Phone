@@ -356,7 +356,7 @@ export struct HtmlHomeSurfaceView {
   }
 }
 
-function parseHtmlHomeAction(raw: string): A2uiAction | null {
+export function parseHtmlHomeAction(raw: string): A2uiAction | null {
   try {
     const parsed = JSON.parse(raw) as HtmlHomePostedAction;
     const keys = Object.keys(parsed);
