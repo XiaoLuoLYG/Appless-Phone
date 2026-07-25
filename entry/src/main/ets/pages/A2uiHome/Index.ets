@@ -80,7 +80,6 @@ import {
   normalizeComposioUserId,
   prepareGmailOAuthAuthorizationUrl,
   prepareGoogleOAuthAuthorizationUrl,
-  prepareXOAuthAuthorizationUrl,
   resolveMultiTaskSlotId,
   sendLocalSocialHubReply,
   shortComposioUserId

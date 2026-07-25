@@ -79,13 +79,6 @@ import {
   saveGmailOAuthPending,
   saveGmailOAuthTokenSet
 } from './GmailOAuthClient';
-import {
-  X_DEFAULT_REDIRECT_URI,
-  XOAuthConfig,
-  buildXOAuthAuthorizationUrl,
-  createXOAuthPending,
-  saveXOAuthPending
-} from './XOAuthClient';
 import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient, McpToolCallResult } from './GenericMcpClient';
 import { DataResult, DataSource } from '../../agent/message/DataResult';
 import {
@@ -326,8 +319,6 @@ interface StationDefault {
 
 interface LocalProviderConfig {
   toolGatewayApiKey: string;
-  xOauthClientId: string;
-  xOauthRedirectUri: string;
   flightMcpKey: string;
   variflightApiUrl: string;
   hotelMcpKey: string;
@@ -396,8 +387,6 @@ interface LocalProviderConfig {
 
 interface LocalProviderRawConfig {
   TOOL_GATEWAY_API_KEY?: string;
-  X_OAUTH_CLIENT_ID?: string;
-  X_OAUTH_REDIRECT_URI?: string;
   FLIGHT_MCP_KEY?: string;
   VARIFLIGHT_API_KEY?: string;
   X_VARIFLIGHT_KEY?: string;
@@ -535,8 +524,6 @@ interface LocalProviderRawConfig {
   paymentLiveAllowedStripeAccountIds?: string;
   paymentLiveMaxAmountMinor?: string;
   toolGatewayApiKey?: string;
-  xOauthClientId?: string;
-  xOauthRedirectUri?: string;
 }
 
 interface VariFlightRequestParams {
@@ -1306,8 +1293,6 @@ const CHINA_FLIGHT_CITY_CODES: FlightCityCode[] = [
 let stationCache: StationCache | null = null;
 let localProviderConfig: LocalProviderConfig = {
   toolGatewayApiKey: '',
-  xOauthClientId: '',
-  xOauthRedirectUri: X_DEFAULT_REDIRECT_URI,
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
   hotelMcpKey: '',
@@ -1707,8 +1692,6 @@ function firstText(values: Array<Object | string | number | boolean | null | und
 export function configureLocalProviderConfig(config: LocalProviderConfig): void {
   localProviderConfig = {
     toolGatewayApiKey: config.toolGatewayApiKey.trim(),
-    xOauthClientId: config.xOauthClientId.trim(),
-    xOauthRedirectUri: config.xOauthRedirectUri.trim().length > 0 ? config.xOauthRedirectUri.trim() : X_DEFAULT_REDIRECT_URI,
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
     hotelMcpKey: config.hotelMcpKey.trim(),
@@ -1837,8 +1820,6 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_TEST_SECRET_KEY, parsed.stripeSecretKey]);
   configureLocalProviderConfig({
     toolGatewayApiKey: firstText([parsed.TOOL_GATEWAY_API_KEY, parsed.toolGatewayApiKey]),
-    xOauthClientId: firstText([parsed.X_OAUTH_CLIENT_ID, parsed.xOauthClientId]),
-    xOauthRedirectUri: firstText([parsed.X_OAUTH_REDIRECT_URI, parsed.xOauthRedirectUri]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
     hotelMcpKey: firstText([parsed.ROLLINGGO_HOTEL_MCP_KEY, parsed.hotelMcpKey]),
@@ -10653,32 +10634,6 @@ export async function prepareGoogleOAuthAuthorizationUrl(setupUrl: string = GMAI
 
 export async function prepareGmailOAuthAuthorizationUrl(): Promise<string> {
   return prepareGoogleOAuthAuthorizationUrl(GMAIL_MCP_AUTH_SETUP_URL);
-}
-
-const X_OAUTH_SETUP_URL: string = 'https://developer.x.com/en/portal/dashboard';
-
-export function xOAuthConfigFromProvider(): XOAuthConfig {
-  return {
-    clientId: localProviderConfig.xOauthClientId,
-    redirectUri: localProviderConfig.xOauthRedirectUri.length > 0 ? localProviderConfig.xOauthRedirectUri : X_DEFAULT_REDIRECT_URI
-  };
-}
-
-export async function prepareXOAuthAuthorizationUrl(): Promise<string> {
-  const config = xOAuthConfigFromProvider();
-  if (config.clientId.length === 0 || config.redirectUri.length === 0) {
-    aiLogInfo('[AIPhone][XOAuthAuthorizeUrl] source=setup-docs clientConfigured=' +
-      (config.clientId.length > 0 ? 'true' : 'false') +
-      ' redirectConfigured=' + (config.redirectUri.length > 0 ? 'true' : 'false'));
-    return X_OAUTH_SETUP_URL;
-  }
-  const pending = createXOAuthPending();
-  await saveXOAuthPending(dynamicCredentialStore, pending);
-  aiLogInfo('[AIPhone][XOAuthPendingSaved] stateChars=' + pending.state.length.toString() +
-    ' verifierChars=' + pending.codeVerifier.length.toString() +
-    ' redirectChars=' + config.redirectUri.length.toString() +
-    ' clientChars=' + config.clientId.length.toString());
-  return buildXOAuthAuthorizationUrl(config, pending);
 }
 
 async function gmailAccessTokenForMcp(): Promise<string> {
