@@ -467,6 +467,10 @@ function liveDeclarationBody(source, declaration) {
   return declarationBody(stripComments(source), declaration);
 }
 
+function executableDeclarationBody(source, declaration) {
+  return declarationBody(maskNonCode(source), declaration);
+}
+
 function hasBoundedLeaderModelCalls(source) {
   const live = stripComments(source);
   const plan = declarationBody(live, 'async plan(');
@@ -517,7 +521,7 @@ function hasTravelRoute(source) {
 }
 
 function hasFourRolesOnBus(source, constructorSignature) {
-  const body = stripStrings(liveDeclarationBody(source, constructorSignature));
+  const body = executableDeclarationBody(source, constructorSignature);
   return [
     ['leader', 'LeaderAgent'],
     ['data', 'DataAgent'],
@@ -525,6 +529,34 @@ function hasFourRolesOnBus(source, constructorSignature) {
     ['action', 'ActionAgent']
   ].every(([field, role]) =>
     new RegExp(`this\\.${field}\\s*=\\s*new\\s+${role}\\s*\\(\\s*this\\.bus\\b`).test(body));
+}
+
+function hasCorrelatedMultiAgentRuntime(source) {
+  const body = executableDeclarationBody(source, 'constructor(options: MultiAgentRuntimeOptions)');
+  return hasFourRolesOnBus(source, 'constructor(options: MultiAgentRuntimeOptions)') &&
+    /this\.bus\s*=\s*options\.bus\s*===\s*undefined\s*\?\s*new\s+LinkedMessageBus\s*\(\s*\)\s*:\s*options\.bus\s*;/.test(body) &&
+    /this\.reader\s*=\s*this\.bus\.openReader\s*\(\s*\)\s*;/.test(body);
+}
+
+function hasLeaderObserveReplan(source) {
+  const planning = executableDeclarationBody(source, 'private startPlanning(');
+  const observation = executableDeclarationBody(source, 'private handleSemanticObservation(');
+  return /this\.planner\.plan\s*\(/.test(planning) &&
+    /state\.turnObservations\.push\s*\(\s*digest\s*\)\s*;/.test(observation) &&
+    /state\.round\s*\+\+\s*;/.test(observation) &&
+    /this\.startPlanning\s*\(\s*this\.inputMessage\s*\(\s*state\s*\)\s*,\s*state\.input\s*,\s*state\s*\)\s*;/.test(observation);
+}
+
+function hasValidatedUiA2uiWrite(source) {
+  const body = executableDeclarationBody(source, 'private async handleUiTask(');
+  const validate = body.search(/this\.validateRenderedJsonl\s*\(\s*rendered\s*,\s*false\s*\)\s*;/);
+  const write = body.search(/await\s+this\.writer\.write\s*\(/);
+  return validate >= 0 && write > validate;
+}
+
+function hasCatalogBoundActionOffers(source) {
+  const body = executableDeclarationBody(source, 'private sanitizeOffers(');
+  return /this\.catalog\.validatePlacement\s*\(\s*sourceToolId\s*,\s*candidate\.actionId\s*,\s*args\s*\)\s*\.ok/.test(body);
 }
 
 function verifyArchitectureVerifier() {
@@ -819,6 +851,80 @@ Use Google Maps for explicit provider requests.`;
     'verifier rejects constructor string bus decoys'
   );
 
+  const runtimeBody = `
+    this.bus = options.bus === undefined ? new LinkedMessageBus() : options.bus;
+    this.leader = new LeaderAgent(this.bus, planner);
+    this.data = new DataAgent(this.bus, executor);
+    this.ui = new UiAgent(this.bus, renderer, writer);
+    this.action = new ActionAgent(this.bus, catalog, registered);
+    this.reader = this.bus.openReader();
+  `;
+  const runtimeFixture = `class MultiAgentRuntime {
+    constructor(options: MultiAgentRuntimeOptions) {${runtimeBody}}
+  }`;
+  assert(hasCorrelatedMultiAgentRuntime(runtimeFixture), 'verifier accepts live correlated runtime roles and bus');
+  assert(
+    !hasCorrelatedMultiAgentRuntime(`class MultiAgentRuntime {
+      constructor(options: MultiAgentRuntimeOptions) {/*${runtimeBody}*/}
+    }`),
+    'verifier rejects comment-only correlated runtime roles and bus'
+  );
+  assert(
+    !hasCorrelatedMultiAgentRuntime(`class MultiAgentRuntime {
+      constructor(options: MultiAgentRuntimeOptions) {const decoy = ${JSON.stringify(runtimeBody)};}
+    }`),
+    'verifier rejects string-only correlated runtime roles and bus'
+  );
+
+  const leaderFixture = `class LeaderAgent {
+    private startPlanning() { this.planner.plan(input); }
+    private handleSemanticObservation() {
+      state.turnObservations.push(digest);
+      state.round++;
+      this.startPlanning(this.inputMessage(state), state.input, state);
+    }
+  }`;
+  assert(hasLeaderObserveReplan(leaderFixture), 'verifier accepts live Leader observe-replan contract');
+  assert(
+    !hasLeaderObserveReplan(`class LeaderAgent {/*${leaderFixture}*/}`),
+    'verifier rejects comment-only Leader observe-replan contract'
+  );
+  assert(
+    !hasLeaderObserveReplan(`class LeaderAgent {const decoy = ${JSON.stringify(leaderFixture)};}`),
+    'verifier rejects string-only Leader observe-replan contract'
+  );
+
+  const uiFixture = `class UiAgent {
+    private async handleUiTask() {
+      this.validateRenderedJsonl(rendered, false);
+      await this.writer.write(surface);
+    }
+  }`;
+  assert(hasValidatedUiA2uiWrite(uiFixture), 'verifier accepts live UI A2UI validation contract');
+  assert(
+    !hasValidatedUiA2uiWrite(`class UiAgent {/*${uiFixture}*/}`),
+    'verifier rejects comment-only UI A2UI validation contract'
+  );
+  assert(
+    !hasValidatedUiA2uiWrite(`class UiAgent {const decoy = ${JSON.stringify(uiFixture)};}`),
+    'verifier rejects string-only UI A2UI validation contract'
+  );
+
+  const actionFixture = `class ActionAgent {
+    private sanitizeOffers() {
+      if (!this.catalog.validatePlacement(sourceToolId, candidate.actionId, args).ok) return [];
+    }
+  }`;
+  assert(hasCatalogBoundActionOffers(actionFixture), 'verifier accepts live catalog-bound Action offers');
+  assert(
+    !hasCatalogBoundActionOffers(`class ActionAgent {/*${actionFixture}*/}`),
+    'verifier rejects comment-only catalog-bound Action offers'
+  );
+  assert(
+    !hasCatalogBoundActionOffers(`class ActionAgent {const decoy = ${JSON.stringify(actionFixture)};}`),
+    'verifier rejects string-only catalog-bound Action offers'
+  );
+
   const registryContract = `{
     toolId: 'gmail.message.send', domain: 'gmail', intent: 'gmail.message.send',
     riskLevel: 'confirm_required', backendPriority: ['oauth_api'], authModes: ['oauth'],
@@ -948,7 +1054,7 @@ function verifySourceContracts() {
   const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
-  const multiAgentRuntime = stripComments(read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets'));
+  const multiAgentRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets');
   const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
   const liveCanaryLeaderPlanner = stripComments(canaryLeaderPlanner);
   const index = stripComments(read('agent_core/Index.ets'));
@@ -1184,9 +1290,7 @@ function verifySourceContracts() {
     'HotelAgentRuntime assigns all four roles to one broadcast bus'
   );
   assert(
-    hasFourRolesOnBus(multiAgentRuntime, 'constructor(options: MultiAgentRuntimeOptions)') &&
-      multiAgentRuntime.includes('this.bus = options.bus === undefined ? new LinkedMessageBus() : options.bus;') &&
-      multiAgentRuntime.includes('this.reader = this.bus.openReader();'),
+    hasCorrelatedMultiAgentRuntime(multiAgentRuntime),
     'MultiAgentRuntime assigns all four correlated subscribers to one LinkedMessageBus'
   );
   assert(
@@ -1479,12 +1583,9 @@ function verifySourceContracts() {
   assertContains(dataAgent, 'authorizer(task)', 'Data Agent authorizes exact tasks before execution');
   assertContains(dataAgent, 'result.toolId === task.toolId && result.outputSchema === task.outputSchema',
     'Data Agent validates result identity and schema');
-  assertContains(leaderAgent, 'this.planner.plan(', 'Leader owns planning rounds');
-  assertContains(leaderAgent, 'state.turnObservations.push(', 'Leader replans from terminal observations');
-  assertContains(uiAgent, 'this.validateRenderedJsonl(rendered, false)',
-    'UI Agent validates rendered A2UI before writing a surface');
-  assertContains(actionAgent, 'this.catalog.validatePlacement(sourceToolId, candidate.actionId, args)',
-    'Action Agent derives only catalog-approved offers');
+  assert(hasLeaderObserveReplan(leaderAgent), 'Leader owns Plan-Observe-Replan on executable code');
+  assert(hasValidatedUiA2uiWrite(uiAgent), 'UI Agent validates rendered A2UI before writing a surface');
+  assert(hasCatalogBoundActionOffers(actionAgent), 'Action Agent derives only catalog-approved offers');
   assertContains(actionAgent, 'type: AgentMessageType.ACTION_OFFERS_READY',
     'Action Agent publishes immutable offers');
   assertContains(actionAgent, 'type: AgentMessageType.ACTION_PLAN_DRAFT',
