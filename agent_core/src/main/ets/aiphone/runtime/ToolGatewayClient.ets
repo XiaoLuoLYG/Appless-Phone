@@ -9973,10 +9973,14 @@ function dynamicManifestReadAllowed(tool: DynamicMcpTool, transport: DynamicTool
   return dynamicReadAuthorizationMessage(request as Object).length === 0;
 }
 
-async function dynamicManifestReadExecution(discovery: DynamicToolDiscoveryResult, prompt: string): Promise<DynamicReadExecution> {
+async function dynamicManifestReadExecution(
+  discovery: DynamicToolDiscoveryResult,
+  prompt: string,
+  selectedToolName: string = ''
+): Promise<DynamicReadExecution> {
   const manifest = discovery.manifest;
   const transport = selectBestRemoteTransport(manifest);
-  const toolName = firstSafeToolName(manifest);
+  const toolName = selectedToolName.length > 0 ? selectedToolName : firstSafeToolName(manifest);
   const tool = dynamicManifestTool(manifest, toolName);
   if (transport === null || tool === null) {
     return dynamicReadFailure(manifest.displayName, toolName, new Object(),
@@ -10030,7 +10034,7 @@ async function defaultDynamicReadExecutor(prompt: string, args: Object | null): 
   if (selected.length > 0) {
     const selectedManifest = selectedDynamicManifest(selected);
     if (selectedManifest !== null) {
-      return dynamicManifestReadExecution(selectedManifest, prompt);
+      return dynamicManifestReadExecution(selectedManifest, prompt, selected);
     }
   }
   const discovery = selected.length === 0 ? discoverDynamicToolForPrompt(prompt) : null;

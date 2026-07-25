@@ -83,6 +83,34 @@ export default function dynamicToolDiscoveryTest() {
       }
     });
 
+    it('executes only the selected second safe manifest tool', 0, async () => {
+      configureDynamicToolSamplesFromJson('{"manifests":[{"toolIds":["multi.search"],"manifest":{' +
+        '"id":"multi","displayName":"Multi","sourceUrl":"memory:multi","hosted":true,' +
+        '"fromSiteUrl":"","capabilities":["first"],"requiredCredentials":[],"transports":[' +
+        '{"type":"http_api","url":"https://multi.invalid/read","command":"","args":[],' +
+        '"headers":{},"env":{},"method":"POST"}],"tools":[' +
+        '{"name":"FIRST_SEARCH_METRICS","description":"Search first metrics","inputSchema":{},' +
+        '"annotations":{"readOnlyHint":true}},' +
+        '{"name":"SECOND_SEARCH_METRICS","description":"Search second metrics","inputSchema":{},' +
+        '"annotations":{"readOnlyHint":true}}]}}]}');
+      try {
+        const result = await callStructuredTool(
+          'dynamic.search', 'search first metrics',
+          looseObject('{"operation":"search","qualifiedName":"SECOND_SEARCH_METRICS"}')
+        );
+        const data = result.data as DynamicStructuredData;
+
+        expect(result.status).assertEqual('error');
+        expect(result.error?.code).assertEqual('DYNAMIC_PROVIDER_ERROR');
+        expect(data.results[0].toolName).assertEqual('SECOND_SEARCH_METRICS');
+        expect(data.registration.qualifiedName).assertEqual('SECOND_SEARCH_METRICS');
+        expect(result.sources[0].operation).assertEqual('SECOND_SEARCH_METRICS');
+        expect(JSON.stringify(data).indexOf('FIRST_SEARCH_METRICS')).assertEqual(-1);
+      } finally {
+        configureDefaultDynamicToolSamplesForTests();
+      }
+    });
+
     it('allows safe dynamic reads and preserves turn-scoped registration metadata', 0, async () => {
       let calls = 0;
       configureDynamicReadExecutorForTests(async (_prompt: string, args: Object | null): Promise<DynamicReadExecution> => {
