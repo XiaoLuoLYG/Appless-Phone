@@ -1208,6 +1208,46 @@ export default function structuredToolUiRendererTest() {
       }
     });
 
+    it('renders dynamic provider authorization without result rows', 0, async () => {
+      const result = dataResult('dynamic.search', 'dynamicToolConnect', object(
+        '{"results":[],"registration":{"provider":"Composio",' +
+        '"qualifiedName":"GITHUB_LIST_PULL_REQUESTS","inputSchema":{},' +
+        '"outputSchema":{},"receipt":""}}'
+      ));
+      result.status = 'error';
+      result.error = { code: 'AUTH_REQUIRED', message: 'GitHub authorization required' };
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], [], 'surface-github-auth'
+      );
+
+      expect(rendered.jsonl.indexOf('GitHub authorization required')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('GenericToolResults')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('GITHUB_LIST_PULL_REQUESTS')).assertEqual(-1);
+      expect(rendered.jsonl.indexOf('"results"')).assertEqual(-1);
+    });
+
+    it('rejects a dynamic result whose source identity differs from its registration', 0, async () => {
+      const result = dataResult('dynamic.search', 'dynamicToolConnect', object(
+        '{"results":[{"sourceTag":"Composio","toolName":"GOOGLEDRIVE_SEARCH_FILES",' +
+        '"title":"Drive result","status":"success","summary":"must not render",' +
+        '"rows":[{"label":"file","value":"wrong identity"}],"rawPreview":""}],"registration":{' +
+        '"provider":"Composio","qualifiedName":"GITHUB_LIST_PULL_REQUESTS",' +
+        '"inputSchema":{},"outputSchema":{},"receipt":""}}'
+      ));
+      result.sources = [{
+        provider: 'Composio', backend: 'oauth_api', operation: 'GOOGLEDRIVE_SEARCH_FILES',
+        fetchedAt: '2026-07-25T00:00:00Z'
+      }];
+
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(), [result], [], 'surface-dynamic-identity-mismatch'
+      );
+
+      expect(rendered.jsonl.indexOf('结构化结果格式无效')).assertLarger(-1);
+      expect(rendered.jsonl.indexOf('wrong identity')).assertEqual(-1);
+    });
+
     it('fails closed for malformed dynamicToolConnect payloads', 0, async () => {
       const missingRegistration = dataResult(
         'dynamic.search',

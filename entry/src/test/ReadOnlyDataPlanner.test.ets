@@ -103,6 +103,24 @@ export default function readOnlyDataPlannerTest() {
       expect(bounded[0].entityRefs[0].length).assertEqual(128);
     });
 
+    it('preserves the selected dynamic qualifiedName', 0, async () => {
+      const task = dataTask();
+      task.allowedToolIds = ['dynamic.search'];
+      task.toolId = 'dynamic.search';
+      task.args = JSON.parse('{"operation":"read","qualifiedName":"MAPS_WEATHER",' +
+        '"query":"北京天气"}') as Object;
+      const planner = new ReadOnlyDataPlanner(new QueueLocalModel([
+        '{"kind":"call","toolId":"dynamic.search","args":{"operation":"read",' +
+        '"qualifiedName":"MAPS_WEATHER","query":"北京天气"},"summary":"read weather"}'
+      ]));
+
+      const decision = await planner.next(task, [], 1);
+
+      expect(decision.toolId).assertEqual('dynamic.search');
+      expect(JSON.stringify(decision.args).indexOf('"qualifiedName":"MAPS_WEATHER"'))
+        .assertLarger(-1);
+    });
+
     it('rejects prose arrays duplicate keys extra fields and malformed decisions', 0, async () => {
       const valid: string = '{"kind":"finish","toolId":"dynamic.search","args":{},"summary":"done"}';
       const duplicateTop: string = '{"kind":"finish","kind":"call",' +

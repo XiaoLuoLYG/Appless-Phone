@@ -81,10 +81,24 @@ export default function dynamicToolDiscoveryTest() {
           'dynamic.search', 'get a repository',
           looseObject('{"operation":"get","qualifiedName":"GITHUB_GET_REPOSITORY","schema":{"type":"object"},"receipt":"turn-4"}')
         );
+        const githubQualifiedName: string = 'GITHUB_LIST_PULL_REQUESTS';
+        const driveQualifiedName: string = 'GOOGLEDRIVE_SEARCH_FILES';
+        const github = await callStructuredTool(
+          'dynamic.search', 'list GitHub pull requests',
+          looseObject('{"operation":"list","qualifiedName":"' + githubQualifiedName +
+            '","schema":{"type":"object"},"receipt":"github-turn"}')
+        );
+        const drive = await callStructuredTool(
+          'dynamic.search', 'search Google Drive files',
+          looseObject('{"operation":"search","qualifiedName":"' + driveQualifiedName +
+            '","schema":{"type":"object"},"receipt":"drive-turn"}')
+        );
         const firstData = first.data as DynamicStructuredData;
         const secondData = second.data as DynamicStructuredData;
         const thirdData = third.data as DynamicStructuredData;
         const fourthData = fourth.data as DynamicStructuredData;
+        const githubData = github.data as DynamicStructuredData;
+        const driveData = drive.data as DynamicStructuredData;
 
         expect(first.status).assertEqual('success');
         expect(first.outputSchema).assertEqual('dynamicToolConnect');
@@ -99,8 +113,12 @@ export default function dynamicToolDiscoveryTest() {
         expect(JSON.stringify(second.data).indexOf('turn-1')).assertEqual(-1);
         expect(thirdData.registration.qualifiedName).assertEqual('NOTION_READ_PAGE');
         expect(fourthData.registration.qualifiedName).assertEqual('GITHUB_GET_REPOSITORY');
+        expect(githubData.registration.qualifiedName).assertEqual(githubQualifiedName);
+        expect(driveData.registration.qualifiedName).assertEqual(driveQualifiedName);
+        expect(github.sources[0].operation).assertEqual(githubQualifiedName);
+        expect(drive.sources[0].operation).assertEqual(driveQualifiedName);
         expect(JSON.stringify(fourth.data).indexOf('turn-3')).assertEqual(-1);
-        expect(calls).assertEqual(4);
+        expect(calls).assertEqual(6);
       } finally {
         configureDynamicReadExecutorForTests(null);
       }

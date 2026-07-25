@@ -31,6 +31,7 @@ import {
   UiTaskRenderer,
   aggregateSearchA2ui,
   calendarAuthRequiredA2ui,
+  dynamicProviderAuthorizationA2ui,
   flightStructuredDataA2ui,
   foodStructuredDataA2ui,
   genericToolResultsA2ui,
@@ -425,6 +426,15 @@ function authJsonl(data: DataResult, surfaceId: string): string | null {
   }
   if (data.toolId.indexOf('calendar.') === 0) {
     return calendarAuthRequiredA2ui(surfaceId, data.toolId, data.error.message);
+  }
+  if (data.toolId === 'dynamic.search') {
+    const record = recordOf(data.data);
+    const registration = recordOf(record === null ? null : record['registration']);
+    if (registration !== null && hasText(registration, 'provider')) {
+      return dynamicProviderAuthorizationA2ui(
+        surfaceId, registration['provider'] as string, data.error.message
+      );
+    }
   }
   return null;
 }
