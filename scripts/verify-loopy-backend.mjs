@@ -516,8 +516,8 @@ function hasTravelRoute(source) {
   return /if\s*\(\s*toolId\s*===\s*'travel\.search'\s*\)\s*\{\s*return\s+callLocalTravelSearch\(prompt,\s*surfaceId\);\s*\}/s.test(body);
 }
 
-function hasHotelRolesOnBus(source) {
-  const body = stripStrings(liveDeclarationBody(source, 'constructor(options: HotelAgentRuntimeOptions)'));
+function hasFourRolesOnBus(source, constructorSignature) {
+  const body = stripStrings(liveDeclarationBody(source, constructorSignature));
   return [
     ['leader', 'LeaderAgent'],
     ['data', 'DataAgent'],
@@ -814,7 +814,10 @@ Use Google Maps for explicit provider requests.`;
   `;
   const decoyConstructor = liveDeclarationBody(decoyBusRuntime, 'constructor(options: HotelAgentRuntimeOptions)');
   assert(['LeaderAgent', 'DataAgent', 'UiAgent', 'ActionAgent'].every((role) => new RegExp(`new\\s+${role}\\s*\\(\\s*this\\.bus\\b`).test(decoyConstructor)), 'fixture reproduces former bus-token predicate');
-  assert(!hasHotelRolesOnBus(decoyBusRuntime), 'verifier rejects constructor string bus decoys');
+  assert(
+    !hasFourRolesOnBus(decoyBusRuntime, 'constructor(options: HotelAgentRuntimeOptions)'),
+    'verifier rejects constructor string bus decoys'
+  );
 
   const registryContract = `{
     toolId: 'gmail.message.send', domain: 'gmail', intent: 'gmail.message.send',
@@ -945,6 +948,7 @@ function verifySourceContracts() {
   const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const canaryRuntime = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentCanaryRuntime.ets');
+  const multiAgentRuntime = stripComments(read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentRuntime.ets'));
   const canaryLeaderPlanner = read('entry/src/main/ets/pages/A2uiHome/agent/MultiAgentLeaderPlanner.ets');
   const liveCanaryLeaderPlanner = stripComments(canaryLeaderPlanner);
   const index = stripComments(read('agent_core/Index.ets'));
@@ -1175,7 +1179,16 @@ function verifySourceContracts() {
     forbiddenHotelTools.every((toolId) => !runtimeUniqueIds.has(toolId)),
     'hotel transaction tools are absent from the runtime registry'
   );
-  assert(hasHotelRolesOnBus(hotelRuntime), 'HotelAgentRuntime assigns all four roles to one broadcast bus');
+  assert(
+    hasFourRolesOnBus(hotelRuntime, 'constructor(options: HotelAgentRuntimeOptions)'),
+    'HotelAgentRuntime assigns all four roles to one broadcast bus'
+  );
+  assert(
+    hasFourRolesOnBus(multiAgentRuntime, 'constructor(options: MultiAgentRuntimeOptions)') &&
+      multiAgentRuntime.includes('this.bus = options.bus === undefined ? new LinkedMessageBus() : options.bus;') &&
+      multiAgentRuntime.includes('this.reader = this.bus.openReader();'),
+    'MultiAgentRuntime assigns all four correlated subscribers to one LinkedMessageBus'
+  );
   assert(
     (hotelA2ui.includes("id: 'hotel.booking.open'") || hotelActions.includes("id: 'hotel.booking.open'")) &&
       !hotelA2ui.includes("row('第三方预订（离开 Appless）'"),
@@ -1466,6 +1479,10 @@ function verifySourceContracts() {
   assertContains(dataAgent, 'authorizer(task)', 'Data Agent authorizes exact tasks before execution');
   assertContains(dataAgent, 'result.toolId === task.toolId && result.outputSchema === task.outputSchema',
     'Data Agent validates result identity and schema');
+  assertContains(leaderAgent, 'this.planner.plan(', 'Leader owns planning rounds');
+  assertContains(leaderAgent, 'state.turnObservations.push(', 'Leader replans from terminal observations');
+  assertContains(uiAgent, 'this.validateRenderedJsonl(rendered, false)',
+    'UI Agent validates rendered A2UI before writing a surface');
   assertContains(actionAgent, 'this.catalog.validatePlacement(sourceToolId, candidate.actionId, args)',
     'Action Agent derives only catalog-approved offers');
   assertContains(actionAgent, 'type: AgentMessageType.ACTION_OFFERS_READY',
