@@ -110,15 +110,15 @@ interface CalendarReviewOutput {
 interface GmailDraftApplySurfaceBinding {
   action: A2uiAction;
   actionJson: string;
-  fingerprint: string;
   runtimeGeneration: number;
   surface: A2uiSurfaceState;
   surfaceId: string;
   surfaceStatus: string;
 }
 
-interface GmailDraftCreateOutputBinding {
+interface GmailDraftApplyCandidate {
   actionJson: string;
+  runtimeGeneration: number;
   surfaceId: string;
   surfaceStatus: string;
 }
@@ -1030,7 +1030,6 @@ function gmailDraftApplySurfaceBinding(
   return {
     action: candidates[0],
     actionJson,
-    fingerprint: registeredPageSnapshotFingerprint(snapshot),
     runtimeGeneration: surfaceGeneration,
     surface: JSON.parse(JSON.stringify(currentHost)) as A2uiSurfaceState,
     surfaceId: snapshot.surface.surfaceId,
@@ -1066,13 +1065,15 @@ function isSuccessfulGmailDraftTerminalTransition(
   return JSON.stringify(normalizedTerminal) === JSON.stringify(normalizedProvider);
 }
 
-function gmailDraftCreateOutputBinding(
+function gmailDraftCreateOutputCandidate(
   result: ActionExecutionResult,
   context: ActionExecutionContext,
-  originalArgs: Object
-): GmailDraftCreateOutputBinding | null {
+  originalArgs: Object,
+  runtimeGeneration: number
+): GmailDraftApplyCandidate | null {
   if (result.status !== 'success' || result.output === undefined ||
     result.output === null || typeof result.output !== 'object' || Array.isArray(result.output) ||
+    !Number.isSafeInteger(runtimeGeneration) || runtimeGeneration <= 0 ||
     !validateRegisteredPageActionArgs('gmail.draft.create', originalArgs).ok) {
     return null;
   }
@@ -1109,6 +1110,7 @@ function gmailDraftCreateOutputBinding(
   }
   return {
     actionJson: JSON.stringify(route.action),
+    runtimeGeneration,
     surfaceId: (output['surfaceId'] as string).trim(),
     surfaceStatus: (output['status'] as string).trim()
   };
@@ -1418,7 +1420,7 @@ export class MultiAgentCanaryRuntime {
   private readonly turnHostGenerationOrder: string[] = [];
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
-  private gmailDraftApplyAuthority: GmailDraftApplySurfaceBinding | null = null;
+  private gmailDraftApplyCandidate: GmailDraftApplyCandidate | null = null;
   private surfaceGeneration: number = 0;
   private lastLeaderPersonaId: string = '';
   private submissionSequence: number = 0;
@@ -1443,11 +1445,7 @@ export class MultiAgentCanaryRuntime {
           0 : current.runtimeGeneration;
       } : options.currentHostGeneration;
     const currentGmailDraftApply = (): A2uiAction | null =>
-      exactCurrentGmailDraftApplyAction(
-        this.gmailDraftApplyAuthority,
-        this.currentHostSurface(),
-        this.currentHostGeneration()
-      );
+      this.currentGmailDraftApplyAction();
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
     this.followUpIds = followUpIds;
@@ -1502,11 +1500,11 @@ export class MultiAgentCanaryRuntime {
       context: RegisteredPageActionContext
     ): Promise<ActionExecutionResult> => {
       if (actionId === 'gmail.draft.create') {
-        this.gmailDraftApplyAuthority = null;
+        this.gmailDraftApplyCandidate = null;
       }
       const result = await configuredPageAction(actionId, args, context);
       if (actionId === 'gmail.draft.create') {
-        this.rememberGmailDraftApplyAuthority(result, context, args);
+        this.rememberGmailDraftApplyCandidate(result, context, args);
       }
       return result;
     };
@@ -1587,7 +1585,7 @@ export class MultiAgentCanaryRuntime {
     hostGeneration: number = 0
   ): Promise<MultiAgentTurnOutcome> {
     if (text.trim() !== '确认应用刚才的 Gmail 草稿') {
-      this.gmailDraftApplyAuthority = null;
+      this.gmailDraftApplyCandidate = null;
     }
     this.submissionSequence++;
     const submissionSequence: number = this.submissionSequence;
@@ -1723,7 +1721,7 @@ export class MultiAgentCanaryRuntime {
     this.mailDetailBridge.dispose();
     this.pageGeneration = 0;
     this.pageFingerprint = '';
-    this.gmailDraftApplyAuthority = null;
+    this.gmailDraftApplyCandidate = null;
     this.surfaceGeneration = 0;
     this.turnHostGenerations.clear();
     this.turnHostGenerationOrder.splice(0, this.turnHostGenerationOrder.length);
@@ -1795,26 +1793,34 @@ export class MultiAgentCanaryRuntime {
     }
   }
 
-  private rememberGmailDraftApplyAuthority(
+  private rememberGmailDraftApplyCandidate(
     result: ActionExecutionResult,
     context: ActionExecutionContext,
     originalArgs: Object
   ): void {
-    const output = gmailDraftCreateOutputBinding(result, context, originalArgs);
+    const runtimeGeneration = this.turnHostGenerations.get(context.turnId);
+    this.gmailDraftApplyCandidate = runtimeGeneration === undefined ? null :
+      gmailDraftCreateOutputCandidate(result, context, originalArgs, runtimeGeneration);
+  }
+
+  private currentGmailDraftApplyAction(): A2uiAction | null {
+    const candidate = this.gmailDraftApplyCandidate;
+    const currentHost = this.currentHostSurface();
     const current = gmailDraftApplySurfaceBinding(
       this.currentPageSnapshot(),
-      this.currentHostSurface()
+      currentHost
     );
-    const runtimeGeneration = this.turnHostGenerations.get(context.turnId);
-    if (output === null || current === null ||
-      runtimeGeneration === undefined ||
-      current.runtimeGeneration !== runtimeGeneration ||
-      current.surfaceId !== output.surfaceId ||
-      current.surfaceStatus !== output.surfaceStatus ||
-      current.actionJson !== output.actionJson) {
-      this.gmailDraftApplyAuthority = null;
-      return;
+    if (candidate === null || current === null ||
+      current.runtimeGeneration !== candidate.runtimeGeneration ||
+      current.surfaceId !== candidate.surfaceId ||
+      current.surfaceStatus !== candidate.surfaceStatus ||
+      current.actionJson !== candidate.actionJson) {
+      return null;
     }
-    this.gmailDraftApplyAuthority = current;
+    return exactCurrentGmailDraftApplyAction(
+      current,
+      currentHost,
+      this.currentHostGeneration()
+    );
   }
 }

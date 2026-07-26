@@ -2403,7 +2403,6 @@ export default function multiAgentCanaryRuntimeTest() {
           const createdSurface = providerGmailDraftSurface(hostGeneration);
           createdSurface.sequence = 7;
           currentHost = createdSurface;
-          currentSnapshot = pageSnapshot(createdSurface, 1);
           output = registeredGmailDraftProviderOutput(createdSurface, context);
           const providerData = (output as RegisteredPageActionOutputFixture).data as A2uiRuntimeDataModel;
           providerResultCount = providerData.genericToolResults.length;
@@ -2443,12 +2442,7 @@ export default function multiAgentCanaryRuntimeTest() {
       currentHost = terminalSurface;
       const terminalSnapshot = pageSnapshot(terminalSurface, 2);
       const f07Document = terminalSnapshot.document;
-      const f08PendingSnapshot = pendingPageSnapshot(
-        terminalSurface,
-        3,
-        '确认应用刚才的 Gmail 草稿'
-      );
-      currentSnapshot = f08PendingSnapshot;
+      currentSnapshot = terminalSnapshot;
       hostGeneration = 42;
       const applied = await runtime.submit(
         '确认应用刚才的 Gmail 草稿',
@@ -2467,10 +2461,9 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(providerResultCount).assertEqual(1);
       expect(providerActionCount).assertEqual(0);
       expect(providerRawHasDraftId).assertTrue();
-      expect(f08PendingSnapshot.document.source).assertEqual('pending');
-      expect(f08PendingSnapshot.document.kind).assertEqual('thinking');
-      expect(f08PendingSnapshot.document.actions.length).assertEqual(0);
-      expect(f08PendingSnapshot.document.blocks.length).assertEqual(0);
+      expect(terminalSnapshot.document.source === 'pending').assertFalse();
+      expect(terminalSnapshot.document.actions.length +
+        terminalSnapshot.document.blocks.length).assertLarger(0);
       expect(applied.status).assertEqual('success');
       expect(calls.length).assertEqual(2);
       expect(calls[0].actionId).assertEqual('gmail.draft.create');
@@ -2593,7 +2586,6 @@ export default function multiAgentCanaryRuntimeTest() {
       ) as MultiAgentSettledOutcome;
       currentHost = JSON.parse(JSON.stringify(currentHost)) as A2uiSurfaceState;
       currentHost.title = 'forged-current-host';
-      currentSnapshot = pageSnapshot(currentHost, 2);
       hostGeneration = 42;
       const applied = await runtime.submit(
         '确认应用刚才的 Gmail 草稿',
@@ -2608,7 +2600,7 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('rejects invalid F07 provider shapes and missing or tampered rendered draft actions', 0, async () => {
+    it('rejects invalid F07 provider data and delayed rendered Gmail authority mismatches', 0, async () => {
       const cases: string[] = [
         'provider_failed',
         'provider_zero',
@@ -2616,8 +2608,14 @@ export default function multiAgentCanaryRuntimeTest() {
         'draft_id_invalid',
         'provider_invalid',
         'original_args_invalid',
+        'snapshot_missing',
+        'snapshot_pending',
+        'rendered_surface_different',
+        'rendered_status_different',
+        'rendered_generation_stale',
         'rendered_action_missing',
-        'rendered_action_tampered'
+        'rendered_action_tampered',
+        'skip_generation'
       ];
       for (let caseIndex = 0; caseIndex < cases.length; caseIndex++) {
         const caseId = cases[caseIndex];
@@ -2653,7 +2651,6 @@ export default function multiAgentCanaryRuntimeTest() {
           }
           createdSurface.dataModelJson = JSON.stringify(renderedData);
           currentHost = createdSurface;
-          currentSnapshot = pageSnapshot(createdSurface, 1);
           const output = registeredGmailDraftProviderOutput(createdSurface, context);
           const data = output.data as A2uiRuntimeDataModel;
           if (caseId === 'provider_failed') {
@@ -2685,7 +2682,29 @@ export default function multiAgentCanaryRuntimeTest() {
           { text: '' },
           hostGeneration
         ) as MultiAgentSettledOutcome;
-        hostGeneration = 42;
+        const providerSurface = currentHost === null ?
+          providerGmailDraftSurface(hostGeneration) : currentHost;
+        currentHost = successfulGmailDraftTerminalSurface(providerSurface);
+        currentSnapshot = pageSnapshot(currentHost, 2);
+        if (caseId === 'snapshot_missing') {
+          currentSnapshot = null;
+        } else if (caseId === 'snapshot_pending') {
+          currentSnapshot = pendingPageSnapshot(
+            currentHost,
+            3,
+            '确认应用刚才的 Gmail 草稿'
+          );
+        } else if (caseId === 'rendered_surface_different') {
+          currentHost.surfaceId = 'forged-gmail-surface';
+          currentSnapshot = pageSnapshot(currentHost, 3);
+        } else if (caseId === 'rendered_status_different') {
+          currentHost.status = 'working';
+          currentSnapshot = pageSnapshot(currentHost, 3);
+        } else if (caseId === 'rendered_generation_stale') {
+          currentHost.runtimeGeneration = 40;
+          currentSnapshot = pageSnapshot(currentHost, 3);
+        }
+        hostGeneration = caseId === 'skip_generation' ? 43 : 42;
         const applied = await runtime.submit(
           '确认应用刚才的 Gmail 草稿',
           { text: '' },
