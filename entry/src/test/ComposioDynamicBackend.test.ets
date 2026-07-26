@@ -890,6 +890,14 @@ export default function composioDynamicBackendTest() {
         'NOTION_CREATE_DRAFT',
         '创建 Notion 草稿'
       );
+      const headerOnly: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":true,"data":{"response_data":{"draft_id":"draft-header-only-1",' +
+          '"headers":[{"title":"private header title","text":"private header text",' +
+          '"body":"private header body"}]}},"error":null}',
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 草稿'
+      );
       const jsonl = gmailDraftPreviewA2ui(
         'gmail_nested_provider_surface',
         result,
@@ -904,8 +912,19 @@ export default function composioDynamicBackendTest() {
       expect(result.rawPreview.indexOf('alice@example.com')).assertEqual(-1);
       expect(result.rawPreview.indexOf('private subject')).assertEqual(-1);
       expect(result.rawPreview.indexOf('private body')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('alice@example.com')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('private subject')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('private body')).assertEqual(-1);
       expect(jsonl.indexOf('"id":"gmail.draft.apply"')).assertLarger(-1);
       expect(jsonl.indexOf('"draftId":"draft-provider-nested-1"')).assertLarger(-1);
+      expect(JSON.stringify(headerOnly.rows).indexOf('draft-header-only-1')).assertLarger(-1);
+      expect(JSON.stringify(headerOnly.rows).indexOf('private header title')).assertEqual(-1);
+      expect(JSON.stringify(headerOnly.rows).indexOf('private header text')).assertEqual(-1);
+      expect(JSON.stringify(headerOnly.rows).indexOf('private header body')).assertEqual(-1);
+      expect(headerOnly.rawPreview.indexOf('draft-header-only-1')).assertLarger(-1);
+      expect(headerOnly.rawPreview.indexOf('private header title')).assertEqual(-1);
+      expect(headerOnly.rawPreview.indexOf('private header text')).assertEqual(-1);
+      expect(headerOnly.rawPreview.indexOf('private header body')).assertEqual(-1);
       expect(JSON.stringify(unrelated.rows).indexOf('"label":"Draft ID"')).assertEqual(-1);
       expect(unrelated.rawPreview.indexOf('draft-provider-nested-1')).assertEqual(-1);
     });

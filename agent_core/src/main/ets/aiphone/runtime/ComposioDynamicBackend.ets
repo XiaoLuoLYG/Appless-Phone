@@ -1731,6 +1731,9 @@ function rowsForExecute(
   appendRow(rows, '执行工具', toolSlug);
   appendRow(rows, '查询', promptSearchKeyword(prompt));
   appendRow(rows, 'Draft ID', gmailDraftId);
+  if (gmailDraftId.length > 0) {
+    return rows;
+  }
   const hit = firstArrayHit(payload);
   if (hit.found) {
     appendRow(rows, '结果数量', hit.items.length.toString());
