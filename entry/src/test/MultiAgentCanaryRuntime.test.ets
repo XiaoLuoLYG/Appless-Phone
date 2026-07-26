@@ -3102,6 +3102,8 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(detailUiTask.dataTaskIds[0]).assertEqual(detailDataTask.taskId);
       expect(detailUiTask.taskId).assertEqual('hotel-detail-ui-2');
       expect(detailDataTask.taskId).assertEqual('hotel-detail-data-1');
+      expect(detailDataTask.roundId).assertEqual(detailDataMessage.turnId + ':round-1');
+      expect(detailUiMessage.turnId).assertEqual(detailDataMessage.turnId);
       expect(detailUiMessage.turnId === restoredSearchContext?.turnId).assertFalse();
       expect(detailSettled).assertFalse();
       executor.detailRelease.open();

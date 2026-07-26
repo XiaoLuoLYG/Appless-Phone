@@ -1873,6 +1873,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       `${active.stored.context.conversationId}:` +
         `${active.stored.context.turnId}:follow-up:` +
         `${Date.now()}:${followUpTurnSequence}`;
+    safe.dataTask.roundId = followUpTurnId + ':round-1';
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: active.stored.context.conversationId,
