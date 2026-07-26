@@ -109,11 +109,13 @@ export function hasPopulatedHotelActionEvidence(evidence) {
 
 export function hasVisibleHotelRateRuleEvidence(layoutText) {
   const lines = String(layoutText || '').split('\n').map((line) => line.trim()).filter(Boolean);
-  const policyIndex = lines.indexOf('取消政策');
-  const policyValue = policyIndex >= 0 ? lines[policyIndex + 1] || '' : '';
+  const policyIndexes = lines.flatMap((line, index) => line === '取消政策' ? [index] : []);
+  const policyValue = policyIndexes.length === 1 ? lines[policyIndexes[0] + 1] || '' : '';
   return lines.some((line) => /^(?:价格与取消规则|收起价格规则)/.test(line)) &&
+    lines.some((line) => /(?:[¥￥$€£]\s*\d[\d,.]*|\b\d[\d,.]*\s*(?:CNY|RMB|USD|EUR|GBP|HKD|JPY)\b)/i.test(line)) &&
     policyValue.length > 0 &&
-    !/^(?:价格与取消规则|收起价格规则)/.test(policyValue);
+    !/^(?:价格与取消规则|收起价格规则|取消政策|报价说明|RollingGo\s*房型|房态|床型|餐食)/.test(policyValue) &&
+    !/^(?:暂无(?:数据)?|供应商未返回|未返回|未知|无|N\/?A|--?)$/i.test(policyValue);
 }
 
 export function hotelToolLifecycleFromLogs(logText) {

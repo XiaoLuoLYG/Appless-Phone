@@ -44,6 +44,21 @@ test('accepts visible expanded hotel rate rules without the offscreen board head
   assert.equal(hasVisibleHotelRateRuleEvidence('取消政策\n价格与取消规则 ⌄'), false);
 });
 
+test('rejects hotel rate labels placeholders and cancellation text without a visible price', () => {
+  assert.equal(hasVisibleHotelRateRuleEvidence(
+    '价格与取消规则⌄\n取消政策\n报价说明\nRollingGo房型'
+  ), false);
+  assert.equal(hasVisibleHotelRateRuleEvidence(
+    '¥379\n价格与取消规则⌄\n取消政策\n取消政策'
+  ), false);
+  assert.equal(hasVisibleHotelRateRuleEvidence(
+    '¥379\n价格与取消规则⌄\n取消政策\n暂无'
+  ), false);
+  assert.equal(hasVisibleHotelRateRuleEvidence(
+    '价格与取消规则⌄\n取消政策\n免费取消'
+  ), false);
+});
+
 const realC20DetailLog = `
   [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=loop_surface_100 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search
   [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail
