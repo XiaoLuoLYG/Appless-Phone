@@ -306,6 +306,23 @@ test('rejects uncorrelated, duplicate, missing, and raw-http C20 hotel search ev
   ].forEach((logs) => assert.equal(hotelMultiAgentSearchEvidence(logs).ok, false));
 });
 
+test('rejects stale pre-input provider and wrong-surface C20 lifecycle records', () => {
+  const provider = [
+    '  [AIPhone][RollingGoHotelRequest] operation=searchHotels\n',
+    '  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1\n'
+  ].join('');
+  const wrongCalling = realC20SearchDataFirstLog.replace(
+    '  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=calling_tool components=2',
+    '  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=wrong-surface status=calling_tool components=2\n  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=calling_tool components=2'
+  );
+  const wrongReady = realC20SearchDataFirstLog.replace(
+    '  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2',
+    '  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=wrong-surface status=ready components=2\n  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2'
+  );
+  [provider + realC20SearchDataFirstLog, wrongCalling, wrongReady]
+    .forEach((logs) => assert.equal(hotelMultiAgentSearchEvidence(logs).ok, false));
+});
+
 test('validates exactly one booking action on a detail surface', () => {
   const detail = validateHotelDetailBookingEvidence(hotelSearchActionEvidence('hotel-detail-2', [validBooking]));
   assert.equal(detail.ok, true);

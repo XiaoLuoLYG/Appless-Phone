@@ -298,6 +298,13 @@ export function hotelMultiAgentSearchEvidence(logText) {
   if (!lifecycle.ok || lifecycle.surfaceId !== lifecycle.finalUiSurfaceId) {
     return { ok: false, lifecycle, provider: failedProvider };
   }
+  const terminal = all.find((item) => item.index === lifecycle.terminalIndex &&
+    item.marker === 'MultiAgentTurnResult');
+  const inputs = all.filter((item) => item.marker === 'MultiAgentInput' &&
+    item.index < lifecycle.terminalIndex && item.fields.conversation === lifecycle.conversationId &&
+    item.fields.turn === lifecycle.turnId && item.fields.task === terminal?.fields.task);
+  if (inputs.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const input = inputs[0];
   const dataTasks = all.filter((item) => item.marker === 'MultiAgentDataTask' &&
     item.fields.conversation === lifecycle.conversationId && item.fields.turn === lifecycle.turnId &&
     item.fields.tool === 'hotel.search');
@@ -319,6 +326,13 @@ export function hotelMultiAgentSearchEvidence(logText) {
     item.fields.operation === 'searchHotels' && item.fields.provider === 'RollingGo' &&
     ['success', 'partial'].includes(item.fields.status) && /^[1-9]\d*$/.test(item.fields.sources || ''));
   if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index) {
+    return { ok: false, lifecycle, provider: failedProvider };
+  }
+  const searchProviderRecords = all.filter((item) =>
+    (item.marker === 'RollingGoHotelRequest' || item.marker === 'RollingGoHotelResponse') &&
+    item.fields.operation === 'searchHotels');
+  if (searchProviderRecords.length !== 2 || !searchProviderRecords.includes(requests[0]) ||
+    !searchProviderRecords.includes(responses[0])) {
     return { ok: false, lifecycle, provider: failedProvider };
   }
   const uiTasks = all.filter((item) => item.marker === 'MultiAgentUiTask' &&
@@ -346,6 +360,13 @@ export function hotelMultiAgentSearchEvidence(logText) {
     item.index > document.index && item.index < lifecycle.terminalIndex &&
     item.fields.surfaceId === lifecycle.surfaceId && item.fields.status === 'ready');
   if (calling.length !== 1 || ready.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const surfaceLifecycle = all.filter((item) => item.marker === 'A2uiHomeSurfaceUpdate' &&
+    item.index > input.index && item.index < lifecycle.terminalIndex &&
+    ['calling_tool', 'ready'].includes(item.fields.status));
+  if (surfaceLifecycle.length !== 2 || !surfaceLifecycle.includes(calling[0]) ||
+    !surfaceLifecycle.includes(ready[0])) {
+    return { ok: false, lifecycle, provider: failedProvider };
+  }
   const provider = {
     requested: true,
     ok: true,
