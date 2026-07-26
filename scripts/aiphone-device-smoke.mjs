@@ -7,6 +7,7 @@ import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
   hasPopulatedHotelActionEvidence,
+  hasVisibleHotelRateRuleEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   hotelMultiAgentSearchEvidence,
@@ -2657,8 +2658,7 @@ async function verifyHotelDetailAction(layout, index, appPid, queryLogs, queryCo
   );
   return {
     ok: pendingSearchCardAbsent &&
-      detailRequested && detailOk && /房型与价格规则/.test(text) &&
-      /床型|餐食|取消政策/.test(text) && restoredOk &&
+      detailRequested && detailOk && hasVisibleHotelRateRuleEvidence(text) && restoredOk &&
       searchActionEvidence.ok && restoredActionEvidence.ok && surfaceIdentity.ok &&
       bookingAction.ok && systemActions.ok,
     capability: 'hotel.detail',

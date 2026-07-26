@@ -4,6 +4,7 @@ import {
   evaluateHotelSystemActionEvidence,
   foregroundBundleFromAbilityDump,
   hasPopulatedHotelActionEvidence,
+  hasVisibleHotelRateRuleEvidence,
   hotelActionEvidenceFromLogs,
   hotelDetailClickLocator,
   hotelMultiAgentDetailEvidence,
@@ -20,6 +21,28 @@ import {
   validateHotelSearchActionEvidence,
   validateHotelSurfaceIdentity
 } from './hotel-smoke-evidence.mjs';
+
+test('accepts visible expanded hotel rate rules without the offscreen board heading', () => {
+  const visibleExpandedRate = `
+    房态
+    当前可订
+    取消政策
+    免费取消截止至酒店当地时间 2026-08-06 12:00:01
+    报价说明
+    税费拆分与报价有效期：供应商未返回
+    RollingGo 房型
+    豪华大床房
+    ¥379
+    晚均参考
+    1 大床
+    含早餐
+    价格与取消规则 ⌄
+  `;
+  assert.equal(hasVisibleHotelRateRuleEvidence(visibleExpandedRate), true);
+  assert.equal(hasVisibleHotelRateRuleEvidence('价格与取消规则 ⌄'), false);
+  assert.equal(hasVisibleHotelRateRuleEvidence('取消政策\n免费取消'), false);
+  assert.equal(hasVisibleHotelRateRuleEvidence('取消政策\n价格与取消规则 ⌄'), false);
+});
 
 const realC20DetailLog = `
   [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=loop_surface_100 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search

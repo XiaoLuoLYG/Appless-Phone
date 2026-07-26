@@ -107,6 +107,15 @@ export function hasPopulatedHotelActionEvidence(evidence) {
     evidence.actions.length > 0;
 }
 
+export function hasVisibleHotelRateRuleEvidence(layoutText) {
+  const lines = String(layoutText || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const policyIndex = lines.indexOf('取消政策');
+  const policyValue = policyIndex >= 0 ? lines[policyIndex + 1] || '' : '';
+  return lines.some((line) => /^(?:价格与取消规则|收起价格规则)/.test(line)) &&
+    policyValue.length > 0 &&
+    !/^(?:价格与取消规则|收起价格规则)/.test(policyValue);
+}
+
 export function hotelToolLifecycleFromLogs(logText) {
   const callingBySurface = new Map();
   const hotelDocuments = [];
