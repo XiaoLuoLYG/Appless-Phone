@@ -1235,7 +1235,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private parseDecision(output: string, context: LeaderPlanningContext): LeaderDecision {
-    const trimmed: string = output.trim();
+    let trimmed: string = output.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       throw new Error('Leader planner requires exactly one JSON object.');
     }
@@ -1243,7 +1243,15 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     try {
       parsed = JSON.parse(trimmed) as Object;
     } catch (_error) {
-      throw new Error('Leader planner requires exactly one JSON object.');
+      if (!trimmed.endsWith('}}')) {
+        throw new Error('Leader planner requires exactly one JSON object.');
+      }
+      trimmed = trimmed.substring(0, trimmed.length - 1);
+      try {
+        parsed = JSON.parse(trimmed) as Object;
+      } catch (_redundantClosureError) {
+        throw new Error('Leader planner requires exactly one JSON object.');
+      }
     }
     if (this.hasDuplicateObjectKeys(trimmed)) {
       throw new Error('Leader planner JSON contains duplicate object keys.');

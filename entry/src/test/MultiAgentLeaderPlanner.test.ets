@@ -123,6 +123,20 @@ const EXPLICIT_GOOGLE_MAPS_DECISION: string =
   '"input":{"query":"伦敦国王十字车站附近的中餐"},"required":true}],' +
   '"uiIntent":{"purpose":"展示 Google Maps 地点","preferredDensity":"comfortable",' +
   '"requiredSections":["places"]}}';
+const DEVICE_C04_FOOD_DECISION: string =
+  '{"personaId":"food_companion","skillId":"","requestedCapabilityIds":["food.search"],' +
+  '"roundAction":"execute","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
+  '"goal":"搜索伦敦国王十字车站附近的中餐","allowedToolIds":["food.search"],"toolId":"food.search",' +
+  '"input":{"query":"中餐 伦敦国王十字车站附近","location":"伦敦国王十字车站",' +
+  '"radius":5000,"language":"zh"},"required":true}],"uiIntent":{"purpose":"search",' +
+  '"preferredDensity":"compact","requiredSections":["results"]}}';
+const DEVICE_C04_MAPS_REPAIR: string =
+  '{"personaId":"default_companion","skillId":"","requestedCapabilityIds":["maps.place.search"],' +
+  '"roundAction":"execute","dataTasks":[{"localId":"search_chinese_restaurant_near_kings_cross",' +
+  '"goal":"搜索伦敦国王十字车站附近的中餐","allowedToolIds":["maps.place.search"],' +
+  '"toolId":"maps.place.search","input":{"query":"中餐 伦敦国王十字车站附近",' +
+  '"location":"伦敦国王十字车站"},"required":true}],"uiIntent":{"purpose":"search",' +
+  '"preferredDensity":"compact","requiredSections":["results"]}}}';
 const PREMATURE_GOOGLE_MAPS_DETAILS_DECISION: string = EXPLICIT_GOOGLE_MAPS_DECISION.replace(
   '["maps.place.search"]',
   '["maps.place.search","maps.place.details"]'
@@ -1417,6 +1431,39 @@ export default function multiAgentLeaderPlannerTest() {
       expect(model.prompts.length).assertEqual(2);
       expect(model.prompts[1].indexOf('LEADER_EXPLICIT_MAPS_SELECTION') >= 0).assertTrue();
       expect(model.prompts[1].indexOf(EXPLICIT_GOOGLE_MAPS_AS_FOOD_DECISION) >= 0).assertTrue();
+    });
+
+    it('accepts the device C04 Maps repair with one redundant terminal object closure', 0, async () => {
+      const model = new QueueLocalModel([DEVICE_C04_FOOD_DECISION, DEVICE_C04_MAPS_REPAIR]);
+      const context = planningContext();
+      context.personas.push({
+        personaId: 'food_companion',
+        name: 'Food Companion',
+        soul: 'Use registered food tools only.',
+        memory: '',
+        previous: false,
+        activeSkills: []
+      });
+      context.personas.push({
+        personaId: 'default_companion',
+        name: 'Default Companion',
+        soul: 'Use registered tools only.',
+        memory: '',
+        previous: false,
+        activeSkills: []
+      });
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        { text: '帮我用 Google Maps 搜索伦敦国王十字车站附近的中餐' },
+        context,
+        1,
+        (): boolean => true
+      );
+
+      expect(decision.requestedCapabilityIds.join(',')).assertEqual('maps.place.search');
+      expect(decision.dataTasks[0].toolId).assertEqual('maps.place.search');
+      expect(model.prompts.length).assertEqual(2);
     });
 
     it('fails closed when the one explicit Google Maps correction is still food search', 0, async () => {
