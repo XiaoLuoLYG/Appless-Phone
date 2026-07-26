@@ -110,7 +110,7 @@ test('holds ordinary C20 multi-agent capture until its bounded settlement window
   assert.equal(typeof smokeLifecycle.multiAgentPostCompletionWaitMs, 'function');
   assert.equal(typeof smokeLifecycle.captureCompletionSettled, 'function');
   const waitMs = smokeLifecycle.multiAgentPostCompletionWaitMs('C20');
-  assert.equal(waitMs, 3000);
+  assert.equal(waitMs, 5000);
   assert.equal(smokeLifecycle.multiAgentPostCompletionWaitMs('C19'), 0);
   assert.equal(smokeLifecycle.captureCompletionSettled({
     done: true,

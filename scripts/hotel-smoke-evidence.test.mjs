@@ -35,6 +35,28 @@ const realC20DetailLog = `
   [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 status=success
 `;
 
+const realC20SearchDataFirstLog = `
+  [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1
+  [AIPhone][MultiAgentDataTask] conversation=c20 turn=search-1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
+  [AIPhone][RollingGoHotelRequest] operation=searchHotels
+  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1
+  [AIPhone][MultiAgentDataResult] conversation=c20 turn=search-1 task=data-1 tool=hotel.search status=success sources=1 error=false
+  [AIPhone][MultiAgentUiTask] conversation=c20 turn=search-1 task=ui-1 dataTasks=data-1
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=calling_tool components=2
+  [AIPhone][MultiAgentUiResult] conversation=c20 turn=search-1 task=ui-1 surface=loop_surface_1785047086609 state=skeleton
+  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=45859 blocks=10
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2
+  [AIPhone][MultiAgentUiResult] conversation=c20 turn=search-1 task=ui-1 surface=loop_surface_1785047086609 state=result
+  [AIPhone][MultiAgentTurnResult] conversation=c20 turn=search-1 task=input-1 status=success surface=loop_surface_1785047086609 roundCount=1 messageChars=35
+`;
+
+function pairedHilog(logText) {
+  return String(logText).split('\n').filter((line) => line.trim().startsWith('[AIPhone]')).flatMap((line) => [
+    `07-26 14:24:54.663 41710 41710 I A00000/com.example.aiphonedemo/AIPhone: ${line.trim()}`,
+    `07-26 14:24:54.663 41710 41710 I A03D00/com.example.aiphonedemo/JSAPP: ${line.trim()}`
+  ]).join('\n');
+}
+
 test('accepts the preserved C20 detail order with a provider request before the skeleton', () => {
   const evidence = hotelMultiAgentDetailEvidence(realC20DetailLog, {
     expectedConversationId: 'c20',
@@ -141,11 +163,12 @@ test('ignores removed dial and legacy booking actions', () => {
   assert.equal(JSON.stringify(evidence).includes('8675512348000'), false);
 });
 
-test('does not treat empty welcome evidence as completed hotel action evidence', () => {
+test('does not treat direct empty hotel action evidence as completed or valid', () => {
   const welcome = hotelActionEvidenceFromLogs('[AIPhone][HotelHomeActionEvidence] evidence=""');
   assert.equal(welcome.surfaceId, '');
   assert.deepEqual(welcome.actions, []);
   assert.equal(hasPopulatedHotelActionEvidence(welcome), false);
+  assert.equal(validateHotelSearchActionEvidence(welcome).ok, false);
   const complete = hotelActionEvidenceFromLogs(
     '[AIPhone][HotelHomeActionEvidence] evidence=' +
       JSON.stringify(JSON.stringify({ surfaceId: 'hotel-search-1', actions: [validActions[0]] }))
@@ -234,6 +257,53 @@ test('combines generic turn correlation with specialized hotel provider evidence
   assert.equal(hotelMultiAgentSearchEvidence(
     complete.raw || '[AIPhone][A2uiHomeSurfaceUpdate] surfaceId=hotel-search-1 status=ready'
   ).ok, false);
+});
+
+test('accepts retained C20 hotel search evidence when provider data completes before UI work', () => {
+  const evidence = hotelMultiAgentSearchEvidence(realC20SearchDataFirstLog);
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.lifecycle.conversationId, 'c20');
+  assert.equal(evidence.provider.operation, 'searchHotels');
+  assert.equal(evidence.provider.blocks, 10);
+});
+
+test('accepts paired C20 HiLog records without counting the second channel twice', () => {
+  assert.equal(hotelMultiAgentSearchEvidence(pairedHilog(realC20SearchDataFirstLog)).ok, true);
+});
+
+test('rejects uncorrelated, duplicate, missing, and raw-http C20 hotel search evidence', () => {
+  const provider = [
+    '  [AIPhone][RollingGoHotelRequest] operation=searchHotels\n',
+    '  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1\n'
+  ].join('');
+  const withoutProvider = realC20SearchDataFirstLog.replace(provider, '');
+  const staleProvider = withoutProvider.replace(
+    '  [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1\n',
+    '  [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1\n' + provider
+  );
+  const duplicateProvider = realC20SearchDataFirstLog.replace(
+    '  [AIPhone][MultiAgentDataResult]',
+    '  [AIPhone][RollingGoHotelResponse] operation=searchHotels provider=RollingGo status=success sources=1\n  [AIPhone][MultiAgentDataResult]'
+  );
+  const duplicateDocument = realC20SearchDataFirstLog.replace(
+    '  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2',
+    '  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=45860 blocks=10\n  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785047086609 status=ready components=2'
+  );
+  const duplicateDataResult = realC20SearchDataFirstLog.replace(
+    '  [AIPhone][MultiAgentUiTask]',
+    '  [AIPhone][MultiAgentDataResult] conversation=c20 turn=search-1 task=data-1 tool=hotel.search status=success sources=1 error=false\n  [AIPhone][MultiAgentUiTask]'
+  );
+  [
+    staleProvider,
+    realC20SearchDataFirstLog.replace('task=data-1 tool=hotel.search status=success', 'task=wrong-data tool=hotel.search status=success'),
+    duplicateDataResult,
+    realC20SearchDataFirstLog.replaceAll('status=calling_tool components=2', 'surfaceId=wrong-surface status=calling_tool components=2').replaceAll('status=ready components=2', 'surfaceId=wrong-surface status=ready components=2'),
+    withoutProvider,
+    duplicateProvider,
+    realC20SearchDataFirstLog.replace('  [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=45859 blocks=10\n', ''),
+    duplicateDocument,
+    realC20SearchDataFirstLog.replace(provider, '  com.example.aiphonedemo/NETSTACK RespCode:200 method:POST\n')
+  ].forEach((logs) => assert.equal(hotelMultiAgentSearchEvidence(logs).ok, false));
 });
 
 test('validates exactly one booking action on a detail surface', () => {

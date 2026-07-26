@@ -6,7 +6,9 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentInput', 'MultiAgentDataTask', 'MultiAgentDataResult',
   'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
-  'MultiAgentTurnResult', 'DynamicToolDiscovery'
+  'MultiAgentTurnResult', 'DynamicToolDiscovery',
+  'RollingGoHotelRequest', 'RollingGoHotelResponse',
+  'A2uiHomeSurfaceUpdate', 'HtmlHomeDocument'
 ]);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
 
@@ -589,7 +591,7 @@ export function composioAuthEvidence({ textValues = [], externalAuthJumps = [] }
 }
 
 export function multiAgentPostCompletionWaitMs(caseId) {
-  return caseId === 'C20' ? 3000 : 0;
+  return caseId === 'C20' ? 5000 : 0;
 }
 
 export function captureCompletionSettled({ done, doneAt, lifecycleOptions, customCompletion, now }) {

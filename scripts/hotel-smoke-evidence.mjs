@@ -280,32 +280,88 @@ export function hotelMultiAgentSearchEvidence(logText) {
   const lifecycle = multiAgentTurnEvidence(logText, {
     expectedToolIds: ['hotel.search']
   });
-  const rawProvider = hotelToolLifecycleFromLogs(logText);
-  const lines = String(logText || '').split('\n');
-  let finalUiIndex = -1;
-  if (lifecycle.finalUiSurfaceId) {
-    const escapedSurface = lifecycle.finalUiSurfaceId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const finalUiPattern = new RegExp(
-      `\\[AIPhone\\]\\[MultiAgentUiResult][^\\n]*surface=${escapedSurface}[^\\n]*state=result(?:\\s|$)`
-    );
-    finalUiIndex = lines.findIndex((line) => finalUiPattern.test(line));
+  const all = lifecycleRecords(logText);
+  const failedProvider = {
+    requested: false,
+    ok: false,
+    surfaceId: '',
+    rawSurfaceId: '',
+    operation: '',
+    providerResponse: false,
+    sources: 0,
+    blocks: 0,
+    requestIndex: -1,
+    responseIndex: -1,
+    documentIndex: -1,
+    readyIndex: -1
+  };
+  if (!lifecycle.ok || lifecycle.surfaceId !== lifecycle.finalUiSurfaceId) {
+    return { ok: false, lifecycle, provider: failedProvider };
   }
-  const orderedProviderChain = rawProvider.ok &&
-    rawProvider.operation === 'searchHotels' &&
-    rawProvider.surfaceId === lifecycle.surfaceId &&
-    rawProvider.requestIndex < rawProvider.responseIndex &&
-    rawProvider.responseIndex < rawProvider.documentIndex &&
-    rawProvider.documentIndex < rawProvider.readyIndex &&
-    rawProvider.readyIndex < lifecycle.terminalIndex &&
-    rawProvider.documentIndex < finalUiIndex &&
-    finalUiIndex < lifecycle.terminalIndex;
+  const dataTasks = all.filter((item) => item.marker === 'MultiAgentDataTask' &&
+    item.fields.conversation === lifecycle.conversationId && item.fields.turn === lifecycle.turnId &&
+    item.fields.tool === 'hotel.search');
+  if (dataTasks.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const dataTask = dataTasks[0];
+  const dataResults = all.filter((item) => item.marker === 'MultiAgentDataResult' &&
+    item.index > dataTask.index && item.index < lifecycle.terminalIndex &&
+    item.fields.conversation === lifecycle.conversationId && item.fields.turn === lifecycle.turnId &&
+    item.fields.task === dataTask.fields.task && item.fields.tool === 'hotel.search' &&
+    ['success', 'partial'].includes(item.fields.status) && item.fields.error === 'false' &&
+    /^[1-9]\d*$/.test(item.fields.sources || ''));
+  if (dataResults.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const dataResult = dataResults[0];
+  const requests = all.filter((item) => item.marker === 'RollingGoHotelRequest' &&
+    item.index > dataTask.index && item.index < dataResult.index &&
+    item.fields.operation === 'searchHotels');
+  const responses = all.filter((item) => item.marker === 'RollingGoHotelResponse' &&
+    item.index > dataTask.index && item.index < dataResult.index &&
+    item.fields.operation === 'searchHotels' && item.fields.provider === 'RollingGo' &&
+    ['success', 'partial'].includes(item.fields.status) && /^[1-9]\d*$/.test(item.fields.sources || ''));
+  if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index) {
+    return { ok: false, lifecycle, provider: failedProvider };
+  }
+  const uiTasks = all.filter((item) => item.marker === 'MultiAgentUiTask' &&
+    item.index > dataTask.index && item.index < lifecycle.terminalIndex &&
+    item.fields.conversation === lifecycle.conversationId && item.fields.turn === lifecycle.turnId &&
+    item.fields.dataTasks === dataTask.fields.task);
+  if (uiTasks.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const uiTask = uiTasks[0];
+  const documents = all.filter((item) => item.marker === 'HtmlHomeDocument' &&
+    item.index > dataResult.index && item.index < lifecycle.terminalIndex &&
+    item.fields.source === 'tool' && item.fields.kind === 'hotel' &&
+    /^[1-9]\d*$/.test(item.fields.chars || '') && /^[1-9]\d*$/.test(item.fields.blocks || ''));
+  if (documents.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const document = documents[0];
+  const uiResults = all.filter((item) => item.marker === 'MultiAgentUiResult' &&
+    item.index > document.index && item.index < lifecycle.terminalIndex &&
+    item.fields.conversation === lifecycle.conversationId && item.fields.turn === lifecycle.turnId &&
+    item.fields.task === uiTask.fields.task && item.fields.state === 'result' &&
+    item.fields.surface === lifecycle.surfaceId);
+  if (uiResults.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
+  const calling = all.filter((item) => item.marker === 'A2uiHomeSurfaceUpdate' &&
+    item.index > uiTask.index && item.index < document.index &&
+    item.fields.surfaceId === lifecycle.surfaceId && item.fields.status === 'calling_tool');
+  const ready = all.filter((item) => item.marker === 'A2uiHomeSurfaceUpdate' &&
+    item.index > document.index && item.index < lifecycle.terminalIndex &&
+    item.fields.surfaceId === lifecycle.surfaceId && item.fields.status === 'ready');
+  if (calling.length !== 1 || ready.length !== 1) return { ok: false, lifecycle, provider: failedProvider };
   const provider = {
-    ...rawProvider,
-    rawSurfaceId: rawProvider.surfaceId
+    requested: true,
+    ok: true,
+    surfaceId: lifecycle.surfaceId,
+    rawSurfaceId: lifecycle.surfaceId,
+    operation: 'searchHotels',
+    providerResponse: true,
+    sources: Number(responses[0].fields.sources),
+    blocks: Number(document.fields.blocks),
+    requestIndex: requests[0].index,
+    responseIndex: responses[0].index,
+    documentIndex: document.index,
+    readyIndex: ready[0].index
   };
   return {
-    ok: lifecycle.ok && orderedProviderChain && provider.blocks > 0 &&
-      lifecycle.surfaceId === lifecycle.finalUiSurfaceId,
+    ok: true,
     lifecycle,
     provider
   };
