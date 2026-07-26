@@ -1089,6 +1089,18 @@ function registeredPageActionOutput(
   return output;
 }
 
+function registeredGmailDraftProviderOutput(
+  surface: A2uiSurfaceState,
+  context: ActionExecutionContext
+): RegisteredPageActionOutputFixture {
+  const output = registeredPageActionOutput('gmail.draft.create', surface, context);
+  const data = output.data as A2uiRuntimeDataModel;
+  data.genericToolResults[0].actions = [];
+  data.genericToolResults[0].rawPreview =
+    '{"draftId":"draft-provider-1","messageId":"message-provider-1"}';
+  return output;
+}
+
 function currentGmailReplySurface(sequence: number): A2uiSurfaceState {
   const result: DynamicGenericToolResult = {
     sourceTag: 'Gmail API',
@@ -2367,6 +2379,9 @@ export default function multiAgentCanaryRuntimeTest() {
       let currentHost: A2uiSurfaceState | null = null;
       let currentSnapshot: RegisteredPageSnapshot | null = null;
       let hostGeneration = 41;
+      let providerResultCount = 0;
+      let providerActionCount = -1;
+      let providerRawHasDraftId = false;
       const options = canaryOptions(
         new QueueModel([GMAIL_DRAFT_CREATE_DECISION, GMAIL_DRAFT_APPLY_DECISION]),
         new CanaryHotelExecutor(),
@@ -2389,7 +2404,13 @@ export default function multiAgentCanaryRuntimeTest() {
           createdSurface.sequence = 7;
           currentHost = createdSurface;
           currentSnapshot = pageSnapshot(createdSurface, 1);
-          output = registeredPageActionOutput(actionId, createdSurface, context);
+          output = registeredGmailDraftProviderOutput(createdSurface, context);
+          const providerData = (output as RegisteredPageActionOutputFixture).data as A2uiRuntimeDataModel;
+          providerResultCount = providerData.genericToolResults.length;
+          const providerActions = providerData.genericToolResults[0].actions;
+          providerActionCount = providerActions === undefined ? 0 : providerActions.length;
+          providerRawHasDraftId =
+            providerData.genericToolResults[0].rawPreview.indexOf('draft-provider-1') >= 0;
         } else if (actionId === 'gmail.draft.apply') {
           const updated = pageSurface('gmail.draft.apply', {
             id: 'gmail.open.web',
@@ -2443,6 +2464,9 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(providerSurface.sequence).assertEqual(7);
       expect(terminalSurface.sequence).assertEqual(8);
       expect(JSON.stringify(terminalSurface) === providerSurfaceJson).assertFalse();
+      expect(providerResultCount).assertEqual(1);
+      expect(providerActionCount).assertEqual(0);
+      expect(providerRawHasDraftId).assertTrue();
       expect(f08PendingSnapshot.document.source).assertEqual('pending');
       expect(f08PendingSnapshot.document.kind).assertEqual('thinking');
       expect(f08PendingSnapshot.document.actions.length).assertEqual(0);
@@ -2584,56 +2608,99 @@ export default function multiAgentCanaryRuntimeTest() {
       runtime.dispose();
     });
 
-    it('rejects F08 when the successful F07 output action is forged', 0, async () => {
-      const calls: RecordedPageAction[] = [];
-      let currentHost: A2uiSurfaceState | null = null;
-      let currentSnapshot: RegisteredPageSnapshot | null = null;
-      let hostGeneration = 41;
-      const options = canaryOptions(
-        new QueueModel([GMAIL_DRAFT_CREATE_DECISION, GMAIL_DRAFT_APPLY_DECISION]),
-        new CanaryHotelExecutor(),
-        new RecordingOpener(),
-        [],
-        []
-      );
-      options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
-      options.currentHostGeneration = (): number => hostGeneration;
-      options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
-      options.pageAction = async (
-        actionId: string,
-        args: Object,
-        context: ActionExecutionContext
-      ): Promise<ActionExecutionResult> => {
-        calls.push({ actionId, args, context });
-        const createdSurface = providerGmailDraftSurface(hostGeneration);
-        currentHost = createdSurface;
-        currentSnapshot = pageSnapshot(createdSurface, 1);
-        const output = registeredPageActionOutput(actionId, createdSurface, context);
-        const data = output.data as A2uiRuntimeDataModel;
-        const actions = data.genericToolResults[0].actions as A2uiAction[];
-        const forgedArgs = actions[0].args as Record<string, Object | string | number | boolean | null | undefined>;
-        forgedArgs['draftId'] = 'draft-forged';
-        return { status: 'success', output };
-      };
-      const runtime = new MultiAgentCanaryRuntime(options);
+    it('rejects invalid F07 provider shapes and missing or tampered rendered draft actions', 0, async () => {
+      const cases: string[] = [
+        'provider_failed',
+        'provider_zero',
+        'provider_two',
+        'draft_id_invalid',
+        'provider_invalid',
+        'original_args_invalid',
+        'rendered_action_missing',
+        'rendered_action_tampered'
+      ];
+      for (let caseIndex = 0; caseIndex < cases.length; caseIndex++) {
+        const caseId = cases[caseIndex];
+        const calls: RecordedPageAction[] = [];
+        let currentHost: A2uiSurfaceState | null = null;
+        let currentSnapshot: RegisteredPageSnapshot | null = null;
+        let hostGeneration = 41;
+        const options = canaryOptions(
+          new QueueModel([GMAIL_DRAFT_CREATE_DECISION, GMAIL_DRAFT_APPLY_DECISION]),
+          new CanaryHotelExecutor(),
+          new RecordingOpener(),
+          [],
+          []
+        );
+        options.currentHostSurface = (): A2uiSurfaceState | null => currentHost;
+        options.currentHostGeneration = (): number => hostGeneration;
+        options.currentPageSnapshot = (): RegisteredPageSnapshot | null => currentSnapshot;
+        options.pageAction = async (
+          actionId: string,
+          args: Object,
+          context: ActionExecutionContext
+        ): Promise<ActionExecutionResult> => {
+          calls.push({ actionId, args, context });
+          const createdSurface = providerGmailDraftSurface(hostGeneration);
+          const renderedData = JSON.parse(createdSurface.dataModelJson) as A2uiRuntimeDataModel;
+          const renderedActions = renderedData.genericToolResults[0].actions as A2uiAction[];
+          if (caseId === 'rendered_action_missing') {
+            renderedData.genericToolResults[0].actions = [];
+          } else if (caseId === 'rendered_action_tampered') {
+            const renderedArgs = renderedActions[0].args as
+              Record<string, Object | string | number | boolean | null | undefined>;
+            renderedArgs['draftId'] = 'draft-rendered-tampered';
+          }
+          createdSurface.dataModelJson = JSON.stringify(renderedData);
+          currentHost = createdSurface;
+          currentSnapshot = pageSnapshot(createdSurface, 1);
+          const output = registeredGmailDraftProviderOutput(createdSurface, context);
+          const data = output.data as A2uiRuntimeDataModel;
+          if (caseId === 'provider_failed') {
+            data.genericToolResults[0].status = 'error';
+          } else if (caseId === 'provider_zero') {
+            data.genericToolResults = [];
+          } else if (caseId === 'provider_two') {
+            data.genericToolResults.push(
+              JSON.parse(JSON.stringify(data.genericToolResults[0]))
+            );
+          } else if (caseId === 'draft_id_invalid') {
+            data.genericToolResults[0].rows = data.genericToolResults[0].rows.filter((row): boolean =>
+              row.label !== 'Draft ID'
+            );
+            data.genericToolResults[0].rawPreview = '{}';
+          } else if (caseId === 'provider_invalid') {
+            data.genericToolResults[0].sourceTag = 'Unknown provider';
+          } else if (caseId === 'original_args_invalid') {
+            const originalArgs = args as
+              Record<string, Object | string | number | boolean | null | undefined>;
+            originalArgs['body'] = '';
+          }
+          return { status: 'success', output };
+        };
+        const runtime = new MultiAgentCanaryRuntime(options);
 
-      const created = await runtime.submit(
-        '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
-        { text: '' },
-        hostGeneration
-      ) as MultiAgentSettledOutcome;
-      hostGeneration = 42;
-      const applied = await runtime.submit(
-        '确认应用刚才的 Gmail 草稿',
-        { text: '' },
-        hostGeneration
-      ) as MultiAgentSettledOutcome;
+        const created = await runtime.submit(
+          '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+          { text: '' },
+          hostGeneration
+        ) as MultiAgentSettledOutcome;
+        hostGeneration = 42;
+        const applied = await runtime.submit(
+          '确认应用刚才的 Gmail 草稿',
+          { text: '' },
+          hostGeneration
+        ) as MultiAgentSettledOutcome;
 
-      expect(created.status).assertEqual('success');
-      expect(applied.status).assertEqual('error');
-      expect(calls.length).assertEqual(1);
-      expect(calls[0].actionId).assertEqual('gmail.draft.create');
-      runtime.dispose();
+        expect(created.status).assertEqual('success');
+        expect(applied.status).assertEqual('error');
+        expect(calls.length).assertEqual(1);
+        expect(calls[0].actionId).assertEqual('gmail.draft.create');
+        expect(calls.filter((call): boolean =>
+          call.actionId === 'gmail.message.send'
+        ).length).assertEqual(0);
+        runtime.dispose();
+      }
     });
 
     it('rejects F08 when the Gmail draft host generation is stale', 0, async () => {
