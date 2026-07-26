@@ -7,6 +7,7 @@ import {
   ActionPlanRequestPayload,
   ActionValidationResult,
   A2uiAction,
+  A2uiRuntimeDataModel,
   A2uiSurfaceStore,
   A2uiSurfaceState,
   CalendarEventArgs,
@@ -85,6 +86,7 @@ import {
   AiphoneRegisteredActionExecutor,
   MailDetailFollowUpPreparer,
   RegisteredPageAction,
+  RegisteredPageActionContext,
   SystemUriOpener,
   validateRegisteredPageActionArgs
 } from './AiphoneRegisteredActionExecutor';
@@ -103,6 +105,24 @@ const TURN_HOST_GENERATION_LIMIT: number = 32;
 interface CalendarReviewOutput {
   surfaceId: string;
 }
+
+interface GmailDraftApplySurfaceBinding {
+  action: A2uiAction;
+  actionJson: string;
+  fingerprint: string;
+  runtimeGeneration: number;
+  surfaceId: string;
+  surfaceStatus: string;
+}
+
+interface GmailDraftCreateOutputBinding {
+  actionJson: string;
+  surfaceId: string;
+  surfaceStatus: string;
+}
+
+type GmailDraftOutputValue = Object | string | number | boolean | null | undefined;
+type GmailDraftOutputRecord = Record<string, GmailDraftOutputValue>;
 
 interface CalendarUpdateRequestArgs extends CalendarEventArgs {
   actionId: string;
@@ -925,23 +945,18 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
   }
 }
 
-function exactCurrentGmailDraftApplyAction(
+function gmailDraftApplySurfaceBinding(
   snapshot: RegisteredPageSnapshot | null,
-  currentHost: A2uiSurfaceState | null,
-  hostGeneration: number,
-  ownsPriorGeneration: (runtimeGeneration: number) => boolean
-): A2uiAction | null {
+  currentHost: A2uiSurfaceState | null
+): GmailDraftApplySurfaceBinding | null {
   const surfaceGeneration = snapshot === null ? 0 : snapshot.surface.runtimeGeneration;
   if (snapshot === null || currentHost === null ||
     !Number.isSafeInteger(snapshot.generation) || snapshot.generation <= 0 ||
-    !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0 ||
     typeof surfaceGeneration !== 'number' ||
     !Number.isSafeInteger(surfaceGeneration) || surfaceGeneration <= 0 ||
     snapshot.surface.runtimeOwner !== 'multi_agent' ||
     currentHost.runtimeOwner !== 'multi_agent' ||
     currentHost.runtimeGeneration !== surfaceGeneration ||
-    (surfaceGeneration !== hostGeneration &&
-      (surfaceGeneration >= hostGeneration || !ownsPriorGeneration(surfaceGeneration))) ||
     snapshot.surface.surfaceId !== currentHost.surfaceId ||
     snapshot.document.surfaceId !== snapshot.surface.surfaceId ||
     snapshot.document.generatedAt.trim().length === 0 ||
@@ -993,16 +1008,88 @@ function exactCurrentGmailDraftApplyAction(
       );
     });
   });
-  if (candidates.length === 0) {
+  if (candidates.length !== 1) {
     return null;
   }
-  const expected = JSON.stringify(candidates[0]);
-  for (let index = 1; index < candidates.length; index++) {
-    if (JSON.stringify(candidates[index]) !== expected) {
-      return null;
-    }
+  const actionJson = JSON.stringify(candidates[0]);
+  return {
+    action: candidates[0],
+    actionJson,
+    fingerprint: registeredPageSnapshotFingerprint(snapshot),
+    runtimeGeneration: surfaceGeneration,
+    surfaceId: snapshot.surface.surfaceId,
+    surfaceStatus: snapshot.surface.status
+  };
+}
+
+function gmailDraftCreateOutputBinding(
+  result: ActionExecutionResult,
+  context: ActionExecutionContext
+): GmailDraftCreateOutputBinding | null {
+  if (result.status !== 'success' || result.output === undefined ||
+    result.output === null || typeof result.output !== 'object' || Array.isArray(result.output)) {
+    return null;
   }
-  return candidates[0];
+  const output = result.output as GmailDraftOutputRecord;
+  const data = output['data'];
+  if (output['actionId'] !== 'gmail.draft.create' ||
+    output['pageActionId'] !== 'gmail.draft.create' ||
+    output['conversationId'] !== context.conversationId ||
+    output['turnId'] !== context.turnId ||
+    typeof output['surfaceId'] !== 'string' ||
+    (output['surfaceId'] as string).trim().length === 0 ||
+    typeof output['status'] !== 'string' ||
+    data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+  const model = data as A2uiRuntimeDataModel;
+  if (!Array.isArray(model.genericToolResults)) {
+    return null;
+  }
+  const actions: A2uiAction[] = [];
+  model.genericToolResults.forEach((providerResult) => {
+    if (providerResult.status !== 'success' || !Array.isArray(providerResult.actions)) {
+      return;
+    }
+    providerResult.actions.forEach((candidate: A2uiAction) => {
+      if (candidate.id !== 'gmail.draft.apply' || candidate.args === undefined) {
+        return;
+      }
+      const route = resolveRegisteredPageAction('gmail.draft.create', candidate);
+      if (route !== null && route.pageActionId === 'gmail.draft.apply' &&
+        route.action.id === 'gmail.draft.apply' && route.action.args !== undefined &&
+        validateRegisteredPageActionArgs('gmail.draft.apply', route.action.args).ok) {
+        actions.push(route.action);
+      }
+    });
+  });
+  if (actions.length !== 1) {
+    return null;
+  }
+  return {
+    actionJson: JSON.stringify(actions[0]),
+    surfaceId: (output['surfaceId'] as string).trim(),
+    surfaceStatus: (output['status'] as string).trim()
+  };
+}
+
+function exactCurrentGmailDraftApplyAction(
+  authority: GmailDraftApplySurfaceBinding | null,
+  snapshot: RegisteredPageSnapshot | null,
+  currentHost: A2uiSurfaceState | null,
+  hostGeneration: number
+): A2uiAction | null {
+  const current = gmailDraftApplySurfaceBinding(snapshot, currentHost);
+  if (authority === null || current === null ||
+    hostGeneration !== authority.runtimeGeneration + 1 ||
+    current.runtimeGeneration !== authority.runtimeGeneration ||
+    current.surfaceId !== authority.surfaceId ||
+    current.surfaceStatus !== authority.surfaceStatus ||
+    current.fingerprint !== authority.fingerprint ||
+    current.actionJson !== authority.actionJson) {
+    return null;
+  }
+  return current.action;
 }
 
 class MemoryIntentResolver implements VirtualActionIntentResolver {
@@ -1295,6 +1382,7 @@ export class MultiAgentCanaryRuntime {
   private readonly turnHostGenerationOrder: string[] = [];
   private pageGeneration: number = 0;
   private pageFingerprint: string = '';
+  private gmailDraftApplyAuthority: GmailDraftApplySurfaceBinding | null = null;
   private surfaceGeneration: number = 0;
   private lastLeaderPersonaId: string = '';
   private submissionSequence: number = 0;
@@ -1320,12 +1408,10 @@ export class MultiAgentCanaryRuntime {
       } : options.currentHostGeneration;
     const currentGmailDraftApply = (): A2uiAction | null =>
       exactCurrentGmailDraftApplyAction(
+        this.gmailDraftApplyAuthority,
         this.currentPageSnapshot(),
         this.currentHostSurface(),
-        this.currentHostGeneration(),
-        (runtimeGeneration: number): boolean => this.turnHostGenerationOrder.some(
-          (turnId: string): boolean => this.turnHostGenerations.get(turnId) === runtimeGeneration
-        )
+        this.currentHostGeneration()
       );
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
@@ -1373,11 +1459,27 @@ export class MultiAgentCanaryRuntime {
       options.onMailDetail
     );
     this.mailDetailBridge = mailDetailBridge;
+    const configuredPageAction: RegisteredPageAction = options.pageAction === undefined ?
+      rejectPageAction : options.pageAction;
+    const pageAction: RegisteredPageAction = async (
+      actionId: string,
+      args: Object,
+      context: RegisteredPageActionContext
+    ): Promise<ActionExecutionResult> => {
+      if (actionId === 'gmail.draft.create') {
+        this.gmailDraftApplyAuthority = null;
+      }
+      const result = await configuredPageAction(actionId, args, context);
+      if (actionId === 'gmail.draft.create') {
+        this.rememberGmailDraftApplyAuthority(result, context);
+      }
+      return result;
+    };
     const aiphoneExecutor = new AiphoneRegisteredActionExecutor(
       catalog,
       options.opener,
       followUpIds,
-      options.pageAction === undefined ? rejectPageAction : options.pageAction,
+      pageAction,
       mailDetailBridge
     );
     this.aiphoneExecutor = aiphoneExecutor;
@@ -1449,6 +1551,9 @@ export class MultiAgentCanaryRuntime {
     context: UserInputPayload,
     hostGeneration: number = 0
   ): Promise<MultiAgentTurnOutcome> {
+    if (text.trim() !== '确认应用刚才的 Gmail 草稿') {
+      this.gmailDraftApplyAuthority = null;
+    }
     this.submissionSequence++;
     const submissionSequence: number = this.submissionSequence;
     const capturedGeneration = Number.isSafeInteger(hostGeneration) && hostGeneration > 0 ?
@@ -1583,6 +1688,7 @@ export class MultiAgentCanaryRuntime {
     this.mailDetailBridge.dispose();
     this.pageGeneration = 0;
     this.pageFingerprint = '';
+    this.gmailDraftApplyAuthority = null;
     this.surfaceGeneration = 0;
     this.turnHostGenerations.clear();
     this.turnHostGenerationOrder.splice(0, this.turnHostGenerationOrder.length);
@@ -1652,5 +1758,27 @@ export class MultiAgentCanaryRuntime {
       this.turnHostGenerationOrder.splice(0, 1);
       this.turnHostGenerations.delete(removedTurnId);
     }
+  }
+
+  private rememberGmailDraftApplyAuthority(
+    result: ActionExecutionResult,
+    context: ActionExecutionContext
+  ): void {
+    const output = gmailDraftCreateOutputBinding(result, context);
+    const current = gmailDraftApplySurfaceBinding(
+      this.currentPageSnapshot(),
+      this.currentHostSurface()
+    );
+    const runtimeGeneration = this.turnHostGenerations.get(context.turnId);
+    if (output === null || current === null ||
+      runtimeGeneration === undefined ||
+      current.runtimeGeneration !== runtimeGeneration ||
+      current.surfaceId !== output.surfaceId ||
+      current.surfaceStatus !== output.surfaceStatus ||
+      current.actionJson !== output.actionJson) {
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    this.gmailDraftApplyAuthority = current;
   }
 }
