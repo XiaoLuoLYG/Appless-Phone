@@ -1776,6 +1776,17 @@ test('maps the positional Gmail confirmation query to the retained F08 apply act
   assert.equal(gmailApply.retryLimit, 0);
 });
 
+test('runs Gmail draft writes once while ordinary reads inherit the configured retry limit', () => {
+  const cases = listedCases([
+    '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+    '确认应用刚才的 Gmail 草稿',
+    '帮我查看我 Gmail 里和 ECCV 论文相关的邮件'
+  ], {
+    AIPHONE_QUERY_RETRY_LIMIT: '5'
+  });
+  assert.deepEqual(cases.map((item) => item.retryLimit), [0, 0, 5]);
+});
+
 test('preserves the Gmail draft surface only for a successful adjacent F07 to F08 pair', () => {
   const f07 = { id: 'F07' };
   const f08 = { id: 'F08', dependsOnCaseId: 'F07' };

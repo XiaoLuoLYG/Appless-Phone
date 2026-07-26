@@ -229,7 +229,13 @@ const retainedFullCases = [
   { id: 'F04', query: '瑞幸生椰拿铁多少钱', expectsTool: true, expectedToolId: 'food.search' },
   { id: 'F05', query: '用 Google Pay 给罗一格转 1 美元', expectsTool: true, expectedToolId: 'payment.send' },
   { id: 'F06', query: '帮我设置 Stripe 收款账户', expectsTool: true, expectedToolId: 'payment.account.setup' },
-  { id: 'F07', query: '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了', expectsTool: true, expectedToolId: 'gmail.draft.create' },
+  {
+    id: 'F07',
+    query: '帮我用 Gmail 写一封邮件给 alice@example.com，说我收到了',
+    expectsTool: true,
+    expectedToolId: 'gmail.draft.create',
+    retryLimit: 0
+  },
   {
     id: 'F08',
     query: '确认应用刚才的 Gmail 草稿',
