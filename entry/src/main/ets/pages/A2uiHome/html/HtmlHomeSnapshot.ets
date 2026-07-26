@@ -1138,9 +1138,7 @@ function mailDetailReadAction(result: A2uiGenericToolResultData): A2uiAction | n
   if (identity.length === 0) {
     return null;
   }
-  const normalizedRequestKey = genericResultRowValue(result, 'Request Key');
-  const requestKey = normalizedRequestKey.length > 0 ?
-    normalizedRequestKey : provider + ':' + identity;
+  const requestKey = provider + ':' + identity;
   const args: MailDetailActionArgs = {
     requestKey: requestKey,
     provider: provider,

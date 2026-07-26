@@ -30,10 +30,6 @@ export interface MailThreadSummary extends MailThreadResult {
   requestKey: string;
 }
 
-interface MailThreadWithOptionalRequestKey extends MailThreadResult {
-  requestKey?: string;
-}
-
 export interface MailSearchStructuredData {
   threads: MailThreadSummary[];
   statuses: MailProviderStatus[];
@@ -163,10 +159,6 @@ function emailFromHeader(value: string): string {
 }
 
 function threadResult(thread: MailThreadResult): A2uiGenericToolResultData {
-  const withRequestKey = thread as MailThreadWithOptionalRequestKey;
-  const requestKey = withRequestKey.requestKey === undefined ||
-    withRequestKey.requestKey.trim().length === 0 ?
-    mailThreadSummary(thread).requestKey : withRequestKey.requestKey.trim();
   return {
     sourceTag: providerLabel(thread.provider),
     toolName: 'mail.thread',
@@ -175,7 +167,6 @@ function threadResult(thread: MailThreadResult): A2uiGenericToolResultData {
     summary: thread.snippet,
     rows: [
       { label: 'Provider', value: thread.provider },
-      { label: 'Request Key', value: requestKey },
       { label: 'Source', value: providerLabel(thread.provider) },
       { label: 'Account', value: thread.accountLabel },
       { label: 'Thread ID', value: thread.threadId },

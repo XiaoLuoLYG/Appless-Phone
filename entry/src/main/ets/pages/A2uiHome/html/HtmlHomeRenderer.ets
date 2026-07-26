@@ -5257,7 +5257,7 @@ const HTML_HOME_JS: string = `
         var detailHost = expandable ? add(card, 'div', 'details') : card;
         addMediaEmbed(detailHost, block);
         addStripeReceivingOnboarding(detailHost, block);
-        if (scene === 'gmail' && text(block.kind) === 'generic-tool-result') {
+        if (isMailBlock(block)) {
           addMailExpandedDetails(detailHost, block, card);
         } else if (isWhatsAppSendBlock(block)) {
           addPairs(detailHost, block.rows, 'rows');

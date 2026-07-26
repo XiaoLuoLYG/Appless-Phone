@@ -19,9 +19,7 @@ import {
   LocalModel,
   LinkedMessageBus,
   ObservationDigest,
-  A2uiSurfaceStore,
   createSeedA2uiSurface,
-  parseA2uiJsonl,
   whatsAppProviderResultFromObservationForTest
 } from '@loop/agent-core';
 import {
@@ -57,7 +55,6 @@ import {
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
-import { StructuredToolUiRenderer } from '../main/ets/pages/A2uiHome/agent/StructuredToolUiRenderer';
 
 const WORLDCUP_DECISION: string = '{"personaId":"default_companion","skillId":"",' +
   '"requestedCapabilityIds":["worldcup.open"],"roundAction":"execute","dataTasks":[],' +
@@ -741,141 +738,6 @@ function mailCalendarSuggestion(requestKey: string = 'qq:101'): MailCalendarSugg
 
 export default function registeredPageActionMigrationTest() {
   describe('registeredPageActionMigration', () => {
-    it('binds an aggregate mail card exact request identity through the existing expand read route', 0, async () => {
-      class AggregateMailReadExecutor implements DataTaskExecutor {
-        readonly calls: CreateDataTaskPayload[] = [];
-
-        async execute(task: CreateDataTaskPayload): Promise<DataResult> {
-          this.calls.push(task);
-          const args = task.args as Record<string, Object | string | number | boolean | null | undefined>;
-          const data: MailThreadDataFixture = {
-            requestKey: args['requestKey'] as string,
-            provider: 'qq',
-            threadId: args['threadId'] as string,
-            messageId: args['messageId'] as string,
-            internetMessageId: '',
-            subject: args['subject'] as string,
-            from: 'Sender <sender@example.com>',
-            replyTo: 'sender@example.com',
-            to: ['qa@example.com'],
-            cc: [],
-            body: '真实邮件正文',
-            bodyHtml: '<p>真实邮件正文</p>'
-          };
-          return {
-            toolId: task.toolId,
-            outputSchema: 'mailThread',
-            status: 'success',
-            data: data as Object,
-            sources: [{
-              provider: 'QQ Mail',
-              backend: 'imap',
-              operation: 'thread.read',
-              fetchedAt: '2026-07-25T00:00:00.000Z'
-            }],
-            warnings: []
-          };
-        }
-      }
-      const exactRequestKey = 'qq:7271';
-      const aggregate: DataResult = {
-        toolId: 'mail.search',
-        outputSchema: 'mailThreads',
-        status: 'success',
-        data: JSON.parse(
-          '{"threads":[{"provider":"qq","accountLabel":"work-account","threadId":"thread-real-1",' +
-            '"messageId":"7271","subject":"真实聚合邮件","from":"sender@example.com",' +
-            '"to":["qa@example.com"],"participants":[],"snippet":"真实摘要",' +
-            '"receivedAt":"2026-07-25T08:00:00.000Z","unread":true,"important":true,' +
-            '"sourceUrl":"","rawProviderRef":"provider-ref-1","requestKey":"' + exactRequestKey + '"}],' +
-            '"statuses":[],"extras":[]}'
-        ) as Object,
-        sources: [],
-        warnings: []
-      };
-      const rendered = await new StructuredToolUiRenderer().result({
-        taskId: 'ui-mail-aggregate',
-        dataTaskIds: ['data-mail-aggregate'],
-        skillId: '',
-        intent: 'show aggregate mail',
-        expectedOutputSchema: 'mailThreads'
-      }, [aggregate], [], 'surface-mail-aggregate');
-      const parsed = parseA2uiJsonl(rendered.jsonl);
-      const store = new A2uiSurfaceStore();
-      parsed.envelopes.forEach(envelope => {
-        store.apply(envelope);
-      });
-      const surface = store.getSurface();
-      surface.runtimeOwner = 'multi_agent';
-      surface.runtimeGeneration = 1;
-      const document = createHtmlHomeDocument({
-        surface,
-        messages: [],
-        isBusy: false,
-        isAwaitingFirstSurface: false
-      });
-      const detail = document.blocks[0].actions.find((candidate: A2uiAction): boolean =>
-        candidate.id === 'html_mail_detail_read'
-      );
-
-      expect(parsed.error).assertEqual('');
-      expect(detail !== undefined).assertTrue();
-      if (detail === undefined) {
-        return;
-      }
-      const requestKeyRow = document.blocks[0].rows.find((row): boolean =>
-        row.label === 'Request Key'
-      );
-      expect(requestKeyRow !== undefined).assertTrue();
-      if (requestKeyRow !== undefined) {
-        expect(requestKeyRow.value).assertEqual(exactRequestKey);
-      }
-      const clicked = detail as A2uiAction;
-      expect(clicked.prompt).assertEqual(exactRequestKey);
-      expect(JSON.stringify(clicked.args)).assertEqual(
-        '{"requestKey":"' + exactRequestKey + '","provider":"qq",' +
-          '"threadId":"thread-real-1","messageId":"7271","subject":"真实聚合邮件"}'
-      );
-
-      const current: RegisteredPageSnapshot = {
-        surface,
-        document,
-        generation: 1
-      };
-      const bus = new TrackingBus();
-      const executor = new AggregateMailReadExecutor();
-      const events: MailDetailInPlaceEvent[] = [];
-      const runtime = canary(
-        new QueueModel([]),
-        new RegisteredPageActionHandler(new RecordingPageToolInvoker()),
-        (): RegisteredPageSnapshot | null => current,
-        bus,
-        undefined,
-        new RecordingOpener(),
-        undefined,
-        undefined,
-        executor,
-        async (event: MailDetailInPlaceEvent): Promise<void> => {
-          events.push(event);
-        }
-      );
-      const result = await dispatchRegisteredPageActionCandidate(
-        clicked,
-        (candidate: A2uiAction): Promise<boolean> => runtime.runPageAction(candidate),
-        async (_legacy: A2uiAction): Promise<void> => {}
-      );
-
-      expect(result.candidate).assertTrue();
-      expect(result.ok).assertTrue();
-      expect(executor.calls.length).assertEqual(1);
-      expect(executor.calls[0].toolId).assertEqual('mail.thread.read');
-      expect(JSON.stringify(executor.calls[0].args)).assertEqual(JSON.stringify(clicked.args));
-      expect(events.length).assertEqual(1);
-      expect(events[0].requestKey).assertEqual(exactRequestKey);
-      expect(events[0].detail?.bodyText).assertEqual('真实邮件正文');
-      runtime.dispose();
-    });
-
     it('routes exact current QQ and Gmail body reads through Action and Data agents in place', 0, async () => {
       class MailReadDataExecutor implements DataTaskExecutor {
         readonly calls: CreateDataTaskPayload[] = [];

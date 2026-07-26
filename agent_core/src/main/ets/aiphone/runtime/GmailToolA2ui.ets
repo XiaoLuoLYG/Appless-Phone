@@ -327,7 +327,6 @@ function isGmailReadResult(result: DynamicGenericToolResult): boolean {
 function gmailCardFromSummary(thread: GmailThreadSummary): A2uiGenericToolResultData {
   const rows: A2uiLabelValueData[] = [];
   appendRow(rows, 'Provider', thread.provider);
-  appendRow(rows, 'Request Key', thread.requestKey);
   appendRow(rows, 'Account', thread.accountLabel);
   appendRow(rows, 'Thread ID', thread.threadId);
   appendRow(rows, 'Message ID', thread.messageId);

@@ -2177,6 +2177,14 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf("kind === 'generic-tool-result' && isMailBlock(block)")).assertLarger(-1);
     });
 
+    it('initializes expanded details for mail blocks outside the Gmail scene', 0, () => {
+      const doc = mailAggregateDocumentFixture();
+      doc.kind = 'generic';
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf("if (isMailBlock(block))")).assertLarger(-1);
+    });
+
     it('filters Gmail hero preview counts to mail blocks', 0, () => {
       const doc = mailAggregateDocumentFixture();
       doc.blocks.unshift({
