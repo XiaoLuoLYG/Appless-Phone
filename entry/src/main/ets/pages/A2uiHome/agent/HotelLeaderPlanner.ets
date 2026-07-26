@@ -28,6 +28,8 @@ const HOTEL_SEARCH_KEYS: string = [
   'stayNights'
 ].join(',');
 
+const HOTEL_SEARCH_KEYS_WITHOUT_SIZE: string = HOTEL_SEARCH_KEYS.replace(',size', '');
+
 interface HotelSearchModelArgs {
   originQuery: string;
   place: string;
@@ -309,8 +311,10 @@ function normalizeHotelSearchInput(
   value: Object,
   currentLocalDate: string
 ): Object {
+  const keys: string = value === null || Array.isArray(value) ? '' :
+    Object.keys(value).sort().join(',');
   if (value === null || Array.isArray(value) ||
-    Object.keys(value).sort().join(',') !== HOTEL_SEARCH_KEYS) {
+    (keys !== HOTEL_SEARCH_KEYS && keys !== HOTEL_SEARCH_KEYS_WITHOUT_SIZE)) {
     throw new Error('Hotel planner output contains missing or unknown fields.');
   }
   const raw = value as HotelSearchModelArgs;
@@ -328,7 +332,7 @@ function normalizeHotelSearchInput(
     childAgeDetails: raw.childAgeDetails,
     roomCount: raw.roomCount,
     currency: raw.currency,
-    size: raw.size
+    size: raw.size === undefined ? 0 : raw.size
   };
   const omittedPrefix: boolean = omittedHotelQueryPrefix(trustedQuery, modelQuery);
   if ((modelQuery !== trustedQuery && !omittedPrefix) ||

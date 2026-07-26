@@ -219,6 +219,27 @@ export default function hotelLeaderPlannerTest() {
       expect(args.size).assertEqual(10);
     });
 
+    it('uses the bounded size default for the exact device C20 output that omits optional size', 0,
+      async () => {
+        const deviceOutput = C20_SEARCH_JSON
+          .replace(',"size":10', '')
+          .replace('"currency":"CNY"', '"currency":""');
+        const plan = await planFor('帮我找' + C20_MODEL_QUERY, deviceOutput);
+        const args = plan.dataTasks[0].args as
+          Record<string, Object | string | number | boolean | null | undefined>;
+
+        expect(args.originQuery).assertEqual('帮我找' + C20_MODEL_QUERY);
+        expect(args.place).assertEqual('深圳科技园');
+        expect(args.placeType).assertEqual('POI');
+        expect(args.checkInDate).assertEqual('2026-08-08');
+        expect(args.stayNights).assertEqual(2);
+        expect(args.adultCount).assertEqual(2);
+        expect(args.childCount).assertEqual(0);
+        expect(args.roomCount).assertEqual(1);
+        expect(args.currency).assertEqual('CNY');
+        expect(args.size).assertEqual(10);
+      });
+
     it('restores the exact trusted C20 query for only the allowed polite prefixes', 0, async () => {
       const trustedQueries: string[] = [
         '帮我找' + C20_MODEL_QUERY,
