@@ -1128,6 +1128,23 @@ function pageSnapshot(surface: A2uiSurfaceState, generation: number): Registered
   };
 }
 
+function pendingPageSnapshot(
+  surface: A2uiSurfaceState,
+  generation: number,
+  inputText: string
+): RegisteredPageSnapshot {
+  return {
+    surface,
+    document: createHtmlHomeDocument({
+      messages: [],
+      inputText,
+      isBusy: true,
+      isAwaitingFirstSurface: true
+    }),
+    generation
+  };
+}
+
 function useLastRenderedSurfaceAsHost(
   options: MultiAgentCanaryOptions,
   surfaces: A2uiSurfaceState[]
@@ -2403,9 +2420,14 @@ export default function multiAgentCanaryRuntimeTest() {
       const providerSurfaceJson = JSON.stringify(providerSurface);
       const terminalSurface = successfulGmailDraftTerminalSurface(providerSurface);
       currentHost = terminalSurface;
-      currentSnapshot = pageSnapshot(terminalSurface, 2);
-      const f07Document = currentSnapshot === null ?
-        null : (currentSnapshot as RegisteredPageSnapshot).document;
+      const terminalSnapshot = pageSnapshot(terminalSurface, 2);
+      const f07Document = terminalSnapshot.document;
+      const f08PendingSnapshot = pendingPageSnapshot(
+        terminalSurface,
+        3,
+        '确认应用刚才的 Gmail 草稿'
+      );
+      currentSnapshot = f08PendingSnapshot;
       hostGeneration = 42;
       const applied = await runtime.submit(
         '确认应用刚才的 Gmail 草稿',
@@ -2421,6 +2443,10 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(providerSurface.sequence).assertEqual(7);
       expect(terminalSurface.sequence).assertEqual(8);
       expect(JSON.stringify(terminalSurface) === providerSurfaceJson).assertFalse();
+      expect(f08PendingSnapshot.document.source).assertEqual('pending');
+      expect(f08PendingSnapshot.document.kind).assertEqual('thinking');
+      expect(f08PendingSnapshot.document.actions.length).assertEqual(0);
+      expect(f08PendingSnapshot.document.blocks.length).assertEqual(0);
       expect(applied.status).assertEqual('success');
       expect(calls.length).assertEqual(2);
       expect(calls[0].actionId).assertEqual('gmail.draft.create');

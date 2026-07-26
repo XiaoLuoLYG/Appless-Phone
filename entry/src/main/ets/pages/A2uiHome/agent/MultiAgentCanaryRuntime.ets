@@ -1118,22 +1118,16 @@ function gmailDraftCreateOutputBinding(
 
 function exactCurrentGmailDraftApplyAction(
   authority: GmailDraftApplySurfaceBinding | null,
-  snapshot: RegisteredPageSnapshot | null,
   currentHost: A2uiSurfaceState | null,
   hostGeneration: number
 ): A2uiAction | null {
-  const current = gmailDraftApplySurfaceBinding(snapshot, currentHost);
-  if (authority === null || current === null || currentHost === null ||
+  if (authority === null || currentHost === null ||
     hostGeneration !== authority.runtimeGeneration + 1 ||
-    current.runtimeGeneration !== authority.runtimeGeneration ||
-    current.surfaceId !== authority.surfaceId ||
-    current.surfaceStatus !== authority.surfaceStatus ||
-    current.actionJson !== authority.actionJson ||
-    (current.fingerprint !== authority.fingerprint &&
+    (JSON.stringify(currentHost) !== JSON.stringify(authority.surface) &&
       !isSuccessfulGmailDraftTerminalTransition(authority.surface, currentHost))) {
     return null;
   }
-  return current.action;
+  return authority.action;
 }
 
 class MemoryIntentResolver implements VirtualActionIntentResolver {
@@ -1453,7 +1447,6 @@ export class MultiAgentCanaryRuntime {
     const currentGmailDraftApply = (): A2uiAction | null =>
       exactCurrentGmailDraftApplyAction(
         this.gmailDraftApplyAuthority,
-        this.currentPageSnapshot(),
         this.currentHostSurface(),
         this.currentHostGeneration()
       );
