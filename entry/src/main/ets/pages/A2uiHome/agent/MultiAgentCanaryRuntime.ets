@@ -928,19 +928,33 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
 function exactCurrentGmailDraftApplyAction(
   snapshot: RegisteredPageSnapshot | null,
   currentHost: A2uiSurfaceState | null,
-  hostGeneration: number
+  hostGeneration: number,
+  ownsPriorGeneration: (runtimeGeneration: number) => boolean
 ): A2uiAction | null {
+  const surfaceGeneration = snapshot === null ? 0 : snapshot.surface.runtimeGeneration;
   if (snapshot === null || currentHost === null ||
     !Number.isSafeInteger(snapshot.generation) || snapshot.generation <= 0 ||
     !Number.isSafeInteger(hostGeneration) || hostGeneration <= 0 ||
+    typeof surfaceGeneration !== 'number' ||
+    !Number.isSafeInteger(surfaceGeneration) || surfaceGeneration <= 0 ||
     snapshot.surface.runtimeOwner !== 'multi_agent' ||
     currentHost.runtimeOwner !== 'multi_agent' ||
-    snapshot.surface.runtimeGeneration !== hostGeneration ||
-    currentHost.runtimeGeneration !== hostGeneration ||
+    currentHost.runtimeGeneration !== surfaceGeneration ||
+    (surfaceGeneration !== hostGeneration &&
+      (surfaceGeneration >= hostGeneration || !ownsPriorGeneration(surfaceGeneration))) ||
     snapshot.surface.surfaceId !== currentHost.surfaceId ||
     snapshot.document.surfaceId !== snapshot.surface.surfaceId ||
     snapshot.document.generatedAt.trim().length === 0 ||
     registeredPageSourceToolId(snapshot.surface) !== 'gmail.draft.create') {
+    return null;
+  }
+  const currentHostSnapshot: RegisteredPageSnapshot = {
+    surface: currentHost,
+    document: snapshot.document,
+    generation: snapshot.generation
+  };
+  if (registeredPageSnapshotFingerprint(currentHostSnapshot) !==
+    registeredPageSnapshotFingerprint(snapshot)) {
     return null;
   }
   const candidates: A2uiAction[] = [];
@@ -1308,7 +1322,10 @@ export class MultiAgentCanaryRuntime {
       exactCurrentGmailDraftApplyAction(
         this.currentPageSnapshot(),
         this.currentHostSurface(),
-        this.currentHostGeneration()
+        this.currentHostGeneration(),
+        (runtimeGeneration: number): boolean => this.turnHostGenerationOrder.some(
+          (turnId: string): boolean => this.turnHostGenerations.get(turnId) === runtimeGeneration
+        )
       );
     const ids = new MonotonicHotelIds();
     const followUpIds = new PreparedHotelFollowUpIds(ids);
