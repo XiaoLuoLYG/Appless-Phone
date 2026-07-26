@@ -228,12 +228,22 @@ export function hotelMultiAgentDetailEvidence(logText, options = {}) {
     item.fields.dataTasks === dataTask.fields.task);
   if (uiTasks.length !== 1) return detailFailure('missing_or_duplicate_ui_task');
   const uiTask = uiTasks[0];
+  if (!dataTask.fields.turn || dataTask.fields.turn === action.turnId ||
+    !dataTask.fields.task || dataTask.fields.task === action.taskId ||
+    !uiTask.fields.task || uiTask.fields.task === action.taskId ||
+    uiTask.fields.task === dataTask.fields.task) {
+    return detailFailure('reused_follow_up_identity');
+  }
   const uiResults = all.filter((item) => item.index > uiTask.index &&
     item.marker === 'MultiAgentUiResult' && item.fields.conversation === action.conversationId &&
     item.fields.turn === dataTask.fields.turn && item.fields.task === uiTask.fields.task &&
     item.fields.state === 'result' && item.fields.surface && item.fields.surface !== 'none');
   if (uiResults.length !== 1) return detailFailure('missing_or_duplicate_ui_result');
   const result = uiResults[0];
+  if (!/^loop_surface_[0-9]+(?:_[0-9]+)?$/.test(result.fields.surface) ||
+    result.fields.surface === action.surfaceId) {
+    return detailFailure('reused_or_invalid_follow_up_surface');
+  }
   const followUpDataTasks = all.filter((item) => item.index > actionRun.index &&
     item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
     item.fields.turn === dataTask.fields.turn && item.fields.tool === 'hotel.detail');

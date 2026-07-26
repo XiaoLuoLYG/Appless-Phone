@@ -22,17 +22,17 @@ import {
 } from './hotel-smoke-evidence.mjs';
 
 const realC20DetailLog = `
-  [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search
+  [AIPhone][MultiAgentActionRun] conversation=c20 turn=action-1 task=action-1 surface=loop_surface_100 plan=plan-1 run=run-1 action=hotel.detail source=hotel.search
   [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail
   [AIPhone][MultiAgentDataTask] conversation=c20 turn=detail-1 task=data-detail round=1 tool=hotel.detail predecessor=none path=none target=none binding=false
   [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
-  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=calling_tool components=2
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_101 status=calling_tool components=2
   [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
   [AIPhone][MultiAgentDataResult] conversation=c20 turn=detail-1 task=data-detail tool=hotel.detail status=success sources=1 error=false
   [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=94242 blocks=64
-  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=detail-1 status=ready components=3
-  [AIPhone][MultiAgentUiResult] conversation=c20 turn=detail-1 task=ui-detail surface=detail-1 state=result
-  [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 status=success
+  [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_101 status=ready components=3
+  [AIPhone][MultiAgentUiResult] conversation=c20 turn=detail-1 task=ui-detail surface=loop_surface_101 state=result
+  [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=loop_surface_100 plan=plan-1 run=run-1 status=success
 `;
 
 const realPostActionC20DetailHilog = `
@@ -87,10 +87,10 @@ function pairedHilog(logText) {
 test('accepts the preserved C20 detail order with a provider request before the skeleton', () => {
   const evidence = hotelMultiAgentDetailEvidence(realC20DetailLog, {
     expectedConversationId: 'c20',
-    currentSurfaceId: 'search-1'
+    currentSurfaceId: 'loop_surface_100'
   });
   assert.equal(evidence.ok, true);
-  assert.equal(evidence.surfaceId, 'detail-1');
+  assert.equal(evidence.surfaceId, 'loop_surface_101');
   assert.equal(evidence.operation, 'getHotelDetail');
 });
 
@@ -177,11 +177,48 @@ test('rejects ambiguous, failed, late, or cross-surface post-action detail evide
   });
 });
 
+test('requires a distinct generated turn task pair and detail surface for the follow-up', () => {
+  const options = {
+    expectedConversationId: 'c75cafde7',
+    currentSurfaceId: 'loop_surface_1785059300279'
+  };
+  const identityCorruptions = [{
+    name: 'follow-up reuses the action turn',
+    log: realPostActionC20DetailHilog.replaceAll('turn=t975a1f01', 'turn=t921f1276')
+  }, {
+    name: 'data task reuses the action task',
+    log: realPostActionC20DetailHilog
+      .replaceAll('task=k8', 'task=k4')
+      .replaceAll('dataTasks=k8', 'dataTasks=k4')
+  }, {
+    name: 'UI task reuses the action task',
+    log: realPostActionC20DetailHilog.replaceAll('task=k7', 'task=k4')
+  }, {
+    name: 'data and UI tasks share one identity',
+    log: realPostActionC20DetailHilog.replaceAll('task=k7', 'task=k8')
+  }, {
+    name: 'detail reuses the search surface',
+    log: realPostActionC20DetailHilog.replaceAll(
+      'loop_surface_1785059324184',
+      'loop_surface_1785059300279'
+    )
+  }, {
+    name: 'detail surface is not generated',
+    log: realPostActionC20DetailHilog.replaceAll('loop_surface_1785059324184', 'detail-1')
+  }];
+  identityCorruptions.forEach(({ name, log }) => {
+    assert.equal(hotelMultiAgentDetailEvidence(log, options).ok, false, name);
+  });
+});
+
 test('rejects C20 detail evidence with a wrong task, surface, operation, response, or terminal order', () => {
-  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'loop_surface_100' };
   [
     realC20DetailLog.replace('task=data-detail round=1 tool=hotel.detail', 'task=wrong-data round=1 tool=hotel.detail'),
-    realC20DetailLog.replaceAll('surface=detail-1', 'surface=wrong-surface'),
+    realC20DetailLog.replace(
+      'surface=loop_surface_101 state=result',
+      'surface=loop_surface_999 state=result'
+    ),
     realC20DetailLog.replaceAll('operation=getHotelDetail', 'operation=searchHotels'),
     realC20DetailLog.replace('[AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1\n', ''),
     realC20DetailLog.replace(
@@ -192,7 +229,7 @@ test('rejects C20 detail evidence with a wrong task, surface, operation, respons
 });
 
 test('rejects C20 detail evidence when either correlated task begins after the provider request', () => {
-  const options = { expectedConversationId: 'c20', currentSurfaceId: 'search-1' };
+  const options = { expectedConversationId: 'c20', currentSurfaceId: 'loop_surface_100' };
   const lateUiTask = realC20DetailLog.replace(
     '  [AIPhone][MultiAgentUiTask] conversation=c20 turn=detail-1 task=ui-detail dataTasks=data-detail\n',
     ''
