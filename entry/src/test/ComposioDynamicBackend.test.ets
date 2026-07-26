@@ -875,9 +875,13 @@ export default function composioDynamicBackendTest() {
     });
 
     it('preserves only nested Gmail draft identity across unrelated provider arrays', 0, () => {
-      const observation = '{"successful":true,"data":{"response_data":{"draft_id":"draft-provider-nested-1",' +
-        '"thread_id":"thread-provider-nested-1","recipients":["alice@example.com"],' +
-        '"headers":[{"name":"Subject","value":"private subject"}],"body":"private body"}},"error":null}';
+      const observation = '{"successful":true,"data":{"response_data":{"data":{' +
+        '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-provider-nested-1",' +
+        '"id":"draft-provider-nested-1","message":{' +
+        '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-provider-nested-1",' +
+        '"id":"message-provider-nested-1","labelIds":["DRAFT"],' +
+        '"threadId":"thread-provider-nested-1"}},' +
+        '"logs":[{"title":"private log title","text":"private log text","body":"private log body"}]}},"error":null}';
       const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
         'execute',
         observation,
@@ -890,18 +894,62 @@ export default function composioDynamicBackendTest() {
         'NOTION_CREATE_DRAFT',
         '创建 Notion 草稿'
       );
-      const headerOnly: DynamicGenericToolResult = composioDynamicResultFromObservation(
+      const messageThreadEvidence: DynamicGenericToolResult = composioDynamicResultFromObservation(
         'execute',
-        '{"successful":true,"data":{"response_data":{"draft_id":"draft-header-only-1",' +
+        '{"successful":true,"data":{"response_data":{"data":{"id":"draft-message-thread-1",' +
+          '"message":{"id":"message-thread-1","threadId":"thread-evidence-1"},' +
           '"headers":[{"title":"private header title","text":"private header text",' +
-          '"body":"private header body"}]}},"error":null}',
+          '"body":"private header body"}]}}},"error":null}',
         'GMAIL_CREATE_EMAIL_DRAFT',
         '创建 Gmail 草稿'
+      );
+      const legacy: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":true,"data":{"response_data":{"draft_id":"draft-legacy-1",' +
+          '"thread_id":"thread-legacy-1"}},"error":null}',
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 草稿'
+      );
+      const missingEvidence: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":true,"data":{"response_data":{"data":{"id":"draft-untrusted-1"},' +
+          '"logs":[]}},"error":null}',
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 草稿'
+      );
+      const failed: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        '{"successful":false,"data":{"response_data":{"data":{' +
+          '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-failed-1",' +
+          '"id":"draft-failed-1"}}},"error":"provider failed"}',
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 草稿'
+      );
+      const originalArgs = looseObject(
+        '{"to":["alice@example.com"],"subject":"","body":"我收到了"}'
       );
       const jsonl = gmailDraftPreviewA2ui(
         'gmail_nested_provider_surface',
         result,
-        looseObject('{"to":["alice@example.com"],"subject":"","body":"我收到了"}'),
+        originalArgs,
+        'gmail.draft.create'
+      );
+      const missingEvidenceJsonl = gmailDraftPreviewA2ui(
+        'gmail_missing_evidence_surface',
+        missingEvidence,
+        originalArgs,
+        'gmail.draft.create'
+      );
+      const failedJsonl = gmailDraftPreviewA2ui(
+        'gmail_failed_surface',
+        failed,
+        originalArgs,
+        'gmail.draft.create'
+      );
+      const unrelatedJsonl = gmailDraftPreviewA2ui(
+        'gmail_unsafe_slug_surface',
+        unrelated,
+        originalArgs,
         'gmail.draft.create'
       );
 
@@ -909,24 +957,32 @@ export default function composioDynamicBackendTest() {
       expect(JSON.stringify(result.rows).indexOf('"label":"Draft ID","value":"draft-provider-nested-1"'))
         .assertLarger(-1);
       expect(result.rawPreview.indexOf('draft-provider-nested-1')).assertLarger(-1);
-      expect(result.rawPreview.indexOf('alice@example.com')).assertEqual(-1);
-      expect(result.rawPreview.indexOf('private subject')).assertEqual(-1);
-      expect(result.rawPreview.indexOf('private body')).assertEqual(-1);
-      expect(JSON.stringify(result.rows).indexOf('alice@example.com')).assertEqual(-1);
-      expect(JSON.stringify(result.rows).indexOf('private subject')).assertEqual(-1);
-      expect(JSON.stringify(result.rows).indexOf('private body')).assertEqual(-1);
+      expect(result.rawPreview.indexOf('private log title')).assertEqual(-1);
+      expect(result.rawPreview.indexOf('private log text')).assertEqual(-1);
+      expect(result.rawPreview.indexOf('private log body')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('private log title')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('private log text')).assertEqual(-1);
+      expect(JSON.stringify(result.rows).indexOf('private log body')).assertEqual(-1);
       expect(jsonl.indexOf('"id":"gmail.draft.apply"')).assertLarger(-1);
       expect(jsonl.indexOf('"draftId":"draft-provider-nested-1"')).assertLarger(-1);
-      expect(JSON.stringify(headerOnly.rows).indexOf('draft-header-only-1')).assertLarger(-1);
-      expect(JSON.stringify(headerOnly.rows).indexOf('private header title')).assertEqual(-1);
-      expect(JSON.stringify(headerOnly.rows).indexOf('private header text')).assertEqual(-1);
-      expect(JSON.stringify(headerOnly.rows).indexOf('private header body')).assertEqual(-1);
-      expect(headerOnly.rawPreview.indexOf('draft-header-only-1')).assertLarger(-1);
-      expect(headerOnly.rawPreview.indexOf('private header title')).assertEqual(-1);
-      expect(headerOnly.rawPreview.indexOf('private header text')).assertEqual(-1);
-      expect(headerOnly.rawPreview.indexOf('private header body')).assertEqual(-1);
+      expect(JSON.stringify(messageThreadEvidence.rows)).assertEqual(
+        '[{"label":"执行工具","value":"GMAIL_CREATE_EMAIL_DRAFT"},' +
+          '{"label":"查询","value":"创建 Gmail 草稿"},' +
+          '{"label":"Draft ID","value":"draft-message-thread-1"}]'
+      );
+      expect(messageThreadEvidence.rawPreview).assertEqual('{"draft_id":"draft-message-thread-1"}');
+      expect(messageThreadEvidence.rawPreview.indexOf('private header title')).assertEqual(-1);
+      expect(messageThreadEvidence.rawPreview.indexOf('private header text')).assertEqual(-1);
+      expect(messageThreadEvidence.rawPreview.indexOf('private header body')).assertEqual(-1);
+      expect(JSON.stringify(legacy.rows).indexOf('draft-legacy-1')).assertLarger(-1);
+      expect(JSON.stringify(missingEvidence.rows).indexOf('"label":"Draft ID"')).assertEqual(-1);
+      expect(missingEvidenceJsonl.indexOf('"id":"gmail.draft.apply"')).assertEqual(-1);
+      expect(failed.status).assertEqual('error');
+      expect(JSON.stringify(failed.rows).indexOf('"label":"Draft ID"')).assertEqual(-1);
+      expect(failedJsonl.indexOf('"id":"gmail.draft.apply"')).assertEqual(-1);
       expect(JSON.stringify(unrelated.rows).indexOf('"label":"Draft ID"')).assertEqual(-1);
       expect(unrelated.rawPreview.indexOf('draft-provider-nested-1')).assertEqual(-1);
+      expect(unrelatedJsonl.indexOf('"id":"gmail.draft.apply"')).assertEqual(-1);
     });
 
     it('accepts the real Calendar write response_data id without a generic success flag', 0, () => {

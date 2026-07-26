@@ -1683,6 +1683,23 @@ function youtubeThumbnailUrl(record: Record<string, Object | string | number | b
   return '';
 }
 
+function gmailDraftIdFromRecord(
+  record: Record<string, Object | string | number | boolean | null | undefined>
+): string {
+  const message = objectRecord(record.message);
+  if (!valueLooksLikeGmailDraft(record) &&
+    (message === null || !valueLooksLikeGmailDraft(message))) {
+    return '';
+  }
+  const value = record.draft_id === undefined ?
+    (record.draftId === undefined ? record.id : record.draftId) : record.draft_id;
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const draftId = value.trim();
+  return draftId.length > 0 && draftId.length <= 512 ? draftId : '';
+}
+
 function gmailDraftIdForExecute(payload: Object, toolSlug: string): string {
   const normalized = toolSlug.trim().toLowerCase();
   if (normalized.indexOf('gmail') < 0 || !isSafeGmailDraftCreateSlug(normalized)) {
@@ -1694,12 +1711,9 @@ function gmailDraftIdForExecute(payload: Object, toolSlug: string): string {
   if (response === null) {
     return '';
   }
-  const value = response.draft_id === undefined ? response.draftId : response.draft_id;
-  if (typeof value !== 'string') {
-    return '';
-  }
-  const draftId = value.trim();
-  return draftId.length > 0 && draftId.length <= 512 ? draftId : '';
+  const providerData = objectRecord(response.data);
+  const nestedId = providerData === null ? '' : gmailDraftIdFromRecord(providerData);
+  return nestedId.length > 0 ? nestedId : gmailDraftIdFromRecord(response);
 }
 
 function rawPreviewForExecute(payload: Object, observation: string, gmailDraftId: string): string {
