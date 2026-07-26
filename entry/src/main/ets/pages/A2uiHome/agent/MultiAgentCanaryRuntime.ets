@@ -44,6 +44,7 @@ import {
   VIRTUAL_ACTION_INTENT_SOURCE_TOOL_ID,
   VirtualActionIntent,
   VirtualActionIntentResolver,
+  aiLogInfo,
   allToolDefinitions,
   callStructuredTool,
   genericToolResultsA2ui,
@@ -124,6 +125,14 @@ interface GmailDraftCreateOutputBinding {
 
 type GmailDraftOutputValue = Object | string | number | boolean | null | undefined;
 type GmailDraftOutputRecord = Record<string, GmailDraftOutputValue>;
+
+function logGmailDraftAuthority(stage: string, reason: string, details: string = ''): void {
+  aiLogInfo(
+    '[AIPhone][GmailDraftAuthority] stage=' + stage +
+      ' reason=' + reason +
+      (details.length > 0 ? ' ' + details : '')
+  );
+}
 
 interface CalendarUpdateRequestArgs extends CalendarEventArgs {
   actionId: string;
@@ -1069,24 +1078,49 @@ function gmailDraftCreateOutputBinding(
   result: ActionExecutionResult,
   context: ActionExecutionContext
 ): GmailDraftCreateOutputBinding | null {
-  if (result.status !== 'success' || result.output === undefined ||
-    result.output === null || typeof result.output !== 'object' || Array.isArray(result.output)) {
+  if (result.status !== 'success') {
+    logGmailDraftAuthority('output', 'result_not_success');
+    return null;
+  }
+  if (result.output === undefined || result.output === null ||
+    typeof result.output !== 'object' || Array.isArray(result.output)) {
+    logGmailDraftAuthority('output', 'output_not_object');
     return null;
   }
   const output = result.output as GmailDraftOutputRecord;
   const data = output['data'];
-  if (output['actionId'] !== 'gmail.draft.create' ||
-    output['pageActionId'] !== 'gmail.draft.create' ||
-    output['conversationId'] !== context.conversationId ||
-    output['turnId'] !== context.turnId ||
-    typeof output['surfaceId'] !== 'string' ||
-    (output['surfaceId'] as string).trim().length === 0 ||
-    typeof output['status'] !== 'string' ||
-    data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+  if (output['actionId'] !== 'gmail.draft.create') {
+    logGmailDraftAuthority('output', 'action_id_mismatch');
+    return null;
+  }
+  if (output['pageActionId'] !== 'gmail.draft.create') {
+    logGmailDraftAuthority('output', 'page_action_id_mismatch');
+    return null;
+  }
+  if (output['conversationId'] !== context.conversationId) {
+    logGmailDraftAuthority('output', 'conversation_mismatch');
+    return null;
+  }
+  if (output['turnId'] !== context.turnId) {
+    logGmailDraftAuthority('output', 'turn_mismatch');
+    return null;
+  }
+  if (typeof output['surfaceId'] !== 'string' ||
+    (output['surfaceId'] as string).trim().length === 0) {
+    logGmailDraftAuthority('output', 'surface_id_invalid');
+    return null;
+  }
+  if (typeof output['status'] !== 'string') {
+    logGmailDraftAuthority('output', 'surface_status_invalid');
+    return null;
+  }
+  if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+    logGmailDraftAuthority('output', 'data_not_object');
     return null;
   }
   const model = data as A2uiRuntimeDataModel;
   if (!Array.isArray(model.genericToolResults)) {
+    logGmailDraftAuthority('output', 'provider_results_missing');
     return null;
   }
   const actions: A2uiAction[] = [];
@@ -1107,8 +1141,20 @@ function gmailDraftCreateOutputBinding(
     });
   });
   if (actions.length !== 1) {
+    logGmailDraftAuthority(
+      'output',
+      'apply_candidate_count',
+      'providerResults=' + model.genericToolResults.length.toString() +
+        ' candidates=' + actions.length.toString()
+    );
     return null;
   }
+  logGmailDraftAuthority(
+    'output',
+    'ok',
+    'providerResults=' + model.genericToolResults.length.toString() +
+      ' candidates=1 surfaceIdChars=' + (output['surfaceId'] as string).trim().length.toString()
+  );
   return {
     actionJson: JSON.stringify(actions[0]),
     surfaceId: (output['surfaceId'] as string).trim(),
@@ -1121,12 +1167,67 @@ function exactCurrentGmailDraftApplyAction(
   currentHost: A2uiSurfaceState | null,
   hostGeneration: number
 ): A2uiAction | null {
-  if (authority === null || currentHost === null ||
-    hostGeneration !== authority.runtimeGeneration + 1 ||
-    (JSON.stringify(currentHost) !== JSON.stringify(authority.surface) &&
-      !isSuccessfulGmailDraftTerminalTransition(authority.surface, currentHost))) {
+  if (authority === null) {
+    logGmailDraftAuthority(
+      'resolve',
+      'authority_missing',
+      'hostPresent=' + (currentHost !== null).toString() +
+        ' hostGeneration=' + hostGeneration.toString()
+    );
     return null;
   }
+  if (currentHost === null) {
+    logGmailDraftAuthority(
+      'resolve',
+      'host_missing',
+      'authorityGeneration=' + authority.runtimeGeneration.toString() +
+        ' hostGeneration=' + hostGeneration.toString()
+    );
+    return null;
+  }
+  const hostRuntimeGeneration = currentHost.runtimeGeneration === undefined ?
+    0 : currentHost.runtimeGeneration;
+  if (hostGeneration !== authority.runtimeGeneration + 1) {
+    logGmailDraftAuthority(
+      'resolve',
+      'generation_mismatch',
+      'authorityGeneration=' + authority.runtimeGeneration.toString() +
+        ' hostGeneration=' + hostGeneration.toString() +
+        ' hostRuntimeGeneration=' + hostRuntimeGeneration.toString()
+    );
+    return null;
+  }
+  const exactHost = JSON.stringify(currentHost) === JSON.stringify(authority.surface);
+  const terminalHost = !exactHost &&
+    isSuccessfulGmailDraftTerminalTransition(authority.surface, currentHost);
+  if (!exactHost && !terminalHost) {
+    logGmailDraftAuthority(
+      'resolve',
+      'host_mismatch',
+      'surfaceIdEqual=' + (currentHost.surfaceId === authority.surfaceId).toString() +
+        ' authoritySurfaceIdChars=' + authority.surfaceId.length.toString() +
+        ' hostSurfaceIdChars=' + currentHost.surfaceId.length.toString() +
+        ' statusEqual=' + (currentHost.status === authority.surfaceStatus).toString() +
+        ' ownerEqual=' + (currentHost.runtimeOwner === authority.surface.runtimeOwner).toString() +
+        ' runtimeGenerationEqual=' +
+          (currentHost.runtimeGeneration === authority.runtimeGeneration).toString() +
+        ' titleEqual=' + (currentHost.title === authority.surface.title).toString() +
+        ' dataEqual=' + (currentHost.dataModelJson === authority.surface.dataModelJson).toString() +
+        ' componentsEqual=' +
+          (JSON.stringify(currentHost.components) === JSON.stringify(authority.surface.components)).toString() +
+        ' authoritySequence=' + authority.surface.sequence.toString() +
+        ' hostSequence=' + currentHost.sequence.toString()
+    );
+    return null;
+  }
+  logGmailDraftAuthority(
+    'resolve',
+    exactHost ? 'accepted_provider' : 'accepted_terminal',
+    'authorityGeneration=' + authority.runtimeGeneration.toString() +
+      ' hostGeneration=' + hostGeneration.toString() +
+      ' authoritySequence=' + authority.surface.sequence.toString() +
+      ' hostSequence=' + currentHost.sequence.toString()
+  );
   return authority.action;
 }
 
@@ -1802,20 +1903,77 @@ export class MultiAgentCanaryRuntime {
     context: ActionExecutionContext
   ): void {
     const output = gmailDraftCreateOutputBinding(result, context);
-    const current = gmailDraftApplySurfaceBinding(
-      this.currentPageSnapshot(),
-      this.currentHostSurface()
-    );
+    const snapshot = this.currentPageSnapshot();
+    const currentHost = this.currentHostSurface();
+    const current = gmailDraftApplySurfaceBinding(snapshot, currentHost);
     const runtimeGeneration = this.turnHostGenerations.get(context.turnId);
-    if (output === null || current === null ||
-      runtimeGeneration === undefined ||
-      current.runtimeGeneration !== runtimeGeneration ||
-      current.surfaceId !== output.surfaceId ||
-      current.surfaceStatus !== output.surfaceStatus ||
-      current.actionJson !== output.actionJson) {
+    if (output === null) {
+      logGmailDraftAuthority(
+        'remember',
+        'output_invalid',
+        'snapshotPresent=' + (snapshot !== null).toString() +
+          ' hostPresent=' + (currentHost !== null).toString()
+      );
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (current === null) {
+      logGmailDraftAuthority(
+        'remember',
+        'current_binding_invalid',
+        'snapshotPresent=' + (snapshot !== null).toString() +
+          ' hostPresent=' + (currentHost !== null).toString() +
+          ' outputSurfaceIdChars=' + output.surfaceId.length.toString()
+      );
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (runtimeGeneration === undefined) {
+      logGmailDraftAuthority(
+        'remember',
+        'turn_generation_missing',
+        'currentRuntimeGeneration=' + current.runtimeGeneration.toString()
+      );
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (current.runtimeGeneration !== runtimeGeneration) {
+      logGmailDraftAuthority(
+        'remember',
+        'runtime_generation_mismatch',
+        'currentRuntimeGeneration=' + current.runtimeGeneration.toString() +
+          ' turnRuntimeGeneration=' + runtimeGeneration.toString()
+      );
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (current.surfaceId !== output.surfaceId) {
+      logGmailDraftAuthority(
+        'remember',
+        'surface_id_mismatch',
+        'currentSurfaceIdChars=' + current.surfaceId.length.toString() +
+          ' outputSurfaceIdChars=' + output.surfaceId.length.toString()
+      );
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (current.surfaceStatus !== output.surfaceStatus) {
+      logGmailDraftAuthority('remember', 'surface_status_mismatch');
+      this.gmailDraftApplyAuthority = null;
+      return;
+    }
+    if (current.actionJson !== output.actionJson) {
+      logGmailDraftAuthority('remember', 'action_mismatch');
       this.gmailDraftApplyAuthority = null;
       return;
     }
     this.gmailDraftApplyAuthority = current;
+    logGmailDraftAuthority(
+      'remember',
+      'stored',
+      'runtimeGeneration=' + current.runtimeGeneration.toString() +
+        ' surfaceSequence=' + current.surface.sequence.toString() +
+        ' surfaceIdChars=' + current.surfaceId.length.toString()
+    );
   }
 }
