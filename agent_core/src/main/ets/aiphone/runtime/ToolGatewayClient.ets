@@ -9750,6 +9750,22 @@ export type HotelTimestampProvider = () => string;
 const defaultHotelTimestampProvider: HotelTimestampProvider = (): string => new Date().toISOString();
 let hotelTimestampProvider: HotelTimestampProvider = defaultHotelTimestampProvider;
 
+export function resolveDynamicCredentialValue(
+  manifestId: string,
+  credentialName: string,
+  storedValue: string
+): string {
+  const stored = storedValue.trim();
+  if (stored.length > 0) {
+    return stored;
+  }
+  if (manifestId !== 'modelscope.@amap.amap-maps' || credentialName !== 'AMAP_MAPS_API_KEY') {
+    return '';
+  }
+  const mcpKey = localProviderConfig.amapMcpKey.trim();
+  return mcpKey.length > 0 ? mcpKey : localProviderConfig.amapKey.trim();
+}
+
 export function configureGmailMcpClientForTests(client: GenericMcpClient | null): void {
   gmailMcpClient = client === null ? genericMcpClient : client;
 }
@@ -9912,11 +9928,14 @@ function dynamicReadFailure(
   qualifiedName: string,
   inputSchema: Object,
   message: string,
-  status: string = 'error'
+  status: string = 'error',
+  selectedToolId: string = 'dynamic.search'
 ): DynamicReadExecution {
   const result = dynamicErrorResult(provider, qualifiedName, '动态读取失败', message);
   result.status = status;
-  const registration = dynamicRegistration(provider, qualifiedName, inputSchema, new Object(), '');
+  const registration = dynamicRegistration(
+    provider, qualifiedName, inputSchema, new Object(), '', selectedToolId
+  );
   return dynamicExecutionResult(result, registration);
 }
 
@@ -9984,21 +10003,25 @@ async function dynamicManifestReadExecution(
   const tool = dynamicManifestTool(manifest, toolName);
   if (transport === null || tool === null) {
     return dynamicReadFailure(manifest.displayName, toolName, new Object(),
-      'No safe HAP-runnable dynamic read tool is available.', 'unsupported_transport');
+      'No safe HAP-runnable dynamic read tool is available.', 'unsupported_transport', discovery.toolId);
   }
   if (!isSafeDynamicManifestTool(tool) || !dynamicManifestReadAllowed(tool, transport)) {
     return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
-      'Dynamic tool is not a recognized read/search/list/get operation.', 'unsafe_action_blocked');
+      'Dynamic tool is not a recognized read/search/list/get operation.', 'unsafe_action_blocked', discovery.toolId);
   }
   let credentialRef = '';
   let credentialValue = '';
   const requiredCredential = firstRequiredCredential(manifest);
   if (requiredCredential !== null) {
     credentialRef = credentialRefFor(manifest.id, requiredCredential.name);
-    credentialValue = await dynamicCredentialStore.get(credentialRef);
+    credentialValue = resolveDynamicCredentialValue(
+      manifest.id,
+      requiredCredential.name,
+      await dynamicCredentialStore.get(credentialRef)
+    );
     if (credentialValue.length === 0) {
       return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
-        'Dynamic read requires configured credentials.', 'needs_auth');
+        'Dynamic read requires configured credentials.', 'needs_auth', discovery.toolId);
     }
   }
   const candidate: DynamicToolRegistration = {
@@ -10021,7 +10044,8 @@ async function dynamicManifestReadExecution(
     const preflight = await genericMcpClient.preflight(registration, credentialValue);
     if (!preflight.ok) {
       return dynamicReadFailure(manifest.displayName, tool.name, tool.inputSchema,
-        preflight.message.length > 0 ? preflight.message : 'Dynamic MCP preflight failed.');
+        preflight.message.length > 0 ? preflight.message : 'Dynamic MCP preflight failed.',
+        'error', discovery.toolId);
     }
     result = await genericMcpClient.callTool(registration, credentialValue, dynamicArgsFromPrompt(prompt));
   }

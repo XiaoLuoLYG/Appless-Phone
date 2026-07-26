@@ -1955,7 +1955,7 @@ export function isUnsafeComposioExecute(toolSlug: string, _argsJson: string): bo
   return isUnsafeMcpTool(toolSlug, '');
 }
 
-const SELECTED_READ_OPERATIONS: string[] = ['read', 'search', 'list', 'get'];
+const SELECTED_READ_OPERATIONS: string[] = ['read', 'search', 'list', 'get', 'find', 'fetch'];
 const SELECTED_PROVIDER_PREFIXES: string[] = [
   'googlecalendar', 'googledrive', 'googledocs', 'ticketmaster', 'hackernews', 'salesforce',
   'composio', 'instagram', 'linkedin', 'whatsapp', 'github', 'twitter', 'youtube',

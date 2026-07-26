@@ -1085,6 +1085,42 @@ export default function multiAgentRuntimeTest() {
       expect(formatter.dynamicDiscoveryLine(message).indexOf('auth=true')).assertLarger(-1);
     });
 
+    it('formats the local Amap weather identity without exposing its display name as invalid', 0, () => {
+      const formatter = new MultiAgentEvidenceFormatter(32);
+      const result: DataResult = {
+        toolId: 'dynamic.search',
+        outputSchema: 'dynamicToolConnect',
+        status: 'error',
+        sources: [{
+          provider: '高德地图',
+          backend: 'mcp_remote',
+          operation: 'maps_weather',
+          fetchedAt: '2026-07-26T00:00:00Z'
+        }],
+        data: JSON.parse(
+          '{"results":[{"status":"needs_auth"}],"registration":{"provider":"高德地图",' +
+          '"qualifiedName":"maps_weather","selectedToolId":"weather.query","inputSchema":{},' +
+          '"outputSchema":{},"receipt":""}}'
+        ) as Object,
+        warnings: []
+      };
+      const message: AgentMessage = {
+        type: AgentMessageType.TASK_RESULT_DATA,
+        conversationId: 'conversation-amap',
+        turnId: 'turn-amap',
+        taskId: 'data-amap',
+        payload: result
+      };
+
+      const line = formatter.dynamicDiscoveryLine(message);
+      expect(line.indexOf('selectedToolId=weather.query')).assertLarger(-1);
+      expect(line.indexOf('provider=amap')).assertLarger(-1);
+      expect(line.indexOf('qualifiedName=maps_weather')).assertLarger(-1);
+      expect(line.indexOf('status=error source=true auth=true receipt=absent')).assertLarger(-1);
+      expect(line.indexOf('provider=invalid')).assertEqual(-1);
+      expect(line.indexOf('高德地图')).assertEqual(-1);
+    });
+
     it('rejects unsafe registry ids and bounds then disposes opaque correlations', 0, () => {
       const formatter = new MultiAgentEvidenceFormatter(8);
       const payload: InputUserPayload = { text: 'not logged' };

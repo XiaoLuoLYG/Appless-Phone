@@ -322,9 +322,12 @@ export class MultiAgentEvidenceFormatter {
       ' task=' + this.token('k', message.taskId);
     const selectedToolId = selected.length > 0 ? selected :
       (provider.toLowerCase() === 'composio' ? 'dynamic.search' : qualifiedName);
+    const providerEvidence = selectedToolId.toLowerCase() === 'weather.query' &&
+      qualifiedName.toLowerCase() === 'maps_weather' &&
+      provider === '高德地图' ? 'amap' : provider.toLowerCase();
     return '[AIPhone][DynamicToolDiscovery]' + identity +
       ' selectedToolId=' + evidenceAllowed(selectedToolId.toLowerCase()) +
-      ' provider=' + evidenceAllowed(provider.toLowerCase()) +
+      ' provider=' + evidenceAllowed(providerEvidence) +
       ' qualifiedName=' + evidenceAllowed(qualifiedName.toLowerCase()) +
       ' status=' + evidenceAllowed(payload.status, ['success', 'partial', 'empty', 'error']) +
       ' source=' + (source === undefined ? 'false' : 'true') +

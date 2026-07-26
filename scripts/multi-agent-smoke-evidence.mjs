@@ -7,8 +7,12 @@ const LIFECYCLE_MARKERS = new Set([
   'MultiAgentUiTask', 'MultiAgentUiResult', 'MultiAgentTaskError',
   'MultiAgentActionPlan', 'MultiAgentActionRun', 'MultiAgentActionResult',
   'MultiAgentTurnResult', 'DynamicToolDiscovery',
+  'MailDetailInPlace',
   'RollingGoHotelRequest', 'RollingGoHotelResponse',
   'A2uiHomeSurfaceUpdate', 'HtmlHomeDocument'
+]);
+const MODEL_DOWNSTREAM_WORK_MARKERS = new Set([
+  'MultiAgentDataTask', 'MultiAgentUiTask', 'MultiAgentActionPlan', 'MultiAgentActionRun'
 ]);
 const DUPLICATE_HILOG_MAX_SKEW_MS = 1;
 
@@ -834,7 +838,7 @@ export function modelTransportEvidence(logText, options = {}) {
   if (terminal === undefined || terminal.index !== lifecycle.terminalIndex ||
     !sameAppIdentity(terminal.line, identity)) return false;
   const plannedWork = all.find((item) => item.index > selected.index &&
-    item.index < terminal.index && LIFECYCLE_MARKERS.has(item.marker));
+    item.index < terminal.index && MODEL_DOWNSTREAM_WORK_MARKERS.has(item.marker));
   const modelEndIndex = plannedWork?.index ?? terminal.index;
 
   const request = all.find((item) => item.index > selected.index && item.index < modelEndIndex &&
@@ -1257,4 +1261,63 @@ export function visibleMailBodyText(value) {
     .replace(/\s+/g, ' ')
     .trim();
   return content.length >= 8;
+}
+
+function layoutEvidenceText(node) {
+  const attributes = node?.attributes || {};
+  return ['text', 'content', 'description', 'hint']
+    .map((key) => attributes[key])
+    .filter((value) => typeof value === 'string' && value.trim().length > 0)
+    .join('\n')
+    .trim();
+}
+
+function hasLayoutDescendant(node, predicate) {
+  if (predicate(node)) return true;
+  return (node?.children || []).some((child) => hasLayoutDescendant(child, predicate));
+}
+
+function mailBodyTextFromDetailRegion(node) {
+  const children = node?.children || [];
+  if (children.length >= 3) {
+    const sender = layoutEvidenceText(children[0]);
+    const route = layoutEvidenceText(children[1]);
+    const body = layoutEvidenceText(children[2]);
+    if (sender.length > 0 && route.includes('发给') && body.length > 0) {
+      return body;
+    }
+  }
+  for (const child of children) {
+    const body = mailBodyTextFromDetailRegion(child);
+    if (body.length > 0) return body;
+  }
+  return '';
+}
+
+export function expandedMailBodyRegionText(layout) {
+  let body = '';
+  const visit = (node) => {
+    if (body.length > 0) return;
+    if (node?.attributes?.type === 'article') {
+      const children = node.children || [];
+      const isMail = children.some((child) =>
+        ['Gmail', 'QQ Mail', 'Outlook'].includes(layoutEvidenceText(child)));
+      const isExpanded = hasLayoutDescendant(node, (candidate) =>
+        candidate?.attributes?.type === 'button' && layoutEvidenceText(candidate).includes('收起'));
+      if (isMail && isExpanded) {
+        body = mailBodyTextFromDetailRegion(node);
+        return;
+      }
+    }
+    for (const child of node?.children || []) visit(child);
+  };
+  visit(layout);
+  return body;
+}
+
+export function shouldRecoverMailBodyViewport(evidence, uiBodyAccepted) {
+  return evidence?.complete === true &&
+    evidence?.ok === true &&
+    evidence?.bodyVisible === true &&
+    uiBodyAccepted !== true;
 }

@@ -946,6 +946,17 @@ test('accepts only a correlated app-owned cloud streaming model lifecycle', () =
   mutations.forEach((logs) => assert.equal(modelTransportEvidence(logs), false));
 });
 
+test('keeps pending presentation markers inside the current model transport window', () => {
+  const pendingPresentation = cloudStreamTurn.replace(
+    '07-22 18:00:05.199 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true\n',
+    '07-22 18:00:05.199 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][ModelRequestStart] model=qwen-max endpoint=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions stream=true\n' +
+      '07-22 18:00:05.210 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][HtmlHomeDocument] source=pending kind=thinking chars=316983 blocks=0 renderTick=0\n' +
+      '07-22 18:00:05.211 44325 44325 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][A2uiHomeSurfaceUpdate] source=pending kind=thinking chars=316983 blocks=0\n'
+  );
+
+  assert.equal(modelTransportEvidence(pendingPresentation), true);
+});
+
 test('does not treat an arbitrary app 443 response as streamed model evidence', () => {
   const providerResponse = cloudStreamTurn.replace(
     'LogHttpInfo: {HTTP_INFO:{"response_code":200,"content_type":"text/event-stream;charset=utf-8"},TCP_INFO:{"dst_port":443}}',
@@ -1570,10 +1581,86 @@ test('correlates an exact mail read action through one Data and in-place Ui term
   ).complete, false);
 });
 
+test('deduplicates one dual-channel mail detail terminal before viewport recovery', () => {
+  const logs = `
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 action=mail.thread.read source=mail.search provider=qq identity=qq-identity-1
+    [AIPhone][MultiAgentUiTask] conversation=c1 turn=read-turn task=ui1 dataTasks=data1
+    [AIPhone][MultiAgentDataTask] conversation=c1 turn=read-turn task=data1 round=1 tool=mail.thread.read predecessor=none path=none target=none binding=false provider=qq identity=qq-identity-1
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=page-turn-1 task=a1 surface=s1 plan=p1 run=r1 status=success
+    [AIPhone][MultiAgentDataResult] conversation=c1 turn=read-turn task=data1 tool=mail.thread.read status=success sources=1 error=false provider=qq identity=qq-identity-1
+    07-26 21:34:46.435 63634 63634 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MailDetailInPlace] requestKeyChars=7 provider=qq identity=qq-identity-1 status=success bodyChars=701
+    07-26 21:34:46.435 63634 63634 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MailDetailInPlace] requestKeyChars=7 provider=qq identity=qq-identity-1 status=success bodyChars=701
+    [AIPhone][MultiAgentUiResult] conversation=c1 turn=read-turn task=ui1 surface=loop_surface_1 state=result
+  `;
+  const evidence = mailThreadReadEvidence(logs, {
+    expectedActionId: 'mail.thread.read',
+    expectedSourceToolId: 'mail.search',
+    currentSurfaceId: 's1',
+    expectedConversationId: 'c1',
+    expectedTurnId: 'page-turn-1'
+  });
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.bodyVisible, true);
+});
+
 test('does not treat the mail loading skeleton as a visible body', () => {
   assert.equal(visibleMailBodyText('发件人\n主题\n正在加载邮件正文\n回复'), false);
   assert.equal(visibleMailBodyText('Alice\nalice@example.com 发给 我\n这是供应商返回的真实完整正文\n回复'), true);
   assert.equal(visibleMailBodyText('邮件正文加载失败。\n重试'), false);
+});
+
+test('extracts visible mail body only from the expanded mail detail region', () => {
+  assert.equal(typeof smokeLifecycle.expandedMailBodyRegionText, 'function');
+  const node = (type, text = '', children = []) => ({
+    attributes: { type, text, content: '', description: '', hint: '' },
+    children
+  });
+  const mailArticle = (detailChildren) => node('article', '', [
+    node('genericContainer', 'QQ Mail'),
+    node('heading', 'Release workflow failed'),
+    node('button', '收起'),
+    node('genericContainer', '', detailChildren)
+  ]);
+  const sender = node('genericContainer', 'Yige Luo');
+  const route = node('genericContainer', 'notifications@example.com 发给 我');
+  const body = node('genericContainer', 'Provider returned the complete release failure details.');
+  const positive = node('root', '', [mailArticle([sender, route, body])]);
+  const headerOnly = node('root', '', [mailArticle([sender, route])]);
+  const unrelatedPage = node('root', '', [
+    node('article', '', [
+      node('heading', 'Release workflow failed'),
+      node('button', '收起'),
+      node('genericContainer', '', [sender, route, body])
+    ]),
+    node('paragraph', 'Provider returned unrelated page copy.')
+  ]);
+  const subjectAndQueryOnly = node('root', '', [
+    mailArticle([sender, route]),
+    node('paragraph', 'Release workflow failed'),
+    node('paragraph', '帮我查看邮箱里最新的重要邮件')
+  ]);
+
+  assert.equal(smokeLifecycle.expandedMailBodyRegionText(positive),
+    'Provider returned the complete release failure details.');
+  assert.equal(smokeLifecycle.expandedMailBodyRegionText(headerOnly), '');
+  assert.equal(smokeLifecycle.expandedMailBodyRegionText(unrelatedPage), '');
+  assert.equal(smokeLifecycle.expandedMailBodyRegionText(subjectAndQueryOnly), '');
+});
+
+test('requests viewport recovery only after a correlated mail body succeeds off-screen', () => {
+  assert.equal(typeof smokeLifecycle.shouldRecoverMailBodyViewport, 'function');
+  const decide = smokeLifecycle.shouldRecoverMailBodyViewport;
+  const success = {
+    complete: true,
+    ok: true,
+    bodyVisible: true
+  };
+  assert.equal(decide(success, false), true);
+  assert.equal(decide(success, true), false);
+  assert.equal(decide({ ...success, complete: false }, false), false);
+  assert.equal(decide({ ...success, ok: false }, false), false);
+  assert.equal(decide({ ...success, bodyVisible: false }, false), false);
 });
 
 test('correlates a virtual action request with its exact terminal result', () => {

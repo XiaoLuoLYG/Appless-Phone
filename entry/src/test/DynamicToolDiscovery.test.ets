@@ -77,6 +77,7 @@ export default function dynamicToolDiscoveryTest() {
         expect(result.status).assertEqual('error');
         expect(result.error?.code).assertEqual('AUTH_REQUIRED');
         expect(data.registration.qualifiedName).assertEqual('GOOGLEDRIVE_SEARCH_FILES');
+        expect(data.registration.selectedToolId).assertEqual('maps.weather');
         expect(result.sources[0].operation).assertEqual('GOOGLEDRIVE_SEARCH_FILES');
       } finally {
         configureDefaultDynamicToolSamplesForTests();

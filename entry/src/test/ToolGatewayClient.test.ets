@@ -42,6 +42,7 @@ import {
   configureLocalPaymentAccountBookJson,
   configureLocalProviderConfigFromRawJson,
   defaultToolGatewayUrl,
+  resolveDynamicCredentialValue,
   emptyDataResult,
   errorDataResult,
   flightDataResultA2ui,
@@ -696,6 +697,47 @@ export default function toolGatewayClientTest() {
         configureLocalProviderConfigFromRawJson(JSON.stringify({
           RIDE_MOCK_ENABLED: 'false'
         }));
+      }
+    });
+
+    it('uses saved dynamic credentials before the exact Amap local fallback', 0, () => {
+      try {
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          AMAP_KEY: 'amap-web-key',
+          AMAP_MCP_KEY: 'amap-mcp-key'
+        }));
+
+        expect(resolveDynamicCredentialValue(
+          'modelscope.@amap.amap-maps',
+          'AMAP_MAPS_API_KEY',
+          'asset-store-key'
+        )).assertEqual('asset-store-key');
+        expect(resolveDynamicCredentialValue(
+          'modelscope.@amap.amap-maps',
+          'AMAP_MAPS_API_KEY',
+          ''
+        )).assertEqual('amap-mcp-key');
+        expect(resolveDynamicCredentialValue(
+          'modelscope.other.weather',
+          'AMAP_MAPS_API_KEY',
+          ''
+        )).assertEqual('');
+        expect(resolveDynamicCredentialValue(
+          'modelscope.@amap.amap-maps',
+          'OTHER_KEY',
+          ''
+        )).assertEqual('');
+
+        configureLocalProviderConfigFromRawJson(JSON.stringify({
+          AMAP_KEY: 'amap-web-only'
+        }));
+        expect(resolveDynamicCredentialValue(
+          'modelscope.@amap.amap-maps',
+          'AMAP_MAPS_API_KEY',
+          ''
+        )).assertEqual('amap-web-only');
+      } finally {
+        configureLocalProviderConfigFromRawJson('{}');
       }
     });
 

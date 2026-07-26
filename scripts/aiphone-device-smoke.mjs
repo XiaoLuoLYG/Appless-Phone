@@ -34,6 +34,7 @@ import {
   directTextVisibleEvidence,
   dynamicAuthOutcomeAssessment,
   dynamicToolDiscoveryEvidence,
+  expandedMailBodyRegionText,
   mailThreadReadEvidence,
   modelTransportEvidence,
   multiAgentActionEvidence,
@@ -42,6 +43,7 @@ import {
   shouldPreserveSmokeAppSession,
   socialDraftUiEvidence,
   socialReplyButtonCenter,
+  shouldRecoverMailBodyViewport,
   toolExecutionEvidence,
   visibleMailBodyText
 } from './multi-agent-smoke-evidence.mjs';
@@ -2029,6 +2031,11 @@ function currentMailReadEvidence(logText, sourceToolId, actionContext) {
   return results.find((result) => result.complete) || results[0];
 }
 
+function visibleExpandedMailBody(layout, text) {
+  return visibleMailBodyText(expandedMailBodyRegionText(layout)) &&
+    !hasTechnicalGmailArgsCard(text);
+}
+
 async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
   let currentLayout = layout;
   const sourceToolId = visibleSourceToolId(actionContext);
@@ -2051,13 +2058,25 @@ async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
       );
       let text = collectLayoutText(expanded).join('\n');
       for (let poll = 0; poll < 16 && evidence.complete &&
-        !visibleMailBodyText(text) &&
+        !visibleExpandedMailBody(expanded, text) &&
         !/邮件正文加载失败|正文读取失败|PROVIDER_|AUTH_REQUIRED/.test(text); poll += 1) {
         await sleep(250);
         expanded = dumpLayout(
           `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-poll-${poll + 1}-layout.json`
         );
         text = collectLayoutText(expanded).join('\n');
+      }
+      let bodyVisible = visibleExpandedMailBody(expanded, text);
+      if (shouldRecoverMailBodyViewport(evidence, bodyVisible)) {
+        for (let recovery = 0; recovery < 4 && !bodyVisible; recovery += 1) {
+          swipeResultsUp();
+          await sleep(450);
+          expanded = dumpLayout(
+            `query-${index + 1}-mail-body-${attempt + 1}-${candidate + 1}-viewport-${recovery + 1}-layout.json`
+          );
+          text = collectLayoutText(expanded).join('\n');
+          bodyVisible = visibleExpandedMailBody(expanded, text);
+        }
       }
       const textPath = join(
         outDir,
@@ -2069,8 +2088,6 @@ async function verifyMailExpandedBody(layout, index, appPid, actionContext) {
       );
       writeFileSync(textPath, text + '\n');
       writeFileSync(logPath, logs + '\n');
-      const bodyVisible = visibleMailBodyText(text) &&
-        !hasTechnicalGmailArgsCard(text);
       if (evidence.ok && evidence.bodyVisible && bodyVisible) {
         return {
           ok: true,
