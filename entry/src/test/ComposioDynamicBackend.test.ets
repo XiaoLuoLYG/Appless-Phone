@@ -10,6 +10,7 @@ import {
   composioExactToolSlugForFixedTool,
   composioPhoneNumberIdsFromObservation,
   configureComposioConfigFromRawJson,
+  gmailDraftPreviewA2ui,
   proxyToolkitAccountsPreview,
   shouldAttemptComposioDynamic,
   configureComposioUserId,
@@ -871,6 +872,42 @@ export default function composioDynamicBackendTest() {
       expect(result.status).assertEqual('success');
       expect(result.summary.indexOf('GMAIL_CREATE_EMAIL_DRAFT')).assertLarger(-1);
       expect(result.rawPreview.indexOf('mail.google.com')).assertLarger(-1);
+    });
+
+    it('preserves only nested Gmail draft identity across unrelated provider arrays', 0, () => {
+      const observation = '{"successful":true,"data":{"response_data":{"draft_id":"draft-provider-nested-1",' +
+        '"thread_id":"thread-provider-nested-1","recipients":["alice@example.com"],' +
+        '"headers":[{"name":"Subject","value":"private subject"}],"body":"private body"}},"error":null}';
+      const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'GMAIL_CREATE_EMAIL_DRAFT',
+        '创建 Gmail 草稿'
+      );
+      const unrelated: DynamicGenericToolResult = composioDynamicResultFromObservation(
+        'execute',
+        observation,
+        'NOTION_CREATE_DRAFT',
+        '创建 Notion 草稿'
+      );
+      const jsonl = gmailDraftPreviewA2ui(
+        'gmail_nested_provider_surface',
+        result,
+        looseObject('{"to":["alice@example.com"],"subject":"","body":"我收到了"}'),
+        'gmail.draft.create'
+      );
+
+      expect(result.status).assertEqual('success');
+      expect(JSON.stringify(result.rows).indexOf('"label":"Draft ID","value":"draft-provider-nested-1"'))
+        .assertLarger(-1);
+      expect(result.rawPreview.indexOf('draft-provider-nested-1')).assertLarger(-1);
+      expect(result.rawPreview.indexOf('alice@example.com')).assertEqual(-1);
+      expect(result.rawPreview.indexOf('private subject')).assertEqual(-1);
+      expect(result.rawPreview.indexOf('private body')).assertEqual(-1);
+      expect(jsonl.indexOf('"id":"gmail.draft.apply"')).assertLarger(-1);
+      expect(jsonl.indexOf('"draftId":"draft-provider-nested-1"')).assertLarger(-1);
+      expect(JSON.stringify(unrelated.rows).indexOf('"label":"Draft ID"')).assertEqual(-1);
+      expect(unrelated.rawPreview.indexOf('draft-provider-nested-1')).assertEqual(-1);
     });
 
     it('accepts the real Calendar write response_data id without a generic success flag', 0, () => {

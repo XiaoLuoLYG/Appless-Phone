@@ -1683,7 +1683,31 @@ function youtubeThumbnailUrl(record: Record<string, Object | string | number | b
   return '';
 }
 
-function rawPreviewForExecute(payload: Object, observation: string): string {
+function gmailDraftIdForExecute(payload: Object, toolSlug: string): string {
+  const normalized = toolSlug.trim().toLowerCase();
+  if (normalized.indexOf('gmail') < 0 || !isSafeGmailDraftCreateSlug(normalized)) {
+    return '';
+  }
+  const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
+  const data = objectRecord(record.data);
+  const response = data === null ? null : objectRecord(data.response_data);
+  if (response === null) {
+    return '';
+  }
+  const value = response.draft_id === undefined ? response.draftId : response.draft_id;
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const draftId = value.trim();
+  return draftId.length > 0 && draftId.length <= 512 ? draftId : '';
+}
+
+function rawPreviewForExecute(payload: Object, observation: string, gmailDraftId: string): string {
+  if (gmailDraftId.length > 0) {
+    const identity: Record<string, string> = {};
+    identity['draft_id'] = gmailDraftId;
+    return JSON.stringify(identity);
+  }
   const hit = firstArrayHit(payload);
   if (!hit.found) {
     return observation.substring(0, 16000);
@@ -1697,10 +1721,16 @@ function rawPreviewForExecute(payload: Object, observation: string): string {
   return JSON.stringify(compact).substring(0, 16000);
 }
 
-function rowsForExecute(payload: Object, prompt: string, toolSlug: string): A2uiLabelValueData[] {
+function rowsForExecute(
+  payload: Object,
+  prompt: string,
+  toolSlug: string,
+  gmailDraftId: string
+): A2uiLabelValueData[] {
   const rows: A2uiLabelValueData[] = [];
   appendRow(rows, '执行工具', toolSlug);
   appendRow(rows, '查询', promptSearchKeyword(prompt));
+  appendRow(rows, 'Draft ID', gmailDraftId);
   const hit = firstArrayHit(payload);
   if (hit.found) {
     appendRow(rows, '结果数量', hit.items.length.toString());
@@ -2110,7 +2140,14 @@ export function composioDynamicResultFromObservation(
     const payload = JSON.parse(observation) as ComposioSearchObservation;
     if (phase === 'execute') {
       const errorMessage = executionErrorMessage(payload as Object, toolSlug);
-      const rows = rowsForExecute(payload as Object, prompt, toolSlug.length > 0 ? toolSlug : 'dynamic.search');
+      const draftId = errorMessage.length === 0 ?
+        gmailDraftIdForExecute(payload as Object, toolSlug) : '';
+      const rows = rowsForExecute(
+        payload as Object,
+        prompt,
+        toolSlug.length > 0 ? toolSlug : 'dynamic.search',
+        draftId
+      );
       if (errorMessage.length > 0) {
         return {
           sourceTag: 'Composio',
@@ -2130,7 +2167,7 @@ export function composioDynamicResultFromObservation(
         status: 'success',
         summary: executeSummary(toolSlug.length > 0 ? toolSlug : 'dynamic.search', rows),
         rows: rows,
-        rawPreview: rawPreviewForExecute(payload as Object, observation),
+        rawPreview: rawPreviewForExecute(payload as Object, observation, draftId),
         providerPhase: 'execution'
       };
     }

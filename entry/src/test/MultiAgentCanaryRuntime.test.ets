@@ -30,6 +30,7 @@ import {
   TaskErrorPayload,
   UiSurfaceWriteLease,
   UiSurfaceWriter,
+  composioDynamicResultFromObservation,
   createSeedA2uiSurface,
   gmailDraftPreviewA2ui,
   gmailThreadResultsA2ui,
@@ -1027,8 +1028,8 @@ function pageSurface(
   return surface;
 }
 
-function providerGmailDraftSurface(sequence: number): A2uiSurfaceState {
-  const providerResult: DynamicGenericToolResult = {
+function defaultGmailDraftProviderResult(): DynamicGenericToolResult {
+  return {
     sourceTag: 'Gmail API',
     toolName: 'users.drafts.create',
     title: 'Gmail 草稿已创建',
@@ -1042,6 +1043,23 @@ function providerGmailDraftSurface(sequence: number): A2uiSurfaceState {
     ],
     rawPreview: 'draftId=draft-provider-1 messageId=message-provider-1'
   };
+}
+
+function realComposioGmailDraftProviderResult(): DynamicGenericToolResult {
+  return composioDynamicResultFromObservation(
+    'execute',
+    '{"successful":true,"data":{"response_data":{"draft_id":"draft-provider-1",' +
+      '"thread_id":"thread-provider-1","recipients":["alice@example.com"],' +
+      '"headers":[{"name":"Subject","value":"private subject"}],"body":"private body"}},"error":null}',
+    'GMAIL_CREATE_EMAIL_DRAFT',
+    '创建 Gmail 草稿'
+  );
+}
+
+function providerGmailDraftSurface(
+  sequence: number,
+  providerResult: DynamicGenericToolResult = defaultGmailDraftProviderResult()
+): A2uiSurfaceState {
   const parsed = parseA2uiJsonl(
     gmailDraftPreviewA2ui(
       'gmail-provider-draft',
@@ -1096,8 +1114,7 @@ function registeredGmailDraftProviderOutput(
   const output = registeredPageActionOutput('gmail.draft.create', surface, context);
   const data = output.data as A2uiRuntimeDataModel;
   data.genericToolResults[0].actions = [];
-  data.genericToolResults[0].rawPreview =
-    '{"draftId":"draft-provider-1","messageId":"message-provider-1"}';
+  data.genericToolResults[0].rawPreview = '';
   return output;
 }
 
@@ -2381,7 +2398,7 @@ export default function multiAgentCanaryRuntimeTest() {
       let hostGeneration = 41;
       let providerResultCount = 0;
       let providerActionCount = -1;
-      let providerRawHasDraftId = false;
+      let providerRowsHaveDraftId = false;
       const options = canaryOptions(
         new QueueModel([GMAIL_DRAFT_CREATE_DECISION, GMAIL_DRAFT_APPLY_DECISION]),
         new CanaryHotelExecutor(),
@@ -2400,7 +2417,10 @@ export default function multiAgentCanaryRuntimeTest() {
         calls.push({ actionId, args, context });
         let output: Object = JSON.parse('{"providerStatus":"exact"}') as Object;
         if (actionId === 'gmail.draft.create') {
-          const createdSurface = providerGmailDraftSurface(hostGeneration);
+          const createdSurface = providerGmailDraftSurface(
+            hostGeneration,
+            realComposioGmailDraftProviderResult()
+          );
           createdSurface.sequence = 7;
           currentHost = createdSurface;
           output = registeredGmailDraftProviderOutput(createdSurface, context);
@@ -2408,8 +2428,8 @@ export default function multiAgentCanaryRuntimeTest() {
           providerResultCount = providerData.genericToolResults.length;
           const providerActions = providerData.genericToolResults[0].actions;
           providerActionCount = providerActions === undefined ? 0 : providerActions.length;
-          providerRawHasDraftId =
-            providerData.genericToolResults[0].rawPreview.indexOf('draft-provider-1') >= 0;
+          providerRowsHaveDraftId =
+            JSON.stringify(providerData.genericToolResults[0].rows).indexOf('draft-provider-1') >= 0;
         } else if (actionId === 'gmail.draft.apply') {
           const updated = pageSurface('gmail.draft.apply', {
             id: 'gmail.open.web',
@@ -2460,7 +2480,7 @@ export default function multiAgentCanaryRuntimeTest() {
       expect(JSON.stringify(terminalSurface) === providerSurfaceJson).assertFalse();
       expect(providerResultCount).assertEqual(1);
       expect(providerActionCount).assertEqual(0);
-      expect(providerRawHasDraftId).assertTrue();
+      expect(providerRowsHaveDraftId).assertTrue();
       expect(terminalSnapshot.document.source === 'pending').assertFalse();
       expect(terminalSnapshot.document.actions.length +
         terminalSnapshot.document.blocks.length).assertLarger(0);
@@ -2472,7 +2492,7 @@ export default function multiAgentCanaryRuntimeTest() {
       );
       expect(calls[1].actionId).assertEqual('gmail.draft.apply');
       expect(JSON.stringify(calls[1].args)).assertEqual(
-        '{"provider":"gmail_oauth","draftId":"draft-provider-1","to":["alice@example.com"],' +
+        '{"provider":"composio","draftId":"draft-provider-1","to":["alice@example.com"],' +
           '"subject":"","body":"我收到了","threadId":""}'
       );
       expect(actions.filter((action): boolean =>
