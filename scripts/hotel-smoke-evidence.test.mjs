@@ -35,6 +35,33 @@ const realC20DetailLog = `
   [AIPhone][MultiAgentActionResult] conversation=c20 turn=action-1 task=action-1 surface=search-1 plan=plan-1 run=run-1 status=success
 `;
 
+const realPostActionC20DetailHilog = `
+07-26 17:48:44.179 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentActionRun] conversation=c75cafde7 turn=t921f1276 task=k4 surface=loop_surface_1785059300279 plan=p5 run=r6 action=hotel.detail source=hotel.search
+07-26 17:48:44.179 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentActionRun] conversation=c75cafde7 turn=t921f1276 task=k4 surface=loop_surface_1785059300279 plan=p5 run=r6 action=hotel.detail source=hotel.search
+07-26 17:48:44.184 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiTask] conversation=c75cafde7 turn=t975a1f01 task=k7 dataTasks=k8
+07-26 17:48:44.184 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentUiTask] conversation=c75cafde7 turn=t975a1f01 task=k7 dataTasks=k8
+07-26 17:48:44.184 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentDataTask] conversation=c75cafde7 turn=t975a1f01 task=k8 round=1 tool=hotel.detail predecessor=none path=none target=none binding=false
+07-26 17:48:44.184 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentDataTask] conversation=c75cafde7 turn=t975a1f01 task=k8 round=1 tool=hotel.detail predecessor=none path=none target=none binding=false
+07-26 17:48:44.187 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentActionResult] conversation=c75cafde7 turn=t921f1276 task=k4 surface=loop_surface_1785059300279 plan=p5 run=r6 status=success
+07-26 17:48:44.187 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentActionResult] conversation=c75cafde7 turn=t921f1276 task=k4 surface=loop_surface_1785059300279 plan=p5 run=r6 status=success
+07-26 17:48:44.188 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785059324184 intent=structured_results status=calling_tool components=2 dataChars=1397 sequence=2 renderTick=4 multiTaskTick=0
+07-26 17:48:44.188 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785059324184 intent=structured_results status=calling_tool components=2 dataChars=1397 sequence=2 renderTick=4 multiTaskTick=0
+07-26 17:48:44.190 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiResult] conversation=c75cafde7 turn=t975a1f01 task=k7 surface=loop_surface_1785059324184 state=skeleton
+07-26 17:48:44.190 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentUiResult] conversation=c75cafde7 turn=t975a1f01 task=k7 surface=loop_surface_1785059324184 state=skeleton
+07-26 17:48:46.645 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
+07-26 17:48:46.645 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][RollingGoHotelRequest] operation=getHotelDetail
+07-26 17:48:47.859 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
+07-26 17:48:47.859 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1
+07-26 17:48:47.859 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentDataResult] conversation=c75cafde7 turn=t975a1f01 task=k8 tool=hotel.detail status=success sources=1 error=false
+07-26 17:48:47.859 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentDataResult] conversation=c75cafde7 turn=t975a1f01 task=k8 tool=hotel.detail status=success sources=1 error=false
+07-26 17:48:50.371 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=82880 blocks=64 renderTick=5
+07-26 17:48:50.371 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=82880 blocks=64 renderTick=5
+07-26 17:48:50.371 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785059324184 intent=hotel status=ready components=2 dataChars=42269 sequence=6 renderTick=5 multiTaskTick=0
+07-26 17:48:50.371 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][A2uiHomeSurfaceUpdate] surfaceId=loop_surface_1785059324184 intent=hotel status=ready components=2 dataChars=42269 sequence=6 renderTick=5 multiTaskTick=0
+07-26 17:48:50.372 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: [AIPhone][MultiAgentUiResult] conversation=c75cafde7 turn=t975a1f01 task=k7 surface=loop_surface_1785059324184 state=result
+07-26 17:48:50.372 62439 62439 I A03D00/com.example.aiphonedemo/JSAPP: [AIPhone][MultiAgentUiResult] conversation=c75cafde7 turn=t975a1f01 task=k7 surface=loop_surface_1785059324184 state=result
+`;
+
 const realC20SearchDataFirstLog = `
   [AIPhone][MultiAgentInput] conversation=c20 turn=search-1 task=input-1
   [AIPhone][MultiAgentDataTask] conversation=c20 turn=search-1 task=data-1 round=1 tool=hotel.search predecessor=none path=none target=none binding=false
@@ -65,6 +92,89 @@ test('accepts the preserved C20 detail order with a provider request before the 
   assert.equal(evidence.ok, true);
   assert.equal(evidence.surfaceId, 'detail-1');
   assert.equal(evidence.operation, 'getHotelDetail');
+});
+
+test('accepts the real C20 detail lifecycle that finishes after its action result', () => {
+  const evidence = hotelMultiAgentDetailEvidence(realPostActionC20DetailHilog, {
+    expectedConversationId: 'c75cafde7',
+    currentSurfaceId: 'loop_surface_1785059300279'
+  });
+  assert.equal(evidence.ok, true);
+  assert.equal(evidence.surfaceId, 'loop_surface_1785059324184');
+  assert.equal(evidence.turnId, 't975a1f01');
+  assert.equal(evidence.taskId, 'k7');
+});
+
+test('rejects ambiguous, failed, late, or cross-surface post-action detail evidence', () => {
+  const options = {
+    expectedConversationId: 'c75cafde7',
+    currentSurfaceId: 'loop_surface_1785059300279'
+  };
+  const requestLine =
+    '07-26 17:48:46.645 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+    '[AIPhone][RollingGoHotelRequest] operation=getHotelDetail';
+  const responseLine =
+    '07-26 17:48:47.859 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+    '[AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=success sources=1';
+  const documentLine =
+    '07-26 17:48:50.371 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+    '[AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=82880 blocks=64 renderTick=5';
+  const insertBefore = (source, anchor, line) => source.replace(anchor, `${line}\n${anchor}`);
+  const lateData = realPostActionC20DetailHilog.split('\n');
+  const dataResultLines = lateData.filter((line) => line.includes('[MultiAgentDataResult]'));
+  const dataAfterTerminal = lateData
+    .filter((line) => !line.includes('[MultiAgentDataResult]'))
+    .join('\n') + dataResultLines.join('\n');
+  const corruptions = [{
+    name: 'failed data result beside a success',
+    log: insertBefore(realPostActionC20DetailHilog, requestLine,
+      '07-26 17:48:45.000 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][MultiAgentDataResult] conversation=c75cafde7 turn=t975a1f01 task=k8 ' +
+      'tool=hotel.detail status=error sources=0 error=true')
+  }, {
+    name: 'correlated task error',
+    log: insertBefore(realPostActionC20DetailHilog, requestLine,
+      '07-26 17:48:45.001 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][MultiAgentTaskError] conversation=c75cafde7 turn=t975a1f01 task=k8 code=PROVIDER_FAILED')
+  }, {
+    name: 'late duplicate UI task',
+    log: insertBefore(realPostActionC20DetailHilog, requestLine,
+      '07-26 17:48:45.002 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][MultiAgentUiTask] conversation=c75cafde7 turn=t975a1f01 task=k7 dataTasks=k8')
+  }, {
+    name: 'UI task after the follow-up terminal',
+    log: realPostActionC20DetailHilog +
+      '07-26 17:48:51.000 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][MultiAgentUiTask] conversation=c75cafde7 turn=t975a1f01 task=k7 dataTasks=k8\n'
+  }, {
+    name: 'failed provider response beside a success',
+    log: insertBefore(realPostActionC20DetailHilog, responseLine,
+      '07-26 17:48:47.000 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][RollingGoHotelResponse] operation=getHotelDetail provider=RollingGo status=error sources=0')
+  }, {
+    name: 'invalid hotel document beside a valid document',
+    log: insertBefore(realPostActionC20DetailHilog, documentLine,
+      '07-26 17:48:49.000 62439 62439 I A00000/com.example.aiphonedemo/AIPhone: ' +
+      '[AIPhone][HtmlHomeDocument] source=tool kind=hotel chars=0 blocks=0 renderTick=5')
+  }, {
+    name: 'data result after the UI terminal',
+    log: dataAfterTerminal
+  }, {
+    name: 'cross-conversation follow-up',
+    log: realPostActionC20DetailHilog.replaceAll(
+      'conversation=c75cafde7 turn=t975a1f01',
+      'conversation=other turn=t975a1f01'
+    )
+  }, {
+    name: 'cross-surface UI terminal',
+    log: realPostActionC20DetailHilog.replaceAll(
+      'surface=loop_surface_1785059324184 state=result',
+      'surface=loop_surface_999 state=result'
+    )
+  }];
+  corruptions.forEach(({ name, log }) => {
+    assert.equal(hotelMultiAgentDetailEvidence(log, options).ok, false, name);
+  });
 });
 
 test('rejects C20 detail evidence with a wrong task, surface, operation, response, or terminal order', () => {

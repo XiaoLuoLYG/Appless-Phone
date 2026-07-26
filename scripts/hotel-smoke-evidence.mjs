@@ -228,43 +228,66 @@ export function hotelMultiAgentDetailEvidence(logText, options = {}) {
     item.fields.dataTasks === dataTask.fields.task);
   if (uiTasks.length !== 1) return detailFailure('missing_or_duplicate_ui_task');
   const uiTask = uiTasks[0];
-  const dataResults = all.filter((item) => item.index > dataTask.index && item.index < action.resultIndex &&
-    item.marker === 'MultiAgentDataResult' && item.fields.conversation === action.conversationId &&
-    item.fields.turn === dataTask.fields.turn && item.fields.task === dataTask.fields.task &&
-    item.fields.tool === 'hotel.detail' && ['success', 'partial'].includes(item.fields.status) &&
-    item.fields.error === 'false' && /^[1-9]\d*$/.test(item.fields.sources || ''));
-  if (dataResults.length !== 1) return detailFailure('missing_or_invalid_data_result');
-  const dataResult = dataResults[0];
-  const requests = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
-    item.marker === 'RollingGoHotelRequest' && item.fields.operation === 'getHotelDetail');
-  const responses = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
-    item.marker === 'RollingGoHotelResponse' && item.fields.operation === 'getHotelDetail' &&
-    item.fields.provider === 'RollingGo' && ['success', 'partial'].includes(item.fields.status) &&
-    /^[1-9]\d*$/.test(item.fields.sources || ''));
-  if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index) {
-    return detailFailure('missing_or_invalid_provider_result');
-  }
-  if (dataTask.index >= requests[0].index || uiTask.index >= requests[0].index) {
-    return detailFailure('late_correlated_task');
-  }
-  const documents = all.filter((item) => item.index > dataResult.index && item.index < action.resultIndex &&
-    item.marker === 'HtmlHomeDocument' && item.fields.source === 'tool' && item.fields.kind === 'hotel' &&
-    /^[1-9]\d*$/.test(item.fields.chars || '') && /^[1-9]\d*$/.test(item.fields.blocks || ''));
-  if (documents.length !== 1) return detailFailure('missing_or_duplicate_document');
-  const document = documents[0];
-  const uiResults = all.filter((item) => item.index > document.index && item.index < action.resultIndex &&
+  const uiResults = all.filter((item) => item.index > uiTask.index &&
     item.marker === 'MultiAgentUiResult' && item.fields.conversation === action.conversationId &&
     item.fields.turn === dataTask.fields.turn && item.fields.task === uiTask.fields.task &&
     item.fields.state === 'result' && item.fields.surface && item.fields.surface !== 'none');
   if (uiResults.length !== 1) return detailFailure('missing_or_duplicate_ui_result');
   const result = uiResults[0];
+  const followUpDataTasks = all.filter((item) => item.index > actionRun.index &&
+    item.marker === 'MultiAgentDataTask' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn && item.fields.tool === 'hotel.detail');
+  const followUpUiTasks = all.filter((item) => item.index > actionRun.index &&
+    item.marker === 'MultiAgentUiTask' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn && item.fields.dataTasks === dataTask.fields.task);
+  if (followUpDataTasks.length !== 1 || followUpUiTasks.length !== 1) {
+    return detailFailure('duplicate_or_late_correlated_task');
+  }
+  const taskErrors = all.filter((item) => item.index > Math.min(dataTask.index, uiTask.index) &&
+    item.marker === 'MultiAgentTaskError' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn);
+  if (taskErrors.length > 0) return detailFailure('correlated_task_error');
+  const dataResults = all.filter((item) => item.index > dataTask.index &&
+    item.marker === 'MultiAgentDataResult' && item.fields.conversation === action.conversationId &&
+    item.fields.turn === dataTask.fields.turn && item.fields.task === dataTask.fields.task);
+  if (dataResults.length !== 1) return detailFailure('missing_or_duplicate_data_result');
+  const dataResult = dataResults[0];
+  if (dataResult.index >= result.index || dataResult.fields.tool !== 'hotel.detail' ||
+    !['success', 'partial'].includes(dataResult.fields.status) ||
+    dataResult.fields.error !== 'false' || !/^[1-9]\d*$/.test(dataResult.fields.sources || '')) {
+    return detailFailure('invalid_data_result');
+  }
+  const requests = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
+    item.marker === 'RollingGoHotelRequest' && item.fields.operation === 'getHotelDetail');
+  const responses = all.filter((item) => item.index > dataTask.index && item.index < dataResult.index &&
+    item.marker === 'RollingGoHotelResponse' && item.fields.operation === 'getHotelDetail');
+  if (requests.length !== 1 || responses.length !== 1 || requests[0].index >= responses[0].index ||
+    responses[0].fields.provider !== 'RollingGo' ||
+    !['success', 'partial'].includes(responses[0].fields.status) ||
+    !/^[1-9]\d*$/.test(responses[0].fields.sources || '')) {
+    return detailFailure('missing_or_invalid_provider_result');
+  }
+  if (dataTask.index >= requests[0].index || uiTask.index >= requests[0].index) {
+    return detailFailure('late_correlated_task');
+  }
+  const documents = all.filter((item) => item.index > dataResult.index && item.index < result.index &&
+    item.marker === 'HtmlHomeDocument' && item.fields.source === 'tool' && item.fields.kind === 'hotel');
+  if (documents.length !== 1) return detailFailure('missing_or_duplicate_document');
+  const document = documents[0];
+  if (!/^[1-9]\d*$/.test(document.fields.chars || '') ||
+    !/^[1-9]\d*$/.test(document.fields.blocks || '')) {
+    return detailFailure('invalid_document');
+  }
   const ready = all.filter((item) => item.index > document.index && item.index < result.index &&
-    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.surfaceId === result.fields.surface &&
-    item.fields.status === 'ready');
-  const calling = all.filter((item) => item.index > requests[0].index && item.index < responses[0].index &&
-    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.surfaceId === result.fields.surface &&
-    item.fields.status === 'calling_tool');
-  if (ready.length !== 1 || calling.length !== 1) return detailFailure('missing_or_invalid_surface_lifecycle');
+    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.status === 'ready');
+  const taskStart = Math.max(dataTask.index, uiTask.index);
+  const calling = all.filter((item) => item.index > taskStart && item.index < document.index &&
+    item.marker === 'A2uiHomeSurfaceUpdate' && item.fields.status === 'calling_tool');
+  if (ready.length !== 1 || calling.length !== 1 ||
+    ready[0].fields.surfaceId !== result.fields.surface ||
+    calling[0].fields.surfaceId !== result.fields.surface) {
+    return detailFailure('missing_or_invalid_surface_lifecycle');
+  }
   return {
     ok: true,
     surfaceId: result.fields.surface,
