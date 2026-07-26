@@ -97,6 +97,8 @@ export interface LeaderPersonaMetadata {
 export interface LeaderPlanningContext {
   tools: LeaderToolMetadata[];
   personas: LeaderPersonaMetadata[];
+  lockedPersonaId?: string;
+  lockedSkillId?: string;
 }
 
 export type LeaderDataTaskInputNormalizer = (

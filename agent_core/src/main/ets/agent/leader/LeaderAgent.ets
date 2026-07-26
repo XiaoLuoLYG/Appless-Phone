@@ -310,12 +310,17 @@ export class LeaderAgent extends MessageDrivenAgent {
         this.timeoutPostObservationPlanning(key, state);
       }, this.postObservationPlanningBudgetMs(state));
     }
+    const planningContext: LeaderPlanningContext = this.copyPlanningContext(this.planningContext);
+    if (state.personaId.length > 0) {
+      planningContext.lockedPersonaId = state.personaId;
+      planningContext.lockedSkillId = state.skillId;
+    }
     try {
       Promise.race([
         this.planner.plan(
           message,
           input,
-          this.copyPlanningContext(this.planningContext),
+          planningContext,
           state.round,
           planningSignal,
           trustedCurrentLocalDate

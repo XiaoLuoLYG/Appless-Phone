@@ -477,6 +477,24 @@ class ObservationPromptAwareModel implements LocalModel {
   }
 }
 
+class LockedSelectionPromptAwareModel implements LocalModel {
+  prompts: string[] = [];
+
+  async complete(prompt: string): Promise<string> {
+    this.prompts.push(prompt);
+    const locked: boolean = prompt.indexOf(
+      'Locked turn persona/skill: {"personaId":"travel_companion","skillId":""}'
+    ) >= 0 && prompt.indexOf(
+      'Every later-round decision must preserve this exact personaId and skillId.'
+    ) >= 0;
+    return locked ? ANSWER_FROM_TRAVEL_OBSERVATION :
+      ANSWER_FROM_TRAVEL_OBSERVATION.replace(
+        '"personaId":"travel_companion"',
+        '"personaId":"default_companion"'
+      );
+  }
+}
+
 class TerminalRepairPromptAwareModel implements LocalModel {
   prompts: string[] = [];
   private readonly firstDecision: string;
@@ -1267,6 +1285,75 @@ export default function multiAgentLeaderPlannerTest() {
           'For roundAction execute, omit answer.'
       ) >= 0).assertTrue();
     });
+
+    it('preserves the locked first-round persona and skill in later-round prompt and decision', 0, async () => {
+      const model = new LockedSelectionPromptAwareModel();
+      const context = planningContext();
+      context.personas.push({
+        personaId: 'default_companion',
+        name: 'Default Companion',
+        soul: 'General conversation.',
+        memory: '',
+        previous: false,
+        activeSkills: []
+      });
+      context.lockedPersonaId = 'travel_companion';
+      context.lockedSkillId = '';
+
+      const decision = await new MultiAgentLeaderPlanner(model).plan(
+        inputMessage(),
+        completedTravelInput(),
+        context,
+        2
+      );
+
+      expect(decision.personaId).assertEqual('travel_companion');
+      expect(decision.skillId).assertEqual('');
+      expect(model.prompts.length).assertEqual(1);
+    });
+
+    it('rejects a later-round persona switch and clearing a locked skill to bypass its capability set', 0,
+      async () => {
+        const personaSwitchContext = planningContext();
+        personaSwitchContext.personas.push({
+          personaId: 'default_companion',
+          name: 'Default Companion',
+          soul: 'General conversation.',
+          memory: '',
+          previous: false,
+          activeSkills: []
+        });
+        personaSwitchContext.lockedPersonaId = 'travel_companion';
+        personaSwitchContext.lockedSkillId = '';
+        const switched = ANSWER_FROM_TRAVEL_OBSERVATION.replace(
+          '"personaId":"travel_companion"',
+          '"personaId":"default_companion"'
+        );
+        let personaError: string = '';
+        try {
+          await new MultiAgentLeaderPlanner(new QueueLocalModel([switched])).plan(
+            inputMessage(), completedTravelInput(), personaSwitchContext, 2
+          );
+        } catch (error) {
+          personaError = error instanceof Error ? error.message : 'unknown';
+        }
+
+        const skillBypassContext = planningContext();
+        skillBypassContext.lockedPersonaId = 'travel_companion';
+        skillBypassContext.lockedSkillId = 'travel-planning';
+        let skillError: string = '';
+        try {
+          await new MultiAgentLeaderPlanner(new QueueLocalModel([SOCIAL_ONLY_DECISION])).plan(
+            inputMessage(), { text: '帮我查看我今天 X 和 Slack 上的消息' },
+            skillBypassContext, 2
+          );
+        } catch (error) {
+          skillError = error instanceof Error ? error.message : 'unknown';
+        }
+
+        expect(personaError).assertEqual('LEADER_PERSONA_SKILL_SWITCH');
+        expect(skillError).assertEqual('LEADER_PERSONA_SKILL_SWITCH');
+      });
 
     it('carries the old hotel date and anti-invention contract in the shared prompt', 0, async () => {
       const model: QueueLocalModel = new QueueLocalModel([PARALLEL_DECISION]);

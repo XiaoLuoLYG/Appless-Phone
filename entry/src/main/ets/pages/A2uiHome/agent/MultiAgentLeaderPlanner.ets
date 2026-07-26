@@ -66,6 +66,7 @@ const OVERLAPPING_VIDEO_TOOLS_ERROR: string = 'LEADER_OVERLAPPING_VIDEO_TOOLS';
 const TASK_INPUT_INVALID_ERROR: string = 'LEADER_TASK_INPUT_INVALID';
 const ACTION_OWNED_DATA_TASK_ERROR: string = 'LEADER_ACTION_OWNED_DATA_TASK';
 const SKILL_CAPABILITY_ERROR: string = 'LEADER_SKILL_CAPABILITY_VIOLATION';
+const PERSONA_SKILL_SWITCH_ERROR: string = 'LEADER_PERSONA_SKILL_SWITCH';
 const EXPLICIT_MAPS_SELECTION_ERROR: string = 'LEADER_EXPLICIT_MAPS_SELECTION';
 const PREMATURE_MAPS_DETAILS_ERROR: string = 'LEADER_PREMATURE_MAPS_DETAILS';
 const PREMATURE_CALENDAR_UPDATE_ACTION_ERROR: string =
@@ -1326,6 +1327,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     if (toolCatalog.length > MAX_LEADER_TOOL_CATALOG_CHARS) {
       throw new Error('LEADER_TOOL_CATALOG_LIMIT');
     }
+    const lockedSelection: string = context.lockedPersonaId === undefined ? '' :
+      'Locked turn persona/skill: ' + JSON.stringify({
+        personaId: context.lockedPersonaId,
+        skillId: context.lockedSkillId
+      }) + '\nEvery later-round decision must preserve this exact personaId and skillId.';
     const result: string = [
       'You are the Appless Leader Agent.',
       'Return exactly one LeaderDecision JSON object.',
@@ -1377,6 +1383,7 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       hotelSearchPlanningContract(currentLocalDate),
       'Maximum planning rounds: 3.',
       'Round: ' + round.toString(),
+      lockedSelection,
       'Context: ' + JSON.stringify(input),
       'Registry capabilities: ' + toolCatalog,
       'Personas: ' + JSON.stringify(context.personas)
@@ -1489,6 +1496,12 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       (reasonCode !== undefined &&
         (typeof reasonCode !== 'string' || reasonCode.trim().length === 0))) {
       throw new Error('Leader decision fields are malformed.');
+    }
+    if ((context.lockedPersonaId !== undefined || context.lockedSkillId !== undefined) &&
+      (typeof context.lockedPersonaId !== 'string' || context.lockedPersonaId.length === 0 ||
+        typeof context.lockedSkillId !== 'string' ||
+        personaId !== context.lockedPersonaId || skillId !== context.lockedSkillId)) {
+      throw new Error(PERSONA_SKILL_SWITCH_ERROR);
     }
     if (!this.validPersonaSkill(context, personaId, skillId)) {
       throw new Error('Leader persona and skill must be an exact registered pair.');

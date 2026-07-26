@@ -206,6 +206,7 @@ class RoundScriptedPlanner implements LeaderPlanner {
   calls: number = 0;
   inputs: InputUserPayload[] = [];
   rounds: number[] = [];
+  contexts: LeaderPlanningContext[] = [];
   private readonly decisions: LeaderDecision[];
 
   constructor(decisions: LeaderDecision[]) {
@@ -215,12 +216,13 @@ class RoundScriptedPlanner implements LeaderPlanner {
   async plan(
     _message: AgentMessage,
     input: InputUserPayload,
-    _context: LeaderPlanningContext,
+    context: LeaderPlanningContext,
     round: number = 1
   ): Promise<LeaderDecision> {
     this.calls++;
     this.inputs.push(input);
     this.rounds.push(round);
+    this.contexts.push(context);
     if (this.decisions.length === 0) {
       throw new Error('No scripted Leader decision');
     }
@@ -1697,10 +1699,11 @@ export default function leaderAgentTest() {
 
     it('starts a dependent second round with only bounded observation digests', 0, async () => {
       const bus = new LinkedMessageBus();
-      const planner = new RoundScriptedPlanner([
-        semanticDecision([semanticDataTask('place')]),
-        semanticDecision([], 'answer')
-      ]);
+      const first = semanticDecision([semanticDataTask('place')]);
+      first.skillId = 'travel-planning';
+      const second = semanticDecision([], 'answer');
+      second.skillId = 'travel-planning';
+      const planner = new RoundScriptedPlanner([first, second]);
       const leader = new LeaderAgent(bus, planner, semanticPlanningContext());
       const observer = bus.openReader();
       leader.start();
@@ -1720,6 +1723,12 @@ export default function leaderAgentTest() {
       expect(planner.inputs[1].recentObservations![0].summary).assertEqual('real result');
       expect(planner.inputs[1].recentObservations![0].entityRefs[0]).assertEqual('entity-1');
       expect(JSON.stringify(planner.inputs[1]).indexOf('must-not-reach-model')).assertEqual(-1);
+      const firstContext = planner.contexts[0];
+      const secondContext = planner.contexts[1];
+      expect(firstContext.lockedPersonaId === undefined).assertTrue();
+      expect(firstContext.lockedSkillId === undefined).assertTrue();
+      expect(secondContext.lockedPersonaId).assertEqual('travel_companion');
+      expect(secondContext.lockedSkillId).assertEqual('travel-planning');
 
       leader.stop();
       observer.close();
