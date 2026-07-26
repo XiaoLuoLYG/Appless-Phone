@@ -54,6 +54,13 @@ export async function runC19CleanupFinalizer({ cleanupRequired, runDelete, runAb
   return { cleanup, absence };
 }
 
+export function shouldPreserveSmokeAppSession(currentCase, previousCase, previousSummary) {
+  const dependency = currentCase?.dependsOnCaseId || '';
+  return dependency.length > 0 &&
+    dependency === (previousCase?.id || '') &&
+    previousSummary?.ok === true;
+}
+
 function duplicateHilogChannelPair(left, right) {
   return (left === 'A00000/AIPHONE' && right === 'A03D00/JSAPP') ||
     (left === 'A03D00/JSAPP' && right === 'A00000/AIPHONE');

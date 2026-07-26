@@ -16,6 +16,7 @@ import {
   visibleMailBodyText,
   modelTransportEvidence,
   multiAgentActionEvidence,
+  shouldPreserveSmokeAppSession,
   multiAgentTurnEvidence,
   socialDraftUiEvidence,
   socialReplyButtonCenter,
@@ -1766,6 +1767,22 @@ test('lists exactly C01-C20 and F01-F16 without excluded sends', () => {
   assert.equal(full.find((item) => item.id === 'F15')?.expectedDynamicQualifiedName,
     'googledocs_search_documents');
   assert.doesNotMatch(serialized, /不确认直接发送|gmail\.message\.send/);
+});
+
+test('maps the positional Gmail confirmation query to the retained F08 apply action', () => {
+  const [gmailApply] = listedCases(['确认应用刚才的 Gmail 草稿']);
+  assert.equal(gmailApply.id, 'F08');
+  assert.deepEqual(gmailApply.expectedToolIds, ['gmail.draft.apply']);
+  assert.equal(gmailApply.retryLimit, 0);
+});
+
+test('preserves the Gmail draft surface only for a successful adjacent F07 to F08 pair', () => {
+  const f07 = { id: 'F07' };
+  const f08 = { id: 'F08', dependsOnCaseId: 'F07' };
+  assert.equal(shouldPreserveSmokeAppSession(f08, f07, { ok: true }), true);
+  assert.equal(shouldPreserveSmokeAppSession(f08, f07, { ok: false }), false);
+  assert.equal(shouldPreserveSmokeAppSession(f08, null, null), false);
+  assert.equal(shouldPreserveSmokeAppSession(f08, { id: 'F06' }, { ok: true }), false);
 });
 
 test('lists Gmail reply send only behind explicit safe manual configuration', () => {
