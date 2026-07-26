@@ -1034,7 +1034,8 @@ export function multiAgentActionEvidence(logText, options = {}) {
     if (!plan.fields.conversation || !plan.fields.turn || !plan.fields.task ||
       plan.fields.uiTask !== plan.fields.task || actions.length !== 1 ||
       fabricatedRun || matchingResults.length !== 1 || result.index <= plan.index ||
-      !result.fields.surface || result.fields.surface === 'none' || result.fields.surface === 'invalid' || !result.fields.plan ||
+      !result.fields.surface || result.fields.surface === 'none' ||
+      (result.fields.surface === 'invalid' && options.expectedVirtual !== true) || !result.fields.plan ||
       !result.fields.run || !ACTION_STATUSES.has(result.fields.status)) continue;
     const chain = all.filter((item) => item.index >= plan.index && item.index <= result.index);
     const truthful = !externalOrSyntheticError(chain) || result.fields.status !== 'success';

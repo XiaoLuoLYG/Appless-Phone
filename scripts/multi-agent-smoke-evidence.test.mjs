@@ -1585,6 +1585,35 @@ test('correlates a virtual action request with its exact terminal result', () =>
   assert.equal(result.surfaceId, 's1');
 });
 
+test('accepts the exact C11b virtual memory terminal with its invalid surface sentinel', () => {
+  const result = multiAgentActionEvidence(`
+    [AIPhone][MultiAgentActionPlan] conversation=c77776924 turn=t921f1276 task=k2 uiTask=k2 dataTasks=none actions=memory.update virtual=true
+    [AIPhone][PersonaMemoryUpdate] ok=true personaId=food_companion summary=我只喝瑞幸咖啡
+    [AIPhone][MultiAgentActionResult] conversation=c77776924 turn=t921f1276 task=k2 surface=invalid plan=p3 run=r4 status=success
+    [AIPhone][MultiAgentTurnResult] conversation=c77776924 turn=t921f1276 task=k1 status=success surface=invalid roundCount=0 messageChars=17
+  `, {
+    expectedActionId: 'memory.update',
+    expectedConversationId: 'c77776924',
+    expectedTurnId: 't921f1276',
+    expectedVirtual: true
+  });
+  assert.equal(result.complete, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.planId, 'p3');
+  assert.equal(result.runId, 'r4');
+  assert.equal(result.status, 'success');
+  assert.equal(result.surfaceId, 'invalid');
+});
+
+test('rejects invalid surface sentinels for direct actions', () => {
+  const result = multiAgentActionEvidence(`
+    [AIPhone][MultiAgentActionRun] conversation=c1 turn=t1 task=a1 surface=invalid plan=p1 run=r1 action=hotel.navigate source=hotel.search
+    [AIPhone][MultiAgentActionResult] conversation=c1 turn=t1 task=a1 surface=invalid plan=p1 run=r1 status=success
+  `, { expectedActionId: 'hotel.navigate', expectedVirtual: false });
+  assert.equal(result.complete, false);
+  assert.equal(result.ok, false);
+});
+
 test('keeps filtered nonadjacent virtual ActionResult copies duplicated', () => {
   const logs = `
     07-22 09:42:00.001  4821  4821 I A00000/AIPhone: [AIPhone][MultiAgentInput] conversation=c1 turn=t1 task=a1
