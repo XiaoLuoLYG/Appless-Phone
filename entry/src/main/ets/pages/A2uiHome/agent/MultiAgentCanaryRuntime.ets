@@ -111,6 +111,7 @@ interface GmailDraftApplySurfaceBinding {
   actionJson: string;
   fingerprint: string;
   runtimeGeneration: number;
+  surface: A2uiSurfaceState;
   surfaceId: string;
   surfaceStatus: string;
 }
@@ -945,6 +946,18 @@ class CanarySurfaceAuthorizer implements SurfaceActionAuthorizer {
   }
 }
 
+function isSuccessfulRegisteredActionTerminal(surface: A2uiSurfaceState): boolean {
+  try {
+    const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+    return model.summary.text === '操作状态：success' &&
+      model.summary.toolName === 'action' &&
+      model.summary.dataLabel === 'actionStatus' &&
+      model.summary.count === 0;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function gmailDraftApplySurfaceBinding(
   snapshot: RegisteredPageSnapshot | null,
   currentHost: A2uiSurfaceState | null
@@ -960,7 +973,8 @@ function gmailDraftApplySurfaceBinding(
     snapshot.surface.surfaceId !== currentHost.surfaceId ||
     snapshot.document.surfaceId !== snapshot.surface.surfaceId ||
     snapshot.document.generatedAt.trim().length === 0 ||
-    registeredPageSourceToolId(snapshot.surface) !== 'gmail.draft.create') {
+    (registeredPageSourceToolId(snapshot.surface) !== 'gmail.draft.create' &&
+      !isSuccessfulRegisteredActionTerminal(snapshot.surface))) {
     return null;
   }
   const currentHostSnapshot: RegisteredPageSnapshot = {
@@ -1017,9 +1031,38 @@ function gmailDraftApplySurfaceBinding(
     actionJson,
     fingerprint: registeredPageSnapshotFingerprint(snapshot),
     runtimeGeneration: surfaceGeneration,
+    surface: JSON.parse(JSON.stringify(currentHost)) as A2uiSurfaceState,
     surfaceId: snapshot.surface.surfaceId,
     surfaceStatus: snapshot.surface.status
   };
+}
+
+function isSuccessfulGmailDraftTerminalTransition(
+  providerSurface: A2uiSurfaceState,
+  terminalSurface: A2uiSurfaceState
+): boolean {
+  if (terminalSurface.sequence !== providerSurface.sequence + 1) {
+    return false;
+  }
+  let providerModel: A2uiRuntimeDataModel;
+  let terminalModel: A2uiRuntimeDataModel;
+  try {
+    providerModel = JSON.parse(providerSurface.dataModelJson) as A2uiRuntimeDataModel;
+    terminalModel = JSON.parse(terminalSurface.dataModelJson) as A2uiRuntimeDataModel;
+  } catch (_error) {
+    return false;
+  }
+  if (providerModel.summary.dataLabel === 'actionStatus' ||
+    !isSuccessfulRegisteredActionTerminal(terminalSurface)) {
+    return false;
+  }
+  terminalModel.summary = providerModel.summary;
+  const normalizedTerminal = JSON.parse(JSON.stringify(terminalSurface)) as A2uiSurfaceState;
+  normalizedTerminal.sequence = providerSurface.sequence;
+  normalizedTerminal.dataModelJson = JSON.stringify(terminalModel);
+  const normalizedProvider = JSON.parse(JSON.stringify(providerSurface)) as A2uiSurfaceState;
+  normalizedProvider.dataModelJson = JSON.stringify(providerModel);
+  return JSON.stringify(normalizedTerminal) === JSON.stringify(normalizedProvider);
 }
 
 function gmailDraftCreateOutputBinding(
@@ -1080,13 +1123,14 @@ function exactCurrentGmailDraftApplyAction(
   hostGeneration: number
 ): A2uiAction | null {
   const current = gmailDraftApplySurfaceBinding(snapshot, currentHost);
-  if (authority === null || current === null ||
+  if (authority === null || current === null || currentHost === null ||
     hostGeneration !== authority.runtimeGeneration + 1 ||
     current.runtimeGeneration !== authority.runtimeGeneration ||
     current.surfaceId !== authority.surfaceId ||
     current.surfaceStatus !== authority.surfaceStatus ||
-    current.fingerprint !== authority.fingerprint ||
-    current.actionJson !== authority.actionJson) {
+    current.actionJson !== authority.actionJson ||
+    (current.fingerprint !== authority.fingerprint &&
+      !isSuccessfulGmailDraftTerminalTransition(authority.surface, currentHost))) {
     return null;
   }
   return current.action;

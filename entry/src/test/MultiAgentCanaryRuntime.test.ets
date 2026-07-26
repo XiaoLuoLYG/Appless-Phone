@@ -1058,6 +1058,20 @@ function providerGmailDraftSurface(sequence: number): A2uiSurfaceState {
   return surface;
 }
 
+function successfulGmailDraftTerminalSurface(surface: A2uiSurfaceState): A2uiSurfaceState {
+  const terminal = JSON.parse(JSON.stringify(surface)) as A2uiSurfaceState;
+  const model = JSON.parse(terminal.dataModelJson) as A2uiRuntimeDataModel;
+  model.summary = {
+    text: '操作状态：success',
+    toolName: 'action',
+    dataLabel: 'actionStatus',
+    count: 0
+  };
+  terminal.dataModelJson = JSON.stringify(model);
+  terminal.sequence = surface.sequence + 1;
+  return terminal;
+}
+
 function registeredPageActionOutput(
   actionId: string,
   surface: A2uiSurfaceState,
@@ -2355,6 +2369,7 @@ export default function multiAgentCanaryRuntimeTest() {
         let output: Object = JSON.parse('{"providerStatus":"exact"}') as Object;
         if (actionId === 'gmail.draft.create') {
           const createdSurface = providerGmailDraftSurface(hostGeneration);
+          createdSurface.sequence = 7;
           currentHost = createdSurface;
           currentSnapshot = pageSnapshot(createdSurface, 1);
           output = registeredPageActionOutput(actionId, createdSurface, context);
@@ -2382,6 +2397,13 @@ export default function multiAgentCanaryRuntimeTest() {
         { text: '' },
         hostGeneration
       ) as MultiAgentSettledOutcome;
+      expect(currentHost === null).assertFalse();
+      const providerSurface: A2uiSurfaceState = currentHost === null ?
+        providerGmailDraftSurface(hostGeneration) : currentHost;
+      const providerSurfaceJson = JSON.stringify(providerSurface);
+      const terminalSurface = successfulGmailDraftTerminalSurface(providerSurface);
+      currentHost = terminalSurface;
+      currentSnapshot = pageSnapshot(terminalSurface, 2);
       const f07Document = currentSnapshot === null ?
         null : (currentSnapshot as RegisteredPageSnapshot).document;
       hostGeneration = 42;
@@ -2396,6 +2418,9 @@ export default function multiAgentCanaryRuntimeTest() {
       }
 
       expect(created.status).assertEqual('success');
+      expect(providerSurface.sequence).assertEqual(7);
+      expect(terminalSurface.sequence).assertEqual(8);
+      expect(JSON.stringify(terminalSurface) === providerSurfaceJson).assertFalse();
       expect(applied.status).assertEqual('success');
       expect(calls.length).assertEqual(2);
       expect(calls[0].actionId).assertEqual('gmail.draft.create');
@@ -2518,6 +2543,7 @@ export default function multiAgentCanaryRuntimeTest() {
       ) as MultiAgentSettledOutcome;
       currentHost = JSON.parse(JSON.stringify(currentHost)) as A2uiSurfaceState;
       currentHost.title = 'forged-current-host';
+      currentSnapshot = pageSnapshot(currentHost, 2);
       hostGeneration = 42;
       const applied = await runtime.submit(
         '确认应用刚才的 Gmail 草稿',
