@@ -50,7 +50,7 @@ export {
   mergeSlotObservationIntoMultiTaskSurface,
   resolveMultiTaskSlotId
 } from './src/main/ets/agent/MultiTaskSurfaceMerge';
-export { MultiTaskBoardData } from './src/main/ets/agent/MultiToolTypes';
+export { MultiTaskBoardData, MultiToolSlotCall } from './src/main/ets/agent/MultiToolTypes';
 export { A2uiObservationDigest, summarizeA2uiObservation, summarizeAppliedA2uiSurface } from './src/main/ets/agent/A2uiObservationDigest';
 export {
   ToolRegistry,

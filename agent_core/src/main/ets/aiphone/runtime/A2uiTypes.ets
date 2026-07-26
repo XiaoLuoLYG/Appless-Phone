@@ -38,6 +38,7 @@ export interface A2uiAction {
   variant: string;
   kind: string;
   args?: Object;
+  sourceSectionId?: string;
 }
 
 export interface A2uiLabelValueData {

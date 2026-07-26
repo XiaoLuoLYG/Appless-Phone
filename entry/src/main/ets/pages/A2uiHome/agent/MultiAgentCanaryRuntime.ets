@@ -93,6 +93,7 @@ import {
 } from './AiphoneRegisteredActionExecutor';
 import {
   RegisteredPageSnapshot,
+  registeredPageActionSourceToolId,
   registeredPageSourceToolId,
   registeredPageSnapshotFingerprint,
   resolveRegisteredPageAction,
@@ -1661,7 +1662,7 @@ export class MultiAgentCanaryRuntime {
       !isHtmlHomeActionAllowed(document, clicked)) {
       return Promise.resolve(false);
     }
-    const sourceToolId = registeredPageSourceToolId(surface);
+    const sourceToolId = registeredPageActionSourceToolId(surface, document, clicked);
     const route = resolveRegisteredPageAction(sourceToolId, clicked);
     if (route === null || route.action.args === undefined) {
       return Promise.resolve(false);

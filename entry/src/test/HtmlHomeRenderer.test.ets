@@ -8,6 +8,7 @@ import {
   parseHotelSearchRequest
 } from '@loop/agent-core';
 import { renderHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeRenderer';
+import { buildMultiTaskHomePayload } from '../main/ets/pages/A2uiHome/html/HtmlMultiTaskHomeRenderer';
 import { createHtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeSnapshot';
 import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from '../main/ets/pages/A2uiHome/html/HtmlHomeTypes';
 import { parseHtmlHomeAction } from '../main/ets/pages/A2uiHome/components/HtmlHomeSurfaceView';
@@ -1319,6 +1320,32 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(documentFixture());
 
       expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+    });
+
+    it('binds an embedded multi-task click to its exact section', 0, () => {
+      const embedded = documentFixture();
+      const document = documentFixture();
+      document.kind = 'multi-task';
+      document.blocks = [{
+        id: 'slot-review',
+        kind: 'multi-task-section',
+        title: 'Review',
+        sectionId: 'slot-review',
+        metrics: [],
+        rows: [],
+        actions: [],
+        embeddedDocument: embedded
+      }];
+      const payload = buildMultiTaskHomePayload(document);
+      const parsed = parseHtmlHomeAction(
+        '{"id":"doc-action","label":"Run Action","prompt":"run it",' +
+        '"variant":"primary","kind":"prompt","sourceSectionId":"slot-review","args":{"id":"real"}}'
+      );
+
+      expect(payload.embeds.length).assertEqual(1);
+      expect(payload.embeds[0].html.indexOf('sourceSectionId')).assertLarger(-1);
+      expect(payload.embeds[0].html.indexOf('slot-review')).assertLarger(-1);
+      expect(JSON.stringify(parsed).indexOf('"sourceSectionId":"slot-review"')).assertLarger(-1);
     });
 
     it('renders ride tool panel with no fake map before driver coordinates', 0, () => {

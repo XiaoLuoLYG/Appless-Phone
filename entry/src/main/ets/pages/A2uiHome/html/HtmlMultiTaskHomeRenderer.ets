@@ -26,14 +26,18 @@ export interface MultiTaskHomePayload {
   isBusy: boolean;
 }
 
-const EMBEDDED_ACTION_BRIDGE: string =
-  '<script>(function(){window.AIPhoneHome=window.AIPhoneHome||{};' +
-  'window.AIPhoneHome.postAction=function(raw){' +
+function embeddedActionBridge(sectionId: string): string {
+  const encodedSectionId = escapeScriptJson(JSON.stringify(sectionId));
+  return '<script>(function(){window.AIPhoneHome=window.AIPhoneHome||{};' +
+  'window.AIPhoneHome.postAction=function(raw){var action;' +
+  'try{action=JSON.parse(raw);action.sourceSectionId=' + encodedSectionId +
+  ';raw=JSON.stringify(action);}catch(parseError){return;}' +
   'try{if(window.parent&&window.parent!==window&&window.parent.AIPhoneHome&&' +
   'typeof window.parent.AIPhoneHome.postAction===\'function\'){' +
   'window.parent.AIPhoneHome.postAction(raw);return;}}catch(e){}' +
   'try{window.parent.postMessage({type:\'aiphone-action\',raw:raw},\'*\');}catch(e2){}};' +
   '})();</script>';
+}
 
 const MULTI_TASK_CSS: string = `
 :root {
@@ -394,12 +398,13 @@ const MULTI_TASK_SCRIPT: string = `
 })();
 `;
 
-function injectEmbeddedActionBridge(html: string): string {
+function injectEmbeddedActionBridge(html: string, sectionId: string): string {
+  const bridge = embeddedActionBridge(sectionId);
   const headIndex = html.indexOf('<head>');
   if (headIndex >= 0) {
-    return html.substring(0, headIndex + 6) + EMBEDDED_ACTION_BRIDGE + html.substring(headIndex + 6);
+    return html.substring(0, headIndex + 6) + bridge + html.substring(headIndex + 6);
   }
-  return EMBEDDED_ACTION_BRIDGE + html;
+  return bridge + html;
 }
 
 function embeddedSectionHtml(block: HtmlHomeBlock, _isBusy: boolean): string {
@@ -407,7 +412,7 @@ function embeddedSectionHtml(block: HtmlHomeBlock, _isBusy: boolean): string {
     return '';
   }
   const html = renderHtmlHomeDocument(block.embeddedDocument, false);
-  return injectEmbeddedActionBridge(html);
+  return injectEmbeddedActionBridge(html, block.sectionId ?? block.id);
 }
 
 function multiTaskPayloadBlocks(blocks: HtmlHomeBlock[]): MultiTaskSectionBlockPayload[] {

@@ -50,6 +50,7 @@ import {
   RegisteredPageSnapshotStore,
   dispatchRegisteredPageActionCandidate,
   isRegisteredPageActionCandidate,
+  registeredPageActionSourceToolId,
   resolveRegisteredPageAction,
   resolveVirtualRegisteredPageAction
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
@@ -423,6 +424,78 @@ function pageSurface(sourceToolId: string, clicked: A2uiAction, sequence: number
     id: 'root',
     component: 'SurfaceRoot',
     actions: [clicked]
+  }];
+  surface.dataModelJson = JSON.stringify(model);
+  return surface;
+}
+
+function multiTaskPageSurface(
+  first: A2uiAction,
+  second: A2uiAction,
+  sequence: number
+): A2uiSurfaceState {
+  const firstSurface = pageSurface('calendar.events.search', first, sequence + 1);
+  const secondSurface = pageSurface('calendar.events.search', second, sequence + 2);
+  const surface = createSeedA2uiSurface();
+  const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+  model.summary.toolName = 'multi.task.batch';
+  model.summary.dataLabel = 'multiTask';
+  model.multiTask = {
+    batchId: 'batch-page-actions',
+    mode: 'parallel',
+    activeSectionId: 'slot-calendar-first',
+    sections: [{
+      slotId: 'slot-calendar-first',
+      toolId: 'calendar.events.search',
+      title: 'First calendar',
+      status: 'success',
+      summary: 'first result'
+    }, {
+      slotId: 'slot-calendar-second',
+      toolId: 'calendar.events.search',
+      title: 'Second calendar',
+      status: 'success',
+      summary: 'second result'
+    }]
+  };
+  model.sections = {
+    'slot-calendar-first': {
+      slotId: 'slot-calendar-first',
+      toolId: 'calendar.events.search',
+      title: 'First calendar',
+      status: 'success',
+      summary: 'first result',
+      observationDigest: 'first-digest',
+      failureKey: '',
+      embeddedSurface: firstSurface as Object
+    },
+    'slot-calendar-second': {
+      slotId: 'slot-calendar-second',
+      toolId: 'calendar.events.search',
+      title: 'Second calendar',
+      status: 'success',
+      summary: 'second result',
+      observationDigest: 'second-digest',
+      failureKey: '',
+      embeddedSurface: secondSurface as Object
+    }
+  };
+  surface.surfaceId = 'registered-multi-page-' + sequence.toString();
+  surface.rootId = 'root';
+  surface.title = 'multi.task.batch';
+  surface.intent = 'multi.task.batch';
+  surface.status = 'ready';
+  surface.sequence = sequence;
+  surface.runtimeOwner = 'multi_agent';
+  surface.runtimeGeneration = sequence;
+  surface.components = [{
+    id: 'root',
+    component: 'SurfaceRoot',
+    child: 'multi-board'
+  }, {
+    id: 'multi-board',
+    component: 'MultiTaskBoard',
+    dataPath: '/multiTask'
   }];
   surface.dataModelJson = JSON.stringify(model);
   return surface;
@@ -1637,6 +1710,49 @@ export default function registeredPageActionMigrationTest() {
       current = null;
       expect(await runtime.runPageAction(exact)).assertFalse();
       expect(invoker.calls.length).assertEqual(1);
+      runtime.dispose();
+    });
+
+    it('routes a multi-result action only through its exact embedded tool section', 0, async () => {
+      const invoker = new ProviderEvidenceInvoker('success');
+      const handler = new RegisteredPageActionHandler(invoker);
+      const firstArgs = JSON.parse(
+        '{"eventId":"event-provider-first","calendarId":"primary","sendUpdates":"none"}'
+      ) as Object;
+      const secondArgs = JSON.parse(
+        '{"eventId":"event-provider-second","calendarId":"primary","sendUpdates":"none"}'
+      ) as Object;
+      const first = action('calendar.event.delete.confirm', firstArgs);
+      const second = action('calendar.event.delete.confirm', secondArgs);
+      const surface = multiTaskPageSurface(first, second, 31);
+      const current: RegisteredPageSnapshot = snapshot(surface, 31);
+      const runtime = canary(
+        new QueueModel([]),
+        handler,
+        (): RegisteredPageSnapshot | null => current
+      );
+      const missingSection = JSON.parse(JSON.stringify(first)) as A2uiAction;
+      const wrongSection = JSON.parse(
+        '{"id":"calendar.event.delete.confirm","label":"calendar.event.delete.confirm",' +
+        '"prompt":"calendar.event.delete.confirm","variant":"primary","kind":"prompt",' +
+        '"sourceSectionId":"slot-calendar-second","args":' + JSON.stringify(firstArgs) + '}'
+      ) as A2uiAction;
+      const exact = JSON.parse(
+        '{"id":"calendar.event.delete.confirm","label":"calendar.event.delete.confirm",' +
+        '"prompt":"calendar.event.delete.confirm","variant":"primary","kind":"prompt",' +
+        '"sourceSectionId":"slot-calendar-first","args":' + JSON.stringify(firstArgs) + '}'
+      ) as A2uiAction;
+
+      expect(await runtime.runPageAction(missingSection)).assertFalse();
+      expect(await runtime.runPageAction(wrongSection)).assertFalse();
+      expect(registeredPageActionSourceToolId(
+        current.surface, current.document, exact
+      )).assertEqual('calendar.events.search');
+      expect(await runtime.runPageAction(exact)).assertTrue();
+      expect(invoker.calls.length).assertEqual(1);
+      expect(invoker.calls[0].toolId).assertEqual('calendar.event.delete');
+      expect(invoker.calls[0].pageActionId).assertEqual('calendar.event.delete.confirm');
+      expect(JSON.stringify(invoker.calls[0].args)).assertEqual(JSON.stringify(firstArgs));
       runtime.dispose();
     });
 

@@ -10,7 +10,9 @@ import {
   A2uiComponent,
   A2uiEnvelope,
   A2uiLabelValueData,
+  A2uiRuntimeDataModel,
   A2uiSummaryData,
+  A2uiSurfaceState,
   ActionOffer,
   AggregateSearchResult,
   CreateUiTaskPayload,
@@ -23,6 +25,8 @@ import {
   HotelDetailResult,
   HotelSearchResult,
   MailSearchStructuredData,
+  MultiToolSlotCall,
+  MultiToolSurfaceComposer,
   SocialHubStructuredData,
   TrainStructuredData,
   TravelStructuredData,
@@ -442,108 +446,62 @@ function authJsonl(data: DataResult, surfaceId: string): string | null {
   return null;
 }
 
-function cloneComponent(component: A2uiComponent, prefix: string, dataPrefix: string): A2uiComponent {
-  const cloned = JSON.parse(JSON.stringify(component)) as A2uiComponent;
-  cloned.id = prefix + component.id;
-  if (component.child !== undefined && component.child.length > 0) {
-    cloned.child = prefix + component.child;
-  } else {
-    cloned.child = undefined;
-  }
-  if (component.children !== undefined) {
-    cloned.children = component.children.filter((id: string): boolean => id.length > 0)
-      .map((id: string): string => prefix + id);
-  }
-  if (component.actions !== undefined) {
-    cloned.actions = JSON.parse(JSON.stringify(component.actions)) as A2uiAction[];
-  }
-  if (component.dataPath !== undefined) {
-    cloned.dataPath = dataPrefix + component.dataPath;
-  }
-  return cloned;
-}
-
-function aggregateJsonl(jsonls: string[], surfaceId: string): string {
+function aggregateJsonl(jsonls: string[], data: DataResult[], surfaceId: string): string {
   if (jsonls.length === 1) {
     return jsonls[0];
   }
-  const components: A2uiComponent[] = [];
-  const children: string[] = [];
-  const dataUpdates: A2uiEnvelope[] = [];
-  for (let resultIndex = 0; resultIndex < jsonls.length; resultIndex++) {
-    const parsed = parseA2uiJsonl(jsonls[resultIndex]);
-    if (parsed.error.length > 0) {
-      throw new Error(parsed.error);
-    }
-    let rootId = '';
-    let resultComponents: A2uiComponent[] = [];
-    parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
-      if (envelope.createSurface !== undefined && envelope.createSurface.root !== undefined) {
-        rootId = envelope.createSurface.root;
-      }
-      if (envelope.updateComponents !== undefined) {
-        resultComponents = envelope.updateComponents.components;
-      }
-      if (envelope.updateDataModel !== undefined) {
-        const dataPrefix = '/results/' + resultIndex.toString();
-        dataUpdates.push({
-          version: A2UI_VERSION,
-          updateDataModel: {
-            surfaceId,
-            path: dataPrefix + envelope.updateDataModel.path,
-            value: envelope.updateDataModel.value
-          }
-        });
-      }
-    });
-    if (rootId.length === 0 || resultComponents.length === 0) {
-      throw new Error('Structured renderer returned an incomplete surface');
-    }
-    const prefix = 'result_' + resultIndex.toString() + '_';
-    const dataPrefix = '/results/' + resultIndex.toString();
-    for (let componentIndex = 0; componentIndex < resultComponents.length; componentIndex++) {
-      const component = resultComponents[componentIndex];
-      if (component.id === rootId) {
-        const rootChildren = component.children !== undefined && component.children.length > 0 ?
-          component.children : (component.child === undefined || component.child.length === 0 ? [] : [component.child]);
-        rootChildren.forEach((id: string) => children.push(prefix + id));
-        continue;
-      }
-      components.push(cloneComponent(component, prefix, dataPrefix));
-    }
+  const emittedSurfaces: A2uiSurfaceState[] = [];
+  const composer = new MultiToolSurfaceComposer(surfaceId, (surface: A2uiSurfaceState, _raw: string): void => {
+    emittedSurfaces.push(surface);
+  });
+  const calls: MultiToolSlotCall[] = [];
+  data.forEach((item: DataResult) => {
+    calls.push({ name: item.toolId, input: '{}' });
+  });
+  composer.registerSlots(calls);
+  composer.emitShell();
+  for (let index = 0; index < jsonls.length; index++) {
+    const slotId = 'slot_' + index.toString();
+    composer.markRunning(slotId);
+    composer.ingestSlotObservation(slotId, jsonls[index]);
   }
-  const root: A2uiComponent = {
-    id: 'root',
-    component: A2UI_COMPONENT_SURFACE_ROOT,
-    child: 'results',
-    title: '结构化结果',
-    status: 'ready'
-  };
-  const column: A2uiComponent = {
-    id: 'results',
-    component: A2UI_COMPONENT_COLUMN,
-    children,
-    title: '结构化结果',
-    status: 'ready'
-  };
+  if (emittedSurfaces.length === 0) {
+    throw new Error('Multi-tool renderer did not produce a surface');
+  }
+  const surface = emittedSurfaces[emittedSurfaces.length - 1];
+  const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+  if (model.multiTask === undefined || model.sections === undefined) {
+    throw new Error('Multi-tool renderer produced an incomplete data model');
+  }
+  model.multiTask.batchId = 'batch_' + surfaceId;
   const envelopes: A2uiEnvelope[] = [
     {
       version: A2UI_VERSION,
       createSurface: {
         surfaceId,
-        root: 'root',
-        title: '结构化结果',
-        intent: 'structured_results',
-        status: 'ready',
+        root: surface.rootId,
+        title: surface.title,
+        intent: surface.intent,
+        status: surface.status,
         sendDataModel: true
       }
     },
     {
       version: A2UI_VERSION,
-      updateComponents: { surfaceId, components: [root, column].concat(components) }
+      updateComponents: {
+        surfaceId,
+        components: surface.components
+      }
+    },
+    {
+      version: A2UI_VERSION,
+      updateDataModel: {
+        surfaceId,
+        path: '/',
+        value: model
+      }
     }
   ];
-  dataUpdates.forEach((envelope: A2uiEnvelope) => envelopes.push(envelope));
   return envelopes.map((envelope: A2uiEnvelope): string => JSON.stringify(envelope)).join('\n') + '\n';
 }
 
@@ -858,7 +816,7 @@ export class StructuredToolUiRenderer implements UiTaskRenderer {
           safeData[index], offersForTool(safeData[index], safeOffers), surfaceId
         ) : auth);
       }
-      const baseline = aggregateJsonl(jsonls, surfaceId);
+      const baseline = aggregateJsonl(jsonls, safeData, surfaceId);
       return rendered(await this.layout(safeData, safeOffers, surfaceId, baseline));
     } catch (_error) {
       return rendered(errorJsonl(surfaceId, '结构化结果格式无效或暂不受支持。'));

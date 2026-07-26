@@ -364,7 +364,7 @@ export function parseHtmlHomeAction(raw: string): A2uiAction | null {
       keys.indexOf('prompt') < 0 || keys.indexOf('kind') < 0) {
       return null;
     }
-    return {
+    const action: A2uiAction = {
       id: actionText(parsed['id']),
       label: actionText(parsed['label']),
       prompt: actionText(parsed['prompt']),
@@ -372,6 +372,12 @@ export function parseHtmlHomeAction(raw: string): A2uiAction | null {
       kind: actionText(parsed['kind']),
       args: actionObject(parsed['args'])
     };
+    const sourceSectionId = typeof parsed['sourceSectionId'] === 'string' ?
+      (parsed['sourceSectionId'] as string).trim() : '';
+    if (sourceSectionId.length > 0) {
+      action.sourceSectionId = sourceSectionId;
+    }
+    return action;
   } catch (error) {
     return null;
   }

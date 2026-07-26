@@ -12,7 +12,8 @@ import {
   normalizedCalendarArgsForPrompt,
   toolDefinitionForToolId
 } from '@loop/agent-core';
-import { HtmlHomeDocument } from '../html/HtmlHomeTypes';
+import { isHtmlHomeActionAllowed } from '../html/HtmlHomeActionPolicy';
+import { HtmlHomeBlock, HtmlHomeDocument } from '../html/HtmlHomeTypes';
 
 const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'luckin.order.preview',
@@ -360,6 +361,52 @@ export function registeredPageSourceToolId(surface: A2uiSurfaceState): string {
     const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
     const sourceToolId = model.summary.toolName.trim();
     return toolDefinitionForToolId(sourceToolId) === null ? '' : sourceToolId;
+  } catch (_error) {
+    return '';
+  }
+}
+
+export function registeredPageActionSourceToolId(
+  surface: A2uiSurfaceState,
+  document: HtmlHomeDocument,
+  clicked: A2uiAction
+): string {
+  const sectionId = clicked.sourceSectionId === undefined ? '' : clicked.sourceSectionId.trim();
+  if (document.kind !== 'multi-task') {
+    return sectionId.length === 0 ? registeredPageSourceToolId(surface) : '';
+  }
+  if (sectionId.length === 0) {
+    return '';
+  }
+  let block: HtmlHomeBlock | null = null;
+  for (let index = 0; index < document.blocks.length; index++) {
+    const candidate = document.blocks[index];
+    if (candidate.kind === 'multi-task-section' && candidate.sectionId === sectionId) {
+      block = candidate;
+      break;
+    }
+  }
+  if (block === null || block.toolId === undefined || block.embeddedDocument === undefined ||
+    !isHtmlHomeActionAllowed(block.embeddedDocument, clicked)) {
+    return '';
+  }
+  try {
+    const model = JSON.parse(surface.dataModelJson) as A2uiRuntimeDataModel;
+    if (model.sections === undefined) {
+      return '';
+    }
+    const section = model.sections[sectionId];
+    if (section === undefined || section.slotId !== sectionId ||
+      section.toolId !== block.toolId || section.embeddedSurface === null) {
+      return '';
+    }
+    const embedded = section.embeddedSurface as A2uiSurfaceState;
+    if (block.embeddedDocument.surfaceId === undefined ||
+      embedded.surfaceId !== block.embeddedDocument.surfaceId) {
+      return '';
+    }
+    const sourceToolId = registeredPageSourceToolId(embedded);
+    return sourceToolId === section.toolId ? sourceToolId : '';
   } catch (_error) {
     return '';
   }

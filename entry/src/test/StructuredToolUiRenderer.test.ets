@@ -487,10 +487,19 @@ export default function structuredToolUiRendererTest() {
       ));
 
       const rendered = await renderer.result(uiTask(['travel-data', 'train-data']), [travel, train], [], 'surface-multi');
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+        store.apply(envelope);
+      });
+      const model = JSON.parse(store.getSurface().dataModelJson) as Record<string, Object>;
+      const board = model['multiTask'] as Record<string, Object>;
+      const sections = board['sections'] as Array<Record<string, Object>>;
 
       expect(rendered.jsonl.indexOf('travelOptions')).assertLarger(-1);
       expect(rendered.jsonl.indexOf('trains')).assertLarger(-1);
-      expect(rendered.jsonl.indexOf('travelOptions') < rendered.jsonl.indexOf('trains')).assertTrue();
+      expect(sections[0]['toolId'] as string).assertEqual('travel.search');
+      expect(sections[1]['toolId'] as string).assertEqual('train.search');
       expect(rendered.jsonl.split('"createSurface"').length - 1).assertEqual(1);
     });
 
@@ -593,10 +602,8 @@ export default function structuredToolUiRendererTest() {
         expect(references.filter((childId: string): boolean => childId === componentId).length)
           .assertEqual(expectedParents);
       });
-      expect(dataPaths.indexOf('/results/0/genericToolResults')).assertLarger(-1);
-      expect(dataPaths.indexOf('/results/0/summary')).assertLarger(-1);
-      expect(dataPaths.indexOf('/results/1/genericToolResults')).assertLarger(-1);
-      expect(dataPaths.indexOf('/results/1/summary')).assertLarger(-1);
+      expect(dataPaths.length).assertEqual(1);
+      expect(dataPaths[0]).assertEqual('/');
       expect(rendered.jsonl.indexOf('First result')).assertLarger(-1);
       expect(rendered.jsonl.indexOf('Second result')).assertLarger(-1);
       expect(rendered.jsonl.indexOf('first summary')).assertLarger(-1);
@@ -606,6 +613,69 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.indexOf('First action')).assertLarger(-1);
       expect(rendered.jsonl.indexOf('Second action')).assertLarger(-1);
       expect(rendered.jsonl).assertEqual(repeated.jsonl);
+    });
+
+    it('persists every rendered result and its action-authority summary through the surface store', 0, async () => {
+      const first = dataResult('calendar.events.search', 'calendarEvents', genericResult(
+        'calendar.events.search', 'First result',
+        '[{"label":"Event ID","value":"event-first"}]',
+        '[{"id":"calendar.open.web","label":"First action","prompt":"first",' +
+        '"variant":"primary","kind":"client","args":{"eventId":"event-first"}}]', '', 'first summary'
+      ));
+      const second = dataResult('calendar.events.search', 'calendarEvents', genericResult(
+        'calendar.events.search', 'Second result',
+        '[{"label":"Event ID","value":"event-second"}]',
+        '[{"id":"calendar.open.web","label":"Second action","prompt":"second",' +
+        '"variant":"secondary","kind":"client","args":{"eventId":"event-second"}}]', '', 'second summary'
+      ));
+      const rendered = await new StructuredToolUiRenderer().result(
+        uiTask(['first-data', 'second-data']), [first, second], [], 'surface-stored-results'
+      );
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const store = new A2uiSurfaceStore();
+      let applied = parsed.error.length === 0;
+      parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+        applied = applied && store.apply(envelope).ok;
+      });
+      const model = JSON.parse(store.getSurface().dataModelJson) as Record<string, Object>;
+
+      expect(applied).assertTrue();
+      expect(model['multiTask'] !== undefined).assertTrue();
+      expect(model['sections'] !== undefined).assertTrue();
+
+      const board = model['multiTask'] as Record<string, Object>;
+      const boardSections = board['sections'] as Object[];
+      const sections = model['sections'] as Record<string, Object>;
+      expect(boardSections.length).assertEqual(2);
+      expect(Object.keys(sections).length).assertEqual(2);
+
+      const firstSection = sections['slot_0'] as Record<string, Object>;
+      const secondSection = sections['slot_1'] as Record<string, Object>;
+      const firstSurface = firstSection['embeddedSurface'] as Record<string, Object>;
+      const secondSurface = secondSection['embeddedSurface'] as Record<string, Object>;
+      const firstModel = JSON.parse(firstSurface['dataModelJson'] as string) as Record<string, Object>;
+      const secondModel = JSON.parse(secondSurface['dataModelJson'] as string) as Record<string, Object>;
+      const firstResults = firstModel['genericToolResults'] as Array<Record<string, Object>>;
+      const secondResults = secondModel['genericToolResults'] as Array<Record<string, Object>>;
+      const firstSummary = firstModel['summary'] as Record<string, Object>;
+      const secondSummary = secondModel['summary'] as Record<string, Object>;
+      const firstActions = firstResults[0]['actions'] as Object[];
+      const secondActions = secondResults[0]['actions'] as Object[];
+
+      expect(firstResults.length).assertEqual(1);
+      expect(secondResults.length).assertEqual(1);
+      expect(firstResults[0]['title'] as string).assertEqual('First result');
+      expect(secondResults[0]['title'] as string).assertEqual('Second result');
+      expect(firstResults[0]['summary'] as string).assertEqual('first summary');
+      expect(secondResults[0]['summary'] as string).assertEqual('second summary');
+      expect(firstSummary['toolName'] as string).assertEqual('calendar.events.search');
+      expect(secondSummary['toolName'] as string).assertEqual('calendar.events.search');
+      expect(firstSummary['dataLabel'] as string).assertEqual('genericToolResults');
+      expect(secondSummary['dataLabel'] as string).assertEqual('genericToolResults');
+      expect(firstActions.length).assertEqual(1);
+      expect(secondActions.length).assertEqual(1);
+      expect((firstActions[0] as Record<string, Object>)['id'] as string).assertEqual('calendar.open.web');
+      expect((secondActions[0] as Record<string, Object>)['id'] as string).assertEqual('calendar.open.web');
     });
 
     it('resolves only registered, catalog-approved offers with exact real-item args', 0, async () => {
@@ -704,10 +774,31 @@ export default function structuredToolUiRendererTest() {
       const rendered = await renderer.result(
         uiTask(['hotel-search-data', 'hotel-detail-data']), [search, detail], offers, 'surface-hotels'
       );
+      const parsed = parseA2uiJsonl(rendered.jsonl);
+      const store = new A2uiSurfaceStore();
+      parsed.envelopes.forEach((envelope: A2uiEnvelope) => {
+        store.apply(envelope);
+      });
+      const model = JSON.parse(store.getSurface().dataModelJson) as Record<string, Object>;
+      const sections = model['sections'] as Record<string, Object>;
+      const searchSurface = sections['slot_0'] as Record<string, Object>;
+      const detailSurface = sections['slot_1'] as Record<string, Object>;
+      const searchModel = JSON.parse(
+        (searchSurface['embeddedSurface'] as Record<string, Object>)['dataModelJson'] as string
+      ) as Record<string, Object>;
+      const detailModel = JSON.parse(
+        (detailSurface['embeddedSurface'] as Record<string, Object>)['dataModelJson'] as string
+      ) as Record<string, Object>;
+      const searchResults = searchModel['genericToolResults'] as Array<Record<string, Object>>;
+      const detailResults = detailModel['genericToolResults'] as Array<Record<string, Object>>;
+      const searchActions = searchResults[0]['actions'] as Object[];
+      const detailActions = detailResults[0]['actions'] as Object[];
 
-      expect(rendered.jsonl.split('"id":"hotel.detail"').length - 1).assertEqual(1);
-      expect(rendered.jsonl.split('"id":"hotel.navigate"').length - 1).assertEqual(1);
-      expect(rendered.jsonl.split('"id":"hotel.booking.open"').length - 1).assertEqual(1);
+      expect(searchActions.length).assertEqual(2);
+      expect(detailActions.length).assertEqual(2);
+      expect((searchActions[0] as Record<string, Object>)['id'] as string).assertEqual('hotel.detail');
+      expect((searchActions[1] as Record<string, Object>)['id'] as string).assertEqual('hotel.navigate');
+      expect((detailActions[1] as Record<string, Object>)['id'] as string).assertEqual('hotel.booking.open');
     });
 
     it('fails closed to canonical placement when one layout spans multiple tool results', 0, async () => {

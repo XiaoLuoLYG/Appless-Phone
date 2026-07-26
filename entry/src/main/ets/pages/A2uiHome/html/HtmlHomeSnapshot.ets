@@ -312,6 +312,7 @@ function buildEmbeddedDocumentFromSurface(
   const root = findA2uiComponent(embedded, embedded.rootId.length > 0 ? embedded.rootId : 'root');
   const document: HtmlHomeDocument = {
     version: HTML_HOME_VERSION,
+    surfaceId: embedded.surfaceId,
     source: 'tool',
     kind: kind,
     title: firstText(embedded.title, embedded.surfaceId),
