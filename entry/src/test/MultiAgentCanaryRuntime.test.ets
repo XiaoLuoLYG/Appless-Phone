@@ -1048,12 +1048,12 @@ function defaultGmailDraftProviderResult(): DynamicGenericToolResult {
 function realComposioGmailDraftProviderResult(): DynamicGenericToolResult {
   return composioDynamicResultFromObservation(
     'execute',
-    '{"successful":true,"data":{"response_data":{"data":{' +
+    '{"data":{' +
       '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-provider-1",' +
       '"id":"draft-provider-1","message":{' +
       '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-provider-1",' +
       '"id":"message-provider-1","labelIds":["DRAFT"],"threadId":"thread-provider-1"}},' +
-      '"logs":[{"title":"private log title","text":"private log text","body":"private log body"}]}},"error":null}',
+      '"error":null,"log_id":"log-provider-1"}',
     'GMAIL_CREATE_EMAIL_DRAFT',
     '创建 Gmail 草稿'
   );

@@ -1707,7 +1707,14 @@ function gmailDraftIdForExecute(payload: Object, toolSlug: string): string {
   }
   const record = payload as Record<string, Object | string | number | boolean | null | undefined>;
   const data = objectRecord(record.data);
-  const response = data === null ? null : objectRecord(data.response_data);
+  if (data === null) {
+    return '';
+  }
+  const directId = gmailDraftIdFromRecord(data);
+  if (directId.length > 0) {
+    return directId;
+  }
+  const response = objectRecord(data.response_data);
   if (response === null) {
     return '';
   }

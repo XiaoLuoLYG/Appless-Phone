@@ -861,17 +861,33 @@ export default function composioDynamicBackendTest() {
     });
 
     it('treats Gmail draft payloads with draft ids as successful execute results', 0, () => {
-      const observation = '{"data":{"display_url":"https://mail.google.com/mail/u/0/#drafts/r-1","id":"draft-1","threadId":"thread-1"},"error":{"display_url":"https://mail.google.com/mail/u/0/#drafts/r-1","id":"draft-1","threadId":"thread-1"}}';
+      const observation = '{"data":{' +
+        '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-client-1",' +
+        '"id":"draft-client-1","message":{' +
+        '"display_url":"https://mail.google.com/mail/u/0/#drafts/draft-client-1",' +
+        '"id":"message-client-1","labelIds":["DRAFT"],"threadId":"thread-client-1"}},' +
+        '"error":null,"log_id":"log-client-1"}';
       const result: DynamicGenericToolResult = composioDynamicResultFromObservation(
         'execute',
         observation,
         'GMAIL_CREATE_EMAIL_DRAFT',
         '创建 Gmail 回复草稿'
       );
+      const jsonl = gmailDraftPreviewA2ui(
+        'gmail_client_response_surface',
+        result,
+        looseObject('{"to":["alice@example.com"],"subject":"Re: Demo","body":"我收到了"}'),
+        'gmail.draft.create'
+      );
 
       expect(result.status).assertEqual('success');
       expect(result.summary.indexOf('GMAIL_CREATE_EMAIL_DRAFT')).assertLarger(-1);
-      expect(result.rawPreview.indexOf('mail.google.com')).assertLarger(-1);
+      expect(JSON.stringify(result.rows).indexOf(
+        '"label":"Draft ID","value":"draft-client-1"'
+      )).assertLarger(-1);
+      expect(result.rawPreview).assertEqual('{"draft_id":"draft-client-1"}');
+      expect(jsonl.indexOf('"id":"gmail.draft.apply"')).assertLarger(-1);
+      expect(jsonl.indexOf('"draftId":"draft-client-1"')).assertLarger(-1);
     });
 
     it('preserves only nested Gmail draft identity across unrelated provider arrays', 0, () => {
