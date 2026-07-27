@@ -1100,7 +1100,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       const task = tasks[index];
       if (task === undefined || task === null ||
         Object.keys(task).sort().join(',') !== 'allowedToolIds,goal,input,localId,required,toolId' ||
-        typeof task.localId !== 'string' || task.localId.trim().length === 0 || localIds.has(task.localId) ||
+        typeof task.localId !== 'string' || task.localId.trim().length === 0 ||
+        task.localId.indexOf(':') >= 0 || localIds.has(task.localId) ||
         typeof task.goal !== 'string' || task.goal.trim().length === 0 ||
         !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
         typeof task.toolId !== 'string' || task.toolId.trim().length === 0 ||

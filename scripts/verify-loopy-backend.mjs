@@ -548,7 +548,7 @@ function hasLeaderObserveReplan(source) {
 }
 
 function hasValidatedUiA2uiWrite(source) {
-  const body = executableDeclarationBody(source, 'private async handleUiTask(');
+  const body = executableDeclarationBody(source, 'private async startUiTask(');
   const validate = body.search(/this\.validateRenderedJsonl\s*\(\s*rendered\s*,\s*false\s*\)\s*;/);
   const write = body.search(/await\s+this\.writer\.write\s*\(/);
   return validate >= 0 && write > validate;
@@ -895,7 +895,7 @@ Use Google Maps for explicit provider requests.`;
   );
 
   const uiFixture = `class UiAgent {
-    private async handleUiTask() {
+    private async startUiTask() {
       this.validateRenderedJsonl(rendered, false);
       await this.writer.write(surface);
     }

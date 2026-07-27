@@ -3023,6 +3023,10 @@ export default function multiAgentLeaderPlannerTest() {
       const actionOwnedReadTool = PARALLEL_DECISION.replace(/flight\.search/g, 'hotel.navigate');
       const wrongSkill = PARALLEL_DECISION.replace('"skillId":""', '"skillId":"missing-skill"');
       const duplicateLocalId = PARALLEL_DECISION.replace('"localId":"train"', '"localId":"flight"');
+      const delimitedLocalId = PARALLEL_DECISION.replace(
+        '"localId":"train"',
+        '"localId":"step:round-1:x"'
+      );
       const extraTask = PARALLEL_DECISION.replace(
         '"input":{},"required":false',
         '"input":{},"required":false,"providerOutput":{"secret":"x"}'
@@ -3043,6 +3047,7 @@ export default function multiAgentLeaderPlannerTest() {
       expect(await fails(actionOwnedReadTool)).assertTrue();
       expect(await fails(wrongSkill)).assertTrue();
       expect(await fails(duplicateLocalId)).assertTrue();
+      expect(await fails(delimitedLocalId)).assertTrue();
       expect(await fails(extraTask)).assertTrue();
       expect(await fails(duplicateNested)).assertTrue();
       expect(await fails(ANSWER_WITHOUT_ANSWER_DECISION)).assertTrue();

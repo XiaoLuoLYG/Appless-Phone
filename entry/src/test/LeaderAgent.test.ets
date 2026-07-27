@@ -2417,6 +2417,25 @@ export default function leaderAgentTest() {
       observer.close();
     });
 
+    it('rejects a Data task localId that can collide with round task IDs', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const planner = new RoundScriptedPlanner([
+        semanticDecision([semanticDataTask('step:round-1:x', 'travel.search')])
+      ]);
+      const leader = new LeaderAgent(bus, planner, nineDataPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const rejected = await receive(observer);
+      expect(rejected.type).assertEqual(AgentMessageType.TASK_ERROR);
+      expect((rejected.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
+
+      leader.stop();
+      observer.close();
+    });
+
     it('publishes eight legal independent Data tasks in one round', 0, async () => {
       const bus = new LinkedMessageBus();
       const planner = new RoundScriptedPlanner([

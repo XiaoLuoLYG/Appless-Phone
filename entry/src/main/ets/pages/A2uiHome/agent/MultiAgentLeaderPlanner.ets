@@ -1787,7 +1787,8 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       const toolId = values['toolId'];
       const input = values['input'];
       const required = values['required'];
-      if (typeof localId !== 'string' || localId.trim().length === 0 || localIds.has(localId) ||
+      if (typeof localId !== 'string' || localId.trim().length === 0 ||
+        localId.indexOf(':') >= 0 || localIds.has(localId) ||
         typeof goal !== 'string' || goal.trim().length === 0 ||
         !Array.isArray(allowedToolIds) || allowedToolIds.length === 0 ||
         typeof toolId !== 'string' || toolId.trim().length === 0 ||
