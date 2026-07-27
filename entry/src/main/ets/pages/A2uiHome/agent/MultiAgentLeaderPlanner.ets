@@ -259,7 +259,9 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
     try {
       const decision: LeaderDecision = this.parseDecision(output, context);
       this.normalizeExplicitSerialDecision(input, decision);
-      this.normalizeIncompleteSerialCalendarCreate(input, decision, currentLocalDate);
+      this.normalizeIncompleteSerialCalendarCreate(
+        message, input, decision, currentLocalDate, round
+      );
       rejectedDecision = decision;
       sameRoundProducerTaskToolIds = leaderSameRoundDependencyProducerTaskToolIds(decision.dataTasks);
       sameRoundConsumerTaskToolIds = leaderSameRoundDependencyConsumerTaskToolIds(decision.dataTasks);
@@ -1227,9 +1229,11 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
   }
 
   private normalizeIncompleteSerialCalendarCreate(
+    message: AgentMessage,
     input: InputUserPayload,
     decision: LeaderDecision,
-    currentLocalDate: string
+    currentLocalDate: string,
+    round: number
   ): void {
     if (!this.explicitSerialRequest(input.text) ||
       decision.roundAction !== 'execute' ||
@@ -1239,23 +1243,57 @@ export class MultiAgentLeaderPlanner implements LeaderPlanner {
       decision.actionIntent.allowedActionIds[0] !== 'calendar.event.create') {
       return;
     }
+    const actionInputText: string = this.serialCalendarActionInput(
+      message, input, round
+    );
     const missing: string[] = calendarEventRequiredFields(
       'calendar.event.create',
       normalizedCalendarArgsForPrompt(
         'calendar.event.create',
-        input.text,
+        actionInputText,
         {},
         new Date(currentLocalDate + 'T00:00:00+08:00'),
         true
       )
     );
     if (missing.length === 0) {
+      if (actionInputText !== input.text) {
+        decision.normalizedActionInputText = actionInputText;
+      }
       return;
     }
     decision.roundAction = 'clarify';
     decision.actionIntent = undefined;
     decision.answer = calendarMissingArgsResult('calendar.event.create', missing).summary;
     decision.reasonCode = 'host_clarify';
+  }
+
+  private serialCalendarActionInput(
+    message: AgentMessage,
+    input: InputUserPayload,
+    round: number
+  ): string {
+    if (!/(这个|同一|相同)时间/u.test(input.text) || round <= 1) {
+      return input.text;
+    }
+    const observations: ObservationDigest[] = input.recentObservations === undefined ? [] :
+      input.recentObservations;
+    for (let index = observations.length - 1; index >= 0; index--) {
+      const observation: ObservationDigest = observations[index];
+      const observationRound: number = this.observationRound(message.taskId, observation.taskId);
+      if (observation.toolId !== 'time' ||
+        (observation.status !== 'success' && observation.status !== 'partial') ||
+        observationRound <= 0 || observationRound >= round) {
+        continue;
+      }
+      const match: RegExpMatchArray | null = observation.summary.match(
+        /\b([01][0-9]|2[0-3]):[0-5][0-9]\b/u
+      );
+      if (match !== null) {
+        return input.text + '\n已查询的当前本地时间：' + match[0];
+      }
+    }
+    return input.text;
   }
 
   private rejectCompletedToolReuse(decision: LeaderDecision, completedToolIds: string[]): void {

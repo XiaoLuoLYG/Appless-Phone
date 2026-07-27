@@ -503,7 +503,7 @@ export default function structuredToolUiRendererTest() {
       expect(rendered.jsonl.split('"createSurface"').length - 1).assertEqual(1);
     });
 
-    it('selects the latest page for results completed across serial rounds', 0, async () => {
+    it('keeps the first page selected as later serial rounds finish', 0, async () => {
       const renderer = new StructuredToolUiRenderer();
       const travel = dataResult('travel.search', 'travelOptions', object(
         '{"title":"旅行","body":"","summary":"travel first","options":[],"rows":[]}'
@@ -526,7 +526,7 @@ export default function structuredToolUiRendererTest() {
       const board = model['multiTask'] as Record<string, Object>;
 
       expect(board['mode'] as string).assertEqual('serial');
-      expect(board['activeSectionId'] as string).assertEqual('slot_1');
+      expect(board['activeSectionId'] as string).assertEqual('slot_0');
     });
 
     it('combines mail and calendar rows without dangling duplicate generic components', 0, async () => {

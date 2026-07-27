@@ -949,10 +949,17 @@ export class LeaderAgent extends MessageDrivenAgent {
     const rawKeys: string[] = Object.keys(decision);
     const hasNormalizationDate: boolean =
       rawKeys.indexOf('normalizationCurrentLocalDate') >= 0;
+    const hasNormalizedActionInput: boolean =
+      rawKeys.indexOf('normalizedActionInputText') >= 0;
     const normalizationDateMatchesAuthority: boolean =
       this.validNormalizationCurrentLocalDate(decision.normalizationCurrentLocalDate) &&
       decision.normalizationCurrentLocalDate === trustedCurrentLocalDate;
     if ((hasNormalizationDate && !normalizationDateMatchesAuthority) ||
+      (hasNormalizedActionInput &&
+        (typeof decision.normalizedActionInputText !== 'string' ||
+          decision.normalizedActionInputText.trim().length === 0 ||
+          decision.normalizedActionInputText.length > 4096 ||
+          !normalizationDateMatchesAuthority)) ||
       (decision.roundAction === 'execute' && this.dataTaskInputNormalizer !== null &&
         Array.isArray(decision.dataTasks) &&
         decision.dataTasks.length > 0 &&
@@ -961,6 +968,7 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
     const keys: string = rawKeys
       .filter((key: string): boolean => key !== 'normalizationCurrentLocalDate')
+      .filter((key: string): boolean => key !== 'normalizedActionInputText')
       .sort()
       .join(',');
     if (keys !== 'dataTasks,personaId,reasonCode,requestedCapabilityIds,roundAction,skillId,uiIntent' &&
@@ -1495,7 +1503,8 @@ export class LeaderAgent extends MessageDrivenAgent {
       allowedActionIds: (intent['allowedActionIds'] as string[]).slice(),
       personaId: decision.personaId,
       skillId: decision.skillId,
-      inputText: (input.payload as InputUserPayload).text
+      inputText: decision.normalizedActionInputText === undefined ?
+        (input.payload as InputUserPayload).text : decision.normalizedActionInputText
     };
     if (decision.normalizationCurrentLocalDate !== undefined) {
       payload.currentLocalDate = decision.normalizationCurrentLocalDate;

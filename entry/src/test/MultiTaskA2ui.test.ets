@@ -11,6 +11,7 @@ import {
   childSurfaceIdForMultiTaskSlot,
   genericToolResultsA2ui,
   mergeSlotObservationIntoMultiTaskSurface,
+  mergeSurfaceIntoMultiTaskSurface,
   MultiToolSurfaceComposer,
   resolveMultiTaskSlotId
 } from '@loop/agent-core';
@@ -713,7 +714,7 @@ export default function multiTaskA2uiTest() {
     expect(payload.indexOf('slot_1')).assertLarger(-1);
   });
 
-  it('serial_keeps_active_tab_on_last_completed_until_next_finishes', 0, () => {
+  it('serial_keeps_the_first_completed_page_active_as_later_pages_finish', 0, () => {
     let latestSurface: A2uiSurfaceState | null = null;
     const composer = new MultiToolSurfaceComposer('surface_serial', (surface) => {
       latestSurface = surface;
@@ -745,7 +746,7 @@ export default function multiTaskA2uiTest() {
     }]));
     const afterSecond = JSON.parse(latestSurface!.dataModelJson) as Record<string, Object>;
     const boardAfterSecond = afterSecond.multiTask as Record<string, string>;
-    expect(boardAfterSecond.activeSectionId).assertEqual('slot_1');
+    expect(boardAfterSecond.activeSectionId).assertEqual('slot_0');
   });
 
   it('builds_serial_multi_task_without_completion_reply_banner', 0, () => {
@@ -840,6 +841,37 @@ export default function multiTaskA2uiTest() {
       .assertEqual('surface_ride');
     expect((sections.slot_1.embeddedSurface as A2uiSurfaceState).surfaceId)
       .assertEqual('surface_luckin_slot');
+  });
+
+  it('appends a virtual action surface without switching away from the first serial page', 0, () => {
+    let latestSurface: A2uiSurfaceState | null = null;
+    const composer = new MultiToolSurfaceComposer('surface_serial_action', (surface) => {
+      latestSurface = surface;
+    });
+    composer.setExecutionMode('serial');
+    composer.registerSlots([
+      { name: 'time', input: '' },
+      { name: 'ride.estimate', input: '{}' }
+    ]);
+    composer.emitShell();
+    composer.ingestSlotObservation('slot_0', '2026-07-27 11:30');
+    composer.ingestSurface('slot_1', rideEmbeddedSurface());
+
+    let composite = appendMultiTaskSlot(latestSurface!, 'calendar.event.create');
+    composite = mergeSurfaceIntoMultiTaskSurface(
+      composite,
+      'slot_2',
+      'calendar.event.create',
+      rideEmbeddedSurface(),
+      false
+    );
+    const parsed = JSON.parse(composite.dataModelJson) as Record<string, Object>;
+    const board = parsed.multiTask as Record<string, string>;
+    const sections = parsed.sections as Record<string, A2uiMultiTaskSectionValue>;
+
+    expect(board.activeSectionId).assertEqual('slot_0');
+    expect((sections.slot_2.embeddedSurface as A2uiSurfaceState).surfaceId)
+      .assertEqual('surface_ride');
   });
 });
 }

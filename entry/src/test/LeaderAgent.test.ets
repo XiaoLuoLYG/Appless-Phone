@@ -1522,12 +1522,13 @@ export default function leaderAgentTest() {
 
     it('publishes only a virtual Action request for a zero-Data semantic execute decision', 0, async () => {
       const bus = new LinkedMessageBus();
-      const decision = semanticDecision([]);
+      const decision = withNormalizationDate(semanticDecision([]));
       decision.actionIntent = {
         goal: 'Remember the explicit user statement',
         allowedActionIds: ['memory.update']
       };
       decision.requestedCapabilityIds = ['memory.update'];
+      decision.normalizedActionInputText = '我在北京\n已查询的当前本地时间：11:30';
       const context = semanticPlanningContext();
       context.tools.push({
         toolId: 'memory.update',
@@ -1539,7 +1540,15 @@ export default function leaderAgentTest() {
         outputSchema: 'memoryUpdateResult',
         actions: ['memory.update']
       });
-      const leader = new LeaderAgent(bus, new RoundScriptedPlanner([decision]), context);
+      const leader = new LeaderAgent(
+        bus,
+        new RoundScriptedPlanner([decision]),
+        context,
+        30000,
+        undefined,
+        undefined,
+        fixedCurrentLocalDate
+      );
       const observer = bus.openReader();
       leader.start();
 
@@ -1572,7 +1581,7 @@ export default function leaderAgentTest() {
       expect(request.goal).assertEqual('Remember the explicit user statement');
       expect(request.allowedActionIds.join(',')).assertEqual('memory.update');
       expect(request.personaId).assertEqual('travel_companion');
-      expect(request.inputText).assertEqual('我在北京');
+      expect(request.inputText).assertEqual('我在北京\n已查询的当前本地时间：11:30');
       expect(request.virtual).assertTrue();
       leader.stop();
       observer.close();

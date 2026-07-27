@@ -49,6 +49,7 @@ export {
   childSurfaceIdForMultiTaskSlot,
   isMultiTaskSurface,
   mergeSlotObservationIntoMultiTaskSurface,
+  mergeSurfaceIntoMultiTaskSurface,
   resolveMultiTaskSlotId,
   wrapSurfaceWithMultiTaskAction
 } from './src/main/ets/agent/MultiTaskSurfaceMerge';

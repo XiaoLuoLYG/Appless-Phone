@@ -1,7 +1,8 @@
 import { A2uiSurfaceState } from '../aiphone/runtime/A2uiTypes';
+import { summarizeAppliedA2uiSurface } from './A2uiObservationDigest';
 import { mergeSectionIntoDataModel, readySectionCount } from './MultiTaskDataModel';
-import { ingestToolObservation } from './MultiToolSectionAdapters';
-import { MultiTaskBoardData, MultiToolSectionValue } from './MultiToolTypes';
+import { ingestToolObservation, serialStepCompletionReply } from './MultiToolSectionAdapters';
+import { MultiTaskBoardData, MultiToolSectionContent, MultiToolSectionValue } from './MultiToolTypes';
 import { MultiToolSurfaceComposer } from './MultiToolSurfaceComposer';
 
 function toolIdMatchesSlot(slotToolId: string, actionToolId: string): boolean {
@@ -83,6 +84,42 @@ export function mergeSlotObservationIntoMultiTaskSurface(
     title: composite.title.length > 0 ? composite.title : '并行任务',
     intent: 'multi-task',
     status,
+    components: composite.components,
+    dataModelJson: JSON.stringify(parsed),
+    error: composite.error,
+    sequence: composite.sequence + 1
+  };
+}
+
+export function mergeSurfaceIntoMultiTaskSurface(
+  composite: A2uiSurfaceState,
+  slotId: string,
+  toolId: string,
+  surface: A2uiSurfaceState,
+  activateSlot: boolean = false
+): A2uiSurfaceState {
+  const digest = summarizeAppliedA2uiSurface('', surface);
+  const content: MultiToolSectionContent = {
+    slotId,
+    toolId,
+    title: surface.title,
+    status: surface.status === 'error' ? 'error' : 'ready',
+    summary: digest.text.split('\n').slice(0, 3).join(' '),
+    completionReply: '',
+    observationDigest: digest.text,
+    failureKey: digest.failureKey,
+    embeddedSurface: surface
+  };
+  content.completionReply = serialStepCompletionReply(toolId, content);
+  let parsed = JSON.parse(composite.dataModelJson) as Record<string, Object | null | undefined>;
+  parsed = mergeSectionIntoDataModel(parsed, slotId, content, activateSlot);
+  const board = parsed.multiTask as MultiTaskBoardData;
+  return {
+    surfaceId: composite.surfaceId,
+    rootId: composite.rootId,
+    title: composite.title,
+    intent: composite.intent,
+    status: readySectionCount(board) === board.sections.length ? 'ready' : 'calling_tool',
     components: composite.components,
     dataModelJson: JSON.stringify(parsed),
     error: composite.error,

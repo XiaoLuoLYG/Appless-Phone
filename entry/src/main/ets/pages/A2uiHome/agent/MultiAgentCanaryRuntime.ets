@@ -49,6 +49,10 @@ import {
   gmailDraftApplyAction,
   genericToolResultsA2ui,
   isExplicitLuckinOrderPrompt,
+  isMultiTaskSurface,
+  appendMultiTaskSlot,
+  mergeSurfaceIntoMultiTaskSurface,
+  resolveMultiTaskSlotId,
   normalizedCalendarArgsForPrompt,
   parseA2uiJsonl,
   setJsonPointer,
@@ -842,6 +846,11 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
     if (task.toolId === TIME_TOOL_ID) {
       const now = new Date();
       const localTime = now.toLocaleString();
+      const observationSummary = now.getFullYear().toString() + '-' +
+        (now.getMonth() + 1).toString().padStart(2, '0') + '-' +
+        now.getDate().toString().padStart(2, '0') + ' ' +
+        now.getHours().toString().padStart(2, '0') + ':' +
+        now.getMinutes().toString().padStart(2, '0');
       const result: DynamicGenericToolResult = {
         sourceTag: 'HarmonyOS device',
         toolName: TIME_TOOL_ID,
@@ -861,7 +870,10 @@ class CanaryStructuredDataExecutor implements DataTaskExecutor {
           operation: 'time.now',
           fetchedAt: now.toISOString()
         }],
-        data: JSON.parse(JSON.stringify({ results: [result] })) as Object,
+        data: JSON.parse(JSON.stringify({
+          summary: observationSummary,
+          results: [result]
+        })) as Object,
         warnings: []
       };
     }
@@ -1595,9 +1607,22 @@ export class MultiAgentCanaryRuntime {
           if (hostGeneration === undefined || hostGeneration <= 0) {
             return;
           }
-          surface.runtimeOwner = 'multi_agent';
-          surface.runtimeGeneration = hostGeneration;
-          options.onSurface(surface, hostGeneration);
+          let nextSurface: A2uiSurfaceState = surface;
+          const current: A2uiSurfaceState | null = this.currentHostSurface();
+          if (surface.intent === 'calendar' && current !== null && isMultiTaskSurface(current)) {
+            let slotId: string = resolveMultiTaskSlotId(current, 'calendar.event.create');
+            let composite: A2uiSurfaceState = current;
+            if (slotId.length === 0) {
+              composite = appendMultiTaskSlot(composite, 'calendar.event.create');
+              slotId = resolveMultiTaskSlotId(composite, 'calendar.event.create');
+            }
+            nextSurface = mergeSurfaceIntoMultiTaskSurface(
+              composite, slotId, 'calendar.event.create', surface, false
+            );
+          }
+          nextSurface.runtimeOwner = 'multi_agent';
+          nextSurface.runtimeGeneration = hostGeneration;
+          options.onSurface(nextSurface, hostGeneration);
         },
         currentGmailDraftApply
       ),

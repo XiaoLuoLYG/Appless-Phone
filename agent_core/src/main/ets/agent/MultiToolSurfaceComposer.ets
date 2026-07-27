@@ -329,14 +329,6 @@ export class MultiToolSurfaceComposer {
   }
 
   private syncActiveSectionFromCompletion(): void {
-    if (this.executionMode === 'serial') {
-      if (this.completionOrder.length === 0) {
-        this.activeSectionId = '';
-        return;
-      }
-      this.activeSectionId = this.completionOrder[this.completionOrder.length - 1];
-      return;
-    }
     if (this.completionOrder.length === 0) {
       this.activeSectionId = '';
       return;

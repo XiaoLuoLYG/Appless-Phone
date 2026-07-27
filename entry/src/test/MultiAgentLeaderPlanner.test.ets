@@ -249,6 +249,9 @@ const VALID_ANSWER_DECISION: string = LIVE_ANSWER_WITHOUT_REASON_CODE.substring(
 ) + ',"reasonCode":"greeting"}';
 const EXPLICIT_SERIAL_QUERY: string =
   '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，再在明天的这个时间新建一个会议日程';
+const EXPLICIT_SERIAL_QUERY_WITH_DURATION: string =
+  '查一下现在的时间，查好时间之后帮我打车从华为坂田基地打车到秋岗花园，' +
+  '再在明天的这个时间新建一个30分钟的会议日程';
 const EXPLICIT_SERIAL_FIRST_DECISION: string =
   '{"personaId":"travel_companion","skillId":"",' +
   '"requestedCapabilityIds":["time","ride.estimate","calendar.event.create"],' +
@@ -2919,6 +2922,32 @@ export default function multiAgentLeaderPlannerTest() {
         expect(third.actionIntent === undefined).assertTrue();
         expect(third.requestedCapabilityIds.join(',')).assertEqual('calendar.event.create');
         expect(third.answer!.indexOf('结束时间或时长')).assertLarger(-1);
+
+        const thirdWithDuration = await new MultiAgentLeaderPlanner(
+          new QueueLocalModel([EXPLICIT_SERIAL_THIRD_DECISION])
+        ).plan(
+          inputMessage(),
+          {
+            text: EXPLICIT_SERIAL_QUERY_WITH_DURATION,
+            recentObservations: [{
+              taskId: 'input-1:round-1:time',
+              toolId: 'time',
+              status: 'success',
+              summary: '2026-07-27 11:30',
+              entityRefs: []
+            }, {
+              taskId: 'input-1:round-2:ride',
+              toolId: 'ride.estimate',
+              status: 'success',
+              summary: '滴滴估价已返回',
+              entityRefs: []
+            }]
+          },
+          context,
+          3
+        );
+        expect(thirdWithDuration.roundAction).assertEqual('execute');
+        expect(thirdWithDuration.actionIntent === undefined).assertFalse();
       });
 
     it('keeps mixed read and Action-owned capabilities in their declared agents', 0, async () => {
