@@ -147,7 +147,8 @@ import { SystemUriOpener } from './agent/AiphoneRegisteredActionExecutor';
 import {
   RegisteredPageSnapshot,
   RegisteredPageSnapshotStore,
-  dispatchRegisteredPageActionCandidate
+  dispatchRegisteredPageActionCandidate,
+  registeredPageActionUsesPageBusy
 } from './agent/RegisteredPageActionRoute';
 import {
   RegisteredPageActionHandler,
@@ -4505,7 +4506,10 @@ struct Index {
       return false;
     }
     const runtime = this.canaryRuntime();
-    this.isBusy = true;
+    const usesPageBusy = registeredPageActionUsesPageBusy(action.id);
+    if (usesPageBusy) {
+      this.isBusy = true;
+    }
     try {
       const ok = await runtime.runPageAction(action);
       if (!runtimeCallbackIsCurrent(
@@ -4523,7 +4527,7 @@ struct Index {
       }));
       return ok;
     } finally {
-      if (runtimeCallbackIsCurrent(
+      if (usesPageBusy && runtimeCallbackIsCurrent(
         this.activeRuntimeOwner, this.runtimeGeneration, 'multi_agent', actionGeneration
       )) {
         this.isBusy = false;

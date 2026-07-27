@@ -51,6 +51,7 @@ import {
   dispatchRegisteredPageActionCandidate,
   isRegisteredPageActionCandidate,
   registeredPageActionSourceToolId,
+  registeredPageActionUsesPageBusy,
   resolveRegisteredPageAction,
   resolveVirtualRegisteredPageAction
 } from '../main/ets/pages/A2uiHome/agent/RegisteredPageActionRoute';
@@ -811,6 +812,11 @@ function mailCalendarSuggestion(requestKey: string = 'qq:101'): MailCalendarSugg
 
 export default function registeredPageActionMigrationTest() {
   describe('registeredPageActionMigration', () => {
+    it('keeps in-place mail body reads out of the page-wide busy state', 0, () => {
+      expect(registeredPageActionUsesPageBusy('html_mail_detail_read')).assertFalse();
+      expect(registeredPageActionUsesPageBusy('gmail.message.send')).assertTrue();
+    });
+
     it('routes exact current QQ and Gmail body reads through Action and Data agents in place', 0, async () => {
       class MailReadDataExecutor implements DataTaskExecutor {
         readonly calls: CreateDataTaskPayload[] = [];

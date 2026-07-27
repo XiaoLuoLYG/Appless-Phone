@@ -43,6 +43,10 @@ const PAGE_ACTION_CANDIDATE_IDS: string[] = [
   'html_mail_detail_read'
 ];
 
+export function registeredPageActionUsesPageBusy(actionId: string): boolean {
+  return actionId !== 'html_mail_detail_read';
+}
+
 export interface RegisteredPageActionResolution {
   action: A2uiAction;
   pageActionId: string;
