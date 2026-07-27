@@ -652,5 +652,30 @@ export default function trainPresaleConfirmationTest() {
       expect(nativeCancelCount).assertEqual(0);
       expect(store.get('train-1')?.state).assertEqual('cancelled');
     });
+
+    it('ends only an awaiting-payment debug test without cancelling a consumed system reminder', 0, async () => {
+      const native = new MemoryPreferences();
+      const store = new TrainPresaleTaskStore(native as Object as preferences.Preferences);
+      const debugTask = task();
+      debugTask.source = 'debug';
+      debugTask.state = 'awaiting_payment';
+      debugTask.reminderId = 73;
+      store.create(debugTask);
+      let nativeCancelCount = 0;
+      const scheduler = new SystemOneShotScheduler(
+        async (): Promise<number> => 0,
+        async (): Promise<void> => {
+          nativeCancelCount++;
+        },
+        async (): Promise<reminderAgentManager.ReminderRequest[]> => []
+      );
+
+      const result = await cancelScheduledTrainPresaleTask(debugTask, store, scheduler);
+
+      expect(result.state).assertEqual('cancelled');
+      expect(result.error).assertEqual('');
+      expect(nativeCancelCount).assertEqual(0);
+      expect(store.get('train-1')?.state).assertEqual('cancelled');
+    });
   });
 }

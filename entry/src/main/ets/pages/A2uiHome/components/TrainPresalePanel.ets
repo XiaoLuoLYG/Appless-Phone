@@ -736,6 +736,9 @@ export async function cancelScheduledTrainPresaleTask(
   store: TrainPresaleTaskStore,
   scheduler: SystemOneShotScheduler
 ): Promise<TrainPresaleCancellationResult> {
+  if (task.source === 'debug' && task.state === 'awaiting_payment') {
+    return cancelLocalTrainPresaleTask(task, store);
+  }
   const startedNeedsUser = task.state === 'needs_user';
   if (task.reminderId <= 0 || task.reminderId % 1 !== 0) {
     return cancelLocalTrainPresaleTask(task, store);
@@ -859,6 +862,9 @@ export struct TrainPresalePanel {
   }
 
   private cancelLabel(): string {
+    if (this.taskState === 'awaiting_payment') {
+      return '结束本次测试';
+    }
     if (this.taskState === 'needs_user') {
       return this.task !== null && this.task.reminderId > 0 ? '重试取消' : '清除预留';
     }
@@ -948,7 +954,8 @@ export struct TrainPresalePanel {
           .margin({ top: 12 })
       }
 
-      if (this.taskState === 'scheduled' || this.taskState === 'needs_user') {
+      if (this.taskState === 'scheduled' || this.taskState === 'needs_user' ||
+        (this.taskState === 'awaiting_payment' && this.task !== null && this.task.source === 'debug')) {
         A2uiButtonView({ label: this.cancelLabel(), shape: 'pill', tone: 'secondary', isEnabled: !this.isWorking })
           .enabled(!this.isWorking)
           .margin({ top: 16 })

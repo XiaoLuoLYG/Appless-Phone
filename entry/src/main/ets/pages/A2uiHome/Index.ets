@@ -4059,7 +4059,9 @@ struct Index {
 
   private async cancelTrainPresaleTask(): Promise<void> {
     const task = this.trainPresaleTask;
-    if (task === null || (task.state !== 'scheduled' && task.state !== 'needs_user') || this.trainPresaleWorking) {
+    const canEndDebug = task !== null && task.source === 'debug' && task.state === 'awaiting_payment';
+    if (task === null || (task.state !== 'scheduled' && task.state !== 'needs_user' && !canEndDebug) ||
+      this.trainPresaleWorking) {
       return;
     }
     this.trainPresaleWorking = true;

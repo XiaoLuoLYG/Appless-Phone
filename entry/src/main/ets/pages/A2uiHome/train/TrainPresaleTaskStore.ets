@@ -112,11 +112,13 @@ function copyTask(value: TrainPresaleTask): TrainPresaleTask {
   };
 }
 
-function canTransition(from: TrainPresaleTaskState, to: TrainPresaleTaskState): boolean {
+function canTransition(task: TrainPresaleTask, to: TrainPresaleTaskState): boolean {
+  const from = task.state;
   return from === to ||
     (from === 'scheduled' && (to === 'executing' || to === 'needs_user' || to === 'cancelled')) ||
     (from === 'needs_user' && (to === 'scheduled' || to === 'cancelled')) ||
-    (from === 'executing' && (to === 'awaiting_payment' || to === 'needs_user'));
+    (from === 'executing' && (to === 'awaiting_payment' || to === 'needs_user')) ||
+    (task.source === 'debug' && from === 'awaiting_payment' && to === 'cancelled');
 }
 
 export function serializeTrainPresaleTaskList(tasks: TrainPresaleTask[]): string {
@@ -150,7 +152,7 @@ export function parseTrainPresaleTaskList(raw: string): TrainPresaleTask[] {
 
 export function updateTrainPresaleTask(task: TrainPresaleTask, patch: Partial<TrainPresaleTask>): TrainPresaleTask {
   const updated = copyTask(task);
-  if (patch.state !== undefined && canTransition(task.state, patch.state)) {
+  if (patch.state !== undefined && canTransition(task, patch.state)) {
     updated.state = patch.state;
   }
   if (patch.reminderId !== undefined) {
